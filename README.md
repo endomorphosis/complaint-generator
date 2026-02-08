@@ -497,10 +497,6 @@ export BRAVE_SEARCH_API_KEY="your_key"
 ```
 Get a free API key at: https://brave.com/search/api/
 
-## License
-
-[Include your license information here]
-
 ## Support
 
 - **Issues**: https://github.com/endomorphosis/complaint-generator/issues
