@@ -15,10 +15,15 @@ from .evidence_hooks import (
 	EvidenceStateHook,
 	EvidenceAnalysisHook
 )
+from .legal_authority_hooks import (
+	LegalAuthoritySearchHook,
+	LegalAuthorityStorageHook,
+	LegalAuthorityAnalysisHook
+)
 
 
 class Mediator:
-	def __init__(self, backends, evidence_db_path=None):
+	def __init__(self, backends, evidence_db_path=None, legal_authority_db_path=None):
 		self.backends = backends
 		self.inquiries = Inquiries(self)
 		self.complaint = Complaint(self)
@@ -33,6 +38,11 @@ class Mediator:
 		self.evidence_storage = EvidenceStorageHook(self)
 		self.evidence_state = EvidenceStateHook(self, db_path=evidence_db_path)
 		self.evidence_analysis = EvidenceAnalysisHook(self)
+		
+		# Initialize legal authority hooks
+		self.legal_authority_search = LegalAuthoritySearchHook(self)
+		self.legal_authority_storage = LegalAuthorityStorageHook(self, db_path=legal_authority_db_path)
+		self.legal_authority_analysis = LegalAuthorityAnalysisHook(self)
 		
 		self.reset()
 
@@ -276,6 +286,167 @@ class Mediator:
 		else:
 			# Return general evidence stats
 			return self.evidence_state.get_evidence_statistics(user_id)
+	
+	def search_legal_authorities(self, query: str, claim_type: str = None,
+	                            jurisdiction: str = None,
+	                            search_all: bool = False):
+		"""
+		Search for relevant legal authorities.
+		
+		Args:
+			query: Search query (e.g., "civil rights violations")
+			claim_type: Optional claim type to focus search
+			jurisdiction: Optional jurisdiction filter
+			search_all: If True, search all sources; if False, use targeted search
+			
+		Returns:
+			Dictionary with search results by source type
+		"""
+		if search_all:
+			return self.legal_authority_search.search_all_sources(
+				query, claim_type, jurisdiction
+			)
+		else:
+			# Default to US Code search
+			results = {
+				'statutes': self.legal_authority_search.search_us_code(query),
+				'regulations': [],
+				'case_law': [],
+				'web_archives': []
+			}
+			return results
+	
+	def store_legal_authorities(self, authorities: Dict[str, List[Dict]], 
+	                           claim_type: str = None,
+	                           search_query: str = None,
+	                           user_id: str = None):
+		"""
+		Store found legal authorities in DuckDB.
+		
+		Args:
+			authorities: Dictionary with authorities by type (from search_legal_authorities)
+			claim_type: Optional claim type these authorities support
+			search_query: Original search query
+			user_id: User identifier (defaults to state username)
+			
+		Returns:
+			Dictionary with count of stored authorities by type
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		complaint_id = getattr(self.state, 'complaint_id', None)
+		
+		stored_counts = {}
+		for auth_type, auth_list in authorities.items():
+			if auth_list:
+				# Add type info to each authority
+				for auth in auth_list:
+					auth['type'] = auth_type.rstrip('s')  # statutes -> statute
+				
+				record_ids = self.legal_authority_storage.add_authorities_bulk(
+					auth_list, user_id, complaint_id, claim_type, search_query
+				)
+				stored_counts[auth_type] = len(record_ids)
+				
+				self.log('legal_authorities_stored',
+					type=auth_type, count=len(record_ids), claim_type=claim_type)
+		
+		return stored_counts
+	
+	def get_legal_authorities(self, user_id: str = None, claim_type: str = None):
+		"""
+		Get stored legal authorities.
+		
+		Args:
+			user_id: User identifier (defaults to state username)
+			claim_type: Optional claim type to filter by
+			
+		Returns:
+			List of legal authority records
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		if claim_type:
+			return self.legal_authority_storage.get_authorities_by_claim(user_id, claim_type)
+		else:
+			return self.legal_authority_storage.get_all_authorities(user_id)
+	
+	def analyze_legal_authorities(self, claim_type: str, user_id: str = None):
+		"""
+		Analyze stored legal authorities for a claim.
+		
+		Args:
+			claim_type: Claim type to analyze
+			user_id: User identifier (defaults to state username)
+			
+		Returns:
+			Analysis with recommendations
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		return self.legal_authority_analysis.analyze_authorities_for_claim(user_id, claim_type)
+	
+	def research_case_automatically(self, user_id: str = None):
+		"""
+		Automatically research legal authorities for the case.
+		
+		This method:
+		1. Analyzes the complaint to identify claims
+		2. Searches for relevant legal authorities
+		3. Stores the authorities in DuckDB
+		
+		Args:
+			user_id: User identifier (defaults to state username)
+			
+		Returns:
+			Dictionary with research results
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		# First, analyze the complaint if not already done
+		if not hasattr(self.state, 'legal_classification'):
+			if not self.state.complaint:
+				return {'error': 'No complaint available. Generate complaint first.'}
+			self.analyze_complaint_legal_issues()
+		
+		classification = self.state.legal_classification
+		results = {
+			'claim_types': classification.get('claim_types', []),
+			'authorities_found': {},
+			'authorities_stored': {}
+		}
+		
+		# Search for authorities for each claim type
+		for claim_type in classification.get('claim_types', []):
+			self.log('auto_research', claim_type=claim_type)
+			
+			# Search all sources
+			search_results = self.search_legal_authorities(
+				query=claim_type,
+				claim_type=claim_type,
+				search_all=True
+			)
+			
+			# Store results
+			stored_counts = self.store_legal_authorities(
+				search_results,
+				claim_type=claim_type,
+				search_query=claim_type,
+				user_id=user_id
+			)
+			
+			results['authorities_found'][claim_type] = {
+				k: len(v) for k, v in search_results.items()
+			}
+			results['authorities_stored'][claim_type] = stored_counts
+		
+		self.log('auto_research_complete', results=results)
+		
+		return results
 
 
 	def query_backend(self, prompt):

@@ -10,3 +10,8 @@ from .evidence_hooks import (
     EvidenceStateHook,
     EvidenceAnalysisHook
 )
+from .legal_authority_hooks import (
+    LegalAuthoritySearchHook,
+    LegalAuthorityStorageHook,
+    LegalAuthorityAnalysisHook
+)
