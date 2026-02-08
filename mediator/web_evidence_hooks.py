@@ -109,6 +109,24 @@ class WebEvidenceSearchHook:
                 max_matches=max_results
             )
             
+            # Filter results by keywords if provided
+            if keywords:
+                lowered_keywords = [k.lower() for k in keywords if k]
+                if lowered_keywords:
+                    filtered_results: List[Dict[str, Any]] = []
+                    for result in results:
+                        # Safely gather text from common fields if present
+                        fields_to_check = []
+                        if isinstance(result, dict):
+                            for field in ("url", "title", "content", "snippet", "text"):
+                                value = result.get(field)
+                                if isinstance(value, str):
+                                    fields_to_check.append(value)
+                        combined_text = " ".join(fields_to_check).lower()
+                        if any(kw in combined_text for kw in lowered_keywords):
+                            filtered_results.append(result)
+                    results = filtered_results
+            
             # Add metadata
             for result in results:
                 result['source_type'] = 'common_crawl'

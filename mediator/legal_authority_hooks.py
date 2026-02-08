@@ -325,10 +325,15 @@ class LegalAuthorityStorageHook:
         try:
             conn = duckdb.connect(self.db_path)
             
+            # Create sequence for auto-incrementing IDs
+            conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS legal_authorities_id_seq START 1
+            """)
+            
             # Create legal_authorities table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS legal_authorities (
-                    id INTEGER PRIMARY KEY,
+                    id BIGINT PRIMARY KEY DEFAULT nextval('legal_authorities_id_seq'),
                     user_id VARCHAR,
                     complaint_id VARCHAR,
                     claim_type VARCHAR,

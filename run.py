@@ -42,6 +42,7 @@ for backend_id in config_mediator['backends']:
 	elif backend_config['type'] == 'workstation':
 		backendDatabases  = WorkstationBackendDatabases(**backend_config)
 		backendModels = WorkstationBackendModels(**backend_config)
+		backend = backendModels  # Use backendModels as the primary backend
 	elif backend_config['type'] == 'llm_router':
 		backend = LLMRouterBackend(**backend_config)
 	else:

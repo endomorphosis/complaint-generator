@@ -46,14 +46,16 @@ This will generate an HTML coverage report in the `htmlcov/` directory.
 
 ### Run Tests by Marker
 
-Run only unit tests:
-```bash
-pytest -m unit
-```
+Tests use markers to categorize different types of tests. Currently, most tests that require external dependencies or backend integrations are marked with `@pytest.mark.integration`.
 
 Run only integration tests:
 ```bash
 pytest -m integration
+```
+
+Run tests excluding integration tests (faster, unit-only tests):
+```bash
+pytest -m "not integration"
 ```
 
 ### Verbose Output
@@ -67,11 +69,12 @@ pytest -v
 
 ### Test Markers
 
-Tests are organized using pytest markers:
+Tests are organized using pytest markers (defined in `pytest.ini`):
 
-- `@pytest.mark.unit` - Fast, isolated unit tests
-- `@pytest.mark.integration` - Integration tests that test multiple components
+- `@pytest.mark.integration` - Integration tests that require backends or external dependencies
 - `@pytest.mark.slow` - Tests that take longer to run
+
+Most tests use mocks to avoid external dependencies, but integration tests may require actual backend initialization or optional dependencies to be installed.
 
 ### Test Naming Convention
 

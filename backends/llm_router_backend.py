@@ -7,19 +7,21 @@ It provides a unified interface for routing requests to various LLM providers.
 
 import sys
 import os
+import logging
 
 # Add ipfs_datasets_py to Python path if not already there
 ipfs_datasets_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ipfs_datasets_py')
 if os.path.exists(ipfs_datasets_path) and ipfs_datasets_path not in sys.path:
     sys.path.insert(0, ipfs_datasets_path)
 
+logger = logging.getLogger(__name__)
+
 try:
-    from ipfs_datasets_py.llm_router import generate_text, get_llm_provider
+    from ipfs_datasets_py.llm_router import generate_text
 except ImportError as e:
     # Fallback if submodule not initialized
-    print(f"Warning: Could not import llm_router from ipfs_datasets_py: {e}")
+    logger.warning("Could not import llm_router from ipfs_datasets_py: %s", e)
     generate_text = None
-    get_llm_provider = None
 
 
 class LLMRouterBackend:

@@ -188,10 +188,15 @@ class EvidenceStateHook:
         try:
             conn = duckdb.connect(self.db_path)
             
+            # Create sequence for auto-incrementing IDs
+            conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS evidence_id_seq START 1
+            """)
+            
             # Create evidence table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS evidence (
-                    id INTEGER PRIMARY KEY,
+                    id BIGINT PRIMARY KEY DEFAULT nextval('evidence_id_seq'),
                     user_id VARCHAR,
                     username VARCHAR,
                     evidence_cid VARCHAR NOT NULL,

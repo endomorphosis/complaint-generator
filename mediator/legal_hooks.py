@@ -126,15 +126,6 @@ class StatuteRetrievalHook:
     
     def __init__(self, mediator):
         self.mediator = mediator
-        self._legal_scrapers_available = self._check_legal_scrapers()
-        
-    def _check_legal_scrapers(self) -> bool:
-        """Check if ipfs_datasets_py legal scrapers are available."""
-        try:
-            from ipfs_datasets_py import legal_scrapers
-            return True
-        except ImportError:
-            return False
     
     def retrieve_statutes(self, classification: Dict[str, Any]) -> List[Dict[str, str]]:
         """
