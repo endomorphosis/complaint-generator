@@ -5,3 +5,8 @@ from .legal_hooks import (
     SummaryJudgmentHook,
     QuestionGenerationHook
 )
+from .evidence_hooks import (
+    EvidenceStorageHook,
+    EvidenceStateHook,
+    EvidenceAnalysisHook
+)

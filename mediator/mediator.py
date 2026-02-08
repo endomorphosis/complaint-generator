@@ -10,10 +10,15 @@ from .legal_hooks import (
 	SummaryJudgmentHook,
 	QuestionGenerationHook
 )
+from .evidence_hooks import (
+	EvidenceStorageHook,
+	EvidenceStateHook,
+	EvidenceAnalysisHook
+)
 
 
 class Mediator:
-	def __init__(self, backends):
+	def __init__(self, backends, evidence_db_path=None):
 		self.backends = backends
 		self.inquiries = Inquiries(self)
 		self.complaint = Complaint(self)
@@ -23,6 +28,11 @@ class Mediator:
 		self.statute_retriever = StatuteRetrievalHook(self)
 		self.summary_judgment = SummaryJudgmentHook(self)
 		self.question_generator = QuestionGenerationHook(self)
+		
+		# Initialize evidence hooks
+		self.evidence_storage = EvidenceStorageHook(self)
+		self.evidence_state = EvidenceStateHook(self, db_path=evidence_db_path)
+		self.evidence_analysis = EvidenceAnalysisHook(self)
 		
 		self.reset()
 
@@ -132,6 +142,140 @@ class Mediator:
 			'requirements': getattr(self.state, 'summary_judgment_requirements', None),
 			'questions': getattr(self.state, 'legal_questions', None)
 		}
+	
+	def submit_evidence(self, data: bytes, evidence_type: str,
+	                   user_id: str = None,
+	                   description: str = None,
+	                   claim_type: str = None,
+	                   metadata: dict = None):
+		"""
+		Submit evidence for the user's case.
+		
+		Args:
+			data: Evidence data as bytes
+			evidence_type: Type of evidence (document, image, video, text, etc.)
+			user_id: User identifier (defaults to state username)
+			description: Description of the evidence
+			claim_type: Which claim this evidence supports
+			metadata: Additional metadata
+			
+		Returns:
+			Dictionary with evidence information including CID and record ID
+		"""
+		# Use username from state if user_id not provided
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		# Store in IPFS
+		self.log('evidence_submission', user_id=user_id, type=evidence_type)
+		evidence_info = self.evidence_storage.store_evidence(data, evidence_type, metadata)
+		
+		# Get complaint ID if available
+		complaint_id = getattr(self.state, 'complaint_id', None)
+		
+		# Store state in DuckDB
+		record_id = self.evidence_state.add_evidence_record(
+			user_id=user_id,
+			evidence_info=evidence_info,
+			complaint_id=complaint_id,
+			claim_type=claim_type,
+			description=description
+		)
+		
+		result = {
+			**evidence_info,
+			'record_id': record_id,
+			'user_id': user_id,
+			'description': description,
+			'claim_type': claim_type
+		}
+		
+		self.log('evidence_submitted', cid=evidence_info['cid'], record_id=record_id)
+		
+		return result
+	
+	def submit_evidence_file(self, file_path: str, evidence_type: str,
+	                        user_id: str = None,
+	                        description: str = None,
+	                        claim_type: str = None,
+	                        metadata: dict = None):
+		"""
+		Submit evidence from a file.
+		
+		Args:
+			file_path: Path to evidence file
+			evidence_type: Type of evidence
+			user_id: User identifier
+			description: Description of the evidence
+			claim_type: Which claim this evidence supports
+			metadata: Additional metadata
+			
+		Returns:
+			Dictionary with evidence information including CID and record ID
+		"""
+		# Read file and submit
+		with open(file_path, 'rb') as f:
+			data = f.read()
+		
+		# Add filename to metadata
+		file_metadata = metadata or {}
+		file_metadata['filename'] = file_path
+		
+		return self.submit_evidence(
+			data=data,
+			evidence_type=evidence_type,
+			user_id=user_id,
+			description=description,
+			claim_type=claim_type,
+			metadata=file_metadata
+		)
+	
+	def get_user_evidence(self, user_id: str = None):
+		"""
+		Get all evidence for a user.
+		
+		Args:
+			user_id: User identifier (defaults to state username)
+			
+		Returns:
+			List of evidence records
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		return self.evidence_state.get_user_evidence(user_id)
+	
+	def retrieve_evidence(self, cid: str):
+		"""
+		Retrieve evidence data by CID.
+		
+		Args:
+			cid: Content ID of the evidence
+			
+		Returns:
+			Evidence data as bytes
+		"""
+		return self.evidence_storage.retrieve_evidence(cid)
+	
+	def analyze_evidence(self, user_id: str = None, claim_type: str = None):
+		"""
+		Analyze evidence for a claim.
+		
+		Args:
+			user_id: User identifier (defaults to state username)
+			claim_type: Claim type to analyze evidence for
+			
+		Returns:
+			Analysis results
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		if claim_type:
+			return self.evidence_analysis.analyze_evidence_for_claim(user_id, claim_type)
+		else:
+			# Return general evidence stats
+			return self.evidence_state.get_evidence_statistics(user_id)
 
 
 	def query_backend(self, prompt):
