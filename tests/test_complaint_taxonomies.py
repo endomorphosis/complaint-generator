@@ -312,7 +312,7 @@ class TestMultiTypeComplaint:
         """
         
         # Should detect multiple applicable types
-        analyzer = ComplaintAnalyzer()  # No specific type
+        analyzer = ComplaintAnalyzer()  # Auto-detect complaint type
         result = analyzer.analyze(text)
         
         categories = result.get('categories', [])
