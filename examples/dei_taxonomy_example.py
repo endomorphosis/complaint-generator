@@ -86,7 +86,11 @@ def main():
     
     print(f"   - Provisions found: {provisions['provision_count']}")
     print(f"   - Unique terms: {provisions['unique_terms']}")
-    print(f"   - Legal terms: {', '.join(provisions['terms_found'][:10])}")
+    terms_found = provisions.get('terms_found', [])
+    if terms_found:
+        print(f"   - Legal terms: {', '.join(terms_found[:10])}")
+    else:
+        print("   - Legal terms: (none found)")
     print()
     
     # Extract citations

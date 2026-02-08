@@ -305,11 +305,20 @@ def _get_applicability_keywords() -> Dict[str, List[str]]:
 class _ApplicabilityKeywords:
     """Lazy-loaded applicability keywords for backward compatibility."""
     _cache = None
+    _lock = None
+    
+    def __init__(self):
+        """Initialize with a threading lock for thread-safety."""
+        import threading
+        self._lock = threading.Lock()
     
     def _ensure_loaded(self):
-        """Ensure the cache is loaded."""
+        """Ensure the cache is loaded (thread-safe)."""
         if self._cache is None:
-            self._cache = _get_applicability_keywords()
+            with self._lock:
+                # Double-check pattern to avoid race conditions
+                if self._cache is None:
+                    self._cache = _get_applicability_keywords()
     
     def __getitem__(self, key):
         self._ensure_loaded()
