@@ -30,7 +30,7 @@ except ImportError:
     EMBEDDINGS_AVAILABLE = False
     EmbeddingsRouter = None
 
-from .keywords import get_keywords
+from .keywords import get_keywords, get_type_specific_keywords
 from .legal_patterns import LegalPatternExtractor
 from .risk_scoring import ComplaintRiskScorer
 
@@ -153,19 +153,28 @@ class HybridDocumentIndexer:
         return list(set(found))  # dedupe
     
     def _tag_applicability(self, text: str) -> List[str]:
-        """Tag document with applicability areas."""
+        """
+        Tag document with applicability areas.
+        
+        Uses type-specific keywords only to avoid false positives from
+        global keywords that appear in all complaint types.
+        """
         tags = []
         text_lower = text.lower()
         
-        # Check for different complaint types
+        # Check for different complaint types using type-specific keywords only
         complaint_types = ['housing', 'employment', 'civil_rights', 'consumer', 'healthcare']
         for ctype in complaint_types:
-            keywords = get_keywords('complaint', complaint_type=ctype)
-            for kw in keywords:
-                if kw.lower() in text_lower:
-                    if ctype not in tags:
-                        tags.append(ctype)
-                    break
+            # Use type-specific keywords to avoid false positives
+            keywords = get_type_specific_keywords('complaint', ctype)
+            if not keywords:
+                continue
+            
+            # Require multiple matches for confidence
+            matches = sum(1 for kw in keywords if kw.lower() in text_lower)
+            if matches >= 2:  # Require at least 2 type-specific keywords
+                tags.append(ctype)
+        
         return tags
     
     def _calculate_relevance(self, index_result: Dict[str, Any]) -> float:

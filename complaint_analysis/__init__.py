@@ -37,6 +37,7 @@ from .legal_patterns import (
 from .keywords import (
     KeywordRegistry,
     get_keywords,
+    get_type_specific_keywords,
     register_keywords,
     COMPLAINT_KEYWORDS,
     EVIDENCE_KEYWORDS,
@@ -76,6 +77,7 @@ __all__ = [
     
     # Functions
     'get_keywords',
+    'get_type_specific_keywords',
     'register_keywords',
     'register_legal_terms',
     'get_legal_terms',

@@ -153,6 +153,7 @@ register_keywords('category_name', keywords_list, complaint_type='optional')
 # Retrieve items
 get_legal_terms('category_name')
 get_keywords('category_name', complaint_type='optional')
+get_type_specific_keywords('category_name', 'complaint_type')  # Type-specific only
 ```
 
 ## API Reference
@@ -165,6 +166,7 @@ get_keywords('category_name', complaint_type='optional')
 
 **LegalPatternExtractor(categories=None, custom_patterns=None)**
 - Extract legal provisions from text
+- Alias: `ComplaintLegalPatternExtractor` (backward compatibility)
 - `extract_provisions(text)` - Find legal terms
 - `extract_citations(text)` - Find legal citations
 - `categorize_complaint_type(text)` - Categorize complaint
@@ -172,13 +174,23 @@ get_keywords('category_name', complaint_type='optional')
 **KeywordRegistry()**
 - Manage keywords by category and type
 - `register_keywords(category, keywords, complaint_type=None)`
-- `get_keywords(category, complaint_type=None)`
+- `get_keywords(category, complaint_type=None)` - Get all keywords (global + type-specific)
+- `get_type_specific_keywords(category, complaint_type)` - Get only type-specific keywords
 - `get_complaint_types()` - List registered types
 
 **ComplaintRiskScorer()**
 - Calculate risk scores
+- Alias: `RiskScorer` (backward compatibility)
 - `calculate_risk(text, legal_provisions=None)` - Risk assessment
 - `is_actionable(text, threshold=2)` - Check if actionable
+
+### Helper Functions
+
+**register_keywords(category, keywords, complaint_type=None)** - Register keywords in global registry  
+**get_keywords(category, complaint_type=None)** - Get keywords (global + type-specific if type specified)  
+**get_type_specific_keywords(category, complaint_type)** - Get only type-specific keywords (no global)  
+**register_legal_terms(category, patterns)** - Register legal term regex patterns  
+**get_legal_terms(category=None)** - Get legal term patterns
 
 ### Registration Functions
 
@@ -194,11 +206,13 @@ get_keywords('category_name', complaint_type='optional')
 The module is backward compatible:
 
 ```python
-# Old way (still works)
-from complaint_analysis import ComplaintLegalPatternExtractor  # Available as alias
+# Old way (still works - backward compatibility alias)
+from complaint_analysis import ComplaintLegalPatternExtractor
+extractor = ComplaintLegalPatternExtractor()
 
 # New way (recommended)
 from complaint_analysis import LegalPatternExtractor
+extractor = LegalPatternExtractor()
 
 # Old constants (still available)
 from complaint_analysis import COMPLAINT_KEYWORDS
@@ -206,6 +220,27 @@ from complaint_analysis import COMPLAINT_KEYWORDS
 # New way (recommended - more flexible)
 from complaint_analysis import get_keywords
 keywords = get_keywords('complaint', complaint_type='housing')
+```
+
+## Advanced Features
+
+### Type-Specific Keywords
+
+To avoid false positives when tagging documents, use `get_type_specific_keywords()` to get only complaint-type-specific keywords (excluding global keywords):
+
+```python
+from complaint_analysis import get_keywords, get_type_specific_keywords
+
+# Get all keywords (global + housing-specific)
+all_housing = get_keywords('complaint', complaint_type='housing')
+# Returns: ['discrimination', 'harassment', ..., 'fair housing', 'Section 8', ...]
+
+# Get only housing-specific keywords (no global)
+housing_only = get_type_specific_keywords('complaint', 'housing')
+# Returns: ['fair housing', 'Section 8', 'landlord', 'tenant', ...]
+
+# This is useful for applicability tagging to avoid false positives
+# e.g., "discrimination" appears in all types, but "fair housing" is specific to housing
 ```
 
 ## Testing

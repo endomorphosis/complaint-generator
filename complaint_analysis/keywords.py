@@ -75,6 +75,29 @@ class KeywordRegistry(BaseKeywordRegistry):
         
         return sorted(list(keywords))
     
+    def get_type_specific_keywords(self, category: str, 
+                                   complaint_type: str) -> List[str]:
+        """
+        Get only type-specific keywords (excluding global keywords).
+        
+        Useful for applicability tagging to avoid false positives from
+        global keywords that appear in all complaint types.
+        
+        Args:
+            category: Category name
+            complaint_type: Complaint type
+            
+        Returns:
+            List of type-specific keywords only
+        """
+        if category not in self._registry:
+            return []
+        
+        if complaint_type not in self._registry[category]:
+            return []
+        
+        return sorted(list(self._registry[category][complaint_type]))
+    
     def get_all_categories(self, complaint_type: Optional[str] = None) -> List[str]:
         """
         Get all registered categories.
@@ -128,6 +151,15 @@ def register_keywords(category: str, keywords: List[str],
 def get_keywords(category: str, complaint_type: Optional[str] = None) -> List[str]:
     """Get keywords from the global registry."""
     return _global_registry.get_keywords(category, complaint_type)
+
+
+def get_type_specific_keywords(category: str, complaint_type: str) -> List[str]:
+    """
+    Get only type-specific keywords (excluding global keywords) from the global registry.
+    
+    Useful for applicability tagging to avoid false positives.
+    """
+    return _global_registry.get_type_specific_keywords(category, complaint_type)
 
 
 # Register default keywords (complaint_type=None means global)
