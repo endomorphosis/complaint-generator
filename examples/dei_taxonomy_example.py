@@ -133,22 +133,6 @@ def main():
         print(f"     {i}. {rec}")
     print()
     
-    # Test backward compatibility
-    print("7. Backward Compatibility:")
-    print("   The DEI taxonomy maintains full backward compatibility with")
-    print("   hacc_integration module. The following imports still work:")
-    print()
-    print("   from hacc_integration import (")
-    print("       ComplaintLegalPatternExtractor,")
-    print("       ComplaintRiskScorer,")
-    print("       COMPLAINT_KEYWORDS,")
-    print("       APPLICABILITY_KEYWORDS")
-    print("   )")
-    print()
-    print("   Note: A deprecation warning will be shown encouraging migration")
-    print("   to the complaint_analysis module.")
-    print()
-    
     print("=" * 80)
     print("Example completed successfully!")
     print("=" * 80)
