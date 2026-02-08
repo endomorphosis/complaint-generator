@@ -11,8 +11,27 @@ The `complaint_analysis` module (formerly `hacc_integration`) provides a flexibl
 ✅ **Extensible Taxonomies** - Register new keyword sets for any complaint type  
 ✅ **Pluggable Risk Scoring** - Customize risk assessment per domain  
 ✅ **Registry Pattern** - Add new complaint types programmatically  
-✅ **Multiple Complaint Types** - Housing, employment, civil rights, consumer, healthcare  
+✅ **Multiple Complaint Types** - Housing, employment, civil rights, consumer, healthcare, DEI, and more  
+✅ **DEI Taxonomy** - Comprehensive Diversity, Equity, and Inclusion complaint analysis (formerly hacc_integration)  
 ✅ **Backward Compatible** - Works with existing code
+
+## Supported Complaint Types
+
+The module includes built-in support for 13 complaint types:
+
+- **DEI (Diversity, Equity, Inclusion)** - Discrimination, harassment, civil rights violations across domains
+- **Housing** - Fair housing, tenant rights, housing discrimination
+- **Employment** - Workplace discrimination, wrongful termination, EEOC complaints
+- **Civil Rights** - Constitutional rights, police misconduct, voting rights
+- **Consumer** - Fraud, deceptive practices, consumer protection
+- **Healthcare** - Medical malpractice, HIPAA violations, patient rights
+- **Free Speech** - First Amendment, censorship, content moderation
+- **Immigration** - Visa issues, deportation, asylum claims
+- **Family Law** - Divorce, custody, domestic violence
+- **Criminal Defense** - Constitutional violations, due process, wrongful conviction
+- **Tax Law** - IRS disputes, tax penalties, collection actions
+- **Intellectual Property** - Patent, trademark, copyright infringement
+- **Environmental Law** - Pollution, EPA violations, environmental hazards
 
 ## Quick Start
 

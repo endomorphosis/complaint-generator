@@ -1,4 +1,71 @@
-# HACC Integration Module
+# HACC Integration Module (DEPRECATED)
+
+⚠️ **DEPRECATION NOTICE**: This module is deprecated and maintained only for backward compatibility.
+
+**Please use the `complaint_analysis` module instead**, which provides the same functionality with an extensible architecture supporting multiple complaint types including the **DEI (Diversity, Equity, and Inclusion)** taxonomy.
+
+## Migration Guide
+
+The HACC integration functionality has been merged into the `complaint_analysis` module as the **DEI taxonomy**:
+
+### Old (hacc_integration):
+```python
+from hacc_integration import (
+    ComplaintLegalPatternExtractor,
+    ComplaintRiskScorer,
+    COMPLAINT_KEYWORDS,
+    APPLICABILITY_KEYWORDS
+)
+```
+
+### New (complaint_analysis with DEI taxonomy):
+```python
+from complaint_analysis import (
+    LegalPatternExtractor,
+    ComplaintRiskScorer,
+    get_keywords,
+    ComplaintAnalyzer
+)
+
+# Access DEI-specific keywords
+dei_keywords = get_keywords('complaint', complaint_type='dei')
+dei_housing = get_keywords('applicability_housing', complaint_type='dei')
+
+# Use the analyzer
+analyzer = ComplaintAnalyzer(complaint_type='dei')
+result = analyzer.analyze(complaint_text)
+```
+
+### What Changed?
+
+1. **Module Name**: `hacc_integration` → `complaint_analysis`
+2. **Class Name**: `ComplaintLegalPatternExtractor` → `LegalPatternExtractor`
+3. **Taxonomy Name**: The HACC integration content is now the **DEI taxonomy**
+4. **Enhanced**: Now part of a comprehensive framework with 13 complaint types
+
+### Why Migrate?
+
+- ✅ **Future-proof**: Active development and new features
+- ✅ **More complaint types**: 13 taxonomies including DEI, housing, employment, civil rights, etc.
+- ✅ **Better organization**: Registry-based architecture for extensibility
+- ✅ **Same functionality**: All HACC keywords, patterns, and risk scoring preserved
+
+## Current Status
+
+This module continues to work but shows a deprecation warning. All functionality is re-exported from `complaint_analysis` module:
+
+```python
+# This still works (with deprecation warning)
+from hacc_integration import ComplaintLegalPatternExtractor
+# → Actually imports from complaint_analysis.LegalPatternExtractor
+
+from hacc_integration import COMPLAINT_KEYWORDS
+# → Actually imports from complaint_analysis DEI taxonomy keywords
+```
+
+---
+
+## Original Documentation (for reference)
 
 This module extracts and adapts the legal domain knowledge from the [HACC repository](https://github.com/endomorphosis/HACC) for use with [ipfs_datasets_py](https://github.com/endomorphosis/ipfs_datasets_py) infrastructure.
 
