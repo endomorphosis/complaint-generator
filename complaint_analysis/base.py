@@ -7,7 +7,6 @@ analysis system with new complaint types, keywords, and risk scoring logic.
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
-from datetime import datetime
 
 
 class BaseLegalPatternExtractor(ABC):

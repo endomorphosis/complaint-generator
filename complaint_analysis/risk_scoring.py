@@ -5,7 +5,7 @@ Adapted from HACC's report_generator.py risk scoring logic.
 Calculates risk scores based on keyword presence and legal patterns.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from .keywords import get_keywords
 from .legal_patterns import LegalPatternExtractor
 
@@ -30,7 +30,7 @@ class ComplaintRiskScorer:
         self.legal_extractor = LegalPatternExtractor()
     
     def calculate_risk(self, text: str, 
-                      legal_provisions: Optional[List[Dict]] = None) -> Dict[str, any]:
+                      legal_provisions: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """
         Calculate comprehensive risk score for a complaint document.
         

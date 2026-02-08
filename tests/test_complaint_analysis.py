@@ -1,7 +1,8 @@
 """
-Tests for HACC Integration Module
+Tests for the complaint_analysis module.
 
-Tests the integration of HACC's legal patterns with ipfs_datasets_py infrastructure.
+Validates legal pattern extraction, complaint risk scoring, and related keyword
+configuration used by the complaint_analysis utilities.
 """
 
 import pytest

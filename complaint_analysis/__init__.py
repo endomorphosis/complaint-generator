@@ -27,7 +27,13 @@ from .base import (
     BaseKeywordRegistry,
     BaseRiskScorer
 )
-from .legal_patterns import LegalPatternExtractor, LEGAL_TERMS_REGISTRY, COMPLAINT_LEGAL_TERMS
+from .legal_patterns import (
+    LegalPatternExtractor, 
+    LEGAL_TERMS_REGISTRY, 
+    COMPLAINT_LEGAL_TERMS,
+    register_legal_terms,
+    get_legal_terms
+)
 from .keywords import (
     KeywordRegistry,
     get_keywords,
@@ -51,6 +57,7 @@ from .analyzer import ComplaintAnalyzer
 
 # Aliases for backward compatibility
 RiskScorer = ComplaintRiskScorer
+ComplaintLegalPatternExtractor = LegalPatternExtractor  # Backward compatibility alias
 
 __all__ = [
     # Base classes for extension
@@ -60,6 +67,7 @@ __all__ = [
     
     # Main classes
     'LegalPatternExtractor',
+    'ComplaintLegalPatternExtractor',  # Backward compatibility alias
     'KeywordRegistry',
     'ComplaintRiskScorer',
     'RiskScorer',  # Alias
@@ -69,6 +77,8 @@ __all__ = [
     # Functions
     'get_keywords',
     'register_keywords',
+    'register_legal_terms',
+    'get_legal_terms',
     
     # Default keyword sets
     'COMPLAINT_KEYWORDS',

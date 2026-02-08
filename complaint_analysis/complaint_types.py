@@ -5,7 +5,7 @@ Provides convenience functions for registering different complaint types
 with their specific keywords, patterns, and scoring models.
 """
 
-from typing import Dict, List
+from typing import List
 from .keywords import register_keywords
 from .legal_patterns import register_legal_terms
 

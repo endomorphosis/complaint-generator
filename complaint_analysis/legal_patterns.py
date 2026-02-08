@@ -15,7 +15,7 @@ New complaint types can be added by registering additional patterns.
 """
 
 import re
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 from .base import BaseLegalPatternExtractor
 
@@ -283,7 +283,7 @@ class LegalPatternExtractor(BaseLegalPatternExtractor):
         if custom_patterns:
             self.patterns.extend([re.compile(p, re.IGNORECASE) for p in custom_patterns])
     
-    def extract_provisions(self, text: str, context_chars: int = 200) -> Dict[str, any]:
+    def extract_provisions(self, text: str, context_chars: int = 200) -> Dict[str, Any]:
         """
         Extract legal provisions with context from text.
         

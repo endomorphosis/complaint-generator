@@ -6,8 +6,8 @@ Provides a high-level interface for analyzing complaints with all components.
 
 from typing import Dict, Optional, Any
 from .legal_patterns import LegalPatternExtractor
-from .risk_scoring import ComplaintRiskScorer  # Use old name for now
-from .keywords import KeywordRegistry
+from .risk_scoring import ComplaintRiskScorer
+from .keywords import get_keywords
 
 
 class ComplaintAnalyzer:
@@ -30,7 +30,6 @@ class ComplaintAnalyzer:
         self.complaint_type = complaint_type
         self.legal_extractor = LegalPatternExtractor()
         self.risk_scorer = ComplaintRiskScorer()
-        self.keyword_registry = KeywordRegistry()
     
     def analyze(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -51,8 +50,8 @@ class ComplaintAnalyzer:
         # Calculate risk
         risk = self.risk_scorer.calculate_risk(text, provisions['provisions'])
         
-        # Extract keywords
-        complaint_keywords = self.keyword_registry.get_keywords('complaint', self.complaint_type)
+        # Extract keywords using global registry
+        complaint_keywords = get_keywords('complaint', self.complaint_type)
         found_keywords = [kw for kw in complaint_keywords if kw.lower() in text.lower()]
         
         return {

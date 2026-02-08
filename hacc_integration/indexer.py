@@ -12,8 +12,11 @@ This provides the best of both approaches:
 
 import sys
 import os
+import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # Add ipfs_datasets_py to path if available
 ipfs_datasets_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ipfs_datasets_py')
@@ -69,7 +72,7 @@ class HybridDocumentIndexer:
             try:
                 self.embeddings_router = EmbeddingsRouter()
             except Exception as e:
-                print(f"Warning: Failed to initialize embeddings: {e}")
+                logger.warning(f"Failed to initialize embeddings: {e}")
                 self.embeddings_router = None
                 self.enable_embeddings = False
         else:

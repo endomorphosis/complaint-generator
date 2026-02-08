@@ -10,7 +10,6 @@ Requirements:
     export BRAVE_API_KEY="your_key_here"
 """
 
-import os
 import sys
 import logging
 from pathlib import Path
@@ -116,13 +115,7 @@ class ComplaintEvidenceGatherer:
         logger.info(f"Downloading {len(urls)} evidence documents...")
         
         # Simulate HACC download_manager.py integration
-        # In real implementation:
-        # manager = DownloadManager(raw_dir=str(self.raw_dir))
-        # filepaths = []
-        # for url in urls:
-        #     filepath = manager.download_pdf(url, source='complaint_evidence')
-        #     if filepath:
-        #         filepaths.append(filepath)
+        # In real implementation, use DownloadManager to download PDFs
         
         logger.info(f"Downloaded to {self.raw_dir}")
         return []
@@ -137,12 +130,7 @@ class ComplaintEvidenceGatherer:
         logger.info("Parsing PDF documents...")
         
         # Simulate HACC parse_pdfs.py integration
-        # In real implementation:
-        # parser = PDFParser(
-        #     raw_dir=str(self.raw_dir),
-        #     parsed_dir=str(self.parsed_dir)
-        # )
-        # parser.batch_parse()
+        # In real implementation, use PDFParser to batch parse documents
         
         logger.info(f"Parsed documents saved to {self.parsed_dir}")
         return []
@@ -159,31 +147,8 @@ class ComplaintEvidenceGatherer:
         """
         logger.info("Indexing evidence documents...")
         
-        # Define complaint-specific keyword sets
-        complaint_legal_keywords = [
-            'discrimination', 'harassment', 'retaliation',
-            'fair housing', 'reasonable accommodation',
-            'protected class', 'familial status', 'disability'
-        ]
-        
-        evidence_keywords = [
-            'witness', 'testimony', 'document', 'record',
-            'correspondence', 'notice', 'communication'
-        ]
-        
-        legal_authority_keywords = [
-            'statute', 'regulation', 'ordinance', 'code',
-            'U.S.C.', 'C.F.R.', 'O.R.S.', 'precedent'
-        ]
-        
         # Simulate HACC index_and_tag.py integration
-        # In real implementation:
-        # indexer = DocumentIndexer(parsed_dir=str(self.parsed_dir))
-        # indexer.DEI_KEYWORDS = complaint_legal_keywords + complaint_keywords
-        # indexer.PROXY_KEYWORDS = evidence_keywords
-        # indexer.BINDING_KEYWORDS = legal_authority_keywords
-        # indexer.batch_index()
-        # indexer.save_index(str(self.base_dir / "index.json"))
+        # In real implementation, use DocumentIndexer with complaint-specific keywords
         
         logger.info(f"Index saved to {self.base_dir / 'index.json'}")
         return {}
@@ -251,7 +216,7 @@ class ComplaintEvidenceGatherer:
         
         # Step 4: Index with keywords
         logger.info("\n[Step 4/5] Indexing evidence...")
-        index = self.index_evidence(complaint_data['keywords'])
+        self.index_evidence(complaint_data['keywords'])
         
         # Step 5: Generate report
         logger.info("\n[Step 5/5] Generating evidence report...")
