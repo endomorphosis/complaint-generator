@@ -2,8 +2,31 @@
 
 Comprehensive examples showing how to use and extend the complaint_analysis module.
 
+## Built-in Complaint Types
+
+The module now includes 12 comprehensive taxonomies covering major practice areas:
+
+- **Housing** - Fair housing, landlord-tenant, Section 8, reasonable accommodation
+- **Employment** - Title VII, EEOC, workplace discrimination, wrongful termination
+- **Civil Rights** - Police misconduct, voting rights, constitutional violations
+- **Consumer Protection** - Fraud, deceptive practices, FTC violations
+- **Healthcare** - Medical malpractice, HIPAA, patient rights, EMTALA
+- **Free Speech/Censorship** - First Amendment, content moderation, prior restraint
+- **Immigration** - Visa, asylum, deportation, USCIS, ICE proceedings
+- **Family Law** - Divorce, custody, child support, domestic violence
+- **Criminal Defense** - Miranda rights, illegal search, due process, habeas corpus
+- **Tax Law** - IRS disputes, tax court, innocent spouse relief, offer in compromise
+- **Intellectual Property** - Patents, trademarks, copyrights, trade secrets
+- **Environmental Law** - EPA violations, Clean Air/Water Act, CERCLA, pollution
+
+For a comprehensive demonstration, run:
+```bash
+python3 examples/complaint_analysis_taxonomies_demo.py
+```
+
 ## Table of Contents
 
+0. [Built-in Complaint Types](#built-in-complaint-types)
 1. [Basic Usage](#basic-usage)
 2. [Extending with New Complaint Types](#extending-with-new-complaint-types)
 3. [Custom Risk Scoring](#custom-risk-scoring)
