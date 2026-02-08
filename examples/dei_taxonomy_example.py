@@ -18,8 +18,7 @@ from complaint_analysis import (
     get_registered_types,
     get_keywords,
     LegalPatternExtractor,
-    ComplaintRiskScorer,
-    ComplaintAnalyzer
+    ComplaintRiskScorer
 )
 
 

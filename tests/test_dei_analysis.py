@@ -288,5 +288,77 @@ class TestDEIIntegration:
         assert len(provs_neutral) == 0
 
 
+class TestDEISpecificRetrieval:
+    """Tests for DEI-specific keyword and pattern retrieval."""
+    
+    def test_get_dei_complaint_keywords(self):
+        """Test retrieving DEI complaint keywords."""
+        keywords = get_keywords('complaint', complaint_type='dei')
+        
+        # Verify we get keywords back
+        assert len(keywords) > 0
+        assert isinstance(keywords, list)
+        
+        # Verify DEI-specific terms are present
+        assert 'diversity' in keywords
+        assert 'equity' in keywords
+        assert 'inclusion' in keywords
+    
+    def test_get_dei_proxy_keywords(self):
+        """Test retrieving DEI proxy keywords."""
+        proxy_keywords = get_keywords('dei_proxy', complaint_type='dei')
+        
+        assert len(proxy_keywords) > 0
+        assert 'cultural competence' in proxy_keywords
+        assert 'lived experience' in proxy_keywords
+    
+    def test_get_dei_applicability_housing(self):
+        """Test retrieving DEI housing applicability keywords."""
+        housing_keywords = get_keywords('applicability_housing', complaint_type='dei')
+        
+        assert len(housing_keywords) > 0
+        assert 'housing' in housing_keywords
+        assert 'tenant' in housing_keywords
+    
+    def test_get_dei_applicability_procurement(self):
+        """Test retrieving DEI procurement applicability keywords."""
+        procurement_keywords = get_keywords('applicability_procurement', complaint_type='dei')
+        
+        assert len(procurement_keywords) > 0
+        assert 'procurement' in procurement_keywords
+        assert 'dbe' in procurement_keywords or 'disadvantaged business enterprise' in procurement_keywords
+    
+    def test_dei_legal_patterns_accessible(self):
+        """Test that DEI legal patterns are registered and accessible."""
+        from complaint_analysis import get_legal_terms
+        
+        # Get DEI-specific patterns
+        dei_patterns = get_legal_terms('dei')
+        
+        # Verify patterns are registered
+        assert len(dei_patterns) > 0
+        assert isinstance(dei_patterns, list)
+        
+        # Verify DEI-unique patterns are present (not duplicates)
+        pattern_strings = [p for p in dei_patterns]
+        assert any('diversity' in p for p in pattern_strings)
+        assert any('equity' in p for p in pattern_strings)
+    
+    def test_dei_pattern_extraction_works(self):
+        """Test that DEI patterns can extract provisions."""
+        from complaint_analysis import LegalPatternExtractor
+        
+        extractor = LegalPatternExtractor()
+        
+        # Test with DEI-specific text
+        dei_text = "This policy promotes diversity, equity, and inclusion through targeted initiatives."
+        result = extractor.extract_provisions(dei_text)
+        
+        # Should find DEI terms
+        assert result['provision_count'] > 0
+        terms_found = [term.lower() for term in result['terms_found']]
+        assert any('diversity' in term or 'equity' in term or 'inclusion' in term for term in terms_found)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

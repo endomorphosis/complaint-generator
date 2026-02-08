@@ -7,7 +7,7 @@ DEI (Diversity, Equity, and Inclusion) taxonomy.
 
 import pytest
 from complaint_analysis import (
-    LegalPatternExtractor as ComplaintLegalPatternExtractor,
+    ComplaintLegalPatternExtractor,  # Test backward compatibility alias
     ComplaintRiskScorer,
     COMPLAINT_KEYWORDS,
     EVIDENCE_KEYWORDS,

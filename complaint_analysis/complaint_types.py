@@ -670,98 +670,11 @@ def register_dei_complaint():
     ], complaint_type='dei')
     
     # DEI-specific legal patterns
+    # DEI-specific legal patterns (unique patterns only, avoiding duplicates)
+    # Note: Common patterns like "discrimination", "fair housing", etc. are already
+    # registered in other categories and will be loaded by LegalPatternExtractor
     register_legal_terms('dei', [
-        # Fair Housing & Discrimination
-        r"\b(fair housing)\b",
-        r"\b(Fair Housing Act)\b",
-        r"\b(FHA)\b",
-        r"\b(discrimination)\b",
-        r"\b(discriminate|discriminatory)\b",
-        r"\b(harassment)\b",
-        r"\b(retaliation|retaliate)\b",
-        r"\b(hostile environment)\b",
-        
-        # Reasonable Accommodation
-        r"\b(reasonable accommodation)\b",
-        r"\b(reasonable modification)\b",
-        r"\b(disability accommodation)\b",
-        r"\b(auxiliary aids?)\b",
-        
-        # Protected Classes
-        r"\b(protected class(es)?)\b",
-        r"\b(familial status)\b",
-        r"\b(disability|disabled)\b",
-        r"\b(race|racial)\b",
-        r"\b(color)\b",
-        r"\b(national origin)\b",
-        r"\b(religion|religious)\b",
-        r"\b(sex|gender)\b",
-        r"\b(sexual orientation)\b",
-        r"\b(gender identity)\b",
-        r"\b(source of income)\b",
-        r"\b(marital status)\b",
-        
-        # Legal Impact
-        r"\b(disparate (impact|treatment))\b",
-        r"\b(intentional discrimination)\b",
-        r"\b(unintentional discrimination)\b",
-        r"\b(discriminatory effect)\b",
-        r"\b(adverse (impact|effect))\b",
-        
-        # Housing Specific
-        r"\b(Section 8)\b",
-        r"\b(Housing Choice Voucher)\b",
-        r"\b(public housing)\b",
-        r"\b(affordable housing)\b",
-        r"\b(tenant|tenancy)\b",
-        r"\b(landlord)\b",
-        r"\b(lease|rental agreement)\b",
-        r"\b(eviction)\b",
-        r"\b(housing authority)\b",
-        
-        # Employment Specific
-        r"\b(Title VII)\b",
-        r"\b(ADA)\b",
-        r"\b(Americans with Disabilities Act)\b",
-        r"\b(ADEA)\b",
-        r"\b(Age Discrimination in Employment Act)\b",
-        r"\b(FMLA)\b",
-        r"\b(Family and Medical Leave Act)\b",
-        r"\b(EEOC)\b",
-        r"\b(Equal Employment Opportunity)\b",
-        
-        # Federal Law Citations
-        r"\b(42 U\.S\.C\.)\b",
-        r"\b(29 U\.S\.C\.)\b",
-        r"\b(C\.F\.R\.)\b",
-        r"\b(Federal Register)\b",
-        
-        # Remedies & Relief
-        r"\b(damages)\b",
-        r"\b(compensatory damages)\b",
-        r"\b(punitive damages)\b",
-        r"\b(injunctive relief)\b",
-        r"\b(declaratory relief)\b",
-        r"\b(attorney('s)? fees)\b",
-        r"\b(equitable relief)\b",
-        r"\b(monetary relief)\b",
-        
-        # Civil Rights
-        r"\b(civil rights)\b",
-        r"\b(equal protection)\b",
-        r"\b(due process)\b",
-        r"\b(constitutional (right|violation))\b",
-        
-        # Complaint-Specific Terms
-        r"\b(complainant)\b",
-        r"\b(respondent)\b",
-        r"\b(charging party)\b",
-        r"\b(aggrieved person)\b",
-        r"\b(prima facie case)\b",
-        r"\b(burden of proof)\b",
-        r"\b(preponderance of evidence)\b",
-        
-        # DEI Core Terms (from HACC deep_analysis.py)
+        # DEI Core Terms (unique to DEI taxonomy)
         r"\b(diversity|diverse)\b",
         r"\b(equity|equitable)\b",
         r"\b(inclusion|inclusive)\b",
@@ -793,6 +706,9 @@ def register_dei_complaint():
         r"\b(cultural (humility|responsiveness))\b",
         r"\b(justice[- ]centered|justice[- ]oriented)\b",
         r"\b(anti[- ]racist)\b",
+        r"\b(lived experience)\b",
+        r"\b(safe space)\b",
+        r"\b(first[- ]generation)\b",
     ])
 
 

@@ -306,14 +306,18 @@ def _get_applicability_keywords() -> Dict[str, List[str]]:
 
 # Lazy-loaded property for backward compatibility
 class _ApplicabilityKeywords:
-    """Lazy-loaded applicability keywords for backward compatibility."""
-    _cache = None
-    _lock = None
+    """
+    Lazy-loaded applicability keywords for backward compatibility.
+    
+    This class implements a dictionary-like interface that lazily loads
+    DEI applicability keywords on first access, with thread-safe initialization.
+    """
     
     def __init__(self):
-        """Initialize with a threading lock for thread-safety."""
+        """Initialize with thread-safe lazy loading."""
         import threading
         self._lock = threading.Lock()
+        self._cache = None
     
     def _ensure_loaded(self):
         """Ensure the cache is loaded (thread-safe)."""
