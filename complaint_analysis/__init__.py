@@ -45,6 +45,7 @@ from .keywords import (
     APPLICABILITY_KEYWORDS
 )
 from .risk_scoring import ComplaintRiskScorer
+from .dei_risk_scoring import DEIRiskScorer
 from .indexer import HybridDocumentIndexer
 from .complaint_types import (
     register_housing_complaint,
@@ -79,6 +80,7 @@ __all__ = [
     'ComplaintLegalPatternExtractor',  # Backward compatibility alias
     'KeywordRegistry',
     'ComplaintRiskScorer',
+    'DEIRiskScorer',  # DEI-specific risk scorer
     'RiskScorer',  # Alias
     'HybridDocumentIndexer',
     'ComplaintAnalyzer',

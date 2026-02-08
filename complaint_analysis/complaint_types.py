@@ -433,10 +433,32 @@ def register_dei_complaint():
     
     This encompasses discrimination, harassment, and civil rights violations across
     multiple domains including housing, employment, and public accommodations.
-    Formerly known as the HACC integration module.
+    Integrates comprehensive DEI keywords from HACC repository for policy analysis.
     """
-    # Core complaint keywords from HACC's DEI_KEYWORDS
+    # Core DEI keywords from HACC's index_and_tag.py
     register_keywords('complaint', [
+        # Core DEI terms
+        'diversity', 'diverse', 'equity', 'equitable', 'inclusion', 'inclusive',
+        'dei', 'deia', 'deib', 'deij',
+        
+        # Justice frameworks
+        'racial justice', 'social justice', 'environmental justice',
+        'justice-centered', 'justice oriented',
+        'anti-racist', 'anti discrimination',
+        
+        # Community descriptors
+        'marginalized', 'minority', 'minorities',
+        'bipoc', 'people of color',
+        'underrepresented', 'underrepresented groups',
+        'underserved', 'underserviced',
+        'historically underrepresented', 'marginalized communities',
+        'socially disadvantaged', 'economically disadvantaged',
+        
+        # Equity frameworks
+        'equity lens', 'equity framework', 'equity initiatives',
+        'equity plan', 'cultural humility', 'cultural responsiveness',
+        'accessibility', 'barrier reduction', 'inclusive environment',
+        
         # Discrimination types
         'discrimination', 'discriminate', 'discriminatory',
         'harassment', 'hostile environment',
@@ -480,6 +502,24 @@ def register_dei_complaint():
         # Complaint process
         'complainant', 'respondent', 'charging party',
         'aggrieved person', 'complaint', 'charge',
+        
+        # Community benefits
+        'community benefit', 'community benefits',
+        'section 3', 'equal opportunity',
+    ], complaint_type='dei')
+    
+    # DEI proxy keywords from HACC (euphemisms and indirect references)
+    register_keywords('dei_proxy', [
+        'cultural competence', 'cultural competency',
+        'lived experience',
+        'diversity statement',
+        'safe space',
+        'minority-only',
+        'first-generation',
+        'low-income targeting',
+        'overcoming obstacles',
+        'implicit bias', 'unconscious bias',
+        'affirmative action',
     ], complaint_type='dei')
     
     # Evidence-related keywords
@@ -597,6 +637,38 @@ def register_dei_complaint():
         'permit', 'license', 'approval',
     ], complaint_type='dei')
     
+    # Procurement and contracting (from HACC DEI research)
+    register_keywords('applicability_procurement', [
+        'procurement', 'contract', 'contracting',
+        'vendor', 'supplier', 'bid', 'bidding',
+        'rfp', 'request for proposal', 'award',
+        'purchase', 'purchasing',
+        'disadvantaged business enterprise', 'dbe',
+        'minority-owned business', 'mbe',
+        'women-owned business', 'wbe',
+        'mwesb', 'esb',
+        'socially disadvantaged', 'economically disadvantaged',
+        'small business', 'certification',
+        'subcontractor', 'subcontracting',
+    ], complaint_type='dei')
+    
+    # Training and development (from HACC index_and_tag.py)
+    register_keywords('applicability_training', [
+        'training', 'workshop', 'course', 'curriculum',
+        'education', 'seminar', 'professional development',
+        'orientation', 'onboarding', 'certification',
+        'cultural competency training', 'implicit bias training',
+        'diversity training', 'sensitivity training',
+    ], complaint_type='dei')
+    
+    # Community engagement (from HACC)
+    register_keywords('applicability_community_engagement', [
+        'community engagement', 'public input',
+        'stakeholder', 'outreach', 'consultation',
+        'community participation', 'public comment',
+        'engagement plan', 'community benefits',
+    ], complaint_type='dei')
+    
     # DEI-specific legal patterns
     register_legal_terms('dei', [
         # Fair Housing & Discrimination
@@ -688,6 +760,39 @@ def register_dei_complaint():
         r"\b(prima facie case)\b",
         r"\b(burden of proof)\b",
         r"\b(preponderance of evidence)\b",
+        
+        # DEI Core Terms (from HACC deep_analysis.py)
+        r"\b(diversity|diverse)\b",
+        r"\b(equity|equitable)\b",
+        r"\b(inclusion|inclusive)\b",
+        r"\b(underrepresented minorit(y|ies))\b",
+        r"\b(underserved communit(y|ies))\b",
+        r"\b(disadvantaged business enterprise|DBE)\b",
+        r"\b(minority[- ]owned business|MBE)\b",
+        r"\b(wom[ae]n[- ]owned business|WBE)\b",
+        r"\b(MWESB|ESB)\b",
+        r"\b(affirmative action)\b",
+        r"\b(cultural competen(cy|ce))\b",
+        r"\b(implicit bias|unconscious bias)\b",
+        r"\b(racial equity)\b",
+        r"\b(social equity)\b",
+        r"\b(environmental justice)\b",
+        r"\b(historically underrepresented)\b",
+        r"\b(marginalized communit(y|ies))\b",
+        r"\b(BIPOC)\b",
+        r"\b(equal opportunity)\b",
+        r"\b(Section 3)\b",
+        r"\b(community benefit(s)?)\b",
+        r"\b(socially disadvantaged)\b",
+        r"\b(economically disadvantaged)\b",
+        r"\b(racial justice)\b",
+        r"\b(social justice)\b",
+        r"\b(people of color)\b",
+        r"\b(underserved|underserviced)\b",
+        r"\b(equity (lens|framework|initiative))\b",
+        r"\b(cultural (humility|responsiveness))\b",
+        r"\b(justice[- ]centered|justice[- ]oriented)\b",
+        r"\b(anti[- ]racist)\b",
     ])
 
 
