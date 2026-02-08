@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-HACC Integration Example - Complaint Evidence Pipeline
+Complaint Analysis Example - Complaint Evidence Pipeline
 
-This example demonstrates how to integrate HACC scripts with the
-complaint-generator mediator for automated evidence gathering.
+This example demonstrates how to use the complaint_analysis module
+(formerly hacc_integration) with the complaint-generator mediator
+for automated evidence gathering.
+
+Note: This file uses the legacy name 'hacc_integration_example.py' 
+for backward compatibility, but demonstrates modern complaint_analysis usage.
 
 Requirements:
     pip install requests beautifulsoup4
@@ -25,13 +29,13 @@ logger = logging.getLogger(__name__)
 
 class ComplaintEvidenceGatherer:
     """
-    Integration wrapper for HACC scripts adapted for complaint evidence gathering.
+    Integration wrapper demonstrating complaint evidence gathering.
     
-    This class demonstrates how to use HACC scripts for:
+    Uses the complaint_analysis module (formerly hacc_integration) for:
     1. Searching for complaint-relevant evidence
     2. Downloading and deduplicating documents
     3. Parsing PDF evidence
-    4. Indexing with complaint-specific keywords
+    4. Indexing with complaint-specific keywords (using complaint_analysis taxonomies)
     5. Generating evidence reports
     """
     

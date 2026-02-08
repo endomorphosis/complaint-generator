@@ -1,10 +1,14 @@
 """
-Tests for HACC Integration Module
+Tests for Complaint Analysis Module (formerly HACC Integration)
 
-Tests the integration of HACC's legal patterns with ipfs_datasets_py infrastructure.
+Tests the legal patterns and complaint analysis functionality.
+For backward compatibility, this file still uses hacc_integration imports,
+but new code should use complaint_analysis imports instead.
 """
 
 import pytest
+# Use hacc_integration for backward compatibility testing
+# Note: This will show a deprecation warning, which is expected
 from hacc_integration import (
     ComplaintLegalPatternExtractor,
     ComplaintRiskScorer,
