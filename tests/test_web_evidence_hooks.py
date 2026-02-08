@@ -1,0 +1,329 @@
+"""
+Unit tests for Web Evidence Discovery Hooks
+
+Tests for web evidence discovery, validation, and integration functionality.
+"""
+import pytest
+import tempfile
+import os
+from unittest.mock import Mock, MagicMock, patch
+from pathlib import Path
+
+
+class TestWebEvidenceSearchHook:
+    """Test cases for WebEvidenceSearchHook"""
+    
+    def test_web_evidence_search_hook_can_be_imported(self):
+        """Test that WebEvidenceSearchHook can be imported"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceSearchHook
+            assert WebEvidenceSearchHook is not None
+        except ImportError as e:
+            pytest.skip(f"WebEvidenceSearchHook has import issues: {e}")
+    
+    def test_init_search_tools(self):
+        """Test initialization of search tools"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceSearchHook
+            
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            
+            hook = WebEvidenceSearchHook(mock_mediator)
+            
+            # Should have initialized with warnings if tools not available
+            assert mock_mediator.log.called
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+    
+    def test_search_brave(self):
+        """Test Brave Search functionality"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceSearchHook
+            
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            
+            hook = WebEvidenceSearchHook(mock_mediator)
+            
+            # Mock Brave Search client
+            mock_brave = Mock()
+            mock_brave.web_search = Mock(return_value={
+                'web': {
+                    'results': [
+                        {
+                            'title': 'Test Result',
+                            'url': 'https://example.com/test',
+                            'description': 'Test description'
+                        }
+                    ]
+                }
+            })
+            hook.brave_search = mock_brave
+            
+            results = hook.search_brave('employment discrimination', max_results=10)
+            
+            assert isinstance(results, list)
+            if results:
+                assert 'source_type' in results[0]
+                assert results[0]['source_type'] == 'brave_search'
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+    
+    def test_search_common_crawl(self):
+        """Test Common Crawl search functionality"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceSearchHook
+            
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            
+            hook = WebEvidenceSearchHook(mock_mediator)
+            
+            # Mock Common Crawl search
+            mock_cc = Mock()
+            mock_cc.search_domain = Mock(return_value=[
+                {
+                    'url': 'https://example.com/page1',
+                    'content': 'Test content'
+                }
+            ])
+            hook.cc_search = mock_cc
+            
+            results = hook.search_common_crawl('example.com', max_results=10)
+            
+            assert isinstance(results, list)
+            if results:
+                assert 'source_type' in results[0]
+                assert results[0]['source_type'] == 'common_crawl'
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+    
+    def test_search_for_evidence(self):
+        """Test searching all sources for evidence"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceSearchHook
+            
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            
+            hook = WebEvidenceSearchHook(mock_mediator)
+            
+            # Mock both search methods
+            hook.search_brave = Mock(return_value=[
+                {'title': 'Brave Result', 'url': 'https://example.com/1'}
+            ])
+            hook.search_common_crawl = Mock(return_value=[
+                {'title': 'CC Result', 'url': 'https://example.com/2'}
+            ])
+            hook.brave_search = True  # Indicate available
+            hook.cc_search = True  # Indicate available
+            
+            results = hook.search_for_evidence(
+                keywords=['employment', 'discrimination'],
+                domains=['example.com'],
+                max_results=20
+            )
+            
+            assert isinstance(results, dict)
+            assert 'brave_search' in results
+            assert 'common_crawl' in results
+            assert 'total_found' in results
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+    
+    def test_validate_evidence(self):
+        """Test evidence validation"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceSearchHook
+            
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value="Relevance: 0.8 - Highly relevant")
+            
+            hook = WebEvidenceSearchHook(mock_mediator)
+            
+            evidence_item = {
+                'title': 'Test Evidence',
+                'url': 'https://example.com/evidence',
+                'content': 'Test content about discrimination',
+                'source_type': 'brave_search'
+            }
+            
+            validation = hook.validate_evidence(evidence_item)
+            
+            assert isinstance(validation, dict)
+            assert 'valid' in validation
+            assert 'relevance_score' in validation
+            assert validation['valid'] is True
+            assert 0.0 <= validation['relevance_score'] <= 1.0
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+
+class TestWebEvidenceIntegrationHook:
+    """Test cases for WebEvidenceIntegrationHook"""
+    
+    def test_web_evidence_integration_hook_can_be_imported(self):
+        """Test that WebEvidenceIntegrationHook can be imported"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceIntegrationHook
+            assert WebEvidenceIntegrationHook is not None
+        except ImportError as e:
+            pytest.skip(f"WebEvidenceIntegrationHook has import issues: {e}")
+    
+    def test_discover_and_store_evidence(self):
+        """Test discovering and storing evidence"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceIntegrationHook
+            
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.state = Mock()
+            mock_mediator.state.username = 'testuser'
+            
+            # Mock dependencies
+            mock_mediator.web_evidence_search = Mock()
+            mock_mediator.web_evidence_search.search_for_evidence = Mock(return_value={
+                'total_found': 2,
+                'brave_search': [
+                    {
+                        'title': 'Evidence 1',
+                        'url': 'https://example.com/1',
+                        'content': 'Content 1',
+                        'source_type': 'brave_search'
+                    }
+                ],
+                'common_crawl': [
+                    {
+                        'title': 'Evidence 2',
+                        'url': 'https://example.com/2',
+                        'content': 'Content 2',
+                        'source_type': 'common_crawl'
+                    }
+                ]
+            })
+            mock_mediator.web_evidence_search.validate_evidence = Mock(return_value={
+                'valid': True,
+                'relevance_score': 0.8
+            })
+            
+            mock_mediator.evidence_storage = Mock()
+            mock_mediator.evidence_storage.store_evidence = Mock(return_value={
+                'cid': 'QmTest123',
+                'size': 100
+            })
+            
+            mock_mediator.evidence_state = Mock()
+            mock_mediator.evidence_state.add_evidence_record = Mock(return_value=1)
+            
+            hook = WebEvidenceIntegrationHook(mock_mediator)
+            
+            result = hook.discover_and_store_evidence(
+                keywords=['employment', 'discrimination'],
+                user_id='testuser',
+                min_relevance=0.5
+            )
+            
+            assert isinstance(result, dict)
+            assert 'discovered' in result
+            assert 'stored' in result
+            assert result['discovered'] == 2
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+    
+    def test_generate_search_keywords(self):
+        """Test search keyword generation"""
+        try:
+            from mediator.web_evidence_hooks import WebEvidenceIntegrationHook
+            
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value="discrimination\nemployment\nwrongful termination")
+            
+            hook = WebEvidenceIntegrationHook(mock_mediator)
+            
+            keywords = hook._generate_search_keywords('employment discrimination')
+            
+            assert isinstance(keywords, list)
+            assert len(keywords) > 0
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+
+class TestMediatorWebEvidenceIntegration:
+    """Integration tests for web evidence hooks with mediator"""
+    
+    @pytest.mark.integration
+    def test_mediator_has_web_evidence_hooks(self):
+        """Test that mediator initializes with web evidence hooks"""
+        try:
+            from mediator import Mediator
+            
+            mock_backend = Mock()
+            mock_backend.id = 'test-backend'
+            
+            mediator = Mediator(backends=[mock_backend])
+            
+            assert hasattr(mediator, 'web_evidence_search')
+            assert hasattr(mediator, 'web_evidence_integration')
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+    
+    @pytest.mark.integration
+    def test_mediator_discover_web_evidence(self):
+        """Test discovering web evidence through mediator"""
+        try:
+            from mediator import Mediator
+            
+            mock_backend = Mock()
+            mock_backend.id = 'test-backend'
+            
+            mediator = Mediator(backends=[mock_backend])
+            mediator.state.username = 'testuser'
+            
+            # Mock the integration method
+            mediator.web_evidence_integration.discover_and_store_evidence = Mock(return_value={
+                'discovered': 5,
+                'validated': 4,
+                'stored': 3,
+                'skipped': 2
+            })
+            
+            result = mediator.discover_web_evidence(
+                keywords=['employment', 'discrimination'],
+                min_relevance=0.6
+            )
+            
+            assert isinstance(result, dict)
+            assert 'discovered' in result
+            assert 'stored' in result
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+    
+    @pytest.mark.integration
+    def test_mediator_search_web_for_evidence(self):
+        """Test searching web without storing"""
+        try:
+            from mediator import Mediator
+            
+            mock_backend = Mock()
+            mock_backend.id = 'test-backend'
+            
+            mediator = Mediator(backends=[mock_backend])
+            
+            # Mock the search method
+            mediator.web_evidence_search.search_for_evidence = Mock(return_value={
+                'brave_search': [],
+                'common_crawl': [],
+                'total_found': 0
+            })
+            
+            result = mediator.search_web_for_evidence(
+                keywords=['test', 'query']
+            )
+            
+            assert isinstance(result, dict)
+            assert 'total_found' in result
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")

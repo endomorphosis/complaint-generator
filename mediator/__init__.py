@@ -15,3 +15,7 @@ from .legal_authority_hooks import (
     LegalAuthorityStorageHook,
     LegalAuthorityAnalysisHook
 )
+from .web_evidence_hooks import (
+    WebEvidenceSearchHook,
+    WebEvidenceIntegrationHook
+)

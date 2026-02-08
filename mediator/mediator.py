@@ -1,4 +1,5 @@
 from time import time
+from typing import List, Optional
 from .strings import user_prompts
 from .state import State
 from .inquiries import Inquiries
@@ -19,6 +20,10 @@ from .legal_authority_hooks import (
 	LegalAuthoritySearchHook,
 	LegalAuthorityStorageHook,
 	LegalAuthorityAnalysisHook
+)
+from .web_evidence_hooks import (
+	WebEvidenceSearchHook,
+	WebEvidenceIntegrationHook
 )
 
 
@@ -43,6 +48,10 @@ class Mediator:
 		self.legal_authority_search = LegalAuthoritySearchHook(self)
 		self.legal_authority_storage = LegalAuthorityStorageHook(self, db_path=legal_authority_db_path)
 		self.legal_authority_analysis = LegalAuthorityAnalysisHook(self)
+		
+		# Initialize web evidence discovery hooks
+		self.web_evidence_search = WebEvidenceSearchHook(self)
+		self.web_evidence_integration = WebEvidenceIntegrationHook(self)
 		
 		self.reset()
 
@@ -447,6 +456,76 @@ class Mediator:
 		self.log('auto_research_complete', results=results)
 		
 		return results
+	
+	def discover_web_evidence(self, keywords: List[str],
+	                         domains: Optional[List[str]] = None,
+	                         user_id: str = None,
+	                         claim_type: str = None,
+	                         min_relevance: float = 0.5):
+		"""
+		Discover evidence from web sources.
+		
+		Args:
+			keywords: Keywords to search for
+			domains: Optional specific domains to search
+			user_id: User identifier (defaults to state username)
+			claim_type: Optional claim type association
+			min_relevance: Minimum relevance score (0.0 to 1.0)
+			
+		Returns:
+			Dictionary with discovered and stored evidence counts
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		return self.web_evidence_integration.discover_and_store_evidence(
+			keywords=keywords,
+			domains=domains,
+			user_id=user_id,
+			claim_type=claim_type,
+			min_relevance=min_relevance
+		)
+	
+	def search_web_for_evidence(self, keywords: List[str],
+	                           domains: Optional[List[str]] = None,
+	                           max_results: int = 20):
+		"""
+		Search web sources for evidence (without storing).
+		
+		Args:
+			keywords: Keywords to search for
+			domains: Optional specific domains
+			max_results: Maximum results per source
+			
+		Returns:
+			Dictionary with search results from each source
+		"""
+		return self.web_evidence_search.search_for_evidence(
+			keywords=keywords,
+			domains=domains,
+			max_results=max_results
+		)
+	
+	def discover_evidence_automatically(self, user_id: str = None):
+		"""
+		Automatically discover evidence for all claims in the case.
+		
+		This method:
+		1. Analyzes the complaint to identify claims
+		2. Generates search keywords for each claim
+		3. Searches web sources (Brave Search, Common Crawl)
+		4. Validates and stores relevant evidence
+		
+		Args:
+			user_id: User identifier (defaults to state username)
+			
+		Returns:
+			Dictionary with discovery results for each claim
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		
+		return self.web_evidence_integration.discover_evidence_for_case(user_id=user_id)
 
 
 	def query_backend(self, prompt):
