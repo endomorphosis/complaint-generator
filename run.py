@@ -5,7 +5,7 @@ def install_pip_package(package_string):
 
 import json
 from lib.log import init_logging, make_logger
-from backends import OpenAIBackend, WorkstationBackendModels, WorkstationBackendDatabases
+from backends import OpenAIBackend, WorkstationBackendModels, WorkstationBackendDatabases, LLMRouterBackend
 from mediator import Mediator, Inquiries, Complaint, State 
 from applications import CLI
 from applications import SERVER
@@ -42,6 +42,12 @@ for backend_id in config_mediator['backends']:
 	elif backend_config['type'] == 'workstation':
 		backendDatabases  = WorkstationBackendDatabases(**backend_config)
 		backendModels = WorkstationBackendModels(**backend_config)
+		backend = backendModels  # Use backendModels as the primary backend
+	elif backend_config['type'] == 'llm_router':
+		backend = LLMRouterBackend(**backend_config)
+	else:
+		log.error('unknown backend type: %s' % backend_config['type'])
+		exit(-1)
 	backends.append(backend)
 
 
