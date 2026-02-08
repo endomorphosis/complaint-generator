@@ -47,6 +47,7 @@ from .keywords import (
 from .risk_scoring import ComplaintRiskScorer
 from .dei_risk_scoring import DEIRiskScorer
 from .dei_provision_extractor import DEIProvisionExtractor
+from .dei_report_generator import DEIReportGenerator
 from .indexer import HybridDocumentIndexer
 from .complaint_types import (
     register_housing_complaint,
@@ -83,6 +84,7 @@ __all__ = [
     'ComplaintRiskScorer',
     'DEIRiskScorer',  # DEI-specific risk scorer
     'DEIProvisionExtractor',  # DEI provision extractor
+    'DEIReportGenerator',  # DEI report generator
     'RiskScorer',  # Alias
     'HybridDocumentIndexer',
     'ComplaintAnalyzer',
