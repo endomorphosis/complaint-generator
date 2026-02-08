@@ -99,20 +99,43 @@ class EnvironmentalRiskScorer(BaseRiskScorer):
 
 ## Built-in Complaint Types
 
+The module includes comprehensive taxonomies for 12 different practice areas:
+
 ### Housing
-Keywords: fair housing, Section 8, landlord, tenant, eviction, etc.
+Keywords: fair housing, Section 8, landlord, tenant, eviction, reasonable accommodation, etc.
 
 ### Employment  
 Keywords: Title VII, EEOC, workplace discrimination, wrongful termination, etc.
 
 ### Civil Rights
-Keywords: police brutality, first amendment, voting rights, etc.
+Keywords: police brutality, first amendment, voting rights, equal protection, etc.
 
 ### Consumer
-Keywords: fraud, deceptive practices, false advertising, FTC, etc.
+Keywords: fraud, deceptive practices, false advertising, FTC, consumer protection, etc.
 
 ### Healthcare
-Keywords: medical malpractice, HIPAA, patient rights, EMTALA, etc.
+Keywords: medical malpractice, HIPAA, patient rights, EMTALA, informed consent, etc.
+
+### Free Speech / Censorship
+Keywords: First Amendment, content moderation, censorship, prior restraint, public forum, etc.
+
+### Immigration
+Keywords: visa, asylum, deportation, USCIS, ICE, green card, naturalization, etc.
+
+### Family Law
+Keywords: divorce, child custody, child support, alimony, domestic violence, adoption, etc.
+
+### Criminal Defense
+Keywords: Miranda rights, Fourth Amendment, due process, illegal search, habeas corpus, etc.
+
+### Tax Law
+Keywords: IRS, tax audit, tax court, tax penalty, innocent spouse, offer in compromise, etc.
+
+### Intellectual Property
+Keywords: patent, trademark, copyright, fair use, DMCA, trade secret, infringement, etc.
+
+### Environmental Law
+Keywords: EPA, Clean Air Act, Clean Water Act, CERCLA, pollution, contamination, etc.
 
 ## Architecture
 
@@ -199,6 +222,13 @@ get_type_specific_keywords('category_name', 'complaint_type')  # Type-specific o
 **register_civil_rights_complaint()** - Register civil rights keywords/patterns  
 **register_consumer_complaint()** - Register consumer keywords/patterns  
 **register_healthcare_complaint()** - Register healthcare keywords/patterns  
+**register_free_speech_complaint()** - Register free speech/censorship keywords/patterns  
+**register_immigration_complaint()** - Register immigration law keywords/patterns  
+**register_family_law_complaint()** - Register family law keywords/patterns  
+**register_criminal_defense_complaint()** - Register criminal defense keywords/patterns  
+**register_tax_law_complaint()** - Register tax law keywords/patterns  
+**register_intellectual_property_complaint()** - Register IP law keywords/patterns  
+**register_environmental_law_complaint()** - Register environmental law keywords/patterns  
 **get_registered_types()** - List all registered complaint types
 
 ## Migration from hacc_integration

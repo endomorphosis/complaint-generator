@@ -52,6 +52,13 @@ from .complaint_types import (
     register_civil_rights_complaint,
     register_consumer_complaint,
     register_healthcare_complaint,
+    register_free_speech_complaint,
+    register_immigration_complaint,
+    register_family_law_complaint,
+    register_criminal_defense_complaint,
+    register_tax_law_complaint,
+    register_intellectual_property_complaint,
+    register_environmental_law_complaint,
     get_registered_types
 )
 from .analyzer import ComplaintAnalyzer
@@ -98,6 +105,13 @@ __all__ = [
     'register_civil_rights_complaint',
     'register_consumer_complaint',
     'register_healthcare_complaint',
+    'register_free_speech_complaint',
+    'register_immigration_complaint',
+    'register_family_law_complaint',
+    'register_criminal_defense_complaint',
+    'register_tax_law_complaint',
+    'register_intellectual_property_complaint',
+    'register_environmental_law_complaint',
     'get_registered_types',
 ]
 

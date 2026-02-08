@@ -19,6 +19,13 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime
 from .base import BaseLegalPatternExtractor
 
+# Constants for complaint categorization
+# Minimum keyword matches required to categorize a complaint as a specific type
+DEFAULT_KEYWORD_MATCH_THRESHOLD = 2
+# Minimum number of keywords a type must have before applying the threshold
+# (types with fewer keywords use threshold of 1 to avoid being too strict)
+MIN_KEYWORDS_FOR_THRESHOLD = 10
+
 
 # Registry for legal term patterns by category
 LEGAL_TERMS_REGISTRY: Dict[str, List[str]] = {}
@@ -369,40 +376,60 @@ class LegalPatternExtractor(BaseLegalPatternExtractor):
         """
         Categorize the complaint based on legal terms found.
         
+        Uses keyword matching with configurable thresholds to identify applicable
+        complaint categories. Requires multiple keyword matches to avoid false positives.
+        
         Args:
             text: Text to analyze
             
         Returns:
             List of applicable complaint categories
         """
+        # Import here to avoid circular dependency issues during module initialization
+        from .keywords import get_type_specific_keywords, _global_registry
+        
         text_lower = text.lower()
         categories = []
         
-        # Housing-related
-        housing_terms = ['fair housing', 'section 8', 'tenant', 'landlord', 'eviction', 'lease']
-        if any(term in text_lower for term in housing_terms):
-            categories.append('housing')
+        # Check each registered complaint type
+        complaint_types = _global_registry.get_complaint_types()
         
-        # Employment-related
-        employment_terms = ['title vii', 'eeoc', 'employment', 'workplace', 'ada']
-        if any(term in text_lower for term in employment_terms):
-            categories.append('employment')
+        for complaint_type in complaint_types:
+            # Get type-specific keywords (excluding global keywords)
+            type_keywords = get_type_specific_keywords('complaint', complaint_type)
+            
+            # Check if any type-specific keywords appear in text
+            # Use a threshold to avoid false positives
+            matches = sum(1 for kw in type_keywords if kw.lower() in text_lower)
+            
+            # If at least threshold keywords match, include this type
+            # Use lower threshold for types with fewer keywords to avoid being too strict
+            threshold = (DEFAULT_KEYWORD_MATCH_THRESHOLD 
+                        if len(type_keywords) > MIN_KEYWORDS_FOR_THRESHOLD 
+                        else 1)
+            if matches >= threshold:
+                categories.append(complaint_type)
         
+        # Legacy categorization for backward compatibility
         # Disability
         if 'disability' in text_lower or 'ada' in text_lower or 'reasonable accommodation' in text_lower:
-            categories.append('disability')
+            if 'disability' not in categories:
+                categories.append('disability')
         
         # Discrimination type
         if 'discrimination' in text_lower or 'discriminate' in text_lower:
-            categories.append('discrimination')
+            if 'discrimination' not in categories:
+                categories.append('discrimination')
         
         # Harassment
         if 'harassment' in text_lower or 'hostile environment' in text_lower:
-            categories.append('harassment')
+            if 'harassment' not in categories:
+                categories.append('harassment')
         
         # Retaliation
         if 'retaliation' in text_lower or 'retaliate' in text_lower:
-            categories.append('retaliation')
+            if 'retaliation' not in categories:
+                categories.append('retaliation')
         
         return categories or ['general']
     
