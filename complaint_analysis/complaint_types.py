@@ -427,6 +427,270 @@ def register_environmental_law_complaint():
     ])
 
 
+def register_dei_complaint():
+    """
+    Register keywords and patterns for DEI (Diversity, Equity, and Inclusion) complaints.
+    
+    This encompasses discrimination, harassment, and civil rights violations across
+    multiple domains including housing, employment, and public accommodations.
+    Formerly known as the HACC integration module.
+    """
+    # Core complaint keywords from HACC's DEI_KEYWORDS
+    register_keywords('complaint', [
+        # Discrimination types
+        'discrimination', 'discriminate', 'discriminatory',
+        'harassment', 'hostile environment',
+        'retaliation', 'retaliate', 'retaliatory',
+        
+        # Fair housing
+        'fair housing', 'housing discrimination',
+        'reasonable accommodation', 'reasonable modification',
+        'familial status', 'source of income',
+        
+        # Protected classes
+        'protected class', 'protected classes',
+        'race', 'racial', 'color',
+        'national origin', 'nationality',
+        'religion', 'religious',
+        'sex', 'gender',
+        'disability', 'disabled', 'handicap',
+        'age', 'elderly',
+        'sexual orientation', 'gender identity',
+        
+        # Legal impact
+        'disparate impact', 'disparate treatment',
+        'intentional discrimination', 'unintentional discrimination',
+        'adverse impact', 'adverse effect',
+        
+        # Housing specific
+        'section 8', 'housing choice voucher',
+        'public housing', 'affordable housing',
+        'tenant', 'landlord', 'lease', 'rental',
+        'eviction', 'housing authority',
+        
+        # Employment specific
+        'employment discrimination', 'workplace discrimination',
+        'equal employment opportunity', 'eeoc',
+        'title vii', 'ada', 'adea', 'fmla',
+        
+        # Civil rights
+        'civil rights', 'equal protection', 'due process',
+        'constitutional rights', 'constitutional violation',
+        
+        # Complaint process
+        'complainant', 'respondent', 'charging party',
+        'aggrieved person', 'complaint', 'charge',
+    ], complaint_type='dei')
+    
+    # Evidence-related keywords
+    register_keywords('evidence', [
+        'evidence', 'proof', 'documentation',
+        'witness', 'testimony', 'statement',
+        'document', 'record', 'file',
+        'exhibit', 'attachment', 'appendix',
+        'correspondence', 'email', 'letter',
+        'notice', 'communication',
+        'photograph', 'image', 'video',
+        'recording', 'audio',
+        'contract', 'agreement', 'lease',
+        'policy', 'procedure', 'manual',
+        'complaint form', 'intake form',
+        'medical record', 'doctor note',
+        'police report', 'incident report',
+    ], complaint_type='dei')
+    
+    # Legal authority keywords
+    register_keywords('legal', [
+        'statute', 'law', 'code', 'regulation',
+        'ordinance', 'rule', 'act',
+        'u.s.c.', 'c.f.r.', 'federal register',
+        'case law', 'precedent', 'holding',
+        'opinion', 'decision', 'ruling',
+        'court order', 'judgment', 'decree',
+        'constitution', 'constitutional',
+        'amendment', 'provision', 'section',
+        'subsection', 'clause', 'paragraph',
+        'title', 'chapter', 'article',
+    ], complaint_type='dei')
+    
+    # Binding/enforceable indicators
+    register_keywords('binding', [
+        'policy', 'ordinance', 'statewide', 'model policy',
+        'contract', 'agreement', 'standard',
+        'required', 'must', 'shall', 'mandatory',
+        'applicable to', 'applicability', 'enforceable',
+        'governing', 'binding', 'regulation', 'rule',
+        'directive', 'compliance', 'obligated', 'stipulation',
+    ], complaint_type='dei')
+    
+    # Severity/risk indicators
+    register_keywords('severity_high', [
+        'systemic', 'pattern', 'practice',
+        'intentional', 'willful', 'deliberate',
+        'egregious', 'severe', 'pervasive',
+        'ongoing', 'repeated', 'continuous',
+        'punitive damages', 'injunctive relief',
+    ], complaint_type='dei')
+    
+    register_keywords('severity_medium', [
+        'violation', 'breach', 'failure',
+        'inadequate', 'insufficient',
+        'disparate impact', 'adverse effect',
+        'compensatory damages',
+    ], complaint_type='dei')
+    
+    register_keywords('severity_low', [
+        'potential', 'possible', 'may',
+        'unintentional', 'inadvertent',
+        'technical', 'procedural',
+        'correctable', 'remediable',
+    ], complaint_type='dei')
+    
+    # Applicability keywords - DEI context covers these domains
+    register_keywords('applicability_housing', [
+        'housing', 'lease', 'tenant', 'landlord', 'rental',
+        'dwelling', 'residence', 'apartment', 'unit',
+        'eviction', 'termination', 'nonrenewal',
+        'affordable', 'public housing', 'section 8',
+        'housing authority', 'housing choice voucher',
+        'reasonable accommodation', 'accessibility',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_employment', [
+        'employment', 'workplace', 'job', 'work',
+        'hire', 'hiring', 'recruit', 'recruitment',
+        'fire', 'firing', 'terminate', 'termination',
+        'promote', 'promotion', 'demote', 'demotion',
+        'employee', 'employer', 'supervisor',
+        'wages', 'salary', 'compensation', 'benefits',
+        'fmla', 'leave', 'accommodation',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_public_accommodation', [
+        'public accommodation', 'place of public accommodation',
+        'service', 'facility', 'establishment',
+        'access', 'accessibility', 'barrier',
+        'restaurant', 'hotel', 'store', 'shop',
+        'theater', 'stadium', 'park',
+        'transportation', 'bus', 'train',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_lending', [
+        'lending', 'loan', 'mortgage', 'credit',
+        'financing', 'financial', 'bank', 'lender',
+        'interest rate', 'terms', 'approval',
+        'denial', 'redlining', 'appraisal',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_education', [
+        'education', 'school', 'university', 'college',
+        'student', 'enrollment', 'admission',
+        'classroom', 'teacher', 'faculty',
+        'curriculum', 'program', 'degree',
+        'disability services', 'accommodations',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_government_services', [
+        'government', 'agency', 'department',
+        'public service', 'benefits', 'assistance',
+        'program', 'eligibility', 'application',
+        'permit', 'license', 'approval',
+    ], complaint_type='dei')
+    
+    # DEI-specific legal patterns
+    register_legal_terms('dei', [
+        # Fair Housing & Discrimination
+        r"\b(fair housing)\b",
+        r"\b(Fair Housing Act)\b",
+        r"\b(FHA)\b",
+        r"\b(discrimination)\b",
+        r"\b(discriminate|discriminatory)\b",
+        r"\b(harassment)\b",
+        r"\b(retaliation|retaliate)\b",
+        r"\b(hostile environment)\b",
+        
+        # Reasonable Accommodation
+        r"\b(reasonable accommodation)\b",
+        r"\b(reasonable modification)\b",
+        r"\b(disability accommodation)\b",
+        r"\b(auxiliary aids?)\b",
+        
+        # Protected Classes
+        r"\b(protected class(es)?)\b",
+        r"\b(familial status)\b",
+        r"\b(disability|disabled)\b",
+        r"\b(race|racial)\b",
+        r"\b(color)\b",
+        r"\b(national origin)\b",
+        r"\b(religion|religious)\b",
+        r"\b(sex|gender)\b",
+        r"\b(sexual orientation)\b",
+        r"\b(gender identity)\b",
+        r"\b(source of income)\b",
+        r"\b(marital status)\b",
+        
+        # Legal Impact
+        r"\b(disparate (impact|treatment))\b",
+        r"\b(intentional discrimination)\b",
+        r"\b(unintentional discrimination)\b",
+        r"\b(discriminatory effect)\b",
+        r"\b(adverse (impact|effect))\b",
+        
+        # Housing Specific
+        r"\b(Section 8)\b",
+        r"\b(Housing Choice Voucher)\b",
+        r"\b(public housing)\b",
+        r"\b(affordable housing)\b",
+        r"\b(tenant|tenancy)\b",
+        r"\b(landlord)\b",
+        r"\b(lease|rental agreement)\b",
+        r"\b(eviction)\b",
+        r"\b(housing authority)\b",
+        
+        # Employment Specific
+        r"\b(Title VII)\b",
+        r"\b(ADA)\b",
+        r"\b(Americans with Disabilities Act)\b",
+        r"\b(ADEA)\b",
+        r"\b(Age Discrimination in Employment Act)\b",
+        r"\b(FMLA)\b",
+        r"\b(Family and Medical Leave Act)\b",
+        r"\b(EEOC)\b",
+        r"\b(Equal Employment Opportunity)\b",
+        
+        # Federal Law Citations
+        r"\b(42 U\.S\.C\.)\b",
+        r"\b(29 U\.S\.C\.)\b",
+        r"\b(C\.F\.R\.)\b",
+        r"\b(Federal Register)\b",
+        
+        # Remedies & Relief
+        r"\b(damages)\b",
+        r"\b(compensatory damages)\b",
+        r"\b(punitive damages)\b",
+        r"\b(injunctive relief)\b",
+        r"\b(declaratory relief)\b",
+        r"\b(attorney('s)? fees)\b",
+        r"\b(equitable relief)\b",
+        r"\b(monetary relief)\b",
+        
+        # Civil Rights
+        r"\b(civil rights)\b",
+        r"\b(equal protection)\b",
+        r"\b(due process)\b",
+        r"\b(constitutional (right|violation))\b",
+        
+        # Complaint-Specific Terms
+        r"\b(complainant)\b",
+        r"\b(respondent)\b",
+        r"\b(charging party)\b",
+        r"\b(aggrieved person)\b",
+        r"\b(prima facie case)\b",
+        r"\b(burden of proof)\b",
+        r"\b(preponderance of evidence)\b",
+    ])
+
+
 def get_registered_types() -> List[str]:
     """
     Get all registered complaint types.
@@ -451,3 +715,4 @@ register_criminal_defense_complaint()
 register_tax_law_complaint()
 register_intellectual_property_complaint()
 register_environmental_law_complaint()
+register_dei_complaint()  # DEI taxonomy (formerly hacc_integration)

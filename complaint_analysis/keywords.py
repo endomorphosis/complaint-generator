@@ -283,8 +283,70 @@ EVIDENCE_KEYWORDS = get_keywords('evidence')
 LEGAL_AUTHORITY_KEYWORDS = get_keywords('legal')
 BINDING_KEYWORDS = get_keywords('binding')
 
-# Applicability keywords (organized by domain)
-APPLICABILITY_KEYWORDS: Dict[str, List[str]] = {
-    'housing': get_keywords('complaint', complaint_type='housing'),
-    'employment': get_keywords('complaint', complaint_type='employment'),
-}
+
+def _get_applicability_keywords() -> Dict[str, List[str]]:
+    """
+    Get applicability keywords dynamically.
+    
+    This function is lazy-loaded to ensure DEI complaint type is registered
+    before keywords are retrieved.
+    """
+    return {
+        'housing': get_keywords('applicability_housing', complaint_type='dei'),
+        'employment': get_keywords('applicability_employment', complaint_type='dei'),
+        'public_accommodation': get_keywords('applicability_public_accommodation', complaint_type='dei'),
+        'lending': get_keywords('applicability_lending', complaint_type='dei'),
+        'education': get_keywords('applicability_education', complaint_type='dei'),
+        'government_services': get_keywords('applicability_government_services', complaint_type='dei'),
+    }
+
+
+# Lazy-loaded property for backward compatibility
+class _ApplicabilityKeywords:
+    """Lazy-loaded applicability keywords for backward compatibility."""
+    _cache = None
+    
+    def _ensure_loaded(self):
+        """Ensure the cache is loaded."""
+        if self._cache is None:
+            self._cache = _get_applicability_keywords()
+    
+    def __getitem__(self, key):
+        self._ensure_loaded()
+        return self._cache[key]
+    
+    def __contains__(self, key):
+        self._ensure_loaded()
+        return key in self._cache
+    
+    def keys(self):
+        self._ensure_loaded()
+        return self._cache.keys()
+    
+    def values(self):
+        self._ensure_loaded()
+        return self._cache.values()
+    
+    def items(self):
+        self._ensure_loaded()
+        return self._cache.items()
+    
+    def get(self, key, default=None):
+        self._ensure_loaded()
+        return self._cache.get(key, default)
+    
+    def __len__(self):
+        self._ensure_loaded()
+        return len(self._cache)
+    
+    def __iter__(self):
+        self._ensure_loaded()
+        return iter(self._cache)
+    
+    def __repr__(self):
+        self._ensure_loaded()
+        return repr(self._cache)
+
+
+# Backward compatibility: lazy-loaded APPLICABILITY_KEYWORDS
+APPLICABILITY_KEYWORDS = _ApplicabilityKeywords()

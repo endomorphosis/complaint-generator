@@ -59,6 +59,7 @@ from .complaint_types import (
     register_tax_law_complaint,
     register_intellectual_property_complaint,
     register_environmental_law_complaint,
+    register_dei_complaint,
     get_registered_types
 )
 from .analyzer import ComplaintAnalyzer
@@ -112,6 +113,7 @@ __all__ = [
     'register_tax_law_complaint',
     'register_intellectual_property_complaint',
     'register_environmental_law_complaint',
+    'register_dei_complaint',
     'get_registered_types',
 ]
 
