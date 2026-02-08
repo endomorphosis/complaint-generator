@@ -45,6 +45,9 @@ from .keywords import (
     APPLICABILITY_KEYWORDS
 )
 from .risk_scoring import ComplaintRiskScorer
+from .dei_risk_scoring import DEIRiskScorer
+from .dei_provision_extractor import DEIProvisionExtractor
+from .dei_report_generator import DEIReportGenerator
 from .indexer import HybridDocumentIndexer
 from .complaint_types import (
     register_housing_complaint,
@@ -59,6 +62,7 @@ from .complaint_types import (
     register_tax_law_complaint,
     register_intellectual_property_complaint,
     register_environmental_law_complaint,
+    register_dei_complaint,
     get_registered_types
 )
 from .analyzer import ComplaintAnalyzer
@@ -78,6 +82,9 @@ __all__ = [
     'ComplaintLegalPatternExtractor',  # Backward compatibility alias
     'KeywordRegistry',
     'ComplaintRiskScorer',
+    'DEIRiskScorer',  # DEI-specific risk scorer
+    'DEIProvisionExtractor',  # DEI provision extractor
+    'DEIReportGenerator',  # DEI report generator
     'RiskScorer',  # Alias
     'HybridDocumentIndexer',
     'ComplaintAnalyzer',
@@ -112,6 +119,7 @@ __all__ = [
     'register_tax_law_complaint',
     'register_intellectual_property_complaint',
     'register_environmental_law_complaint',
+    'register_dei_complaint',
     'get_registered_types',
 ]
 

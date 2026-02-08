@@ -24,6 +24,16 @@ The system integrates [ipfs_datasets_py](https://github.com/endomorphosis/ipfs_d
 - Unified interface for all LLM operations
 - See [docs/LLM_ROUTER.md](docs/LLM_ROUTER.md)
 
+### 📊 DEI Policy Analysis (NEW)
+Comprehensive DEI (Diversity, Equity, Inclusion) policy analysis integrated from [HACC repository](https://github.com/endomorphosis/HACC):
+- **Risk Scoring** - 0-3 algorithm detecting DEI mandates with binding language
+- **Provision Extraction** - Context-aware extraction with binding vs aspirational detection
+- **Report Generation** - Executive summaries, technical reports, CSV/JSON exports
+- **100+ Keywords** - Direct DEI terms, proxy/euphemisms, procurement, training, etc.
+- **9 Applicability Domains** - Housing, employment, procurement, training, community engagement, etc.
+
+See [docs/HACC_INTEGRATION.md](docs/HACC_INTEGRATION.md) and [examples/hacc_dei_analysis_example.py](examples/hacc_dei_analysis_example.py)
+
 ### ⚖️ Legal Analysis Pipeline
 Four-stage automated legal analysis:
 1. **Classification** - Extract claim types, jurisdiction, and legal areas
@@ -268,6 +278,43 @@ for auth in authorities:
 # Automatically discover evidence
 results = mediator.discover_evidence_automatically()
 print(f"Discovered: {results['total_discovered']}")
+```
+
+### DEI Policy Analysis
+
+```python
+from complaint_analysis import (
+    DEIRiskScorer,
+    DEIProvisionExtractor,
+    DEIReportGenerator
+)
+
+# Analyze policy for DEI compliance risks
+policy_text = """
+All contractors shall implement diversity, equity, and inclusion 
+initiatives. Cultural competence training is mandatory for all staff.
+"""
+
+# Risk assessment
+scorer = DEIRiskScorer()
+risk = scorer.calculate_risk(policy_text)
+print(f"Risk Level: {risk['level']} ({risk['score']}/3)")
+print(f"Issues: {risk['issues']}")
+
+# Extract specific provisions
+extractor = DEIProvisionExtractor()
+provisions = extractor.extract_provisions(policy_text, document_type='policy')
+for prov in provisions:
+    print(f"{prov['section']}: {prov['is_binding']}")
+
+# Generate comprehensive report
+generator = DEIReportGenerator(project_name="Policy Review")
+generator.add_document_analysis(risk, provisions, {'source': 'Contract XYZ'})
+reports = generator.save_reports('output/')
+print(f"Reports saved: {list(reports.keys())}")
+```
+
+See [docs/HACC_INTEGRATION.md](docs/HACC_INTEGRATION.md) for complete API reference.
 print(f"Stored: {results['total_stored']}")
 
 # Manual search with specific keywords

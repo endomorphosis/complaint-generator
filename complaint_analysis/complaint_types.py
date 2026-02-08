@@ -427,6 +427,291 @@ def register_environmental_law_complaint():
     ])
 
 
+def register_dei_complaint():
+    """
+    Register keywords and patterns for DEI (Diversity, Equity, and Inclusion) complaints.
+    
+    This encompasses discrimination, harassment, and civil rights violations across
+    multiple domains including housing, employment, and public accommodations.
+    Integrates comprehensive DEI keywords from HACC repository for policy analysis.
+    """
+    # Core DEI keywords from HACC's index_and_tag.py
+    register_keywords('complaint', [
+        # Core DEI terms
+        'diversity', 'diverse', 'equity', 'equitable', 'inclusion', 'inclusive',
+        'dei', 'deia', 'deib', 'deij',
+        
+        # Justice frameworks
+        'racial justice', 'social justice', 'environmental justice',
+        'justice-centered', 'justice oriented',
+        'anti-racist', 'anti discrimination',
+        
+        # Community descriptors
+        'marginalized', 'minority', 'minorities',
+        'bipoc', 'people of color',
+        'underrepresented', 'underrepresented groups',
+        'underserved', 'underserviced',
+        'historically underrepresented', 'marginalized communities',
+        'socially disadvantaged', 'economically disadvantaged',
+        
+        # Equity frameworks
+        'equity lens', 'equity framework', 'equity initiatives',
+        'equity plan', 'cultural humility', 'cultural responsiveness',
+        'accessibility', 'barrier reduction', 'inclusive environment',
+        
+        # Discrimination types
+        'discrimination', 'discriminate', 'discriminatory',
+        'harassment', 'hostile environment',
+        'retaliation', 'retaliate', 'retaliatory',
+        
+        # Fair housing
+        'fair housing', 'housing discrimination',
+        'reasonable accommodation', 'reasonable modification',
+        'familial status', 'source of income',
+        
+        # Protected classes
+        'protected class', 'protected classes',
+        'race', 'racial', 'color',
+        'national origin', 'nationality',
+        'religion', 'religious',
+        'sex', 'gender',
+        'disability', 'disabled', 'handicap',
+        'age', 'elderly',
+        'sexual orientation', 'gender identity',
+        
+        # Legal impact
+        'disparate impact', 'disparate treatment',
+        'intentional discrimination', 'unintentional discrimination',
+        'adverse impact', 'adverse effect',
+        
+        # Housing specific
+        'section 8', 'housing choice voucher',
+        'public housing', 'affordable housing',
+        'tenant', 'landlord', 'lease', 'rental',
+        'eviction', 'housing authority',
+        
+        # Employment specific
+        'employment discrimination', 'workplace discrimination',
+        'equal employment opportunity', 'eeoc',
+        'title vii', 'ada', 'adea', 'fmla',
+        
+        # Civil rights
+        'civil rights', 'equal protection', 'due process',
+        'constitutional rights', 'constitutional violation',
+        
+        # Complaint process
+        'complainant', 'respondent', 'charging party',
+        'aggrieved person', 'complaint', 'charge',
+        
+        # Community benefits
+        'community benefit', 'community benefits',
+        'section 3', 'equal opportunity',
+    ], complaint_type='dei')
+    
+    # DEI proxy keywords from HACC (euphemisms and indirect references)
+    register_keywords('dei_proxy', [
+        'cultural competence', 'cultural competency',
+        'lived experience',
+        'diversity statement',
+        'safe space',
+        'minority-only',
+        'first-generation',
+        'low-income targeting',
+        'overcoming obstacles',
+        'implicit bias', 'unconscious bias',
+        'affirmative action',
+    ], complaint_type='dei')
+    
+    # Evidence-related keywords
+    register_keywords('evidence', [
+        'evidence', 'proof', 'documentation',
+        'witness', 'testimony', 'statement',
+        'document', 'record', 'file',
+        'exhibit', 'attachment', 'appendix',
+        'correspondence', 'email', 'letter',
+        'notice', 'communication',
+        'photograph', 'image', 'video',
+        'recording', 'audio',
+        'contract', 'agreement', 'lease',
+        'policy', 'procedure', 'manual',
+        'complaint form', 'intake form',
+        'medical record', 'doctor note',
+        'police report', 'incident report',
+    ], complaint_type='dei')
+    
+    # Legal authority keywords
+    register_keywords('legal', [
+        'statute', 'law', 'code', 'regulation',
+        'ordinance', 'rule', 'act',
+        'u.s.c.', 'c.f.r.', 'federal register',
+        'case law', 'precedent', 'holding',
+        'opinion', 'decision', 'ruling',
+        'court order', 'judgment', 'decree',
+        'constitution', 'constitutional',
+        'amendment', 'provision', 'section',
+        'subsection', 'clause', 'paragraph',
+        'title', 'chapter', 'article',
+    ], complaint_type='dei')
+    
+    # Binding/enforceable indicators
+    register_keywords('binding', [
+        'policy', 'ordinance', 'statewide', 'model policy',
+        'contract', 'agreement', 'standard',
+        'required', 'must', 'shall', 'mandatory',
+        'applicable to', 'applicability', 'enforceable',
+        'governing', 'binding', 'regulation', 'rule',
+        'directive', 'compliance', 'obligated', 'stipulation',
+    ], complaint_type='dei')
+    
+    # Severity/risk indicators
+    register_keywords('severity_high', [
+        'systemic', 'pattern', 'practice',
+        'intentional', 'willful', 'deliberate',
+        'egregious', 'severe', 'pervasive',
+        'ongoing', 'repeated', 'continuous',
+        'punitive damages', 'injunctive relief',
+    ], complaint_type='dei')
+    
+    register_keywords('severity_medium', [
+        'violation', 'breach', 'failure',
+        'inadequate', 'insufficient',
+        'disparate impact', 'adverse effect',
+        'compensatory damages',
+    ], complaint_type='dei')
+    
+    register_keywords('severity_low', [
+        'potential', 'possible', 'may',
+        'unintentional', 'inadvertent',
+        'technical', 'procedural',
+        'correctable', 'remediable',
+    ], complaint_type='dei')
+    
+    # Applicability keywords - DEI context covers these domains
+    register_keywords('applicability_housing', [
+        'housing', 'lease', 'tenant', 'landlord', 'rental',
+        'dwelling', 'residence', 'apartment', 'unit',
+        'eviction', 'termination', 'nonrenewal',
+        'affordable', 'public housing', 'section 8',
+        'housing authority', 'housing choice voucher',
+        'reasonable accommodation', 'accessibility',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_employment', [
+        'employment', 'workplace', 'job', 'work',
+        'hire', 'hiring', 'recruit', 'recruitment',
+        'fire', 'firing', 'terminate', 'termination',
+        'promote', 'promotion', 'demote', 'demotion',
+        'employee', 'employer', 'supervisor',
+        'wages', 'salary', 'compensation', 'benefits',
+        'fmla', 'leave', 'accommodation',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_public_accommodation', [
+        'public accommodation', 'place of public accommodation',
+        'service', 'facility', 'establishment',
+        'access', 'accessibility', 'barrier',
+        'restaurant', 'hotel', 'store', 'shop',
+        'theater', 'stadium', 'park',
+        'transportation', 'bus', 'train',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_lending', [
+        'lending', 'loan', 'mortgage', 'credit',
+        'financing', 'financial', 'bank', 'lender',
+        'interest rate', 'terms', 'approval',
+        'denial', 'redlining', 'appraisal',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_education', [
+        'education', 'school', 'university', 'college',
+        'student', 'enrollment', 'admission',
+        'classroom', 'teacher', 'faculty',
+        'curriculum', 'program', 'degree',
+        'disability services', 'accommodations',
+    ], complaint_type='dei')
+    
+    register_keywords('applicability_government_services', [
+        'government', 'agency', 'department',
+        'public service', 'benefits', 'assistance',
+        'program', 'eligibility', 'application',
+        'permit', 'license', 'approval',
+    ], complaint_type='dei')
+    
+    # Procurement and contracting (from HACC DEI research)
+    register_keywords('applicability_procurement', [
+        'procurement', 'contract', 'contracting',
+        'vendor', 'supplier', 'bid', 'bidding',
+        'rfp', 'request for proposal', 'award',
+        'purchase', 'purchasing',
+        'disadvantaged business enterprise', 'dbe',
+        'minority-owned business', 'mbe',
+        'women-owned business', 'wbe',
+        'mwesb', 'esb',
+        'socially disadvantaged', 'economically disadvantaged',
+        'small business', 'certification',
+        'subcontractor', 'subcontracting',
+    ], complaint_type='dei')
+    
+    # Training and development (from HACC index_and_tag.py)
+    register_keywords('applicability_training', [
+        'training', 'workshop', 'course', 'curriculum',
+        'education', 'seminar', 'professional development',
+        'orientation', 'onboarding', 'certification',
+        'cultural competency training', 'implicit bias training',
+        'diversity training', 'sensitivity training',
+    ], complaint_type='dei')
+    
+    # Community engagement (from HACC)
+    register_keywords('applicability_community_engagement', [
+        'community engagement', 'public input',
+        'stakeholder', 'outreach', 'consultation',
+        'community participation', 'public comment',
+        'engagement plan', 'community benefits',
+    ], complaint_type='dei')
+    
+    # DEI-specific legal patterns
+    # DEI-specific legal patterns (unique patterns only, avoiding duplicates)
+    # Note: Common patterns like "discrimination", "fair housing", etc. are already
+    # registered in other categories and will be loaded by LegalPatternExtractor
+    register_legal_terms('dei', [
+        # DEI Core Terms (unique to DEI taxonomy)
+        r"\b(diversity|diverse)\b",
+        r"\b(equity|equitable)\b",
+        r"\b(inclusion|inclusive)\b",
+        r"\b(underrepresented minorit(y|ies))\b",
+        r"\b(underserved communit(y|ies))\b",
+        r"\b(disadvantaged business enterprise|DBE)\b",
+        r"\b(minority[- ]owned business|MBE)\b",
+        r"\b(wom[ae]n[- ]owned business|WBE)\b",
+        r"\b(MWESB|ESB)\b",
+        r"\b(affirmative action)\b",
+        r"\b(cultural competen(cy|ce))\b",
+        r"\b(implicit bias|unconscious bias)\b",
+        r"\b(racial equity)\b",
+        r"\b(social equity)\b",
+        r"\b(environmental justice)\b",
+        r"\b(historically underrepresented)\b",
+        r"\b(marginalized communit(y|ies))\b",
+        r"\b(BIPOC)\b",
+        r"\b(equal opportunity)\b",
+        r"\b(Section 3)\b",
+        r"\b(community benefit(s)?)\b",
+        r"\b(socially disadvantaged)\b",
+        r"\b(economically disadvantaged)\b",
+        r"\b(racial justice)\b",
+        r"\b(social justice)\b",
+        r"\b(people of color)\b",
+        r"\b(underserved|underserviced)\b",
+        r"\b(equity (lens|framework|initiative))\b",
+        r"\b(cultural (humility|responsiveness))\b",
+        r"\b(justice[- ]centered|justice[- ]oriented)\b",
+        r"\b(anti[- ]racist)\b",
+        r"\b(lived experience)\b",
+        r"\b(safe space)\b",
+        r"\b(first[- ]generation)\b",
+    ])
+
+
 def get_registered_types() -> List[str]:
     """
     Get all registered complaint types.
@@ -451,3 +736,4 @@ register_criminal_defense_complaint()
 register_tax_law_complaint()
 register_intellectual_property_complaint()
 register_environmental_law_complaint()
+register_dei_complaint()  # DEI taxonomy (formerly hacc_integration)

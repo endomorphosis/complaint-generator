@@ -1,16 +1,13 @@
 """
-Tests for Complaint Analysis Module (formerly HACC Integration)
+Tests for Complaint Analysis Module - DEI Taxonomy
 
-Tests the legal patterns and complaint analysis functionality.
-For backward compatibility, this file still uses hacc_integration imports,
-but new code should use complaint_analysis imports instead.
+Tests the legal patterns and complaint analysis functionality for the
+DEI (Diversity, Equity, and Inclusion) taxonomy.
 """
 
 import pytest
-# Use hacc_integration for backward compatibility testing
-# Note: This will show a deprecation warning, which is expected
-from hacc_integration import (
-    ComplaintLegalPatternExtractor,
+from complaint_analysis import (
+    ComplaintLegalPatternExtractor,  # Test backward compatibility alias
     ComplaintRiskScorer,
     COMPLAINT_KEYWORDS,
     EVIDENCE_KEYWORDS,
@@ -241,7 +238,7 @@ class TestHybridIndexer:
     @pytest.mark.asyncio
     async def test_index_document_without_embeddings(self):
         """Test indexing without embeddings (should still work)."""
-        from hacc_integration import HybridDocumentIndexer
+        from complaint_analysis import HybridDocumentIndexer
         
         indexer = HybridDocumentIndexer(enable_embeddings=False)
         result = await indexer.index_document(SAMPLE_FAIR_HOUSING_TEXT)
@@ -256,7 +253,7 @@ class TestHybridIndexer:
     @pytest.mark.asyncio  
     async def test_index_document_metadata(self):
         """Test indexing with metadata."""
-        from hacc_integration import HybridDocumentIndexer
+        from complaint_analysis import HybridDocumentIndexer
         
         indexer = HybridDocumentIndexer(enable_embeddings=False)
         metadata = {'source': 'complaint_form', 'user_id': '123'}
@@ -267,7 +264,7 @@ class TestHybridIndexer:
     
     def test_get_statistics(self):
         """Test statistics generation."""
-        from hacc_integration import HybridDocumentIndexer
+        from complaint_analysis import HybridDocumentIndexer
         
         indexer = HybridDocumentIndexer(enable_embeddings=False)
         
