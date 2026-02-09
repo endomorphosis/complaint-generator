@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import py_compile
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -284,6 +285,12 @@ On each turn, output exactly ONE of the following:
 
 3) (Backward compatible) Output a raw apply_patch patch starting with '*** Begin Patch' and ending with '*** End Patch'.
 
+Important patch-application behavior (read carefully):
+- If you output MULTIPLE separate apply_patch blocks in one response, the system will validate each block and then attempt to COMBINE all valid blocks into ONE transactional patch.
+- The combined patch is applied ONLY if the combined patch also validates (dry-run apply).
+- If blocks validate individually but do NOT combine cleanly, your output is treated as invalid and you must return ONE coherent patch block that includes ALL intended changes.
+- Therefore: Prefer returning a SINGLE apply_patch block that covers all changes across all files.
+
 Tool specs (paths must be within the repository root; keep outputs small):
 - ls:    args={{"path": "."}}  -> list directory entries
 - cat:   args={{"path": "path/to/file.py", "start_line": 1, "end_line": 200}} -> read a line range
@@ -291,6 +298,8 @@ Tool specs (paths must be within the repository root; keep outputs small):
 - patch: args={{"patch": "*** Begin Patch\\n...\\n*** End Patch"}} -> validate patch formatting + file targets (does NOT apply)
 
 Before returning a final patch (type=final or raw patch), you SHOULD call the patch tool on your candidate patch and fix any errors it reports.
+
+When PATCH_VALIDATION reports an error, it may include file_context/file_excerpt lines. Use those EXACT lines for your hunk context (copy them contiguously), then apply minimal edits.
 
 You must output a REAL patch in apply_patch format, not a template.
 
@@ -366,6 +375,12 @@ On each turn, output exactly ONE of the following:
 
 3) (Backward compatible) Output a raw apply_patch patch starting with '*** Begin Patch' and ending with '*** End Patch'.
 
+Important patch-application behavior (read carefully):
+- If you output MULTIPLE separate apply_patch blocks in one response, the system will validate each block and then attempt to COMBINE all valid blocks into ONE transactional patch.
+- The combined patch is applied ONLY if the combined patch also validates (dry-run apply).
+- If blocks validate individually but do NOT combine cleanly, your output is treated as invalid and you must return ONE coherent patch block that includes ALL intended changes.
+- Therefore: Prefer returning a SINGLE apply_patch block that covers all changes across all files.
+
 Tool specs (paths must be within the repository root; keep outputs small):
 - ls:    args={{"path": "."}}  -> list directory entries
 - cat:   args={{"path": "path/to/file.py", "start_line": 1, "end_line": 200}} -> read a line range
@@ -373,6 +388,8 @@ Tool specs (paths must be within the repository root; keep outputs small):
 - patch: args={{"patch": "*** Begin Patch\\n...\\n*** End Patch"}} -> validate patch formatting + file targets (does NOT apply)
 
 Before returning a final patch (type=final or raw patch), you SHOULD call the patch tool on your candidate patch and fix any errors it reports.
+
+When PATCH_VALIDATION reports an error, it may include file_context/file_excerpt lines. Use those EXACT lines for your hunk context (copy them contiguously), then apply minimal edits.
 
 You must output a REAL patch in apply_patch format, not a template.
 
@@ -763,6 +780,222 @@ def _apply_hunk_to_lines(file_lines: List[str], hunk_lines: List[str]) -> List[s
     return file_lines[:pos] + new_block + file_lines[pos + len(old_block) :]
 
 
+def _build_failure_excerpt_from_file_lines(
+    *,
+    file_path: str,
+    file_lines: List[str],
+    failure_details: Optional[Dict[str, Any]],
+    window_lines: int = 80,
+) -> Dict[str, Any]:
+    """Build a compact excerpt around a likely anchor line.
+
+    The excerpt is meant to be embedded into error JSON and then fed back to Codex.
+    """
+
+    total = len(file_lines)
+    window_lines = max(20, int(window_lines))
+
+    anchor: Optional[str] = None
+    old_block = None
+    if isinstance(failure_details, dict):
+        old_block = failure_details.get("old_block")
+    if isinstance(old_block, list):
+        for ln in old_block:
+            if not isinstance(ln, str):
+                continue
+            s = ln.strip()
+            if not s:
+                continue
+            if s.startswith("#"):
+                continue
+            if len(s) < 8:
+                continue
+            anchor = ln
+            break
+
+    start = 0
+    end = min(total, window_lines)
+    if anchor is not None:
+        try:
+            pos = file_lines.index(anchor)
+            half = window_lines // 2
+            start = max(0, pos - half)
+            end = min(total, start + window_lines)
+            start = max(0, end - window_lines)
+        except ValueError:
+            # Anchor not found; keep default head excerpt.
+            pass
+
+    excerpt_lines = [f"{i+1}: {file_lines[i]}" for i in range(start, end)]
+    return {
+        "file_excerpt": excerpt_lines,
+        "file_context": {
+            "path": file_path,
+            "start_line": start + 1,
+            "end_line": end,
+            "total_lines": total,
+        },
+    }
+
+
+def _extract_json_block_after_header(text: str, header: str) -> Optional[str]:
+    """Extract a JSON value that appears after a header line in the base prompt."""
+
+    if not isinstance(text, str) or not text:
+        return None
+    idx = text.find(header)
+    if idx < 0:
+        return None
+    after = text[idx + len(header) :]
+    # The JSON block typically begins on the next line.
+    if after.startswith("\n"):
+        after = after[1:]
+    # Stop at the next double-newline section break.
+    end = after.find("\n\n")
+    blob = after if end < 0 else after[:end]
+    blob = blob.strip()
+    return blob or None
+
+
+def _make_task_reminder(base_prompt: str) -> str:
+    """Build a short reminder line to keep Codex on-task each turn."""
+
+    focus_summary = ""
+    suspected_summary = ""
+    try:
+        focus_blob = _extract_json_block_after_header(
+            base_prompt, "Primary focus (computed from diagnostics):\n"
+        )
+        if focus_blob:
+            focus_val = json.loads(focus_blob)
+            if isinstance(focus_val, list) and focus_val:
+                items = [str(x) for x in focus_val[:2] if x]
+                focus_summary = "; ".join(items)
+    except Exception:
+        focus_summary = ""
+
+    try:
+        sus_blob = _extract_json_block_after_header(
+            base_prompt, "Suspected files to start with:\n"
+        )
+        if sus_blob:
+            sus_val = json.loads(sus_blob)
+            if isinstance(sus_val, list) and sus_val:
+                # Keep it short: file basenames only.
+                basenames = [os.path.basename(str(p)) for p in sus_val[:3] if p]
+                suspected_summary = ",".join(basenames)
+    except Exception:
+        suspected_summary = ""
+
+    parts = [
+        "SYSTEM_TASK_REMINDER:",
+        (f"focus={focus_summary}" if focus_summary else "focus=follow the diagnostics"),
+        (f"start={suspected_summary}" if suspected_summary else ""),
+        "output=ONE coherent apply_patch block",
+        "no placeholders/no bare @@",
+        "fix validation by copying file_excerpt lines verbatim",
+    ]
+    return " ".join([p for p in parts if p]).strip()
+
+
+def _extract_update_files_from_patch_text(patch_text: str) -> List[str]:
+    """Best-effort: extract absolute file paths targeted by a patch."""
+
+    try:
+        blocks = _parse_apply_patch(_normalize_patch_text(patch_text))
+    except Exception:
+        return []
+    out: List[str] = []
+    for fp, _ in blocks:
+        if isinstance(fp, str) and fp:
+            out.append(fp)
+    return out
+
+
+def _multi_file_excerpts_for_prompt(
+    file_paths: List[str],
+    *,
+    patch_text: Optional[str] = None,
+    max_files: int = 4,
+    lines_each: int = 50,
+) -> str:
+    """Build a clipped multi-file excerpt block for Codex repair prompts."""
+
+    patch_text_norm = None
+    patch_blocks = None
+    if isinstance(patch_text, str) and patch_text.strip():
+        patch_text_norm = _normalize_patch_text(patch_text)
+        try:
+            patch_blocks = _parse_apply_patch(patch_text_norm)
+        except Exception:
+            patch_blocks = None
+
+    def excerpt_for_file(fp: str) -> Dict[str, Any]:
+        # Default: head excerpt.
+        try:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.read().splitlines()
+        except Exception:
+            return {}
+
+        if patch_blocks:
+            # Try to anchor around a line from the old_block context in the patch.
+            for pfp, hunks in patch_blocks:
+                if pfp != fp:
+                    continue
+                for hunk_lines in hunks:
+                    old_block: List[str] = []
+                    for raw in hunk_lines:
+                        if raw.startswith("-"):
+                            old_block.append(raw[1:])
+                        elif raw.startswith("+"):
+                            continue
+                        else:
+                            old_block.append(raw)
+                    if old_block:
+                        return _build_failure_excerpt_from_file_lines(
+                            file_path=fp,
+                            file_lines=lines,
+                            failure_details={"old_block": old_block},
+                            window_lines=int(lines_each),
+                        )
+
+        return _build_failure_excerpt_from_file_lines(
+            file_path=fp,
+            file_lines=lines,
+            failure_details=None,
+            window_lines=int(lines_each),
+        )
+
+    out_lines: List[str] = []
+    picked = 0
+    for fp in file_paths:
+        if picked >= max(1, int(max_files)):
+            break
+        if not isinstance(fp, str) or not fp:
+            continue
+        try:
+            _safe_abs_path(fp)
+        except Exception:
+            continue
+        if not os.path.isfile(fp):
+            continue
+        excerpt = excerpt_for_file(fp)
+        if not excerpt:
+            continue
+        out_lines.append(f"FILE_CONTEXT: {fp}")
+        ctx = excerpt.get("file_context") or {}
+        out_lines.append(
+            f"RANGE: {ctx.get('start_line')}..{ctx.get('end_line')} of {ctx.get('total_lines')}"
+        )
+        for ln in excerpt.get("file_excerpt") or []:
+            out_lines.append(str(ln))
+        out_lines.append("")
+        picked += 1
+
+    return "\n".join(out_lines).strip()
+
+
 def _dry_run_apply_patch_text(patch_text: str) -> List[str]:
     """Return list of files that would be updated, or raise PatchApplyError."""
     patch_text = _normalize_patch_text(patch_text)
@@ -788,13 +1021,197 @@ def _dry_run_apply_patch_text(patch_text: str) -> List[str]:
             try:
                 file_lines = _apply_hunk_to_lines(file_lines, hunk_lines)
             except PatchApplyError as e:
-                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index, details=e.details) from e
+                details = dict(e.details or {}) if isinstance(e.details, dict) else {}
+                details.update(
+                    _build_failure_excerpt_from_file_lines(
+                        file_path=file_path,
+                        file_lines=file_lines,
+                        failure_details=details,
+                    )
+                )
+                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index, details=details) from e
 
         _validate_python_syntax(file_path, file_lines)
         if file_path not in updated_files:
             updated_files.append(file_path)
 
     return updated_files
+
+
+def _extract_apply_patch_blocks(text: str) -> List[str]:
+    """Extract one-or-more apply_patch blocks from text.
+
+    Codex sometimes returns multiple "*** Begin Patch ... *** End Patch" blocks
+    in a single response. Treating that as one combined patch causes the
+    intermediate boundary lines to be interpreted as hunk context.
+    """
+
+    normalized = _normalize_patch_text(text or "")
+    pattern = re.compile(r"\*\*\* Begin Patch.*?\*\*\* End Patch", re.DOTALL)
+    blocks = [m.group(0).strip() for m in pattern.finditer(normalized)]
+    if blocks:
+        return blocks
+    if _looks_like_apply_patch(normalized):
+        return [normalized]
+    return []
+
+
+def _pick_first_valid_patch(text: str) -> Optional[str]:
+    """Return first apply_patch block that passes dry-run validation."""
+
+    candidate, _ = _pick_best_valid_patch_with_report(text)
+    return candidate
+
+
+def _combine_apply_patch_blocks(blocks: List[str]) -> str:
+    """Combine multiple apply_patch blocks into a single apply_patch patch.
+
+    Each input block must begin with '*** Begin Patch' and end with '*** End Patch'.
+    The combined output contains one Begin/End wrapper and concatenates the
+    internal patch bodies.
+    """
+
+    bodies: List[str] = []
+    for b in blocks:
+        lines = _normalize_patch_text(b).splitlines()
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if not lines or lines[0].strip() != "*** Begin Patch" or lines[-1].strip() != "*** End Patch":
+            raise PatchApplyError("Not in apply_patch format")
+        body = lines[1:-1]
+        bodies.extend(body)
+
+    out_lines = ["*** Begin Patch"]
+    out_lines.extend(bodies)
+    out_lines.append("*** End Patch")
+    return "\n".join(out_lines).strip() + "\n"
+
+
+def _pick_first_valid_patch_with_report(
+    text: str,
+    *,
+    max_blocks: int = 12,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """Pick the first valid patch block and return a validation report.
+
+    Codex sometimes emits multiple "*** Begin Patch ... *** End Patch" blocks.
+    We validate blocks independently and return the first one that dry-runs.
+    The returned report is designed to be JSON-serializable.
+    """
+
+    blocks = _extract_apply_patch_blocks(text)
+    report: Dict[str, Any] = {
+        "block_count": len(blocks),
+        "max_blocks": int(max_blocks),
+        "blocks": [],
+        "valid_count": 0,
+        "selected_index": None,
+    }
+    if not blocks:
+        return None, report
+
+    selected: Optional[str] = None
+    for idx, block in enumerate(blocks[: max(1, int(max_blocks))]):
+        if not _looks_like_apply_patch(block):
+            report["blocks"].append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "looks_like_apply_patch": False,
+                    "error": {"message": "Not in apply_patch format"},
+                }
+            )
+            continue
+
+        try:
+            updated = _dry_run_apply_patch_text(block)
+            report["valid_count"] += 1
+            report["blocks"].append(
+                {
+                    "index": idx,
+                    "ok": True,
+                    "looks_like_apply_patch": True,
+                    "would_update_files": updated,
+                    "note": ("no-op patch" if not updated else None),
+                }
+            )
+            if selected is None:
+                selected = block
+                report["selected_index"] = idx
+        except PatchApplyError as e:
+            report["blocks"].append(
+                {
+                    "index": idx,
+                    "ok": False,
+                    "looks_like_apply_patch": True,
+                    "error": {
+                        "message": e.message,
+                        "file_path": e.file_path,
+                        "hunk_index": e.hunk_index,
+                        "details": e.details,
+                    },
+                }
+            )
+
+    return selected, report
+
+
+def _pick_best_valid_patch_with_report(
+    text: str,
+    *,
+    max_blocks: int = 12,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """Pick the best patch from a model output.
+
+    - If exactly one block validates, select it.
+    - If multiple blocks validate, attempt to combine them into a single patch
+      and select the combined patch only if it also validates.
+
+    If multiple blocks validate individually but cannot be combined cleanly,
+    we return (None, report) so the caller can ask Codex to produce a single
+    coherent patch.
+    """
+
+    first, report = _pick_first_valid_patch_with_report(text, max_blocks=max_blocks)
+    blocks = _extract_apply_patch_blocks(text)
+    report["selected_kind"] = "single" if first is not None else None
+    report["selected_indices"] = [report.get("selected_index")] if report.get("selected_index") is not None else []
+
+    valid_blocks: List[Tuple[int, str]] = []
+    for entry in report.get("blocks", []):
+        if entry.get("ok") is True and isinstance(entry.get("index"), int):
+            idx = int(entry["index"])
+            if 0 <= idx < len(blocks):
+                valid_blocks.append((idx, blocks[idx]))
+
+    if len(valid_blocks) <= 1:
+        return first, report
+
+    # Multiple valid blocks: try combining.
+    try:
+        combined_text = _combine_apply_patch_blocks([b for _, b in valid_blocks])
+        _dry_run_apply_patch_text(combined_text)
+    except PatchApplyError as e:
+        report["selected_kind"] = None
+        report["selected_index"] = None
+        report["selected_indices"] = [i for i, _ in valid_blocks]
+        report["combined_validation"] = {
+            "ok": False,
+            "error": {
+                "message": e.message,
+                "file_path": e.file_path,
+                "hunk_index": e.hunk_index,
+                "details": e.details,
+            },
+        }
+        return None, report
+
+    report["selected_kind"] = "combined"
+    report["selected_indices"] = [i for i, _ in valid_blocks]
+    report["combined_validation"] = {"ok": True}
+    return combined_text, report
 
 
 def _apply_patch_transaction(patch_text: str) -> Tuple[List[str], Dict[str, str]]:
@@ -871,6 +1288,9 @@ def _run_post_apply_checks(
 
     # Pylance isn't a CLI, but pyright uses the same underlying analyzer.
     if check_pyright:
+        pyright_targets = [fp for fp in updated_files if fp.endswith(".py")]
+        if not pyright_targets:
+            return
         pyright = shutil.which("pyright")
         if pyright:
             cmd = [pyright]
@@ -878,7 +1298,12 @@ def _run_post_apply_checks(
             # If installed via pip, pyright is typically available as a module.
             cmd = [sys.executable, "-m", "pyright"]
 
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        proc = subprocess.run(
+            cmd + pyright_targets,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
         if proc.returncode != 0:
             raise RuntimeError("pyright failed:\n" + (proc.stdout or ""))
 
@@ -895,30 +1320,72 @@ def _run_post_apply_checks(
 
 def _tool_patch(*, patch: str) -> str:
     text = _normalize_patch_text(patch or "")
-    looks_like = _looks_like_apply_patch(text)
-    update_files: List[str] = []
+    blocks = _extract_apply_patch_blocks(text)
+    looks_like = _looks_like_apply_patch(text) or bool(blocks)
 
-    try:
-        update_files = _dry_run_apply_patch_text(text)
-        result = {
-            "ok": True,
-            "looks_like_apply_patch": looks_like,
-            "would_update_files": update_files,
-            "note": ("no-op patch" if not update_files else None),
-        }
-        return json.dumps(result, ensure_ascii=False, indent=2)
-    except PatchApplyError as e:
-        result = {
-            "ok": False,
-            "looks_like_apply_patch": looks_like,
-            "error": {
+    # Single-block validation (fast path)
+    if len(blocks) <= 1:
+        try:
+            update_files = _dry_run_apply_patch_text(text)
+            result = {
+                "ok": True,
+                "looks_like_apply_patch": looks_like,
+                "would_update_files": update_files,
+                "note": ("no-op patch" if not update_files else None),
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        except PatchApplyError as e:
+            result = {
+                "ok": False,
+                "looks_like_apply_patch": looks_like,
+                "error": {
+                    "message": e.message,
+                    "file_path": e.file_path,
+                    "hunk_index": e.hunk_index,
+                    "details": e.details,
+                },
+            }
+            return json.dumps(result, ensure_ascii=False, indent=2)
+
+    # Multi-block validation: validate each block individually, then validate a combined patch
+    # built from all individually-valid blocks.
+    _, report = _pick_first_valid_patch_with_report(text)
+    valid_indices = [
+        int(b["index"]) for b in report.get("blocks", [])
+        if b.get("ok") is True and isinstance(b.get("index"), int)
+    ]
+    valid_blocks = [blocks[i] for i in valid_indices if 0 <= i < len(blocks)]
+
+    combined_ok = False
+    combined_error: Optional[Dict[str, Any]] = None
+    combined_would_update: List[str] = []
+    if valid_blocks:
+        try:
+            combined_text = _combine_apply_patch_blocks(valid_blocks)
+            combined_would_update = _dry_run_apply_patch_text(combined_text)
+            combined_ok = True
+        except PatchApplyError as e:
+            combined_error = {
                 "message": e.message,
                 "file_path": e.file_path,
                 "hunk_index": e.hunk_index,
                 "details": e.details,
-            },
-        }
-        return json.dumps(result, ensure_ascii=False, indent=2)
+            }
+
+    result = {
+        "ok": combined_ok,
+        "looks_like_apply_patch": looks_like,
+        "multi_block": True,
+        "block_count": len(blocks),
+        "valid_block_count": len(valid_blocks),
+        "blocks": report.get("blocks", []),
+        "combined": {
+            "ok": combined_ok,
+            "would_update_files": combined_would_update,
+            "error": combined_error,
+        },
+    }
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 def _try_parse_json_object(text: str) -> Optional[Dict[str, Any]]:
@@ -961,6 +1428,7 @@ def _run_codex_with_tools_logged(
 ) -> str:
     tool_log: List[str] = []
     last_output = ""
+    task_reminder = _make_task_reminder(base_prompt)
 
     def _compact_for_prompt(text: str, *, max_chars: int = 2200, max_lines: int = 80) -> str:
         """Compact tool results/validation before re-injecting into the rolling prompt.
@@ -999,6 +1467,7 @@ def _run_codex_with_tools_logged(
         transcript = base_prompt
         if tool_log:
             transcript += "\n\n" + "\n\n".join(tool_log[-8:])
+        transcript += "\n\n" + task_reminder
 
         if chat_jsonl_path:
             _append_jsonl(
@@ -1025,41 +1494,120 @@ def _run_codex_with_tools_logged(
                 },
             )
 
-        norm = _normalize_patch_text(last_output)
-        if _looks_like_apply_patch(norm):
-            try:
-                updated = _dry_run_apply_patch_text(norm)
-                if chat_jsonl_path:
-                    _append_jsonl(
-                        chat_jsonl_path,
-                        {
-                            "event": "patch_candidate",
-                            "ts": _utc_iso(),
-                            "step": step + 1,
-                            "kind": "raw",
-                            "ok": True,
-                            "would_update_files": updated,
-                        },
-                    )
-                return norm
-            except PatchApplyError:
-                if chat_jsonl_path:
-                    _append_jsonl(
-                        chat_jsonl_path,
-                        {
-                            "event": "patch_candidate",
-                            "ts": _utc_iso(),
-                            "step": step + 1,
-                            "kind": "raw",
-                            "ok": False,
-                            "validation": json.loads(_tool_patch(patch=norm)),
-                        },
-                    )
-                tool_log.append(
-                    "SYSTEM: Candidate patch failed dry-run validation. Fix the patch, and consider calling the patch tool before finalizing."
+        raw_candidate, raw_report = _pick_best_valid_patch_with_report(last_output)
+        if raw_candidate is not None:
+            if chat_jsonl_path and raw_report.get("block_count", 0) > 1:
+                _append_jsonl(
+                    chat_jsonl_path,
+                    {
+                        "event": "patch_blocks",
+                        "ts": _utc_iso(),
+                        "step": step + 1,
+                        "kind": "raw",
+                        "report": raw_report,
+                    },
                 )
-                tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=norm)))
+            would_update = []
+            selected_index = raw_report.get("selected_index")
+            if isinstance(selected_index, int):
+                for b in raw_report.get("blocks", []):
+                    if b.get("index") == selected_index and b.get("ok") is True:
+                        would_update = b.get("would_update_files", []) or []
+                        break
+            if chat_jsonl_path:
+                _append_jsonl(
+                    chat_jsonl_path,
+                    {
+                        "event": "patch_candidate",
+                        "ts": _utc_iso(),
+                        "step": step + 1,
+                        "kind": "raw",
+                        "ok": True,
+                        "would_update_files": would_update,
+                        "block_index": raw_report.get("selected_index"),
+                        "block_count": raw_report.get("block_count"),
+                        "valid_count": raw_report.get("valid_count"),
+                    },
+                )
+            return raw_candidate
+
+        # Multiple blocks may each validate, but the combined patch may still fail.
+        # If that happens, provide combined validation back to the model.
+        if raw_report.get("block_count", 0) > 1 and raw_report.get("valid_count", 0) > 1:
+            combined_text = ""
+            try:
+                blocks = _extract_apply_patch_blocks(last_output)
+                valid_indices = [
+                    int(b["index"]) for b in raw_report.get("blocks", [])
+                    if b.get("ok") is True and isinstance(b.get("index"), int)
+                ]
+                valid_blocks = [blocks[i] for i in valid_indices if 0 <= i < len(blocks)]
+                combined_text = _combine_apply_patch_blocks(valid_blocks)
+            except Exception:
+                combined_text = ""
+            if combined_text:
+                validation = _tool_patch(patch=combined_text)
+                involved = _extract_update_files_from_patch_text(combined_text)
+                context = _multi_file_excerpts_for_prompt(involved, patch_text=combined_text)
+                tool_log.append(
+                    "SYSTEM: Your output contained multiple independently-valid patch blocks, "
+                    "but they did not combine into a single transactional patch. Return ONE coherent patch block "
+                    "that includes ALL intended changes across files."
+                )
+                tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(validation))
+                if context:
+                    tool_log.append("MULTI_FILE_CONTEXT:\n" + _compact_for_prompt(context, max_chars=2200, max_lines=120))
+                if chat_jsonl_path:
+                    _append_jsonl(
+                        chat_jsonl_path,
+                        {
+                            "event": "combined_patch_failed",
+                            "ts": _utc_iso(),
+                            "step": step + 1,
+                            "validation": json.loads(validation),
+                            "multi_file_context": context,
+                            "report": raw_report,
+                        },
+                    )
                 continue
+
+        # If we got apply_patch-looking output but it failed, log the first block's validation
+        # so the model can repair it.
+        raw_blocks = _extract_apply_patch_blocks(last_output)
+        if raw_blocks:
+            first = raw_blocks[0]
+            if chat_jsonl_path:
+                _append_jsonl(
+                    chat_jsonl_path,
+                    {
+                        "event": "patch_candidate",
+                        "ts": _utc_iso(),
+                        "step": step + 1,
+                        "kind": "raw",
+                        "ok": False,
+                        "validation": json.loads(_tool_patch(patch=first)),
+                    },
+                )
+                if len(raw_blocks) > 1:
+                    _append_jsonl(
+                        chat_jsonl_path,
+                        {
+                            "event": "patch_blocks",
+                            "ts": _utc_iso(),
+                            "step": step + 1,
+                            "kind": "raw",
+                            "report": raw_report,
+                        },
+                    )
+            tool_log.append(
+                "SYSTEM: Candidate patch failed dry-run validation. Fix the patch, and consider calling the patch tool before finalizing."
+            )
+            if len(raw_blocks) > 1:
+                tool_log.append(
+                    f"SYSTEM: Your output contained {len(raw_blocks)} separate patch blocks, and none validated. Return ONE corrected patch block."
+                )
+            tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=first)))
+            continue
 
         obj = _try_parse_json_object(last_output)
         if not obj:
@@ -1074,41 +1622,102 @@ def _run_codex_with_tools_logged(
         if typ == "final":
             patch = obj.get("patch")
             if isinstance(patch, str):
-                patch = _normalize_patch_text(patch)
-                if _looks_like_apply_patch(patch):
-                    try:
-                        updated = _dry_run_apply_patch_text(patch)
-                        if chat_jsonl_path:
-                            _append_jsonl(
-                                chat_jsonl_path,
-                                {
-                                    "event": "patch_candidate",
-                                    "ts": _utc_iso(),
-                                    "step": step + 1,
-                                    "kind": "json_final",
-                                    "ok": True,
-                                    "would_update_files": updated,
-                                },
-                            )
-                        return patch
-                    except PatchApplyError:
-                        if chat_jsonl_path:
-                            _append_jsonl(
-                                chat_jsonl_path,
-                                {
-                                    "event": "patch_candidate",
-                                    "ts": _utc_iso(),
-                                    "step": step + 1,
-                                    "kind": "json_final",
-                                    "ok": False,
-                                    "validation": json.loads(_tool_patch(patch=patch)),
-                                },
-                            )
-                        tool_log.append(
-                            "SYSTEM: Your JSON final patch failed dry-run validation. Fix it, and consider calling the patch tool before finalizing."
+                json_candidate, json_report = _pick_best_valid_patch_with_report(patch)
+                if json_candidate is not None:
+                    if chat_jsonl_path and json_report.get("block_count", 0) > 1:
+                        _append_jsonl(
+                            chat_jsonl_path,
+                            {
+                                "event": "patch_blocks",
+                                "ts": _utc_iso(),
+                                "step": step + 1,
+                                "kind": "json_final",
+                                "report": json_report,
+                            },
                         )
-                        tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=patch)))
+                    would_update = []
+                    selected_index = json_report.get("selected_index")
+                    if isinstance(selected_index, int):
+                        for b in json_report.get("blocks", []):
+                            if b.get("index") == selected_index and b.get("ok") is True:
+                                would_update = b.get("would_update_files", []) or []
+                                break
+                    if chat_jsonl_path:
+                        _append_jsonl(
+                            chat_jsonl_path,
+                            {
+                                "event": "patch_candidate",
+                                "ts": _utc_iso(),
+                                "step": step + 1,
+                                "kind": "json_final",
+                                "ok": True,
+                                "would_update_files": would_update,
+                                "block_index": json_report.get("selected_index"),
+                                "block_count": json_report.get("block_count"),
+                                "valid_count": json_report.get("valid_count"),
+                            },
+                        )
+                    return json_candidate
+
+                if json_report.get("block_count", 0) > 1 and json_report.get("valid_count", 0) > 1:
+                    blocks = _extract_apply_patch_blocks(patch)
+                    valid_indices = [
+                        int(b["index"]) for b in json_report.get("blocks", [])
+                        if b.get("ok") is True and isinstance(b.get("index"), int)
+                    ]
+                    valid_blocks = [blocks[i] for i in valid_indices if 0 <= i < len(blocks)]
+                    try:
+                        combined_text = _combine_apply_patch_blocks(valid_blocks)
+                    except Exception:
+                        combined_text = ""
+                    if combined_text:
+                        validation = _tool_patch(patch=combined_text)
+                        involved = _extract_update_files_from_patch_text(combined_text)
+                        context = _multi_file_excerpts_for_prompt(involved, patch_text=combined_text)
+                        tool_log.append(
+                            "SYSTEM: Your JSON final included multiple independently-valid patch blocks, "
+                            "but they did not combine into a single transactional patch. Return ONE coherent patch block "
+                            "that includes ALL intended changes across files."
+                        )
+                        tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(validation))
+                        if context:
+                            tool_log.append(
+                                "MULTI_FILE_CONTEXT:\n" + _compact_for_prompt(context, max_chars=2200, max_lines=120)
+                            )
+                        if chat_jsonl_path:
+                            _append_jsonl(
+                                chat_jsonl_path,
+                                {
+                                    "event": "combined_patch_failed",
+                                    "ts": _utc_iso(),
+                                    "step": step + 1,
+                                    "validation": json.loads(validation),
+                                    "multi_file_context": context,
+                                    "report": json_report,
+                                },
+                            )
                         continue
+
+                json_blocks = _extract_apply_patch_blocks(patch)
+                if json_blocks:
+                    first = json_blocks[0]
+                    if chat_jsonl_path:
+                        _append_jsonl(
+                            chat_jsonl_path,
+                            {
+                                "event": "patch_candidate",
+                                "ts": _utc_iso(),
+                                "step": step + 1,
+                                "kind": "json_final",
+                                "ok": False,
+                                "validation": json.loads(_tool_patch(patch=first)),
+                            },
+                        )
+                    tool_log.append(
+                        "SYSTEM: Your JSON final patch failed dry-run validation. Fix it, and consider calling the patch tool before finalizing."
+                    )
+                    tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=first)))
+                    continue
             tool_log.append(
                 "SYSTEM: Your previous JSON final did not include a valid apply_patch patch. Return ONLY a corrected final patch."
             )
@@ -1178,6 +1787,7 @@ def _run_codex_with_tools_logged(
     final_prompt = base_prompt
     if tool_log:
         final_prompt += "\n\n" + "\n\n".join(tool_log[-8:])
+    final_prompt += "\n\n" + task_reminder
     final_prompt += (
         "\n\n"
         "Tool budget exhausted. You MUST now return ONLY a JSON {type:'final', patch:'...'} "
@@ -1223,13 +1833,28 @@ def _run_codex_with_tools_logged(
                 },
             )
 
-    norm = _normalize_patch_text(out or "")
-    if _looks_like_apply_patch(norm):
+    raw_candidate, raw_report = _pick_best_valid_patch_with_report(out or "")
+    if raw_candidate is not None:
+        if chat_jsonl_path and raw_report.get("block_count", 0) > 1:
+            _append_jsonl(
+                chat_jsonl_path,
+                {
+                    "event": "patch_blocks",
+                    "ts": _utc_iso(),
+                    "kind": "forced_final_raw",
+                    "report": raw_report,
+                },
+            )
+        return raw_candidate
+
+    raw_blocks = _extract_apply_patch_blocks(out or "")
+    if raw_blocks:
+        first = raw_blocks[0]
         try:
-            _dry_run_apply_patch_text(norm)
-            return norm
+            _dry_run_apply_patch_text(first)
+            return first
         except PatchApplyError:
-            validation = _tool_patch(patch=norm)
+            validation = _tool_patch(patch=first)
             repair_prompt = (
                 base_prompt
                 + "\n\nYour candidate patch failed dry-run validation. Fix it."
@@ -1249,19 +1874,43 @@ def _run_codex_with_tools_logged(
             out2 = backend(repair_prompt)
             obj2 = _try_parse_json_object(out2 or "")
             if obj2 and obj2.get("type") == "final" and isinstance(obj2.get("patch"), str):
-                patch2 = _normalize_patch_text(obj2["patch"])
-                if _looks_like_apply_patch(patch2):
-                    _dry_run_apply_patch_text(patch2)
-                    return patch2
+                repaired, repaired_report = _pick_best_valid_patch_with_report(obj2["patch"])
+                if repaired is not None:
+                    if chat_jsonl_path and repaired_report.get("block_count", 0) > 1:
+                        _append_jsonl(
+                            chat_jsonl_path,
+                            {
+                                "event": "patch_blocks",
+                                "ts": _utc_iso(),
+                                "kind": "forced_final_repair",
+                                "report": repaired_report,
+                            },
+                        )
+                    return repaired
     obj = _try_parse_json_object(out or "")
     if obj and obj.get("type") == "final" and isinstance(obj.get("patch"), str):
-        patch = _normalize_patch_text(obj["patch"])
-        if _looks_like_apply_patch(patch):
+        candidate, json_report = _pick_best_valid_patch_with_report(obj["patch"])
+        if candidate is not None:
+            if chat_jsonl_path and json_report.get("block_count", 0) > 1:
+                _append_jsonl(
+                    chat_jsonl_path,
+                    {
+                        "event": "patch_blocks",
+                        "ts": _utc_iso(),
+                        "kind": "forced_final_json",
+                        "report": json_report,
+                    },
+                )
+            return candidate
+
+        blocks = _extract_apply_patch_blocks(obj["patch"])
+        if blocks:
+            first = blocks[0]
             try:
-                _dry_run_apply_patch_text(patch)
-                return patch
+                _dry_run_apply_patch_text(first)
+                return first
             except PatchApplyError:
-                validation = _tool_patch(patch=patch)
+                validation = _tool_patch(patch=first)
                 repair_prompt = (
                     base_prompt
                     + "\n\nYour candidate patch failed dry-run validation. Fix it."
@@ -1281,10 +1930,19 @@ def _run_codex_with_tools_logged(
                 out2 = backend(repair_prompt)
                 obj2 = _try_parse_json_object(out2 or "")
                 if obj2 and obj2.get("type") == "final" and isinstance(obj2.get("patch"), str):
-                    patch2 = _normalize_patch_text(obj2["patch"])
-                    if _looks_like_apply_patch(patch2):
-                        _dry_run_apply_patch_text(patch2)
-                        return patch2
+                    repaired, repaired_report = _pick_best_valid_patch_with_report(obj2["patch"])
+                    if repaired is not None:
+                        if chat_jsonl_path and repaired_report.get("block_count", 0) > 1:
+                            _append_jsonl(
+                                chat_jsonl_path,
+                                {
+                                    "event": "patch_blocks",
+                                    "ts": _utc_iso(),
+                                    "kind": "forced_final_json_repair",
+                                    "report": repaired_report,
+                                },
+                            )
+                        return repaired
     raise SystemExit(
         "Codex did not return a valid apply_patch patch after tool loop. "
         "Re-run with different prompt or increase max steps."
@@ -1308,6 +1966,11 @@ def _normalize_patch_text(text: str) -> str:
         if lines and lines[-1].strip().startswith("```"):
             lines = lines[:-1]
         text = "\n".join(lines).strip()
+
+    # Normalize Begin/End Patch markers even when they appear mid-text (e.g.
+    # multiple patch blocks concatenated).
+    text = re.sub(r"(?m)^Begin Patch\s*$", "*** Begin Patch", text)
+    text = re.sub(r"(?m)^End Patch\s*$", "*** End Patch", text)
 
     if text.startswith("Begin Patch"):
         text = "*** " + text
@@ -1371,6 +2034,36 @@ def main() -> int:
         type=float,
         default=0.1,
         help="Random jitter seconds added to backoff (default: 0.1).",
+    )
+
+    # Driver-level 429 handling (Codex usage-limit): optionally sleep until reset then retry once.
+    parser.set_defaults(wait_on_429=True)
+    parser.add_argument(
+        "--wait-on-429",
+        dest="wait_on_429",
+        action="store_true",
+        help=(
+            "If Codex returns 429/usage_limit_reached and provides resets_in_seconds, "
+            "sleep then retry once (default)."
+        ),
+    )
+    parser.add_argument(
+        "--no-wait-on-429",
+        dest="wait_on_429",
+        action="store_false",
+        help="Do not sleep/retry on 429; exit with code 2 after writing the transcript.",
+    )
+    parser.add_argument(
+        "--wait-on-429-max-s",
+        type=int,
+        default=15 * 60,
+        help="Maximum seconds to sleep on 429 before giving up (default: 900).",
+    )
+    parser.add_argument(
+        "--wait-on-429-buffer-s",
+        type=int,
+        default=2,
+        help="Extra seconds added to resets_in_seconds before retry (default: 2).",
     )
 
     parser.set_defaults(apply_patch=True)
@@ -1506,22 +2199,58 @@ def main() -> int:
 
     out_dir = os.path.join(run_dir, "_patches")
     os.makedirs(out_dir, exist_ok=True)
-    chat_jsonl_path = os.path.join(
-        out_dir,
-        f"codex_chat_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.jsonl",
-    )
+    ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+    chat_jsonl_path = os.path.join(out_dir, f"codex_chat_{ts}.jsonl")
 
-    try:
-        patch_text = _run_codex_with_tools_logged(
-            backend=backend,
-            base_prompt=prompt,
-            max_steps=int(args.max_steps),
-            chat_jsonl_path=chat_jsonl_path,
+    def _rate_limit_hint(*, reset_s: Optional[int], transcript_path: str) -> str:
+        hint = "Codex CLI rate/usage limit reached."
+        if isinstance(reset_s, int) and reset_s > 0:
+            mins = max(1, int(round(reset_s / 60.0)))
+            hint += f" Try again in ~{mins} min (resets_in_seconds={reset_s})."
+        if bool(args.wait_on_429):
+            hint += (
+                " If you want to fail fast instead of waiting, pass: --no-wait-on-429"
+            )
+        hint += " You can reduce load and rerun with one or more of:"
+        hint += (
+            f" --retry-max-attempts {max(3, int(args.retry_max_attempts))}"
+            f" --retry-backoff-base-s {max(0.5, float(args.retry_backoff_base_s))}"
+            f" --retry-backoff-max-s {max(5.0, float(args.retry_backoff_max_s))}"
         )
-    except Exception as e:
-        msg = str(e or "")
-        low = msg.lower()
-        if "usage_limit_reached" in low or ("http 429" in low) or ("too many requests" in low):
+        hint += (
+            f" --context-mode lean"
+            f" --max-steps {max(10, int(args.max_steps) // 2)}"
+            f" --max-worst-sessions {max(1, int(args.max_worst_sessions) // 2)}"
+        )
+        hint += (
+            "\nTranscript (including tool loop prompts) is saved at: "
+            + os.path.abspath(transcript_path)
+        )
+        return hint
+
+    patch_text: str
+    attempt = 0
+    current_chat_path = chat_jsonl_path
+    while True:
+        try:
+            patch_text = _run_codex_with_tools_logged(
+                backend=backend,
+                base_prompt=prompt,
+                max_steps=int(args.max_steps),
+                chat_jsonl_path=current_chat_path,
+            )
+            break
+        except Exception as e:
+            msg = str(e or "")
+            low = msg.lower()
+            is_rate_limit = (
+                "usage_limit_reached" in low
+                or ("http 429" in low)
+                or ("too many requests" in low)
+            )
+            if not is_rate_limit:
+                raise
+
             # Best-effort parse for Codex usage-limit reset window.
             reset_s = None
             m = re.search(r"resets_in_seconds\"\s*:\s*(\d+)", msg)
@@ -1533,20 +2262,36 @@ def main() -> int:
                 except Exception:
                     reset_s = None
 
-            hint = "Codex CLI rate/usage limit reached."
-            if isinstance(reset_s, int) and reset_s > 0:
-                mins = max(1, int(round(reset_s / 60.0)))
-                hint += f" Try again in ~{mins} min (resets_in_seconds={reset_s})."
-            hint += (
-                " You can also reduce parallelism / calls, or rerun later. "
-                "Transcript (including tool loop prompts) is saved at: "
-                + os.path.abspath(chat_jsonl_path)
-            )
-            print(hint, file=sys.stderr)
-            return 2
+            if (
+                (not bool(args.wait_on_429))
+                or attempt >= 1
+                or (not isinstance(reset_s, int))
+                or reset_s <= 0
+            ):
+                print(
+                    _rate_limit_hint(reset_s=reset_s, transcript_path=current_chat_path),
+                    file=sys.stderr,
+                )
+                return 2
 
-        # Default: keep the original error for debugging.
-        raise
+            buffer_s = max(0, int(args.wait_on_429_buffer_s))
+            sleep_s = int(reset_s) + buffer_s
+            max_wait_s = max(1, int(args.wait_on_429_max_s))
+            if sleep_s > max_wait_s:
+                print(
+                    _rate_limit_hint(reset_s=reset_s, transcript_path=current_chat_path)
+                    + f"\nNot waiting: resets_in_seconds+buffer={sleep_s} exceeds --wait-on-429-max-s={max_wait_s}.",
+                    file=sys.stderr,
+                )
+                return 2
+
+            print(
+                f"Codex usage-limit: sleeping {sleep_s}s then retrying once...",
+                file=sys.stderr,
+            )
+            time.sleep(sleep_s)
+            attempt += 1
+            current_chat_path = os.path.join(out_dir, f"codex_chat_{ts}_retry{attempt:02d}.jsonl")
 
     out_path = os.path.join(
         out_dir,
