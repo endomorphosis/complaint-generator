@@ -196,16 +196,45 @@ class PatchApplyError(Exception):
     hunk_index: Optional[int] = None
 
     def __str__(self) -> str:
-        parts = [self.message]
+        msg = self.message or ""
+        extra: List[str] = []
         if self.file_path:
-            parts.append(f"file={self.file_path}")
+            extra.append(f"file={self.file_path}")
         if self.hunk_index is not None:
-            parts.append(f"hunk={self.hunk_index}")
-        return " (" + ", ".join(parts[1:]) + ")" if len(parts) > 1 else parts[0]
+            extra.append(f"hunk={self.hunk_index}")
+        if extra:
+            return f"{msg} ({', '.join(extra)})".strip()
+        return msg
+
+
+def _normalize_patch_text(text: str) -> str:
+    """Normalize common Codex near-miss formats into apply_patch text."""
+    text = (text or "").strip()
+    if not text:
+        return text
+
+    # Drop fenced blocks like ```diff ... ```
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:] if lines else []
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    # Normalize Begin Patch -> *** Begin Patch
+    if text.startswith("Begin Patch"):
+        text = "*** " + text
+
+    # Normalize missing space: ***Begin Patch
+    if text.startswith("***Begin Patch"):
+        text = text.replace("***Begin Patch", "*** Begin Patch", 1)
+
+    return text
 
 
 def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
     """Parse apply_patch formatted text into [(file_path, [hunk_lines...])]."""
+    text = _normalize_patch_text(text)
     lines = text.splitlines()
     # tolerate leading/trailing whitespace
     while lines and not lines[0].strip():
@@ -216,18 +245,81 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
     if not lines or lines[0].strip() != "*** Begin Patch" or lines[-1].strip() != "*** End Patch":
         raise PatchApplyError("Not in apply_patch format")
 
+    # Detect a common model formatting issue: every line is prefixed with exactly one extra space.
+    # If present anywhere in the patch, we treat it as global for all hunks.
+    global_prefix_hint = False
+    for ln in lines:
+        if ln.startswith("*** ") or ln.startswith("@@"):
+            continue
+        if ln.startswith(("+", "-")):
+            if len(ln) >= 3 and ln[1] == " " and ln[2] != " ":
+                global_prefix_hint = True
+                break
+        if ln.startswith(" ") and (len(ln) == 1 or ln[1] != " "):
+            global_prefix_hint = True
+            break
+
     i = 1
     file_blocks: List[Tuple[str, List[List[str]]]] = []
     current_file: Optional[str] = None
     current_hunks: List[List[str]] = []
     current_hunk: Optional[List[str]] = None
 
+    def normalize_hunk_lines(raw_lines: List[str]) -> List[str]:
+        # If the model prefixed *every* patch line with one extra space, we'll see patterns like:
+        #  ' import logging' or '- import logging' or '+ import logging'
+        # In that case we need to strip one leading space (or one space after +/-) on *all* lines,
+        # including indented lines.
+        strip_global_prefix = global_prefix_hint or any(
+            (
+                (ln.startswith(("+ ", "- ")) and len(ln) >= 3 and ln[2] != " ")
+                or (ln.startswith(" ") and (len(ln) == 1 or ln[1] != " "))
+            )
+            for ln in raw_lines
+        )
+
+        def leading_space_count(s: str) -> int:
+            n = 0
+            for ch in s:
+                if ch == " ":
+                    n += 1
+                else:
+                    break
+            return n
+
+        out: List[str] = []
+        for ln in raw_lines:
+            if not strip_global_prefix:
+                out.append(ln)
+                continue
+
+            if ln.startswith(("+", "-")) and len(ln) > 1 and ln[1] == " ":
+                spaces = leading_space_count(ln[1:])
+                # If indentation after +/- is off-by-one relative to 4-space blocks, strip one.
+                if spaces % 4 == 1:
+                    out.append(ln[0] + ln[2:])
+                else:
+                    out.append(ln)
+                continue
+
+            if ln.startswith(" "):
+                spaces = leading_space_count(ln)
+                if spaces % 4 == 1:
+                    out.append(ln[1:])
+                else:
+                    out.append(ln)
+                continue
+
+            out.append(ln)
+
+        return out
+
     def flush_file():
         nonlocal current_file, current_hunks, current_hunk
         if current_file is None:
             return
         if current_hunk is not None and current_hunk:
-            current_hunks.append(current_hunk)
+            current_hunks.append(normalize_hunk_lines(current_hunk))
         file_blocks.append((current_file, current_hunks))
         current_file = None
         current_hunks = []
@@ -249,7 +341,7 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
                 i += 1
                 continue
             if current_hunk is not None and current_hunk:
-                current_hunks.append(current_hunk)
+                current_hunks.append(normalize_hunk_lines(current_hunk))
             current_hunk = []
             i += 1
             continue
@@ -278,6 +370,19 @@ def _find_subsequence(haystack: Sequence[str], needle: Sequence[str], start_at: 
     return None
 
 
+def _find_subsequence_rstrip(haystack: Sequence[str], needle: Sequence[str], start_at: int = 0) -> Optional[int]:
+    """Fallback matching that ignores trailing whitespace differences."""
+    if not needle:
+        return None
+    hay = [h.rstrip() for h in haystack]
+    ned = [n.rstrip() for n in needle]
+    max_i = len(hay) - len(ned)
+    for i in range(start_at, max_i + 1):
+        if hay[i : i + len(ned)] == ned:
+            return i
+    return None
+
+
 def _apply_hunk_to_lines(file_lines: List[str], hunk_lines: List[str]) -> List[str]:
     old_block: List[str] = []
     new_block: List[str] = []
@@ -293,9 +398,35 @@ def _apply_hunk_to_lines(file_lines: List[str], hunk_lines: List[str]) -> List[s
 
     pos = _find_subsequence(file_lines, old_block)
     if pos is None:
+        pos = _find_subsequence_rstrip(file_lines, old_block)
+    if pos is None:
         raise PatchApplyError("Hunk context not found")
 
     return file_lines[:pos] + new_block + file_lines[pos + len(old_block) :]
+
+
+def _dry_run_apply_patch_text(patch_text: str) -> None:
+    """Validate that a patch can apply cleanly to current working tree.
+
+    Raises PatchApplyError if it cannot be applied.
+    """
+    patch_text = _normalize_patch_text(patch_text)
+    file_blocks = _parse_apply_patch(patch_text)
+
+    for file_path, hunks in file_blocks:
+        if not os.path.isabs(file_path):
+            raise PatchApplyError("Patch paths must be absolute", file_path=file_path)
+        if not os.path.isfile(file_path):
+            raise PatchApplyError("Target file does not exist", file_path=file_path)
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            file_lines = f.read().splitlines()
+
+        for hunk_index, hunk_lines in enumerate(hunks):
+            try:
+                file_lines = _apply_hunk_to_lines(file_lines, hunk_lines)
+            except PatchApplyError as e:
+                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index) from e
 
 
 def apply_apply_patch_text(patch_text: str) -> List[str]:
@@ -303,6 +434,7 @@ def apply_apply_patch_text(patch_text: str) -> List[str]:
 
     Returns list of updated file paths.
     """
+    patch_text = _normalize_patch_text(patch_text)
     file_blocks = _parse_apply_patch(patch_text)
     updated_files: List[str] = []
 
@@ -359,12 +491,16 @@ def _codex_fix_patch(
         "- Use only: *** Update File: <absolute path>\n"
         "- Do not use placeholder paths or template lines.\n"
         "- Keep the change minimal; preserve intent of the previous patch.\n\n"
+        "Patch quality requirements:\n"
+        "- Do not truncate or corrupt lines (no partial tokens).\n"
+        "- Ensure every changed region includes enough exact context lines to apply.\n"
+        "- Keep hunks small and focused; avoid huge hunks spanning multiple functions.\n\n"
         "Here is the failure context as JSON (includes current file contents):\n"
         + json.dumps(context, ensure_ascii=False)
     )
 
     fixed = codex_backend(prompt)
-    return str(fixed)
+    return _normalize_patch_text(str(fixed))
 
 
 def _read_text(path: str) -> str:
@@ -394,6 +530,12 @@ def main() -> int:
     parser.add_argument("--retry-jitter-s", type=float, default=0.1)
 
     parser.add_argument("--apply-fix-max-attempts", type=int, default=2)
+    parser.add_argument(
+        "--generate-fix-max-attempts",
+        type=int,
+        default=2,
+        help="If Codex generates a patch that can't apply to the current tree, ask Codex to fix it up to this many times.",
+    )
     args = parser.parse_args()
 
     personalities = None
@@ -450,8 +592,37 @@ def main() -> int:
             backend_id=args.codex_backend_id,
         )
         patch_text = _read_text(patch_path)
+        patch_text = _normalize_patch_text(patch_text)
+
+        # Validate (dry-run apply) immediately; if Codex produced a broken patch, repair it now.
+        gen_attempt = 0
+        while True:
+            gen_attempt += 1
+            try:
+                _dry_run_apply_patch_text(patch_text)
+                break
+            except PatchApplyError as e:
+                if gen_attempt > args.generate_fix_max_attempts:
+                    raise SystemExit(
+                        f"Generated patch for run {run_id} could not be applied after fixes: {e}"
+                    )
+
+                update_files = _extract_update_files(patch_text)
+                file_contents: Dict[str, str] = {}
+                for fp in update_files:
+                    if os.path.isfile(fp):
+                        file_contents[fp] = _read_text(fp)
+
+                patch_text = _codex_fix_patch(
+                    codex_backend=codex_backend,
+                    failing_patch_text=patch_text,
+                    error_message=f"Generated patch failed dry-run apply: {e}",
+                    file_contents=file_contents,
+                )
 
         # Copy patch into orchestrator folder for later application
+        # Ensure directories exist even if state_dir is changed mid-run.
+        _ensure_dir(patches_dir)
         local_patch_path = os.path.join(patches_dir, f"patch_{i:02d}.patch")
         with open(local_patch_path, "w", encoding="utf-8") as f:
             f.write(patch_text)
