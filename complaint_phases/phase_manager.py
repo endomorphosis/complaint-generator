@@ -117,7 +117,8 @@ class PhaseManager:
         gaps_addressed = data.get('remaining_gaps', float('inf')) <= 3
         converged = data.get('denoising_converged', False)
         
-        return has_knowledge_graph and has_dependency_graph and (gaps_addressed or converged)
+        # Require both gaps to be addressed AND convergence
+        return has_knowledge_graph and has_dependency_graph and gaps_addressed and converged
     
     def _is_evidence_complete(self) -> bool:
         """

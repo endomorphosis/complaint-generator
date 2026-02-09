@@ -310,6 +310,17 @@ class WebEvidenceIntegrationHook:
     
     def __init__(self, mediator):
         self.mediator = mediator
+        # Create a search hook for convenience methods
+        self._search_hook = None
+    
+    def _get_search_hook(self):
+        """Lazy initialization of search hook."""
+        if self._search_hook is None:
+            if hasattr(self.mediator, 'web_evidence_search'):
+                self._search_hook = self.mediator.web_evidence_search
+            else:
+                self._search_hook = WebEvidenceSearchHook(self.mediator)
+        return self._search_hook
     
     def discover_and_store_evidence(self, keywords: List[str],
                                     domains: Optional[List[str]] = None,
@@ -501,7 +512,7 @@ Return only the keywords, one per line, focused on finding factual evidence."""
             List of relevant legal precedents
         """
         query = f"{claim} legal precedent case law"
-        return self.search_brave(query, max_results=max_results)
+        return self._get_search_hook().search_brave(query, max_results=max_results)
     
     def search_case_law(self, complaint_type: str, jurisdiction: Optional[str] = None,
                        max_results: int = 10) -> List[Dict[str, Any]]:
@@ -519,7 +530,7 @@ Return only the keywords, one per line, focused on finding factual evidence."""
         query = f"{complaint_type} case law"
         if jurisdiction:
             query += f" {jurisdiction}"
-        return self.search_brave(query, max_results=max_results)
+        return self._get_search_hook().search_brave(query, max_results=max_results)
     
     def search_legal_definitions(self, term: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """
@@ -533,7 +544,7 @@ Return only the keywords, one per line, focused on finding factual evidence."""
             List of definition sources
         """
         query = f'legal definition of "{term}"'
-        return self.search_brave(query, max_results=max_results)
+        return self._get_search_hook().search_brave(query, max_results=max_results)
     
     def search_statute_text(self, statute_name: str, max_results: int = 5) -> List[Dict[str, Any]]:
         """
@@ -547,4 +558,4 @@ Return only the keywords, one per line, focused on finding factual evidence."""
             List of statute sources
         """
         query = f'"{statute_name}" full text statute'
-        return self.search_brave(query, max_results=max_results)
+        return self._get_search_hook().search_brave(query, max_results=max_results)

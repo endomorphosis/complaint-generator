@@ -120,13 +120,46 @@ class TestMediatorThreePhaseIntegration:
         assert phase_manager.advance_to_phase(ComplaintPhase.FORMALIZATION)
         assert phase_manager.get_current_phase() == ComplaintPhase.FORMALIZATION
         
-        # Build legal graph
-        legal_graph = legal_graph_builder.build_rules_of_procedure()
+        # Build legal graph with actual requirements (not just procedural)
+        # Create requirements that match the claim type in dependency graph
+        legal_graph = LegalGraph()
+        
+        # Add a substantive requirement for discrimination claims
+        req_element = LegalElement(
+            id='req_1',
+            element_type='requirement',
+            name='Protected Class Membership',
+            description='Plaintiff must be a member of a protected class',
+            citation='Title VII, 42 U.S.C. § 2000e',
+            jurisdiction='federal',
+            required=True,
+            attributes={'applicable_claim_types': ['discrimination', 'employment_discrimination']}
+        )
+        legal_graph.add_element(req_element)
+        
+        # Add procedural requirements with applicable_claim_types
+        proc_req = LegalElement(
+            id='req_2',
+            element_type='procedural_requirement',
+            name='Statement of Claim',
+            description='Must state the claim showing entitlement to relief',
+            citation='FRCP 8(a)(2)',
+            jurisdiction='federal',
+            required=True,
+            attributes={'applicable_claim_types': ['discrimination', 'employment_discrimination']}
+        )
+        legal_graph.add_element(proc_req)
+        
         phase_manager.update_phase_data(ComplaintPhase.FORMALIZATION, 'legal_graph', legal_graph)
         
-        # Perform matching
+        # Perform matching - should now find requirements
         matching_results = matcher.match_claims_to_law(kg, dg, legal_graph)
         phase_manager.update_phase_data(ComplaintPhase.FORMALIZATION, 'matching_results', matching_results)
+        
+        # Assert that matching actually found requirements
+        assert 'matched_requirements' in matching_results, "Matching should find requirements"
+        assert len(matching_results.get('matched_requirements', [])) > 0, "Should match at least one requirement"
+        
         phase_manager.update_phase_data(ComplaintPhase.FORMALIZATION, 'matching_complete', True)
         
         # Generate formal complaint (simplified)

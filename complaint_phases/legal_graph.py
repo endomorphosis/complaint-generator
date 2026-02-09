@@ -95,13 +95,14 @@ class LegalGraph:
             claim_type: Type of legal claim (e.g., 'discrimination', 'wrongful_termination')
             
         Returns:
-            List of required legal elements
+            List of required legal elements (both 'requirement' and 'procedural_requirement')
         """
         requirements = []
         
         # Find elements tagged with this claim type
+        # Include both regular requirements and procedural requirements
         for element in self.elements.values():
-            if element.element_type == 'requirement':
+            if element.element_type in ('requirement', 'procedural_requirement'):
                 applicable_claims = element.attributes.get('applicable_claim_types', [])
                 if claim_type in applicable_claims:
                     requirements.append(element)

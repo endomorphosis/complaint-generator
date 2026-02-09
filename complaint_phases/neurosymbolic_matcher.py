@@ -199,14 +199,24 @@ class NeurosymbolicMatcher:
             'suggested_action': ''
         }
         
-        # Get relevant entities from knowledge graph
-        claim_entity = knowledge_graph.get_entity(claim_node.id)
+        # Try to find the claim entity by name/type instead of ID
+        # since dependency graph and knowledge graph use different ID schemes
+        claim_entity = None
+        claim_name = claim_node.attributes.get('claim_type', claim_node.name)
+        
+        # Search for matching entity by name or claim type
+        for entity in knowledge_graph.entities.values():
+            if (entity.entity_type == 'claim' and 
+                (entity.name == claim_name or entity.name == claim_node.name)):
+                claim_entity = entity
+                break
+        
         if not claim_entity:
             result['suggested_action'] = f"Provide more information about {claim_node.name}"
             return result
         
-        # Check for supporting relationships
-        relationships = knowledge_graph.get_relationships_for_entity(claim_node.id)
+        # Check for supporting relationships using the found entity ID
+        relationships = knowledge_graph.get_relationships_for_entity(claim_entity.id)
         supporting_rels = [r for r in relationships if r.relation_type == 'supported_by']
         
         if supporting_rels:
