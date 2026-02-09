@@ -303,6 +303,128 @@ class AdversarialSession:
         return any(term in text for term in harm_remedy_terms)
 
     @staticmethod
+    def _is_actor_or_decisionmaker_question(question_text: str) -> bool:
+        text = question_text.lower()
+        actor_terms = (
+            'who',
+            'manager',
+            'supervisor',
+            'decision',
+            'hr',
+            'human resources',
+            'person',
+            'individual',
+            'name',
+        )
+        return any(term in text for term in actor_terms)
+
+    @staticmethod
+    def _is_documentary_evidence_question(question_text: str) -> bool:
+        text = question_text.lower()
+        document_terms = (
+            'document',
+            'email',
+            'text message',
+            'notice',
+            'letter',
+            'written',
+            'record',
+            'screenshot',
+            'attachment',
+            'paperwork',
+            'file',
+        )
+        return any(term in text for term in document_terms)
+
+    @staticmethod
+    def _is_witness_question(question_text: str) -> bool:
+        text = question_text.lower()
+        witness_terms = (
+            'witness',
+            'anyone else',
+            'who else',
+            'present',
+            'saw',
+            'heard',
+            'observer',
+            'coworker',
+        )
+        return any(term in text for term in witness_terms)
+
+    def _build_fallback_probe(
+        self,
+        asked_question_counts: Dict[str, int],
+        asked_intent_counts: Dict[str, int],
+        need_timeline: bool,
+        need_harm_remedy: bool,
+        need_actor_decisionmaker: bool,
+        need_documentary_evidence: bool,
+        need_witness: bool,
+        last_question_key: str | None,
+        last_question_intent_key: str | None,
+        recent_intent_keys: Set[str],
+    ) -> Dict[str, Any] | None:
+        probe_candidates: List[tuple[str, str]] = []
+        if need_timeline:
+            probe_candidates.append((
+                "What are the most precise dates or date ranges for each key event, starting with the first incident?",
+                "timeline",
+            ))
+        if need_harm_remedy:
+            probe_candidates.append((
+                "What concrete harms did this cause you, and what specific remedy are you requesting?",
+                "harm_remedy",
+            ))
+        if need_actor_decisionmaker:
+            probe_candidates.append((
+                "Who specifically made each decision or statement, and what exactly was said or done?",
+                "actors",
+            ))
+        if need_documentary_evidence:
+            probe_candidates.append((
+                "Do you have any supporting records such as emails, messages, notices, or other written documents?",
+                "documents",
+            ))
+        if need_witness:
+            probe_candidates.append((
+                "Were there any witnesses who saw or heard these events, and how can they be identified?",
+                "witnesses",
+            ))
+
+        if not probe_candidates:
+            return None
+
+        seen_question_keys = [k for k, count in asked_question_counts.items() if count > 0]
+        for probe_text, probe_type in probe_candidates:
+            key = self._question_dedupe_key(probe_text)
+            intent_key = self._question_intent_key(probe_text)
+            asked_count = asked_question_counts.get(key, 0)
+            intent_count = asked_intent_counts.get(intent_key, 0)
+            similarity_to_seen = 0.0
+            if seen_question_keys:
+                similarity_to_seen = max(
+                    self._question_similarity(probe_text, seen_key)
+                    for seen_key in seen_question_keys
+                )
+            if self._is_redundant_candidate(
+                key=key,
+                intent_key=intent_key,
+                asked_count=asked_count,
+                intent_count=intent_count,
+                similarity_to_seen=similarity_to_seen,
+                last_question_key=last_question_key,
+                last_question_intent_key=last_question_intent_key,
+                recent_intent_keys=recent_intent_keys,
+            ):
+                continue
+            return {
+                "question": probe_text,
+                "type": probe_type,
+                "source": "harness_fallback",
+            }
+        return None
+
+    @staticmethod
     def _has_empathy_prefix(question_text: str) -> bool:
         text = question_text.lower()
         empathy_markers = (
@@ -484,32 +606,59 @@ class AdversarialSession:
             recent_intent_window = 2
             has_timeline_question = False
             has_harm_remedy_question = False
+            has_actor_or_decisionmaker_question = False
+            has_documentary_evidence_question = False
+            has_witness_question = False
             
             while turns < self.max_turns:
                 # Get questions from mediator
                 questions = result.get('initial_questions', []) if turns == 0 else \
                            result.get('next_questions', [])
-                
-                if not questions:
-                    logger.info(f"No more questions, session complete after {turns} turns")
-                    break
-                
-                # Ask a non-repeated question when available and prioritize key coverage gaps.
-                question = self._select_next_question(
-                    questions=questions,
-                    asked_question_counts=asked_question_counts,
-                    asked_intent_counts=asked_intent_counts,
-                    need_timeline=not has_timeline_question,
-                    need_harm_remedy=not has_harm_remedy_question,
-                    last_question_key=last_question_key,
-                    last_question_intent_key=last_question_intent_key,
-                    recent_intent_keys=set(recent_intent_keys),
-                )
-                if question is None:
-                    logger.info(
-                        "Only repeated questions remain; ending session early at turn %s",
-                        turns,
+
+                need_timeline = not has_timeline_question
+                need_harm_remedy = not has_harm_remedy_question
+                need_actor_decisionmaker = not has_actor_or_decisionmaker_question
+                need_documentary_evidence = not has_documentary_evidence_question
+                need_witness = not has_witness_question
+
+                question = None
+                if questions:
+                    # Ask a non-repeated question when available and prioritize key coverage gaps.
+                    question = self._select_next_question(
+                        questions=questions,
+                        asked_question_counts=asked_question_counts,
+                        asked_intent_counts=asked_intent_counts,
+                        need_timeline=need_timeline,
+                        need_harm_remedy=need_harm_remedy,
+                        last_question_key=last_question_key,
+                        last_question_intent_key=last_question_intent_key,
+                        recent_intent_keys=set(recent_intent_keys),
                     )
+
+                if question is None:
+                    question = self._build_fallback_probe(
+                        asked_question_counts=asked_question_counts,
+                        asked_intent_counts=asked_intent_counts,
+                        need_timeline=need_timeline,
+                        need_harm_remedy=need_harm_remedy,
+                        need_actor_decisionmaker=need_actor_decisionmaker,
+                        need_documentary_evidence=need_documentary_evidence,
+                        need_witness=need_witness,
+                        last_question_key=last_question_key,
+                        last_question_intent_key=last_question_intent_key,
+                        recent_intent_keys=set(recent_intent_keys),
+                    )
+                    if question is not None:
+                        logger.debug("Using harness fallback probe for missing coverage")
+
+                if question is None:
+                    if not questions:
+                        logger.info(f"No more questions, session complete after {turns} turns")
+                    else:
+                        logger.info(
+                            "Only repeated questions remain and no useful fallback probe was available; ending session at turn %s",
+                            turns,
+                        )
                     break
                 question_text = self._extract_question_text(question)
                 question_key = self._question_dedupe_key(question_text)
@@ -540,13 +689,25 @@ class AdversarialSession:
                     has_timeline_question = True
                 if self._is_harm_or_remedy_question(question_text):
                     has_harm_remedy_question = True
+                if self._is_actor_or_decisionmaker_question(question_text):
+                    has_actor_or_decisionmaker_question = True
+                if self._is_documentary_evidence_question(question_text):
+                    has_documentary_evidence_question = True
+                if self._is_witness_question(question_text):
+                    has_witness_question = True
                 
                 questions_asked += 1
                 turns += 1
                 
                 # Check if converged
                 converged = result.get('converged', False) or result.get('ready_for_evidence_phase', False)
-                if converged and has_harm_remedy_question:
+                has_core_coverage = has_timeline_question and has_harm_remedy_question
+                has_evidence_coverage = (
+                    has_actor_or_decisionmaker_question
+                    or has_documentary_evidence_question
+                    or has_witness_question
+                )
+                if converged and has_core_coverage and has_evidence_coverage:
                     logger.info(f"Session converged after {turns} turns")
                     break
             

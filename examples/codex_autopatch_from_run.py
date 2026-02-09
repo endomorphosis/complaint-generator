@@ -277,6 +277,12 @@ Before returning a final patch (type=final or raw patch), you SHOULD call the pa
 
 You must output a REAL patch in apply_patch format, not a template.
 
+Patch formatting rules (important):
+- Do NOT output unified-diff style prefixes (no leading ' ' marker on unchanged lines).
+- Do NOT use '...' or '@@' as an ellipsis to omit lines inside a hunk.
+- Each hunk must contain exact, contiguous lines copied from the current file content.
+- Use '@@' only to start a new hunk (or include a scope hint like '@@ class Foo'), never as a placeholder.
+
 Scope:
 - You MAY change any *.py file under the repository root: {os.path.abspath(PROJECT_ROOT)}
 - Use ONLY absolute paths in *** Update File lines.
@@ -485,14 +491,6 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
     current_hunk: Optional[List[str]] = None
 
     def normalize_hunk_lines(raw_lines: List[str]) -> List[str]:
-        strip_global_prefix = global_prefix_hint or any(
-            (
-                (ln.startswith(("+ ", "- ")) and len(ln) >= 3 and ln[2] != " ")
-                or (ln.startswith(" ") and (len(ln) == 1 or ln[1] != " "))
-            )
-            for ln in raw_lines
-        )
-
         def leading_space_count(s: str) -> int:
             n = 0
             for ch in s:
@@ -502,6 +500,31 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
                     break
             return n
 
+        def looks_like_unified_diff_prefix(ln: str) -> bool:
+            """Detect common unified-diff prefixes that Codex sometimes emits.
+
+            apply_patch format expects raw file lines (optionally prefixed with + / -).
+            Unified diffs often prefix unchanged lines with a single leading space.
+            For Python, that produces leading whitespace counts of 5, 9, 13, ... which
+            won't match the underlying file. We strip that prefix when detected.
+            """
+            if not ln:
+                return False
+            if ln.startswith(("*** ", "@@")):
+                return False
+            if ln[0] in "+-":
+                # Some diffs include an extra space after +/- before the actual line.
+                if len(ln) > 1 and ln[1] == " ":
+                    return leading_space_count(ln[1:]) % 4 == 1
+                return False
+            if ln.startswith(" "):
+                return leading_space_count(ln) % 4 == 1
+            return False
+
+        strip_global_prefix = global_prefix_hint or any(
+            looks_like_unified_diff_prefix(ln) for ln in raw_lines
+        )
+
         out: List[str] = []
         for ln in raw_lines:
             if not strip_global_prefix:
@@ -509,20 +532,14 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
                 continue
 
             if ln.startswith(("+", "-")) and len(ln) > 1 and ln[1] == " ":
-                spaces = leading_space_count(ln[1:])
-                if spaces % 4 == 1:
+                if leading_space_count(ln[1:]) % 4 == 1:
                     out.append(ln[0] + ln[2:])
-                else:
-                    out.append(ln)
-                continue
+                    continue
 
             if ln.startswith(" "):
-                spaces = leading_space_count(ln)
-                if spaces % 4 == 1:
+                if leading_space_count(ln) % 4 == 1:
                     out.append(ln[1:])
-                else:
-                    out.append(ln)
-                continue
+                    continue
 
             out.append(ln)
 
@@ -592,6 +609,28 @@ def _find_subsequence_rstrip(haystack: List[str], needle: List[str]) -> Optional
     return None
 
 
+def _find_subsequence_relaxed_indent(haystack: List[str], needle: List[str]) -> Optional[int]:
+    """Fallback matching that ignores leading indentation differences.
+
+    This is intentionally conservative: it only succeeds when there is exactly ONE
+    matching location, to avoid applying hunks to the wrong region.
+    """
+
+    if not needle:
+        return None
+
+    hay = [h.strip() for h in haystack]
+    ned = [n.strip() for n in needle]
+    max_i = len(hay) - len(ned)
+    matches: List[int] = []
+    for i in range(max_i + 1):
+        if hay[i : i + len(ned)] == ned:
+            matches.append(i)
+            if len(matches) > 1:
+                return None
+    return matches[0] if matches else None
+
+
 def _apply_hunk_to_lines(file_lines: List[str], hunk_lines: List[str]) -> List[str]:
     old_block: List[str] = []
     new_block: List[str] = []
@@ -607,6 +646,8 @@ def _apply_hunk_to_lines(file_lines: List[str], hunk_lines: List[str]) -> List[s
     pos = _find_subsequence(file_lines, old_block)
     if pos is None:
         pos = _find_subsequence_rstrip(file_lines, old_block)
+    if pos is None:
+        pos = _find_subsequence_relaxed_indent(file_lines, old_block)
     if pos is None:
         def clip(lines: List[str], limit: int = 80) -> List[str]:
             return lines if len(lines) <= limit else (lines[:limit] + ["...<clipped>..."])
@@ -703,22 +744,101 @@ def _try_parse_json_object(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _run_codex_with_tools(*, backend: LLMRouterBackend, base_prompt: str, max_steps: int = 8) -> str:
+    raise RuntimeError("Use _run_codex_with_tools_logged")
+
+
+def _append_jsonl(path: str, obj: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _run_codex_with_tools_logged(
+    *,
+    backend: LLMRouterBackend,
+    base_prompt: str,
+    max_steps: int = 8,
+    chat_jsonl_path: Optional[str] = None,
+) -> str:
     tool_log: List[str] = []
     last_output = ""
+
+    if chat_jsonl_path:
+        _append_jsonl(
+            chat_jsonl_path,
+            {
+                "event": "session_start",
+                "ts": _utc_iso(),
+                "tool_protocol": "v1",
+                "max_steps": int(max_steps),
+                "base_prompt": base_prompt,
+            },
+        )
 
     for step in range(max(1, int(max_steps))):
         transcript = base_prompt
         if tool_log:
             transcript += "\n\n" + "\n\n".join(tool_log[-8:])
 
+        if chat_jsonl_path:
+            _append_jsonl(
+                chat_jsonl_path,
+                {
+                    "event": "prompt",
+                    "ts": _utc_iso(),
+                    "step": step + 1,
+                    "tool_log_tail": tool_log[-8:],
+                },
+            )
+
         out = backend(transcript)
         last_output = out or ""
+
+        if chat_jsonl_path:
+            _append_jsonl(
+                chat_jsonl_path,
+                {
+                    "event": "model_output",
+                    "ts": _utc_iso(),
+                    "step": step + 1,
+                    "text": last_output,
+                },
+            )
+
         norm = _normalize_patch_text(last_output)
         if _looks_like_apply_patch(norm):
             try:
-                _dry_run_apply_patch_text(norm)
+                updated = _dry_run_apply_patch_text(norm)
+                if chat_jsonl_path:
+                    _append_jsonl(
+                        chat_jsonl_path,
+                        {
+                            "event": "patch_candidate",
+                            "ts": _utc_iso(),
+                            "step": step + 1,
+                            "kind": "raw",
+                            "ok": True,
+                            "would_update_files": updated,
+                        },
+                    )
                 return norm
             except PatchApplyError:
+                if chat_jsonl_path:
+                    _append_jsonl(
+                        chat_jsonl_path,
+                        {
+                            "event": "patch_candidate",
+                            "ts": _utc_iso(),
+                            "step": step + 1,
+                            "kind": "raw",
+                            "ok": False,
+                            "validation": json.loads(_tool_patch(patch=norm)),
+                        },
+                    )
                 tool_log.append(
                     "SYSTEM: Candidate patch failed dry-run validation. Fix the patch, and consider calling the patch tool before finalizing."
                 )
@@ -741,9 +861,33 @@ def _run_codex_with_tools(*, backend: LLMRouterBackend, base_prompt: str, max_st
                 patch = _normalize_patch_text(patch)
                 if _looks_like_apply_patch(patch):
                     try:
-                        _dry_run_apply_patch_text(patch)
+                        updated = _dry_run_apply_patch_text(patch)
+                        if chat_jsonl_path:
+                            _append_jsonl(
+                                chat_jsonl_path,
+                                {
+                                    "event": "patch_candidate",
+                                    "ts": _utc_iso(),
+                                    "step": step + 1,
+                                    "kind": "json_final",
+                                    "ok": True,
+                                    "would_update_files": updated,
+                                },
+                            )
                         return patch
                     except PatchApplyError:
+                        if chat_jsonl_path:
+                            _append_jsonl(
+                                chat_jsonl_path,
+                                {
+                                    "event": "patch_candidate",
+                                    "ts": _utc_iso(),
+                                    "step": step + 1,
+                                    "kind": "json_final",
+                                    "ok": False,
+                                    "validation": json.loads(_tool_patch(patch=patch)),
+                                },
+                            )
                         tool_log.append(
                             "SYSTEM: Your JSON final patch failed dry-run validation. Fix it, and consider calling the patch tool before finalizing."
                         )
@@ -786,23 +930,106 @@ def _run_codex_with_tools(*, backend: LLMRouterBackend, base_prompt: str, max_st
         except Exception as e:
             result = f"ERROR: tool execution failed: {e}"
 
+        if chat_jsonl_path:
+            _append_jsonl(
+                chat_jsonl_path,
+                {
+                    "event": "tool_call",
+                    "ts": _utc_iso(),
+                    "step": step + 1,
+                    "tool": tool,
+                    "args": args,
+                },
+            )
+            _append_jsonl(
+                chat_jsonl_path,
+                {
+                    "event": "tool_result",
+                    "ts": _utc_iso(),
+                    "step": step + 1,
+                    "tool": tool,
+                    "result": result,
+                },
+            )
+
         tool_log.append(
             f"TOOL_CALL(step={step+1}): {json.dumps(obj, ensure_ascii=False)}\nTOOL_RESULT:\n{result}".strip()
         )
 
     # Final forced attempt
     final_prompt = base_prompt + "\n\nTool budget exhausted. Return a JSON {type:'final', patch:'...'} with a valid apply_patch patch."
+    if chat_jsonl_path:
+        _append_jsonl(
+            chat_jsonl_path,
+            {
+                "event": "final_prompt",
+                "ts": _utc_iso(),
+                "tool_log_tail": tool_log[-8:],
+            },
+        )
     out = backend(final_prompt)
     norm = _normalize_patch_text(out or "")
     if _looks_like_apply_patch(norm):
-        _dry_run_apply_patch_text(norm)
-        return norm
+        try:
+            _dry_run_apply_patch_text(norm)
+            return norm
+        except PatchApplyError:
+            validation = _tool_patch(patch=norm)
+            repair_prompt = (
+                base_prompt
+                + "\n\nYour candidate patch failed dry-run validation. Fix it."
+                + "\nPATCH_VALIDATION:\n"
+                + validation
+                + "\n\nReturn ONLY a JSON {type:'final', patch:'...'} with a corrected patch."
+            )
+            if chat_jsonl_path:
+                _append_jsonl(
+                    chat_jsonl_path,
+                    {
+                        "event": "forced_patch_failed",
+                        "ts": _utc_iso(),
+                        "validation": json.loads(validation),
+                    },
+                )
+            out2 = backend(repair_prompt)
+            obj2 = _try_parse_json_object(out2 or "")
+            if obj2 and obj2.get("type") == "final" and isinstance(obj2.get("patch"), str):
+                patch2 = _normalize_patch_text(obj2["patch"])
+                if _looks_like_apply_patch(patch2):
+                    _dry_run_apply_patch_text(patch2)
+                    return patch2
     obj = _try_parse_json_object(out or "")
     if obj and obj.get("type") == "final" and isinstance(obj.get("patch"), str):
         patch = _normalize_patch_text(obj["patch"])
         if _looks_like_apply_patch(patch):
-            _dry_run_apply_patch_text(patch)
-            return patch
+            try:
+                _dry_run_apply_patch_text(patch)
+                return patch
+            except PatchApplyError:
+                validation = _tool_patch(patch=patch)
+                repair_prompt = (
+                    base_prompt
+                    + "\n\nYour candidate patch failed dry-run validation. Fix it."
+                    + "\nPATCH_VALIDATION:\n"
+                    + validation
+                    + "\n\nReturn ONLY a JSON {type:'final', patch:'...'} with a corrected patch."
+                )
+                if chat_jsonl_path:
+                    _append_jsonl(
+                        chat_jsonl_path,
+                        {
+                            "event": "forced_patch_failed",
+                            "ts": _utc_iso(),
+                            "validation": json.loads(validation),
+                        },
+                    )
+                out2 = backend(repair_prompt)
+                obj2 = _try_parse_json_object(out2 or "")
+                if obj2 and obj2.get("type") == "final" and isinstance(obj2.get("patch"), str):
+                    patch2 = _normalize_patch_text(obj2["patch"])
+                    if _looks_like_apply_patch(patch2):
+                        _dry_run_apply_patch_text(patch2)
+                        return patch2
     raise SystemExit(
         "Codex did not return a valid apply_patch patch after tool loop. "
         "Re-run with different prompt or increase max steps."
@@ -887,10 +1114,20 @@ def main() -> int:
         worst_sessions=worst,
     )
 
-    patch_text = _run_codex_with_tools(backend=backend, base_prompt=prompt, max_steps=8)
-
     out_dir = os.path.join(run_dir, "_patches")
     os.makedirs(out_dir, exist_ok=True)
+    chat_jsonl_path = os.path.join(
+        out_dir,
+        f"codex_chat_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.jsonl",
+    )
+
+    patch_text = _run_codex_with_tools_logged(
+        backend=backend,
+        base_prompt=prompt,
+        max_steps=8,
+        chat_jsonl_path=chat_jsonl_path,
+    )
+
     out_path = os.path.join(
         out_dir,
         f"codex_patch_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.patch",

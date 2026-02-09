@@ -456,14 +456,6 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
         #  ' import logging' or '- import logging' or '+ import logging'
         # In that case we need to strip one leading space (or one space after +/-) on *all* lines,
         # including indented lines.
-        strip_global_prefix = global_prefix_hint or any(
-            (
-                (ln.startswith(("+ ", "- ")) and len(ln) >= 3 and ln[2] != " ")
-                or (ln.startswith(" ") and (len(ln) == 1 or ln[1] != " "))
-            )
-            for ln in raw_lines
-        )
-
         def leading_space_count(s: str) -> int:
             n = 0
             for ch in s:
@@ -473,6 +465,23 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
                     break
             return n
 
+        def looks_like_unified_diff_prefix(ln: str) -> bool:
+            if not ln:
+                return False
+            if ln.startswith(("*** ", "@@")):
+                return False
+            if ln[0] in "+-":
+                if len(ln) > 1 and ln[1] == " ":
+                    return leading_space_count(ln[1:]) % 4 == 1
+                return False
+            if ln.startswith(" "):
+                return leading_space_count(ln) % 4 == 1
+            return False
+
+        strip_global_prefix = global_prefix_hint or any(
+            looks_like_unified_diff_prefix(ln) for ln in raw_lines
+        )
+
         out: List[str] = []
         for ln in raw_lines:
             if not strip_global_prefix:
@@ -480,21 +489,15 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
                 continue
 
             if ln.startswith(("+", "-")) and len(ln) > 1 and ln[1] == " ":
-                spaces = leading_space_count(ln[1:])
                 # If indentation after +/- is off-by-one relative to 4-space blocks, strip one.
-                if spaces % 4 == 1:
+                if leading_space_count(ln[1:]) % 4 == 1:
                     out.append(ln[0] + ln[2:])
-                else:
-                    out.append(ln)
-                continue
+                    continue
 
             if ln.startswith(" "):
-                spaces = leading_space_count(ln)
-                if spaces % 4 == 1:
+                if leading_space_count(ln) % 4 == 1:
                     out.append(ln[1:])
-                else:
-                    out.append(ln)
-                continue
+                    continue
 
             out.append(ln)
 
@@ -569,6 +572,28 @@ def _find_subsequence_rstrip(haystack: Sequence[str], needle: Sequence[str], sta
     return None
 
 
+def _find_subsequence_relaxed_indent(haystack: Sequence[str], needle: Sequence[str], start_at: int = 0) -> Optional[int]:
+    """Conservative fallback matching that ignores leading indentation differences.
+
+    Only succeeds when there is exactly ONE matching location (from start_at), to
+    reduce the risk of applying a hunk to the wrong region.
+    """
+
+    if not needle:
+        return None
+
+    hay = [h.strip() for h in haystack]
+    ned = [n.strip() for n in needle]
+    max_i = len(hay) - len(ned)
+    matches: List[int] = []
+    for i in range(start_at, max_i + 1):
+        if list(hay[i : i + len(ned)]) == list(ned):
+            matches.append(i)
+            if len(matches) > 1:
+                return None
+    return matches[0] if matches else None
+
+
 def _apply_hunk_to_lines(file_lines: List[str], hunk_lines: List[str]) -> List[str]:
     old_block: List[str] = []
     new_block: List[str] = []
@@ -585,6 +610,8 @@ def _apply_hunk_to_lines(file_lines: List[str], hunk_lines: List[str]) -> List[s
     pos = _find_subsequence(file_lines, old_block)
     if pos is None:
         pos = _find_subsequence_rstrip(file_lines, old_block)
+    if pos is None:
+        pos = _find_subsequence_relaxed_indent(file_lines, old_block)
     if pos is None:
         # Keep details small but actionable for Codex repair prompts.
         def clip(lines: List[str], limit: int = 80) -> List[str]:
@@ -763,6 +790,8 @@ def _codex_fix_patch(
         "- Output MUST start with: *** Begin Patch\n"
         "- Output MUST end with: *** End Patch\n"
         "- Use only: *** Update File: <absolute path>\n"
+        "- Do NOT emit unified-diff prefixes (no leading ' ' marker on unchanged lines).\n"
+        "- Do NOT use '@@' or '...' as an ellipsis to omit lines inside a hunk.\n"
         "- Do not use placeholder paths or template lines.\n"
         "- Keep the change minimal; preserve intent of the previous patch.\n\n"
         "Patch quality requirements:\n"
