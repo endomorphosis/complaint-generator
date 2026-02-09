@@ -7,6 +7,10 @@
 
 The Complaint Generator is an AI-powered legal automation system that assists users in preparing legal complaints by:
 
+- **Three-Phase Processing** - Intake with denoising, evidence gathering, formal complaint generation (NEW)
+- **Knowledge Graphs** - Extract entities and relationships from complaints (NEW)
+- **Dependency Graphs** - Track claim requirements and satisfaction (NEW)
+- **Neurosymbolic AI** - Combine symbolic and semantic reasoning for legal matching (NEW)
 - **Classifying legal issues** from complaint text
 - **Researching applicable laws** from multiple authoritative sources
 - **Managing evidence** with immutable IPFS storage and DuckDB metadata
@@ -17,6 +21,17 @@ The Complaint Generator is an AI-powered legal automation system that assists us
 The system integrates [ipfs_datasets_py](https://github.com/endomorphosis/ipfs_datasets_py) for LLM routing, IPFS storage, legal research tools, and web archiving capabilities.
 
 ## Features
+
+### 🔄 Three-Phase Complaint Processing (NEW)
+Sophisticated multi-phase workflow inspired by denoising diffusion:
+- **Phase 1: Intake & Denoising** - Build knowledge/dependency graphs, iteratively ask questions to fill gaps
+- **Phase 2: Evidence Gathering** - Enhance graphs with evidence, track satisfaction of requirements  
+- **Phase 3: Formalization** - Neurosymbolic matching against legal requirements, generate formal complaint
+- **Convergence Detection** - Automatically detect when complaint is complete
+- **Graph Persistence** - Save/load knowledge, dependency, and legal graphs as JSON
+- **33 Tests** - Comprehensive test coverage for all three phases
+
+See [docs/THREE_PHASE_SYSTEM.md](docs/THREE_PHASE_SYSTEM.md) and [examples/three_phase_example.py](examples/three_phase_example.py)
 
 ### 🤖 LLM Router Backend
 - Multi-provider LLM routing (OpenRouter, HuggingFace, Codex, Copilot, Gemini, Claude)
