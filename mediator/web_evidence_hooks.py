@@ -310,6 +310,17 @@ class WebEvidenceIntegrationHook:
     
     def __init__(self, mediator):
         self.mediator = mediator
+        # Create a search hook for convenience methods
+        self._search_hook = None
+    
+    def _get_search_hook(self):
+        """Lazy initialization of search hook."""
+        if self._search_hook is None:
+            if hasattr(self.mediator, 'web_evidence_search'):
+                self._search_hook = self.mediator.web_evidence_search
+            else:
+                self._search_hook = WebEvidenceSearchHook(self.mediator)
+        return self._search_hook
     
     def discover_and_store_evidence(self, keywords: List[str],
                                     domains: Optional[List[str]] = None,
@@ -486,3 +497,65 @@ Return only the keywords, one per line, focused on finding factual evidence."""
         except Exception:
             # Fallback to claim type
             return [claim_type, f"{claim_type} evidence", f"{claim_type} documentation"]
+    
+    # Convenience methods for legal research
+    
+    def search_legal_precedents(self, claim: str, max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        Search for legal precedents related to a claim.
+        
+        Args:
+            claim: Legal claim description
+            max_results: Maximum number of results
+            
+        Returns:
+            List of relevant legal precedents
+        """
+        query = f"{claim} legal precedent case law"
+        return self._get_search_hook().search_brave(query, max_results=max_results)
+    
+    def search_case_law(self, complaint_type: str, jurisdiction: Optional[str] = None,
+                       max_results: int = 10) -> List[Dict[str, Any]]:
+        """
+        Search for case law related to complaint type.
+        
+        Args:
+            complaint_type: Type of complaint
+            jurisdiction: Optional jurisdiction (e.g., "federal", "California")
+            max_results: Maximum number of results
+            
+        Returns:
+            List of relevant case law
+        """
+        query = f"{complaint_type} case law"
+        if jurisdiction:
+            query += f" {jurisdiction}"
+        return self._get_search_hook().search_brave(query, max_results=max_results)
+    
+    def search_legal_definitions(self, term: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search for legal definitions of a term.
+        
+        Args:
+            term: Legal term to define
+            max_results: Maximum number of results
+            
+        Returns:
+            List of definition sources
+        """
+        query = f'legal definition of "{term}"'
+        return self._get_search_hook().search_brave(query, max_results=max_results)
+    
+    def search_statute_text(self, statute_name: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search for the text of a statute or regulation.
+        
+        Args:
+            statute_name: Name of statute (e.g., "Fair Housing Act")
+            max_results: Maximum number of results
+            
+        Returns:
+            List of statute sources
+        """
+        query = f'"{statute_name}" full text statute'
+        return self._get_search_hook().search_brave(query, max_results=max_results)

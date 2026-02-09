@@ -19,3 +19,6 @@ from .web_evidence_hooks import (
     WebEvidenceSearchHook,
     WebEvidenceIntegrationHook
 )
+from .legal_corpus_hooks import (
+    LegalCorpusRAGHook
+)

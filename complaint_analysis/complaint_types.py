@@ -427,6 +427,142 @@ def register_environmental_law_complaint():
     ])
 
 
+def register_probate_complaint():
+    """Register keywords and patterns for probate and estate law complaints."""
+    register_keywords('complaint', [
+        # Probate process
+        'probate', 'probate court', 'probate proceeding',
+        'estate administration', 'estate proceeding',
+        'surrogate court', 'orphans court',
+        
+        # Parties
+        'decedent', 'deceased', 'testator', 'testatrix',
+        'estate', 'estate of', 'probate estate',
+        'executor', 'executrix', 'personal representative',
+        'administrator', 'administratrix',
+        'beneficiary', 'heir', 'legatee', 'devisee',
+        'guardian', 'conservator', 'ward',
+        'trustee', 'trust beneficiary', 'settlor', 'grantor',
+        
+        # Documents
+        'will', 'last will and testament', 'testament',
+        'codicil', 'holographic will', 'nuncupative will',
+        'living will', 'advance directive',
+        'trust', 'living trust', 'testamentary trust',
+        'revocable trust', 'irrevocable trust',
+        'trust agreement', 'trust instrument',
+        'letters testamentary', 'letters of administration',
+        
+        # Estate types
+        'testate', 'intestate', 'intestacy',
+        'partial intestacy',
+        
+        # Assets and property
+        'estate asset', 'probate asset', 'non-probate asset',
+        'real property', 'personal property',
+        'tangible property', 'intangible property',
+        'estate inventory', 'asset appraisal',
+        'estate account', 'estate accounting',
+        
+        # Inheritance and distribution
+        'inheritance', 'inherit', 'heir',
+        'intestate succession', 'statutory share',
+        'elective share', 'forced share',
+        'distribution', 'final distribution',
+        'per stirpes', 'per capita',
+        'right of survivorship', 'joint tenancy',
+        'payable on death', 'pod', 'transfer on death', 'tod',
+        
+        # Debts and taxes
+        'estate debt', 'estate claim', 'creditor claim',
+        'claim against estate', 'notice to creditors',
+        'estate tax', 'inheritance tax', 'death tax',
+        'estate expenses', 'administration expenses',
+        
+        # Guardianship and conservatorship
+        'guardianship', 'guardian of the person',
+        'guardian of the estate', 'guardian ad litem',
+        'conservatorship', 'conservator',
+        'incapacitated person', 'protected person',
+        'ward', 'minor', 'adult guardianship',
+        'guardianship proceeding',
+        
+        # Disputes and litigation
+        'will contest', 'challenge will', 'contested will',
+        'undue influence', 'lack of capacity',
+        'testamentary capacity', 'sound mind',
+        'fraud', 'forgery', 'duress', 'coercion',
+        'trust dispute', 'trust litigation',
+        'breach of fiduciary duty', 'fiduciary duty',
+        'removal of executor', 'removal of trustee',
+        'surcharge', 'accounting dispute',
+        'construction of will', 'interpretation of will',
+        
+        # Trust types and issues
+        'charitable trust', 'special needs trust',
+        'spendthrift trust', 'discretionary trust',
+        'marital trust', 'bypass trust', 'credit shelter trust',
+        'qualified terminable interest property', 'qtip trust',
+        'trust modification', 'trust termination',
+        'trust reformation', 'trust amendment',
+        
+        # Powers and authority
+        'power of attorney', 'durable power of attorney',
+        'springing power of attorney',
+        'healthcare power of attorney',
+        'attorney in fact', 'agent',
+        
+        # Estate planning
+        'estate plan', 'estate planning',
+        'succession plan', 'wealth transfer',
+        'gift', 'inter vivos gift', 'gift causa mortis',
+        
+        # Marital property
+        'community property', 'separate property',
+        'marital property', 'quasi-community property',
+        'surviving spouse', 'widow', 'widower',
+        
+        # Small estate procedures
+        'small estate affidavit', 'summary administration',
+        'affidavit of heirship', 'muniment of title',
+        
+        # Appeals and review
+        'probate appeal', 'estate litigation',
+        'accounting review', 'estate audit',
+    ], complaint_type='probate')
+    
+    register_legal_terms('probate', [
+        r'\b(probate( court| proceeding)?)\b',
+        r'\b(estate (administration|proceeding))\b',
+        r'\b(surrogate court|orphans court)\b',
+        r'\b(executor|executrix|personal representative)\b',
+        r'\b(administrator|administratrix)\b',
+        r'\b((last )?will and testament|testament)\b',
+        r'\b(codicil)\b',
+        r'\b(living trust|testamentary trust)\b',
+        r'\b(revocable trust|irrevocable trust)\b',
+        r'\b(letters testamentary)\b',
+        r'\b(letters of administration)\b',
+        r'\b(testate|intestate|intestacy)\b',
+        r'\b(beneficiary|heir|legatee|devisee)\b',
+        r'\b(guardianship|conservatorship)\b',
+        r'\b(guardian|conservator)\b',
+        r'\b(will contest)\b',
+        r'\b(undue influence)\b',
+        r'\b(testamentary capacity)\b',
+        r'\b(breach of fiduciary duty)\b',
+        r'\b(estate (tax|debt|claim))\b',
+        r'\b(inheritance tax)\b',
+        r'\b(per stirpes|per capita)\b',
+        r'\b(elective share|forced share)\b',
+        r'\b(power of attorney)\b',
+        r'\b(trust (dispute|litigation|modification|termination))\b',
+        r'\b(charitable trust|special needs trust)\b',
+        r'\b(small estate affidavit)\b',
+        r'\b(summary administration)\b',
+    ])
+
+
 def register_dei_complaint():
     """
     Register keywords and patterns for DEI (Diversity, Equity, and Inclusion) complaints.
@@ -736,4 +872,5 @@ register_criminal_defense_complaint()
 register_tax_law_complaint()
 register_intellectual_property_complaint()
 register_environmental_law_complaint()
+register_probate_complaint()  # Probate and estate law
 register_dei_complaint()  # DEI taxonomy (formerly hacc_integration)

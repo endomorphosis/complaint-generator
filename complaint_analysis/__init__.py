@@ -66,6 +66,29 @@ from .complaint_types import (
     get_registered_types
 )
 from .analyzer import ComplaintAnalyzer
+from .seed_generator import SeedGenerator, SeedComplaintTemplate
+from .decision_trees import (
+    DecisionTreeGenerator,
+    DecisionTree,
+    QuestionNode
+)
+from .prompt_templates import (
+    PromptTemplate,
+    PromptLibrary,
+    ReturnFormat
+)
+from .response_parsers import (
+    BaseResponseParser,
+    JSONResponseParser,
+    StructuredTextParser,
+    EntityParser,
+    RelationshipParser,
+    QuestionParser,
+    ClaimParser,
+    StateFileIngester,
+    ResponseParserFactory,
+    ParsedResponse
+)
 
 # Aliases for backward compatibility
 RiskScorer = ComplaintRiskScorer
@@ -88,6 +111,30 @@ __all__ = [
     'RiskScorer',  # Alias
     'HybridDocumentIndexer',
     'ComplaintAnalyzer',
+    
+    # Seed generation and decision trees
+    'SeedGenerator',
+    'SeedComplaintTemplate',
+    'DecisionTreeGenerator',
+    'DecisionTree',
+    'QuestionNode',
+    
+    # Prompt engineering
+    'PromptTemplate',
+    'PromptLibrary',
+    'ReturnFormat',
+    
+    # Response parsing
+    'BaseResponseParser',
+    'JSONResponseParser',
+    'StructuredTextParser',
+    'EntityParser',
+    'RelationshipParser',
+    'QuestionParser',
+    'ClaimParser',
+    'StateFileIngester',
+    'ResponseParserFactory',
+    'ParsedResponse',
     
     # Functions
     'get_keywords',
