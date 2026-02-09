@@ -5,7 +5,7 @@ Manages a single adversarial training session between complainant and mediator.
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Set
 from dataclasses import dataclass
 from datetime import datetime
 import time
@@ -107,6 +107,84 @@ class AdversarialSession:
         self.conversation_history = []
         self.start_time = None
         self.end_time = None
+
+    @staticmethod
+    def _extract_question_text(question: Any) -> str:
+        if isinstance(question, dict):
+            return str(question.get('question', ''))
+        return str(question)
+
+    @staticmethod
+    def _normalize_question(question_text: str) -> str:
+        return " ".join(question_text.lower().strip().split())
+
+    @staticmethod
+    def _is_timeline_question(question_text: str) -> bool:
+        text = question_text.lower()
+        timeline_terms = (
+            'when',
+            'date',
+            'timeline',
+            'chronolog',
+            'sequence',
+            'what happened first',
+            'before',
+            'after',
+        )
+        return any(term in text for term in timeline_terms)
+
+    @staticmethod
+    def _is_harm_or_remedy_question(question_text: str) -> bool:
+        text = question_text.lower()
+        harm_remedy_terms = (
+            'harm',
+            'impact',
+            'affected',
+            'damag',
+            'loss',
+            'distress',
+            'remedy',
+            'resolve',
+            'outcome',
+            'seeking',
+            'requesting',
+            'want',
+            'relief',
+            'fix',
+        )
+        return any(term in text for term in harm_remedy_terms)
+
+    def _select_next_question(
+        self,
+        questions: List[Any],
+        asked_question_keys: Set[str],
+        need_timeline: bool,
+        need_harm_remedy: bool,
+    ) -> Any:
+        if not questions:
+            return None
+
+        candidates = []
+        for q in questions:
+            text = self._extract_question_text(q)
+            key = self._normalize_question(text)
+            candidates.append((q, text, key, key in asked_question_keys))
+
+        if need_timeline:
+            for q, text, _, is_repeat in candidates:
+                if not is_repeat and self._is_timeline_question(text):
+                    return q
+
+        if need_harm_remedy:
+            for q, text, _, is_repeat in candidates:
+                if not is_repeat and self._is_harm_or_remedy_question(text):
+                    return q
+
+        for q, _, _, is_repeat in candidates:
+            if not is_repeat:
+                return q
+
+        return questions[0]
     
     def run(self, seed_complaint: Dict[str, Any]) -> SessionResult:
         """
@@ -132,6 +210,9 @@ class AdversarialSession:
             # Step 3: Iteratively ask and answer questions
             questions_asked = 0
             turns = 0
+            asked_question_keys: Set[str] = set()
+            has_timeline_question = False
+            has_harm_remedy_question = False
             
             while turns < self.max_turns:
                 # Get questions from mediator
@@ -142,17 +223,31 @@ class AdversarialSession:
                     logger.info(f"No more questions, session complete after {turns} turns")
                     break
                 
-                # Ask first question
-                question = questions[0]
-                logger.debug(f"Mediator asks: {question.get('question', question)}")
+                # Ask a non-repeated question when available and prioritize key coverage gaps.
+                question = self._select_next_question(
+                    questions=questions,
+                    asked_question_keys=asked_question_keys,
+                    need_timeline=not has_timeline_question,
+                    need_harm_remedy=not has_harm_remedy_question,
+                )
+                question_text = self._extract_question_text(question)
+                question_key = self._normalize_question(question_text)
+                if question_key in asked_question_keys:
+                    logger.debug("Mediator repeated question (no non-repeated alternative available)")
+                logger.debug(f"Mediator asks: {question_text}")
                 
                 # Get response from complainant
-                question_text = question.get('question') if isinstance(question, dict) else question
                 answer = self.complainant.respond_to_question(question_text)
                 logger.debug(f"Complainant answers: {answer[:100]}...")
                 
                 # Process answer with mediator
                 result = self.mediator.process_denoising_answer(question, answer)
+
+                asked_question_keys.add(question_key)
+                if self._is_timeline_question(question_text):
+                    has_timeline_question = True
+                if self._is_harm_or_remedy_question(question_text):
+                    has_harm_remedy_question = True
                 
                 questions_asked += 1
                 turns += 1
