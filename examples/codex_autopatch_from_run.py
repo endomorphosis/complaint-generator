@@ -131,9 +131,13 @@ def _pick_worst_sessions(session_docs: List[Dict[str, Any]], k: int) -> List[Dic
 def _build_prompt(
     *,
     run_dir: str,
+    cycle_summary_path: str,
     cycle_summary: Dict[str, Any],
+    sgd_report_path: str,
     sgd_report: Dict[str, Any],
     worst_sessions: List[Dict[str, Any]],
+    worst_session_json_paths: List[str],
+    context_mode: str = "rich",
 ) -> str:
     optimizer = cycle_summary.get("optimizer_report") or {}
     priority = optimizer.get("priority_improvements") or []
@@ -234,17 +238,109 @@ def _build_prompt(
     else:
         suspected_files.append(abs_session_path)
 
+    context_mode = (context_mode or "rich").strip().lower()
+    if context_mode not in {"rich", "lean"}:
+        context_mode = "rich"
+
     worst_briefs = [_session_brief(d) for d in worst_sessions]
 
     # We include a helpful snippet (question selection logic) but allow patches across
     # the key files that affect question selection and graph population.
-    try:
-        with open(session_snippet_path, "r", encoding="utf-8") as f:
-            lines = f.read().splitlines()
-        # Grab the question selection section if possible.
-        snippet = "\n".join(lines[90:170])
-    except Exception:
-        snippet = "(unable to load adversarial_harness/session.py snippet)"
+    # In lean mode, omit the snippet to avoid resending ~80 lines of code every step.
+    snippet = "(omitted in lean mode)"
+    if context_mode == "rich":
+        try:
+            with open(session_snippet_path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+            # Grab the question selection section if possible.
+            snippet = "\n".join(lines[90:170])
+        except Exception:
+            snippet = "(unable to load adversarial_harness/session.py snippet)"
+
+    # To reduce prompt tokens, lean mode points Codex at the persisted JSON artifacts
+    # and relies on tool calls (cat/grep) to pull only what it needs.
+    if context_mode == "lean":
+        return f"""You are Codex CLI.
+
+Tool-mode is ENABLED. You may take multiple turns by requesting a tool call, then using its result to decide on a better patch.
+
+On each turn, output exactly ONE of the following:
+
+1) A single JSON object requesting a tool:
+{{
+  "type": "tool",
+    "tool": "ls" | "cat" | "grep" | "patch",
+  "args": {{ ... }}
+}}
+
+2) A single JSON object returning the final patch:
+{{
+  "type": "final",
+  "patch": "*** Begin Patch\n...\n*** End Patch"
+}}
+
+3) (Backward compatible) Output a raw apply_patch patch starting with '*** Begin Patch' and ending with '*** End Patch'.
+
+Tool specs (paths must be within the repository root; keep outputs small):
+- ls:    args={{"path": "."}}  -> list directory entries
+- cat:   args={{"path": "path/to/file.py", "start_line": 1, "end_line": 200}} -> read a line range
+- grep:  args={{"pattern": "string or regex", "path": "path/or/dir", "max_matches": 50}} -> search text
+- patch: args={{"patch": "*** Begin Patch\\n...\\n*** End Patch"}} -> validate patch formatting + file targets (does NOT apply)
+
+Before returning a final patch (type=final or raw patch), you SHOULD call the patch tool on your candidate patch and fix any errors it reports.
+
+You must output a REAL patch in apply_patch format, not a template.
+
+Patch formatting rules (important):
+- Do NOT output unified-diff style prefixes (no leading ' ' marker on unchanged lines).
+- Do NOT use '...' or '@@' as an ellipsis to omit lines inside a hunk.
+- Each hunk must contain exact, contiguous lines copied from the current file content.
+- Use '@@' only to start a new hunk (or include a scope hint like '@@ class Foo'), never as a placeholder.
+
+Scope:
+- You MAY change any *.py file under the repository root: {os.path.abspath(PROJECT_ROOT)}
+- Use ONLY absolute paths in *** Update File lines.
+- Suggested starting points (not exclusive):
+    - {abs_session_path}
+    - {abs_kg_path}
+    - {abs_dg_path}
+    - {abs_denoiser_path}
+    - {abs_mediator_path}
+
+Context files (use tools to read only what you need):
+- cycle_summary.json: {os.path.abspath(cycle_summary_path)}
+- sgd_report.json:    {os.path.abspath(sgd_report_path)}
+- worst sessions (session.json):\n{json.dumps([os.path.abspath(p) for p in worst_session_json_paths], ensure_ascii=False, indent=2)}
+
+Primary focus (computed from diagnostics):
+{json.dumps(focus, ensure_ascii=False)}
+
+Suspected files to start with:
+{json.dumps(suspected_files, ensure_ascii=False, indent=2)}
+
+Goal:
+- Address the highest-impact items in Priority improvements and SGD recommendations.
+- If graphs are empty/tiny: improve knowledge graph and dependency graph population/reduction so downstream denoising has structure.
+- If question repetition is flagged: reduce repeated identical mediator questions in adversarial sessions (improve efficiency + info extraction).
+- Keep changes minimal and localized.
+- Do NOT add dependencies.
+- Ensure existing tests keep passing.
+
+Implementation constraints:
+- Only modify Python files.
+- Prefer changing adversarial harness behavior (e.g., question selection logic) rather than core mediator logic.
+
+Strong suggestion for step 1:
+- Use cat/grep to inspect the relevant portions of the suspected files and the context JSONs, then propose a patch.
+
+Output requirements:
+- Output MUST start with the exact line: *** Begin Patch
+- Use absolute file paths (within the repository root) in each *** Update File line.
+- Patch MUST include a non-trivial change (not placeholders like /abs/path/to/file.py or 'old'/'new').
+- Output MUST end with the exact line: *** End Patch
+- No markdown fences. No extra commentary.
+
+Now begin."""
 
     return f"""You are Codex CLI.
 
@@ -767,6 +863,27 @@ def _run_codex_with_tools_logged(
     tool_log: List[str] = []
     last_output = ""
 
+    def _compact_for_prompt(text: str, *, max_chars: int = 2200, max_lines: int = 80) -> str:
+        """Compact tool results/validation before re-injecting into the rolling prompt.
+
+        We still persist full results in the JSONL transcript, but keeping the
+        rolling prompt compact materially reduces prompt tokens on later turns.
+        """
+
+        if not isinstance(text, str):
+            text = str(text)
+        lines = text.splitlines()
+        if len(lines) > max_lines:
+            head = lines[: max_lines // 2]
+            tail = lines[-(max_lines - len(head)) :]
+            omitted = len(lines) - len(head) - len(tail)
+            lines = head + [f"...(omitted {omitted} lines)..."] + tail
+        out = "\n".join(lines)
+        if len(out) > max_chars:
+            keep = max(200, max_chars // 2)
+            out = out[:keep] + "\n...(omitted chars)...\n" + out[-keep:]
+        return out
+
     if chat_jsonl_path:
         _append_jsonl(
             chat_jsonl_path,
@@ -842,7 +959,7 @@ def _run_codex_with_tools_logged(
                 tool_log.append(
                     "SYSTEM: Candidate patch failed dry-run validation. Fix the patch, and consider calling the patch tool before finalizing."
                 )
-                tool_log.append("PATCH_VALIDATION:\n" + _tool_patch(patch=norm))
+                tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=norm)))
                 continue
 
         obj = _try_parse_json_object(last_output)
@@ -891,7 +1008,7 @@ def _run_codex_with_tools_logged(
                         tool_log.append(
                             "SYSTEM: Your JSON final patch failed dry-run validation. Fix it, and consider calling the patch tool before finalizing."
                         )
-                        tool_log.append("PATCH_VALIDATION:\n" + _tool_patch(patch=patch))
+                        tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=patch)))
                         continue
             tool_log.append(
                 "SYSTEM: Your previous JSON final did not include a valid apply_patch patch. Return ONLY a corrected final patch."
@@ -953,7 +1070,7 @@ def _run_codex_with_tools_logged(
             )
 
         tool_log.append(
-            f"TOOL_CALL(step={step+1}): {json.dumps(obj, ensure_ascii=False)}\nTOOL_RESULT:\n{result}".strip()
+            f"TOOL_CALL(step={step+1}): {json.dumps(obj, ensure_ascii=False)}\nTOOL_RESULT:\n{_compact_for_prompt(result)}".strip()
         )
 
     # Final forced attempt
@@ -1084,6 +1201,13 @@ def main() -> int:
     parser.add_argument("--backend-id", default="llm-router-codex")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--max-worst-sessions", type=int, default=3)
+    parser.add_argument(
+        "--context-mode",
+        choices=["rich", "lean"],
+        default="rich",
+        help="rich inlines JSON context into the prompt; lean points Codex at JSON artifacts and relies on tool calls to fetch context",
+    )
+    parser.add_argument("--max-steps", type=int, default=8)
     args = parser.parse_args()
 
     run_dir = args.run_dir
@@ -1102,16 +1226,37 @@ def main() -> int:
     session_jsons = _find_session_jsons(run_dir)
     session_docs = [_load_json(p) for p in session_jsons]
     worst = _pick_worst_sessions(session_docs, args.max_worst_sessions)
+    worst_session_paths = session_jsons[:]
+    try:
+        worst_ids = {d.get("session_id") for d in worst}
+        worst_session_paths = [p for p, d in zip(session_jsons, session_docs) if d.get("session_id") in worst_ids]
+    except Exception:
+        worst_session_paths = session_jsons[: args.max_worst_sessions]
 
     config = _load_config(args.config)
     backend_kwargs = _get_llm_router_backend_config(config, args.backend_id)
+    # Keep Codex CLI session/event logs inside the run artifacts (statefiles is git-ignored).
+    # This relies on ipfs_datasets_py.llm_router trace options.
+    try:
+        provider = str(backend_kwargs.get("provider") or "")
+    except Exception:
+        provider = ""
+    if provider.strip() == "codex_cli":
+        # Best-effort: codex exec stdout JSONL (thread_id, usage incl cached_input_tokens).
+        backend_kwargs.setdefault("trace", True)
+        backend_kwargs.setdefault("trace_dir", os.path.join(run_dir, "_patches"))
+
     backend = LLMRouterBackend(**backend_kwargs)
 
     prompt = _build_prompt(
         run_dir=run_dir,
+        cycle_summary_path=cycle_summary_path,
         cycle_summary=cycle_summary,
+        sgd_report_path=str(sgd_report_path),
         sgd_report=sgd_report,
         worst_sessions=worst,
+        worst_session_json_paths=worst_session_paths[: args.max_worst_sessions],
+        context_mode=str(args.context_mode),
     )
 
     out_dir = os.path.join(run_dir, "_patches")
@@ -1124,7 +1269,7 @@ def main() -> int:
     patch_text = _run_codex_with_tools_logged(
         backend=backend,
         base_prompt=prompt,
-        max_steps=8,
+        max_steps=int(args.max_steps),
         chat_jsonl_path=chat_jsonl_path,
     )
 

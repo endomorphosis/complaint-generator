@@ -223,6 +223,7 @@ def _generate_codex_patch_for_run(
     run_dir: str,
     config_path: str,
     backend_id: str,
+    context_mode: str = "rich",
 ) -> str:
     cmd = [
         python_exe,
@@ -233,6 +234,8 @@ def _generate_codex_patch_for_run(
         backend_id,
         "--run-dir",
         run_dir,
+        "--context-mode",
+        str(context_mode or "rich"),
     ]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if proc.returncode != 0:
@@ -823,6 +826,12 @@ def main() -> int:
     parser.add_argument("--state-dir", default="statefiles")
     parser.add_argument("--batch-backend-id", default=None, help="Backend id for running sessions (defaults to config.MEDIATOR.backends[0])")
     parser.add_argument("--codex-backend-id", default="llm-router-codex")
+    parser.add_argument(
+        "--codex-context-mode",
+        choices=["rich", "lean"],
+        default="rich",
+        help="Pass through to codex_autopatch_from_run.py to reduce prompt tokens (lean relies on tool reads)",
+    )
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--sessions-per-run", type=int, default=10)
     parser.add_argument("--max-turns", type=int, default=8)
@@ -960,6 +969,7 @@ def main() -> int:
                 run_dir=run_dir,
                 config_path=args.config,
                 backend_id=args.codex_backend_id,
+                context_mode=str(args.codex_context_mode),
             )
             patch_text = _normalize_patch_text(_read_text(patch_path))
 

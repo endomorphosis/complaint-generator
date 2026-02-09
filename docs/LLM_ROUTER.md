@@ -79,13 +79,100 @@ The router will try providers in this order:
 
 ## Supported Providers
 
+Note: In this repository's current `ipfs_datasets_py/llm_router.py` shim implementation, `codex_cli`, `copilot_cli`, and `claude_code` are implemented as CLI providers. `gemini_cli` is listed here as an intended target, but requires additional wrapper work (and the corresponding CLI binary installed) before it can be used.
+
 - `local_hf` / `huggingface` - Local HuggingFace transformers
 - `openrouter` - OpenRouter API
 - `codex_cli` - OpenAI Codex CLI
 - `copilot_cli` - GitHub Copilot CLI
+- `copilot_sdk` - GitHub Copilot Python SDK (controls Copilot CLI via JSON-RPC)
 - `gemini_cli` - Google Gemini CLI
 - `claude_code` - Claude Code CLI
 - Auto-detect (no provider specified)
+
+## Tracing and Session Artifacts
+
+The CLI-based providers (`copilot_cli`, `codex_cli`) support optional tracing so you can keep session artifacts (transcripts/logs) inside this repo (for example under `statefiles/_runs/...`, which is typically git-ignored).
+
+You can pass these keys through `config.llm_router.json` (they are forwarded as `**config` into `ipfs_datasets_py.llm_router.generate_text`).
+
+### Common tracing keys
+
+- `trace`: boolean. Enables tracing (you can also enable tracing by setting `trace_dir` or `trace_jsonl_path`).
+- `trace_dir`: directory path. When set, providers will write trace outputs into this directory.
+
+### Copilot CLI (`copilot_cli`)
+
+- Writes a markdown transcript via `copilot --share <path>` when tracing is enabled.
+- If `trace_dir` is set, the transcript is written into that directory.
+- If only `trace_jsonl_path` is set (and `trace_dir` is not), the transcript is written next to the JSONL path.
+- When tracing is enabled and `copilot_log_dir` is not set, the shim sets `--log-dir` to `trace_dir` by default.
+
+Optional keys:
+
+- `copilot_config_dir`: pass through to `copilot --config-dir`.
+- `copilot_log_dir`: pass through to `copilot --log-dir`.
+- `resume_session_id`: pass through to `copilot --resume <sessionId>`.
+- `continue_session`: boolean. If true and `resume_session_id` is not set, uses `copilot --continue`.
+- `trace_jsonl_path`: append a small JSONL metadata record per call (the full transcript is in the markdown share file).
+
+### Codex CLI (`codex_cli`)
+
+- When tracing is enabled, the shim adds `codex exec --json` and saves stdout JSONL into `trace_jsonl_path` or a generated file under `trace_dir`.
+
+### Claude Code CLI (`claude_code`)
+
+The shim supports Claude Code’s non-interactive mode via `claude --print`.
+
+Defaults:
+
+- Tools are disabled by default (`--tools ""`) to keep behavior LLM-like and avoid permission prompts.
+
+Optional keys:
+
+- `claude_output_format`: one of `text` (default), `json`, `stream-json`
+- `claude_input_format`: `text` (default) or `stream-json`
+- `claude_include_partial_messages`: boolean (only meaningful with `claude_output_format=stream-json`)
+- `claude_no_session_persistence`: boolean
+- `claude_permission_mode`: pass-through to `--permission-mode`
+- `claude_system_prompt`, `claude_append_system_prompt`
+- `claude_tools`: override tools setting (e.g. `default` or a comma-separated list)
+- `claude_add_dir`: string or list of strings passed as repeated `--add-dir`
+- `claude_allowed_tools`, `claude_disallowed_tools`
+- `claude_session_id`: set a specific session UUID
+- `resume_session_id`: resume a session id (shared key used by other providers)
+- `continue_session`: resume most recent session (shared key used by other providers)
+- `claude_fork_session`: boolean (use with `resume_session_id`)
+
+Tracing:
+
+- If `trace_dir` is set, the shim writes `claude_print_<timestamp>_<pid>.txt` containing stdout (and stderr, if any).
+- If `trace_jsonl_path` is set, the shim appends a small JSONL metadata record per call.
+
+### Copilot Python SDK (`copilot_sdk`)
+
+The shim also supports using the Copilot Python SDK, which programmatically controls the Copilot CLI via JSON-RPC.
+
+Notes:
+
+- The SDK is an optional dependency; it is only imported when `provider="copilot_sdk"`.
+- You still need the `copilot` CLI installed and authenticated.
+
+Common keys:
+
+- `trace_jsonl_path`: append a small JSONL metadata record per call (session id, workspace path, prompt/response sizes).
+
+SDK-specific keys (all optional):
+
+- `copilot_sdk_cli_path`: path to the `copilot` executable.
+- `copilot_sdk_cli_url`: connect to an existing running server.
+- `copilot_sdk_log_level`: SDK log level.
+- `copilot_sdk_use_stdio`, `copilot_sdk_port`, `copilot_sdk_auto_start`, `copilot_sdk_auto_restart`, `copilot_sdk_cwd`
+- `copilot_sdk_github_token`, `copilot_sdk_use_logged_in_user`
+- `copilot_sdk_session_id`: custom session id.
+- `copilot_sdk_streaming`: enable streaming events.
+- `copilot_sdk_infinite_sessions`: dict config for infinite session compaction.
+
 
 ## Environment Variables
 
