@@ -1,0 +1,458 @@
+# Adversarial Test Harness
+
+An LLM-based adversarial testing framework for optimizing complaint generation through multi-agent interaction and evaluation.
+
+## Overview
+
+The adversarial test harness implements a sophisticated system for testing and optimizing the mediator's complaint processing capabilities using three LLM-based agents:
+
+1. **Complainant Agent** - Simulates real complainants with various personalities
+2. **Mediator** (System Under Test) - Processes complaints and asks questions
+3. **Critic Agent** - Evaluates interaction quality across multiple dimensions
+
+The system uses stochastic gradient descent (SGD) cycles with parallel batch processing to iteratively improve performance based on critic feedback.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   Seed Complaint Library                     │
+│         (Templates + Pre-defined Complaint Scenarios)        │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Adversarial Harness                         │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │  Parallel Session Executor (LLM Router)            │     │
+│  │  - Runs multiple sessions concurrently             │     │
+│  │  - Handles failures and retries                    │     │
+│  │  - Aggregates results                              │     │
+│  └────────────────────────────────────────────────────┘     │
+└────────────────────────┬────────────────────────────────────┘
+                         │
+                         ▼
+         ┌───────────────────────────────────┐
+         │    Adversarial Session            │
+         │  ┌─────────────────────────────┐  │
+         │  │  1. Complainant (LLM)       │  │
+         │  │     - Generates complaint   │  │
+         │  │     - Answers questions     │  │
+         │  └─────────────────────────────┘  │
+         │            ↕                       │
+         │  ┌─────────────────────────────┐  │
+         │  │  2. Mediator (SUT)          │  │
+         │  │     - Processes complaint   │  │
+         │  │     - Asks questions        │  │
+         │  └─────────────────────────────┘  │
+         │            ↓                       │
+         │  ┌─────────────────────────────┐  │
+         │  │  3. Critic (LLM)            │  │
+         │  │     - Evaluates interaction │  │
+         │  │     - Scores quality        │  │
+         │  └─────────────────────────────┘  │
+         └───────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       Optimizer                              │
+│  - Analyzes critic scores across sessions                   │
+│  - Identifies patterns and trends                           │
+│  - Generates optimization recommendations                   │
+│  - Tracks improvement over time                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Core Components
+
+### 1. Adversarial Harness (`harness.py`)
+
+**Purpose:** Orchestrates parallel execution of multiple adversarial sessions.
+
+**Key Classes:**
+- `AdversarialHarness` - Main coordinator for batch testing
+
+**Features:**
+- Parallel session execution via LLM Router
+- Failure handling and automatic retries
+- Result aggregation and reporting
+- Configurable batch sizes and parallelism
+
+**Example:**
+```python
+from adversarial_harness import AdversarialHarness
+from backends import LLMRouterBackend
+
+backend = LLMRouterBackend(id='llm', provider='copilot_cli', model='gpt-5-mini')
+harness = AdversarialHarness(
+    backend=backend,
+    parallelism=4,
+    max_retries=3
+)
+
+results = harness.run_sessions(
+    complaint_types=['employment_discrimination', 'housing'],
+    num_sessions_per_type=10
+)
+
+print(f"Average Score: {results['average_score']}")
+print(f"Success Rate: {results['success_rate']}")
+```
+
+### 2. Complainant Agent (`complainant.py`)
+
+**Purpose:** LLM-based agent that simulates real complainants.
+
+**Key Classes:**
+- `ComplaintContext` - Context information for a complaint
+- `Complainant` - Main complainant agent
+- `ComplaintGenerator` - Generates complaint variations
+
+**Personality Types:**
+- `cooperative` - Provides clear, complete answers
+- `defensive` - Reluctant to share information
+- `vague` - Provides unclear or incomplete responses
+- `emotional` - Focuses on feelings over facts
+- `technical` - Provides detailed factual information
+
+**Example:**
+```python
+from adversarial_harness import Complainant, ComplaintContext
+
+complainant = Complainant(backend, personality="cooperative")
+
+context = ComplaintContext(
+    complaint_type="employment_discrimination",
+    key_facts={
+        'employer': 'Acme Corp',
+        'action': 'terminated',
+        'protected_class': 'age'
+    }
+)
+complainant.set_context(context)
+
+# Generate initial complaint
+complaint = complainant.generate_initial_complaint(seed_data)
+
+# Respond to questions
+response = complainant.respond_to_question("When did this occur?")
+```
+
+### 3. Critic Agent (`critic.py`)
+
+**Purpose:** Evaluates mediator-complainant interaction quality.
+
+**Key Classes:**
+- `CriticScore` - Structured score with breakdown by dimension
+- `Critic` - Evaluation agent
+
+**Evaluation Dimensions:**
+1. **Question Quality** (25% weight) - Relevance, clarity, legal appropriateness
+2. **Information Extraction** (25% weight) - Completeness, efficiency of information gathering
+3. **Empathy** (15% weight) - Tone, sensitivity, rapport building
+4. **Efficiency** (15% weight) - Question count, redundancy, focus
+5. **Coverage** (20% weight) - Breadth of legal issues addressed
+
+**Example:**
+```python
+from adversarial_harness import Critic
+
+critic = Critic(backend)
+
+score = critic.evaluate_session(
+    complaint=complaint_text,
+    questions=mediator_questions,
+    responses=complainant_responses,
+    mediator_analysis=analysis_result
+)
+
+print(f"Overall Score: {score.overall}")
+print(f"Question Quality: {score.question_quality}")
+print(f"Information Extraction: {score.information_extraction}")
+print(f"Strengths: {score.strengths}")
+print(f"Weaknesses: {score.weaknesses}")
+```
+
+### 4. Adversarial Session (`session.py`)
+
+**Purpose:** Manages a single adversarial session (one complaint through full interaction).
+
+**Key Classes:**
+- `SessionResult` - Results from a single session
+- `AdversarialSession` - Session coordinator
+
+**Features:**
+- Multi-round interaction management
+- Conversation history tracking
+- Automatic session termination on convergence
+- Detailed logging and debugging
+
+**Example:**
+```python
+from adversarial_harness import AdversarialSession
+
+session = AdversarialSession(
+    mediator=mediator,
+    complainant=complainant,
+    critic=critic,
+    max_rounds=10
+)
+
+result = session.run(seed_complaint)
+
+print(f"Rounds: {result.num_rounds}")
+print(f"Converged: {result.converged}")
+print(f"Score: {result.critic_score.overall}")
+```
+
+### 5. Optimizer (`optimizer.py`)
+
+**Purpose:** Analyzes results and generates optimization recommendations.
+
+**Key Classes:**
+- `OptimizationReport` - Structured optimization recommendations
+- `Optimizer` - Analysis and recommendation engine
+
+**Analysis Types:**
+- Pattern identification across sessions
+- Trend analysis over time
+- Comparative analysis by complaint type
+- Performance regression detection
+
+**Example:**
+```python
+from adversarial_harness import Optimizer
+
+optimizer = Optimizer()
+
+# Analyze single batch
+report = optimizer.analyze_batch(session_results)
+print(f"Top Recommendations: {report.recommendations[:3]}")
+print(f"Trend: {report.trend}")
+
+# Analyze multiple batches over time
+trend_report = optimizer.analyze_trends(historical_results)
+print(f"Improvement Rate: {trend_report.improvement_rate}")
+```
+
+### 6. Seed Complaint Library (`seed_complaints.py`)
+
+**Purpose:** Pre-built complaint templates for bootstrapping tests.
+
+**Key Classes:**
+- `SeedComplaintLibrary` - Template repository
+- `ComplaintTemplate` - Individual template structure
+
+**Built-in Templates:**
+- Employment discrimination
+- Housing discrimination
+- Wrongful termination
+- Consumer fraud
+- Healthcare malpractice
+- And more...
+
+**Example:**
+```python
+from adversarial_harness import SeedComplaintLibrary
+
+library = SeedComplaintLibrary()
+
+# Get template
+template = library.get_template('employment_discrimination')
+print(f"Required Fields: {template.required_fields}")
+print(f"Optional Fields: {template.optional_fields}")
+
+# Generate complaint from template
+complaint = library.generate_from_template(
+    'employment_discrimination',
+    employer='Acme Corp',
+    action='termination',
+    protected_class='age'
+)
+```
+
+### 7. Search Integration (`search_hooks.py`)
+
+**Purpose:** Enrich adversarial testing with legal research and web evidence.
+
+**Key Classes:**
+- `SearchEnrichedSeedGenerator` - Generate seeds enriched with search results
+- `DecisionTreeEnhancer` - Enhance decision trees with legal knowledge
+- `MediatorSearchIntegration` - Add search to mediation during testing
+
+**Example:**
+```python
+from adversarial_harness import SearchEnrichedSeedGenerator
+
+generator = SearchEnrichedSeedGenerator(
+    legal_corpus_hook=legal_corpus_hook,
+    web_search_hook=web_search_hook
+)
+
+enriched_seed = generator.generate_enriched_seed(
+    complaint_type='employment_discrimination',
+    include_legal_corpus=True,
+    include_web_evidence=True
+)
+
+print(f"Legal Patterns: {enriched_seed['legal_patterns']}")
+print(f"Web Evidence: {enriched_seed['web_evidence']}")
+```
+
+## Usage Patterns
+
+### Basic Adversarial Session
+
+```python
+from adversarial_harness import (
+    AdversarialSession,
+    Complainant,
+    Critic,
+    SeedComplaintLibrary
+)
+from mediator import Mediator
+from backends import LLMRouterBackend
+
+# Setup
+backend = LLMRouterBackend(id='llm', provider='copilot_cli', model='gpt-5-mini')
+mediator = Mediator(backends=[backend])
+complainant = Complainant(backend, personality='cooperative')
+critic = Critic(backend)
+
+# Get seed complaint
+library = SeedComplaintLibrary()
+seed = library.get_template('employment_discrimination').generate()
+
+# Run session
+session = AdversarialSession(mediator, complainant, critic, max_rounds=10)
+result = session.run(seed)
+
+print(f"Score: {result.critic_score.overall}")
+print(f"Recommendations: {result.critic_score.recommendations}")
+```
+
+### Batch Testing with Harness
+
+```python
+from adversarial_harness import AdversarialHarness
+
+harness = AdversarialHarness(
+    backend=backend,
+    parallelism=4,
+    max_retries=3
+)
+
+results = harness.run_sessions(
+    complaint_types=['employment_discrimination', 'housing', 'consumer'],
+    num_sessions_per_type=20,
+    personalities=['cooperative', 'defensive', 'vague']
+)
+
+print(f"Total Sessions: {results['total_sessions']}")
+print(f"Success Rate: {results['success_rate']}")
+print(f"Average Score: {results['average_score']}")
+print(f"Best Performing Type: {results['best_type']}")
+```
+
+### SGD Cycle Optimization
+
+```python
+from adversarial_harness import Optimizer
+
+optimizer = Optimizer()
+
+# Run multiple optimization cycles
+for cycle in range(10):
+    # Run batch
+    results = harness.run_sessions(
+        complaint_types=['employment_discrimination'],
+        num_sessions_per_type=10
+    )
+    
+    # Analyze and optimize
+    report = optimizer.analyze_batch(results['sessions'])
+    
+    # Apply recommendations
+    if report.recommendations:
+        apply_recommendations(mediator, report.recommendations)
+    
+    # Check convergence
+    if report.converged:
+        print(f"Converged after {cycle + 1} cycles")
+        break
+    
+    print(f"Cycle {cycle + 1}: Score={report.average_score}, Trend={report.trend}")
+```
+
+## Testing
+
+Comprehensive test coverage in `tests/test_adversarial_harness.py`:
+
+- `TestComplainant` - Complainant agent functionality (6 tests)
+- `TestCritic` - Critic evaluation logic (4 tests)
+- `TestSeedComplaintLibrary` - Template management (3 tests)
+- `TestAdversarialSession` - Session orchestration (2 tests)
+- `TestAdversarialHarness` - Batch execution (2 tests)
+- `TestOptimizer` - Optimization logic (1 test)
+
+Run tests:
+```bash
+pytest tests/test_adversarial_harness.py -v
+```
+
+## Examples
+
+See the `examples/` directory for complete demonstrations:
+
+- `adversarial_harness_example.py` - Basic harness usage
+- `adversarial_harness_standalone.py` - Standalone session
+- `adversarial_optimization_demo.py` - SGD cycle optimization
+- `batch_sgd_cycle.py` - Batch SGD testing with persistence
+- `session_sgd_report.py` - Report generation from sessions
+- `parallelism_backoff_sweep.py` - Parameter sweeping
+- `sweep_ranker.py` - Ranking parameter combinations
+
+## Integration with Other Modules
+
+### Complaint Analysis Integration
+- Uses seed generators for complaint templates
+- Leverages decision trees for guided testing
+- Integrates legal patterns for enrichment
+
+### Search Integration
+- Enriches seeds with legal corpus knowledge
+- Adds web evidence to test scenarios
+- Enhances decision trees with legal research
+
+### Mediator Integration
+- Tests all mediator hooks and workflows
+- Validates three-phase processing
+- Evaluates evidence management capabilities
+
+## Configuration
+
+Key configuration parameters:
+
+- `parallelism` - Number of concurrent sessions (default: 4)
+- `max_retries` - Retry count for failed sessions (default: 3)
+- `max_rounds` - Maximum interaction rounds per session (default: 10)
+- `personality` - Complainant behavior type (default: 'cooperative')
+- `convergence_threshold` - Score threshold for early termination (default: 0.8)
+
+## Best Practices
+
+1. **Start Small** - Begin with single sessions before batch testing
+2. **Use Appropriate Personalities** - Match personalities to test goals
+3. **Monitor Convergence** - Track improvement over SGD cycles
+4. **Analyze Failures** - Review failed sessions for systemic issues
+5. **Iterate on Feedback** - Apply critic recommendations incrementally
+6. **Test Edge Cases** - Include difficult scenarios (vague, defensive)
+7. **Track Metrics** - Log scores and trends for regression detection
+
+## See Also
+
+- [docs/ADVERSARIAL_HARNESS.md](../docs/ADVERSARIAL_HARNESS.md) - Detailed system documentation
+- [examples/adversarial_harness_example.py](../examples/adversarial_harness_example.py) - Usage examples
+- [tests/test_adversarial_harness.py](../tests/test_adversarial_harness.py) - Test suite
+- [docs/THREE_PHASE_SYSTEM.md](../docs/THREE_PHASE_SYSTEM.md) - Three-phase workflow integration
+- [docs/SEARCH_HOOKS.md](../docs/SEARCH_HOOKS.md) - Search integration

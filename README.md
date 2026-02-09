@@ -49,6 +49,31 @@ Comprehensive DEI (Diversity, Equity, Inclusion) policy analysis integrated from
 
 See [docs/HACC_INTEGRATION.md](docs/HACC_INTEGRATION.md) and [examples/hacc_dei_analysis_example.py](examples/hacc_dei_analysis_example.py)
 
+### 📋 Complaint Analysis System (NEW)
+Extensible framework for analyzing 14+ legal complaint types:
+- **14 Complaint Types** - DEI, housing, employment, civil rights, consumer, healthcare, free speech, immigration, family law, criminal defense, tax, IP, environmental, probate
+- **390+ Keywords** - Comprehensive legal terminology per domain
+- **90+ Legal Patterns** - Regex-based extraction of provisions and citations
+- **Decision Trees** - Automated classification with 76+ questions across all types
+- **Seed Generation** - Template-based complaint generation for testing
+- **Risk Scoring** - 0-3 algorithm for assessment
+- **Prompt Templates** - LLM-ready structured prompts for analysis
+- **Response Parsers** - Parse LLM output into structured data (entities, relationships, claims, questions)
+
+See [complaint_analysis/README.md](complaint_analysis/README.md) and [docs/COMPLAINT_ANALYSIS_INTEGRATION.md](docs/COMPLAINT_ANALYSIS_INTEGRATION.md)
+
+### 🎯 Adversarial Testing & Optimization (NEW)
+LLM-based adversarial framework for testing and optimizing complaint generation:
+- **Complainant Agent** - Simulates real complainants with different personalities
+- **Critic Agent** - Evaluates quality across 5 dimensions (question quality, information extraction, empathy, efficiency, coverage)
+- **Optimizer** - SGD cycle optimization with convergence detection
+- **Session Management** - Multi-round adversarial testing with parallelism
+- **Seed Library** - Pre-built complaint templates for bootstrapping
+- **Search Integration** - Enriched seeds with legal corpus and web research
+- **18 Tests** - Comprehensive test coverage
+
+See [docs/ADVERSARIAL_HARNESS.md](docs/ADVERSARIAL_HARNESS.md) and [examples/adversarial_harness_example.py](examples/adversarial_harness_example.py)
+
 ### ⚖️ Legal Analysis Pipeline
 Four-stage automated legal analysis:
 1. **Classification** - Extract claim types, jurisdiction, and legal areas
@@ -367,17 +392,41 @@ pytest -m "not integration"
 ### Test Structure
 
 ```
-tests/
-├── test_log.py                     # Logging module (6 tests)
-├── test_mediator.py                # Mediator core (4 tests)
-├── test_state.py                   # State management (2 tests)
-├── test_integration.py             # End-to-end workflows (2 tests)
-├── test_llm_router_backend.py      # LLM routing (7 tests)
-├── test_legal_hooks.py             # Legal analysis (12 tests)
-├── test_evidence_hooks.py          # Evidence management (12 tests)
-├── test_legal_authority_hooks.py   # Legal research (11 tests)
-└── test_web_evidence_hooks.py      # Web discovery (12 tests)
+tests/ (22 files, 60+ test classes)
+├── Complaint Processing Tests
+│   ├── test_complaint_phases.py           # Three-phase system (7 classes, 27 tests)
+│   ├── test_mediator_three_phase.py       # Three-phase integration (1 class, 6 tests)
+│   └── test_enhanced_denoising.py         # Advanced denoising (4 classes)
+├── Complaint Analysis Tests
+│   ├── test_complaint_analysis.py         # Core analysis (5 classes)
+│   ├── test_complaint_analysis_integration.py # Integration features (5 classes)
+│   ├── test_complaint_taxonomies.py       # All 14 complaint types (10 classes)
+│   ├── test_dei_analysis.py               # DEI analysis (5 classes, 19 tests)
+│   └── test_hacc_integration.py           # DEI/HACC features (5 classes)
+├── Adversarial Testing Tests
+│   ├── test_adversarial_harness.py        # Adversarial framework (6 classes, 18 tests)
+│   ├── test_sgd_cycle_integration.py      # SGD cycle integration
+│   └── test_sweep_ranker.py               # Sweep ranking tests
+├── Mediator & Hooks Tests
+│   ├── test_mediator.py                   # Core orchestration (2 classes, 4 tests)
+│   ├── test_legal_hooks.py                # Legal analysis pipeline (5 classes, 12 tests)
+│   ├── test_legal_authority_hooks.py      # Legal research (4 classes, 11 tests)
+│   ├── test_web_evidence_hooks.py         # Web evidence (3 classes, 12 tests)
+│   ├── test_evidence_hooks.py             # Evidence management (4 classes, 12 tests)
+│   └── test_search_hooks.py               # Search integration (5 classes)
+├── Core Tests
+│   ├── test_state.py                      # State management (1 class, 2 tests)
+│   ├── test_llm_router_backend.py         # LLM routing (1 class, 7 tests)
+│   ├── test_integration.py                # End-to-end (1 class, 2 tests)
+│   └── test_log.py                        # Logging (6 tests)
+└── __init__.py                            # Test package initialization
 ```
+
+**Total Coverage:**
+- 22 test files
+- 60+ test classes
+- 150+ individual tests
+- All major features covered
 
 See [TESTING.md](TESTING.md) and [tests/README.md](tests/README.md) for detailed testing documentation.
 
@@ -440,6 +489,13 @@ CREATE TABLE legal_authorities (
 ### Core Documentation
 - [TESTING.md](TESTING.md) - Testing guide and TDD workflow
 - [tests/README.md](tests/README.md) - Detailed test documentation
+- [complaint_analysis/README.md](complaint_analysis/README.md) - Complaint analysis module
+
+### System Documentation
+- [docs/THREE_PHASE_SYSTEM.md](docs/THREE_PHASE_SYSTEM.md) - Three-phase complaint processing
+- [docs/ADVERSARIAL_HARNESS.md](docs/ADVERSARIAL_HARNESS.md) - Adversarial testing framework
+- [docs/COMPLAINT_ANALYSIS_INTEGRATION.md](docs/COMPLAINT_ANALYSIS_INTEGRATION.md) - Complaint analysis integration
+- [docs/SEARCH_HOOKS.md](docs/SEARCH_HOOKS.md) - Search and RAG integration
 
 ### Feature Documentation
 - [docs/LLM_ROUTER.md](docs/LLM_ROUTER.md) - LLM routing configuration
@@ -447,12 +503,39 @@ CREATE TABLE legal_authorities (
 - [docs/EVIDENCE_MANAGEMENT.md](docs/EVIDENCE_MANAGEMENT.md) - Evidence handling
 - [docs/LEGAL_AUTHORITY_RESEARCH.md](docs/LEGAL_AUTHORITY_RESEARCH.md) - Legal research
 - [docs/WEB_EVIDENCE_DISCOVERY.md](docs/WEB_EVIDENCE_DISCOVERY.md) - Web evidence discovery
+- [docs/HACC_INTEGRATION.md](docs/HACC_INTEGRATION.md) - DEI policy analysis
+- [docs/IPFS_DATASETS_INTEGRATION.md](docs/IPFS_DATASETS_INTEGRATION.md) - IPFS integration guide
 
-### Example Scripts
-- [examples/legal_analysis_demo.py](examples/legal_analysis_demo.py)
-- [examples/evidence_management_demo.py](examples/evidence_management_demo.py)
-- [examples/legal_authority_research_demo.py](examples/legal_authority_research_demo.py)
-- [examples/web_evidence_discovery_demo.py](examples/web_evidence_discovery_demo.py)
+### Example Scripts (21 Total)
+
+#### Core System Examples
+- [examples/three_phase_example.py](examples/three_phase_example.py) - Complete three-phase workflow
+- [examples/legal_analysis_demo.py](examples/legal_analysis_demo.py) - Legal analysis pipeline
+- [examples/evidence_management_demo.py](examples/evidence_management_demo.py) - Evidence storage & analysis
+- [examples/legal_authority_research_demo.py](examples/legal_authority_research_demo.py) - Legal research
+- [examples/web_evidence_discovery_demo.py](examples/web_evidence_discovery_demo.py) - Web evidence discovery
+- [examples/search_hooks_demo.py](examples/search_hooks_demo.py) - Search & RAG integration
+
+#### Complaint Analysis Examples
+- [examples/complaint_analysis_integration_demo.py](examples/complaint_analysis_integration_demo.py) - End-to-end analysis
+- [examples/complaint_analysis_taxonomies_demo.py](examples/complaint_analysis_taxonomies_demo.py) - All 14 complaint types
+- [examples/dei_taxonomy_example.py](examples/dei_taxonomy_example.py) - DEI analysis
+- [examples/hacc_integration_example.py](examples/hacc_integration_example.py) - Full DEI pipeline
+- [examples/hacc_dei_analysis_example.py](examples/hacc_dei_analysis_example.py) - DEI with synthetic policies
+
+#### Adversarial Testing Examples
+- [examples/adversarial_harness_example.py](examples/adversarial_harness_example.py) - Basic harness usage
+- [examples/adversarial_harness_standalone.py](examples/adversarial_harness_standalone.py) - Standalone session
+- [examples/adversarial_optimization_demo.py](examples/adversarial_optimization_demo.py) - SGD optimization
+- [examples/batch_sgd_cycle.py](examples/batch_sgd_cycle.py) - Batch SGD testing
+- [examples/session_sgd_report.py](examples/session_sgd_report.py) - Report generation
+- [examples/parallelism_backoff_sweep.py](examples/parallelism_backoff_sweep.py) - Parameter sweeping
+- [examples/sweep_ranker.py](examples/sweep_ranker.py) - Ranking sweeps
+
+#### Advanced Examples
+- [examples/codex_autopatch_from_run.py](examples/codex_autopatch_from_run.py) - Code autopatch
+- [examples/codex_multi_run_autopatch.py](examples/codex_multi_run_autopatch.py) - Multi-run autopatch
+- [examples/codex_multi_run_autopatch_loop.py](examples/codex_multi_run_autopatch_loop.py) - Autopatch loop
 
 ## Development
 
@@ -460,22 +543,55 @@ CREATE TABLE legal_authorities (
 
 ```
 complaint-generator/
-├── applications/          # Frontend applications
+├── adversarial_harness/  # Adversarial testing framework
+│   ├── harness.py        # Core adversarial harness
+│   ├── complainant.py    # LLM-based complainant agent
+│   ├── critic.py         # Quality evaluation agent
+│   ├── optimizer.py      # SGD cycle optimization
+│   ├── session.py        # Multi-round session management
+│   ├── seed_complaints.py # Seed complaint templates
+│   └── search_hooks.py   # Search integration for seeds
+├── complaint_analysis/   # Complaint analysis framework (14 types)
+│   ├── complaint_types.py # Type registration
+│   ├── legal_patterns.py  # Regex-based pattern extraction
+│   ├── keywords.py        # Keyword registries (390+ keywords)
+│   ├── risk_scoring.py    # Risk assessment
+│   ├── decision_trees.py  # Classification decision trees
+│   ├── seed_generator.py  # Seed complaint generation
+│   ├── prompt_templates.py # LLM prompt templates
+│   ├── response_parsers.py # Parse LLM responses
+│   ├── indexer.py         # Hybrid document indexing
+│   ├── analyzer.py        # Unified analysis interface
+│   ├── dei_risk_scoring.py # DEI-specific risk scoring
+│   ├── dei_provision_extractor.py # DEI provision extraction
+│   ├── dei_report_generator.py # DEI report generation
+│   └── decision_trees/    # JSON decision tree configs (14 files)
+├── complaint_phases/     # Three-phase complaint processing
+│   ├── phase_manager.py  # Phase orchestration
+│   ├── knowledge_graph.py # Entity & relationship extraction
+│   ├── dependency_graph.py # Claim requirement tracking
+│   ├── legal_graph.py     # Legal requirement matching
+│   ├── denoiser.py        # Iterative gap reduction
+│   └── neurosymbolic_matcher.py # Symbolic + semantic matching
+├── applications/         # Frontend applications
 ├── backends/             # Backend adapters (OpenAI, LLM Router, etc.)
-├── docs/                 # Documentation
-├── examples/             # Example scripts
+├── docs/                 # Documentation (24 markdown files)
+├── examples/             # Example scripts (21 demos)
 ├── ipfs_datasets_py/     # Submodule: IPFS, LLM routing, legal scrapers
-├── lib/                  # Core utilities
-├── mediator/             # Core business logic
+├── lib/                  # Core utilities (logging)
+├── mediator/             # Core orchestration & research
 │   ├── mediator.py       # Main mediator class
-│   ├── state.py          # State management
-│   ├── legal_hooks.py    # Legal analysis hooks
-│   ├── evidence_hooks.py # Evidence management hooks
-│   ├── legal_authority_hooks.py    # Legal research hooks
-│   └── web_evidence_hooks.py       # Web discovery hooks
+│   ├── state.py          # State management (DuckDB)
+│   ├── complaint.py      # Complaint data structure
+│   ├── legal_hooks.py    # Legal analysis hooks (4-stage pipeline)
+│   ├── evidence_hooks.py # Evidence management (IPFS + DuckDB)
+│   ├── legal_authority_hooks.py # Legal research (multi-source)
+│   ├── legal_corpus_hooks.py # Legal corpus RAG
+│   └── web_evidence_hooks.py # Web discovery hooks
+├── scripts/              # Utility scripts
 ├── statefiles/           # Persistent state storage
 ├── templates/            # Application templates
-├── tests/                # Test suite
+├── tests/                # Test suite (19 files, 60+ test classes)
 ├── config.llm_router.json # Canonical configuration
 ├── pytest.ini            # Pytest configuration
 ├── requirements.txt      # Python dependencies
