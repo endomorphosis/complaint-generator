@@ -1303,6 +1303,32 @@ def main() -> int:
     )
     parser.add_argument("--max-steps", type=int, default=8)
 
+    # Backend retry/backoff (passed through to LLMRouterBackend)
+    parser.add_argument(
+        "--retry-max-attempts",
+        type=int,
+        default=1,
+        help="Retry attempts for transient LLM/router failures (default: 1).",
+    )
+    parser.add_argument(
+        "--retry-backoff-base-s",
+        type=float,
+        default=0.5,
+        help="Base backoff seconds for retries (default: 0.5).",
+    )
+    parser.add_argument(
+        "--retry-backoff-max-s",
+        type=float,
+        default=20.0,
+        help="Max backoff seconds for retries (default: 20.0).",
+    )
+    parser.add_argument(
+        "--retry-jitter-s",
+        type=float,
+        default=0.1,
+        help="Random jitter seconds added to backoff (default: 0.1).",
+    )
+
     parser.set_defaults(apply_patch=True)
     parser.add_argument(
         "--apply",
@@ -1410,6 +1436,15 @@ def main() -> int:
         backend_kwargs.setdefault("trace", True)
         backend_kwargs.setdefault("trace_dir", os.path.join(run_dir, "_patches"))
 
+    # Pass through retry/backoff tuning.
+    backend_kwargs = {
+        **backend_kwargs,
+        "retry_max_attempts": int(args.retry_max_attempts),
+        "retry_backoff_base_s": float(args.retry_backoff_base_s),
+        "retry_backoff_max_s": float(args.retry_backoff_max_s),
+        "retry_jitter_s": float(args.retry_jitter_s),
+    }
+
     backend = LLMRouterBackend(**backend_kwargs)
 
     prompt = _build_prompt(
@@ -1430,12 +1465,42 @@ def main() -> int:
         f"codex_chat_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.jsonl",
     )
 
-    patch_text = _run_codex_with_tools_logged(
-        backend=backend,
-        base_prompt=prompt,
-        max_steps=int(args.max_steps),
-        chat_jsonl_path=chat_jsonl_path,
-    )
+    try:
+        patch_text = _run_codex_with_tools_logged(
+            backend=backend,
+            base_prompt=prompt,
+            max_steps=int(args.max_steps),
+            chat_jsonl_path=chat_jsonl_path,
+        )
+    except Exception as e:
+        msg = str(e or "")
+        low = msg.lower()
+        if "usage_limit_reached" in low or ("http 429" in low) or ("too many requests" in low):
+            # Best-effort parse for Codex usage-limit reset window.
+            reset_s = None
+            m = re.search(r"resets_in_seconds\"\s*:\s*(\d+)", msg)
+            if not m:
+                m = re.search(r"resets_in_seconds\s*[:=]\s*(\d+)", msg)
+            if m:
+                try:
+                    reset_s = int(m.group(1))
+                except Exception:
+                    reset_s = None
+
+            hint = "Codex CLI rate/usage limit reached."
+            if isinstance(reset_s, int) and reset_s > 0:
+                mins = max(1, int(round(reset_s / 60.0)))
+                hint += f" Try again in ~{mins} min (resets_in_seconds={reset_s})."
+            hint += (
+                " You can also reduce parallelism / calls, or rerun later. "
+                "Transcript (including tool loop prompts) is saved at: "
+                + os.path.abspath(chat_jsonl_path)
+            )
+            print(hint, file=sys.stderr)
+            return 2
+
+        # Default: keep the original error for debugging.
+        raise
 
     out_path = os.path.join(
         out_dir,
