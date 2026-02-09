@@ -11,6 +11,7 @@ Components:
 - AdversarialSession: Single rollout/episode
 - AdversarialHarness: Orchestrator for multiple sessions
 - Optimizer: Analyzes critic feedback to improve mediator
+- Search Hooks: Integration with Brave search and legal corpus RAG
 """
 
 from .complainant import Complainant, ComplaintGenerator, ComplaintContext
@@ -19,6 +20,11 @@ from .session import AdversarialSession, SessionResult
 from .harness import AdversarialHarness
 from .optimizer import Optimizer, OptimizationReport
 from .seed_complaints import SeedComplaintLibrary, ComplaintTemplate
+from .search_hooks import (
+    SearchEnrichedSeedGenerator,
+    DecisionTreeEnhancer,
+    MediatorSearchIntegration
+)
 
 __all__ = [
     'Complainant',
@@ -33,4 +39,7 @@ __all__ = [
     'OptimizationReport',
     'SeedComplaintLibrary',
     'ComplaintTemplate',
+    'SearchEnrichedSeedGenerator',
+    'DecisionTreeEnhancer',
+    'MediatorSearchIntegration',
 ]
