@@ -1,4 +1,6 @@
 import argparse
+import ast
+import base64
 import importlib.util
 import json
 import os
@@ -6,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -207,6 +210,18 @@ class PatchApplyError(Exception):
         return msg
 
 
+def _validate_python_syntax(file_path: str, file_lines: List[str]) -> None:
+    if not file_path.endswith(".py"):
+        return
+    src = "\n".join(file_lines) + "\n"
+    try:
+        compile(src, file_path, "exec")
+    except SyntaxError as e:
+        detail = (e.msg or "SyntaxError").strip()
+        loc = f"line {e.lineno}" if e.lineno else "unknown line"
+        raise PatchApplyError(f"Python syntax error after patch: {detail} ({loc})", file_path=file_path) from e
+
+
 def _normalize_patch_text(text: str) -> str:
     """Normalize common Codex near-miss formats into apply_patch text."""
     text = (text or "").strip()
@@ -355,8 +370,8 @@ def _parse_apply_patch(text: str) -> List[Tuple[str, List[List[str]]]]:
         i += 1
 
     flush_file()
-    if not file_blocks:
-        raise PatchApplyError("No file blocks found")
+    # Allow a no-op patch (Begin/End Patch with no file blocks). This can happen
+    # when Codex determines the requested change is already present.
     return file_blocks
 
 
@@ -413,6 +428,10 @@ def _dry_run_apply_patch_text(patch_text: str) -> None:
     patch_text = _normalize_patch_text(patch_text)
     file_blocks = _parse_apply_patch(patch_text)
 
+    # No-op patches are valid.
+    if not file_blocks:
+        return
+
     for file_path, hunks in file_blocks:
         if not os.path.isabs(file_path):
             raise PatchApplyError("Patch paths must be absolute", file_path=file_path)
@@ -427,6 +446,52 @@ def _dry_run_apply_patch_text(patch_text: str) -> None:
                 file_lines = _apply_hunk_to_lines(file_lines, hunk_lines)
             except PatchApplyError as e:
                 raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index) from e
+
+        _validate_python_syntax(file_path, file_lines)
+
+
+def _apply_patch_transaction(patch_text: str) -> Tuple[List[str], Dict[str, str]]:
+    """Apply patch in-memory across all files first, then write.
+
+    Returns (updated_files, original_contents_by_file) on success.
+    """
+    patch_text = _normalize_patch_text(patch_text)
+    file_blocks = _parse_apply_patch(patch_text)
+    if not file_blocks:
+        return ([], {})
+
+    # Load all file contents upfront so we can write atomically per patch.
+    original_text_by_file: Dict[str, str] = {}
+    updated_lines_by_file: Dict[str, List[str]] = {}
+
+    for file_path, _ in file_blocks:
+        if not os.path.isabs(file_path):
+            raise PatchApplyError("Patch paths must be absolute", file_path=file_path)
+        if not os.path.isfile(file_path):
+            raise PatchApplyError("Target file does not exist", file_path=file_path)
+        if file_path not in original_text_by_file:
+            original_text_by_file[file_path] = _read_text(file_path)
+            updated_lines_by_file[file_path] = original_text_by_file[file_path].splitlines()
+
+    updated_files: List[str] = []
+    for file_path, hunks in file_blocks:
+        file_lines = updated_lines_by_file[file_path]
+        for hunk_index, hunk_lines in enumerate(hunks):
+            try:
+                file_lines = _apply_hunk_to_lines(file_lines, hunk_lines)
+            except PatchApplyError as e:
+                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index) from e
+        _validate_python_syntax(file_path, file_lines)
+        updated_lines_by_file[file_path] = file_lines
+        if file_path not in updated_files:
+            updated_files.append(file_path)
+
+    # Write all updated files at the end.
+    for file_path in updated_files:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(updated_lines_by_file[file_path]) + "\n")
+
+    return (updated_files, original_text_by_file)
 
 
 def apply_apply_patch_text(patch_text: str) -> List[str]:
@@ -434,31 +499,54 @@ def apply_apply_patch_text(patch_text: str) -> List[str]:
 
     Returns list of updated file paths.
     """
-    patch_text = _normalize_patch_text(patch_text)
-    file_blocks = _parse_apply_patch(patch_text)
-    updated_files: List[str] = []
+    updated, _original = _apply_patch_transaction(patch_text)
+    return updated
 
-    for file_path, hunks in file_blocks:
-        if not os.path.isabs(file_path):
-            raise PatchApplyError("Patch paths must be absolute", file_path=file_path)
-        if not os.path.isfile(file_path):
-            raise PatchApplyError("Target file does not exist", file_path=file_path)
 
-        with open(file_path, "r", encoding="utf-8") as f:
-            file_lines = f.read().splitlines()
+def _project_relative_path(abs_path: str) -> str:
+    try:
+        rel = os.path.relpath(abs_path, PROJECT_ROOT)
+    except Exception:
+        rel = abs_path.lstrip(os.sep)
+    if rel.startswith(".."):
+        return abs_path.lstrip(os.sep)
+    return rel
 
-        for hunk_index, hunk_lines in enumerate(hunks):
-            try:
-                file_lines = _apply_hunk_to_lines(file_lines, hunk_lines)
-            except PatchApplyError as e:
-                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index) from e
 
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(file_lines) + "\n")
+def _write_undo_record(undo_dir: str, patch_name: str, original_text_by_file: Dict[str, str], updated_files: List[str]) -> str:
+    _ensure_dir(undo_dir)
+    payload = {
+        "patch": patch_name,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "files": {
+            path: {
+                "relative": _project_relative_path(path),
+                "original_b64": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+            }
+            for path, text in original_text_by_file.items()
+        },
+        "updated_files": updated_files,
+    }
+    out_path = os.path.join(undo_dir, f"{patch_name}.undo.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return out_path
 
-        updated_files.append(file_path)
 
-    return updated_files
+def _restore_undo_record(undo_record_path: str) -> List[str]:
+    payload = _load_json(undo_record_path)
+    files = payload.get("files", {})
+    restored: List[str] = []
+    for abs_path, meta in files.items():
+        original_b64 = (meta or {}).get("original_b64")
+        if not original_b64:
+            continue
+        text = base64.b64decode(original_b64.encode("ascii")).decode("utf-8")
+        _ensure_dir(os.path.dirname(abs_path))
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        restored.append(abs_path)
+    return restored
 
 
 def _extract_update_files(patch_text: str) -> List[str]:
@@ -536,6 +624,16 @@ def main() -> int:
         default=2,
         help="If Codex generates a patch that can't apply to the current tree, ask Codex to fix it up to this many times.",
     )
+    parser.add_argument(
+        "--undo-on-test-failure",
+        action="store_true",
+        help="If pytest fails at the end, undo all applied patches from this run before exiting.",
+    )
+    parser.add_argument(
+        "--undo-dir",
+        default=None,
+        help="Directory to store undo records (defaults to <orchestrator_dir>/undo)",
+    )
     args = parser.parse_args()
 
     personalities = None
@@ -556,8 +654,10 @@ def main() -> int:
 
     patches_dir = os.path.join(orchestrator_dir, "patches")
     fixed_dir = os.path.join(orchestrator_dir, "patches_fixed")
+    undo_dir = args.undo_dir or os.path.join(orchestrator_dir, "undo")
     _ensure_dir(patches_dir)
     _ensure_dir(fixed_dir)
+    _ensure_dir(undo_dir)
 
     python_exe = sys.executable
 
@@ -585,75 +685,100 @@ def main() -> int:
             retry_jitter_s=args.retry_jitter_s,
         )
 
-        patch_path = _generate_codex_patch_for_run(
-            python_exe=python_exe,
-            run_dir=run_dir,
-            config_path=args.config,
-            backend_id=args.codex_backend_id,
-        )
-        patch_text = _read_text(patch_path)
-        patch_text = _normalize_patch_text(patch_text)
+        try:
+            patch_path = _generate_codex_patch_for_run(
+                python_exe=python_exe,
+                run_dir=run_dir,
+                config_path=args.config,
+                backend_id=args.codex_backend_id,
+            )
+            patch_text = _read_text(patch_path)
+            patch_text = _normalize_patch_text(patch_text)
 
-        # Validate (dry-run apply) immediately; if Codex produced a broken patch, repair it now.
-        gen_attempt = 0
-        while True:
-            gen_attempt += 1
-            try:
-                _dry_run_apply_patch_text(patch_text)
-                break
-            except PatchApplyError as e:
-                if gen_attempt > args.generate_fix_max_attempts:
-                    raise SystemExit(
-                        f"Generated patch for run {run_id} could not be applied after fixes: {e}"
+            # Validate (dry-run apply) immediately; if Codex produced a broken patch, repair it now.
+            gen_attempt = 0
+            while True:
+                gen_attempt += 1
+                try:
+                    _dry_run_apply_patch_text(patch_text)
+                    break
+                except PatchApplyError as e:
+                    if gen_attempt > args.generate_fix_max_attempts:
+                        raise PatchApplyError(
+                            f"Generated patch failed dry-run apply after fixes: {e}",
+                            file_path=e.file_path,
+                            hunk_index=e.hunk_index,
+                        ) from e
+
+                    update_files = _extract_update_files(patch_text)
+                    file_contents: Dict[str, str] = {}
+                    for fp in update_files:
+                        if os.path.isfile(fp):
+                            file_contents[fp] = _read_text(fp)
+
+                    # If we know the specific failing file, include it even if the patch headers are malformed.
+                    if e.file_path and os.path.isfile(e.file_path):
+                        file_contents.setdefault(e.file_path, _read_text(e.file_path))
+
+                    patch_text = _codex_fix_patch(
+                        codex_backend=codex_backend,
+                        failing_patch_text=patch_text,
+                        error_message=f"Generated patch failed dry-run apply: {e}",
+                        file_contents=file_contents,
                     )
 
-                update_files = _extract_update_files(patch_text)
-                file_contents: Dict[str, str] = {}
-                for fp in update_files:
-                    if os.path.isfile(fp):
-                        file_contents[fp] = _read_text(fp)
+            # Copy patch into orchestrator folder for later application
+            # Ensure directories exist even if state_dir is changed mid-run.
+            _ensure_dir(patches_dir)
+            local_patch_path = os.path.join(patches_dir, f"patch_{i:02d}.patch")
+            with open(local_patch_path, "w", encoding="utf-8") as f:
+                f.write(patch_text)
 
-                patch_text = _codex_fix_patch(
-                    codex_backend=codex_backend,
-                    failing_patch_text=patch_text,
-                    error_message=f"Generated patch failed dry-run apply: {e}",
-                    file_contents=file_contents,
-                )
+            run_records.append(
+                {
+                    "i": i,
+                    "run_id": run_id,
+                    "run_dir": os.path.abspath(run_dir),
+                    "patch_path": os.path.abspath(local_patch_path),
+                }
+            )
+        except Exception as e:
+            print(f"[patch] SKIP run_id={run_id} error={e}")
+            run_records.append(
+                {
+                    "i": i,
+                    "run_id": run_id,
+                    "run_dir": os.path.abspath(run_dir),
+                    "patch_error": str(e),
+                }
+            )
 
-        # Copy patch into orchestrator folder for later application
-        # Ensure directories exist even if state_dir is changed mid-run.
-        _ensure_dir(patches_dir)
-        local_patch_path = os.path.join(patches_dir, f"patch_{i:02d}.patch")
-        with open(local_patch_path, "w", encoding="utf-8") as f:
-            f.write(patch_text)
-
-        run_records.append(
-            {
-                "i": i,
-                "run_id": run_id,
-                "run_dir": os.path.abspath(run_dir),
-                "patch_path": os.path.abspath(local_patch_path),
-            }
-        )
-
-    print(f"[apply] applying {len(run_records)} patches")
+    patch_records = [r for r in run_records if r.get("patch_path")]
+    print(f"[apply] applying {len(patch_records)} patches")
 
     applied: List[Dict[str, Any]] = []
-    for rec in run_records:
+    undo_records: List[str] = []
+    for rec in patch_records:
         patch_path = rec["patch_path"]
         patch_text = _read_text(patch_path)
+        patch_name = os.path.basename(patch_path).replace(".patch", "")
 
         attempt = 0
         while True:
             attempt += 1
             try:
-                updated = apply_apply_patch_text(patch_text)
+                updated, original = _apply_patch_transaction(patch_text)
+                undo_record_path = ""
+                if updated:
+                    undo_record_path = _write_undo_record(undo_dir, patch_name, original, updated)
+                    undo_records.append(undo_record_path)
                 applied.append(
                     {
                         "patch_path": patch_path,
                         "attempt": attempt,
                         "updated_files": updated,
                         "fixed": attempt > 1,
+                        "undo_record": undo_record_path or None,
                     }
                 )
                 print(f"[apply] ok patch={os.path.basename(patch_path)} updated={len(updated)}")
@@ -701,6 +826,14 @@ def main() -> int:
         cwd=PROJECT_ROOT,
     )
 
+    if test_proc.returncode != 0 and args.undo_on_test_failure and undo_records:
+        print(f"[undo] pytest failed; undoing {len(undo_records)} applied patches")
+        for undo_path in reversed(undo_records):
+            try:
+                _restore_undo_record(undo_path)
+            except Exception as e:
+                print(f"[undo] WARN failed to restore {undo_path}: {e}")
+
     summary = {
         "orchestrator_id": orchestrator_id,
         "orchestrator_dir": os.path.abspath(orchestrator_dir),
@@ -716,6 +849,7 @@ def main() -> int:
         },
         "runs": run_records,
         "applied": applied,
+        "undo_records": undo_records,
         "tests": {
             "exit_code": test_proc.returncode,
         },
