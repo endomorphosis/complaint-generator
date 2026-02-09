@@ -760,6 +760,61 @@ class Mediator:
 			'ready_for_formalization': self.phase_manager.is_phase_complete(ComplaintPhase.EVIDENCE)
 		}
 	
+	def process_evidence_denoising(self, question: Dict[str, Any], answer: str) -> Dict[str, Any]:
+		"""
+		Process denoising questions during evidence phase.
+		
+		This applies the denoising diffusion pattern to evidence gathering,
+		iteratively clarifying evidence gaps.
+		
+		Args:
+			question: Evidence denoising question
+			answer: User's answer
+			
+		Returns:
+			Updated evidence phase status
+		"""
+		kg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph')
+		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
+		
+		# Process answer (similar to Phase 1 but focused on evidence)
+		updates = self.denoiser.process_answer(question, answer, kg, dg)
+		
+		# If answer describes evidence, add it
+		if len(answer) > 20 and question.get('type') in ['evidence_clarification', 'evidence_quality']:
+			evidence_data = {
+				'id': f"evidence_from_q_{len(self.denoiser.questions_asked)}",
+				'name': f"Evidence: {answer[:50]}",
+				'type': 'user_provided',
+				'description': answer,
+				'confidence': 0.7,
+				'supports_claims': [question.get('context', {}).get('claim_id')]
+			}
+			self.add_evidence_to_graphs(evidence_data)
+		
+		# Generate next evidence questions
+		evidence_gaps = self.phase_manager.get_phase_data(ComplaintPhase.EVIDENCE, 'evidence_gaps') or []
+		questions = self.denoiser.generate_evidence_questions(kg, dg, evidence_gaps, max_questions=3)
+		
+		# Calculate evidence noise level
+		evidence_count = self.phase_manager.get_phase_data(ComplaintPhase.EVIDENCE, 'evidence_count') or 0
+		gap_ratio = self.phase_manager.get_phase_data(ComplaintPhase.EVIDENCE, 'evidence_gap_ratio') or 1.0
+		noise = gap_ratio * 0.7 + (1.0 - min(evidence_count / 10.0, 1.0)) * 0.3
+		
+		self.phase_manager.record_iteration(noise, {
+			'phase': 'evidence',
+			'evidence_count': evidence_count,
+			'gap_ratio': gap_ratio
+		})
+		
+		return {
+			'phase': ComplaintPhase.EVIDENCE.value,
+			'updates': updates,
+			'next_questions': questions,
+			'noise_level': noise,
+			'ready_for_formalization': self.phase_manager.is_phase_complete(ComplaintPhase.EVIDENCE)
+		}
+	
 	def advance_to_formalization_phase(self) -> Dict[str, Any]:
 		"""
 		Advance to Phase 3: Neurosymbolic matching and formalization.
@@ -837,6 +892,96 @@ class Mediator:
 			'complete': True,
 			'ready_to_file': self._check_filing_readiness(formal_complaint)
 		}
+	
+	def process_legal_denoising(self, question: Dict[str, Any], answer: str) -> Dict[str, Any]:
+		"""
+		Process denoising questions during formalization phase.
+		
+		This applies denoising to ensure all legal requirements are satisfied.
+		
+		Args:
+			question: Legal requirement denoising question
+			answer: User's answer
+			
+		Returns:
+			Updated formalization status
+		"""
+		kg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph')
+		dg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
+		legal_graph = self.phase_manager.get_phase_data(ComplaintPhase.FORMALIZATION, 'legal_graph')
+		
+		# Process answer to update graphs
+		updates = self.denoiser.process_answer(question, answer, kg, dg)
+		
+		# Re-run neurosymbolic matching with updated information
+		matching_results = self.neurosymbolic_matcher.match_claims_to_law(kg, dg, legal_graph)
+		self.phase_manager.update_phase_data(ComplaintPhase.FORMALIZATION, 'matching_results', matching_results)
+		
+		# Generate next legal denoising questions
+		questions = self.denoiser.generate_legal_matching_questions(matching_results, max_questions=3)
+		
+		# Calculate legal matching noise
+		viability = self.neurosymbolic_matcher.assess_claim_viability(matching_results)
+		avg_confidence = sum(m.get('confidence', 0) for m in matching_results.get('matches', [])) / max(len(matching_results.get('matches', [])), 1)
+		unmatched_ratio = len(matching_results.get('unmatched_requirements', [])) / max(len(legal_graph.elements), 1)
+		
+		noise = (1.0 - avg_confidence) * 0.5 + unmatched_ratio * 0.5
+		
+		self.phase_manager.record_iteration(noise, {
+			'phase': 'formalization',
+			'viable_claims': viability.get('viable_count', 0),
+			'unmatched_requirements': len(matching_results.get('unmatched_requirements', []))
+		})
+		
+		return {
+			'phase': ComplaintPhase.FORMALIZATION.value,
+			'updates': updates,
+			'matching_results': matching_results,
+			'next_questions': questions,
+			'noise_level': noise,
+			'ready_to_generate': len(questions) == 0 or noise < 0.2
+		}
+	
+	def synthesize_complaint_summary(self, include_conversation: bool = True) -> str:
+		"""
+		Synthesize a human-readable summary from knowledge graphs, 
+		conversation history, and evidence.
+		
+		This hides the complexity of graphs from end users while providing
+		a clear, denoised summary of the complaint status.
+		
+		Args:
+			include_conversation: Whether to include conversation insights
+			
+		Returns:
+			Human-readable complaint summary
+		"""
+		kg = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph')
+		
+		# Get evidence list
+		evidence_entities = kg.get_entities_by_type('evidence') if kg else []
+		evidence_list = [
+			{
+				'name': e.name,
+				'type': e.attributes.get('type', 'unknown'),
+				'description': e.attributes.get('description', '')
+			}
+			for e in evidence_entities
+		]
+		
+		# Get conversation history if available
+		conversation_history = []
+		if include_conversation:
+			conversation_history = self.denoiser.questions_asked
+		
+		# Use denoiser's synthesis method
+		summary = self.denoiser.synthesize_complaint_summary(
+			kg,
+			conversation_history,
+			evidence_list
+		)
+		
+		return summary
 	
 	def get_three_phase_status(self) -> Dict[str, Any]:
 		"""Get current status of three-phase process."""

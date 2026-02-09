@@ -225,6 +225,101 @@ class ComplaintDenoiser:
         """
         return len(self.questions_pool) == 0 or len(self.questions_asked) > 50
     
+    def generate_evidence_questions(self,
+                                   knowledge_graph: KnowledgeGraph,
+                                   dependency_graph: DependencyGraph,
+                                   evidence_gaps: List[Dict[str, Any]],
+                                   max_questions: int = 5) -> List[Dict[str, Any]]:
+        """
+        Generate denoising questions for evidence phase.
+        
+        Args:
+            knowledge_graph: Current knowledge graph
+            dependency_graph: Current dependency graph
+            evidence_gaps: Identified evidence gaps
+            max_questions: Maximum questions to generate
+            
+        Returns:
+            List of evidence-focused denoising questions
+        """
+        questions = []
+        
+        # Questions about missing evidence
+        for gap in evidence_gaps[:max_questions]:
+            questions.append({
+                'type': 'evidence_clarification',
+                'question': f"Do you have evidence to support: {gap.get('name', 'this claim')}?",
+                'context': {
+                    'gap_id': gap.get('id'),
+                    'claim_id': gap.get('related_claim'),
+                    'gap_type': gap.get('type', 'missing_evidence')
+                },
+                'priority': 'high'
+            })
+        
+        # Questions about evidence quality/completeness
+        evidence_entities = knowledge_graph.get_entities_by_type('evidence')
+        for evidence in evidence_entities[:max(0, max_questions - len(questions))]:
+            if evidence.confidence < 0.7:
+                questions.append({
+                    'type': 'evidence_quality',
+                    'question': f"Can you provide more details about this evidence: {evidence.name}?",
+                    'context': {
+                        'evidence_id': evidence.id,
+                        'evidence_name': evidence.name,
+                        'confidence': evidence.confidence
+                    },
+                    'priority': 'medium'
+                })
+        
+        return questions[:max_questions]
+    
+    def generate_legal_matching_questions(self,
+                                         matching_results: Dict[str, Any],
+                                         max_questions: int = 5) -> List[Dict[str, Any]]:
+        """
+        Generate denoising questions for legal matching phase.
+        
+        Args:
+            matching_results: Results from neurosymbolic matching
+            max_questions: Maximum questions to generate
+            
+        Returns:
+            List of legal-focused denoising questions
+        """
+        questions = []
+        
+        # Questions about unsatisfied legal requirements
+        unmatched = matching_results.get('unmatched_requirements', [])
+        for req in unmatched[:max_questions]:
+            questions.append({
+                'type': 'legal_requirement',
+                'question': f"To satisfy the legal requirement '{req.get('name')}', can you provide: {req.get('missing_info', 'additional information')}?",
+                'context': {
+                    'requirement_id': req.get('id'),
+                    'requirement_name': req.get('name'),
+                    'legal_element': req.get('element_type')
+                },
+                'priority': 'high'
+            })
+        
+        # Questions about weak matches
+        weak_matches = [m for m in matching_results.get('matches', []) 
+                       if m.get('confidence', 1.0) < 0.6]
+        for match in weak_matches[:max(0, max_questions - len(questions))]:
+            questions.append({
+                'type': 'legal_strengthening',
+                'question': f"Can you provide more information to strengthen the claim for: {match.get('claim_name')}?",
+                'context': {
+                    'claim_id': match.get('claim_id'),
+                    'legal_requirement': match.get('requirement_name'),
+                    'confidence': match.get('confidence')
+                },
+                'priority': 'medium'
+            })
+        
+        return questions[:max_questions]
+    
     def get_summary(self) -> Dict[str, Any]:
         """Get a summary of denoising progress."""
         return {
@@ -232,3 +327,85 @@ class ComplaintDenoiser:
             'questions_remaining': len(self.questions_pool),
             'exhausted': self.is_exhausted()
         }
+    
+    def synthesize_complaint_summary(self,
+                                    knowledge_graph: KnowledgeGraph,
+                                    conversation_history: List[Dict[str, Any]],
+                                    evidence_list: List[Dict[str, Any]] = None) -> str:
+        """
+        Synthesize a human-readable summary from knowledge graph, chat transcripts, 
+        and evidence without exposing raw graph structures.
+        
+        This implements the denoising diffusion pattern by progressively refining
+        the narrative from structured data.
+        
+        Args:
+            knowledge_graph: The complaint knowledge graph
+            conversation_history: List of conversation exchanges
+            evidence_list: Optional list of evidence items
+            
+        Returns:
+            Human-readable complaint summary
+        """
+        summary_parts = []
+        
+        # Extract key entities
+        people = knowledge_graph.get_entities_by_type('person')
+        organizations = knowledge_graph.get_entities_by_type('organization')
+        claims = knowledge_graph.get_entities_by_type('claim')
+        facts = knowledge_graph.get_entities_by_type('fact')
+        
+        # Build narrative introduction
+        if people or organizations:
+            summary_parts.append("## Parties Involved")
+            for person in people[:5]:  # Limit to key people
+                summary_parts.append(f"- {person.name}: {person.attributes.get('role', 'individual')}")
+            for org in organizations[:5]:
+                summary_parts.append(f"- {org.name}: {org.attributes.get('role', 'organization')}")
+            summary_parts.append("")
+        
+        # Summarize the complaint nature
+        if claims:
+            summary_parts.append("## Nature of Complaint")
+            for claim in claims:
+                claim_type = claim.attributes.get('claim_type', 'general')
+                description = claim.attributes.get('description', claim.name)
+                summary_parts.append(f"- **{claim.name}** ({claim_type}): {description}")
+            summary_parts.append("")
+        
+        # Key facts from graph
+        if facts:
+            summary_parts.append("## Key Facts")
+            high_conf_facts = [f for f in facts if f.confidence > 0.7]
+            for fact in high_conf_facts[:10]:  # Top 10 confident facts
+                summary_parts.append(f"- {fact.name}")
+            summary_parts.append("")
+        
+        # Evidence summary
+        if evidence_list and len(evidence_list) > 0:
+            summary_parts.append("## Available Evidence")
+            for evidence in evidence_list[:10]:
+                ename = evidence.get('name', 'Evidence item')
+                etype = evidence.get('type', 'document')
+                summary_parts.append(f"- {ename} ({etype})")
+            summary_parts.append("")
+        
+        # Key insights from conversation
+        if conversation_history and len(conversation_history) > 0:
+            summary_parts.append("## Additional Context from Discussion")
+            # Extract key clarifications
+            clarifications = [msg for msg in conversation_history 
+                            if msg.get('type') == 'response' and len(msg.get('content', '')) > 50]
+            for clarif in clarifications[:5]:  # Top 5 meaningful clarifications
+                content = clarif.get('content', '')[:200]  # Limit length
+                if len(clarif.get('content', '')) > 200:
+                    content += "..."
+                summary_parts.append(f"- {content}")
+            summary_parts.append("")
+        
+        # Completeness assessment
+        kg_summary = knowledge_graph.summary()
+        completeness = "high" if kg_summary['total_entities'] > 10 else "moderate" if kg_summary['total_entities'] > 5 else "developing"
+        summary_parts.append(f"**Complaint Status:** Information gathering {completeness}ly complete with {kg_summary['total_entities']} key elements identified.")
+        
+        return "\n".join(summary_parts)
