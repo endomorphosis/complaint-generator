@@ -873,9 +873,14 @@ def _run_post_apply_checks(
     if check_pyright:
         pyright = shutil.which("pyright")
         if pyright:
-            proc = subprocess.run([pyright], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-            if proc.returncode != 0:
-                raise RuntimeError("pyright failed:\n" + (proc.stdout or ""))
+            cmd = [pyright]
+        else:
+            # If installed via pip, pyright is typically available as a module.
+            cmd = [sys.executable, "-m", "pyright"]
+
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError("pyright failed:\n" + (proc.stdout or ""))
 
     if check_pytest:
         proc = subprocess.run(
@@ -1421,8 +1426,10 @@ def main() -> int:
         "--no-check-pyright",
         dest="check_pyright",
         action="store_false",
-        help="Skip pyright checks (default).",
+        help="Skip pyright checks.",
     )
+    # Enable pyright by default so the default flow runs the Pylance-like gate.
+    parser.set_defaults(check_pyright=True)
 
     parser.set_defaults(check_pytest=True)
     parser.add_argument(
