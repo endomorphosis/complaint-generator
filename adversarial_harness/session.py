@@ -5,8 +5,8 @@ Manages a single adversarial training session between complainant and mediator.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field
+from typing import Dict, Any, List
+from dataclasses import dataclass
 from datetime import datetime
 import time
 

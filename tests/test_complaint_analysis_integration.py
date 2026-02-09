@@ -7,11 +7,10 @@ import json
 import tempfile
 from pathlib import Path
 
-from complaint_analysis.seed_generator import SeedGenerator, SeedComplaintTemplate
+from complaint_analysis.seed_generator import SeedGenerator
 from complaint_analysis.decision_trees import (
     DecisionTreeGenerator,
-    DecisionTree,
-    QuestionNode
+    DecisionTree
 )
 from complaint_analysis.prompt_templates import (
     PromptTemplate,

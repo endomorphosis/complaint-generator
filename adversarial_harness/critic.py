@@ -241,7 +241,11 @@ Evaluation:"""
                     try:
                         scores[key.strip()] = float(value.strip())
                     except ValueError:
-                        pass
+                        # Ignore malformed score values and rely on default weights
+                        logger.debug(
+                            "Could not parse score value '%s' for key '%s'",
+                            value.strip(), key.strip()
+                        )
                 elif current_section == 'feedback' and line:
                     feedback += line + " "
                 elif current_section == 'strengths' and line.startswith('-'):
@@ -282,8 +286,9 @@ Evaluation:"""
             matches = re.findall(r'0\.\d+|1\.0|0|1', response)
             if matches:
                 return float(matches[0])
-        except:
-            pass
+        except (ValueError, TypeError) as exc:
+            # If parsing fails, log and fall back to a neutral score
+            logger.debug("Failed to extract score from response: %s", exc)
         return 0.5
     
     def _format_conversation(self, history: List[Dict[str, Any]]) -> str:

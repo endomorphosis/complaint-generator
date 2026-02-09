@@ -14,8 +14,7 @@ from complaint_phases import (
     DependencyGraphBuilder,
     ComplaintDenoiser,
     LegalGraphBuilder,
-    NeurosymbolicMatcher,
-    NodeType
+    NeurosymbolicMatcher
 )
 
 

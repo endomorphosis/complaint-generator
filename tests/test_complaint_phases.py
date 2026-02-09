@@ -5,10 +5,6 @@ Tests the three-phase complaint processing system with knowledge graphs,
 dependency graphs, and neurosymbolic matching.
 """
 
-import pytest
-import json
-import tempfile
-import os
 from complaint_phases import (
     KnowledgeGraphBuilder, KnowledgeGraph, Entity, Relationship,
     DependencyGraphBuilder, DependencyGraph, DependencyNode, Dependency,

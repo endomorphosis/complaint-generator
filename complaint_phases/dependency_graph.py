@@ -7,7 +7,7 @@ Used to ensure all elements of a claim are properly supported.
 
 import json
 import logging
-from typing import Dict, List, Set, Optional, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum

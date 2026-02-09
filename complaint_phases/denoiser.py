@@ -198,7 +198,6 @@ class ComplaintDenoiser:
             kg_confidence = total_confidence / len(knowledge_graph.entities)
         
         # Calculate dependency satisfaction
-        dep_satisfaction = 0.0
         readiness = dependency_graph.get_claim_readiness()
         dep_satisfaction = readiness.get('overall_readiness', 0.0)
         

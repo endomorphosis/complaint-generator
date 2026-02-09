@@ -6,7 +6,7 @@ requirements (from legal graph) to assess claim viability and identify gaps.
 """
 
 import logging
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any
 from .knowledge_graph import KnowledgeGraph, Entity
 from .dependency_graph import DependencyGraph, DependencyNode, NodeType
 from .legal_graph import LegalGraph, LegalElement

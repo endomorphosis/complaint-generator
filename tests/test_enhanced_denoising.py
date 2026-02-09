@@ -6,9 +6,7 @@ import pytest
 from complaint_phases import (
     KnowledgeGraphBuilder,
     DependencyGraphBuilder,
-    ComplaintDenoiser,
-    LegalGraphBuilder,
-    NeurosymbolicMatcher
+    ComplaintDenoiser
 )
 
 
@@ -234,7 +232,7 @@ class TestIntegratedDenoising:
         dg = dg_builder.build_from_claims(claims)
         
         # Phase 1: Basic questions (should exist from unsatisfied requirements in DG)
-        phase1_questions = denoiser.generate_questions(kg, dg, max_questions=5)
+        _phase1_questions = denoiser.generate_questions(kg, dg, max_questions=5)
         
         # Phase 2: Evidence questions with actual gaps
         evidence_gaps = [

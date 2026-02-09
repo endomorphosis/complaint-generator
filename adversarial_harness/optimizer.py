@@ -5,10 +5,9 @@ Analyzes critic feedback and provides optimization recommendations.
 """
 
 import logging
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field
+from typing import Dict, Any, List
+from dataclasses import dataclass
 from datetime import datetime
-import json
 
 logger = logging.getLogger(__name__)
 

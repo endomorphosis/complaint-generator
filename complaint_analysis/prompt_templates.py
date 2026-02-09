@@ -5,7 +5,6 @@ Structured prompt engineering with format: | system prompt | return format | war
 """
 
 import logging
-import json
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum

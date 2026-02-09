@@ -8,7 +8,7 @@ keywords, and legal patterns. This replaces hardcoded seeds with data-driven gen
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
-from .keywords import get_keywords, get_type_specific_keywords
+from .keywords import get_type_specific_keywords
 from .legal_patterns import get_legal_terms
 from .complaint_types import get_registered_types
 

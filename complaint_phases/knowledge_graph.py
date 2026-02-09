@@ -7,7 +7,7 @@ a knowledge graph representation for denoising and evidence gathering.
 
 import json
 import logging
-from typing import Dict, List, Set, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 

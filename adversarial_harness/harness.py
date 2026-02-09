@@ -5,7 +5,7 @@ Orchestrates multiple adversarial sessions with parallel execution.
 """
 
 import logging
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from datetime import datetime

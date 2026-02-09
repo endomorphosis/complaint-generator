@@ -10,11 +10,9 @@ This module provides hooks for RAG (Retrieval-Augmented Generation) over the leg
 
 import sys
 import os
-import json
 import logging
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 from datetime import datetime
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +20,7 @@ logger = logging.getLogger(__name__)
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 try:
-    from complaint_analysis.keywords import get_type_specific_keywords, get_keywords
+    from complaint_analysis.keywords import get_type_specific_keywords
     from complaint_analysis.legal_patterns import get_legal_terms, COMPLAINT_LEGAL_TERMS
     from complaint_analysis.complaint_types import get_registered_types, get_complaint_type
     COMPLAINT_ANALYSIS_AVAILABLE = True

@@ -5,8 +5,8 @@ LLM-based complainant that generates complaints and responds to mediator questio
 """
 
 import logging
-from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field
+from typing import Dict, Any, List
+from dataclasses import dataclass
 import json
 
 logger = logging.getLogger(__name__)

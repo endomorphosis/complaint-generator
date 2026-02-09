@@ -5,7 +5,6 @@ Tests for adversarial harness system
 import pytest
 from adversarial_harness import (
     Complainant,
-    ComplaintGenerator,
     ComplaintContext,
     Critic,
     CriticScore,
@@ -321,7 +320,7 @@ class TestAdversarialHarness:
         harness = AdversarialHarness(
             MockLLMBackend(),
             MockLLMBackend(),
-            lambda: MockMediator()
+            MockMediator
         )
         
         stats = harness.get_statistics()

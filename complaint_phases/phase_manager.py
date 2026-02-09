@@ -6,7 +6,7 @@ Manages the three-phase complaint process and transitions between phases.
 
 import logging
 from enum import Enum
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

@@ -10,8 +10,7 @@ import json
 from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from .keywords import get_type_specific_keywords, get_keywords
-from .legal_patterns import get_legal_terms
+from .keywords import get_type_specific_keywords
 from .complaint_types import get_registered_types
 
 logger = logging.getLogger(__name__)
