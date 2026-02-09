@@ -351,7 +351,10 @@ class KnowledgeGraphBuilder:
         # Create employment relationships
         for person in persons:
             for org in orgs:
-                if 'employer' in org.name.lower():
+                if (
+                    'employer' in org.name.lower()
+                    or org.attributes.get('role') == 'respondent'
+                ):
                     relationships.append({
                         'source_id': person.id,
                         'target_id': org.id,
@@ -373,9 +376,22 @@ class KnowledgeGraphBuilder:
         # Use LLM if available
         if self.mediator:
             llm_rels = self._llm_extract_relationships(text, graph)
-            relationships.extend(llm_rels)
+            for rel in llm_rels:
+                if not isinstance(rel, dict):
+                    continue
+                if rel.get('source_id') and rel.get('target_id') and rel.get('type'):
+                    relationships.append(rel)
         
-        return relationships
+        unique_relationships = {}
+        for rel in relationships:
+            key = (rel.get('source_id'), rel.get('target_id'), rel.get('type'))
+            if not all(key):
+                continue
+            current = unique_relationships.get(key)
+            if current is None or rel.get('confidence', 0.0) > current.get('confidence', 0.0):
+                unique_relationships[key] = rel
+
+        return list(unique_relationships.values())
     
     def _llm_extract_entities(self, text: str) -> List[Dict[str, Any]]:
         """Use LLM to extract entities (placeholder for LLM integration)."""
