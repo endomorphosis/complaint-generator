@@ -13,21 +13,21 @@ The complaint-generator now includes a backend that uses the `llm_router` from t
 
 ### Basic Usage
 
-Add the LLM Router backend to your `config.json`:
+Add the LLM Router backend to your `config.llm_router.json`:
 
 ```json
 {
     "BACKENDS": [
         {
-            "id": "llm-router-local",
+            "id": "llm-router",
             "type": "llm_router",
-            "provider": "local_hf",
-            "model": "gpt2",
+            "provider": "copilot_cli",
+            "model": "gpt-5-mini",
             "max_tokens": 128
         }
     ],
     "MEDIATOR": {
-        "backends": ["llm-router-local"]
+        "backends": ["llm-router"]
     }
 }
 ```

@@ -1,16 +1,25 @@
-from turtle import back
-import os 
-def install_pip_package(package_string):
-    os.system('pip install ' + package_string)
-
+import argparse
 import json
+import os
+
 from lib.log import init_logging, make_logger
 from backends import OpenAIBackend, WorkstationBackendModels, WorkstationBackendDatabases, LLMRouterBackend
 from mediator import Mediator, Inquiries, Complaint, State 
 from applications import CLI
 from applications import SERVER
 
-with open('config.json') as f:
+parser = argparse.ArgumentParser(description='Complaint Generator')
+parser.add_argument(
+	'--config',
+	default=os.environ.get('COMPLAINT_GENERATOR_CONFIG', 'config.llm_router.json'),
+	help='Path to configuration JSON (default: config.llm_router.json)'
+)
+args = parser.parse_args()
+
+if not os.path.exists(args.config):
+	raise FileNotFoundError(f'Config not found: {args.config}')
+
+with open(args.config) as f:
 	config = json.load(f)
 	config_backends = config['BACKENDS']
 	config_mediator = config['MEDIATOR']

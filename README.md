@@ -190,7 +190,7 @@ python run.py --config config.llm_router.json
 
 ## Configuration
 
-The generator's behavior is defined by configuration files (`.json` or `.toml` format).
+The generator's behavior is defined by a JSON configuration file.
 
 ### Configuration Structure
 
@@ -200,8 +200,8 @@ The generator's behavior is defined by configuration files (`.json` or `.toml` f
     {
       "id": "llm-router",
       "type": "llm_router",
-      "provider": "local_hf",
-      "model": "gpt2",
+      "provider": "copilot_cli",
+      "model": "gpt-5-mini",
       "max_tokens": 128
     }
   ],
@@ -222,9 +222,7 @@ The generator's behavior is defined by configuration files (`.json` or `.toml` f
 
 ### Example Configurations
 
-- `config.json` - Default OpenAI backend configuration
-- `config.llm_router.json` - LLM Router with multiple provider support
-- `config.toml` - TOML format configuration
+- `config.llm_router.json` - Canonical configuration (LLM Router + legacy backends)
 
 ## Usage Examples
 
@@ -235,7 +233,7 @@ from mediator import Mediator
 from backends import LLMRouterBackend
 
 # Initialize
-backend = LLMRouterBackend(id='llm-router', provider='local_hf')
+backend = LLMRouterBackend(id='llm-router', provider='copilot_cli', model='gpt-5-mini')
 mediator = Mediator(backends=[backend])
 
 # Set complaint text
@@ -478,8 +476,7 @@ complaint-generator/
 ├── statefiles/           # Persistent state storage
 ├── templates/            # Application templates
 ├── tests/                # Test suite
-├── config.json           # Default configuration
-├── config.llm_router.json # LLM Router configuration
+├── config.llm_router.json # Canonical configuration
 ├── pytest.ini            # Pytest configuration
 ├── requirements.txt      # Python dependencies
 └── run.py               # Application entry point

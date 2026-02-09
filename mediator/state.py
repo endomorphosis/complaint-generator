@@ -14,10 +14,8 @@ import requests
 import datetime 
 import sys
 import time
-sys.path.append('../backends') 
-from huggingface import HuggingFaceBackend
-sys.path.append('../backends') 
-from openaibackend import OpenAIBackend
+from backends.huggingface import HuggingFaceBackend
+from backends.openaibackend import OpenAIBackend
 
 
 
@@ -28,6 +26,9 @@ class State:
 		self.data_fields = list(str("complaint_summary original_complaint log username password hashed_username hashed_password chat_history questions answered_questions last_question last_message").split(" "))
 		self.complaint_summary = None
 		self.original_complaint = None
+		# Core mediator workflow fields
+		self.inquiries = []
+		self.complaint = None
 		self.log = []
 		self.username = None
 		self.password = None
@@ -123,6 +124,7 @@ class State:
 		with open(file) as f:
 			self.mediator.set_state(json.load(f))
 
+	@classmethod
 	def from_serialized(cls, serialized):
 		state = cls()
 		state.inquiries = serialized['inquiries']
@@ -290,6 +292,7 @@ class State:
 		return None
 
 
-test = State()
-data = test.response()
-print(data)
+if __name__ == "__main__":
+	test = State()
+	data = test.response()
+	print(data)

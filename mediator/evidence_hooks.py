@@ -167,7 +167,25 @@ class EvidenceStateHook:
         self.db_path = db_path or self._get_default_db_path()
         self._check_duckdb_availability()
         if DUCKDB_AVAILABLE:
+            self._prepare_duckdb_path()
             self._initialize_schema()
+
+    def _prepare_duckdb_path(self):
+        """Prepare DuckDB path for connect().
+
+        DuckDB errors if the file exists but is not a valid DuckDB database.
+        Our tests create an empty temp file (0 bytes) and pass its name; in
+        that case we delete the empty file so DuckDB can create the DB.
+        """
+        try:
+            path = Path(self.db_path)
+            if path.parent and not path.parent.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.is_file() and path.stat().st_size == 0:
+                path.unlink()
+        except Exception:
+            # Best-effort only; duckdb.connect will raise a useful error if needed.
+            pass
     
     def _get_default_db_path(self) -> str:
         """Get default DuckDB database path."""
@@ -253,7 +271,10 @@ class EvidenceStateHook:
             conn = duckdb.connect(self.db_path)
             
             # Get username from mediator state if available
-            username = getattr(self.mediator.state, 'username', None) or user_id
+            state = getattr(self.mediator, 'state', None)
+            username = getattr(state, 'username', None) if state is not None else None
+            if not isinstance(username, str) or not username:
+                username = user_id
             
             result = conn.execute("""
                 INSERT INTO evidence (

@@ -1,9 +1,4 @@
-from re import S
-import spacy
-# import sys
-# sys.path.append('../mediator')
-
-from mediator import strings 
+from . import strings
 
 
 class Inquiries:

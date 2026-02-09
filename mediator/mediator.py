@@ -42,6 +42,8 @@ from complaint_phases import (
 class Mediator:
 	def __init__(self, backends, evidence_db_path=None, legal_authority_db_path=None):
 		self.backends = backends
+		# Initialize state early because hooks may log during construction.
+		self.state = State()
 		self.inquiries = Inquiries(self)
 		self.complaint = Complaint(self)
 		
@@ -73,7 +75,9 @@ class Mediator:
 		self.legal_graph_builder = LegalGraphBuilder(mediator=self)
 		self.neurosymbolic_matcher = NeurosymbolicMatcher(mediator=self)
 		
-		self.reset()
+		# State is already initialized above; keep reset() for callers that
+		# explicitly want a fresh state.
+		# self.reset()
 
 
 	def reset(self):
@@ -1143,9 +1147,9 @@ class Mediator:
 		
 
 
-	def log(self, type, **data):
+	def log(self, event_type, **data):
 		self.state.log.append({
 			'time': int(time()),
-			'type': type,
+			'type': event_type,
 			**data
 		})

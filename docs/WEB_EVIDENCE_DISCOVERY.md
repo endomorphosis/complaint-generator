@@ -50,7 +50,7 @@ from mediator import Mediator
 from backends import LLMRouterBackend
 
 # Initialize mediator
-backend = LLMRouterBackend(id='llm-router', provider='local_hf')
+backend = LLMRouterBackend(id='llm-router', provider='copilot_cli', model='gpt-5-mini')
 mediator = Mediator(backends=[backend])
 mediator.state.username = 'user123'
 

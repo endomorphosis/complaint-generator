@@ -305,7 +305,24 @@ class LegalAuthorityStorageHook:
         self.db_path = db_path or self._get_default_db_path()
         self._check_duckdb_availability()
         if DUCKDB_AVAILABLE:
+            self._prepare_duckdb_path()
             self._initialize_schema()
+
+    def _prepare_duckdb_path(self):
+        """Prepare DuckDB path for connect().
+
+        DuckDB errors if the file exists but is not a valid DuckDB database.
+        Tests often pass a NamedTemporaryFile() path which is an empty file.
+        Delete empty files so DuckDB can initialize the database.
+        """
+        try:
+            path = Path(self.db_path)
+            if path.parent and not path.parent.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.is_file() and path.stat().st_size == 0:
+                path.unlink()
+        except Exception:
+            pass
     
     def _get_default_db_path(self) -> str:
         """Get default DuckDB database path."""

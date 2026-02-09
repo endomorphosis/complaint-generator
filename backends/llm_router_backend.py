@@ -38,8 +38,8 @@ class LLMRouterBackend:
             **config: Additional configuration passed to generate_text
         """
         self.id = id
-        self.provider = provider
-        self.model = model
+        self.provider = provider or 'copilot_cli'
+        self.model = model or 'gpt-5-mini'
         self.config = config
         
         # Check if llm_router is available

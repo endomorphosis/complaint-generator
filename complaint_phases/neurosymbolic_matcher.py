@@ -44,6 +44,10 @@ class NeurosymbolicMatcher:
         """
         results = {
             'claims': [],
+            # Flattened list of requirements considered for matching.
+            # This is useful for UI/reporting and for tests that assert that
+            # requirements were discovered, even if not fully satisfied.
+            'matched_requirements': [],
             'overall_satisfaction': 0.0,
             'satisfied_claims': 0,
             'total_claims': 0,
@@ -59,6 +63,18 @@ class NeurosymbolicMatcher:
                 claim_node, knowledge_graph, dependency_graph, legal_graph
             )
             results['claims'].append(claim_result)
+
+            # Track applicable requirements for reporting.
+            for req in claim_result.get('requirements', []):
+                results['matched_requirements'].append({
+                    'claim_id': claim_node.id,
+                    'claim_type': claim_node.attributes.get('claim_type', 'unknown'),
+                    'requirement_name': req.get('requirement_name'),
+                    'requirement_description': req.get('requirement_description', ''),
+                    'citation': req.get('citation', ''),
+                    'satisfied': req.get('satisfied', False),
+                    'confidence': req.get('confidence', 0.0),
+                })
             
             if claim_result['satisfied']:
                 results['satisfied_claims'] += 1
@@ -91,6 +107,7 @@ class NeurosymbolicMatcher:
             'legal_requirements': len(legal_requirements),
             'satisfied_requirements': 0,
             'missing_requirements': [],
+            'requirements': [],
             'satisfied': False,
             'confidence': 0.0
         }
@@ -100,6 +117,14 @@ class NeurosymbolicMatcher:
             match = self._check_requirement_satisfied(
                 legal_req, claim_node, knowledge_graph, dependency_graph
             )
+
+            result['requirements'].append({
+                'requirement_name': legal_req.name,
+                'requirement_description': legal_req.description,
+                'citation': legal_req.citation,
+                'satisfied': match.get('satisfied', False),
+                'confidence': match.get('confidence', 0.0),
+            })
             
             if match['satisfied']:
                 result['satisfied_requirements'] += 1
@@ -206,8 +231,11 @@ class NeurosymbolicMatcher:
         
         # Search for matching entity by name or claim type
         for entity in knowledge_graph.entities.values():
-            if (entity.entity_type == 'claim' and 
-                (entity.name == claim_name or entity.name == claim_node.name)):
+            entity_type = getattr(entity, 'type', None)
+            if (
+                entity_type == 'claim'
+                and (entity.name == claim_name or entity.name == claim_node.name)
+            ):
                 claim_entity = entity
                 break
         

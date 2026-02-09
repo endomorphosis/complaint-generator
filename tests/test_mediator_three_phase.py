@@ -14,6 +14,8 @@ from complaint_phases import (
     DependencyGraphBuilder,
     ComplaintDenoiser,
     LegalGraphBuilder,
+    LegalGraph,
+    LegalElement,
     NeurosymbolicMatcher
 )
 
