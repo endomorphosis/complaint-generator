@@ -12,6 +12,99 @@ import json
 logger = logging.getLogger(__name__)
 
 
+def _normalize_personality(value: str) -> str:
+    if not value:
+        return "cooperative"
+    return str(value).strip().lower().replace(" ", "_")
+
+
+_PERSONALITY_PROFILES: Dict[str, Dict[str, Any]] = {
+    # Keep legacy personalities stable.
+    "cooperative": {
+        "emotional_state": "distressed",
+        "cooperation_level": 0.8,
+        "context_depth": 2,
+        "instructions": [
+            "Be candid and answer directly.",
+            "Volunteer relevant details even if not explicitly asked.",
+        ],
+    },
+    "defensive": {
+        "emotional_state": "guarded",
+        "cooperation_level": 0.5,
+        "context_depth": 1,
+        "instructions": [
+            "Be wary and somewhat resistant to sharing details.",
+            "You may ask why a question matters before answering fully.",
+        ],
+    },
+    "vague": {
+        "emotional_state": "overwhelmed",
+        "cooperation_level": 0.55,
+        "context_depth": 1,
+        "instructions": [
+            "Answer in broad strokes and avoid specifics unless pressed.",
+            "Use imprecise language when you don't remember exact details.",
+        ],
+    },
+    "detailed": {
+        "emotional_state": "focused",
+        "cooperation_level": 0.85,
+        "context_depth": 3,
+        "instructions": [
+            "Provide concrete details (dates, names, locations) when known.",
+            "Organize your answer as a short narrative, not a legal filing.",
+        ],
+    },
+    "emotional": {
+        "emotional_state": "upset",
+        "cooperation_level": 0.75,
+        "context_depth": 2,
+        "instructions": [
+            "Express feelings strongly.",
+            "You may include subjective impact and stress.",
+        ],
+    },
+    # Additional personalities for broader adversarial coverage.
+    "hostile": {
+        "emotional_state": "angry",
+        "cooperation_level": 0.3,
+        "context_depth": 1,
+        "instructions": [
+            "Be irritated and reluctant to cooperate.",
+            "Answer briefly; you may refuse to answer some questions.",
+        ],
+    },
+    "confused": {
+        "emotional_state": "confused",
+        "cooperation_level": 0.6,
+        "context_depth": 1,
+        "instructions": [
+            "Admit uncertainty when you are not sure.",
+            "Ask for clarification if a question is complex.",
+        ],
+    },
+    "anxious": {
+        "emotional_state": "anxious",
+        "cooperation_level": 0.65,
+        "context_depth": 2,
+        "instructions": [
+            "Sound worried and hesitant.",
+            "You may ramble slightly but still try to answer.",
+        ],
+    },
+    "legalistic": {
+        "emotional_state": "determined",
+        "cooperation_level": 0.7,
+        "context_depth": 2,
+        "instructions": [
+            "Use semi-formal language and reference rights/obligations in plain terms.",
+            "Avoid making up statute names or citations.",
+        ],
+    },
+}
+
+
 @dataclass
 class ComplaintContext:
     """Context information for a complaint."""
@@ -41,9 +134,22 @@ class Complainant:
             personality: Type of complainant (cooperative, defensive, vague, etc.)
         """
         self.llm_backend = llm_backend
-        self.personality = personality
+        self.personality = _normalize_personality(personality)
+        self.personality_profile = _PERSONALITY_PROFILES.get(self.personality) or _PERSONALITY_PROFILES["cooperative"]
         self.context = None
         self.conversation_history = []
+
+    @staticmethod
+    def build_default_context(seed: Dict[str, Any], personality: str) -> ComplaintContext:
+        p = _normalize_personality(personality)
+        profile = _PERSONALITY_PROFILES.get(p) or _PERSONALITY_PROFILES["cooperative"]
+        return ComplaintContext(
+            complaint_type=seed.get("type", "unknown"),
+            key_facts=seed.get("key_facts", {}),
+            emotional_state=str(profile.get("emotional_state", "distressed")),
+            cooperation_level=float(profile.get("cooperation_level", 0.8)),
+            context_depth=int(profile.get("context_depth", 1)),
+        )
     
     def set_context(self, context: ComplaintContext):
         """Set the complaint context for this session."""
@@ -108,12 +214,16 @@ class Complainant:
     
     def _build_complaint_prompt(self, seed_data: Dict[str, Any]) -> str:
         """Build prompt for generating initial complaint."""
+        instructions = "\n".join([f"- {x}" for x in (self.personality_profile.get("instructions") or [])])
         prompt = f"""You are a person filing a complaint. Based on the following situation, write a detailed but natural complaint as if you were experiencing this issue.
 
 Situation:
 {json.dumps(seed_data, indent=2)}
 
 Personality: {self.personality}
+
+Behavioral constraints:
+{instructions}
 
 Generate a complaint that:
 1. Describes what happened in your own words
@@ -135,6 +245,8 @@ Complaint:"""
         cooperation_desc = "very cooperative" if self.context.cooperation_level > 0.7 else \
                           "somewhat cooperative" if self.context.cooperation_level > 0.4 else \
                           "defensive"
+
+        instructions = "\n".join([f"- {x}" for x in (self.personality_profile.get("instructions") or [])])
         
         prompt = f"""You are a complainant in a legal matter. You are {cooperation_desc} and your personality is {self.personality}.
 
@@ -151,6 +263,11 @@ Respond naturally as this person would. Your response should:
 2. Match your personality ({self.personality}) and cooperation level ({cooperation_desc})
 3. Be honest but not overly detailed unless asked
 4. Sound like a real person, not a legal document
+
+Behavioral constraints:
+{instructions}
+
+If you don't know something, say so. If your cooperation level is low, it's okay to be brief or refuse minor details.
 
 Response:"""
         return prompt

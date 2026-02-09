@@ -32,6 +32,10 @@ class SessionResult:
     final_state: Dict[str, Any]
     knowledge_graph_summary: Dict[str, Any] = None
     dependency_graph_summary: Dict[str, Any] = None
+
+    # Optional full graph snapshots (may be large); persisted as separate JSON files.
+    knowledge_graph: Dict[str, Any] | None = None
+    dependency_graph: Dict[str, Any] | None = None
     
     # Evaluation
     critic_score: Any = None  # CriticScore object
@@ -56,6 +60,8 @@ class SessionResult:
             'final_state': self.final_state,
             'knowledge_graph_summary': self.knowledge_graph_summary,
             'dependency_graph_summary': self.dependency_graph_summary,
+            'knowledge_graph': self.knowledge_graph,
+            'dependency_graph': self.dependency_graph,
             'critic_score': self.critic_score.to_dict() if self.critic_score else None,
             'duration_seconds': self.duration_seconds,
             'success': self.success,
@@ -162,14 +168,24 @@ class AdversarialSession:
             # Get graph summaries if available
             kg_summary = None
             dg_summary = None
+            kg_dict = None
+            dg_dict = None
             try:
                 from complaint_phases import ComplaintPhase
                 kg = self.mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'knowledge_graph')
                 dg = self.mediator.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'dependency_graph')
                 if kg:
                     kg_summary = kg.summary()
+                    try:
+                        kg_dict = kg.to_dict()
+                    except Exception:
+                        kg_dict = None
                 if dg:
                     dg_summary = dg.summary()
+                    try:
+                        dg_dict = dg.to_dict()
+                    except Exception:
+                        dg_dict = None
             except Exception as e:
                 logger.warning(f"Could not get graph summaries: {e}")
             
@@ -197,6 +213,8 @@ class AdversarialSession:
                 final_state=final_state,
                 knowledge_graph_summary=kg_summary,
                 dependency_graph_summary=dg_summary,
+                knowledge_graph=kg_dict,
+                dependency_graph=dg_dict,
                 critic_score=critic_score,
                 duration_seconds=duration,
                 success=True

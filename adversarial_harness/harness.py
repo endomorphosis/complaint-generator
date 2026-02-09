@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from datetime import datetime
 import os
+import inspect
 
 from .session import AdversarialSession, SessionResult
 from .complainant import Complainant, ComplaintContext
@@ -67,19 +68,75 @@ class AdversarialHarness:
                 allowed.append('_')
         return ''.join(allowed)
 
+    def _get_session_dir(self, session_id: str) -> str | None:
+        if not self.session_state_dir:
+            return None
+        safe = self._safe_session_id(session_id)
+        return os.path.join(self.session_state_dir, safe)
+
+    def _create_mediator_for_session(self, *, evidence_db_path: str | None, legal_authority_db_path: str | None):
+        """Call mediator_factory with optional per-session DB paths if supported."""
+        try:
+            sig = inspect.signature(self.mediator_factory)
+            params = sig.parameters
+            accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+            kwargs: Dict[str, Any] = {}
+            if accepts_kwargs or "evidence_db_path" in params:
+                kwargs["evidence_db_path"] = evidence_db_path
+            if accepts_kwargs or "legal_authority_db_path" in params:
+                kwargs["legal_authority_db_path"] = legal_authority_db_path
+            if kwargs:
+                return self.mediator_factory(**kwargs)
+        except Exception:
+            pass
+        return self.mediator_factory()
+
     def _persist_session(self, result: SessionResult) -> None:
         if not self.session_state_dir:
             return
 
-        session_id = self._safe_session_id(result.session_id)
-        session_dir = os.path.join(self.session_state_dir, session_id)
+        session_dir = self._get_session_dir(result.session_id)
+        if not session_dir:
+            return
         os.makedirs(session_dir, exist_ok=True)
 
         session_json_path = os.path.join(session_dir, 'session.json')
         chat_jsonl_path = os.path.join(session_dir, 'chat.jsonl')
 
+        payload = result.to_dict()
+
+        # Persist full graphs as separate JSON files to keep session.json manageable.
+        kg = payload.pop("knowledge_graph", None)
+        dg = payload.pop("dependency_graph", None)
+        if isinstance(kg, dict):
+            with open(os.path.join(session_dir, "knowledge_graph.json"), "w", encoding="utf-8") as f:
+                json.dump(kg, f, ensure_ascii=False, indent=2)
+        if isinstance(dg, dict):
+            with open(os.path.join(session_dir, "dependency_graph.json"), "w", encoding="utf-8") as f:
+                json.dump(dg, f, ensure_ascii=False, indent=2)
+
+        # Record artifact paths (if present).
+        artifacts: Dict[str, Any] = {}
+        evidence_db = os.path.join(session_dir, "evidence.duckdb")
+        legal_db = os.path.join(session_dir, "legal_authorities.duckdb")
+        artifacts["evidence_duckdb_expected"] = os.path.abspath(evidence_db)
+        artifacts["legal_authorities_duckdb_expected"] = os.path.abspath(legal_db)
+        artifacts["evidence_duckdb_exists"] = os.path.isfile(evidence_db)
+        artifacts["legal_authorities_duckdb_exists"] = os.path.isfile(legal_db)
+        if os.path.isfile(evidence_db):
+            artifacts["evidence_duckdb"] = os.path.abspath(evidence_db)
+        if os.path.isfile(legal_db):
+            artifacts["legal_authorities_duckdb"] = os.path.abspath(legal_db)
+        kg_path = os.path.join(session_dir, "knowledge_graph.json")
+        dg_path = os.path.join(session_dir, "dependency_graph.json")
+        if os.path.isfile(kg_path):
+            artifacts["knowledge_graph_json"] = os.path.abspath(kg_path)
+        if os.path.isfile(dg_path):
+            artifacts["dependency_graph_json"] = os.path.abspath(dg_path)
+        payload["artifacts"] = artifacts
+
         with open(session_json_path, 'w', encoding='utf-8') as f:
-            json.dump(result.to_dict(), f, ensure_ascii=False, indent=2)
+            json.dump(payload, f, ensure_ascii=False, indent=2)
 
         # Persist conversation history as JSONL for easy streaming/grepping.
         # Note: history entries don't include timestamps; include ordering index.
@@ -196,19 +253,35 @@ class AdversarialHarness:
                 personality=spec['personality']
             )
             
-            # Set context
-            context = ComplaintContext(
-                complaint_type=spec['seed'].get('type', 'unknown'),
-                key_facts=spec['seed'].get('key_facts', {}),
-                emotional_state='distressed',
-                cooperation_level=0.8 if spec['personality'] == 'cooperative' else 0.5
-            )
-            complainant.set_context(context)
+            # Set context (maps personality to emotional_state/cooperation/context_depth)
+            complainant.set_context(Complainant.build_default_context(spec['seed'], spec['personality']))
             
             critic = Critic(self.llm_backend_critic)
-            
-            # Create new mediator instance (thread-safe)
-            mediator = self.mediator_factory()
+
+            session_dir = self._get_session_dir(spec['session_id'])
+            if session_dir:
+                os.makedirs(session_dir, exist_ok=True)
+            evidence_db_path = os.path.join(session_dir, "evidence.duckdb") if session_dir else None
+            legal_authority_db_path = os.path.join(session_dir, "legal_authorities.duckdb") if session_dir else None
+
+            # Proactively create valid DuckDB container files so they are always present
+            # in the session folder (hooks will still initialize schemas when DuckDB is available).
+            try:
+                import duckdb  # type: ignore
+                if evidence_db_path:
+                    conn = duckdb.connect(evidence_db_path)
+                    conn.close()
+                if legal_authority_db_path:
+                    conn = duckdb.connect(legal_authority_db_path)
+                    conn.close()
+            except Exception:
+                pass
+
+            # Create new mediator instance (thread-safe). If supported, use per-session DuckDB paths.
+            mediator = self._create_mediator_for_session(
+                evidence_db_path=evidence_db_path,
+                legal_authority_db_path=legal_authority_db_path,
+            )
             
             # Create and run session
             session = AdversarialSession(

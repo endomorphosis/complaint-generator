@@ -5,6 +5,7 @@ import os
 import sys
 import time
 from datetime import datetime
+import importlib.util
 from typing import Any, Dict
 
 # Allow running via: python examples/batch_sgd_cycle.py
@@ -16,8 +17,21 @@ from adversarial_harness import AdversarialHarness, Optimizer
 from backends import LLMRouterBackend
 from mediator import Mediator
 
-# Import report helpers (keeps this as a thin orchestrator)
-from examples.session_sgd_report import _find_session_json_files, _summarize_session, _write_report
+
+def _load_session_sgd_report_module():
+	path = os.path.join(PROJECT_ROOT, "examples", "session_sgd_report.py")
+	spec = importlib.util.spec_from_file_location("session_sgd_report", path)
+	if not spec or not spec.loader:
+		raise RuntimeError(f"Unable to load session_sgd_report.py from {path}")
+	module = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(module)  # type: ignore[attr-defined]
+	return module
+
+
+_sgd = _load_session_sgd_report_module()
+_find_session_json_files = _sgd._find_session_json_files
+_summarize_session = _sgd._summarize_session
+_write_report = _sgd._write_report
 
 
 def _load_config(path: str) -> Dict[str, Any]:
@@ -53,6 +67,11 @@ def main() -> int:
 	parser.add_argument("--num-sessions", type=int, default=5)
 	parser.add_argument("--max-turns", type=int, default=8)
 	parser.add_argument("--max-parallel", type=int, default=2)
+	parser.add_argument(
+		"--personalities",
+		default=None,
+		help="Comma-separated complainant personalities to cycle through (e.g. cooperative,defensive,vague).",
+	)
 	parser.add_argument("--retry-max-attempts", type=int, default=1)
 	parser.add_argument("--retry-backoff-base-s", type=float, default=0.5)
 	parser.add_argument("--retry-backoff-max-s", type=float, default=20.0)
@@ -64,6 +83,10 @@ def main() -> int:
 	parser.add_argument("--denoiser-momentum-beta", type=float, default=None)
 	parser.add_argument("--denoiser-seed", type=int, default=None)
 	args = parser.parse_args()
+
+	personalities = None
+	if args.personalities:
+		personalities = [p.strip() for p in args.personalities.split(",") if p.strip()]
 
 	if args.denoiser_exploration_enabled:
 		os.environ["CG_DENOISER_EXPLORATION_ENABLED"] = "1"
@@ -101,8 +124,8 @@ def main() -> int:
 	llm_backend_complainant = LLMRouterBackend(**backend_kwargs)
 	llm_backend_critic = LLMRouterBackend(**backend_kwargs)
 
-	def mediator_factory() -> Mediator:
-		return Mediator(backends=[LLMRouterBackend(**backend_kwargs)])
+	def mediator_factory(**kwargs) -> Mediator:
+		return Mediator(backends=[LLMRouterBackend(**backend_kwargs)], **kwargs)
 
 	harness = AdversarialHarness(
 		llm_backend_complainant=llm_backend_complainant,
@@ -113,7 +136,11 @@ def main() -> int:
 	)
 
 	start = time.time()
-	results = harness.run_batch(num_sessions=args.num_sessions, max_turns_per_session=args.max_turns)
+	results = harness.run_batch(
+		num_sessions=args.num_sessions,
+		max_turns_per_session=args.max_turns,
+		personalities=personalities,
+	)
 	duration_s = time.time() - start
 
 	opt_report = Optimizer().analyze(results)
@@ -131,6 +158,7 @@ def main() -> int:
 			"num_sessions": args.num_sessions,
 			"max_turns": args.max_turns,
 			"max_parallel": args.max_parallel,
+			"personalities": personalities,
 			"retry_max_attempts": args.retry_max_attempts,
 			"retry_backoff_base_s": args.retry_backoff_base_s,
 			"retry_backoff_max_s": args.retry_backoff_max_s,

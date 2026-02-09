@@ -5,6 +5,7 @@ import os
 import sys
 import time
 from datetime import datetime
+import importlib.util
 from itertools import product
 from typing import Any, Dict, List
 
@@ -17,7 +18,21 @@ from adversarial_harness import AdversarialHarness
 from backends import LLMRouterBackend
 from mediator import Mediator
 
-from examples.session_sgd_report import _find_session_json_files, _summarize_session, _write_report
+
+def _load_session_sgd_report_module():
+	path = os.path.join(PROJECT_ROOT, "examples", "session_sgd_report.py")
+	spec = importlib.util.spec_from_file_location("session_sgd_report", path)
+	if not spec or not spec.loader:
+		raise RuntimeError(f"Unable to load session_sgd_report.py from {path}")
+	module = importlib.util.module_from_spec(spec)
+	spec.loader.exec_module(module)  # type: ignore[attr-defined]
+	return module
+
+
+_sgd = _load_session_sgd_report_module()
+_find_session_json_files = _sgd._find_session_json_files
+_summarize_session = _sgd._summarize_session
+_write_report = _sgd._write_report
 
 
 def _load_config(path: str) -> Dict[str, Any]:
@@ -52,6 +67,21 @@ def _parse_float_list(s: str) -> List[float]:
 	return [float(x.strip()) for x in s.split(",") if x.strip()]
 
 
+def _parse_str_list(s: str) -> List[str]:
+	return [x.strip() for x in s.split(",") if x.strip()]
+
+
+def _parse_personality_sets(s: str) -> List[List[str]]:
+	# Semicolon-separated CSVs: "cooperative,defensive;vague,detailed"
+	sets: List[List[str]] = []
+	for part in (s or "").split(";"):
+		part = part.strip()
+		if not part:
+			continue
+		sets.append(_parse_str_list(part))
+	return sets
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser(description="Empirically sweep parallelism and retry/backoff settings")
 	parser.add_argument("--config", default="config.llm_router.json")
@@ -65,6 +95,16 @@ def main() -> int:
 	parser.add_argument("--base-backoffs", default="0.5,1.0")
 	parser.add_argument("--max-backoff-s", type=float, default=20.0)
 	parser.add_argument("--jitter-s", type=float, default=0.1)
+	parser.add_argument(
+		"--personalities",
+		default=None,
+		help="Comma-separated personalities to cycle through for every run (overrides harness defaults).",
+	)
+	parser.add_argument(
+		"--personality-sets",
+		default=None,
+		help="Semicolon-separated personality CSVs to sweep as an extra grid dimension (e.g. 'cooperative,defensive;vague,detailed,emotional').",
+	)
 	parser.add_argument("--denoiser-exploration-enabled", action="store_true")
 	parser.add_argument("--denoiser-momentum-enabled", action="store_true")
 	parser.add_argument("--denoiser-exploration-epsilon", type=float, default=None)
@@ -99,13 +139,20 @@ def main() -> int:
 	attempts = _parse_int_list(args.attempts)
 	base_backoffs = _parse_float_list(args.base_backoffs)
 
-	grid = list(product(parallels, attempts, base_backoffs))
+	personalities = _parse_str_list(args.personalities) if args.personalities else None
+	personality_sets = _parse_personality_sets(args.personality_sets) if args.personality_sets else None
+	if personality_sets is None:
+		personality_sets = [personalities]  # may be None; means use harness default personalities
+
+	grid = list(product(parallels, attempts, base_backoffs, personality_sets))
 	logging.info("Sweep dir: %s", os.path.abspath(sweep_dir))
 	logging.info("Grid points: %d", len(grid))
 
 	results = []
-	for max_parallel, retry_max_attempts, retry_backoff_base_s in grid:
+	for max_parallel, retry_max_attempts, retry_backoff_base_s, run_personalities in grid:
 		label = f"p{max_parallel}_a{retry_max_attempts}_b{retry_backoff_base_s}".replace(".", "p")
+		if run_personalities:
+			label += "_pers_" + "-".join(run_personalities)
 		run_dir = os.path.join(sweep_dir, label)
 		os.makedirs(run_dir, exist_ok=True)
 
@@ -120,8 +167,8 @@ def main() -> int:
 		llm_backend_complainant = LLMRouterBackend(**backend_kwargs)
 		llm_backend_critic = LLMRouterBackend(**backend_kwargs)
 
-		def mediator_factory() -> Mediator:
-			return Mediator(backends=[LLMRouterBackend(**backend_kwargs)])
+		def mediator_factory(**kwargs) -> Mediator:
+			return Mediator(backends=[LLMRouterBackend(**backend_kwargs)], **kwargs)
 
 		harness = AdversarialHarness(
 			llm_backend_complainant=llm_backend_complainant,
@@ -132,7 +179,11 @@ def main() -> int:
 		)
 
 		start = time.time()
-		batch_results = harness.run_batch(num_sessions=args.num_sessions, max_turns_per_session=args.max_turns)
+		batch_results = harness.run_batch(
+			num_sessions=args.num_sessions,
+			max_turns_per_session=args.max_turns,
+			personalities=run_personalities,
+		)
 		duration_s = time.time() - start
 
 		successes = sum(1 for r in batch_results if r.success)
@@ -153,6 +204,7 @@ def main() -> int:
 				"retry_backoff_base_s": retry_backoff_base_s,
 				"retry_backoff_max_s": args.max_backoff_s,
 				"retry_jitter_s": args.jitter_s,
+				"personalities": run_personalities,
 			},
 			"metrics": {
 				"batch_duration_seconds": duration_s,
