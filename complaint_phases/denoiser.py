@@ -25,6 +25,79 @@ class ComplaintDenoiser:
         self.mediator = mediator
         self.questions_asked = []
         self.questions_pool = []
+
+    def _normalize_question_text(self, text: str) -> str:
+        return (text or "").strip().lower()
+
+    def _already_asked(self, question_text: str) -> bool:
+        norm = self._normalize_question_text(question_text)
+        for item in self.questions_asked:
+            q = item.get('question') or {}
+            if isinstance(q, dict):
+                asked_text = q.get('question', '')
+            else:
+                asked_text = str(q)
+            if self._normalize_question_text(asked_text) == norm:
+                return True
+        return False
+
+    def _with_empathy(self, question_text: str, question_type: str) -> str:
+        # Keep this minimal so we don't overwhelm the prompt.
+        text = (question_text or "").strip()
+        if not text:
+            return text
+        prefix = ""
+        if question_type in {'clarification', 'relationship', 'requirement'}:
+            prefix = "To make sure I understand, "
+        elif question_type in {'evidence'}:
+            prefix = "So we can support your claim, "
+        if prefix and not text.lower().startswith(prefix.strip().lower()):
+            return prefix + text[0].lower() + text[1:] if len(text) > 1 else prefix + text.lower()
+        return text
+
+    def _ensure_standard_intake_questions(self, questions: List[Dict[str, Any]], max_questions: int) -> List[Dict[str, Any]]:
+        if len(questions) >= max_questions:
+            return questions
+
+        existing_text = " ".join([q.get('question', '') for q in questions]).lower()
+        added: List[Dict[str, Any]] = []
+
+        # Timeline question
+        timeline_text = (
+            "What is the timeline of key events (dates, who was involved, what was said or done, and when you requested help/accommodation)?"
+        )
+        if len(questions) + len(added) < max_questions:
+            if not any(q.get('type') == 'timeline' for q in questions) and not any(k in existing_text for k in ['timeline', 'when did', 'what date', 'dates']):
+                if not self._already_asked(timeline_text):
+                    added.append({
+                        'type': 'timeline',
+                        'question': timeline_text,
+                        'context': {},
+                        'priority': 'high'
+                    })
+
+        # Harms/remedy question
+        impact_text = (
+            "What harm did you experience (financial, emotional, professional), and what outcome or remedy are you seeking?"
+        )
+        if len(questions) + len(added) < max_questions:
+            if not any(q.get('type') in {'impact', 'remedy'} for q in questions) and not any(k in existing_text for k in ['harm', 'damages', 'remedy', 'seeking']):
+                if not self._already_asked(impact_text):
+                    added.append({
+                        'type': 'impact',
+                        'question': impact_text,
+                        'context': {},
+                        'priority': 'high'
+                    })
+
+        if not added:
+            return questions
+
+        # Add to front (high priority) but keep stable ordering otherwise.
+        priority_order = {'high': 0, 'medium': 1, 'low': 2}
+        combined = questions + added
+        combined.sort(key=lambda q: priority_order.get(q.get('priority', 'low'), 3))
+        return combined[:max_questions]
     
     def generate_questions(self, 
                           knowledge_graph: KnowledgeGraph,
@@ -98,6 +171,15 @@ class ComplaintDenoiser:
         # Sort by priority
         priority_order = {'high': 0, 'medium': 1, 'low': 2}
         questions.sort(key=lambda q: priority_order.get(q.get('priority', 'low'), 3))
+
+        # Ensure we cover basic intake dimensions beyond evidence-only prompts.
+        questions = self._ensure_standard_intake_questions(questions, max_questions)
+
+        # Light empathy / framing tweaks (text-only; doesn't change structure).
+        for q in questions:
+            qtype = q.get('type', '')
+            qtext = q.get('question', '')
+            q['question'] = self._with_empathy(qtext, qtype)
         
         # Track questions in pool
         self.questions_pool.extend(questions[:max_questions])

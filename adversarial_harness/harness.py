@@ -35,7 +35,8 @@ class AdversarialHarness:
                  llm_backend_critic,
                  mediator_factory: Callable,
                  seed_library: SeedComplaintLibrary = None,
-                 max_parallel: int = 4):
+                 max_parallel: int = 4,
+                 session_state_dir: str | None = None):
         """
         Initialize adversarial harness.
         
@@ -45,14 +46,55 @@ class AdversarialHarness:
             mediator_factory: Factory function to create mediator instances
             seed_library: Optional seed complaint library
             max_parallel: Maximum parallel sessions
+            session_state_dir: Optional directory to persist each session under
+                as <session_state_dir>/<session_id>/{chat.jsonl,session.json}.
         """
         self.llm_backend_complainant = llm_backend_complainant
         self.llm_backend_critic = llm_backend_critic
         self.mediator_factory = mediator_factory
         self.seed_library = seed_library or SeedComplaintLibrary()
         self.max_parallel = max_parallel
+        self.session_state_dir = session_state_dir
         
         self.results = []
+
+    def _safe_session_id(self, text: str) -> str:
+        allowed = []
+        for ch in text:
+            if ch.isalnum() or ch in ('-', '_', '.'):
+                allowed.append(ch)
+            else:
+                allowed.append('_')
+        return ''.join(allowed)
+
+    def _persist_session(self, result: SessionResult) -> None:
+        if not self.session_state_dir:
+            return
+
+        session_id = self._safe_session_id(result.session_id)
+        session_dir = os.path.join(self.session_state_dir, session_id)
+        os.makedirs(session_dir, exist_ok=True)
+
+        session_json_path = os.path.join(session_dir, 'session.json')
+        chat_jsonl_path = os.path.join(session_dir, 'chat.jsonl')
+
+        with open(session_json_path, 'w', encoding='utf-8') as f:
+            json.dump(result.to_dict(), f, ensure_ascii=False, indent=2)
+
+        # Persist conversation history as JSONL for easy streaming/grepping.
+        # Note: history entries don't include timestamps; include ordering index.
+        with open(chat_jsonl_path, 'w', encoding='utf-8') as f:
+            for i, msg in enumerate(result.conversation_history or []):
+                line = {
+                    'session_id': result.session_id,
+                    'i': i,
+                    'role': msg.get('role', 'unknown'),
+                    'type': msg.get('type', ''),
+                    'content': msg.get('content', ''),
+                }
+                f.write(json.dumps(line, ensure_ascii=False) + '\n')
+
+        logger.info('Session artifacts saved to %s', session_dir)
     
     def run_batch(self,
                   num_sessions: int = 10,
@@ -113,7 +155,21 @@ class AdversarialHarness:
                 spec = future_to_spec[future]
                 try:
                     result = future.result()
+                    # Attach spec metadata for downstream optimization.
+                    try:
+                        if isinstance(result.seed_complaint, dict):
+                            result.seed_complaint = {
+                                **result.seed_complaint,
+                                '_meta': {
+                                    'personality': spec.get('personality'),
+                                    'max_turns': spec.get('max_turns'),
+                                }
+                            }
+                    except Exception:
+                        pass
+
                     results.append(result)
+                    self._persist_session(result)
                     completed += 1
                     
                     if result.success:

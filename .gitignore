@@ -5,6 +5,7 @@ statefiles/*.json
 # Test artifacts
 .pytest_cache/
 .coverage
+statefiles/
 htmlcov/
 *.pyc
 *.pyo
