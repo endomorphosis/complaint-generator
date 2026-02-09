@@ -629,6 +629,40 @@ def main() -> int:
         action="store_true",
         help="If pytest fails at the end, undo all applied patches from this run before exiting.",
     )
+
+    parser.set_defaults(pytest_after_each_run=True)
+    parser.add_argument(
+        "--pytest-after-each-run",
+        dest="pytest_after_each_run",
+        action="store_true",
+        help="Run pytest -q after each run's patch is applied (default).",
+    )
+    parser.add_argument(
+        "--no-pytest-after-each-run",
+        dest="pytest_after_each_run",
+        action="store_false",
+        help="Disable running pytest after each run.",
+    )
+
+    parser.set_defaults(undo_last_on_pytest_fail=True)
+    parser.add_argument(
+        "--undo-last-on-pytest-fail",
+        dest="undo_last_on_pytest_fail",
+        action="store_true",
+        help="If pytest fails after applying a patch, undo only that patch and continue (default).",
+    )
+    parser.add_argument(
+        "--no-undo-last-on-pytest-fail",
+        dest="undo_last_on_pytest_fail",
+        action="store_false",
+        help="If pytest fails after applying a patch, keep the patch applied.",
+    )
+
+    parser.add_argument(
+        "--stop-on-pytest-fail",
+        action="store_true",
+        help="Stop immediately if pytest fails after a run.",
+    )
     parser.add_argument(
         "--undo-dir",
         default=None,
@@ -666,6 +700,9 @@ def main() -> int:
     codex_backend = LLMRouterBackend(**codex_backend_kwargs)
 
     run_records: List[Dict[str, Any]] = []
+    applied: List[Dict[str, Any]] = []
+    undo_records: List[str] = []
+    per_run_tests: List[Dict[str, Any]] = []
 
     for i in range(args.runs):
         run_id = f"{orchestrator_id}_run_{i:02d}"
@@ -685,6 +722,12 @@ def main() -> int:
             retry_jitter_s=args.retry_jitter_s,
         )
 
+        rec: Dict[str, Any] = {
+            "i": i,
+            "run_id": run_id,
+            "run_dir": os.path.abspath(run_dir),
+        }
+
         try:
             patch_path = _generate_codex_patch_for_run(
                 python_exe=python_exe,
@@ -692,8 +735,7 @@ def main() -> int:
                 config_path=args.config,
                 backend_id=args.codex_backend_id,
             )
-            patch_text = _read_text(patch_path)
-            patch_text = _normalize_patch_text(patch_text)
+            patch_text = _normalize_patch_text(_read_text(patch_path))
 
             # Validate (dry-run apply) immediately; if Codex produced a broken patch, repair it now.
             gen_attempt = 0
@@ -715,8 +757,6 @@ def main() -> int:
                     for fp in update_files:
                         if os.path.isfile(fp):
                             file_contents[fp] = _read_text(fp)
-
-                    # If we know the specific failing file, include it even if the patch headers are malformed.
                     if e.file_path and os.path.isfile(e.file_path):
                         file_contents.setdefault(e.file_path, _read_text(e.file_path))
 
@@ -727,98 +767,142 @@ def main() -> int:
                         file_contents=file_contents,
                     )
 
-            # Copy patch into orchestrator folder for later application
-            # Ensure directories exist even if state_dir is changed mid-run.
+            # Copy patch into orchestrator folder for traceability.
             _ensure_dir(patches_dir)
             local_patch_path = os.path.join(patches_dir, f"patch_{i:02d}.patch")
             with open(local_patch_path, "w", encoding="utf-8") as f:
                 f.write(patch_text)
+            rec["patch_path"] = os.path.abspath(local_patch_path)
 
-            run_records.append(
-                {
-                    "i": i,
-                    "run_id": run_id,
-                    "run_dir": os.path.abspath(run_dir),
-                    "patch_path": os.path.abspath(local_patch_path),
-                }
-            )
-        except Exception as e:
-            print(f"[patch] SKIP run_id={run_id} error={e}")
-            run_records.append(
-                {
-                    "i": i,
-                    "run_id": run_id,
-                    "run_dir": os.path.abspath(run_dir),
-                    "patch_error": str(e),
-                }
-            )
-
-    patch_records = [r for r in run_records if r.get("patch_path")]
-    print(f"[apply] applying {len(patch_records)} patches")
-
-    applied: List[Dict[str, Any]] = []
-    undo_records: List[str] = []
-    for rec in patch_records:
-        patch_path = rec["patch_path"]
-        patch_text = _read_text(patch_path)
-        patch_name = os.path.basename(patch_path).replace(".patch", "")
-
-        attempt = 0
-        while True:
-            attempt += 1
-            try:
-                updated, original = _apply_patch_transaction(patch_text)
-                undo_record_path = ""
-                if updated:
-                    undo_record_path = _write_undo_record(undo_dir, patch_name, original, updated)
-                    undo_records.append(undo_record_path)
-                applied.append(
-                    {
-                        "patch_path": patch_path,
-                        "attempt": attempt,
-                        "updated_files": updated,
-                        "fixed": attempt > 1,
-                        "undo_record": undo_record_path or None,
-                    }
-                )
-                print(f"[apply] ok patch={os.path.basename(patch_path)} updated={len(updated)}")
-                break
-            except PatchApplyError as e:
-                if attempt > args.apply_fix_max_attempts + 1:
+            # Apply immediately so later patches are generated against the updated tree.
+            patch_name = os.path.basename(local_patch_path).replace(".patch", "")
+            apply_attempt = 0
+            while True:
+                apply_attempt += 1
+                try:
+                    updated, original = _apply_patch_transaction(patch_text)
+                    undo_record_path = ""
+                    if updated:
+                        undo_record_path = _write_undo_record(undo_dir, patch_name, original, updated)
+                        undo_records.append(undo_record_path)
                     applied.append(
                         {
-                            "patch_path": patch_path,
-                            "attempt": attempt,
-                            "error": str(e),
-                            "fixed": True,
-                            "failed": True,
+                            "patch_path": rec["patch_path"],
+                            "attempt": apply_attempt,
+                            "updated_files": updated,
+                            "fixed": apply_attempt > 1,
+                            "undo_record": undo_record_path or None,
                         }
                     )
-                    print(f"[apply] FAIL patch={os.path.basename(patch_path)} error={e}")
+                    print(f"[apply] ok patch={os.path.basename(local_patch_path)} updated={len(updated)}")
+                    rec["patch_applied"] = True
                     break
+                except PatchApplyError as e:
+                    if apply_attempt > args.apply_fix_max_attempts + 1:
+                        applied.append(
+                            {
+                                "patch_path": rec["patch_path"],
+                                "attempt": apply_attempt,
+                                "error": str(e),
+                                "fixed": True,
+                                "failed": True,
+                            }
+                        )
+                        print(f"[apply] FAIL patch={os.path.basename(local_patch_path)} error={e}")
+                        rec["patch_applied"] = False
+                        rec["patch_apply_error"] = str(e)
+                        break
 
-                # Ask Codex to fix patch based on current contents of impacted files.
-                update_files = _extract_update_files(patch_text)
-                file_contents: Dict[str, str] = {}
-                for fp in update_files:
-                    if os.path.isfile(fp):
-                        file_contents[fp] = _read_text(fp)
+                    update_files = _extract_update_files(patch_text)
+                    file_contents: Dict[str, str] = {}
+                    for fp in update_files:
+                        if os.path.isfile(fp):
+                            file_contents[fp] = _read_text(fp)
+                    if e.file_path and os.path.isfile(e.file_path):
+                        file_contents.setdefault(e.file_path, _read_text(e.file_path))
 
-                fixed_patch_text = _codex_fix_patch(
-                    codex_backend=codex_backend,
-                    failing_patch_text=patch_text,
-                    error_message=str(e),
-                    file_contents=file_contents,
+                    patch_text = _codex_fix_patch(
+                        codex_backend=codex_backend,
+                        failing_patch_text=patch_text,
+                        error_message=str(e),
+                        file_contents=file_contents,
+                    )
+
+                    fixed_out_path = os.path.join(
+                        fixed_dir,
+                        f"fixed_{os.path.basename(local_patch_path).replace('.patch','')}_attempt_{apply_attempt}.patch",
+                    )
+                    with open(fixed_out_path, "w", encoding="utf-8") as f2:
+                        f2.write(patch_text)
+
+            # Run pytest after each run (batch of sessions) by default.
+            if args.pytest_after_each_run:
+                test_start = time.time()
+                test_proc = subprocess.run(
+                    [python_exe, "-m", "pytest", "-q"],
+                    cwd=PROJECT_ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
                 )
-
-                fixed_out_path = os.path.join(
-                    fixed_dir,
-                    f"fixed_{os.path.basename(patch_path).replace('.patch','')}_attempt_{attempt}.patch",
+                out_lines = (test_proc.stdout or "").splitlines()
+                per_run_tests.append(
+                    {
+                        "run_id": run_id,
+                        "patch_path": rec.get("patch_path"),
+                        "exit_code": test_proc.returncode,
+                        "duration_seconds": time.time() - test_start,
+                        "output_tail": out_lines[-60:],
+                    }
                 )
-                with open(fixed_out_path, "w", encoding="utf-8") as f:
-                    f.write(fixed_patch_text)
+                rec["pytest_after_run_exit_code"] = test_proc.returncode
 
-                patch_text = fixed_patch_text
+                if test_proc.returncode != 0:
+                    print(f"[test] FAIL run_id={run_id} exit={test_proc.returncode}")
+                    if args.undo_last_on_pytest_fail and undo_records:
+                        last_undo = undo_records.pop()
+                        print(f"[undo] restoring last patch via {os.path.basename(last_undo)}")
+                        _restore_undo_record(last_undo)
+                        if applied:
+                            applied[-1]["rolled_back"] = True
+                        rec["rolled_back"] = True
+
+                        # Verify rollback restored a passing state.
+                        verify_proc = subprocess.run(
+                            [python_exe, "-m", "pytest", "-q"],
+                            cwd=PROJECT_ROOT,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                        )
+                        verify_lines = (verify_proc.stdout or "").splitlines()
+                        per_run_tests.append(
+                            {
+                                "run_id": run_id,
+                                "patch_path": rec.get("patch_path"),
+                                "exit_code": verify_proc.returncode,
+                                "duration_seconds": None,
+                                "output_tail": verify_lines[-60:],
+                                "note": "post_rollback_verify",
+                            }
+                        )
+                        if verify_proc.returncode != 0:
+                            print(f"[test] STILL FAIL after rollback run_id={run_id} exit={verify_proc.returncode}")
+                            rec["pytest_after_rollback_exit_code"] = verify_proc.returncode
+                            if args.stop_on_pytest_fail:
+                                rec["stopped_on_pytest_fail"] = True
+                                raise RuntimeError("Stopping due to pytest failure even after rollback")
+                    if args.stop_on_pytest_fail:
+                        rec["stopped_on_pytest_fail"] = True
+                        raise RuntimeError("Stopping due to pytest failure after run")
+                else:
+                    print(f"[test] ok run_id={run_id}")
+
+        except Exception as e:
+            print(f"[patch] SKIP run_id={run_id} error={e}")
+            rec["patch_error"] = str(e)
+
+        run_records.append(rec)
 
     print("[test] running pytest -q")
     test_proc = subprocess.run(
@@ -850,6 +934,7 @@ def main() -> int:
         "runs": run_records,
         "applied": applied,
         "undo_records": undo_records,
+        "per_run_tests": per_run_tests,
         "tests": {
             "exit_code": test_proc.returncode,
         },
