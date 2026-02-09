@@ -7,6 +7,8 @@ noise/ambiguity in the complaint information.
 
 import logging
 from typing import Dict, List, Any, Optional
+import os
+import random
 from .knowledge_graph import KnowledgeGraph
 from .dependency_graph import DependencyGraph
 
@@ -25,6 +27,140 @@ class ComplaintDenoiser:
         self.mediator = mediator
         self.questions_asked = []
         self.questions_pool = []
+
+        # Optional “policy” knobs for SGD-style exploration.
+        # Default is deterministic/no-randomness.
+        self.exploration_epsilon = self._env_float("CG_DENOISER_EXPLORATION_EPSILON", 0.0)
+        self.momentum_beta = self._env_float("CG_DENOISER_MOMENTUM_BETA", 0.85)
+        self.momentum_enabled = self._env_bool("CG_DENOISER_MOMENTUM_ENABLED", False)
+        self.exploration_enabled = self._env_bool("CG_DENOISER_EXPLORATION_ENABLED", False)
+        self.exploration_top_k = int(self._env_float("CG_DENOISER_EXPLORATION_TOP_K", 3) or 3)
+        self.stagnation_window = int(self._env_float("CG_DENOISER_STAGNATION_WINDOW", 4) or 4)
+        self.stagnation_gain_threshold = float(self._env_float("CG_DENOISER_STAGNATION_GAIN_THRESHOLD", 0.5) or 0.5)
+
+        seed = os.getenv("CG_DENOISER_SEED")
+        self._rng = random.Random(int(seed)) if seed and seed.isdigit() else random.Random()
+
+        # Momentum state: EMA of “gain” by question type.
+        self._type_gain_ema: Dict[str, float] = {}
+        self._recent_gains: List[float] = []
+
+
+    def _env_bool(self, key: str, default: bool) -> bool:
+        raw = os.getenv(key)
+        if raw is None:
+            return default
+        val = raw.strip().lower()
+        if val in {"1", "true", "yes", "y", "on"}:
+            return True
+        if val in {"0", "false", "no", "n", "off"}:
+            return False
+        return default
+
+
+    def _env_float(self, key: str, default: float) -> float:
+        raw = os.getenv(key)
+        if raw is None:
+            return default
+        try:
+            return float(raw.strip())
+        except Exception:
+            return default
+
+
+    def get_policy_state(self) -> Dict[str, Any]:
+        return {
+            "exploration_enabled": bool(self.exploration_enabled),
+            "exploration_epsilon": float(self.exploration_epsilon),
+            "exploration_top_k": int(self.exploration_top_k),
+            "momentum_enabled": bool(self.momentum_enabled),
+            "momentum_beta": float(self.momentum_beta),
+            "stagnation_window": int(self.stagnation_window),
+            "stagnation_gain_threshold": float(self.stagnation_gain_threshold),
+            "type_gain_ema": dict(self._type_gain_ema),
+            "recent_gains": list(self._recent_gains[-10:]),
+        }
+
+
+    def _compute_gain(self, updates: Dict[str, Any]) -> float:
+        # A small heuristic: “did this question produce useful structured updates?”
+        return float(
+            (updates.get('entities_updated') or 0)
+            + (updates.get('relationships_added') or 0)
+            + (updates.get('requirements_satisfied') or 0)
+        )
+
+
+    def _update_momentum(self, question_type: str, gain: float) -> None:
+        qtype = (question_type or "unknown").strip() or "unknown"
+        prev = float(self._type_gain_ema.get(qtype, gain))
+        beta = float(self.momentum_beta)
+        beta = min(max(beta, 0.0), 0.999)
+        self._type_gain_ema[qtype] = beta * prev + (1.0 - beta) * float(gain)
+
+
+    def _maybe_increase_exploration_when_stuck(self) -> float:
+        # If recent gains are consistently low, boost epsilon slightly.
+        if self.stagnation_window <= 0:
+            return float(self.exploration_epsilon)
+        window = self._recent_gains[-self.stagnation_window :]
+        if len(window) < self.stagnation_window:
+            return float(self.exploration_epsilon)
+        avg_gain = sum(window) / max(len(window), 1)
+        if avg_gain <= self.stagnation_gain_threshold:
+            return min(0.5, float(self.exploration_epsilon) + 0.1)
+        return float(self.exploration_epsilon)
+
+
+    def is_stagnating(self) -> bool:
+        if self.stagnation_window <= 0:
+            return False
+        window = self._recent_gains[-self.stagnation_window :]
+        if len(window) < self.stagnation_window:
+            return False
+        avg_gain = sum(window) / max(len(window), 1)
+        return avg_gain <= self.stagnation_gain_threshold
+
+
+    def _apply_exploration_and_momentum(self, questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not questions:
+            return questions
+
+        # Keep deterministic behavior unless explicitly enabled.
+        if not (self.momentum_enabled or self.exploration_enabled):
+            return questions
+
+        # Momentum: reorder within the same priority bucket by EMA gain.
+        priority_order = {'high': 0, 'medium': 1, 'low': 2}
+
+        def score(q: Dict[str, Any]) -> float:
+            qtype = (q.get('type') or 'unknown')
+            return float(self._type_gain_ema.get(qtype, 0.0))
+
+        # Group by priority to preserve the high/medium/low structure.
+        grouped: Dict[int, List[Dict[str, Any]]] = {0: [], 1: [], 2: [], 3: []}
+        for q in questions:
+            grouped[priority_order.get(q.get('priority', 'low'), 3)].append(q)
+
+        if self.momentum_enabled:
+            for k in list(grouped.keys()):
+                grouped[k].sort(key=score, reverse=True)
+
+        merged: List[Dict[str, Any]] = []
+        for k in sorted(grouped.keys()):
+            merged.extend(grouped[k])
+
+        # Exploration: with probability epsilon, swap the top question with another
+        # from the top-K to encourage exploration.
+        if self.exploration_enabled and self.exploration_top_k > 1:
+            epsilon = self._maybe_increase_exploration_when_stuck()
+            if self._rng.random() < max(0.0, min(1.0, epsilon)):
+                k = min(int(self.exploration_top_k), len(merged))
+                if k > 1:
+                    j = self._rng.randrange(0, k)
+                    merged[0], merged[j] = merged[j], merged[0]
+
+        return merged
 
     def _normalize_question_text(self, text: str) -> str:
         return (text or "").strip().lower()
@@ -168,12 +304,15 @@ class ComplaintDenoiser:
                     'priority': 'high'
                 })
         
-        # Sort by priority
+        # Sort by priority (baseline ordering)
         priority_order = {'high': 0, 'medium': 1, 'low': 2}
         questions.sort(key=lambda q: priority_order.get(q.get('priority', 'low'), 3))
 
         # Ensure we cover basic intake dimensions beyond evidence-only prompts.
         questions = self._ensure_standard_intake_questions(questions, max_questions)
+
+        # Optional exploration/momentum policy (reorders questions only).
+        questions = self._apply_exploration_and_momentum(questions)
 
         # Light empathy / framing tweaks (text-only; doesn't change structure).
         for q in questions:
@@ -256,6 +395,19 @@ class ComplaintDenoiser:
                     updates['requirements_satisfied'] += 1
         
         logger.info(f"Processed answer: {updates}")
+
+        # Update momentum from observed “gain”.
+        try:
+            gain = self._compute_gain(updates)
+            self._recent_gains.append(gain)
+            # Cap memory.
+            if len(self._recent_gains) > 50:
+                self._recent_gains = self._recent_gains[-50:]
+            qtype = question.get('type') if isinstance(question, dict) else 'unknown'
+            self._update_momentum(str(qtype or 'unknown'), gain)
+        except Exception:
+            pass
+
         return updates
     
     def calculate_noise_level(self, 

@@ -8,6 +8,9 @@ It provides a unified interface for routing requests to various LLM providers.
 import sys
 import os
 import logging
+import random
+import time
+import threading
 
 # Add ipfs_datasets_py to Python path if not already there
 ipfs_datasets_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'ipfs_datasets_py')
@@ -39,8 +42,44 @@ class LLMRouterBackend:
         """
         self.id = id
         self.provider = provider or 'copilot_cli'
-        self.model = model or 'gpt-5-mini'
+        if model is None:
+            self.model = 'gpt-5.3-codex' if self.provider == 'codex_cli' else 'gpt-5-mini'
+        else:
+            self.model = model
+
+        # Retry/backoff tuning. Defaults to no retries for backward compatibility.
+        self.retry_max_attempts = int(config.pop('retry_max_attempts', 1) or 1)
+        self.retry_backoff_base_s = float(config.pop('retry_backoff_base_s', 0.5) or 0.5)
+        self.retry_backoff_max_s = float(config.pop('retry_backoff_max_s', 20.0) or 20.0)
+        self.retry_jitter_s = float(config.pop('retry_jitter_s', 0.1) or 0.1)
+        self.retryable_error_substrings = list(
+            config.pop(
+                'retryable_error_substrings',
+                [
+                    '429',
+                    'rate limit',
+                    'too many requests',
+                    'temporarily unavailable',
+                    'timeout',
+                    'timed out',
+                    'econnreset',
+                    'connection reset',
+                    'connection aborted',
+                    'service unavailable',
+                ],
+            )
+        )
+
         self.config = config
+
+        self._stats_lock = threading.Lock()
+        self._retry_stats = {
+            'calls_total': 0,
+            'attempts_total': 0,
+            'retries_total': 0,
+            'backoff_seconds_total': 0.0,
+            'failures_total': 0,
+        }
         
         # Check if llm_router is available
         if generate_text is None:
@@ -59,17 +98,59 @@ class LLMRouterBackend:
         Returns:
             Generated text response
         """
-        try:
-            # Use the llm_router to generate text
-            response = generate_text(
-                prompt=text,
-                provider=self.provider,
-                model_name=self.model,
-                **self.config
-            )
-            return response
-        except Exception as e:
-            raise Exception(f'llm_router_error: {str(e)}')
+        with self._stats_lock:
+            self._retry_stats['calls_total'] += 1
+
+        last_error = None
+        max_attempts = max(1, self.retry_max_attempts)
+        for attempt in range(1, max_attempts + 1):
+            with self._stats_lock:
+                self._retry_stats['attempts_total'] += 1
+            try:
+                response = generate_text(
+                    prompt=text,
+                    provider=self.provider,
+                    model_name=self.model,
+                    **self.config
+                )
+                return response
+            except Exception as e:
+                last_error = e
+                retryable = self._is_retryable_error(e)
+                if attempt >= max_attempts or not retryable:
+                    with self._stats_lock:
+                        self._retry_stats['failures_total'] += 1
+                    raise Exception(f'llm_router_error: {str(e)}')
+
+                backoff_s = self._compute_backoff_seconds(attempt)
+                with self._stats_lock:
+                    self._retry_stats['retries_total'] += 1
+                    self._retry_stats['backoff_seconds_total'] += float(backoff_s)
+                time.sleep(backoff_s)
+
+        # Should be unreachable, but keep a safe fallback.
+        with self._stats_lock:
+            self._retry_stats['failures_total'] += 1
+        raise Exception(f'llm_router_error: {str(last_error)}')
+
+    def _compute_backoff_seconds(self, attempt: int) -> float:
+        # attempt is 1-based; backoff applies between attempt and attempt+1.
+        exp = max(0, attempt - 1)
+        base = self.retry_backoff_base_s * (2 ** exp)
+        base = min(base, self.retry_backoff_max_s)
+        jitter = random.uniform(0.0, max(0.0, self.retry_jitter_s))
+        return float(base + jitter)
+
+    def _is_retryable_error(self, error: Exception) -> bool:
+        message = str(error or '').lower()
+        # unwrap our own wrapper if present
+        if message.startswith('llm_router_error:'):
+            message = message.split(':', 1)[-1].strip()
+        return any(s.lower() in message for s in self.retryable_error_substrings)
+
+    def get_retry_stats(self):
+        with self._stats_lock:
+            return dict(self._retry_stats)
 
 
 # For backward compatibility, create an alias

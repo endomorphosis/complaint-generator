@@ -630,7 +630,13 @@ class Mediator:
 		updates = self.denoiser.process_answer(question, answer, kg, dg)
 		
 		# Generate next questions
-		questions = self.denoiser.generate_questions(kg, dg, max_questions=5)
+		max_questions = 5
+		try:
+			if hasattr(self.denoiser, "is_stagnating") and self.denoiser.is_stagnating():
+				max_questions = 8
+		except Exception:
+			max_questions = 5
+		questions = self.denoiser.generate_questions(kg, dg, max_questions=max_questions)
 		self.phase_manager.update_phase_data(ComplaintPhase.INTAKE, 'current_questions', questions)
 		
 		# Update graphs in phase data
@@ -647,7 +653,8 @@ class Mediator:
 			'entities': len(kg.entities),
 			'relationships': len(kg.relationships),
 			'gaps': gaps,
-			'updates': updates
+			'updates': updates,
+			'denoiser_policy': self.denoiser.get_policy_state() if hasattr(self.denoiser, 'get_policy_state') else None,
 		})
 		
 		# Check for convergence

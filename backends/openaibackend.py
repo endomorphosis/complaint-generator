@@ -1,11 +1,30 @@
 import requests
 import json
+import os
+import re
+
+
+_ENV_REF_RE = re.compile(r"^\$\{([A-Z0-9_]+)\}$")
+
+
+def _resolve_api_key(value):
+	if not value:
+		return os.getenv("OPENAI_API_KEY")
+	if isinstance(value, str):
+		match = _ENV_REF_RE.match(value.strip())
+		if match:
+			return os.getenv(match.group(1))
+		if value.startswith("env:"):
+			return os.getenv(value[4:])
+	return value
 
 
 class OpenAIBackend:
 	def __init__(self, id, api_key, engine, **config):
 		self.id = id
-		self.api_key = api_key
+		self.api_key = _resolve_api_key(api_key)
+		if not self.api_key:
+			raise ValueError("OpenAI API key is required (set OPENAI_API_KEY or pass api_key)")
 		self.engine = engine
 		self.config = config
 

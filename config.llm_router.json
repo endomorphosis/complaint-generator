@@ -8,9 +8,16 @@
             "max_tokens": 128
         },
         {
+            "id": "llm-router-codex",
+            "type": "llm_router",
+            "provider": "codex_cli",
+            "model": "gpt-5.3-codex",
+            "max_tokens": 128
+        },
+        {
             "id": "openai-davinci",
             "type": "openai",
-            "api_key": "sk-hhmt0YZxBvLUyBolMj93330e0WVy5upUdsQKA2cE",
+            "api_key": "${OPENAI_API_KEY}",
             "engine": "text-davinci-002",
             "temperature": 0,
             "top_p": 1,
@@ -22,7 +29,7 @@
         {
             "id": "openai-ada",
             "type": "openai",
-            "api_key": "sk-hhmt0YZxBvLUyBolMj93330e0WVy5upUdsQKA2cE",
+            "api_key": "${OPENAI_API_KEY}",
             "engine": "text-ada-001",
             "temperature": 0,
             "top_p": 1,
