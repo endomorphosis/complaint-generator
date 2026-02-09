@@ -2,150 +2,59 @@
 Seed Complaints Library
 
 Templates and generators for seed complaints across different types.
+Now uses complaint_analysis.SeedGenerator for data-driven seed generation.
 """
 
 import logging
 from typing import Dict, Any, List
-from dataclasses import dataclass
-import json
+import sys
+sys.path.insert(0, '.')
+
+from complaint_analysis import SeedGenerator as AnalysisSeedGenerator
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ComplaintTemplate:
-    """Template for generating seed complaints."""
-    id: str
-    type: str
-    category: str
-    description: str
-    key_facts_template: Dict[str, Any]
-    required_fields: List[str]
-    optional_fields: List[str]
-    
-    def instantiate(self, values: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Create a concrete complaint from this template.
-        
-        Args:
-            values: Values to fill in the template
-            
-        Returns:
-            Instantiated complaint data
-        """
-        # Check required fields
-        missing = [f for f in self.required_fields if f not in values]
-        if missing:
-            raise ValueError(f"Missing required fields: {missing}")
-        
-        # Merge template with values
-        key_facts = self.key_facts_template.copy()
-        key_facts.update(values)
-        
-        return {
-            'template_id': self.id,
-            'type': self.type,
-            'category': self.category,
-            'description': self.description,
-            'key_facts': key_facts
-        }
+# Re-export the dataclass from complaint_analysis
+from complaint_analysis.seed_generator import SeedComplaintTemplate as ComplaintTemplate
 
 
 class SeedComplaintLibrary:
     """
     Library of seed complaints for testing.
     
-    Provides templates and seed data for generating diverse test scenarios.
+    Now uses complaint_analysis.SeedGenerator to automatically generate
+    templates from registered complaint types.
     """
     
     def __init__(self):
         """Initialize the seed complaint library."""
-        self.templates = {}
-        self._initialize_templates()
-    
-    def _initialize_templates(self):
-        """Initialize default complaint templates."""
-        
-        # Employment discrimination template
-        self.register_template(ComplaintTemplate(
-            id='employment_discrimination_1',
-            type='employment_discrimination',
-            category='employment',
-            description='Workplace discrimination based on protected class',
-            key_facts_template={
-                'employer': None,
-                'position': None,
-                'protected_class': None,
-                'discriminatory_action': None,
-                'date': None,
-                'witnesses': []
-            },
-            required_fields=['employer', 'position', 'protected_class', 'discriminatory_action'],
-            optional_fields=['date', 'witnesses', 'prior_complaints']
-        ))
-        
-        # Housing discrimination template
-        self.register_template(ComplaintTemplate(
-            id='housing_discrimination_1',
-            type='housing_discrimination',
-            category='housing',
-            description='Housing discrimination based on protected class',
-            key_facts_template={
-                'landlord': None,
-                'property_address': None,
-                'protected_class': None,
-                'discriminatory_action': None,
-                'date': None
-            },
-            required_fields=['landlord', 'protected_class', 'discriminatory_action'],
-            optional_fields=['property_address', 'date', 'witnesses']
-        ))
-        
-        # Wrongful termination template
-        self.register_template(ComplaintTemplate(
-            id='wrongful_termination_1',
-            type='wrongful_termination',
-            category='employment',
-            description='Wrongful termination without cause',
-            key_facts_template={
-                'employer': None,
-                'position': None,
-                'termination_date': None,
-                'termination_reason': None,
-                'years_employed': None,
-                'performance_record': None
-            },
-            required_fields=['employer', 'position', 'termination_date'],
-            optional_fields=['termination_reason', 'years_employed', 'performance_record']
-        ))
-        
-        # Consumer fraud template
-        self.register_template(ComplaintTemplate(
-            id='consumer_fraud_1',
-            type='consumer_fraud',
-            category='consumer',
-            description='Fraudulent business practices',
-            key_facts_template={
-                'business': None,
-                'product_service': None,
-                'fraud_type': None,
-                'amount_lost': None,
-                'date': None
-            },
-            required_fields=['business', 'product_service', 'fraud_type'],
-            optional_fields=['amount_lost', 'date', 'attempts_to_resolve']
-        ))
+        # Use the complaint_analysis seed generator
+        self._generator = AnalysisSeedGenerator()
+        self.templates = self._generator.templates
+        logger.info(f"Initialized with {len(self.templates)} templates from complaint_analysis")
     
     def register_template(self, template: ComplaintTemplate):
-        """Register a new template."""
+        """
+        Register a new template.
+        
+        Args:
+            template: Template to register
+        """
         self.templates[template.id] = template
         logger.debug(f"Registered template: {template.id}")
     
     def get_template(self, template_id: str) -> ComplaintTemplate:
-        """Get a template by ID."""
-        if template_id not in self.templates:
-            raise KeyError(f"Template not found: {template_id}")
-        return self.templates[template_id]
+        """
+        Get a template by ID.
+        
+        Args:
+            template_id: Template identifier
+            
+        Returns:
+            Template object
+        """
+        return self._generator.get_template(template_id)
     
     def list_templates(self, category: str = None) -> List[ComplaintTemplate]:
         """
@@ -157,10 +66,7 @@ class SeedComplaintLibrary:
         Returns:
             List of templates
         """
-        templates = list(self.templates.values())
-        if category:
-            templates = [t for t in templates if t.category == category]
-        return templates
+        return self._generator.list_templates(category=category)
     
     def get_seed_complaints(self, count: int = 10) -> List[Dict[str, Any]]:
         """
@@ -174,102 +80,95 @@ class SeedComplaintLibrary:
         """
         seeds = []
         
-        # Employment discrimination examples
-        seeds.extend([
-            {
-                'template_id': 'employment_discrimination_1',
-                'type': 'employment_discrimination',
-                'category': 'employment',
-                'key_facts': {
-                    'employer': 'Acme Corporation',
-                    'position': 'Senior Engineer',
-                    'protected_class': 'race',
-                    'discriminatory_action': 'passed over for promotion',
-                    'date': '2024-01-15'
-                },
-                'summary': 'Passed over for promotion due to race'
-            },
-            {
-                'template_id': 'employment_discrimination_1',
-                'type': 'employment_discrimination',
-                'category': 'employment',
-                'key_facts': {
-                    'employer': 'Tech Solutions Inc',
-                    'position': 'Manager',
-                    'protected_class': 'gender',
-                    'discriminatory_action': 'pay disparity',
-                    'date': '2024-02-01'
-                },
-                'summary': 'Paid less than male colleagues in same role'
-            },
-        ])
+        # Get templates from different categories
+        categories = ['employment', 'housing', 'consumer', 'civil_rights', 'healthcare']
+        templates_per_category = max(1, count // len(categories))
         
-        # Housing discrimination examples
-        seeds.extend([
-            {
-                'template_id': 'housing_discrimination_1',
-                'type': 'housing_discrimination',
-                'category': 'housing',
-                'key_facts': {
-                    'landlord': 'Property Management LLC',
-                    'property_address': '123 Main St',
-                    'protected_class': 'familial status',
-                    'discriminatory_action': 'refused rental application',
-                    'date': '2024-03-01'
-                },
-                'summary': 'Refused rental because I have children'
-            },
-        ])
-        
-        # Wrongful termination examples
-        seeds.extend([
-            {
-                'template_id': 'wrongful_termination_1',
-                'type': 'wrongful_termination',
-                'category': 'employment',
-                'key_facts': {
-                    'employer': 'Global Industries',
-                    'position': 'Sales Manager',
-                    'termination_date': '2024-04-01',
-                    'termination_reason': 'downsizing',
-                    'years_employed': 8,
-                    'performance_record': 'excellent'
-                },
-                'summary': 'Fired after whistleblowing on accounting fraud'
-            },
-        ])
-        
-        # Consumer fraud examples
-        seeds.extend([
-            {
-                'template_id': 'consumer_fraud_1',
-                'type': 'consumer_fraud',
-                'category': 'consumer',
-                'key_facts': {
-                    'business': 'QuickFix Auto Repair',
-                    'product_service': 'car repair',
-                    'fraud_type': 'unnecessary repairs',
-                    'amount_lost': 2500,
-                    'date': '2024-05-01'
-                },
-                'summary': 'Charged for repairs that were never needed'
-            },
-        ])
+        for category in categories:
+            category_templates = self._generator.list_templates(category=category)
+            if not category_templates:
+                continue
+            
+            # Take first few templates from this category
+            for template in category_templates[:templates_per_category]:
+                # Create example values based on template type
+                values = self._get_example_values(template)
+                try:
+                    seed = template.instantiate(values)
+                    seeds.append(seed)
+                    if len(seeds) >= count:
+                        break
+                except ValueError as e:
+                    logger.warning(f"Could not instantiate template {template.id}: {e}")
+            
+            if len(seeds) >= count:
+                break
         
         return seeds[:count]
     
-    def create_seed_from_template(self, 
-                                  template_id: str,
-                                  values: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_example_values(self, template: ComplaintTemplate) -> Dict[str, Any]:
         """
-        Create a seed complaint from a template.
+        Generate example values for a template.
         
         Args:
-            template_id: ID of template to use
-            values: Values to fill in template
+            template: Template to generate values for
             
         Returns:
-            Seed complaint data
+            Dictionary of example values
         """
-        template = self.get_template(template_id)
-        return template.instantiate(values)
+        values = {}
+        
+        # Type-specific examples
+        if template.type in ['employment_discrimination', 'wrongful_termination']:
+            values.update({
+                'employer_name': 'Acme Corporation',
+                'position': 'Senior Engineer',
+                'protected_class': 'race',
+                'discriminatory_action': 'passed over for promotion',
+                'date_of_incident': '2024-01-15',
+                'termination_date': '2024-01-15',
+                'termination_reason': 'alleged performance issues',
+                'years_employed': 5
+            })
+        elif template.type in ['housing_discrimination', 'unlawful_eviction']:
+            values.update({
+                'landlord_name': 'Property Management LLC',
+                'property_address': '123 Main St',
+                'protected_class': 'familial status',
+                'discriminatory_action': 'refused rental application',
+                'date_of_incident': '2024-03-01',
+                'eviction_reason': 'alleged lease violation',
+                'notice_date': '2024-03-01'
+            })
+        elif template.type == 'consumer_fraud':
+            values.update({
+                'business_name': 'QuickFix Services',
+                'product_or_service': 'home repair',
+                'fraud_type': 'misrepresentation of work needed',
+                'amount_lost': '$5000',
+                'date_of_purchase': '2024-02-15'
+            })
+        elif template.type == 'civil_rights_violation':
+            values.update({
+                'violating_party': 'City Police Department',
+                'type_of_violation': 'excessive force',
+                'protected_right': 'freedom from unreasonable seizure',
+                'date_of_incident': '2024-01-20'
+            })
+        elif template.type == 'medical_malpractice':
+            values.update({
+                'healthcare_provider': 'Dr. Smith',
+                'facility_name': 'General Hospital',
+                'type_of_negligence': 'misdiagnosis',
+                'date_of_incident': '2024-02-10',
+                'injuries_sustained': 'delayed treatment resulting in complications'
+            })
+        else:
+            # Generic values for unknown types
+            values.update({
+                'party_name': 'Defendant Party',
+                'issue_description': 'Detailed description of the legal issue',
+                'date_of_incident': '2024-01-01'
+            })
+        
+        return values
