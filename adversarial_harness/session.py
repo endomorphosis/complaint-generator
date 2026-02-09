@@ -237,6 +237,9 @@ class AdversarialSession:
         # Avoid asking the same normalized question more than once.
         if asked_count > 0:
             return True
+        # Treat near-identical rephrasings as redundant even when intent bucketing differs.
+        if similarity_to_seen >= 0.9:
+            return True
         # Avoid immediate intent repetition when it's already substantially similar.
         if (
             last_question_intent_key
@@ -378,16 +381,6 @@ class AdversarialSession:
         # Prefer broader coverage by choosing less-repeated intents/questions first.
         non_redundant_candidates.sort(key=lambda c: (c[5], c[4], c[6]))
 
-        if need_timeline:
-            for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
-                if (
-                    asked_count == 0
-                    and intent_count == 0
-                    and similarity_to_seen < novel_similarity_threshold
-                    and self._is_timeline_question(text)
-                ):
-                    return q
-
         if need_harm_remedy:
             for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
                 if (
@@ -395,6 +388,16 @@ class AdversarialSession:
                     and intent_count == 0
                     and similarity_to_seen < novel_similarity_threshold
                     and self._is_harm_or_remedy_question(text)
+                ):
+                    return q
+
+        if need_timeline:
+            for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
+                if (
+                    asked_count == 0
+                    and intent_count == 0
+                    and similarity_to_seen < novel_similarity_threshold
+                    and self._is_timeline_question(text)
                 ):
                     return q
 
@@ -522,7 +525,8 @@ class AdversarialSession:
                 turns += 1
                 
                 # Check if converged
-                if result.get('converged', False) or result.get('ready_for_evidence_phase', False):
+                converged = result.get('converged', False) or result.get('ready_for_evidence_phase', False)
+                if converged and has_harm_remedy_question:
                     logger.info(f"Session converged after {turns} turns")
                     break
             

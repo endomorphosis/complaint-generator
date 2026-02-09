@@ -197,6 +197,7 @@ class PatchApplyError(Exception):
     message: str
     file_path: Optional[str] = None
     hunk_index: Optional[int] = None
+    details: Optional[Dict[str, Any]] = None
 
     def __str__(self) -> str:
         msg = self.message or ""
@@ -415,7 +416,20 @@ def _apply_hunk_to_lines(file_lines: List[str], hunk_lines: List[str]) -> List[s
     if pos is None:
         pos = _find_subsequence_rstrip(file_lines, old_block)
     if pos is None:
-        raise PatchApplyError("Hunk context not found")
+        # Keep details small but actionable for Codex repair prompts.
+        def clip(lines: List[str], limit: int = 80) -> List[str]:
+            if len(lines) <= limit:
+                return lines
+            return lines[:limit] + ["...<clipped>..."]
+
+        raise PatchApplyError(
+            "Hunk context not found",
+            details={
+                "old_block": clip(old_block),
+                "new_block": clip(new_block),
+                "hunk_lines": clip(list(hunk_lines)),
+            },
+        )
 
     return file_lines[:pos] + new_block + file_lines[pos + len(old_block) :]
 
@@ -445,7 +459,7 @@ def _dry_run_apply_patch_text(patch_text: str) -> None:
             try:
                 file_lines = _apply_hunk_to_lines(file_lines, hunk_lines)
             except PatchApplyError as e:
-                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index) from e
+                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index, details=e.details) from e
 
         _validate_python_syntax(file_path, file_lines)
 
@@ -480,7 +494,7 @@ def _apply_patch_transaction(patch_text: str) -> Tuple[List[str], Dict[str, str]
             try:
                 file_lines = _apply_hunk_to_lines(file_lines, hunk_lines)
             except PatchApplyError as e:
-                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index) from e
+                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index, details=e.details) from e
         _validate_python_syntax(file_path, file_lines)
         updated_lines_by_file[file_path] = file_lines
         if file_path not in updated_files:
@@ -563,9 +577,11 @@ def _codex_fix_patch(
     failing_patch_text: str,
     error_message: str,
     file_contents: Dict[str, str],
+    failure_details: Optional[Dict[str, Any]] = None,
 ) -> str:
     context = {
         "error": error_message,
+        "failure_details": failure_details,
         "files": {path: contents for path, contents in file_contents.items()},
         "previous_patch": failing_patch_text,
     }
@@ -583,6 +599,7 @@ def _codex_fix_patch(
         "- Do not truncate or corrupt lines (no partial tokens).\n"
         "- Ensure every changed region includes enough exact context lines to apply.\n"
         "- Keep hunks small and focused; avoid huge hunks spanning multiple functions.\n\n"
+        "If the failure_details include an old_block that could not be found, rebase your patch: locate the intended code in the CURRENT file and rewrite the hunk context so it matches exactly.\n\n"
         "Here is the failure context as JSON (includes current file contents):\n"
         + json.dumps(context, ensure_ascii=False)
     )
@@ -765,6 +782,7 @@ def main() -> int:
                         failing_patch_text=patch_text,
                         error_message=f"Generated patch failed dry-run apply: {e}",
                         file_contents=file_contents,
+                        failure_details=e.details,
                     )
 
             # Copy patch into orchestrator folder for traceability.
@@ -826,6 +844,7 @@ def main() -> int:
                         failing_patch_text=patch_text,
                         error_message=str(e),
                         file_contents=file_contents,
+                        failure_details=e.details,
                     )
 
                     fixed_out_path = os.path.join(
