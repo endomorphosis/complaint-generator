@@ -83,11 +83,11 @@
     }
   },
   "required_fields": [
-    "incident_description",
     "protected_right",
+    "date_of_incident",
     "violating_party",
-    "violation_type",
-    "date_of_incident"
+    "incident_description",
+    "violation_type"
   ],
   "optional_fields": [
     "damages"

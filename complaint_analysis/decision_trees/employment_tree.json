@@ -114,16 +114,16 @@
     }
   },
   "required_fields": [
-    "incident_description",
     "issue_type",
-    "employer_name",
     "date_of_incident",
-    "position"
+    "incident_description",
+    "position",
+    "employer_name"
   ],
   "optional_fields": [
     "witnesses",
     "hr_complaints",
-    "years_employed",
-    "protected_class"
+    "protected_class",
+    "years_employed"
   ]
 }

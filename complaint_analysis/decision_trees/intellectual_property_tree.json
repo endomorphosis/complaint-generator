@@ -61,12 +61,12 @@
     }
   },
   "required_fields": [
-    "infringing_party",
+    "date_of_infringement",
     "ip_type",
-    "date_of_infringement"
+    "infringing_party"
   ],
   "optional_fields": [
-    "registration_number",
-    "damages_estimate"
+    "damages_estimate",
+    "registration_number"
   ]
 }

@@ -45,9 +45,9 @@
     }
   },
   "required_fields": [
+    "issue_description",
     "date_of_incident",
-    "party_name",
-    "issue_description"
+    "party_name"
   ],
   "optional_fields": [
     "damages"

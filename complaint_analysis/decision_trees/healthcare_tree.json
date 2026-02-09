@@ -71,9 +71,9 @@
     }
   },
   "required_fields": [
-    "incident_description",
     "healthcare_provider",
     "date_of_incident",
+    "incident_description",
     "type_of_negligence"
   ],
   "optional_fields": [

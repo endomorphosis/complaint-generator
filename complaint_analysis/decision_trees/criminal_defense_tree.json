@@ -61,12 +61,12 @@
     }
   },
   "required_fields": [
-    "violation_type",
-    "law_enforcement_agency"
+    "law_enforcement_agency",
+    "violation_type"
   ],
   "optional_fields": [
-    "charges",
     "date_of_arrest",
-    "evidence_issues"
+    "evidence_issues",
+    "charges"
   ]
 }

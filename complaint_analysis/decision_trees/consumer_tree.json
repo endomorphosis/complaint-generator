@@ -84,10 +84,10 @@
     }
   },
   "required_fields": [
-    "product_or_service",
-    "business_name",
-    "date_of_purchase",
     "issue_description",
+    "date_of_purchase",
+    "business_name",
+    "product_or_service",
     "fraud_type"
   ],
   "optional_fields": [

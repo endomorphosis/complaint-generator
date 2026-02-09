@@ -60,9 +60,9 @@
     }
   },
   "required_fields": [
-    "violation_type",
+    "violating_party",
     "date_discovered",
-    "violating_party"
+    "violation_type"
   ],
   "optional_fields": [
     "environmental_impact",

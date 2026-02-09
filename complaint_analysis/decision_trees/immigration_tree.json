@@ -59,12 +59,12 @@
     }
   },
   "required_fields": [
-    "violation_type",
+    "government_agency",
     "date_of_incident",
-    "government_agency"
+    "violation_type"
   ],
   "optional_fields": [
-    "relief_sought",
-    "immigration_status"
+    "immigration_status",
+    "relief_sought"
   ]
 }

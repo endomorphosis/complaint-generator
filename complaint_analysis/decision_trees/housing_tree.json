@@ -127,15 +127,15 @@
     }
   },
   "required_fields": [
-    "incident_description",
     "issue_type",
+    "date_of_incident",
+    "incident_description",
     "landlord_name",
-    "property_address",
-    "date_of_incident"
+    "property_address"
   ],
   "optional_fields": [
     "witnesses",
-    "prior_complaints",
-    "protected_class"
+    "protected_class",
+    "prior_complaints"
   ]
 }

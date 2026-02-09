@@ -61,9 +61,9 @@
     }
   },
   "required_fields": [
-    "date_of_censorship",
     "censoring_party",
-    "content_censored"
+    "content_censored",
+    "date_of_censorship"
   ],
   "optional_fields": [
     "platform_or_venue",
