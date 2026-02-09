@@ -1000,6 +1000,7 @@ class Mediator:
 			'current_phase': self.phase_manager.get_current_phase().value,
 			'iteration_count': self.phase_manager.iteration_count,
 			'convergence_history': self.phase_manager.loss_history[-10:] if self.phase_manager.loss_history else [],
+			'loss_history': self.phase_manager.loss_history if self.phase_manager.loss_history else [],
 			'phase_completion': {
 				'intake': self.phase_manager.is_phase_complete(ComplaintPhase.INTAKE),
 				'evidence': self.phase_manager.is_phase_complete(ComplaintPhase.EVIDENCE),

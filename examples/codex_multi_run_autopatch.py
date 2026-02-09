@@ -1,6 +1,7 @@
 import argparse
 import ast
 import base64
+import difflib
 import importlib.util
 import json
 import os
@@ -128,10 +129,58 @@ def _run_batch_and_persist(
     duration_s = time.time() - start
 
     opt_report = Optimizer().analyze(results)
+    optimizer_dict = opt_report.to_dict()
 
     session_json_files = _find_session_json_files(run_dir)
     summaries = [_summarize_session(p) for p in session_json_files]
     sgd_report_path = _write_report(run_dir, os.path.join(run_dir, "_reports"), summaries)
+
+    sgd_report: Dict[str, Any] = {}
+    try:
+        sgd_report = _load_json(sgd_report_path)
+    except Exception:
+        sgd_report = {}
+
+    graphs_health = None
+    try:
+        graphs = sgd_report.get("graphs") if isinstance(sgd_report, dict) else None
+        if isinstance(graphs, dict):
+            kg = graphs.get("knowledge_graph") if isinstance(graphs.get("knowledge_graph"), dict) else {}
+            dg = graphs.get("dependency_graph") if isinstance(graphs.get("dependency_graph"), dict) else {}
+            graphs_health = (
+                f"kg_files={kg.get('sessions_with_file')}/{sgd_report.get('num_sessions')} "
+                f"kg_empty={kg.get('sessions_empty')}/{kg.get('sessions_with_file')} "
+                f"dg_files={dg.get('sessions_with_file')}/{sgd_report.get('num_sessions')} "
+                f"dg_empty={dg.get('sessions_empty')}/{dg.get('sessions_with_file')}"
+            )
+    except Exception:
+        graphs_health = None
+
+    graphs_dynamics_health = None
+    try:
+        def _fmt_delta(value: Any) -> str:
+            if isinstance(value, (int, float)):
+                return f"{value:+.2f}"
+            return "n/a"
+
+        kg_ent_d = optimizer_dict.get("kg_avg_entities_delta_per_iter")
+        kg_rel_d = optimizer_dict.get("kg_avg_relationships_delta_per_iter")
+        kg_gaps_d = optimizer_dict.get("kg_avg_gaps_delta_per_iter")
+        kg_gaps_nondec = optimizer_dict.get("kg_sessions_gaps_not_reducing")
+
+        if any(isinstance(v, (int, float)) for v in (kg_ent_d, kg_rel_d, kg_gaps_d)) or isinstance(
+            kg_gaps_nondec, int
+        ):
+            denom = num_sessions if isinstance(num_sessions, int) and num_sessions > 0 else "n/a"
+            nondec_s = kg_gaps_nondec if isinstance(kg_gaps_nondec, int) else "n/a"
+            graphs_dynamics_health = (
+                f"kg_entΔ={_fmt_delta(kg_ent_d)} "
+                f"kg_relΔ={_fmt_delta(kg_rel_d)} "
+                f"kg_gapsΔ={_fmt_delta(kg_gaps_d)} "
+                f"kg_gaps_nondec={nondec_s}/{denom}"
+            )
+    except Exception:
+        graphs_dynamics_health = None
 
     payload = {
         "run_id": run_id,
@@ -150,8 +199,11 @@ def _run_batch_and_persist(
         "timing": {
             "batch_duration_seconds": duration_s,
         },
-        "optimizer_report": opt_report.to_dict(),
+        "optimizer_report": optimizer_dict,
         "sgd_report_path": os.path.abspath(sgd_report_path),
+        "sgd_graphs": (sgd_report.get("graphs") if isinstance(sgd_report, dict) else None),
+        "graphs_health": graphs_health,
+        "graphs_dynamics_health": graphs_dynamics_health,
         "retry_stats": {
             "complainant": llm_backend_complainant.get_retry_stats(),
             "critic": llm_backend_critic.get_retry_stats(),
@@ -221,6 +273,124 @@ def _validate_python_syntax(file_path: str, file_lines: List[str]) -> None:
         detail = (e.msg or "SyntaxError").strip()
         loc = f"line {e.lineno}" if e.lineno else "unknown line"
         raise PatchApplyError(f"Python syntax error after patch: {detail} ({loc})", file_path=file_path) from e
+
+
+def _select_context_slice_for_failure(
+    *,
+    file_text: str,
+    failure_details: Optional[Dict[str, Any]],
+    window_lines: int,
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """Return (maybe_sliced_text, slice_meta).
+
+    Uses failure_details['old_block'] as an anchor to find the best approximate
+    location in the current file, then returns a bounded line slice around it.
+    """
+    file_lines = (file_text or "").splitlines()
+
+    if window_lines <= 0:
+        return file_text, {
+            "start_line": 1,
+            "end_line": len(file_lines),
+            "total_lines": len(file_lines),
+            "sliced": False,
+            "mode": "full_file",
+        }
+
+    if len(file_lines) <= window_lines:
+        return file_text, {"start_line": 1, "end_line": len(file_lines), "total_lines": len(file_lines), "sliced": False}
+
+    old_block = []
+    if failure_details and isinstance(failure_details.get("old_block"), list):
+        old_block = [str(x) for x in (failure_details.get("old_block") or [])]
+
+    # Pick a few distinctive anchor lines from the old block.
+    anchors: List[str] = []
+    for ln in old_block:
+        s = ln.rstrip("\n")
+        if not s.strip():
+            continue
+        if sum(ch.isalnum() for ch in s) < 8:
+            continue
+        if len(s.strip()) < 12:
+            continue
+        anchors.append(s.rstrip())
+        if len(anchors) >= 6:
+            break
+
+    # Find best candidate index.
+    best_idx: Optional[int] = None
+    best_score = -1
+
+    def score_at(idx: int) -> int:
+        # Score by counting matching lines with rstrip() in a small lookahead.
+        score = 0
+        for j in range(min(12, len(old_block), len(file_lines) - idx)):
+            if file_lines[idx + j].rstrip() == (old_block[j].rstrip() if j < len(old_block) else ""):
+                score += 1
+        return score
+
+    # First: exact line matches.
+    for a in anchors:
+        for idx, fl in enumerate(file_lines):
+            if fl.rstrip() == a:
+                s = score_at(idx)
+                if s > best_score:
+                    best_score = s
+                    best_idx = idx
+
+    # Second: approximate (close) match to a single anchor line.
+    if best_idx is None and anchors:
+        for idx, fl in enumerate(file_lines):
+            cand = fl.strip()
+            if not cand:
+                continue
+            ratios = [difflib.SequenceMatcher(None, cand, a.strip()).ratio() for a in anchors]
+            if not ratios:
+                continue
+            r = max(ratios)
+            if r >= 0.88:
+                s = score_at(idx)
+                # Boost by ratio to break ties.
+                boosted = int(s * 100 + r * 10)
+                if boosted > best_score:
+                    best_score = boosted
+                    best_idx = idx
+
+    if best_idx is None:
+        # Fallback: keep full text if we cannot localize.
+        return file_text, {"start_line": 1, "end_line": len(file_lines), "total_lines": len(file_lines), "sliced": False}
+
+    half = max(20, window_lines // 2)
+    start = max(0, best_idx - half)
+    end = min(len(file_lines), start + window_lines)
+    # Re-adjust start if we hit the end.
+    start = max(0, end - window_lines)
+
+    sliced_lines = file_lines[start:end]
+    sliced_text = "\n".join(sliced_lines) + "\n"
+    meta = {
+        "start_line": start + 1,
+        "end_line": end,
+        "total_lines": len(file_lines),
+        "sliced": True,
+        "anchor_index": best_idx + 1,
+    }
+    return sliced_text, meta
+
+
+def _expand_context_window_lines(*, base_window_lines: int, attempt: int, file_total_lines: int) -> int:
+    """Increase context window on repeated failures.
+
+    Returns 0 to indicate "full file" once the expanded window would cover the whole file.
+    """
+    if base_window_lines <= 0:
+        return 0
+    attempt = max(1, int(attempt or 1))
+    expanded = base_window_lines * (2 ** (attempt - 1))
+    if file_total_lines > 0 and expanded >= file_total_lines:
+        return 0
+    return int(expanded)
 
 
 def _normalize_patch_text(text: str) -> str:
@@ -600,6 +770,7 @@ def _codex_fix_patch(
         "- Ensure every changed region includes enough exact context lines to apply.\n"
         "- Keep hunks small and focused; avoid huge hunks spanning multiple functions.\n\n"
         "If the failure_details include an old_block that could not be found, rebase your patch: locate the intended code in the CURRENT file and rewrite the hunk context so it matches exactly.\n\n"
+        "Note: Some file contents may be truncated to a line slice; if failure_details.file_context is present, use those line ranges as the authoritative view for rebasing hunks.\n\n"
         "Here is the failure context as JSON (includes current file contents):\n"
         + json.dumps(context, ensure_ascii=False)
     )
@@ -679,6 +850,15 @@ def main() -> int:
         "--stop-on-pytest-fail",
         action="store_true",
         help="Stop immediately if pytest fails after a run.",
+    )
+    parser.add_argument(
+        "--fix-context-window-lines",
+        type=int,
+        default=240,
+        help=(
+            "When asking Codex to fix a failing/out-of-date patch, include only a slice of the failing file around the best anchor match. "
+            "Set to 0 to always send full files."
+        ),
     )
     parser.add_argument(
         "--undo-dir",
@@ -775,7 +955,21 @@ def main() -> int:
                         if os.path.isfile(fp):
                             file_contents[fp] = _read_text(fp)
                     if e.file_path and os.path.isfile(e.file_path):
-                        file_contents.setdefault(e.file_path, _read_text(e.file_path))
+                        full_text = _read_text(e.file_path)
+                        total_lines = len((full_text or "").splitlines())
+                        window_lines = _expand_context_window_lines(
+                            base_window_lines=args.fix_context_window_lines,
+                            attempt=gen_attempt,
+                            file_total_lines=total_lines,
+                        )
+                        sliced_text, slice_meta = _select_context_slice_for_failure(
+                            file_text=full_text,
+                            failure_details=e.details,
+                            window_lines=window_lines,
+                        )
+                        file_contents.setdefault(e.file_path, sliced_text)
+                        if e.details is not None and slice_meta is not None:
+                            e.details = {**e.details, "file_context": slice_meta}
 
                     patch_text = _codex_fix_patch(
                         codex_backend=codex_backend,
@@ -837,7 +1031,21 @@ def main() -> int:
                         if os.path.isfile(fp):
                             file_contents[fp] = _read_text(fp)
                     if e.file_path and os.path.isfile(e.file_path):
-                        file_contents.setdefault(e.file_path, _read_text(e.file_path))
+                        full_text = _read_text(e.file_path)
+                        total_lines = len((full_text or "").splitlines())
+                        window_lines = _expand_context_window_lines(
+                            base_window_lines=args.fix_context_window_lines,
+                            attempt=apply_attempt,
+                            file_total_lines=total_lines,
+                        )
+                        sliced_text, slice_meta = _select_context_slice_for_failure(
+                            file_text=full_text,
+                            failure_details=e.details,
+                            window_lines=window_lines,
+                        )
+                        file_contents.setdefault(e.file_path, sliced_text)
+                        if e.details is not None and slice_meta is not None:
+                            e.details = {**e.details, "file_context": slice_meta}
 
                     patch_text = _codex_fix_patch(
                         codex_backend=codex_backend,

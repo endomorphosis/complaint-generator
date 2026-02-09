@@ -5,7 +5,7 @@ Analyzes critic feedback and provides optimization recommendations.
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -36,6 +36,22 @@ class OptimizationReport:
     # Recommendations
     recommendations: List[str]
     priority_improvements: List[str]
+
+    # Graph diagnostics (used to steer graph population/reduction improvements)
+    kg_sessions_with_data: int = 0
+    dg_sessions_with_data: int = 0
+    kg_sessions_empty: int = 0
+    dg_sessions_empty: int = 0
+    kg_avg_total_entities: Optional[float] = None
+    kg_avg_total_relationships: Optional[float] = None
+    kg_avg_gaps: Optional[float] = None
+    dg_avg_total_nodes: Optional[float] = None
+    dg_avg_total_dependencies: Optional[float] = None
+    dg_avg_satisfaction_rate: Optional[float] = None
+    kg_avg_entities_delta_per_iter: Optional[float] = None
+    kg_avg_relationships_delta_per_iter: Optional[float] = None
+    kg_avg_gaps_delta_per_iter: Optional[float] = None
+    kg_sessions_gaps_not_reducing: int = 0
     
     # Detailed insights
     best_session_id: str = None
@@ -59,6 +75,20 @@ class OptimizationReport:
             'common_strengths': self.common_strengths,
             'recommendations': self.recommendations,
             'priority_improvements': self.priority_improvements,
+            'kg_sessions_with_data': self.kg_sessions_with_data,
+            'dg_sessions_with_data': self.dg_sessions_with_data,
+            'kg_sessions_empty': self.kg_sessions_empty,
+            'dg_sessions_empty': self.dg_sessions_empty,
+            'kg_avg_total_entities': self.kg_avg_total_entities,
+            'kg_avg_total_relationships': self.kg_avg_total_relationships,
+            'kg_avg_gaps': self.kg_avg_gaps,
+            'dg_avg_total_nodes': self.dg_avg_total_nodes,
+            'dg_avg_total_dependencies': self.dg_avg_total_dependencies,
+            'dg_avg_satisfaction_rate': self.dg_avg_satisfaction_rate,
+            'kg_avg_entities_delta_per_iter': self.kg_avg_entities_delta_per_iter,
+            'kg_avg_relationships_delta_per_iter': self.kg_avg_relationships_delta_per_iter,
+            'kg_avg_gaps_delta_per_iter': self.kg_avg_gaps_delta_per_iter,
+            'kg_sessions_gaps_not_reducing': self.kg_sessions_gaps_not_reducing,
             'best_session_id': self.best_session_id,
             'worst_session_id': self.worst_session_id,
             'best_score': self.best_score,
@@ -80,6 +110,128 @@ class Optimizer:
     def __init__(self):
         """Initialize optimizer."""
         self.history = []
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        try:
+            if value is None:
+                return None
+            if isinstance(value, bool):
+                return None
+            return float(value)
+        except Exception:
+            return None
+
+    def _extract_graph_metrics(self, result: Any) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int], Optional[float], Optional[int]]:
+        """Return (kg_entities, kg_relationships, dg_nodes, dg_dependencies, dg_satisfaction_rate, kg_gaps)."""
+        kg_entities = None
+        kg_relationships = None
+        kg_gaps = None
+        dg_nodes = None
+        dg_dependencies = None
+        dg_satisfaction_rate = None
+
+        kg_summary = getattr(result, "knowledge_graph_summary", None)
+        if isinstance(kg_summary, dict):
+            kg_entities = kg_summary.get("total_entities")
+            kg_relationships = kg_summary.get("total_relationships")
+            kg_gaps = kg_summary.get("gaps")
+
+        dg_summary = getattr(result, "dependency_graph_summary", None)
+        if isinstance(dg_summary, dict):
+            dg_nodes = dg_summary.get("total_nodes")
+            dg_dependencies = dg_summary.get("total_dependencies")
+            dg_satisfaction_rate = self._safe_float(dg_summary.get("satisfaction_rate"))
+
+        # Fall back to full graph dict snapshots if summaries are missing.
+        kg_dict = getattr(result, "knowledge_graph", None)
+        if (kg_entities is None or kg_relationships is None) and isinstance(kg_dict, dict):
+            entities = kg_dict.get("entities")
+            rels = kg_dict.get("relationships")
+            if isinstance(entities, dict):
+                kg_entities = len(entities)
+            if isinstance(rels, dict):
+                kg_relationships = len(rels)
+
+        dg_dict = getattr(result, "dependency_graph", None)
+        if (dg_nodes is None or dg_dependencies is None or dg_satisfaction_rate is None) and isinstance(dg_dict, dict):
+            nodes = dg_dict.get("nodes")
+            deps = dg_dict.get("dependencies")
+            if isinstance(nodes, dict):
+                dg_nodes = len(nodes)
+                try:
+                    satisfied = 0
+                    for n in nodes.values():
+                        if isinstance(n, dict) and n.get("satisfied") is True:
+                            satisfied += 1
+                    dg_satisfaction_rate = (satisfied / len(nodes)) if nodes else 0.0
+                except Exception:
+                    dg_satisfaction_rate = dg_satisfaction_rate
+            if isinstance(deps, dict):
+                dg_dependencies = len(deps)
+
+        def _safe_int(v: Any) -> Optional[int]:
+            try:
+                if v is None:
+                    return None
+                if isinstance(v, bool):
+                    return None
+                return int(v)
+            except Exception:
+                return None
+
+        return (
+            _safe_int(kg_entities),
+            _safe_int(kg_relationships),
+            _safe_int(dg_nodes),
+            _safe_int(dg_dependencies),
+            dg_satisfaction_rate,
+            _safe_int(kg_gaps),
+        )
+
+    def _extract_kg_dynamics(self, result: Any) -> Tuple[Optional[float], Optional[float], Optional[float], bool]:
+        """Return (entities_delta_per_iter, relationships_delta_per_iter, gaps_delta_per_iter, gaps_not_reducing)."""
+        final_state = getattr(result, "final_state", None)
+        if not isinstance(final_state, dict):
+            return None, None, None, False
+        history = final_state.get("loss_history")
+        if not isinstance(history, list) or len(history) < 2:
+            # Fall back to convergence_history if present
+            history = final_state.get("convergence_history")
+        if not isinstance(history, list) or len(history) < 2:
+            return None, None, None, False
+
+        def _metric_at(idx: int) -> Dict[str, Any]:
+            row = history[idx]
+            if not isinstance(row, dict):
+                return {}
+            m = row.get("metrics")
+            return m if isinstance(m, dict) else {}
+
+        m0 = _metric_at(0)
+        m1 = _metric_at(-1)
+        iters = max(1, len(history) - 1)
+
+        def _int(v: Any) -> Optional[int]:
+            try:
+                if v is None or isinstance(v, bool):
+                    return None
+                return int(v)
+            except Exception:
+                return None
+
+        e0 = _int(m0.get("entities"))
+        e1 = _int(m1.get("entities"))
+        r0 = _int(m0.get("relationships"))
+        r1 = _int(m1.get("relationships"))
+        g0 = _int(m0.get("gaps"))
+        g1 = _int(m1.get("gaps"))
+
+        de = ((e1 - e0) / iters) if (isinstance(e0, int) and isinstance(e1, int)) else None
+        dr = ((r1 - r0) / iters) if (isinstance(r0, int) and isinstance(r1, int)) else None
+        dg = ((g1 - g0) / iters) if (isinstance(g0, int) and isinstance(g1, int)) else None
+        gaps_not_reducing = bool(isinstance(g0, int) and isinstance(g1, int) and g1 >= g0)
+        return de, dr, dg, gaps_not_reducing
     
     def analyze(self, results: List[Any]) -> OptimizationReport:
         """
@@ -113,6 +265,63 @@ class Optimizer:
         # Find best and worst
         best_result = max(successful, key=lambda r: r.critic_score.overall_score)
         worst_result = min(successful, key=lambda r: r.critic_score.overall_score)
+
+        # Aggregate graph metrics
+        kg_entities_vals: List[int] = []
+        kg_rels_vals: List[int] = []
+        kg_gaps_vals: List[int] = []
+        dg_nodes_vals: List[int] = []
+        dg_deps_vals: List[int] = []
+        dg_rate_vals: List[float] = []
+        kg_entities_delta_vals: List[float] = []
+        kg_rels_delta_vals: List[float] = []
+        kg_gaps_delta_vals: List[float] = []
+        kg_with = 0
+        dg_with = 0
+        kg_empty = 0
+        dg_empty = 0
+        kg_gaps_not_reducing = 0
+        for r in successful:
+            kg_e, kg_r, dg_n, dg_d, dg_rate, kg_gaps = self._extract_graph_metrics(r)
+            d_e, d_r, d_g, not_reducing = self._extract_kg_dynamics(r)
+            if not_reducing:
+                kg_gaps_not_reducing += 1
+            if isinstance(d_e, (int, float)):
+                kg_entities_delta_vals.append(float(d_e))
+            if isinstance(d_r, (int, float)):
+                kg_rels_delta_vals.append(float(d_r))
+            if isinstance(d_g, (int, float)):
+                kg_gaps_delta_vals.append(float(d_g))
+            if kg_e is not None or kg_r is not None:
+                kg_with += 1
+                if kg_e == 0:
+                    kg_empty += 1
+            if dg_n is not None or dg_d is not None:
+                dg_with += 1
+                if dg_n == 0:
+                    dg_empty += 1
+            if isinstance(kg_e, int):
+                kg_entities_vals.append(kg_e)
+            if isinstance(kg_r, int):
+                kg_rels_vals.append(kg_r)
+            if isinstance(kg_gaps, int):
+                kg_gaps_vals.append(kg_gaps)
+            if isinstance(dg_n, int):
+                dg_nodes_vals.append(dg_n)
+            if isinstance(dg_d, int):
+                dg_deps_vals.append(dg_d)
+            if isinstance(dg_rate, (int, float)):
+                dg_rate_vals.append(float(dg_rate))
+
+        def _avg_int(vals: List[int]) -> Optional[float]:
+            if not vals:
+                return None
+            return sum(vals) / len(vals)
+
+        def _avg_float(vals: List[float]) -> Optional[float]:
+            if not vals:
+                return None
+            return sum(vals) / len(vals)
         
         # Aggregate feedback
         all_strengths = []
@@ -137,7 +346,23 @@ class Optimizer:
             efficiency_scores,
             coverage_scores,
             common_weaknesses,
-            all_suggestions
+            all_suggestions,
+            graph_summary={
+                "kg_sessions_with_data": kg_with,
+                "dg_sessions_with_data": dg_with,
+                "kg_sessions_empty": kg_empty,
+                "dg_sessions_empty": dg_empty,
+                "kg_avg_total_entities": _avg_int(kg_entities_vals),
+                "kg_avg_total_relationships": _avg_int(kg_rels_vals),
+                "kg_avg_gaps": _avg_int(kg_gaps_vals),
+                "dg_avg_total_nodes": _avg_int(dg_nodes_vals),
+                "dg_avg_total_dependencies": _avg_int(dg_deps_vals),
+                "dg_avg_satisfaction_rate": _avg_float(dg_rate_vals),
+                "kg_avg_entities_delta_per_iter": _avg_float(kg_entities_delta_vals),
+                "kg_avg_relationships_delta_per_iter": _avg_float(kg_rels_delta_vals),
+                "kg_avg_gaps_delta_per_iter": _avg_float(kg_gaps_delta_vals),
+                "kg_sessions_gaps_not_reducing": kg_gaps_not_reducing,
+            },
         )
         
         # Determine priority improvements
@@ -166,6 +391,20 @@ class Optimizer:
             common_strengths=common_strengths,
             recommendations=recommendations,
             priority_improvements=priority_improvements,
+            kg_sessions_with_data=kg_with,
+            dg_sessions_with_data=dg_with,
+            kg_sessions_empty=kg_empty,
+            dg_sessions_empty=dg_empty,
+            kg_avg_total_entities=_avg_int(kg_entities_vals),
+            kg_avg_total_relationships=_avg_int(kg_rels_vals),
+            kg_avg_gaps=_avg_int(kg_gaps_vals),
+            dg_avg_total_nodes=_avg_int(dg_nodes_vals),
+            dg_avg_total_dependencies=_avg_int(dg_deps_vals),
+            dg_avg_satisfaction_rate=_avg_float(dg_rate_vals),
+            kg_avg_entities_delta_per_iter=_avg_float(kg_entities_delta_vals),
+            kg_avg_relationships_delta_per_iter=_avg_float(kg_rels_delta_vals),
+            kg_avg_gaps_delta_per_iter=_avg_float(kg_gaps_delta_vals),
+            kg_sessions_gaps_not_reducing=kg_gaps_not_reducing,
             best_session_id=best_result.session_id,
             worst_session_id=worst_result.session_id,
             best_score=best_result.critic_score.overall_score,
@@ -194,7 +433,8 @@ class Optimizer:
                                   efficiency: List[float],
                                   coverage: List[float],
                                   weaknesses: List[str],
-                                  suggestions: List[str]) -> List[str]:
+                              suggestions: List[str],
+                              graph_summary: Optional[Dict[str, Any]] = None) -> List[str]:
         """Generate actionable recommendations."""
         recommendations = []
         
@@ -226,6 +466,72 @@ class Optimizer:
         avg_coverage = sum(coverage) / len(coverage)
         if avg_coverage < 0.6:
             recommendations.append("Expand topic coverage: ensure all important aspects are addressed.")
+
+        # Graph-aware recommendations (to steer improvements in KG/DG population/reduction).
+        if isinstance(graph_summary, dict):
+            kg_with = int(graph_summary.get("kg_sessions_with_data") or 0)
+            dg_with = int(graph_summary.get("dg_sessions_with_data") or 0)
+            kg_empty = int(graph_summary.get("kg_sessions_empty") or 0)
+            dg_empty = int(graph_summary.get("dg_sessions_empty") or 0)
+            kg_avg_entities = self._safe_float(graph_summary.get("kg_avg_total_entities"))
+            dg_avg_nodes = self._safe_float(graph_summary.get("dg_avg_total_nodes"))
+            kg_avg_gaps = self._safe_float(graph_summary.get("kg_avg_gaps"))
+            kg_d_entities = self._safe_float(graph_summary.get("kg_avg_entities_delta_per_iter"))
+            kg_d_rels = self._safe_float(graph_summary.get("kg_avg_relationships_delta_per_iter"))
+            kg_d_gaps = self._safe_float(graph_summary.get("kg_avg_gaps_delta_per_iter"))
+            kg_not_reducing = int(graph_summary.get("kg_sessions_gaps_not_reducing") or 0)
+            dg_avg_rate = self._safe_float(graph_summary.get("dg_avg_satisfaction_rate"))
+
+            if kg_with == 0:
+                recommendations.append(
+                    "No knowledge graph data was captured. Ensure Phase 1 builds a KnowledgeGraph and the session extracts/saves knowledge_graph_summary."
+                )
+            elif kg_empty == kg_with:
+                recommendations.append(
+                    "All knowledge graphs are empty. Improve entity/relationship extraction in complaint_phases/knowledge_graph.py so downstream phases can reason over claims and facts."
+                )
+            elif kg_avg_entities is not None and kg_avg_entities < 2:
+                recommendations.append(
+                    "Knowledge graphs are very small on average. Consider adding lightweight rule-based extraction (dates/actors/employer/action) or LLM extraction to enrich the KG."
+                )
+
+            if dg_with == 0:
+                recommendations.append(
+                    "No dependency graph data was captured. Ensure Phase 1 builds a DependencyGraph and the session extracts/saves dependency_graph_summary."
+                )
+            elif dg_empty == dg_with:
+                recommendations.append(
+                    "All dependency graphs are empty. This often indicates missing/empty claims in the KG or claim extraction logic; verify claim entities and dg_builder.build_from_claims inputs."
+                )
+            elif dg_avg_nodes is not None and dg_avg_nodes < 2:
+                recommendations.append(
+                    "Dependency graphs are very small on average. Expand claim->requirement modeling so denoising can target missing legal elements and facts."
+                )
+
+            if kg_avg_gaps is not None and kg_avg_gaps >= 3:
+                recommendations.append(
+                    "Knowledge graph gap count is high on average. Improve gap-reduction logic in complaint_phases/denoiser.py and ensure process_answer updates entities/relationships meaningfully."
+                )
+            if kg_not_reducing > 0:
+                recommendations.append(
+                    f"In {kg_not_reducing} sessions, KG gaps did not reduce over iterations. Consider making denoiser.process_answer reduce gaps deterministically (e.g., marking gap items as addressed when answers supply the missing fields)."
+                )
+            if kg_d_entities is not None and kg_d_entities < 0.1:
+                recommendations.append(
+                    "Knowledge graph is not growing much per iteration. Consider extracting structured entities/relationships from denoising answers to enrich the KG over time."
+                )
+            if kg_d_rels is not None and kg_d_rels < 0.05:
+                recommendations.append(
+                    "Knowledge graph relationships are not increasing across iterations. Consider adding relationship updates when answers mention who/what/when/where/why links."
+                )
+            if kg_d_gaps is not None and kg_d_gaps >= 0.0:
+                recommendations.append(
+                    "KG gaps are not decreasing on average (or are increasing). Improve gap selection + answer processing so each turn reduces uncertainty."
+                )
+            if dg_avg_rate is not None and dg_avg_rate < 0.2:
+                recommendations.append(
+                    "Dependency satisfaction rate is very low on average. Consider having denoising answers mark requirements as satisfied or add evidence/fact nodes as they are provided."
+                )
         
         # Add unique suggestions from critics
         unique_suggestions = list(set(suggestions))

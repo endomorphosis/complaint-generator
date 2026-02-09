@@ -144,11 +144,58 @@ def main() -> int:
 	duration_s = time.time() - start
 
 	opt_report = Optimizer().analyze(results)
+	optimizer_dict = opt_report.to_dict()
 
 	# SGD report over persisted sessions
 	session_json_files = _find_session_json_files(run_dir)
 	summaries = [_summarize_session(p) for p in session_json_files]
 	sgd_report_path = _write_report(run_dir, os.path.join(run_dir, "_reports"), summaries)
+
+	sgd_report = {}
+	try:
+		with open(sgd_report_path, "r", encoding="utf-8") as f:
+			sgd_report = json.load(f)
+	except Exception:
+		sgd_report = {}
+
+	graphs_health = None
+	try:
+		graphs = sgd_report.get("graphs") if isinstance(sgd_report, dict) else None
+		if isinstance(graphs, dict):
+			kg = graphs.get("knowledge_graph") if isinstance(graphs.get("knowledge_graph"), dict) else {}
+			dg = graphs.get("dependency_graph") if isinstance(graphs.get("dependency_graph"), dict) else {}
+			graphs_health = (
+				f"kg_files={kg.get('sessions_with_file')}/{sgd_report.get('num_sessions')} "
+				f"kg_empty={kg.get('sessions_empty')}/{kg.get('sessions_with_file')} "
+				f"dg_files={dg.get('sessions_with_file')}/{sgd_report.get('num_sessions')} "
+				f"dg_empty={dg.get('sessions_empty')}/{dg.get('sessions_with_file')}"
+			)
+	except Exception:
+		graphs_health = None
+
+	graphs_dynamics_health = None
+	try:
+		def _fmt_delta(value: Any) -> str:
+			if isinstance(value, (int, float)):
+				return f"{value:+.2f}"
+			return "n/a"
+
+		kg_ent_d = optimizer_dict.get("kg_avg_entities_delta_per_iter")
+		kg_rel_d = optimizer_dict.get("kg_avg_relationships_delta_per_iter")
+		kg_gaps_d = optimizer_dict.get("kg_avg_gaps_delta_per_iter")
+		kg_gaps_nondec = optimizer_dict.get("kg_sessions_gaps_not_reducing")
+
+		if any(isinstance(v, (int, float)) for v in (kg_ent_d, kg_rel_d, kg_gaps_d)) or isinstance(kg_gaps_nondec, int):
+			denom = args.num_sessions if isinstance(args.num_sessions, int) and args.num_sessions > 0 else "n/a"
+			nondec_s = kg_gaps_nondec if isinstance(kg_gaps_nondec, int) else "n/a"
+			graphs_dynamics_health = (
+				f"kg_entΔ={_fmt_delta(kg_ent_d)} "
+				f"kg_relΔ={_fmt_delta(kg_rel_d)} "
+				f"kg_gapsΔ={_fmt_delta(kg_gaps_d)} "
+				f"kg_gaps_nondec={nondec_s}/{denom}"
+			)
+	except Exception:
+		graphs_dynamics_health = None
 
 	payload = {
 		"run_id": run_id,
@@ -167,8 +214,11 @@ def main() -> int:
 		"timing": {
 			"batch_duration_seconds": duration_s,
 		},
-		"optimizer_report": opt_report.to_dict(),
+		"optimizer_report": optimizer_dict,
 		"sgd_report_path": os.path.abspath(sgd_report_path),
+		"sgd_graphs": (sgd_report.get("graphs") if isinstance(sgd_report, dict) else None),
+		"graphs_health": graphs_health,
+		"graphs_dynamics_health": graphs_dynamics_health,
 		"retry_stats": {
 			"complainant": llm_backend_complainant.get_retry_stats(),
 			"critic": llm_backend_critic.get_retry_stats(),

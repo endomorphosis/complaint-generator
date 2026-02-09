@@ -25,6 +25,13 @@ class SessionSummary:
 	ended_reason: str
 	has_timeline_question: bool
 	has_impact_remedy_question: bool
+	knowledge_graph_path: Optional[str]
+	dependency_graph_path: Optional[str]
+	kg_total_entities: Optional[int]
+	kg_total_relationships: Optional[int]
+	dg_total_nodes: Optional[int]
+	dg_total_dependencies: Optional[int]
+	dg_satisfaction_rate: Optional[float]
 	path: str
 
 
@@ -40,6 +47,62 @@ def _safe_int(value: Any) -> Optional[int]:
 def _load_json(path: str) -> Dict[str, Any]:
 	with open(path, "r", encoding="utf-8") as f:
 		return json.load(f)
+
+
+def _maybe_load_json(path: Optional[str]) -> Optional[Dict[str, Any]]:
+	if not path:
+		return None
+	try:
+		if not os.path.isfile(path):
+			return None
+		return _load_json(path)
+	except Exception:
+		return None
+
+
+def _session_graph_paths(doc: Dict[str, Any], session_json_path: str) -> Tuple[Optional[str], Optional[str]]:
+	"""Return (knowledge_graph_path, dependency_graph_path)."""
+	art = doc.get("artifacts") or {}
+	kg = art.get("knowledge_graph_json")
+	dg = art.get("dependency_graph_json")
+	if isinstance(kg, str) and kg:
+		kg_path = kg
+	else:
+		kg_path = os.path.join(os.path.dirname(session_json_path), "knowledge_graph.json")
+	if isinstance(dg, str) and dg:
+		dg_path = dg
+	else:
+		dg_path = os.path.join(os.path.dirname(session_json_path), "dependency_graph.json")
+	if not os.path.isfile(kg_path):
+		kg_path = None
+	if not os.path.isfile(dg_path):
+		dg_path = None
+	return kg_path, dg_path
+
+
+def _kg_counts(kg: Optional[Dict[str, Any]]) -> Tuple[Optional[int], Optional[int]]:
+	if not isinstance(kg, dict):
+		return None, None
+	entities = kg.get("entities") or {}
+	rels = kg.get("relationships") or {}
+	if isinstance(entities, dict) and isinstance(rels, dict):
+		return len(entities), len(rels)
+	return None, None
+
+
+def _dg_counts(dg: Optional[Dict[str, Any]]) -> Tuple[Optional[int], Optional[int], Optional[float]]:
+	if not isinstance(dg, dict):
+		return None, None, None
+	nodes = dg.get("nodes") or {}
+	deps = dg.get("dependencies") or {}
+	if not isinstance(nodes, dict) or not isinstance(deps, dict):
+		return None, None, None
+	satisfied = 0
+	for n in nodes.values():
+		if isinstance(n, dict) and n.get("satisfied") is True:
+			satisfied += 1
+	rate = (satisfied / len(nodes)) if nodes else 0.0
+	return len(nodes), len(deps), rate
 
 
 def _find_session_json_files(state_dir: str) -> List[str]:
@@ -108,6 +171,12 @@ def _summarize_session(path: str) -> SessionSummary:
 	has_timeline = _has_question_matching(['timeline', 'when', 'what date', 'dates', 'how long'])
 	has_impact = _has_question_matching(['harm', 'damages', 'lost', 'impact', 'remedy', 'seeking', 'outcome'])
 
+	kg_path, dg_path = _session_graph_paths(doc, path)
+	kg_doc = _maybe_load_json(kg_path)
+	dg_doc = _maybe_load_json(dg_path)
+	kg_entities, kg_rels = _kg_counts(kg_doc)
+	dg_nodes, dg_deps, dg_rate = _dg_counts(dg_doc)
+
 	return SessionSummary(
 		session_id=doc.get("session_id", os.path.basename(os.path.dirname(path))),
 		success=bool(doc.get("success", True)),
@@ -126,6 +195,13 @@ def _summarize_session(path: str) -> SessionSummary:
 		ended_reason=_termination_reason(doc),
 		has_timeline_question=has_timeline,
 		has_impact_remedy_question=has_impact,
+		knowledge_graph_path=os.path.abspath(kg_path) if kg_path else None,
+		dependency_graph_path=os.path.abspath(dg_path) if dg_path else None,
+		kg_total_entities=kg_entities,
+		kg_total_relationships=kg_rels,
+		dg_total_nodes=dg_nodes,
+		dg_total_dependencies=dg_deps,
+		dg_satisfaction_rate=dg_rate,
 		path=path,
 	)
 
@@ -176,11 +252,39 @@ def _write_report(state_dir: str, out_dir: str, sessions: List[SessionSummary]) 
 	if missing_impact > 0:
 		recommendations.append(f"{missing_impact}/{len(sessions)} sessions lacked a harms/remedy question. Consider prioritizing harms+remedy coverage early in Phase 1.")
 
+	kg_present = sum(1 for s in sessions if s.knowledge_graph_path)
+	dg_present = sum(1 for s in sessions if s.dependency_graph_path)
+	kg_empty = sum(1 for s in sessions if (s.kg_total_entities == 0 if s.kg_total_entities is not None else False))
+	dg_empty = sum(1 for s in sessions if (s.dg_total_nodes == 0 if s.dg_total_nodes is not None else False))
+	if kg_present > 0 and kg_empty == kg_present:
+		recommendations.append(
+			"All sessions had empty knowledge graphs. Improve extraction in complaint_phases/knowledge_graph.py (the LLM extractors are currently placeholders)."
+		)
+	if dg_present > 0 and dg_empty == dg_present:
+		recommendations.append(
+			"All sessions had empty dependency graphs. This is usually downstream of empty claim extraction from the knowledge graph."
+		)
+
 	report = {
 		"generated_at": datetime.utcnow().isoformat(),
 		"state_dir": os.path.abspath(state_dir),
 		"num_sessions": len(sessions),
 		"ended_reason_counts": ended_counts,
+		"graphs": {
+			"knowledge_graph": {
+				"sessions_with_file": kg_present,
+				"sessions_empty": kg_empty,
+				"avg_total_entities": _avg([float(s.kg_total_entities) for s in sessions if s.kg_total_entities is not None]),
+				"avg_total_relationships": _avg([float(s.kg_total_relationships) for s in sessions if s.kg_total_relationships is not None]),
+			},
+			"dependency_graph": {
+				"sessions_with_file": dg_present,
+				"sessions_empty": dg_empty,
+				"avg_total_nodes": _avg([float(s.dg_total_nodes) for s in sessions if s.dg_total_nodes is not None]),
+				"avg_total_dependencies": _avg([float(s.dg_total_dependencies) for s in sessions if s.dg_total_dependencies is not None]),
+				"avg_satisfaction_rate": _avg([float(s.dg_satisfaction_rate) for s in sessions if s.dg_satisfaction_rate is not None]),
+			},
+		},
 		"missing_question_category_counts": {
 			"timeline": missing_timeline,
 			"impact_remedy": missing_impact,
@@ -209,6 +313,17 @@ def _write_report(state_dir: str, out_dir: str, sessions: List[SessionSummary]) 
 				"coverage": s.coverage,
 				"has_timeline_question": s.has_timeline_question,
 				"has_impact_remedy_question": s.has_impact_remedy_question,
+				"knowledge_graph": {
+					"path": s.knowledge_graph_path,
+					"total_entities": s.kg_total_entities,
+					"total_relationships": s.kg_total_relationships,
+				},
+				"dependency_graph": {
+					"path": s.dependency_graph_path,
+					"total_nodes": s.dg_total_nodes,
+					"total_dependencies": s.dg_total_dependencies,
+					"satisfaction_rate": s.dg_satisfaction_rate,
+				},
 				"next_action": s.next_action,
 				"phase": s.phase,
 				"ended_reason": s.ended_reason,

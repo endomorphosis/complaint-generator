@@ -166,7 +166,18 @@ class AdversarialSession:
             "",
             normalized,
         )
+        normalized = re.sub(
+            r"^(?:can|could|would)\s+you\s+(?:tell me|share|describe|explain|clarify|walk me through)\s+",
+            "",
+            normalized,
+        )
+        normalized = re.sub(
+            r"^(?:tell me|share|describe|explain|clarify|walk me through)\s+",
+            "",
+            normalized,
+        )
         normalized = re.sub(r"\s+(please|thanks?)$", "", normalized)
+        normalized = re.sub(r"\s+(?:if you can|if possible|when you can)$", "", normalized)
         # Remove punctuation differences so "when did X happen?" and "when did X happen"
         # map to the same dedupe key.
         return " ".join(re.sub(r"[^a-z0-9\s]", " ", normalized).split())
@@ -413,6 +424,15 @@ class AdversarialSession:
         for q, _, _, _, asked_count, intent_count, _ in non_redundant_candidates:
             if asked_count == 0 and intent_count == 0:
                 return q
+
+        if need_timeline or need_harm_remedy:
+            for q, text, key, _, asked_count, _, _ in candidates:
+                if asked_count > 0 or key == last_question_key:
+                    continue
+                if need_timeline and self._is_timeline_question(text):
+                    return q
+                if need_harm_remedy and self._is_harm_or_remedy_question(text):
+                    return q
 
         # As a last resort, allow one rephrase on a covered intent only if we still
         # need timeline or harm/remedy coverage and the wording is meaningfully different.

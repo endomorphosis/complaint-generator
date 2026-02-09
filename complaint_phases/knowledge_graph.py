@@ -310,6 +310,27 @@ class KnowledgeGraphBuilder:
         if self.mediator:
             llm_entities = self._llm_extract_entities(text)
             entities.extend(llm_entities)
+
+        # Fallback: ensure we have at least one claim to drive downstream graphs.
+        # Many parts of the pipeline (dependency graph, denoiser questions) assume
+        # there's at least one claim-like entity.
+        has_claim = any(e.get("type") == "claim" for e in entities if isinstance(e, dict))
+        if not has_claim:
+            snippet = (text or "").strip().splitlines()[0:1]
+            description = snippet[0].strip() if snippet else ""
+            if len(description) > 240:
+                description = description[:237] + "..."
+            entities.append(
+                {
+                    "type": "claim",
+                    "name": "Complaint Claim",
+                    "attributes": {
+                        "claim_type": "unknown",
+                        "description": description,
+                    },
+                    "confidence": 0.5,
+                }
+            )
         
         return entities
     
