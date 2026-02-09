@@ -2,7 +2,10 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import py_compile
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -794,6 +797,97 @@ def _dry_run_apply_patch_text(patch_text: str) -> List[str]:
     return updated_files
 
 
+def _apply_patch_transaction(patch_text: str) -> Tuple[List[str], Dict[str, str]]:
+    """Apply patch in-memory across all files first, then write.
+
+    Returns (updated_files, original_text_by_file) on success.
+    """
+
+    patch_text = _normalize_patch_text(patch_text)
+    file_blocks = _parse_apply_patch(patch_text)
+    if not file_blocks:
+        return ([], {})
+
+    original_text_by_file: Dict[str, str] = {}
+    updated_lines_by_file: Dict[str, List[str]] = {}
+
+    for file_path, _ in file_blocks:
+        if not os.path.isabs(file_path):
+            raise PatchApplyError("Patch paths must be absolute", file_path=file_path)
+        try:
+            _safe_abs_path(file_path)
+        except Exception as e:
+            raise PatchApplyError("Patch path not allowed", file_path=file_path, details={"error": str(e)}) from e
+        if not os.path.isfile(file_path):
+            raise PatchApplyError("Target file does not exist", file_path=file_path)
+        if file_path not in original_text_by_file:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                original_text_by_file[file_path] = f.read()
+            updated_lines_by_file[file_path] = original_text_by_file[file_path].splitlines()
+
+    updated_files: List[str] = []
+    for file_path, hunks in file_blocks:
+        file_lines = updated_lines_by_file[file_path]
+        for hunk_index, hunk_lines in enumerate(hunks):
+            try:
+                file_lines = _apply_hunk_to_lines(file_lines, hunk_lines)
+            except PatchApplyError as e:
+                raise PatchApplyError(e.message, file_path=file_path, hunk_index=hunk_index, details=e.details) from e
+
+        _validate_python_syntax(file_path, file_lines)
+        updated_lines_by_file[file_path] = file_lines
+        if file_path not in updated_files:
+            updated_files.append(file_path)
+
+    for file_path in updated_files:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(updated_lines_by_file[file_path]) + "\n")
+
+    return (updated_files, original_text_by_file)
+
+
+def _restore_original_text(original_text_by_file: Dict[str, str]) -> None:
+    for abs_path, text in original_text_by_file.items():
+        os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(text)
+
+
+def _run_post_apply_checks(
+    *,
+    updated_files: List[str],
+    check_pycompile: bool,
+    check_pyright: bool,
+    check_pytest: bool,
+) -> None:
+    if check_pycompile:
+        for fp in updated_files:
+            if not fp.endswith(".py"):
+                continue
+            try:
+                py_compile.compile(fp, doraise=True)
+            except py_compile.PyCompileError as e:
+                raise RuntimeError(f"py_compile failed for {fp}: {e}") from e
+
+    # Pylance isn't a CLI, but pyright uses the same underlying analyzer.
+    if check_pyright:
+        pyright = shutil.which("pyright")
+        if pyright:
+            proc = subprocess.run([pyright], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            if proc.returncode != 0:
+                raise RuntimeError("pyright failed:\n" + (proc.stdout or ""))
+
+    if check_pytest:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError("pytest failed:\n" + (proc.stdout or ""))
+
+
 def _tool_patch(*, patch: str) -> str:
     text = _normalize_patch_text(patch or "")
     looks_like = _looks_like_apply_patch(text)
@@ -1208,6 +1302,76 @@ def main() -> int:
         help="rich inlines JSON context into the prompt; lean points Codex at JSON artifacts and relies on tool calls to fetch context",
     )
     parser.add_argument("--max-steps", type=int, default=8)
+
+    parser.set_defaults(apply_patch=True)
+    parser.add_argument(
+        "--apply",
+        dest="apply_patch",
+        action="store_true",
+        help="Apply the generated patch to the working tree (default).",
+    )
+    parser.add_argument(
+        "--no-apply",
+        dest="apply_patch",
+        action="store_false",
+        help="Do not apply the patch (only write it under <run_dir>/_patches).",
+    )
+
+    parser.set_defaults(undo_on_failure=True)
+    parser.add_argument(
+        "--undo-on-failure",
+        dest="undo_on_failure",
+        action="store_true",
+        help="If apply/checks fail, restore original file contents (default).",
+    )
+    parser.add_argument(
+        "--no-undo-on-failure",
+        dest="undo_on_failure",
+        action="store_false",
+        help="If apply/checks fail, leave changes on disk.",
+    )
+
+    parser.set_defaults(check_pycompile=True)
+    parser.add_argument(
+        "--check-pycompile",
+        dest="check_pycompile",
+        action="store_true",
+        help="Run py_compile on updated .py files after applying (default).",
+    )
+    parser.add_argument(
+        "--no-check-pycompile",
+        dest="check_pycompile",
+        action="store_false",
+        help="Skip py_compile checks.",
+    )
+
+    parser.set_defaults(check_pyright=False)
+    parser.add_argument(
+        "--check-pyright",
+        dest="check_pyright",
+        action="store_true",
+        help="Run pyright (Pylance-like) if installed.",
+    )
+    parser.add_argument(
+        "--no-check-pyright",
+        dest="check_pyright",
+        action="store_false",
+        help="Skip pyright checks (default).",
+    )
+
+    parser.set_defaults(check_pytest=True)
+    parser.add_argument(
+        "--check-pytest",
+        dest="check_pytest",
+        action="store_true",
+        help="Run pytest -q after applying (default).",
+    )
+    parser.add_argument(
+        "--no-check-pytest",
+        dest="check_pytest",
+        action="store_false",
+        help="Skip pytest checks.",
+    )
     args = parser.parse_args()
 
     run_dir = args.run_dir
@@ -1279,6 +1443,22 @@ def main() -> int:
     )
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(patch_text)
+
+    if bool(args.apply_patch):
+        updated_files: List[str] = []
+        original_text_by_file: Dict[str, str] = {}
+        try:
+            updated_files, original_text_by_file = _apply_patch_transaction(patch_text)
+            _run_post_apply_checks(
+                updated_files=updated_files,
+                check_pycompile=bool(args.check_pycompile),
+                check_pyright=bool(args.check_pyright),
+                check_pytest=bool(args.check_pytest),
+            )
+        except Exception:
+            if bool(args.undo_on_failure) and original_text_by_file:
+                _restore_original_text(original_text_by_file)
+            raise
 
     print(out_path)
     return 0

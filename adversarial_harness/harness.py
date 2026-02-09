@@ -5,7 +5,7 @@ Orchestrates multiple adversarial sessions with parallel execution.
 """
 
 import logging
-from typing import Dict, Any, List, Callable
+from typing import Dict, Any, List, Callable, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from datetime import datetime
@@ -37,7 +37,9 @@ class AdversarialHarness:
                  mediator_factory: Callable,
                  seed_library: SeedComplaintLibrary = None,
                  max_parallel: int = 4,
-                 session_state_dir: str | None = None):
+                 session_state_dir: str | None = None,
+                 llm_backend_complainant_factory: Optional[Callable[..., Any]] = None,
+                 llm_backend_critic_factory: Optional[Callable[..., Any]] = None):
         """
         Initialize adversarial harness.
         
@@ -52,6 +54,8 @@ class AdversarialHarness:
         """
         self.llm_backend_complainant = llm_backend_complainant
         self.llm_backend_critic = llm_backend_critic
+        self.llm_backend_complainant_factory = llm_backend_complainant_factory
+        self.llm_backend_critic_factory = llm_backend_critic_factory
         self.mediator_factory = mediator_factory
         self.seed_library = seed_library or SeedComplaintLibrary()
         self.max_parallel = max_parallel
@@ -74,7 +78,14 @@ class AdversarialHarness:
         safe = self._safe_session_id(session_id)
         return os.path.join(self.session_state_dir, safe)
 
-    def _create_mediator_for_session(self, *, evidence_db_path: str | None, legal_authority_db_path: str | None):
+    def _create_mediator_for_session(
+        self,
+        *,
+        evidence_db_path: str | None,
+        legal_authority_db_path: str | None,
+        session_id: str | None = None,
+        session_dir: str | None = None,
+    ):
         """Call mediator_factory with optional per-session DB paths if supported."""
         try:
             sig = inspect.signature(self.mediator_factory)
@@ -85,6 +96,10 @@ class AdversarialHarness:
                 kwargs["evidence_db_path"] = evidence_db_path
             if accepts_kwargs or "legal_authority_db_path" in params:
                 kwargs["legal_authority_db_path"] = legal_authority_db_path
+            if session_id is not None and (accepts_kwargs or "session_id" in params):
+                kwargs["session_id"] = session_id
+            if session_dir is not None and (accepts_kwargs or "session_dir" in params):
+                kwargs["session_dir"] = session_dir
             if kwargs:
                 return self.mediator_factory(**kwargs)
         except Exception:
@@ -247,20 +262,34 @@ class AdversarialHarness:
     def _run_single_session(self, spec: Dict[str, Any]) -> SessionResult:
         """Run a single session (called in thread pool)."""
         try:
+            session_dir = self._get_session_dir(spec['session_id'])
+            if session_dir:
+                os.makedirs(session_dir, exist_ok=True)
+
+            complainant_backend = self.llm_backend_complainant
+            if callable(self.llm_backend_complainant_factory):
+                complainant_backend = self.llm_backend_complainant_factory(
+                    session_id=spec['session_id'],
+                    session_dir=session_dir,
+                )
+
+            critic_backend = self.llm_backend_critic
+            if callable(self.llm_backend_critic_factory):
+                critic_backend = self.llm_backend_critic_factory(
+                    session_id=spec['session_id'],
+                    session_dir=session_dir,
+                )
+
             # Create instances for this session
             complainant = Complainant(
-                self.llm_backend_complainant,
+                complainant_backend,
                 personality=spec['personality']
             )
             
             # Set context (maps personality to emotional_state/cooperation/context_depth)
             complainant.set_context(Complainant.build_default_context(spec['seed'], spec['personality']))
             
-            critic = Critic(self.llm_backend_critic)
-
-            session_dir = self._get_session_dir(spec['session_id'])
-            if session_dir:
-                os.makedirs(session_dir, exist_ok=True)
+            critic = Critic(critic_backend)
             evidence_db_path = os.path.join(session_dir, "evidence.duckdb") if session_dir else None
             legal_authority_db_path = os.path.join(session_dir, "legal_authorities.duckdb") if session_dir else None
 
@@ -281,6 +310,8 @@ class AdversarialHarness:
             mediator = self._create_mediator_for_session(
                 evidence_db_path=evidence_db_path,
                 legal_authority_db_path=legal_authority_db_path,
+                session_id=spec['session_id'],
+                session_dir=session_dir,
             )
             
             # Create and run session

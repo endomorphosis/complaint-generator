@@ -79,7 +79,7 @@ The router will try providers in this order:
 
 ## Supported Providers
 
-Note: In this repository's current `ipfs_datasets_py/llm_router.py` shim implementation, `codex_cli`, `copilot_cli`, and `claude_code` are implemented as CLI providers. `gemini_cli` is listed here as an intended target, but requires additional wrapper work (and the corresponding CLI binary installed) before it can be used.
+Note: In this repository's current `ipfs_datasets_py/llm_router.py` shim implementation, `codex_cli`, `copilot_cli`, `claude_code`, and `gemini_cli` are implemented as CLI providers. For `gemini_cli`, you must configure the correct CLI command/flags for the specific Gemini CLI you installed (there are multiple, with different argument conventions).
 
 - `local_hf` / `huggingface` - Local HuggingFace transformers
 - `openrouter` - OpenRouter API
@@ -116,6 +116,29 @@ Optional keys:
 - `continue_session`: boolean. If true and `resume_session_id` is not set, uses `copilot --continue`.
 - `trace_jsonl_path`: append a small JSONL metadata record per call (the full transcript is in the markdown share file).
 
+#### Cache-friendly multi-turn sessions (Copilot CLI)
+
+Unlike the Codex CLI JSON traces, Copilot CLI does not currently expose a standardized `cached_input_tokens` counter. The practical way to be “prompt-caching-friendly” with Copilot CLI is to keep the prompt prefix stable across turns and to reuse the same Copilot CLI session.
+
+In this repo, the adversarial/batch runners implement this by:
+
+- Creating an isolated `copilot_config_dir` per logical conversation (and per role, e.g. mediator vs critic), so multiple sessions can run in parallel without sharing state.
+- Setting `continue_session=true` so the Copilot CLI uses `--continue` and keeps a single session thread for that conversation.
+
+This mode is exposed as a CLI flag on the example runners:
+
+- `python examples/codex_multi_run_autopatch.py --session-cache-friendly ...`
+- `python examples/batch_sgd_cycle.py --session-cache-friendly ...`
+- `python examples/parallelism_backoff_sweep.py --session-cache-friendly ...`
+- `python examples/adversarial_optimization_demo.py --session-cache-friendly ...`
+
+Artifacts are written under each session directory (which is typically under `statefiles/_runs/...`), for example:
+
+- `<session_dir>/_copilot/mediator/config/`
+- `<session_dir>/_copilot/mediator/logs/`
+
+Note: The Copilot CLI may error on `--continue` when no prior session exists in the config dir; the shim retries once without `--continue` so the first turn still succeeds.
+
 ### Codex CLI (`codex_cli`)
 
 - When tracing is enabled, the shim adds `codex exec --json` and saves stdout JSONL into `trace_jsonl_path` or a generated file under `trace_dir`.
@@ -148,6 +171,25 @@ Tracing:
 
 - If `trace_dir` is set, the shim writes `claude_print_<timestamp>_<pid>.txt` containing stdout (and stderr, if any).
 - If `trace_jsonl_path` is set, the shim appends a small JSONL metadata record per call.
+
+### Gemini CLI (`gemini_cli`)
+
+Because Gemini CLIs vary, the shim uses a configurable command and always sends the prompt on stdin.
+
+If you installed Gemini via `npx @google/gemini-cli`, note that package currently requires Node `>=20` at runtime. The shim avoids a system Node upgrade by running it under a transient Node 20 binary via `npx -p node@20`.
+
+Optional keys:
+
+- `gemini_cli_path`: executable path/name (default: `gemini`)
+- `gemini_cli_path`: can also be a shorthand `npx:@google/gemini-cli` to force using `npx -y @google/gemini-cli`
+- `gemini_cmd`: full command override (string like `"mygemini --flag"` or a list like `["mygemini","--flag"]`). Takes precedence.
+- `gemini_args`: extra args appended after the base command (string or list)
+- `gemini_env`: dict of env vars to set for the subprocess
+
+Tracing:
+
+- If `trace_dir` is set, writes `gemini_exec_<timestamp>_<pid>.txt` containing stdout (and stderr, if any).
+- If `trace_jsonl_path` is set, appends a JSONL metadata record per call.
 
 ### Copilot Python SDK (`copilot_sdk`)
 

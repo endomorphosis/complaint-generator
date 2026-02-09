@@ -90,6 +90,8 @@ def _run_batch_and_persist(
     retry_backoff_base_s: float,
     retry_backoff_max_s: float,
     retry_jitter_s: float,
+    session_trace: bool = False,
+    session_cache_friendly: bool = False,
 ) -> str:
     config = _load_config(config_path)
     backend_kwargs = _get_llm_router_backend_config(config, backend_id)
@@ -98,7 +100,7 @@ def _run_batch_and_persist(
     _ensure_dir(run_dir)
 
     # Retry/backoff settings are passed through as kwargs.
-    backend_kwargs = {
+    base_backend_kwargs: Dict[str, Any] = {
         **backend_kwargs,
         "retry_max_attempts": retry_max_attempts,
         "retry_backoff_base_s": retry_backoff_base_s,
@@ -106,11 +108,53 @@ def _run_batch_and_persist(
         "retry_jitter_s": retry_jitter_s,
     }
 
-    llm_backend_complainant = LLMRouterBackend(**backend_kwargs)
-    llm_backend_critic = LLMRouterBackend(**backend_kwargs)
+    if session_trace:
+        base_backend_kwargs = {
+            **base_backend_kwargs,
+            "trace": True,
+            "trace_dir": os.path.join(run_dir, "_sessions"),
+        }
 
-    def mediator_factory(**kwargs) -> Mediator:
-        return Mediator(backends=[LLMRouterBackend(**backend_kwargs)], **kwargs)
+    llm_backend_complainant = LLMRouterBackend(**base_backend_kwargs)
+    llm_backend_critic = LLMRouterBackend(**base_backend_kwargs)
+
+    def _make_session_backend(*, role: str, session_id: str, session_dir: str | None) -> LLMRouterBackend:
+        per_call_kwargs: Dict[str, Any] = dict(base_backend_kwargs)
+
+        # Cache-friendly Copilot CLI mode:
+        # - Use an isolated --config-dir per (session, role) so `--continue` reuses
+        #   a stable session without contaminating other sessions.
+        # - `ipfs_datasets_py.llm_router.generate_text` will retry once without
+        #   --continue on the first turn if needed.
+        if session_cache_friendly and session_dir:
+            per_call_kwargs["copilot_config_dir"] = os.path.join(session_dir, "_copilot", role, "config")
+            per_call_kwargs["continue_session"] = True
+
+            # Keep Copilot logs nearby for debugging.
+            per_call_kwargs.setdefault("copilot_log_dir", os.path.join(session_dir, "_copilot", role, "logs"))
+
+        return LLMRouterBackend(**per_call_kwargs)
+
+    complainant_factory = None
+    critic_factory = None
+    if session_cache_friendly:
+        complainant_factory = lambda session_id, session_dir: _make_session_backend(
+            role="complainant",
+            session_id=session_id,
+            session_dir=session_dir,
+        )
+        critic_factory = lambda session_id, session_dir: _make_session_backend(
+            role="critic",
+            session_id=session_id,
+            session_dir=session_dir,
+        )
+
+    def mediator_factory(session_id: str | None = None, session_dir: str | None = None, **kwargs) -> Mediator:
+        if session_cache_friendly and session_id and session_dir:
+            backend = _make_session_backend(role="mediator", session_id=session_id, session_dir=session_dir)
+        else:
+            backend = LLMRouterBackend(**base_backend_kwargs)
+        return Mediator(backends=[backend], **kwargs)
 
     harness = AdversarialHarness(
         llm_backend_complainant=llm_backend_complainant,
@@ -118,6 +162,8 @@ def _run_batch_and_persist(
         mediator_factory=mediator_factory,
         max_parallel=max_parallel,
         session_state_dir=run_dir,
+        llm_backend_complainant_factory=complainant_factory,
+        llm_backend_critic_factory=critic_factory,
     )
 
     start = time.time()
@@ -236,6 +282,7 @@ def _generate_codex_patch_for_run(
         run_dir,
         "--context-mode",
         str(context_mode or "rich"),
+        "--no-apply",
     ]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if proc.returncode != 0:
@@ -838,6 +885,21 @@ def main() -> int:
     parser.add_argument("--max-parallel", type=int, default=2)
     parser.add_argument("--personalities", default=None)
 
+    parser.add_argument(
+        "--session-trace",
+        action="store_true",
+        help="Enable per-call LLM traces for mediator sessions (useful to observe cached_input_tokens with codex_cli).",
+    )
+
+    parser.add_argument(
+        "--session-cache-friendly",
+        action="store_true",
+        help=(
+            "Enable a Copilot CLI cache-friendly mode by isolating each session into its own Copilot --config-dir and using --continue. "
+            "This reduces prompt-prefix churn across turns without leaking state across parallel sessions."
+        ),
+    )
+
     parser.add_argument("--retry-max-attempts", type=int, default=1)
     parser.add_argument("--retry-backoff-base-s", type=float, default=0.5)
     parser.add_argument("--retry-backoff-max-s", type=float, default=20.0)
@@ -955,6 +1017,8 @@ def main() -> int:
             retry_backoff_base_s=args.retry_backoff_base_s,
             retry_backoff_max_s=args.retry_backoff_max_s,
             retry_jitter_s=args.retry_jitter_s,
+            session_trace=bool(args.session_trace),
+            session_cache_friendly=bool(args.session_cache_friendly),
         )
 
         rec: Dict[str, Any] = {

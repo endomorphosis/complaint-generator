@@ -96,6 +96,14 @@ def main() -> int:
 		default=None,
 		help="Optional session id (default: timestamp-based)",
 	)
+	parser.add_argument(
+		"--session-cache-friendly",
+		action="store_true",
+		help=(
+			"Enable a Copilot CLI cache-friendly mode by isolating each session into its own Copilot --config-dir and using --continue. "
+			"This reduces prompt-prefix churn across turns."
+		),
+	)
 	parser.add_argument("--num-sessions", type=int, default=3, help="(batch mode) number of sessions")
 	parser.add_argument("--max-parallel", type=int, default=1, help="(batch mode) parallel sessions")
 	args = parser.parse_args()
@@ -106,18 +114,48 @@ def main() -> int:
 	backend_kwargs = _get_llm_router_backend_config(config, args.backend_id)
 
 	if args.mode == "batch":
+		state_dir = os.path.join(PROJECT_ROOT, "statefiles")
+
+		def _make_session_backend(*, role: str, session_id: str, session_dir: str | None) -> LLMRouterBackend:
+			per_call_kwargs: Dict[str, Any] = dict(backend_kwargs)
+			if args.session_cache_friendly and session_dir:
+				per_call_kwargs["copilot_config_dir"] = os.path.join(session_dir, "_copilot", role, "config")
+				per_call_kwargs["continue_session"] = True
+				per_call_kwargs.setdefault("copilot_log_dir", os.path.join(session_dir, "_copilot", role, "logs"))
+			return LLMRouterBackend(**per_call_kwargs)
+
 		llm_backend_complainant = LLMRouterBackend(**backend_kwargs)
 		llm_backend_critic = LLMRouterBackend(**backend_kwargs)
 
-		def mediator_factory() -> Mediator:
-			return Mediator(backends=[LLMRouterBackend(**backend_kwargs)])
+		complainant_factory = None
+		critic_factory = None
+		if args.session_cache_friendly:
+			complainant_factory = lambda session_id, session_dir: _make_session_backend(
+				role="complainant",
+				session_id=session_id,
+				session_dir=session_dir,
+			)
+			critic_factory = lambda session_id, session_dir: _make_session_backend(
+				role="critic",
+				session_id=session_id,
+				session_dir=session_dir,
+			)
+
+		def mediator_factory(session_id: str | None = None, session_dir: str | None = None) -> Mediator:
+			if args.session_cache_friendly and session_id and session_dir:
+				backend = _make_session_backend(role="mediator", session_id=session_id, session_dir=session_dir)
+			else:
+				backend = LLMRouterBackend(**backend_kwargs)
+			return Mediator(backends=[backend])
 
 		harness = AdversarialHarness(
 			llm_backend_complainant=llm_backend_complainant,
 			llm_backend_critic=llm_backend_critic,
 			mediator_factory=mediator_factory,
 			max_parallel=args.max_parallel,
-			session_state_dir=os.path.join(PROJECT_ROOT, "statefiles"),
+			session_state_dir=state_dir,
+			llm_backend_complainant_factory=complainant_factory,
+			llm_backend_critic_factory=critic_factory,
 		)
 		results = harness.run_batch(num_sessions=args.num_sessions, max_turns_per_session=args.max_turns)
 		report = Optimizer().analyze(results)
@@ -135,6 +173,14 @@ def main() -> int:
 	report_json_path = os.path.join(session_dir, "optimization_report.json")
 
 	logging.info("Session folder: %s", session_dir)
+
+	if args.session_cache_friendly:
+		backend_kwargs = {
+			**backend_kwargs,
+			"copilot_config_dir": os.path.join(session_dir, "_copilot", "interactive", "config"),
+			"copilot_log_dir": os.path.join(session_dir, "_copilot", "interactive", "logs"),
+			"continue_session": True,
+		}
 
 	llm_backend = LLMRouterBackend(**backend_kwargs)
 	mediator = Mediator(backends=[llm_backend])
