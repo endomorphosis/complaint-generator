@@ -144,7 +144,7 @@ manager.transition_to_next_phase()
 ```python
 from complaint_phases import KnowledgeGraphBuilder
 
-builder = KnowledgeGraphBuilder(llm_backend)
+builder = KnowledgeGraphBuilder(mediator=mediator)
 graph = builder.build_from_text(complaint_text)
 
 # Inspect entities
@@ -156,13 +156,13 @@ for rel in graph.relationships.values():
     print(f"{rel.source} --[{rel.type}]--> {rel.target}")
 
 # Detect gaps
-gaps = graph.detect_gaps()
-print(f"Low confidence entities: {len(gaps['low_confidence_entities'])}")
-print(f"Isolated entities: {len(gaps['isolated_entities'])}")
+gaps = graph.find_gaps()
+print(f"Low confidence entities: {len(gaps.get('low_confidence_entities', []))}")
+print(f"Isolated entities: {len(gaps.get('isolated_entities', []))}")
 
 # Save/load
-graph.to_json_file('knowledge_graph.json')
-loaded_graph = KnowledgeGraph.from_json_file('knowledge_graph.json')
+graph.to_json('knowledge_graph.json')
+loaded_graph = KnowledgeGraph.from_json('knowledge_graph.json')
 ```
 
 ### 3. Dependency Graph (`dependency_graph.py`)
@@ -199,25 +199,23 @@ loaded_graph = KnowledgeGraph.from_json_file('knowledge_graph.json')
 ```python
 from complaint_phases import DependencyGraphBuilder
 
-builder = DependencyGraphBuilder(llm_backend)
-graph = builder.build_from_claims(claims, knowledge_graph)
+builder = DependencyGraphBuilder(mediator=mediator)
+graph = builder.build_from_claims(claims)
 
 # Check satisfaction
 for claim_id, node in graph.nodes.items():
-    if node.node_type == 'claim':
-        satisfaction = graph.check_satisfaction(claim_id)
-        print(f"Claim: {node.label}")
-        print(f"  Satisfaction: {satisfaction.satisfied}/{satisfaction.total}")
-        print(f"  Satisfied Requirements: {satisfaction.satisfied_requirements}")
-        print(f"  Unsatisfied Requirements: {satisfaction.unsatisfied_requirements}")
+    if node.node_type == NodeType.CLAIM:
+        satisfaction = graph.calculate_satisfaction(claim_id)
+        print(f"Claim: {node.name}")
+        print(f"  Satisfaction: {satisfaction['satisfied']}/{satisfaction['total']}")
 
 # Get gaps
-gaps = graph.get_gaps()
-print(f"Claims with gaps: {gaps['claims_with_gaps']}")
+gaps = graph.identify_gaps()
+print(f"Unsatisfied requirements: {len(gaps.get('unsatisfied_requirements', []))}")
 
 # Save/load
-graph.to_json_file('dependency_graph.json')
-loaded_graph = DependencyGraph.from_json_file('dependency_graph.json')
+graph.to_json('dependency_graph.json')
+loaded_graph = DependencyGraph.from_json('dependency_graph.json')
 ```
 
 ### 4. Complaint Denoiser (`denoiser.py`)
@@ -243,25 +241,15 @@ loaded_graph = DependencyGraph.from_json_file('dependency_graph.json')
 ```python
 from complaint_phases import ComplaintDenoiser
 
-denoiser = ComplaintDenoiser(llm_backend)
+denoiser = ComplaintDenoiser(mediator=mediator)
 
-# Initialize with graphs
-denoiser.set_graphs(knowledge_graph, dependency_graph)
+# Generate questions from graphs
+questions = denoiser.generate_questions(knowledge_graph, dependency_graph, max_questions=5)
 
-# Generate questions
-questions = denoiser.generate_denoising_questions(max_questions=5)
+# Calculate noise level
+noise_level = denoiser.calculate_noise_level(knowledge_graph, dependency_graph)
 
-# Process answers
-for question, answer in zip(questions, answers):
-    denoiser.process_answer(question, answer)
-
-# Check convergence
-converged = denoiser.has_converged()
-noise_level = denoiser.calculate_noise()
-
-print(f"Converged: {converged}")
 print(f"Noise Level: {noise_level}")
-print(f"Gap Ratio: {denoiser.get_gap_ratio()}")
 ```
 
 ### 5. Legal Graph (`legal_graph.py`)
@@ -298,8 +286,8 @@ print(f"Gap Ratio: {denoiser.get_gap_ratio()}")
 ```python
 from complaint_phases import LegalGraphBuilder
 
-builder = LegalGraphBuilder(llm_backend, legal_research_hooks)
-graph = builder.build_for_claims(claims, jurisdiction='federal')
+builder = LegalGraphBuilder(mediator=mediator)
+graph = builder.build_for_claims(claims)
 
 # Inspect legal elements
 for element in graph.elements.values():
@@ -314,8 +302,8 @@ for req in procedural:
     print(f"  Deadline: {req.metadata.get('deadline')}")
 
 # Save/load
-graph.to_json_file('legal_graph.json')
-loaded_graph = LegalGraph.from_json_file('legal_graph.json')
+graph.to_json('legal_graph.json')
+loaded_graph = LegalGraph.from_json('legal_graph.json')
 ```
 
 ### 6. Neurosymbolic Matcher (`neurosymbolic_matcher.py`)
@@ -341,25 +329,23 @@ loaded_graph = LegalGraph.from_json_file('legal_graph.json')
 ```python
 from complaint_phases import NeurosymbolicMatcher
 
-matcher = NeurosymbolicMatcher(llm_backend)
+matcher = NeurosymbolicMatcher(mediator=mediator)
 
 # Match facts to legal requirements
-matches = matcher.match_facts_to_requirements(
+matches = matcher.match_requirements(
     knowledge_graph=knowledge_graph,
     dependency_graph=dependency_graph,
     legal_graph=legal_graph
 )
 
 # Review matches
-for requirement_id, match in matches.items():
+for req_id, match in matches.items():
     print(f"Requirement: {match['requirement']}")
     print(f"  Satisfaction: {match['satisfaction_score']}")
-    print(f"  Matched Facts: {match['matched_facts']}")
-    print(f"  Missing Elements: {match['missing_elements']}")
-    print(f"  Explanation: {match['explanation']}")
+    print(f"  Matched Facts: {match.get('matched_facts', [])}")
 
 # Check overall satisfaction
-overall = matcher.calculate_overall_satisfaction(matches)
+overall = matcher.calculate_satisfaction_score(matches)
 print(f"Overall Satisfaction: {overall}")
 ```
 

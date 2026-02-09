@@ -8,8 +8,8 @@ The `examples/` directory contains 21 demonstration scripts covering all major f
 
 1. **Core System Examples** (6) - Basic workflows and core features
 2. **Complaint Analysis Examples** (5) - Analysis and classification
-3. **Adversarial Testing Examples** (8) - Testing and optimization
-4. **Advanced Examples** (2) - Code generation and autopatch
+3. **Adversarial Testing Examples** (7) - Testing and optimization
+4. **Advanced Examples** (3) - Code generation and autopatch
 
 ## Core System Examples
 
@@ -67,13 +67,13 @@ python examples/legal_analysis_demo.py
 
 **Key Code:**
 ```python
-mediator.state.complaint = "Employment discrimination complaint..."
-
-result = mediator.analyze_complaint_legal_issues()
-
-print("Claim Types:", result['classification']['claim_types'])
-print("Statutes:", result['statutes'])
-print("Questions:", result['questions'][:3])
+# Placeholder implementation: the current demo script only prints a message.
+print("Legal Analysis Hooks Demo - See docs/LEGAL_HOOKS.md for full documentation")
+print("This demonstrates the 4-step legal analysis process:")
+print("1. Classification - Identify claim types")
+print("2. Statute Retrieval - Find applicable laws")
+print("3. Requirements - Determine elements to prove") 
+print("4. Questions - Generate targeted questions")
 ```
 
 ---
@@ -669,9 +669,6 @@ export OPENAI_API_KEY="your_openai_key"
 ```bash
 # Run specific example
 python examples/three_phase_example.py
-
-# Run with verbose output
-python examples/legal_analysis_demo.py --verbose
 
 # Run with custom config
 python examples/adversarial_harness_example.py --config config.llm_router.json

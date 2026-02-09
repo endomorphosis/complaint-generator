@@ -355,7 +355,7 @@ Graphs are persisted as JSON for resumability:
 
 ### Authentication
 - API keys stored in environment variables
-- No credentials in code or config files
+- Credentials should not be stored in code or config files
 
 ### Data Privacy
 - User data isolated by user_id

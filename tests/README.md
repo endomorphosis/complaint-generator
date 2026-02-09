@@ -5,7 +5,7 @@ This directory contains tests for the complaint-generator application following 
 ## Test Structure
 
 ```
-tests/ (19 files, 60+ test classes, 150+ tests)
+tests/ (22 files, 60+ test classes, 150+ tests)
 ├── Complaint Processing Tests
 │   ├── test_complaint_phases.py           # Three-phase system (7 classes, 27 tests)
 │   ├── test_mediator_three_phase.py       # Three-phase integration (1 class, 6 tests)
@@ -17,7 +17,9 @@ tests/ (19 files, 60+ test classes, 150+ tests)
 │   ├── test_dei_analysis.py               # DEI analysis (5 classes, 19 tests)
 │   └── test_hacc_integration.py           # DEI/HACC features (5 classes)
 ├── Adversarial Testing Tests
-│   └── test_adversarial_harness.py        # Adversarial framework (6 classes, 18 tests)
+│   ├── test_adversarial_harness.py        # Adversarial framework (6 classes, 18 tests)
+│   ├── test_sgd_cycle_integration.py      # SGD cycle integration
+│   └── test_sweep_ranker.py               # Sweep ranking tests
 ├── Mediator & Hooks Tests
 │   ├── test_mediator.py                   # Core orchestration (2 classes, 4 tests)
 │   ├── test_legal_hooks.py                # Legal analysis pipeline (5 classes, 12 tests)
@@ -30,8 +32,7 @@ tests/ (19 files, 60+ test classes, 150+ tests)
 │   ├── test_llm_router_backend.py         # LLM routing (1 class, 7 tests)
 │   ├── test_integration.py                # End-to-end (1 class, 2 tests)
 │   └── test_log.py                        # Logging (6 tests)
-└── Probate Integration
-    └── test_probate_integration.py        # Probate complaint type (5 tests)
+└── __init__.py                            # Test package initialization
 ```
 
 ## Running Tests

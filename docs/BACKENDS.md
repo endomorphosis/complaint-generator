@@ -70,66 +70,28 @@ backend = LLMRouterBackend(
     temperature=0.7
 )
 
-# Generate text
-response = backend.generate(
-    prompt="Extract legal claims from: [complaint text]",
-    max_tokens=500
+# Generate text by calling the backend
+response = backend(
+    "Extract legal claims from: [complaint text]"
 )
 
 print(response)
 ```
 
-### Automatic Fallback
+### Retry and Backoff
 
-The LLM Router automatically falls back to alternative providers if the primary provider fails:
-
-```python
-# Configure with fallback chain
-backend = LLMRouterBackend(
-    id='llm-router',
-    provider='copilot_cli',  # Primary
-    fallback_providers=['openai', 'huggingface'],  # Fallbacks
-    model='gpt-5-mini'
-)
-
-# Request will try copilot_cli first, then openai, then huggingface
-response = backend.generate(prompt)
-```
-
-### Rate Limiting
-
-Built-in rate limiting prevents API throttling:
+The LLM Router includes built-in retry logic with exponential backoff:
 
 ```python
 backend = LLMRouterBackend(
     id='llm-router',
-    provider='openai',
-    model='gpt-4',
-    rate_limit=60,  # Requests per minute
-    rate_limit_window=60  # Window in seconds
+    provider='copilot_cli',
+    model='gpt-5-mini',
+    retry_max_attempts=3,  # Max retry attempts
+    retry_backoff_base_s=1.0,  # Base backoff time
+    retry_backoff_max_s=60.0,  # Max backoff time
+    retry_jitter_s=0.5  # Random jitter
 )
-```
-
-### Batch Processing
-
-Support for parallel batch requests:
-
-```python
-prompts = [
-    "Analyze complaint 1...",
-    "Analyze complaint 2...",
-    "Analyze complaint 3..."
-]
-
-responses = backend.batch_generate(
-    prompts=prompts,
-    max_workers=4,  # Parallel workers
-    timeout=30  # Timeout per request
-)
-
-for prompt, response in zip(prompts, responses):
-    print(f"Prompt: {prompt[:50]}...")
-    print(f"Response: {response[:100]}...\n")
 ```
 
 ## OpenAI Backend (`backends/openai.py`, `backends/openaibackend.py`)
@@ -145,8 +107,9 @@ Direct integration with OpenAI's API.
       "id": "openai",
       "type": "openai",
       "api_key": "${OPENAI_API_KEY}",
-      "model": "gpt-4",
-      "max_tokens": 500
+      "engine": "text-davinci-003",
+      "temperature": 0.7,
+      "max_tokens": 256
     }
   ]
 }
@@ -165,12 +128,14 @@ from backends import OpenAIBackend
 
 backend = OpenAIBackend(
     id='openai',
-    api_key='sk-...',
-    model='gpt-4',
-    max_tokens=500
+    api_key='sk-...',  # or use ${OPENAI_API_KEY}
+    engine='text-davinci-003',
+    temperature=0.7,
+    max_tokens=256
 )
 
-response = backend.generate(prompt="Your prompt here")
+# Call the backend
+response = backend("Your prompt here")
 ```
 
 ## HuggingFace Backend (`backends/huggingface.py`)
@@ -186,7 +151,7 @@ Integration with HuggingFace's model hub.
       "id": "huggingface",
       "type": "huggingface",
       "api_key": "${HUGGINGFACE_API_KEY}",
-      "model": "mistralai/Mistral-7B-Instruct-v0.1",
+      "engine": "mistralai/Mistral-7B-Instruct-v0.1",
       "max_tokens": 500
     }
   ]
@@ -207,11 +172,12 @@ from backends import HuggingFaceBackend
 backend = HuggingFaceBackend(
     id='huggingface',
     api_key='hf_...',
-    model='mistralai/Mistral-7B-Instruct-v0.1',
+    engine='mistralai/Mistral-7B-Instruct-v0.1',
     max_tokens=500
 )
 
-response = backend.generate(prompt="Your prompt here")
+# Call the backend
+response = backend("Your prompt here")
 ```
 
 ## Workstation Backend (`backends/workstation.py`)
@@ -285,7 +251,7 @@ result = mediator.submit_evidence(
 print(f"Evidence CID: {result['cid']}")
 
 # Retrieve evidence by CID
-evidence = mediator.get_evidence_by_cid(result['cid'])
+evidence = mediator.evidence_state.get_evidence_by_cid(result['cid'])
 print(f"Retrieved: {evidence['description']}")
 ```
 
@@ -377,7 +343,7 @@ Backends include comprehensive test coverage:
 pytest tests/test_llm_router_backend.py -v
 
 # Test all backends
-pytest tests/test_backends.py -v
+pytest tests -v
 ```
 
 ## Best Practices

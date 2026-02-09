@@ -24,8 +24,11 @@ The main orchestration class that coordinates all complaint processing activitie
 - `analyze_evidence()` - AI-powered evidence gap analysis
 - `get_legal_authorities()` - Query researched legal authorities
 - `search_web_for_evidence()` - Manual web search with specific keywords
-- `run_three_phase_processing()` - Execute complete three-phase workflow
-- `save_phase_state()` / `load_phase_state()` - Persist processing state
+- `start_three_phase_process()` - Initialize three-phase complaint workflow
+- `process_denoising_answer()` - Handle user responses in denoising phase
+- `advance_to_evidence_phase()` - Transition to evidence collection phase
+- `advance_to_formalization_phase()` - Transition to formalization phase
+- `get_three_phase_status()` - Get current status of three-phase workflow
 
 ### State Management (`state.py`)
 
@@ -40,16 +43,27 @@ DuckDB-backed persistent state management for evidence, legal authorities, and p
 
 ### Hooks Architecture
 
-The mediator uses a hook-based architecture for extensibility. All hooks implement `.execute(state, mediator)` and `.hook_name()` methods.
+The mediator uses a hook-based architecture for extensibility. Each hook is implemented as a dedicated class that the mediator instantiates and calls directly via specific methods.
+
+**Hook Classes:**
+- Legal analysis hooks provide methods like `classify_complaint()`, `retrieve_statutes()`
+- Evidence hooks provide methods like `store_evidence()`, `get_evidence_by_cid()`
+- Search hooks provide methods like `search_legal_corpus()`, `search_web_for_evidence()`
+
+The mediator instantiates these hook classes during initialization and calls their methods directly rather than using a generic `.execute()` interface.
 
 #### Legal Analysis Hooks (`legal_hooks.py`)
 
 Four-stage legal analysis pipeline:
 
 1. **LegalClassificationHook** - Extract claim types, jurisdiction, legal areas
+   - Methods: `classify_complaint(text)` → classification dict
 2. **StatuteRetrievalHook** - Identify applicable laws and regulations
+   - Methods: `retrieve_statutes(classification)` → statute list
 3. **SummaryJudgmentHook** - Generate required elements per claim type
+   - Methods: `get_requirements(claim_types)` → requirements dict
 4. **QuestionGenerationHook** - Create evidence-gathering questions
+   - Methods: `generate_questions(requirements)` → question list
 
 #### Legal Research Hooks (`legal_authority_hooks.py`)
 
@@ -151,14 +165,21 @@ print("Questions:", result['questions'][:3])
 
 ### Three-Phase Processing
 ```python
-# Run complete three-phase workflow
-result = mediator.run_three_phase_processing(
-    initial_complaint="My employer violated my rights...",
-    max_iterations=5
+# Start three-phase workflow
+state = mediator.start_three_phase_process(
+    initial_complaint_text="My employer violated my rights..."
 )
 
-print(f"Phase: {result['current_phase']}")
-print(f"Formal Complaint: {result['formal_complaint']}")
+# Process denoising answers from user
+state = mediator.process_denoising_answer(
+    question=state['initial_questions'][0],
+    answer="Yes, I was terminated on January 15, 2024"
+)
+
+# Check status
+status = mediator.get_three_phase_status()
+print(f"Phase: {status['current_phase']}")
+print(f"Progress: {status['progress']}")
 ```
 
 ### Evidence Management
