@@ -351,6 +351,27 @@ class AdversarialSession:
         )
         return any(term in text for term in witness_terms)
 
+    @staticmethod
+    def _coverage_gap_rank(
+        question_text: str,
+        need_timeline: bool,
+        need_harm_remedy: bool,
+        need_actor_decisionmaker: bool,
+        need_documentary_evidence: bool,
+        need_witness: bool,
+    ) -> int:
+        if need_harm_remedy and AdversarialSession._is_harm_or_remedy_question(question_text):
+            return 0
+        if need_timeline and AdversarialSession._is_timeline_question(question_text):
+            return 1
+        if need_actor_decisionmaker and AdversarialSession._is_actor_or_decisionmaker_question(question_text):
+            return 2
+        if need_documentary_evidence and AdversarialSession._is_documentary_evidence_question(question_text):
+            return 3
+        if need_witness and AdversarialSession._is_witness_question(question_text):
+            return 4
+        return 5
+
     def _build_fallback_probe(
         self,
         asked_question_counts: Dict[str, int],
@@ -457,6 +478,9 @@ class AdversarialSession:
         asked_intent_counts: Dict[str, int],
         need_timeline: bool,
         need_harm_remedy: bool,
+        need_actor_decisionmaker: bool,
+        need_documentary_evidence: bool,
+        need_witness: bool,
         last_question_key: str | None,
         last_question_intent_key: str | None,
         recent_intent_keys: Set[str],
@@ -511,8 +535,22 @@ class AdversarialSession:
                 recent_intent_keys=recent_intent_keys,
             )
         ]
-        # Prefer broader coverage by choosing less-repeated intents/questions first.
-        non_redundant_candidates.sort(key=lambda c: (c[5], c[4], c[6]))
+        # Prefer filling high-value information gaps before exploring lower-value variants.
+        non_redundant_candidates.sort(
+            key=lambda c: (
+                self._coverage_gap_rank(
+                    c[1],
+                    need_timeline=need_timeline,
+                    need_harm_remedy=need_harm_remedy,
+                    need_actor_decisionmaker=need_actor_decisionmaker,
+                    need_documentary_evidence=need_documentary_evidence,
+                    need_witness=need_witness,
+                ),
+                c[5],
+                c[4],
+                c[6],
+            )
+        )
 
         if need_harm_remedy:
             for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
@@ -521,6 +559,36 @@ class AdversarialSession:
                     and intent_count == 0
                     and similarity_to_seen < novel_similarity_threshold
                     and self._is_harm_or_remedy_question(text)
+                ):
+                    return q
+
+        if need_actor_decisionmaker:
+            for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
+                if (
+                    asked_count == 0
+                    and intent_count == 0
+                    and similarity_to_seen < novel_similarity_threshold
+                    and self._is_actor_or_decisionmaker_question(text)
+                ):
+                    return q
+
+        if need_documentary_evidence:
+            for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
+                if (
+                    asked_count == 0
+                    and intent_count == 0
+                    and similarity_to_seen < novel_similarity_threshold
+                    and self._is_documentary_evidence_question(text)
+                ):
+                    return q
+
+        if need_witness:
+            for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
+                if (
+                    asked_count == 0
+                    and intent_count == 0
+                    and similarity_to_seen < novel_similarity_threshold
+                    and self._is_witness_question(text)
                 ):
                     return q
 
@@ -630,6 +698,9 @@ class AdversarialSession:
                         asked_intent_counts=asked_intent_counts,
                         need_timeline=need_timeline,
                         need_harm_remedy=need_harm_remedy,
+                        need_actor_decisionmaker=need_actor_decisionmaker,
+                        need_documentary_evidence=need_documentary_evidence,
+                        need_witness=need_witness,
                         last_question_key=last_question_key,
                         last_question_intent_key=last_question_intent_key,
                         recent_intent_keys=set(recent_intent_keys),
@@ -666,10 +737,13 @@ class AdversarialSession:
                 if question_key in asked_question_keys:
                     logger.debug("Mediator repeated question (no non-repeated alternative available)")
                 logger.debug(f"Mediator asks: {question_text}")
-                
+
                 # Get response from complainant
+                complainant_prompt = question_text
+                if turns == 0:
+                    complainant_prompt = self._with_empathy_prefix(question_text)
                 answer = self.complainant.respond_to_question(
-                    self._with_empathy_prefix(question_text)
+                    complainant_prompt
                 )
                 logger.debug(f"Complainant answers: {answer[:100]}...")
                 

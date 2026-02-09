@@ -5,7 +5,7 @@ Provides convenience functions for registering different complaint types
 with their specific keywords, patterns, and scoring models.
 """
 
-from typing import List
+from typing import Any, Dict, List, Optional
 from .keywords import register_keywords
 from .legal_patterns import register_legal_terms
 
@@ -857,6 +857,39 @@ def get_registered_types() -> List[str]:
     """
     from .keywords import _global_registry
     return _global_registry.get_complaint_types()
+
+
+def get_complaint_type(complaint_type: str) -> Optional[Dict[str, Any]]:
+    """Return basic metadata for a registered complaint type.
+
+    This is used by mediator hooks (e.g., LegalCorpusRAGHook) to retrieve
+    type-scoped keyword categories.
+
+    Returns None when the type is unknown.
+    """
+
+    if not isinstance(complaint_type, str):
+        return None
+
+    name = complaint_type.strip()
+    if not name:
+        return None
+
+    from .keywords import _global_registry
+
+    if name not in _global_registry.get_complaint_types():
+        return None
+
+    categories = _global_registry.get_all_categories(name)
+    primary_category = "complaint"
+    if categories:
+        primary_category = "complaint" if "complaint" in categories else categories[0]
+
+    return {
+        "name": name,
+        "category": primary_category,
+        "categories": categories,
+    }
 
 
 # Register default types on module import
