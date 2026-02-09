@@ -1168,7 +1168,17 @@ def _run_codex_with_tools_logged(
         )
 
     # Final forced attempt
-    final_prompt = base_prompt + "\n\nTool budget exhausted. Return a JSON {type:'final', patch:'...'} with a valid apply_patch patch."
+    # Important: include the tool_log tail so the model has the evidence/context
+    # it gathered (otherwise it may keep asking for tools and never finalize).
+    final_prompt = base_prompt
+    if tool_log:
+        final_prompt += "\n\n" + "\n\n".join(tool_log[-8:])
+    final_prompt += (
+        "\n\n"
+        "Tool budget exhausted. You MUST now return ONLY a JSON {type:'final', patch:'...'} "
+        "containing a valid apply_patch patch. Do NOT request any tools."
+    )
+
     if chat_jsonl_path:
         _append_jsonl(
             chat_jsonl_path,
@@ -1178,7 +1188,36 @@ def _run_codex_with_tools_logged(
                 "tool_log_tail": tool_log[-8:],
             },
         )
+
     out = backend(final_prompt)
+    if chat_jsonl_path:
+        _append_jsonl(
+            chat_jsonl_path,
+            {
+                "event": "final_model_output",
+                "ts": _utc_iso(),
+                "text": out or "",
+            },
+        )
+
+    # If the model still tries to request tools, reprompt once more (no tools allowed).
+    out_obj = _try_parse_json_object(out or "")
+    if out_obj and out_obj.get("type") == "tool":
+        reprompt = (
+            final_prompt
+            + "\n\nSYSTEM: Tool calls are not allowed now. Return ONLY the JSON final patch object."
+        )
+        out = backend(reprompt)
+        if chat_jsonl_path:
+            _append_jsonl(
+                chat_jsonl_path,
+                {
+                    "event": "final_model_output_retry",
+                    "ts": _utc_iso(),
+                    "text": out or "",
+                },
+            )
+
     norm = _normalize_patch_text(out or "")
     if _looks_like_apply_patch(norm):
         try:
