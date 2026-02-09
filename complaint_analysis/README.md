@@ -17,7 +17,7 @@ The `complaint_analysis` module (formerly `hacc_integration`) provides a flexibl
 
 ## Supported Complaint Types
 
-The module includes built-in support for 13 complaint types:
+The module includes built-in support for 14 complaint types:
 
 - **DEI (Diversity, Equity, Inclusion)** - Discrimination, harassment, civil rights violations across domains
 - **Housing** - Fair housing, tenant rights, housing discrimination
@@ -32,6 +32,7 @@ The module includes built-in support for 13 complaint types:
 - **Tax Law** - IRS disputes, tax penalties, collection actions
 - **Intellectual Property** - Patent, trademark, copyright infringement
 - **Environmental Law** - Pollution, EPA violations, environmental hazards
+- **Probate** - Estate disputes, will contests, trust administration, guardianship
 
 ## Quick Start
 
@@ -118,7 +119,7 @@ class EnvironmentalRiskScorer(BaseRiskScorer):
 
 ## Built-in Complaint Types
 
-The module includes comprehensive taxonomies for 12 different practice areas:
+The module includes comprehensive taxonomies for 14 different practice areas:
 
 ### Housing
 Keywords: fair housing, Section 8, landlord, tenant, eviction, reasonable accommodation, etc.
@@ -155,6 +156,9 @@ Keywords: patent, trademark, copyright, fair use, DMCA, trade secret, infringeme
 
 ### Environmental Law
 Keywords: EPA, Clean Air Act, Clean Water Act, CERCLA, pollution, contamination, etc.
+
+### Probate
+Keywords: estate, will, probate court, executor, beneficiary, trust, guardianship, intestate succession, etc.
 
 ## Architecture
 
@@ -248,6 +252,7 @@ get_type_specific_keywords('category_name', 'complaint_type')  # Type-specific o
 **register_tax_law_complaint()** - Register tax law keywords/patterns  
 **register_intellectual_property_complaint()** - Register IP law keywords/patterns  
 **register_environmental_law_complaint()** - Register environmental law keywords/patterns  
+**register_probate_complaint()** - Register probate law keywords/patterns  
 **get_registered_types()** - List all registered complaint types
 
 ## Migration from hacc_integration

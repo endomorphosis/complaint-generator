@@ -5,12 +5,33 @@ This directory contains tests for the complaint-generator application following 
 ## Test Structure
 
 ```
-tests/
-├── __init__.py
-├── test_log.py           # Tests for logging functionality
-├── test_mediator.py      # Tests for mediator module
-├── test_state.py         # Tests for state management
-└── test_integration.py   # Integration tests
+tests/ (19 files, 60+ test classes, 150+ tests)
+├── Complaint Processing Tests
+│   ├── test_complaint_phases.py           # Three-phase system (7 classes, 27 tests)
+│   ├── test_mediator_three_phase.py       # Three-phase integration (1 class, 6 tests)
+│   └── test_enhanced_denoising.py         # Advanced denoising (4 classes)
+├── Complaint Analysis Tests
+│   ├── test_complaint_analysis.py         # Core analysis (5 classes)
+│   ├── test_complaint_analysis_integration.py # Integration features (5 classes)
+│   ├── test_complaint_taxonomies.py       # All 14 complaint types (10 classes)
+│   ├── test_dei_analysis.py               # DEI analysis (5 classes, 19 tests)
+│   └── test_hacc_integration.py           # DEI/HACC features (5 classes)
+├── Adversarial Testing Tests
+│   └── test_adversarial_harness.py        # Adversarial framework (6 classes, 18 tests)
+├── Mediator & Hooks Tests
+│   ├── test_mediator.py                   # Core orchestration (2 classes, 4 tests)
+│   ├── test_legal_hooks.py                # Legal analysis pipeline (5 classes, 12 tests)
+│   ├── test_legal_authority_hooks.py      # Legal research (4 classes, 11 tests)
+│   ├── test_web_evidence_hooks.py         # Web evidence (3 classes, 12 tests)
+│   ├── test_evidence_hooks.py             # Evidence management (4 classes, 12 tests)
+│   └── test_search_hooks.py               # Search integration (5 classes)
+├── Core Tests
+│   ├── test_state.py                      # State management (1 class, 2 tests)
+│   ├── test_llm_router_backend.py         # LLM routing (1 class, 7 tests)
+│   ├── test_integration.py                # End-to-end (1 class, 2 tests)
+│   └── test_log.py                        # Logging (6 tests)
+└── Probate Integration
+    └── test_probate_integration.py        # Probate complaint type (5 tests)
 ```
 
 ## Running Tests
