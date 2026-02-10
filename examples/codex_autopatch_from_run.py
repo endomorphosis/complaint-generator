@@ -141,6 +141,72 @@ def _debug_extract_reset_info_from_message(msg: str) -> Dict[str, Any]:
     }
 
 
+def _extract_first_error_message_from_exec_jsonl(path: str) -> Optional[str]:
+    """Best-effort: extract the first error.message from a Codex exec JSONL."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(obj, dict) and obj.get("type") == "error" and isinstance(obj.get("message"), str):
+                    msg = str(obj.get("message") or "").strip()
+                    return msg or None
+    except Exception:
+        return None
+    return None
+
+
+def _extract_rate_limit_reset_info_with_exec_fallback(
+    *,
+    msg: str,
+    exec_jsonl_path: Optional[str] = None,
+) -> Tuple[Optional[int], Optional[datetime], Optional[str]]:
+    """Extract reset timing from the exception message, with optional exec-JSONL fallback.
+
+    Codex provider sometimes includes the definitive reset timestamp only in the
+    codex_exec_*.jsonl error message.
+    """
+    reset_s, reset_at, source = _extract_rate_limit_reset_info(msg)
+    if reset_at is not None or (isinstance(reset_s, int) and reset_s > 0):
+        return reset_s, reset_at, source
+
+    if isinstance(exec_jsonl_path, str) and exec_jsonl_path.strip():
+        provider_msg = _extract_first_error_message_from_exec_jsonl(exec_jsonl_path.strip())
+        if provider_msg:
+            s2, at2, src2 = _extract_rate_limit_reset_info(provider_msg)
+            if at2 is not None or (isinstance(s2, int) and s2 > 0):
+                return s2, at2, src2
+
+    return reset_s, reset_at, source
+
+
+def _truncate_for_log(s: Optional[str], max_len: int = 400) -> Optional[str]:
+    if not isinstance(s, str):
+        return None
+    s = s.strip().replace("\r", " ").replace("\n", " ")
+    if not s:
+        return None
+    if len(s) <= int(max_len):
+        return s
+    if int(max_len) <= 3:
+        return s[: int(max_len)]
+    return s[: int(max_len) - 3] + "..."
+
+
+def _pick_reset_at_raw_from_rate_limit_artifact(data: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(data, dict):
+        return None
+    provider_reset_at_raw = data.get("provider_reset_at")
+    if isinstance(provider_reset_at_raw, str) and provider_reset_at_raw.strip():
+        return provider_reset_at_raw.strip()
+    reset_at_raw = data.get("reset_at")
+    if isinstance(reset_at_raw, str) and reset_at_raw.strip():
+        return reset_at_raw.strip()
+    return None
+
+
 def _find_session_jsons(run_dir: str) -> List[str]:
     out: List[str] = []
     if not os.path.isdir(run_dir):
@@ -2385,6 +2451,7 @@ def main() -> int:
         reset_s: Optional[int],
         reset_at_override: Optional[str] = None,
         reset_source: Optional[str] = None,
+        provider_error_message: Optional[str] = None,
         will_retry: bool,
         sleep_s: Optional[int] = None,
         attempt_index: int = 0,
@@ -2404,6 +2471,7 @@ def main() -> int:
             "kind": "rate_limit",
             "provider": "codex_cli",
             "transcript_path": os.path.abspath(transcript_path),
+            "provider_error_message": _truncate_for_log(provider_error_message, 2000),
             "resets_in_seconds": reset_s,
             "reset_at": reset_at,
             "reset_source": (str(reset_source) if reset_source else None),
@@ -2430,6 +2498,7 @@ def main() -> int:
                     "ts": payload["ts"],
                     "resets_in_seconds": reset_s,
                     "reset_at": reset_at,
+                    "provider_error_message": payload.get("provider_error_message"),
                     "will_retry": bool(will_retry),
                     "sleep_seconds": sleep_s,
                     "artifact_path": os.path.abspath(path),
@@ -2457,7 +2526,7 @@ def main() -> int:
                 return
 
             now = datetime.now(timezone.utc)
-            reset_at_raw = data.get("reset_at")
+            reset_at_raw = _pick_reset_at_raw_from_rate_limit_artifact(data)
             reset_at = None
             if isinstance(reset_at_raw, str) and reset_at_raw.strip():
                 try:
@@ -2503,6 +2572,7 @@ def main() -> int:
         transcript_path: str,
         artifact_path: Optional[str] = None,
         reset_at: Optional[str] = None,
+        provider_error_message: Optional[str] = None,
     ) -> str:
         hint = "Codex CLI rate/usage limit reached."
         if isinstance(reset_s, int) and reset_s > 0:
@@ -2533,11 +2603,15 @@ def main() -> int:
         )
         if isinstance(artifact_path, str) and artifact_path.strip():
             hint += "\nRate-limit metadata is saved at: " + os.path.abspath(artifact_path.strip())
+        provider_msg_snip = _truncate_for_log(provider_error_message, 800)
+        if provider_msg_snip:
+            hint += "\nProvider error message: " + provider_msg_snip
         return hint
 
     patch_text: str
     attempt = 0
     current_chat_path = chat_jsonl_path
+
     _maybe_sleep_from_previous_rate_limit()
     while True:
         try:
@@ -2559,8 +2633,28 @@ def main() -> int:
             if not is_rate_limit:
                 raise
 
-            reset_s, reset_at, _source = _extract_rate_limit_reset_info(msg)
-            reset_source = _source
+            exec_jsonl_path: Optional[str] = None
+            try:
+                exec_candidates = sorted(
+                    [p for p in os.listdir(out_dir) if p.startswith("codex_exec_") and p.endswith(".jsonl")]
+                )
+                if exec_candidates:
+                    exec_jsonl_path = os.path.join(out_dir, exec_candidates[-1])
+            except Exception:
+                exec_jsonl_path = None
+
+            provider_error_message: Optional[str] = None
+            if isinstance(exec_jsonl_path, str) and exec_jsonl_path.strip():
+                provider_error_message = _extract_first_error_message_from_exec_jsonl(exec_jsonl_path.strip())
+
+            # Enrich the exception string with provider text for better debugging/observability.
+            if provider_error_message and provider_error_message not in msg:
+                msg = msg + "\n" + provider_error_message
+
+            reset_s, reset_at, reset_source = _extract_rate_limit_reset_info_with_exec_fallback(
+                msg=msg,
+                exec_jsonl_path=exec_jsonl_path,
+            )
 
             if (not bool(args.wait_on_429)) or (
                 int(args.wait_on_429_max_retries) > 0 and attempt >= int(args.wait_on_429_max_retries)
@@ -2571,6 +2665,7 @@ def main() -> int:
                     reset_s=reset_s,
                     reset_at_override=reset_at_override,
                     reset_source=reset_source,
+                    provider_error_message=provider_error_message,
                     will_retry=False,
                     attempt_index=int(attempt),
                 )
@@ -2580,6 +2675,7 @@ def main() -> int:
                         transcript_path=current_chat_path,
                         artifact_path=artifact_path,
                         reset_at=(reset_at_override or None),
+                        provider_error_message=provider_error_message,
                     ),
                     file=sys.stderr,
                 )
@@ -2610,6 +2706,7 @@ def main() -> int:
                     reset_s=reset_s,
                     reset_at_override=reset_at_override,
                     reset_source=reset_source,
+                    provider_error_message=provider_error_message,
                     will_retry=False,
                     attempt_index=int(attempt),
                 )
@@ -2619,6 +2716,7 @@ def main() -> int:
                         transcript_path=current_chat_path,
                         artifact_path=artifact_path,
                         reset_at=(reset_at_override or None),
+                        provider_error_message=provider_error_message,
                     )
                     + f"\nNot waiting: resets_in_seconds+buffer={sleep_s} exceeds --wait-on-429-max-s={max_wait_s}.",
                     file=sys.stderr,
@@ -2633,14 +2731,17 @@ def main() -> int:
                 reset_s=reset_s,
                 reset_at_override=reset_at_override,
                 reset_source=reset_source,
+                provider_error_message=provider_error_message,
                 will_retry=True,
                 sleep_s=sleep_s,
                 attempt_index=int(attempt),
             )
             reset_at_str = reset_at_override or (datetime.now(timezone.utc) + timedelta(seconds=int(sleep_s))).isoformat()
             next_attempt = int(attempt) + 1
+            exc_snip = _truncate_for_log(msg, 500) or ""
+            exc_part = f" exception=\"{exc_snip}\"" if exc_snip else ""
             print(
-                f"Codex usage-limit: resets_in_seconds={reset_s} reset_at={reset_at_str} (wrote {os.path.abspath(artifact_path)}); sleeping {sleep_s}s then retrying (attempt={next_attempt})...",
+                f"Codex usage-limit: resets_in_seconds={reset_s} reset_at={reset_at_str}{exc_part} (wrote {os.path.abspath(artifact_path)}); sleeping {sleep_s}s then retrying (attempt={next_attempt})...",
                 file=sys.stderr,
             )
             time.sleep(sleep_s)

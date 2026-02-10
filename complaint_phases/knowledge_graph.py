@@ -7,6 +7,7 @@ a knowledge graph representation for denoising and evidence gathering.
 
 import json
 import logging
+import re
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -305,7 +306,35 @@ class KnowledgeGraphBuilder:
                 'attributes': {'role': 'complainant'},
                 'confidence': 0.9
             })
-        
+
+        # Additional heuristic extraction for dates (timeline) and common claims
+        date_patterns = [
+            r'\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{1,2},\s+\d{4}\b',
+            r'\b\d{1,2}/\d{1,2}/\d{2,4}\b',
+            r'\b\d{4}-\d{2}-\d{2}\b',
+        ]
+        found_dates: set[str] = set()
+        for pattern in date_patterns:
+            for match in re.findall(pattern, text):
+                found_dates.add(match.strip())
+
+        for date_str in found_dates:
+            entities.append({
+                'type': 'date',
+                'name': date_str,
+                'attributes': {},
+                'confidence': 0.8
+            })
+
+        # Add a termination-related claim if relevant keywords appear
+        if 'terminated' in text.lower() or 'fired' in text.lower():
+            entities.append({
+                'type': 'claim',
+                'name': 'Termination Claim',
+                'attributes': {'claim_type': 'termination'},
+                'confidence': 0.8
+            })
+
         # Use LLM if available
         if self.mediator:
             llm_entities = self._llm_extract_entities(text)
@@ -373,6 +402,17 @@ class KnowledgeGraphBuilder:
                         'confidence': 0.9
                     })
         
+        # Link claims to extracted dates to build a timeline
+        dates = graph.get_entities_by_type('date')
+        for claim in claims:
+            for date_ent in dates:
+                relationships.append({
+                    'source_id': claim.id,
+                    'target_id': date_ent.id,
+                    'type': 'occurred_on',
+                    'confidence': 0.6
+                })
+
         # Use LLM if available
         if self.mediator:
             llm_rels = self._llm_extract_relationships(text, graph)

@@ -263,18 +263,16 @@ def main() -> int:
             else:
                 next_loop_index = loop_index + 1
                 if args.loops and next_loop_index > args.loops:
-                    if active_orchestrator_id and not args.resume:
-                        print(
-                            "[loop] loops limit reached but an orchestrator is still active; rerun with --resume "
-                            + f"to continue orchestrator_id={active_orchestrator_id}",
-                            flush=True,
-                        )
-                    print(
+                    msg = (
                         "[loop] exiting (loops limit reached) "
                         + f"loop_index={loop_index} loops_target={int(args.loops)}"
-                        ,
-                        flush=True,
                     )
+                    if active_orchestrator_id and not bool(args.resume):
+                        msg += (
+                            "\n[loop] note: an in-progress orchestrator id is saved: "
+                            + f"{active_orchestrator_id}. Re-run with --resume to continue it."
+                        )
+                    print(msg, flush=True)
                     break
                 loop_index = next_loop_index
 

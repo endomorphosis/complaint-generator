@@ -18,6 +18,8 @@ def _load_codex_autopatch_module():
 
 _codex_autopatch = _load_codex_autopatch_module()
 _debug_extract_reset_info_from_message = _codex_autopatch._debug_extract_reset_info_from_message
+_extract_rate_limit_reset_info_with_exec_fallback = _codex_autopatch._extract_rate_limit_reset_info_with_exec_fallback
+_pick_reset_at_raw_from_rate_limit_artifact = _codex_autopatch._pick_reset_at_raw_from_rate_limit_artifact
 
 
 def test_parse_try_again_at_human_timestamp() -> None:
@@ -86,3 +88,86 @@ def test_parse_real_codex_exec_jsonl_if_present() -> None:
     # The known artifact contains a human 'try again at Feb 11th, 2026 11:46 PM' string.
     if info["source"] == "try_again_at":
         assert info["reset_at_iso"] == "2026-02-11T23:46:00+00:00"
+
+
+def test_exec_jsonl_fallback_provides_reset_at() -> None:
+    now = datetime.now(timezone.utc)
+    future = datetime.fromtimestamp(now.timestamp() + 30, tz=timezone.utc).replace(microsecond=0)
+
+    # Exception string lacks reset timing; exec JSONL has provider message with reset_at.
+    msg = "HTTP 429 usage_limit"
+    exec_jsonl = {
+        "type": "error",
+        "message": f"You've hit your usage limit. reset_at={future.isoformat()}"
+    }
+
+    # Write a minimal JSONL file.
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "codex_exec_test.jsonl")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(json.dumps(exec_jsonl) + "\n")
+
+        reset_s, reset_at, source = _extract_rate_limit_reset_info_with_exec_fallback(
+            msg=msg,
+            exec_jsonl_path=p,
+        )
+        assert source == "reset_at"
+        assert isinstance(reset_at, datetime)
+        assert reset_at.isoformat() == future.isoformat()
+        assert isinstance(reset_s, int)
+        assert 0 < reset_s <= 35
+
+
+def test_exec_jsonl_fallback_provides_try_again_at_human_timestamp() -> None:
+    def _ordinal_suffix(n: int) -> str:
+        if 11 <= (n % 100) <= 13:
+            return "th"
+        return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+    now = datetime.now(timezone.utc)
+    # Use a near-future timestamp so derived seconds are stable.
+    future = datetime.fromtimestamp(now.timestamp() + 2 * 3600, tz=timezone.utc).replace(
+        microsecond=0, second=0
+    )
+    expected_iso = future.isoformat()
+
+    month = future.strftime("%b")
+    day_i = int(future.strftime("%d"))
+    day = f"{future.strftime('%d')}{_ordinal_suffix(day_i)}"
+    year = future.strftime("%Y")
+    time_part = future.strftime("%I:%M %p")
+    human = f"{month} {day}, {year} {time_part}"
+
+    # Exception string lacks reset timing; exec JSONL has provider message with 'try again at ...'.
+    msg = "HTTP 429 usage_limit"
+    exec_jsonl = {
+        "type": "error",
+        "message": f"You've hit your usage limit. Upgrade to Pro, or try again at {human}.",
+    }
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "codex_exec_test.jsonl")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(json.dumps(exec_jsonl) + "\n")
+
+        reset_s, reset_at, source = _extract_rate_limit_reset_info_with_exec_fallback(
+            msg=msg,
+            exec_jsonl_path=p,
+        )
+        assert source == "try_again_at"
+        assert isinstance(reset_at, datetime)
+        assert reset_at.isoformat() == expected_iso
+        assert isinstance(reset_s, int)
+        assert 0 < reset_s <= 3 * 3600
+
+
+def test_pick_reset_at_prefers_provider_reset_at() -> None:
+    data = {
+        "reset_at": "2026-02-10T00:00:00+00:00",
+        "provider_reset_at": "2026-02-11T23:46:00+00:00",
+    }
+    assert _pick_reset_at_raw_from_rate_limit_artifact(data) == "2026-02-11T23:46:00+00:00"
