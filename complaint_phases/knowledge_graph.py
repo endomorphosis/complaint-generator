@@ -8,7 +8,7 @@ a knowledge graph representation for denoising and evidence gathering.
 import json
 import logging
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
@@ -134,6 +134,27 @@ class KnowledgeGraph:
                     'claim_name': claim.name,
                     'suggested_question': f"What evidence supports the claim: {claim.name}?"
                 })
+
+        # Check for missing timeline details
+        has_dates = any(e.type == 'date' for e in self.entities.values())
+        has_timeline_rel = any(rel.relation_type == 'occurred_on' for rel in self.relationships.values())
+        if not has_dates and not has_timeline_rel:
+            gaps.append({
+                'type': 'missing_timeline',
+                'suggested_question': "When did the key events happen? Please share dates or a brief timeline."
+            })
+
+        # Check for missing responsible party (no orgs or respondent roles captured)
+        has_org = any(e.type == 'organization' for e in self.entities.values())
+        has_respondent_person = any(
+            e.type == 'person' and e.attributes.get('role', '').lower() in {'respondent', 'manager', 'supervisor', 'employer', 'owner', 'landlord'}
+            for e in self.entities.values()
+        )
+        if not has_org and not has_respondent_person:
+            gaps.append({
+                'type': 'missing_responsible_party',
+                'suggested_question': "Who is the person or organization you believe is responsible (e.g., employer, manager, agency)?"
+            })
         
         return gaps
     
@@ -277,30 +298,55 @@ class KnowledgeGraphBuilder:
         the mediator's LLM backend to do sophisticated entity extraction.
         """
         entities = []
+        seen: Set[Tuple[str, str]] = set()
+
+        def add_entity(entity: Dict[str, Any]) -> None:
+            if not isinstance(entity, dict):
+                return
+            name = (entity.get("name") or "").strip()
+            etype = (entity.get("type") or "").strip()
+            if not name or not etype:
+                return
+            key = (etype.lower(), name.lower())
+            if key in seen:
+                return
+            seen.add(key)
+            entities.append(entity)
+
+        def short_description(text_value: str, limit: int = 240) -> str:
+            snippet = " ".join((text_value or "").strip().split())
+            if len(snippet) > limit:
+                return snippet[: limit - 3] + "..."
+            return snippet
+
+        lower_text = (text or "").lower()
         
         # For now, use simple keyword-based extraction
         # In production, this would use LLM prompts like:
         # "Extract all people, organizations, dates, locations, and claims from: {text}"
         
         # Extract simple entities (this is a placeholder)
-        if 'discrimination' in text.lower():
-            entities.append({
+        if 'discrimination' in lower_text:
+            add_entity({
                 'type': 'claim',
                 'name': 'Discrimination Claim',
-                'attributes': {'claim_type': 'discrimination'},
+                'attributes': {
+                    'claim_type': 'discrimination',
+                    'description': short_description(text),
+                },
                 'confidence': 0.9
             })
         
-        if 'employer' in text.lower():
-            entities.append({
+        if 'employer' in lower_text:
+            add_entity({
                 'type': 'organization',
                 'name': 'Employer',
-                'attributes': {},
+                'attributes': {'role': 'respondent'},
                 'confidence': 0.7
             })
         
-        if 'employee' in text.lower() or 'complainant' in text.lower():
-            entities.append({
+        if 'employee' in lower_text or 'complainant' in lower_text:
+            add_entity({
                 'type': 'person',
                 'name': 'Complainant',
                 'attributes': {'role': 'complainant'},
@@ -319,7 +365,7 @@ class KnowledgeGraphBuilder:
                 found_dates.add(match.strip())
 
         for date_str in found_dates:
-            entities.append({
+            add_entity({
                 'type': 'date',
                 'name': date_str,
                 'attributes': {},
@@ -327,29 +373,100 @@ class KnowledgeGraphBuilder:
             })
 
         # Add a termination-related claim if relevant keywords appear
-        if 'terminated' in text.lower() or 'fired' in text.lower():
-            entities.append({
+        if 'terminated' in lower_text or 'fired' in lower_text:
+            add_entity({
                 'type': 'claim',
                 'name': 'Termination Claim',
-                'attributes': {'claim_type': 'termination'},
+                'attributes': {
+                    'claim_type': 'termination',
+                    'description': short_description(text),
+                },
                 'confidence': 0.8
             })
+
+        # Heuristic extraction for organization names
+        org_candidates: Set[str] = set()
+        org_suffixes = (
+            r"(?:Inc\.?|LLC|Ltd\.?|Co\.?|Corp\.?|Corporation|Company|University|"
+            r"Hospital|School|Department|Dept\.?|Agency|Clinic|Bank|Foundation|"
+            r"Association|Partners|Group|Systems|Services)"
+        )
+        for match in re.findall(rf"\b([A-Z][\w&.-]*(?:\s+[A-Z][\w&.-]*){{0,4}}\s+{org_suffixes})\b", text or ""):
+            org_candidates.add(match.strip())
+
+        for match in re.findall(r"\b(?:at|for|with|from)\s+([A-Z][\w&.-]*(?:\s+[A-Z][\w&.-]*){0,4})\b", text or ""):
+            org_candidates.add(match.strip())
+
+        months = {
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december",
+            "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+        }
+        banned = {"i", "we", "they", "he", "she", "it", "my", "our", "their", "the", "a", "an"}
+
+        for candidate in sorted(org_candidates):
+            cleaned = re.sub(r"[^\w&.\-\s]", "", candidate).strip()
+            if not cleaned:
+                continue
+            lowered = cleaned.lower()
+            if lowered in banned or lowered in months:
+                continue
+            tokens = cleaned.split()
+            if len(tokens) == 1 and len(cleaned) < 4:
+                continue
+            add_entity({
+                'type': 'organization',
+                'name': cleaned,
+                'attributes': {'role': 'respondent'},
+                'confidence': 0.6
+            })
+
+        # If we still don't have any organization, add a generic employer when text implies one.
+        has_org = any(e.get("type") == "organization" for e in entities if isinstance(e, dict))
+        if not has_org and any(k in lower_text for k in ["company", "workplace", "organization", "business", "agency", "department", "school", "university", "hospital", "clinic"]):
+            add_entity({
+                'type': 'organization',
+                'name': 'Organization',
+                'attributes': {'role': 'respondent'},
+                'confidence': 0.5
+            })
+
+        # Heuristic extraction for named individuals in role contexts
+        role_keywords = (
+            r"manager|supervisor|boss|coworker|co-worker|hr|human resources|director|"
+            r"owner|principal|teacher|professor|doctor|nurse|attorney|lawyer|agent|"
+            r"officer|landlord|neighbor|representative"
+        )
+        for match in re.finditer(
+            rf"\b(?:my|the|a|an)\s+(?P<role>{role_keywords})\s+(?P<name>[A-Z][a-z]+(?:\s+[A-Z][a-z]+){{0,2}})\b",
+            text or "",
+            re.IGNORECASE
+        ):
+            role = (match.group("role") or "").strip().lower()
+            name = (match.group("name") or "").strip()
+            if name:
+                add_entity({
+                    'type': 'person',
+                    'name': name,
+                    'attributes': {'role': role},
+                    'confidence': 0.7
+                })
 
         # Use LLM if available
         if self.mediator:
             llm_entities = self._llm_extract_entities(text)
-            entities.extend(llm_entities)
+            for ent in llm_entities:
+                if isinstance(ent, dict):
+                    add_entity(ent)
 
         # Fallback: ensure we have at least one claim to drive downstream graphs.
         # Many parts of the pipeline (dependency graph, denoiser questions) assume
         # there's at least one claim-like entity.
         has_claim = any(e.get("type") == "claim" for e in entities if isinstance(e, dict))
         if not has_claim:
-            snippet = (text or "").strip().splitlines()[0:1]
-            description = snippet[0].strip() if snippet else ""
-            if len(description) > 240:
-                description = description[:237] + "..."
-            entities.append(
+            description = short_description(text)
+            add_entity(
                 {
                     "type": "claim",
                     "name": "Complaint Claim",

@@ -7,6 +7,7 @@ Used to ensure all elements of a claim are properly supported.
 
 import json
 import logging
+import re
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -296,7 +297,7 @@ class DependencyGraphBuilder:
         self.dependency_counter = 0
     
     def build_from_claims(self, claims: List[Dict[str, Any]], 
-                         legal_requirements: Optional[Dict[str, Any]] = None) -> DependencyGraph:
+                          legal_requirements: Optional[Dict[str, Any]] = None) -> DependencyGraph:
         """
         Build a dependency graph from claims and legal requirements.
         
@@ -321,7 +322,70 @@ class DependencyGraphBuilder:
             )
             graph.add_node(node)
             claim_nodes.append(node)
+
+        def has_date(text_value: str) -> bool:
+            if not text_value:
+                return False
+            patterns = [
+                r'\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{1,2},\s+\d{4}\b',
+                r'\b\d{1,2}/\d{1,2}/\d{2,4}\b',
+                r'\b\d{4}-\d{2}-\d{2}\b',
+            ]
+            return any(re.search(p, text_value) for p in patterns)
+
+        def has_actor_signal(text_value: str) -> bool:
+            if not text_value:
+                return False
+            lower = text_value.lower()
+            actor_keywords = [
+                "employer", "company", "organization", "business", "manager", "supervisor",
+                "boss", "hr", "human resources", "landlord", "owner", "agency", "department",
+                "school", "university", "hospital", "clinic", "doctor", "nurse", "teacher",
+                "principal", "officer", "agent", "neighbor", "coworker", "co-worker",
+                "colleague", "respondent",
+            ]
+            return any(k in lower for k in actor_keywords)
         
+        # Add lightweight fact dependencies to avoid empty graphs when legal requirements are absent.
+        for claim_node in claim_nodes:
+            claim_text = f"{claim_node.name} {claim_node.description}".strip()
+
+            if not has_date(claim_text):
+                timeline_node = DependencyNode(
+                    id=self._get_node_id(),
+                    node_type=NodeType.FACT,
+                    name="Timeline of events",
+                    description="Dates or sequence of key events related to this claim",
+                    satisfied=False,
+                    confidence=0.0
+                )
+                graph.add_node(timeline_node)
+                graph.add_dependency(Dependency(
+                    id=self._get_dependency_id(),
+                    source_id=timeline_node.id,
+                    target_id=claim_node.id,
+                    dependency_type=DependencyType.DEPENDS_ON,
+                    required=True
+                ))
+
+            if not has_actor_signal(claim_text):
+                actor_node = DependencyNode(
+                    id=self._get_node_id(),
+                    node_type=NodeType.FACT,
+                    name="Responsible party",
+                    description="Who took the action or decision tied to this claim",
+                    satisfied=False,
+                    confidence=0.0
+                )
+                graph.add_node(actor_node)
+                graph.add_dependency(Dependency(
+                    id=self._get_dependency_id(),
+                    source_id=actor_node.id,
+                    target_id=claim_node.id,
+                    dependency_type=DependencyType.DEPENDS_ON,
+                    required=True
+                ))
+
         # Add legal requirements for each claim
         if legal_requirements:
             for claim_node in claim_nodes:

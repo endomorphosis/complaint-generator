@@ -169,10 +169,10 @@ class AdversarialHarness:
         logger.info('Session artifacts saved to %s', session_dir)
     
     def run_batch(self,
-                  num_sessions: int = 10,
-                  seed_complaints: List[Dict[str, Any]] = None,
-                  personalities: List[str] = None,
-                  max_turns_per_session: int = 10) -> List[SessionResult]:
+                   num_sessions: int = 10,
+                   seed_complaints: List[Dict[str, Any]] = None,
+                   personalities: List[str] = None,
+                  max_turns_per_session: int = 12) -> List[SessionResult]:
         """
         Run a batch of adversarial sessions in parallel.
         

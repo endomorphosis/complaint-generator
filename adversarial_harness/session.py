@@ -84,11 +84,11 @@ class AdversarialSession:
     """
     
     def __init__(self,
-                 session_id: str,
-                 complainant: Any,  # Complainant instance
-                 mediator: Any,  # Mediator instance
-                 critic: Any,  # Critic instance
-                 max_turns: int = 10):
+                  session_id: str,
+                  complainant: Any,  # Complainant instance
+                  mediator: Any,  # Mediator instance
+                  critic: Any,  # Critic instance
+                max_turns: int = 12):
         """
         Initialize adversarial session.
         
