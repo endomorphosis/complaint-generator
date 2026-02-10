@@ -137,8 +137,15 @@ class KnowledgeGraph:
 
         # Check for missing timeline details
         has_dates = any(e.type == 'date' for e in self.entities.values())
-        has_timeline_rel = any(rel.relation_type == 'occurred_on' for rel in self.relationships.values())
-        if not has_dates and not has_timeline_rel:
+        has_timeline_rel = any(
+            rel.relation_type in {'occurred_on', 'has_timeline_detail'}
+            for rel in self.relationships.values()
+        )
+        has_timeline_fact = any(
+            e.type == 'fact' and e.attributes.get('fact_type') == 'timeline'
+            for e in self.entities.values()
+        )
+        if not has_dates and not has_timeline_rel and not has_timeline_fact:
             gaps.append({
                 'type': 'missing_timeline',
                 'suggested_question': "When did the key events happen? Please share dates or a brief timeline."
@@ -378,9 +385,18 @@ class KnowledgeGraphBuilder:
             r'\b\d{4}-\d{2}-\d{2}\b',
             r'\b(?:in|on|since|during|around|by|from)\s+(?:19|20)\d{2}\b',
         ]
+        relative_patterns = [
+            r'\b(?:today|yesterday|tonight|last night|this morning|this afternoon|this evening)\b',
+            r'\b(?:last|this|next)\s+(?:week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+            r'\b\d+\s+(?:day|week|month|year)s?\s+ago\b',
+            r'\b(?:a|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:day|week|month|year)s?\s+ago\b',
+        ]
         found_dates: set[str] = set()
         for pattern in date_patterns:
             for match in re.findall(pattern, text):
+                found_dates.add(match.strip())
+        for pattern in relative_patterns:
+            for match in re.findall(pattern, text, flags=re.IGNORECASE):
                 found_dates.add(match.strip())
 
         for date_str in found_dates:

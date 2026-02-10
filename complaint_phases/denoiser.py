@@ -7,7 +7,7 @@ noise/ambiguity in the complaint information.
 
 import logging
 import re
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Set
 import os
 import random
 from .knowledge_graph import KnowledgeGraph, Entity, Relationship
@@ -95,6 +95,250 @@ class ComplaintDenoiser:
                 if value and value not in found:
                     found.append(value)
         return found
+
+
+    def _extract_org_candidates(self, text: str) -> List[str]:
+        if not text:
+            return []
+        candidates: Set[str] = set()
+        org_suffixes = (
+            r"(?:Inc\.?|LLC|Ltd\.?|Co\.?|Corp\.?|Corporation|Company|University|"
+            r"Hospital|School|Department|Dept\.?|Agency|Clinic|Bank|Foundation|"
+            r"Association|Partners|Group|Systems|Services)"
+        )
+        for match in re.findall(
+            rf"\b([A-Z][\w&.-]*(?:\s+[A-Z][\w&.-]*){{0,4}}\s+{org_suffixes})\b",
+            text,
+        ):
+            candidates.add(match.strip())
+        for match in re.findall(
+            r"\b(?:at|for|with|from)\s+([A-Z][\w&.-]*(?:\s+[A-Z][\w&.-]*){0,4})\b",
+            text or "",
+        ):
+            candidates.add(match.strip())
+
+        lower_text = text.lower()
+        if any(
+            k in lower_text
+            for k in [
+                "property management",
+                "property manager",
+                "management company",
+                "leasing office",
+                "housing authority",
+                "housing office",
+            ]
+        ):
+            candidates.add("Property Management")
+        if "employer" in lower_text:
+            candidates.add("Employer")
+        if any(
+            k in lower_text
+            for k in [
+                "company",
+                "organization",
+                "business",
+                "agency",
+                "department",
+                "school",
+                "university",
+                "hospital",
+                "clinic",
+            ]
+        ):
+            candidates.add("Organization")
+
+        months = {
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+            "jan",
+            "feb",
+            "mar",
+            "apr",
+            "jun",
+            "jul",
+            "aug",
+            "sep",
+            "sept",
+            "oct",
+            "nov",
+            "dec",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+        }
+        banned = {"i", "we", "they", "he", "she", "it", "my", "our", "their", "the", "a", "an"}
+
+        results: List[str] = []
+        for candidate in sorted(candidates):
+            cleaned = re.sub(r"[^\w&.\-\s]", "", candidate).strip()
+            if not cleaned:
+                continue
+            lowered = cleaned.lower()
+            if lowered in banned or lowered in months:
+                continue
+            tokens = cleaned.split()
+            if len(tokens) == 1 and len(cleaned) < 4:
+                continue
+            results.append(cleaned)
+        return results
+
+
+    def _extract_named_role_people(self, text: str) -> List[Tuple[str, str]]:
+        if not text:
+            return []
+        role_keywords = (
+            r"manager|supervisor|boss|coworker|co-worker|hr|human resources|director|"
+            r"owner|principal|teacher|professor|doctor|nurse|attorney|lawyer|agent|"
+            r"officer|landlord|neighbor|representative"
+        )
+        results: List[Tuple[str, str]] = []
+        for match in re.finditer(
+            rf"\b(?:my|the|a|an)\s+(?P<role>{role_keywords})\s+(?P<name>[A-Z][a-z]+(?:\s+[A-Z][a-z]+){{0,2}})\b",
+            text or "",
+            re.IGNORECASE,
+        ):
+            role = (match.group("role") or "").strip().lower()
+            name = (match.group("name") or "").strip()
+            if name and role:
+                results.append((name, role))
+        return results
+
+
+    def _extract_generic_roles(self, text: str) -> List[str]:
+        if not text:
+            return []
+        lower_text = text.lower()
+        roles = [
+            "manager",
+            "supervisor",
+            "boss",
+            "owner",
+            "landlord",
+            "hr",
+            "human resources",
+            "director",
+            "agent",
+            "representative",
+            "officer",
+            "employer",
+            "company",
+            "organization",
+            "agency",
+            "department",
+            "school",
+            "university",
+            "hospital",
+            "clinic",
+        ]
+        found: List[str] = []
+        for role in roles:
+            if role in lower_text and role not in found:
+                found.append(role)
+        return found
+
+
+    def _update_responsible_parties_from_answer(self,
+                                               answer: str,
+                                               knowledge_graph: KnowledgeGraph,
+                                               updates: Dict[str, Any]) -> Dict[str, Any]:
+        if not answer:
+            return updates
+        claims = knowledge_graph.get_entities_by_type("claim")
+        claim_id = claims[0].id if len(claims) == 1 else None
+        added_any = False
+
+        for name, role in self._extract_named_role_people(answer):
+            person, created = self._add_entity_if_missing(
+                knowledge_graph,
+                "person",
+                name,
+                {"role": role},
+                0.7,
+            )
+            if created:
+                updates["entities_updated"] += 1
+            if claim_id and person:
+                _, rel_created = self._add_relationship_if_missing(
+                    knowledge_graph,
+                    claim_id,
+                    person.id,
+                    "involves",
+                    0.6,
+                )
+                if rel_created:
+                    updates["relationships_added"] += 1
+            added_any = True
+
+        for org_name in self._extract_org_candidates(answer):
+            org, created = self._add_entity_if_missing(
+                knowledge_graph,
+                "organization",
+                org_name,
+                {"role": "respondent"},
+                0.6,
+            )
+            if created:
+                updates["entities_updated"] += 1
+            if claim_id and org:
+                _, rel_created = self._add_relationship_if_missing(
+                    knowledge_graph,
+                    claim_id,
+                    org.id,
+                    "involves",
+                    0.6,
+                )
+                if rel_created:
+                    updates["relationships_added"] += 1
+            added_any = True
+
+        if not added_any:
+            for role in self._extract_generic_roles(answer):
+                role_norm = role.strip().lower()
+                if role_norm in {"employer", "company", "organization", "agency", "department", "school", "university", "hospital", "clinic"}:
+                    etype = "organization"
+                    name = "Employer" if role_norm == "employer" else role_norm.title()
+                    attrs = {"role": "respondent"}
+                    confidence = 0.55
+                else:
+                    etype = "person"
+                    name = "HR" if role_norm == "hr" else role_norm.title()
+                    attrs = {"role": role_norm if role_norm != "human resources" else "hr"}
+                    confidence = 0.55
+                entity, created = self._add_entity_if_missing(
+                    knowledge_graph,
+                    etype,
+                    name,
+                    attrs,
+                    confidence,
+                )
+                if created:
+                    updates["entities_updated"] += 1
+                if claim_id and entity:
+                    _, rel_created = self._add_relationship_if_missing(
+                        knowledge_graph,
+                        claim_id,
+                        entity.id,
+                        "involves",
+                        0.55,
+                    )
+                    if rel_created:
+                        updates["relationships_added"] += 1
+        return updates
 
 
     def _find_entity(self, knowledge_graph: KnowledgeGraph, etype: str, name: str) -> Optional[Entity]:
@@ -389,6 +633,20 @@ class ComplaintDenoiser:
                     },
                     'priority': 'low'
                 })
+            elif gap['type'] == 'missing_timeline':
+                questions.append({
+                    'type': 'timeline',
+                    'question': gap['suggested_question'],
+                    'context': {},
+                    'priority': 'high'
+                })
+            elif gap['type'] == 'missing_responsible_party':
+                questions.append({
+                    'type': 'responsible_party',
+                    'question': gap['suggested_question'],
+                    'context': {},
+                    'priority': 'high'
+                })
         
         # Get dependency graph unsatisfied requirements
         unsatisfied = dependency_graph.find_unsatisfied_requirements()
@@ -476,6 +734,10 @@ class ComplaintDenoiser:
                 if entity:
                     entity.attributes['relationship_described'] = True
                     updates['entities_updated'] += 1
+            updates = self._update_responsible_parties_from_answer(answer, knowledge_graph, updates)
+
+        elif question_type == 'responsible_party':
+            updates = self._update_responsible_parties_from_answer(answer, knowledge_graph, updates)
         
         elif question_type == 'evidence':
             # Track evidence description
@@ -538,6 +800,30 @@ class ComplaintDenoiser:
                         )
                         if rel_created:
                             updates['relationships_added'] += 1
+            elif answer and answer.strip():
+                claims = knowledge_graph.get_entities_by_type('claim')
+                claim_id = claims[0].id if len(claims) == 1 else None
+                snippet = self._short_description(answer, 120)
+                fact_name = f"Timeline detail: {self._short_description(answer, 60)}"
+                fact_entity, created = self._add_entity_if_missing(
+                    knowledge_graph,
+                    'fact',
+                    fact_name,
+                    {'fact_type': 'timeline', 'description': snippet},
+                    0.6
+                )
+                if created:
+                    updates['entities_updated'] += 1
+                if claim_id and fact_entity:
+                    _, rel_created = self._add_relationship_if_missing(
+                        knowledge_graph,
+                        claim_id,
+                        fact_entity.id,
+                        'has_timeline_detail',
+                        0.6
+                    )
+                    if rel_created:
+                        updates['relationships_added'] += 1
         
         elif question_type == 'requirement':
             # Mark requirement as addressed
