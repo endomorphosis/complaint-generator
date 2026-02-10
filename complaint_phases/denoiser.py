@@ -671,6 +671,16 @@ class ComplaintDenoiser:
                     'context': {},
                     'priority': 'high'
                 })
+            elif gap['type'] == 'missing_impact_remedy':
+                questions.append({
+                    'type': 'impact',
+                    'question': gap['suggested_question'],
+                    'context': {
+                        'missing_impact': gap.get('missing_impact'),
+                        'missing_remedy': gap.get('missing_remedy'),
+                    },
+                    'priority': 'high'
+                })
         
         # Get dependency graph unsatisfied requirements
         unsatisfied = dependency_graph.find_unsatisfied_requirements()

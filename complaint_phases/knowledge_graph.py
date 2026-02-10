@@ -538,6 +538,63 @@ class KnowledgeGraphBuilder:
                     'confidence': 0.55
                 })
 
+        impact_keywords = [
+            'harm',
+            'damages',
+            'injury',
+            'emotional',
+            'stress',
+            'anxiety',
+            'financial',
+            'lost wages',
+            'lost pay',
+            'missed work',
+            'out of pocket',
+            'medical',
+            'evicted',
+            'unsafe',
+            'retaliation',
+        ]
+        if any(k in lower_text for k in impact_keywords):
+            add_entity({
+                'type': 'fact',
+                'name': f"Impact: {short_description(text, 60)}",
+                'attributes': {
+                    'fact_type': 'impact',
+                    'description': short_description(text),
+                },
+                'confidence': 0.55
+            })
+
+        remedy_keywords = [
+            'seeking',
+            'seek',
+            'would like',
+            'looking for',
+            'request',
+            'asking for',
+            'refund',
+            'reimbursement',
+            'compensation',
+            'back pay',
+            'repair',
+            'fix',
+            'replacement',
+            'apology',
+            'policy change',
+            'accommodation',
+        ]
+        if any(k in lower_text for k in remedy_keywords):
+            add_entity({
+                'type': 'fact',
+                'name': f"Requested remedy: {short_description(text, 60)}",
+                'attributes': {
+                    'fact_type': 'remedy',
+                    'description': short_description(text),
+                },
+                'confidence': 0.55
+            })
+
         # If we still don't have any organization, add a generic employer when text implies one.
         has_org = any(e.get("type") == "organization" for e in entities if isinstance(e, dict))
         if not has_org and any(k in lower_text for k in ["company", "workplace", "organization", "business", "agency", "department", "school", "university", "hospital", "clinic"]):
