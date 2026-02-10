@@ -162,6 +162,23 @@ class KnowledgeGraph:
                 'type': 'missing_responsible_party',
                 'suggested_question': "Who is the person or organization you believe is responsible (e.g., employer, manager, agency)?"
             })
+
+        # Check for missing impact/remedy details
+        has_impact = any(
+            e.type == 'fact' and e.attributes.get('fact_type') == 'impact'
+            for e in self.entities.values()
+        )
+        has_remedy = any(
+            e.type == 'fact' and e.attributes.get('fact_type') == 'remedy'
+            for e in self.entities.values()
+        )
+        if not has_impact or not has_remedy:
+            gaps.append({
+                'type': 'missing_impact_remedy',
+                'missing_impact': not has_impact,
+                'missing_remedy': not has_remedy,
+                'suggested_question': "What harm did you experience, and what outcome or remedy are you seeking?"
+            })
         
         return gaps
     

@@ -252,6 +252,30 @@ class ComplaintDenoiser:
         return found
 
 
+    def _contains_remedy_cue(self, text: str) -> bool:
+        if not text:
+            return False
+        lowered = text.lower()
+        cues = [
+            "seeking",
+            "seek",
+            "would like",
+            "looking for",
+            "request",
+            "asking for",
+            "refund",
+            "reimbursement",
+            "compensation",
+            "back pay",
+            "repair",
+            "fix",
+            "replacement",
+            "apology",
+            "policy change",
+        ]
+        return any(cue in lowered for cue in cues)
+
+
     def _update_responsible_parties_from_answer(self,
                                                answer: str,
                                                knowledge_graph: KnowledgeGraph,
@@ -798,8 +822,8 @@ class ComplaintDenoiser:
                             'occurred_on',
                             0.6
                         )
-                        if rel_created:
-                            updates['relationships_added'] += 1
+                    if rel_created:
+                        updates['relationships_added'] += 1
             elif answer and answer.strip():
                 claims = knowledge_graph.get_entities_by_type('claim')
                 claim_id = claims[0].id if len(claims) == 1 else None
@@ -824,6 +848,60 @@ class ComplaintDenoiser:
                     )
                     if rel_created:
                         updates['relationships_added'] += 1
+
+        elif question_type in {'impact', 'remedy'}:
+            if answer and answer.strip():
+                claims = knowledge_graph.get_entities_by_type('claim')
+                claim_id = claims[0].id if len(claims) == 1 else None
+                snippet = self._short_description(answer, 120)
+                if question_type == 'remedy':
+                    fact_type = 'remedy'
+                    fact_name = f"Requested remedy: {self._short_description(answer, 60)}"
+                    rel_type = 'seeks_remedy'
+                else:
+                    fact_type = 'impact'
+                    fact_name = f"Impact: {self._short_description(answer, 60)}"
+                    rel_type = 'has_impact'
+                fact_entity, created = self._add_entity_if_missing(
+                    knowledge_graph,
+                    'fact',
+                    fact_name,
+                    {'fact_type': fact_type, 'description': snippet},
+                    0.6
+                )
+                if created:
+                    updates['entities_updated'] += 1
+                if claim_id and fact_entity:
+                    _, rel_created = self._add_relationship_if_missing(
+                        knowledge_graph,
+                        claim_id,
+                        fact_entity.id,
+                        rel_type,
+                        0.6
+                    )
+                    if rel_created:
+                        updates['relationships_added'] += 1
+                if question_type == 'impact' and self._contains_remedy_cue(answer):
+                    remedy_name = f"Requested remedy: {self._short_description(answer, 60)}"
+                    remedy_entity, remedy_created = self._add_entity_if_missing(
+                        knowledge_graph,
+                        'fact',
+                        remedy_name,
+                        {'fact_type': 'remedy', 'description': snippet},
+                        0.55
+                    )
+                    if remedy_created:
+                        updates['entities_updated'] += 1
+                    if claim_id and remedy_entity:
+                        _, rel_created = self._add_relationship_if_missing(
+                            knowledge_graph,
+                            claim_id,
+                            remedy_entity.id,
+                            'seeks_remedy',
+                            0.55
+                        )
+                        if rel_created:
+                            updates['relationships_added'] += 1
         
         elif question_type == 'requirement':
             # Mark requirement as addressed
