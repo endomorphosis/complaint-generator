@@ -145,7 +145,11 @@ DATABASE_PATH=/home/complaint-app/complaint-generator/statefiles
 
 **Generate secure JWT key:**
 ```bash
+# Python 3.6+ (recommended)
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Python 2.7 or 3.5 and earlier
+python -c "import os; import base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
 ```
 
 #### 5. Create systemd Service

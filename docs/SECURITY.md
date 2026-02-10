@@ -653,10 +653,10 @@ trivy image your-image:tag
 
 **Do not open public issues for security vulnerabilities.**
 
-Email security concerns to: security@justicedao.org (if applicable)
-
-Or open a private security advisory on GitHub:
+To report security vulnerabilities, please open a private security advisory on GitHub:
 https://github.com/endomorphosis/complaint-generator/security/advisories
+
+Alternatively, contact the repository maintainers directly through GitHub.
 
 ---
 
