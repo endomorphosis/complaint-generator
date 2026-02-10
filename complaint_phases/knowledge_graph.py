@@ -353,6 +353,23 @@ class KnowledgeGraphBuilder:
                 'confidence': 0.9
             })
 
+        # Housing/property management role heuristics
+        if 'landlord' in lower_text:
+            add_entity({
+                'type': 'person',
+                'name': 'Landlord',
+                'attributes': {'role': 'landlord'},
+                'confidence': 0.6
+            })
+
+        if any(k in lower_text for k in ['property management', 'property manager', 'management company', 'leasing office', 'housing authority', 'housing office']):
+            add_entity({
+                'type': 'organization',
+                'name': 'Property Management',
+                'attributes': {'role': 'respondent'},
+                'confidence': 0.6
+            })
+
         # Additional heuristic extraction for dates (timeline) and common claims
         date_patterns = [
             r'\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{1,2},\s+\d{4}\b',
@@ -423,6 +440,32 @@ class KnowledgeGraphBuilder:
                 'attributes': {'role': 'respondent'},
                 'confidence': 0.6
             })
+
+        # Evidence-related entities from common document/communication mentions
+        evidence_keywords = {
+            'email': 'Email communication',
+            'emails': 'Email communication',
+            'text message': 'Text messages',
+            'texts': 'Text messages',
+            'letter': 'Letter',
+            'notice': 'Notice',
+            'application': 'Application',
+            'receipt': 'Receipt',
+            'lease': 'Lease',
+            'voicemail': 'Voicemail',
+            'meeting notes': 'Meeting notes',
+        }
+        for keyword, label in evidence_keywords.items():
+            if keyword in lower_text:
+                add_entity({
+                    'type': 'evidence',
+                    'name': label,
+                    'attributes': {
+                        'evidence_type': label.lower(),
+                        'description': short_description(text),
+                    },
+                    'confidence': 0.55
+                })
 
         # If we still don't have any organization, add a generic employer when text implies one.
         has_org = any(e.get("type") == "organization" for e in entities if isinstance(e, dict))
@@ -578,6 +621,28 @@ class KnowledgeGraphBuilder:
                     'type': 'occurred_on',
                     'confidence': 0.6
                 })
+
+        # Link claims to evidence entities when unambiguous
+        evidence_entities = graph.get_entities_by_type('evidence')
+        if claims and evidence_entities:
+            if len(claims) == 1:
+                claim = claims[0]
+                for evidence in evidence_entities:
+                    relationships.append({
+                        'source_id': claim.id,
+                        'target_id': evidence.id,
+                        'type': 'supported_by',
+                        'confidence': 0.55
+                    })
+            elif len(evidence_entities) == 1:
+                evidence = evidence_entities[0]
+                for claim in claims:
+                    relationships.append({
+                        'source_id': claim.id,
+                        'target_id': evidence.id,
+                        'type': 'supported_by',
+                        'confidence': 0.55
+                    })
 
         # Use LLM if available
         if self.mediator:
