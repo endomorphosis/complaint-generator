@@ -464,11 +464,38 @@ When PATCH_VALIDATION reports an error, it may include file_context/file_excerpt
 
 You must output a REAL patch in apply_patch format, not a template.
 
+apply_patch dialect (STRICT):
+- Your final output must contain EXACTLY ONE apply_patch block.
+- The very first non-empty line must be exactly: *** Begin Patch
+- The very last non-empty line must be exactly:  *** End Patch
+- Between them, you MUST include one-or-more file sections that begin with:
+        *** Update File: /absolute/path/to/file.py
+- Only Update File is supported (do NOT use Add File / Delete File).
+- Paths in *** Update File MUST be absolute paths under the repository root.
+- Hunks consist of raw file lines copied verbatim from the current file.
+    - Prefix deletions with '-' and additions with '+'.
+    - Unchanged context lines have NO prefix (do not start them with a single leading space).
+    - Do NOT include unified-diff headers like 'diff --git', '---', '+++', 'index', or '@@ -1,2 +1,2'.
+- You MAY include lines that start with '@@' ONLY as hunk separators/scope hints; never use '@@' or '...' as placeholders.
+
+Minimal valid example (illustrative only — you must use real current file lines):
+*** Begin Patch
+*** Update File: /home/barberb/complaint-generator/some_module.py
+@@
+-old line copied exactly from file
++new line
+ unchanged context line copied exactly from file
+*** End Patch
+
 Patch formatting rules (important):
 - Do NOT output unified-diff style prefixes (no leading ' ' marker on unchanged lines).
 - Do NOT use '...' or '@@' as an ellipsis to omit lines inside a hunk.
 - Each hunk must contain exact, contiguous lines copied from the current file content.
 - Use '@@' only to start a new hunk (or include a scope hint like '@@ class Foo'), never as a placeholder.
+
+If you return option (2) as JSON (type=final):
+- The value of "patch" MUST be a valid JSON string.
+- Represent newlines as '\\n' inside that JSON string (do not include literal newlines inside the JSON string).
 
 Scope:
 - You MAY change any *.py file under the repository root: {os.path.abspath(PROJECT_ROOT)}
@@ -559,11 +586,38 @@ When PATCH_VALIDATION reports an error, it may include file_context/file_excerpt
 
 You must output a REAL patch in apply_patch format, not a template.
 
+apply_patch dialect (STRICT):
+- Your final output must contain EXACTLY ONE apply_patch block.
+- The very first non-empty line must be exactly: *** Begin Patch
+- The very last non-empty line must be exactly:  *** End Patch
+- Between them, you MUST include one-or-more file sections that begin with:
+        *** Update File: /absolute/path/to/file.py
+- Only Update File is supported (do NOT use Add File / Delete File).
+- Paths in *** Update File MUST be absolute paths under the repository root.
+- Hunks consist of raw file lines copied verbatim from the current file.
+    - Prefix deletions with '-' and additions with '+'.
+    - Unchanged context lines have NO prefix (do not start them with a single leading space).
+    - Do NOT include unified-diff headers like 'diff --git', '---', '+++', 'index', or '@@ -1,2 +1,2'.
+- You MAY include lines that start with '@@' ONLY as hunk separators/scope hints; never use '@@' or '...' as placeholders.
+
+Minimal valid example (illustrative only — you must use real current file lines):
+*** Begin Patch
+*** Update File: /home/barberb/complaint-generator/some_module.py
+@@
+-old line copied exactly from file
++new line
+ unchanged context line copied exactly from file
+*** End Patch
+
 Patch formatting rules (important):
 - Do NOT output unified-diff style prefixes (no leading ' ' marker on unchanged lines).
 - Do NOT use '...' or '@@' as an ellipsis to omit lines inside a hunk.
 - Each hunk must contain exact, contiguous lines copied from the current file content.
 - Use '@@' only to start a new hunk (or include a scope hint like '@@ class Foo'), never as a placeholder.
+
+If you return option (2) as JSON (type=final):
+- The value of "patch" MUST be a valid JSON string.
+- Represent newlines as '\\n' inside that JSON string (do not include literal newlines inside the JSON string).
 
 Scope:
 - You MAY change any *.py file under the repository root: {os.path.abspath(PROJECT_ROOT)}
