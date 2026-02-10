@@ -822,8 +822,8 @@ class ComplaintDenoiser:
                             'occurred_on',
                             0.6
                         )
-                    if rel_created:
-                        updates['relationships_added'] += 1
+                        if rel_created:
+                            updates['relationships_added'] += 1
             elif answer and answer.strip():
                 claims = knowledge_graph.get_entities_by_type('claim')
                 claim_id = claims[0].id if len(claims) == 1 else None

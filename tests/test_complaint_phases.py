@@ -240,6 +240,15 @@ class TestComplaintDenoiser:
         noise = denoiser.calculate_noise_level(kg, dg)
         assert 0.0 <= noise <= 1.0
 
+    def test_process_answer_timeline_without_claim_does_not_crash(self):
+        denoiser = ComplaintDenoiser()
+        kg = KnowledgeGraph()
+        dg = DependencyGraph()
+
+        q = {"question": "When did this happen?", "type": "timeline", "context": {}}
+        updates = denoiser.process_answer(q, "2020-01-01", kg, dg)
+        assert isinstance(updates, dict)
+
 
 class TestPhaseManager:
     """Tests for PhaseManager."""
