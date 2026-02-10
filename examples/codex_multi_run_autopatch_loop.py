@@ -184,6 +184,15 @@ def main() -> int:
         ),
     )
 
+    parser.add_argument(
+        "--codex-exit-on-429",
+        action="store_true",
+        help=(
+            "Do not wait indefinitely through Codex 429s. If a 429 is encountered, let the orchestrator fail fast "
+            "(exit code 2 from codex_autopatch_from_run.py) so finite --loops/--runs jobs can terminate."
+        ),
+    )
+
     parser.add_argument("--generate-fix-max-attempts", type=int, default=2)
     parser.add_argument("--apply-fix-max-attempts", type=int, default=2)
 
@@ -245,6 +254,7 @@ def main() -> int:
         "[loop] init "
         + f"state={os.path.abspath(state_path)} "
         + f"resume={bool(args.resume)} "
+        + f"exit_on_429={bool(args.codex_exit_on_429)} "
         + f"loops_target={loops_target} "
         + f"loop_index={loop_index} "
         + f"active_orchestrator_id={(active_orchestrator_id or 'none')}"
@@ -298,7 +308,6 @@ def main() -> int:
                 args.state_dir,
                 "--codex-backend-id",
                 args.codex_backend_id,
-                "--codex-wait-forever-on-429",
                 "--orchestrator-id",
                 str(orchestrator_id),
                 "--runs",
@@ -315,6 +324,11 @@ def main() -> int:
                 str(args.apply_fix_max_attempts),
                 "--undo-on-test-failure",
             ]
+
+            # Default behavior is to wait indefinitely through Codex 429s.
+            # For small, finite jobs (e.g. --loops 1 --runs 1), you can opt out with --codex-exit-on-429.
+            if not bool(args.codex_exit_on_429):
+                cmd += ["--codex-wait-forever-on-429"]
             if args.codex_wait_on_429_fallback_s is not None:
                 cmd += ["--codex-wait-on-429-fallback-s", str(int(args.codex_wait_on_429_fallback_s))]
             if args.codex_wait_on_429_fallback_max_s is not None:
