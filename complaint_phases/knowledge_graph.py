@@ -343,6 +343,28 @@ class KnowledgeGraphBuilder:
                 },
                 'confidence': 0.9
             })
+
+        if 'accommodation' in lower_text:
+            add_entity({
+                'type': 'claim',
+                'name': 'Accommodation Request',
+                'attributes': {
+                    'claim_type': 'accommodation',
+                    'description': short_description(text),
+                },
+                'confidence': 0.8
+            })
+
+        if any(k in lower_text for k in ['denied', 'refused', 'rejected', 'declined']):
+            add_entity({
+                'type': 'claim',
+                'name': 'Denial/Refusal Claim',
+                'attributes': {
+                    'claim_type': 'denial',
+                    'description': short_description(text),
+                },
+                'confidence': 0.7
+            })
         
         if 'employer' in lower_text:
             add_entity({
@@ -657,6 +679,56 @@ class KnowledgeGraphBuilder:
                         'source_id': claim.id,
                         'target_id': evidence.id,
                         'type': 'supported_by',
+                        'confidence': 0.55
+                    })
+
+        # Link evidence to a single respondent party when unambiguous.
+        respondent_orgs = [
+            org for org in orgs
+            if org.attributes.get('role') == 'respondent' or 'employer' in org.name.lower()
+        ]
+        if evidence_entities:
+            if len(respondent_orgs) == 1:
+                org = respondent_orgs[0]
+                for evidence in evidence_entities:
+                    relationships.append({
+                        'source_id': evidence.id,
+                        'target_id': org.id,
+                        'type': 'associated_with',
+                        'confidence': 0.5
+                    })
+            elif len(respondent_people) == 1:
+                person = respondent_people[0]
+                for evidence in evidence_entities:
+                    relationships.append({
+                        'source_id': evidence.id,
+                        'target_id': person.id,
+                        'type': 'associated_with',
+                        'confidence': 0.5
+                    })
+
+        # Add a communication edge when evidence suggests contact and parties are clear.
+        complainants = [
+            person for person in persons
+            if 'complainant' in person.attributes.get('role', '').lower()
+        ]
+        if evidence_entities and complainants:
+            if len(respondent_orgs) == 1:
+                org = respondent_orgs[0]
+                for complainant in complainants:
+                    relationships.append({
+                        'source_id': complainant.id,
+                        'target_id': org.id,
+                        'type': 'communicated_with',
+                        'confidence': 0.55
+                    })
+            elif len(respondent_people) == 1:
+                person = respondent_people[0]
+                for complainant in complainants:
+                    relationships.append({
+                        'source_id': complainant.id,
+                        'target_id': person.id,
+                        'type': 'communicated_with',
                         'confidence': 0.55
                     })
 
