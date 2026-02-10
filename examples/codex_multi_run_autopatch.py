@@ -9,6 +9,8 @@ import re
 import subprocess
 import sys
 import time
+import glob
+import tempfile
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -189,10 +191,12 @@ def _run_batch_and_persist(
 
     graphs_health = None
     try:
-        graphs = sgd_report.get("graphs") if isinstance(sgd_report, dict) else None
-        if isinstance(graphs, dict):
-            kg = graphs.get("knowledge_graph") if isinstance(graphs.get("knowledge_graph"), dict) else {}
-            dg = graphs.get("dependency_graph") if isinstance(graphs.get("dependency_graph"), dict) else {}
+        graphs_obj: Any = sgd_report.get("graphs")
+        if isinstance(graphs_obj, dict):
+            kg_obj = graphs_obj.get("knowledge_graph")
+            dg_obj = graphs_obj.get("dependency_graph")
+            kg: Dict[str, Any] = kg_obj if isinstance(kg_obj, dict) else {}
+            dg: Dict[str, Any] = dg_obj if isinstance(dg_obj, dict) else {}
             graphs_health = (
                 f"kg_files={kg.get('sessions_with_file')}/{sgd_report.get('num_sessions')} "
                 f"kg_empty={kg.get('sessions_empty')}/{kg.get('sessions_with_file')} "
@@ -270,7 +274,63 @@ def _generate_codex_patch_for_run(
     config_path: str,
     backend_id: str,
     context_mode: str = "rich",
+    wait_forever_on_429: bool = False,
 ) -> str:
+    def _find_latest_rate_limit_artifact() -> Optional[str]:
+        try:
+            candidates = sorted(
+                glob.glob(os.path.join(run_dir, "_patches", "codex_rate_limit_*.json"))
+            )
+        except Exception:
+            candidates = []
+        return candidates[-1] if candidates else None
+
+    def _print_rate_limit_summary(path: str) -> None:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            print(f"[codex] rate-limited (metadata unreadable): {path}")
+            return
+
+        reset_s = data.get("resets_in_seconds")
+        reset_at = data.get("reset_at")
+        sleep_s = data.get("sleep_seconds")
+        will_retry = data.get("will_retry")
+        parts = ["[codex] rate-limited"]
+        if reset_s:
+            parts.append(f"resets_in_seconds={reset_s}")
+        if reset_at:
+            parts.append(f"reset_at={reset_at}")
+        if sleep_s:
+            parts.append(f"sleep_seconds={sleep_s}")
+        parts.append(f"will_retry={bool(will_retry)}")
+        parts.append(f"artifact={os.path.abspath(path)}")
+        print(" ".join(parts))
+
+    def _run_streaming(cmd: List[str]) -> subprocess.CompletedProcess:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        assert proc.stdout is not None
+        lines: List[str] = []
+        saw_sleep_line = False
+        for line in proc.stdout:
+            # Stream child output live so users see sleep/backoff without waiting.
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            lines.append(line)
+            if (not saw_sleep_line) and ("Codex usage-limit:" in line and "sleeping" in line):
+                saw_sleep_line = True
+                # Child line already includes reset_at + sleep seconds; add a parent-level marker.
+                print("[codex] child entered sleep mode (rate limit)")
+
+        rc = proc.wait()
+        return subprocess.CompletedProcess(cmd, rc, "".join(lines), None)
+
     cmd = [
         python_exe,
         os.path.join(PROJECT_ROOT, "examples", "codex_autopatch_from_run.py"),
@@ -284,9 +344,28 @@ def _generate_codex_patch_for_run(
         str(context_mode or "rich"),
         "--no-apply",
     ]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if wait_forever_on_429:
+        cmd += [
+            "--wait-on-429",
+            "--wait-on-429-max-s",
+            "0",
+            "--wait-on-429-max-retries",
+            "0",
+        ]
+
+    proc = _run_streaming(cmd)
     if proc.returncode != 0:
+        if proc.returncode == 2:
+            artifact = _find_latest_rate_limit_artifact()
+            if artifact:
+                _print_rate_limit_summary(artifact)
+            raise RuntimeError(
+                "codex_autopatch_from_run rate-limited (exit=2). "
+                + (f"See: {os.path.abspath(artifact)}\n" if artifact else "")
+                + (proc.stdout or "")
+            )
         raise RuntimeError(f"codex_autopatch_from_run failed (exit={proc.returncode}):\n{proc.stdout}")
+
     out = (proc.stdout or "").strip().splitlines()
     patch_path = out[-1].strip() if out else ""
     if not patch_path or not os.path.isfile(patch_path):
@@ -863,6 +942,53 @@ def _read_text(path: str) -> str:
         return f.read()
 
 
+def _atomic_write_json(path: str, payload: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=os.path.dirname(path) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def _load_json_or_none(path: str) -> Optional[Dict[str, Any]]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+_STAGE_ORDER: Dict[str, int] = {
+    "batch": 10,
+    "batch_done": 20,
+    "patch": 30,
+    "patch_saved": 40,
+    "apply": 50,
+    "apply_done": 60,
+    "pytest": 70,
+    "pytest_done": 80,
+    "run_done": 90,
+    "done": 100,
+}
+
+
+def _maybe_advance_stage(progress: Dict[str, Any], new_stage: str) -> None:
+    cur = progress.get("current_stage")
+    if isinstance(cur, str):
+        if _STAGE_ORDER.get(cur, -1) >= _STAGE_ORDER.get(new_stage, -1):
+            return
+    progress["current_stage"] = new_stage
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -878,6 +1004,14 @@ def main() -> int:
         choices=["rich", "lean"],
         default="rich",
         help="Pass through to codex_autopatch_from_run.py to reduce prompt tokens (lean relies on tool reads)",
+    )
+    parser.add_argument(
+        "--codex-wait-forever-on-429",
+        action="store_true",
+        help=(
+            "When calling codex_autopatch_from_run.py, wait indefinitely through rate limiting "
+            "(sleep+retry until success) instead of exiting with code 2."
+        ),
     )
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--sessions-per-run", type=int, default=10)
@@ -965,6 +1099,29 @@ def main() -> int:
         default=None,
         help="Directory to store undo records (defaults to <orchestrator_dir>/undo)",
     )
+
+    parser.add_argument(
+        "--orchestrator-id",
+        default=None,
+        help=(
+            "Optional stable id for this orchestrator run (enables resume). "
+            "Artifacts are written under <state-dir>/_runs/<orchestrator-id>."
+        ),
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Resume an existing orchestrator run using --orchestrator-id and its progress.json. "
+            "Skips already-completed runs/stages when possible."
+        ),
+    )
+    parser.add_argument(
+        "--start-at",
+        type=int,
+        default=None,
+        help="Start (or resume) at a specific run index i (0-based). Overrides progress.json.",
+    )
     args = parser.parse_args()
 
     personalities = None
@@ -979,9 +1136,33 @@ def main() -> int:
     if not batch_backend_id:
         raise SystemExit("No batch backend id available")
 
-    orchestrator_id = f"autopatch_{_utc_stamp()}"
+    orchestrator_id = str(args.orchestrator_id or f"autopatch_{_utc_stamp()}")
     orchestrator_dir = os.path.join(args.state_dir, "_runs", orchestrator_id)
+    if bool(args.resume) and not os.path.isdir(orchestrator_dir):
+        raise SystemExit(f"--resume was set but orchestrator dir does not exist: {orchestrator_dir}")
     _ensure_dir(orchestrator_dir)
+
+    progress_path = os.path.join(orchestrator_dir, "progress.json")
+    progress = _load_json_or_none(progress_path) or {}
+
+    start_i = 0
+    if isinstance(args.start_at, int) and args.start_at >= 0:
+        start_i = int(args.start_at)
+    elif bool(args.resume):
+        nxt = progress.get("next_run_index")
+        if isinstance(nxt, int) and nxt >= 0:
+            start_i = int(nxt)
+
+    progress = {
+        **progress,
+        "orchestrator_id": orchestrator_id,
+        "orchestrator_dir": os.path.abspath(orchestrator_dir),
+        "runs_total": int(args.runs),
+        "next_run_index": int(start_i),
+        "status": "running",
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    _atomic_write_json(progress_path, progress)
 
     patches_dir = os.path.join(orchestrator_dir, "patches")
     fixed_dir = os.path.join(orchestrator_dir, "patches_fixed")
@@ -1001,238 +1182,409 @@ def main() -> int:
     undo_records: List[str] = []
     per_run_tests: List[Dict[str, Any]] = []
 
-    for i in range(args.runs):
-        run_id = f"{orchestrator_id}_run_{i:02d}"
-        print(f"[batch] {i+1}/{args.runs} run_id={run_id}")
-        run_dir = _run_batch_and_persist(
-            config_path=args.config,
-            backend_id=batch_backend_id,
-            state_dir=args.state_dir,
-            run_id=run_id,
-            num_sessions=args.sessions_per_run,
-            max_turns=args.max_turns,
-            max_parallel=args.max_parallel,
-            personalities=personalities,
-            retry_max_attempts=args.retry_max_attempts,
-            retry_backoff_base_s=args.retry_backoff_base_s,
-            retry_backoff_max_s=args.retry_backoff_max_s,
-            retry_jitter_s=args.retry_jitter_s,
-            session_trace=bool(args.session_trace),
-            session_cache_friendly=bool(args.session_cache_friendly),
-        )
+    try:
+        for i in range(int(start_i), int(args.runs)):
+            run_id = f"{orchestrator_id}_run_{i:02d}"
+            print(f"[batch] {i+1}/{args.runs} run_id={run_id}")
 
-        rec: Dict[str, Any] = {
-            "i": i,
-            "run_id": run_id,
-            "run_dir": os.path.abspath(run_dir),
-        }
+            prev_run_index = progress.get("current_run_index")
+            prev_stage = progress.get("current_stage") if isinstance(progress.get("current_stage"), str) else None
+            resuming_same_run = bool(args.resume) and prev_run_index == int(i) and bool(prev_stage)
+            start_stage = prev_stage if resuming_same_run else "batch"
 
-        try:
-            patch_path = _generate_codex_patch_for_run(
-                python_exe=python_exe,
-                run_dir=run_dir,
-                config_path=args.config,
-                backend_id=args.codex_backend_id,
-                context_mode=str(args.codex_context_mode),
+            progress.update(
+                {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "current_run_index": int(i),
+                    "current_run_id": run_id,
+                    "current_stage": start_stage,
+                    "next_run_index": int(i),
+                }
             )
-            patch_text = _normalize_patch_text(_read_text(patch_path))
+            _atomic_write_json(progress_path, progress)
 
-            # Validate (dry-run apply) immediately; if Codex produced a broken patch, repair it now.
-            gen_attempt = 0
-            while True:
-                gen_attempt += 1
-                try:
-                    _dry_run_apply_patch_text(patch_text)
-                    break
-                except PatchApplyError as e:
-                    if gen_attempt > args.generate_fix_max_attempts:
-                        raise PatchApplyError(
-                            f"Generated patch failed dry-run apply after fixes: {e}",
-                            file_path=e.file_path,
-                            hunk_index=e.hunk_index,
-                        ) from e
-
-                    update_files = _extract_update_files(patch_text)
-                    file_contents: Dict[str, str] = {}
-                    for fp in update_files:
-                        if os.path.isfile(fp):
-                            file_contents[fp] = _read_text(fp)
-                    if e.file_path and os.path.isfile(e.file_path):
-                        full_text = _read_text(e.file_path)
-                        total_lines = len((full_text or "").splitlines())
-                        window_lines = _expand_context_window_lines(
-                            base_window_lines=args.fix_context_window_lines,
-                            attempt=gen_attempt,
-                            file_total_lines=total_lines,
-                        )
-                        sliced_text, slice_meta = _select_context_slice_for_failure(
-                            file_text=full_text,
-                            failure_details=e.details,
-                            window_lines=window_lines,
-                        )
-                        file_contents.setdefault(e.file_path, sliced_text)
-                        if e.details is not None and slice_meta is not None:
-                            e.details = {**e.details, "file_context": slice_meta}
-
-                    patch_text = _codex_fix_patch(
-                        codex_backend=codex_backend,
-                        failing_patch_text=patch_text,
-                        error_message=f"Generated patch failed dry-run apply: {e}",
-                        file_contents=file_contents,
-                        failure_details=e.details,
-                    )
-
-            # Copy patch into orchestrator folder for traceability.
-            _ensure_dir(patches_dir)
-            local_patch_path = os.path.join(patches_dir, f"patch_{i:02d}.patch")
-            with open(local_patch_path, "w", encoding="utf-8") as f:
-                f.write(patch_text)
-            rec["patch_path"] = os.path.abspath(local_patch_path)
-
-            # Apply immediately so later patches are generated against the updated tree.
-            patch_name = os.path.basename(local_patch_path).replace(".patch", "")
-            apply_attempt = 0
-            while True:
-                apply_attempt += 1
-                try:
-                    updated, original = _apply_patch_transaction(patch_text)
-                    undo_record_path = ""
-                    if updated:
-                        undo_record_path = _write_undo_record(undo_dir, patch_name, original, updated)
-                        undo_records.append(undo_record_path)
-                    applied.append(
-                        {
-                            "patch_path": rec["patch_path"],
-                            "attempt": apply_attempt,
-                            "updated_files": updated,
-                            "fixed": apply_attempt > 1,
-                            "undo_record": undo_record_path or None,
-                        }
-                    )
-                    print(f"[apply] ok patch={os.path.basename(local_patch_path)} updated={len(updated)}")
-                    rec["patch_applied"] = True
-                    break
-                except PatchApplyError as e:
-                    if apply_attempt > args.apply_fix_max_attempts + 1:
-                        applied.append(
-                            {
-                                "patch_path": rec["patch_path"],
-                                "attempt": apply_attempt,
-                                "error": str(e),
-                                "fixed": True,
-                                "failed": True,
-                            }
-                        )
-                        print(f"[apply] FAIL patch={os.path.basename(local_patch_path)} error={e}")
-                        rec["patch_applied"] = False
-                        rec["patch_apply_error"] = str(e)
-                        break
-
-                    update_files = _extract_update_files(patch_text)
-                    file_contents: Dict[str, str] = {}
-                    for fp in update_files:
-                        if os.path.isfile(fp):
-                            file_contents[fp] = _read_text(fp)
-                    if e.file_path and os.path.isfile(e.file_path):
-                        full_text = _read_text(e.file_path)
-                        total_lines = len((full_text or "").splitlines())
-                        window_lines = _expand_context_window_lines(
-                            base_window_lines=args.fix_context_window_lines,
-                            attempt=apply_attempt,
-                            file_total_lines=total_lines,
-                        )
-                        sliced_text, slice_meta = _select_context_slice_for_failure(
-                            file_text=full_text,
-                            failure_details=e.details,
-                            window_lines=window_lines,
-                        )
-                        file_contents.setdefault(e.file_path, sliced_text)
-                        if e.details is not None and slice_meta is not None:
-                            e.details = {**e.details, "file_context": slice_meta}
-
-                    patch_text = _codex_fix_patch(
-                        codex_backend=codex_backend,
-                        failing_patch_text=patch_text,
-                        error_message=str(e),
-                        file_contents=file_contents,
-                        failure_details=e.details,
-                    )
-
-                    fixed_out_path = os.path.join(
-                        fixed_dir,
-                        f"fixed_{os.path.basename(local_patch_path).replace('.patch','')}_attempt_{apply_attempt}.patch",
-                    )
-                    with open(fixed_out_path, "w", encoding="utf-8") as f2:
-                        f2.write(patch_text)
-
-            # Run pytest after each run (batch of sessions) by default.
-            if args.pytest_after_each_run:
-                test_start = time.time()
-                test_proc = subprocess.run(
-                    [python_exe, "-m", "pytest", "-q"],
-                    cwd=PROJECT_ROOT,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
+            run_dir = os.path.join(args.state_dir, "_runs", run_id)
+            cycle_summary_path = os.path.join(run_dir, "cycle_summary.json")
+            if os.path.isfile(cycle_summary_path):
+                run_dir = os.path.abspath(run_dir)
+                print(f"[batch] skip (already exists) run_dir={run_dir}")
+            else:
+                run_dir = _run_batch_and_persist(
+                    config_path=args.config,
+                    backend_id=batch_backend_id,
+                    state_dir=args.state_dir,
+                    run_id=run_id,
+                    num_sessions=args.sessions_per_run,
+                    max_turns=args.max_turns,
+                    max_parallel=args.max_parallel,
+                    personalities=personalities,
+                    retry_max_attempts=args.retry_max_attempts,
+                    retry_backoff_base_s=args.retry_backoff_base_s,
+                    retry_backoff_max_s=args.retry_backoff_max_s,
+                    retry_jitter_s=args.retry_jitter_s,
+                    session_trace=bool(args.session_trace),
+                    session_cache_friendly=bool(args.session_cache_friendly),
                 )
-                out_lines = (test_proc.stdout or "").splitlines()
-                per_run_tests.append(
+
+            if not resuming_same_run or start_stage in {"batch", "batch_done"}:
+                progress.update(
                     {
-                        "run_id": run_id,
-                        "patch_path": rec.get("patch_path"),
-                        "exit_code": test_proc.returncode,
-                        "duration_seconds": time.time() - test_start,
-                        "output_tail": out_lines[-60:],
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "current_stage": "batch_done",
+                        "current_run_dir": os.path.abspath(run_dir),
                     }
                 )
-                rec["pytest_after_run_exit_code"] = test_proc.returncode
+            else:
+                progress.update(
+                    {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "current_run_dir": os.path.abspath(run_dir),
+                    }
+                )
+            _atomic_write_json(progress_path, progress)
 
-                if test_proc.returncode != 0:
-                    print(f"[test] FAIL run_id={run_id} exit={test_proc.returncode}")
-                    if args.undo_last_on_pytest_fail and undo_records:
-                        last_undo = undo_records.pop()
-                        print(f"[undo] restoring last patch via {os.path.basename(last_undo)}")
-                        _restore_undo_record(last_undo)
-                        if applied:
-                            applied[-1]["rolled_back"] = True
-                        rec["rolled_back"] = True
+            rec: Dict[str, Any] = {
+                "i": i,
+                "run_id": run_id,
+                "run_dir": os.path.abspath(run_dir),
+            }
 
-                        # Verify rollback restored a passing state.
-                        verify_proc = subprocess.run(
-                            [python_exe, "-m", "pytest", "-q"],
-                            cwd=PROJECT_ROOT,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
-                        )
-                        verify_lines = (verify_proc.stdout or "").splitlines()
-                        per_run_tests.append(
-                            {
-                                "run_id": run_id,
-                                "patch_path": rec.get("patch_path"),
-                                "exit_code": verify_proc.returncode,
-                                "duration_seconds": None,
-                                "output_tail": verify_lines[-60:],
-                                "note": "post_rollback_verify",
-                            }
-                        )
-                        if verify_proc.returncode != 0:
-                            print(f"[test] STILL FAIL after rollback run_id={run_id} exit={verify_proc.returncode}")
-                            rec["pytest_after_rollback_exit_code"] = verify_proc.returncode
-                            if args.stop_on_pytest_fail:
-                                rec["stopped_on_pytest_fail"] = True
-                                raise RuntimeError("Stopping due to pytest failure even after rollback")
-                    if args.stop_on_pytest_fail:
-                        rec["stopped_on_pytest_fail"] = True
-                        raise RuntimeError("Stopping due to pytest failure after run")
+            try:
+                # If we're resuming and the prior state already indicates this run is finished,
+                # fast-forward to the next run index.
+                if resuming_same_run and isinstance(prev_stage, str) and prev_stage in {"run_done", "done"}:
+                    print(f"[run] skip (resume complete) run_id={run_id} stage={prev_stage}")
+                    run_records.append({**rec, "resumed_complete": True, "resumed_stage": prev_stage})
+                    progress.update(
+                        {
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                            "next_run_index": int(i) + 1,
+                        }
+                    )
+                    _maybe_advance_stage(progress, "run_done")
+                    _atomic_write_json(progress_path, progress)
+                    continue
+
+                if not resuming_same_run or start_stage in {"batch", "batch_done", "patch"}:
+                    progress.update(
+                        {
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                            "current_stage": "patch",
+                        }
+                    )
                 else:
-                    print(f"[test] ok run_id={run_id}")
+                    progress.update({"ts": datetime.now(timezone.utc).isoformat()})
+                _atomic_write_json(progress_path, progress)
 
-        except Exception as e:
-            print(f"[patch] SKIP run_id={run_id} error={e}")
-            rec["patch_error"] = str(e)
+                local_patch_path = os.path.join(patches_dir, f"patch_{i:02d}.patch")
+                if os.path.isfile(local_patch_path):
+                    patch_text = _normalize_patch_text(_read_text(local_patch_path))
+                    rec["patch_path"] = os.path.abspath(local_patch_path)
+                    print(f"[patch] skip (already exists) patch={os.path.basename(local_patch_path)}")
+                else:
+                    patch_path = _generate_codex_patch_for_run(
+                        python_exe=python_exe,
+                        run_dir=run_dir,
+                        config_path=args.config,
+                        backend_id=args.codex_backend_id,
+                        context_mode=str(args.codex_context_mode),
+                        wait_forever_on_429=bool(args.codex_wait_forever_on_429),
+                    )
+                    patch_text = _normalize_patch_text(_read_text(patch_path))
 
-        run_records.append(rec)
+                # If resuming at/after apply_done, the saved patch is expected to no longer
+                # dry-run apply (because it may already be applied). Skip validation/fix.
+                resume_stage_order = (
+                    _STAGE_ORDER.get(str(prev_stage), -1) if (resuming_same_run and isinstance(prev_stage, str)) else -1
+                )
+                if resume_stage_order >= _STAGE_ORDER.get("apply_done", 60):
+                    print(f"[patch] resume: skipping dry-run validation (stage={prev_stage})")
+                else:
+                    # Validate (dry-run apply) immediately; if Codex produced a broken patch, repair it now.
+                    gen_attempt = 0
+                    while True:
+                        gen_attempt += 1
+                        try:
+                            _dry_run_apply_patch_text(patch_text)
+                            break
+                        except PatchApplyError as e:
+                            if gen_attempt > args.generate_fix_max_attempts:
+                                raise PatchApplyError(
+                                    f"Generated patch failed dry-run apply after fixes: {e}",
+                                    file_path=e.file_path,
+                                    hunk_index=e.hunk_index,
+                                ) from e
+
+                            update_files = _extract_update_files(patch_text)
+                            file_contents: Dict[str, str] = {}
+                            for fp in update_files:
+                                if os.path.isfile(fp):
+                                    file_contents[fp] = _read_text(fp)
+                            if e.file_path and os.path.isfile(e.file_path):
+                                full_text = _read_text(e.file_path)
+                                total_lines = len((full_text or "").splitlines())
+                                window_lines = _expand_context_window_lines(
+                                    base_window_lines=args.fix_context_window_lines,
+                                    attempt=gen_attempt,
+                                    file_total_lines=total_lines,
+                                )
+                                sliced_text, slice_meta = _select_context_slice_for_failure(
+                                    file_text=full_text,
+                                    failure_details=e.details,
+                                    window_lines=window_lines,
+                                )
+                                file_contents.setdefault(e.file_path, sliced_text)
+                                if e.details is not None and slice_meta is not None:
+                                    e.details = {**e.details, "file_context": slice_meta}
+
+                            patch_text = _codex_fix_patch(
+                                codex_backend=codex_backend,
+                                failing_patch_text=patch_text,
+                                error_message=f"Generated patch failed dry-run apply: {e}",
+                                file_contents=file_contents,
+                                failure_details=e.details,
+                            )
+
+                # Copy patch into orchestrator folder for traceability.
+                _ensure_dir(patches_dir)
+                with open(local_patch_path, "w", encoding="utf-8") as f:
+                    f.write(patch_text)
+                rec["patch_path"] = os.path.abspath(local_patch_path)
+
+                progress.update(
+                    {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "current_patch_path": rec.get("patch_path"),
+                    }
+                )
+                _maybe_advance_stage(progress, "patch_saved")
+                _atomic_write_json(progress_path, progress)
+
+                # Apply immediately so later patches are generated against the updated tree.
+                # If resuming mid-run and we already recorded apply_done, avoid double-applying.
+                resuming_same_run = bool(args.resume) and progress.get("current_run_index") == int(i)
+                if resuming_same_run and progress.get("current_stage") in {"apply_done", "pytest", "pytest_done"}:
+                    print(f"[apply] skip (resume) patch={os.path.basename(local_patch_path)}")
+                    rec["patch_applied"] = True
+                else:
+                    progress.update(
+                        {
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
+                    _maybe_advance_stage(progress, "apply")
+                    _atomic_write_json(progress_path, progress)
+
+                    patch_name = os.path.basename(local_patch_path).replace(".patch", "")
+                    apply_attempt = 0
+                    while True:
+                        apply_attempt += 1
+                        try:
+                            updated, original = _apply_patch_transaction(patch_text)
+
+                            undo_record_path = ""
+                            if updated:
+                                undo_record_path = _write_undo_record(undo_dir, patch_name, original, updated)
+                                undo_records.append(undo_record_path)
+                            applied.append(
+                                {
+                                    "patch_path": rec["patch_path"],
+                                    "attempt": apply_attempt,
+                                    "updated_files": updated,
+                                    "fixed": apply_attempt > 1,
+                                    "undo_record": undo_record_path or None,
+                                }
+                            )
+                            print(
+                                f"[apply] ok patch={os.path.basename(local_patch_path)} updated={len(updated)}"
+                            )
+                            rec["patch_applied"] = True
+
+                            progress.update(
+                                {
+                                    "ts": datetime.now(timezone.utc).isoformat(),
+                                }
+                            )
+                            _maybe_advance_stage(progress, "apply_done")
+                            _atomic_write_json(progress_path, progress)
+                            break
+                        except PatchApplyError as e:
+                            if apply_attempt > args.apply_fix_max_attempts + 1:
+                                applied.append(
+                                    {
+                                        "patch_path": rec["patch_path"],
+                                        "attempt": apply_attempt,
+                                        "error": str(e),
+                                        "fixed": True,
+                                        "failed": True,
+                                    }
+                                )
+                                print(
+                                    f"[apply] FAIL patch={os.path.basename(local_patch_path)} error={e}"
+                                )
+                                rec["patch_applied"] = False
+                                rec["patch_apply_error"] = str(e)
+                                break
+
+                            update_files = _extract_update_files(patch_text)
+                            file_contents: Dict[str, str] = {}
+                            for fp in update_files:
+                                if os.path.isfile(fp):
+                                    file_contents[fp] = _read_text(fp)
+                            if e.file_path and os.path.isfile(e.file_path):
+                                full_text = _read_text(e.file_path)
+                                total_lines = len((full_text or "").splitlines())
+                                window_lines = _expand_context_window_lines(
+                                    base_window_lines=args.fix_context_window_lines,
+                                    attempt=apply_attempt,
+                                    file_total_lines=total_lines,
+                                )
+                                sliced_text, slice_meta = _select_context_slice_for_failure(
+                                    file_text=full_text,
+                                    failure_details=e.details,
+                                    window_lines=window_lines,
+                                )
+                                file_contents.setdefault(e.file_path, sliced_text)
+                                if e.details is not None and slice_meta is not None:
+                                    e.details = {**e.details, "file_context": slice_meta}
+
+                            patch_text = _codex_fix_patch(
+                                codex_backend=codex_backend,
+                                failing_patch_text=patch_text,
+                                error_message=str(e),
+                                file_contents=file_contents,
+                                failure_details=e.details,
+                            )
+
+                            fixed_out_path = os.path.join(
+                                fixed_dir,
+                                f"fixed_{os.path.basename(local_patch_path).replace('.patch','')}_attempt_{apply_attempt}.patch",
+                            )
+                            with open(fixed_out_path, "w", encoding="utf-8") as f2:
+                                f2.write(patch_text)
+                            with open(local_patch_path, "w", encoding="utf-8") as f3:
+                                f3.write(patch_text)
+
+                progress.update(
+                    {
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                _maybe_advance_stage(progress, "pytest" if args.pytest_after_each_run else "run_done")
+                _atomic_write_json(progress_path, progress)
+
+                # Run pytest after each run (batch of sessions) by default.
+                if args.pytest_after_each_run:
+                    test_start = time.time()
+                    test_proc = subprocess.run(
+                        [python_exe, "-m", "pytest", "-q"],
+                        cwd=PROJECT_ROOT,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                    )
+                    out_lines = (test_proc.stdout or "").splitlines()
+                    per_run_tests.append(
+                        {
+                            "run_id": run_id,
+                            "patch_path": rec.get("patch_path"),
+                            "exit_code": test_proc.returncode,
+                            "duration_seconds": time.time() - test_start,
+                            "output_tail": out_lines[-60:],
+                        }
+                    )
+                    rec["pytest_after_run_exit_code"] = test_proc.returncode
+
+                    progress.update(
+                        {
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                            "last_pytest_exit": int(test_proc.returncode),
+                        }
+                    )
+                    _maybe_advance_stage(progress, "pytest_done")
+                    _atomic_write_json(progress_path, progress)
+
+                    if test_proc.returncode != 0:
+                        print(f"[test] FAIL run_id={run_id} exit={test_proc.returncode}")
+                        if args.undo_last_on_pytest_fail and undo_records:
+                            last_undo = undo_records.pop()
+                            print(f"[undo] restoring last patch via {os.path.basename(last_undo)}")
+                            _restore_undo_record(last_undo)
+                            if applied:
+                                applied[-1]["rolled_back"] = True
+                            rec["rolled_back"] = True
+
+                            # Verify rollback restored a passing state.
+                            verify_proc = subprocess.run(
+                                [python_exe, "-m", "pytest", "-q"],
+                                cwd=PROJECT_ROOT,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True,
+                            )
+                            verify_lines = (verify_proc.stdout or "").splitlines()
+                            per_run_tests.append(
+                                {
+                                    "run_id": run_id,
+                                    "patch_path": rec.get("patch_path"),
+                                    "exit_code": verify_proc.returncode,
+                                    "duration_seconds": None,
+                                    "output_tail": verify_lines[-60:],
+                                    "note": "post_rollback_verify",
+                                }
+                            )
+                            if verify_proc.returncode != 0:
+                                print(
+                                    f"[test] STILL FAIL after rollback run_id={run_id} exit={verify_proc.returncode}"
+                                )
+                                rec["pytest_after_rollback_exit_code"] = verify_proc.returncode
+                                if args.stop_on_pytest_fail:
+                                    rec["stopped_on_pytest_fail"] = True
+                                    raise RuntimeError(
+                                        "Stopping due to pytest failure even after rollback"
+                                    )
+                        if args.stop_on_pytest_fail:
+                            rec["stopped_on_pytest_fail"] = True
+                            raise RuntimeError("Stopping due to pytest failure after run")
+                    else:
+                        print(f"[test] ok run_id={run_id}")
+
+            except Exception as e:
+                print(f"[patch] SKIP run_id={run_id} error={e}")
+                rec["patch_error"] = str(e)
+
+            run_records.append(rec)
+            progress.update(
+                {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "next_run_index": int(i) + 1,
+                }
+            )
+            _maybe_advance_stage(progress, "run_done")
+            _atomic_write_json(progress_path, progress)
+    except KeyboardInterrupt:
+        print("[orchestrator] interrupted")
+        progress.update(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "status": "interrupted",
+            }
+        )
+        _atomic_write_json(progress_path, progress)
+        raise
+
+    if args.resume and int(start_i) >= int(args.runs):
+        summary_path = progress.get("summary_path")
+        if progress.get("status") == "done" and isinstance(summary_path, str) and os.path.exists(summary_path):
+            try:
+                with open(summary_path, "r", encoding="utf-8") as f:
+                    existing_summary = json.load(f)
+                prior_exit = existing_summary.get("tests", {}).get("exit_code", 0)
+                print(f"[resume] already complete summary={summary_path} exit_code={prior_exit}")
+                return int(prior_exit)
+            except Exception:
+                print(f"[resume] already complete summary={summary_path}")
+                return 0
 
     print("[test] running pytest -q")
     test_proc = subprocess.run(
@@ -1273,6 +1625,17 @@ def main() -> int:
     summary_path = os.path.join(orchestrator_dir, "autopatch_summary.json")
     with open(summary_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
+
+    progress.update(
+        {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "status": "done",
+            "next_run_index": int(args.runs),
+            "summary_path": os.path.abspath(summary_path),
+        }
+    )
+    _maybe_advance_stage(progress, "done")
+    _atomic_write_json(progress_path, progress)
 
     print(f"[done] summary={summary_path}")
     return int(test_proc.returncode)

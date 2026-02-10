@@ -399,9 +399,14 @@ class KnowledgeGraphBuilder:
         return []
     
     def _llm_extract_relationships(self, text: str, graph: KnowledgeGraph) -> List[Dict[str, Any]]:
-        """Use LLM to extract relationships with deterministic fallback."""
-        # Preserve relationship growth when an LLM extractor is not wired in.
-        return self._extract_relationships(text, graph)
+        """Use LLM to extract relationships (placeholder for LLM integration).
+
+        IMPORTANT: This method must not call back into `_extract_relationships`,
+        because `_extract_relationships` already calls this method when a
+        mediator is present.
+        """
+        # TODO: Implement LLM-based extraction
+        return []
     
     def _get_entity_id(self) -> str:
         """Generate unique entity ID."""

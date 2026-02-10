@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 import py_compile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 # Allow running via: python examples/codex_autopatch_from_run.py
@@ -2057,13 +2057,40 @@ def main() -> int:
         "--wait-on-429-max-s",
         type=int,
         default=15 * 60,
-        help="Maximum seconds to sleep on 429 before giving up (default: 900).",
+        help="Maximum seconds to sleep on 429 before giving up (default: 900). Use 0 for unlimited.",
+    )
+    parser.add_argument(
+        "--wait-on-429-max-retries",
+        type=int,
+        default=1,
+        help=(
+            "Maximum number of sleep+retry cycles on 429 before giving up (default: 1). "
+            "Use 0 for unlimited."
+        ),
     )
     parser.add_argument(
         "--wait-on-429-buffer-s",
         type=int,
         default=2,
         help="Extra seconds added to resets_in_seconds before retry (default: 2).",
+    )
+    parser.add_argument(
+        "--wait-on-429-fallback-s",
+        type=int,
+        default=60,
+        help=(
+            "If a 429/usage limit error does not include resets_in_seconds, sleep this many seconds then retry "
+            "(default: 60)."
+        ),
+    )
+    parser.add_argument(
+        "--wait-on-429-fallback-max-s",
+        type=int,
+        default=15 * 60,
+        help=(
+            "Maximum seconds to sleep when using fallback/exponential backoff because reset timing is unknown "
+            "(default: 900). Use 0 for unlimited."
+        ),
     )
 
     parser.set_defaults(apply_patch=True)
@@ -2202,11 +2229,145 @@ def main() -> int:
     ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     chat_jsonl_path = os.path.join(out_dir, f"codex_chat_{ts}.jsonl")
 
-    def _rate_limit_hint(*, reset_s: Optional[int], transcript_path: str) -> str:
+    def _parse_iso_dt(s: str) -> Optional[datetime]:
+        if not isinstance(s, str):
+            return None
+        s = s.strip()
+        if not s:
+            return None
+        try:
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            return None
+
+    def _write_rate_limit_artifact(
+        *,
+        transcript_path: str,
+        reset_s: Optional[int],
+        will_retry: bool,
+        sleep_s: Optional[int] = None,
+        attempt_index: int = 0,
+    ) -> str:
+        now = datetime.now(timezone.utc)
+        reset_at = None
+        if isinstance(reset_s, int) and reset_s > 0:
+            reset_at = (now + timedelta(seconds=int(reset_s))).isoformat()
+        elif isinstance(sleep_s, int) and sleep_s > 0:
+            # Fallback when Codex doesn't provide resets_in_seconds: record the wait window we chose.
+            reset_at = (now + timedelta(seconds=int(sleep_s))).isoformat()
+
+        payload = {
+            "ts": now.isoformat(),
+            "kind": "rate_limit",
+            "provider": "codex_cli",
+            "transcript_path": os.path.abspath(transcript_path),
+            "resets_in_seconds": reset_s,
+            "reset_at": reset_at,
+            "will_retry": bool(will_retry),
+            "sleep_seconds": sleep_s,
+        }
+
+        suffix = "" if int(attempt_index) <= 0 else f"_retry{int(attempt_index):02d}"
+        path = os.path.join(out_dir, f"codex_rate_limit_{ts}{suffix}.json")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+        except Exception:
+            pass
+
+        try:
+            _append_jsonl(
+                transcript_path,
+                {
+                    "event": "rate_limit",
+                    "ts": payload["ts"],
+                    "resets_in_seconds": reset_s,
+                    "reset_at": reset_at,
+                    "will_retry": bool(will_retry),
+                    "sleep_seconds": sleep_s,
+                    "artifact_path": os.path.abspath(path),
+                },
+            )
+        except Exception:
+            pass
+
+        return path
+
+    def _maybe_sleep_from_previous_rate_limit() -> None:
+        if not bool(args.wait_on_429):
+            return
+        try:
+            candidates = sorted(
+                [p for p in os.listdir(out_dir) if p.startswith("codex_rate_limit_") and p.endswith(".json")]
+            )
+            if not candidates:
+                return
+
+            latest = os.path.join(out_dir, candidates[-1])
+            with open(latest, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict) or data.get("will_retry") is not True:
+                return
+
+            now = datetime.now(timezone.utc)
+            reset_at_raw = data.get("reset_at")
+            reset_at = None
+            if isinstance(reset_at_raw, str) and reset_at_raw.strip():
+                try:
+                    reset_at = datetime.fromisoformat(reset_at_raw.strip())
+                    if reset_at.tzinfo is None:
+                        reset_at = reset_at.replace(tzinfo=timezone.utc)
+                except Exception:
+                    reset_at = None
+
+            if reset_at is None:
+                ts_raw = data.get("ts")
+                sleep_raw = data.get("sleep_seconds")
+                if isinstance(ts_raw, str) and isinstance(sleep_raw, (int, float)) and float(sleep_raw) > 0:
+                    try:
+                        started = datetime.fromisoformat(ts_raw.strip())
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=timezone.utc)
+                        reset_at = started + timedelta(seconds=int(float(sleep_raw)))
+                    except Exception:
+                        reset_at = None
+
+            if reset_at is None:
+                return
+
+            remaining = (reset_at - now).total_seconds()
+            if remaining <= 1:
+                return
+
+            buffer_s = max(0, int(args.wait_on_429_buffer_s))
+            sleep_for = int(remaining) + buffer_s
+            print(
+                f"Codex usage-limit: resets_in_seconds={int(remaining)} reset_at={reset_at.isoformat()} "
+                f"(wrote {os.path.abspath(latest)}); sleeping {sleep_for}s then retrying (attempt=resume)...",
+                file=sys.stderr,
+            )
+            time.sleep(sleep_for)
+        except Exception:
+            return
+
+    def _rate_limit_hint(
+        *,
+        reset_s: Optional[int],
+        transcript_path: str,
+        artifact_path: Optional[str] = None,
+        reset_at: Optional[str] = None,
+    ) -> str:
         hint = "Codex CLI rate/usage limit reached."
         if isinstance(reset_s, int) and reset_s > 0:
             mins = max(1, int(round(reset_s / 60.0)))
             hint += f" Try again in ~{mins} min (resets_in_seconds={reset_s})."
+        elif isinstance(reset_at, str) and reset_at.strip():
+            hint += f" Reset ETA: {reset_at.strip()}."
+        else:
+            hint += " Reset ETA unknown (no resets_in_seconds provided)."
         if bool(args.wait_on_429):
             hint += (
                 " If you want to fail fast instead of waiting, pass: --no-wait-on-429"
@@ -2226,11 +2387,14 @@ def main() -> int:
             "\nTranscript (including tool loop prompts) is saved at: "
             + os.path.abspath(transcript_path)
         )
+        if isinstance(artifact_path, str) and artifact_path.strip():
+            hint += "\nRate-limit metadata is saved at: " + os.path.abspath(artifact_path.strip())
         return hint
 
     patch_text: str
     attempt = 0
     current_chat_path = chat_jsonl_path
+    _maybe_sleep_from_previous_rate_limit()
     while True:
         try:
             patch_text = _run_codex_with_tools_logged(
@@ -2262,31 +2426,89 @@ def main() -> int:
                 except Exception:
                     reset_s = None
 
-            if (
-                (not bool(args.wait_on_429))
-                or attempt >= 1
-                or (not isinstance(reset_s, int))
-                or reset_s <= 0
+            reset_at = None
+            # Best-effort parse for provider-supplied reset_at. Handle both JSON-ish and key=value forms.
+            m_at = re.search(r"reset_at\"\s*:\s*\"([^\"]+)\"", msg)
+            if not m_at:
+                m_at = re.search(r"reset_at\s*[:=]\s*([^\s\)]+)", msg)
+            if m_at:
+                reset_at = _parse_iso_dt(m_at.group(1))
+
+            # If reset_at is present, it should drive the wait window even if resets_in_seconds is None.
+            if reset_at is not None and (not isinstance(reset_s, int) or reset_s <= 0):
+                try:
+                    remaining = int((reset_at - datetime.now(timezone.utc)).total_seconds())
+                    if remaining > 0:
+                        reset_s = remaining
+                except Exception:
+                    pass
+
+            if (not bool(args.wait_on_429)) or (
+                int(args.wait_on_429_max_retries) > 0 and attempt >= int(args.wait_on_429_max_retries)
             ):
+                artifact_path = _write_rate_limit_artifact(
+                    transcript_path=current_chat_path,
+                    reset_s=reset_s,
+                    will_retry=False,
+                    attempt_index=int(attempt),
+                )
                 print(
-                    _rate_limit_hint(reset_s=reset_s, transcript_path=current_chat_path),
+                    _rate_limit_hint(
+                        reset_s=reset_s,
+                        transcript_path=current_chat_path,
+                        artifact_path=artifact_path,
+                    ),
                     file=sys.stderr,
                 )
                 return 2
 
             buffer_s = max(0, int(args.wait_on_429_buffer_s))
-            sleep_s = int(reset_s) + buffer_s
-            max_wait_s = max(1, int(args.wait_on_429_max_s))
-            if sleep_s > max_wait_s:
+            fallback_base_s = max(1, int(args.wait_on_429_fallback_s))
+            fallback_max_s = int(args.wait_on_429_fallback_max_s)
+            if fallback_max_s <= 0:
+                fallback_max_s = -1
+
+            if isinstance(reset_s, int) and reset_s > 0:
+                # Known reset window (from resets_in_seconds or derived from reset_at).
+                sleep_s = int(reset_s) + buffer_s
+            else:
+                # Unknown reset timing: exponential backoff based on attempt count.
+                sleep_s = int(fallback_base_s) * (2 ** int(attempt))
+                if fallback_max_s > 0:
+                    sleep_s = min(int(sleep_s), int(fallback_max_s))
+
+            max_wait_s = int(args.wait_on_429_max_s)
+            if max_wait_s <= 0:
+                max_wait_s = -1
+            if max_wait_s > 0 and sleep_s > max_wait_s:
+                artifact_path = _write_rate_limit_artifact(
+                    transcript_path=current_chat_path,
+                    reset_s=reset_s,
+                    will_retry=False,
+                    attempt_index=int(attempt),
+                )
                 print(
-                    _rate_limit_hint(reset_s=reset_s, transcript_path=current_chat_path)
+                    _rate_limit_hint(
+                        reset_s=reset_s,
+                        transcript_path=current_chat_path,
+                        artifact_path=artifact_path,
+                    )
                     + f"\nNot waiting: resets_in_seconds+buffer={sleep_s} exceeds --wait-on-429-max-s={max_wait_s}.",
                     file=sys.stderr,
                 )
                 return 2
 
+            artifact_path = _write_rate_limit_artifact(
+                transcript_path=current_chat_path,
+                reset_s=reset_s,
+                will_retry=True,
+                sleep_s=sleep_s,
+                attempt_index=int(attempt),
+            )
+            reset_at_str = (datetime.now(timezone.utc) + timedelta(seconds=int(sleep_s))).isoformat()
+            next_attempt = int(attempt) + 1
             print(
-                f"Codex usage-limit: sleeping {sleep_s}s then retrying once...",
+                f"Codex usage-limit: resets_in_seconds={reset_s} reset_at={reset_at_str} (wrote {os.path.abspath(artifact_path)}); sleeping {sleep_s}s then retrying (attempt={next_attempt})...",
                 file=sys.stderr,
             )
             time.sleep(sleep_s)

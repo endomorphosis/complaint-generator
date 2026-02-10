@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -24,6 +25,58 @@ def _run(cmd: list[str], *, cwd: Optional[str] = None, capture: bool = False) ->
     )
 
 
+def _run_streaming(cmd: list[str], *, cwd: Optional[str] = None) -> subprocess.CompletedProcess:
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    assert proc.stdout is not None
+    lines: list[str] = []
+    printed_waiting = False
+    for line in proc.stdout:
+        sys.stdout.write(line)
+        sys.stdout.flush()
+        lines.append(line)
+
+        if (not printed_waiting) and ("Codex usage-limit:" in line and "sleeping" in line):
+            printed_waiting = True
+            artifact_path = None
+            reset_at = None
+
+            # Child line format includes: "(wrote /abs/path/to/codex_rate_limit_*.json);"
+            m = re.search(r"\(wrote\s+([^\)]+)\)", line)
+            if m:
+                artifact_path = m.group(1).strip()
+                # Some outputs include a trailing ';' before ')'
+                artifact_path = artifact_path.rstrip("; ")
+
+            if artifact_path and os.path.isfile(artifact_path):
+                try:
+                    with open(artifact_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    reset_at = data.get("reset_at")
+                except Exception:
+                    reset_at = None
+
+            if not reset_at:
+                m2 = re.search(r"reset_at=([^\s]+)", line)
+                if m2:
+                    reset_at = m2.group(1).strip()
+
+            if reset_at:
+                msg = f"[loop] waiting on Codex rate limit until {reset_at}"
+            else:
+                msg = "[loop] waiting on Codex rate limit (reset ETA unknown)"
+            if artifact_path:
+                msg += f" (artifact={artifact_path})"
+            print(msg)
+    rc = proc.wait()
+    return subprocess.CompletedProcess(cmd, rc, "".join(lines), None)
+
+
 def _git_has_changes() -> bool:
     proc = _run(["git", "status", "--porcelain"], cwd=PROJECT_ROOT, capture=True)
     return bool((proc.stdout or "").strip())
@@ -45,6 +98,24 @@ def _load_orchestrator_id(summary_path: str) -> Optional[str]:
         return data.get("orchestrator_id")
     except Exception:
         return None
+
+
+def _load_json_or_none(path: str) -> Optional[dict]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _atomic_write_json(path: str, payload: dict) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    os.replace(tmp_path, path)
 
 
 def main() -> int:
@@ -75,6 +146,22 @@ def main() -> int:
     parser.add_argument("--sleep-s", type=float, default=0.0)
 
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Resume the most recent in-progress loop iteration by reusing the saved orchestrator id and passing --resume to the orchestrator."
+        ),
+    )
+    parser.add_argument(
+        "--loop-state-path",
+        default=None,
+        help=(
+            "Optional JSON file path used to persist loop progress for --resume. "
+            "Defaults to <state-dir>/_runs/_codex_multi_run_autopatch_loop_state.json."
+        ),
+    )
+
+    parser.add_argument(
         "--commit",
         action="store_true",
         help="Commit changes after each loop (default).",
@@ -94,15 +181,59 @@ def main() -> int:
         do_commit = False
 
     python_exe = sys.executable
-    loop_index = 0
+    state_path = (
+        str(args.loop_state_path)
+        if args.loop_state_path
+        else os.path.join(args.state_dir, "_runs", "_codex_multi_run_autopatch_loop_state.json")
+    )
+    state = _load_json_or_none(state_path) or {}
+    loop_index = int(state.get("loop_index", 0) or 0)
+    active_orchestrator_id = state.get("active_orchestrator_id") if isinstance(state.get("active_orchestrator_id"), str) else None
+
+    loops_target = int(args.loops or 0)
+    print(
+        "[loop] init "
+        + f"state={os.path.abspath(state_path)} "
+        + f"resume={bool(args.resume)} "
+        + f"loops_target={loops_target} "
+        + f"loop_index={loop_index} "
+        + f"active_orchestrator_id={(active_orchestrator_id or 'none')}"
+        ,
+        flush=True,
+    )
+    if bool(args.resume) and not active_orchestrator_id:
+        print("[loop] resume requested but no active orchestrator id; starting a new iteration", flush=True)
 
     try:
         while True:
-            loop_index += 1
-            if args.loops and loop_index > args.loops:
-                break
+            if active_orchestrator_id and args.resume:
+                print(f"[loop] {loop_index} resuming orchestrator_id={active_orchestrator_id}", flush=True)
+                orchestrator_id = active_orchestrator_id
+                is_resume = True
+            else:
+                next_loop_index = loop_index + 1
+                if args.loops and next_loop_index > args.loops:
+                    print(
+                        "[loop] exiting (loops limit reached) "
+                        + f"loop_index={loop_index} loops_target={int(args.loops)}"
+                        ,
+                        flush=True,
+                    )
+                    break
+                loop_index = next_loop_index
 
-            print(f"[loop] {loop_index} starting")
+                orchestrator_id = f"autopatch_loop_{loop_index:04d}_{_utc_stamp()}"
+                active_orchestrator_id = orchestrator_id
+                is_resume = False
+                print(f"[loop] {loop_index} starting orchestrator_id={orchestrator_id}", flush=True)
+
+            state = {
+                **(state if isinstance(state, dict) else {}),
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "loop_index": int(loop_index),
+                "active_orchestrator_id": str(orchestrator_id),
+            }
+            _atomic_write_json(state_path, state)
 
             cmd = [
                 python_exe,
@@ -113,6 +244,9 @@ def main() -> int:
                 args.state_dir,
                 "--codex-backend-id",
                 args.codex_backend_id,
+                "--codex-wait-forever-on-429",
+                "--orchestrator-id",
+                str(orchestrator_id),
                 "--runs",
                 str(args.runs),
                 "--sessions-per-run",
@@ -127,21 +261,40 @@ def main() -> int:
                 str(args.apply_fix_max_attempts),
                 "--undo-on-test-failure",
             ]
+            if is_resume:
+                cmd += ["--resume"]
             if args.batch_backend_id:
                 cmd += ["--batch-backend-id", args.batch_backend_id]
 
-            proc = _run(cmd, cwd=PROJECT_ROOT, capture=True)
-            if proc.stdout:
-                print(proc.stdout)
+            proc = _run_streaming(cmd, cwd=PROJECT_ROOT)
 
             summary_path = _extract_summary_path(proc.stdout or "")
             orchestrator_id = _load_orchestrator_id(summary_path) if summary_path else None
 
             if proc.returncode != 0:
-                print(f"[loop] orchestrator failed exit={proc.returncode}")
+                print(f"[loop] orchestrator failed exit={proc.returncode}", flush=True)
                 # Do not auto-commit on a failed loop.
+                state = {
+                    **(state if isinstance(state, dict) else {}),
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "last_exit_code": int(proc.returncode),
+                }
+                _atomic_write_json(state_path, state)
+                # Avoid a tight failure loop (especially when --resume keeps selecting the same orchestrator id).
+                return int(proc.returncode)
             else:
-                print(f"[loop] ok orchestrator_id={orchestrator_id or 'unknown'}")
+                print(f"[loop] ok orchestrator_id={orchestrator_id or 'unknown'}", flush=True)
+
+                # Clear active orchestrator on success.
+                active_orchestrator_id = None
+                state = {
+                    **(state if isinstance(state, dict) else {}),
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "loop_index": int(loop_index),
+                    "active_orchestrator_id": None,
+                    "last_exit_code": int(proc.returncode),
+                }
+                _atomic_write_json(state_path, state)
 
                 if do_commit:
                     if _git_has_changes():
@@ -164,7 +317,7 @@ def main() -> int:
                 time.sleep(args.sleep_s)
 
     except KeyboardInterrupt:
-        print("[loop] interrupted")
+        print("[loop] interrupted", flush=True)
         return 130
 
     return 0
