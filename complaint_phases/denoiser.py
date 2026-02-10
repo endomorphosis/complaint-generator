@@ -6,10 +6,11 @@ noise/ambiguity in the complaint information.
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+import re
+from typing import Dict, List, Any, Optional, Tuple
 import os
 import random
-from .knowledge_graph import KnowledgeGraph
+from .knowledge_graph import KnowledgeGraph, Entity, Relationship
 from .dependency_graph import DependencyGraph
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,108 @@ class ComplaintDenoiser:
             return float(raw.strip())
         except Exception:
             return default
+
+
+    def _short_description(self, text_value: str, limit: int = 160) -> str:
+        snippet = " ".join((text_value or "").strip().split())
+        if len(snippet) > limit:
+            return snippet[: limit - 3] + "..."
+        return snippet
+
+
+    def _extract_date_strings(self, text: str) -> List[str]:
+        if not text:
+            return []
+        date_patterns = [
+            r'\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{1,2},\s+\d{4}\b',
+            r'\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{4}\b',
+            r'\b\d{1,2}/\d{1,2}/\d{2,4}\b',
+            r'\b\d{4}-\d{2}-\d{2}\b',
+            r'\b(?:in|on|since|during|around|by|from)\s+((?:19|20)\d{2})\b',
+        ]
+        found: List[str] = []
+        for pattern in date_patterns:
+            for match in re.findall(pattern, text):
+                if isinstance(match, tuple):
+                    match = match[0]
+                value = (match or "").strip()
+                if value and value not in found:
+                    found.append(value)
+        return found
+
+
+    def _find_entity(self, knowledge_graph: KnowledgeGraph, etype: str, name: str) -> Optional[Entity]:
+        etype_norm = (etype or "").strip().lower()
+        name_norm = (name or "").strip().lower()
+        if not etype_norm or not name_norm:
+            return None
+        for entity in knowledge_graph.entities.values():
+            if entity.type.lower() == etype_norm and entity.name.strip().lower() == name_norm:
+                return entity
+        return None
+
+
+    def _next_entity_id(self, knowledge_graph: KnowledgeGraph) -> str:
+        max_id = 0
+        for entity_id in knowledge_graph.entities.keys():
+            match = re.match(r"entity_(\d+)$", str(entity_id))
+            if match:
+                max_id = max(max_id, int(match.group(1)))
+        return f"entity_{max_id + 1}"
+
+
+    def _next_relationship_id(self, knowledge_graph: KnowledgeGraph) -> str:
+        max_id = 0
+        for rel_id in knowledge_graph.relationships.keys():
+            match = re.match(r"rel_(\d+)$", str(rel_id))
+            if match:
+                max_id = max(max_id, int(match.group(1)))
+        return f"rel_{max_id + 1}"
+
+
+    def _add_entity_if_missing(self,
+                               knowledge_graph: KnowledgeGraph,
+                               etype: str,
+                               name: str,
+                               attributes: Dict[str, Any],
+                               confidence: float) -> Tuple[Optional[Entity], bool]:
+        existing = self._find_entity(knowledge_graph, etype, name)
+        if existing:
+            return existing, False
+        entity = Entity(
+            id=self._next_entity_id(knowledge_graph),
+            type=etype,
+            name=name,
+            attributes=attributes,
+            confidence=confidence,
+            source='complaint'
+        )
+        knowledge_graph.add_entity(entity)
+        return entity, True
+
+
+    def _add_relationship_if_missing(self,
+                                    knowledge_graph: KnowledgeGraph,
+                                    source_id: str,
+                                    target_id: str,
+                                    relation_type: str,
+                                    confidence: float) -> Tuple[Optional[Relationship], bool]:
+        if not (source_id and target_id and relation_type):
+            return None, False
+        for rel in knowledge_graph.relationships.values():
+            if rel.source_id == source_id and rel.target_id == target_id and rel.relation_type == relation_type:
+                return rel, False
+        relationship = Relationship(
+            id=self._next_relationship_id(knowledge_graph),
+            source_id=source_id,
+            target_id=target_id,
+            relation_type=relation_type,
+            attributes={},
+            confidence=confidence,
+            source='complaint'
+        )
+        knowledge_graph.add_relationship(relationship)
+        return relationship, True
 
 
     def get_policy_state(self) -> Dict[str, Any]:
@@ -383,6 +486,58 @@ class ComplaintDenoiser:
                     entity.attributes['evidence_descriptions'] = []
                 entity.attributes['evidence_descriptions'].append(answer)
                 updates['entities_updated'] += 1
+            if not claim_id:
+                claims = knowledge_graph.get_entities_by_type('claim')
+                if len(claims) == 1:
+                    claim_id = claims[0].id
+            if claim_id and len(answer) > 10:
+                snippet = self._short_description(answer, 120)
+                evidence_name = f"Evidence: {self._short_description(answer, 80)}"
+                evidence_entity, created = self._add_entity_if_missing(
+                    knowledge_graph,
+                    'evidence',
+                    evidence_name,
+                    {'description': snippet},
+                    0.6
+                )
+                if created:
+                    updates['entities_updated'] += 1
+                if evidence_entity:
+                    _, rel_created = self._add_relationship_if_missing(
+                        knowledge_graph,
+                        claim_id,
+                        evidence_entity.id,
+                        'supported_by',
+                        0.6
+                    )
+                    if rel_created:
+                        updates['relationships_added'] += 1
+
+        elif question_type == 'timeline':
+            dates = self._extract_date_strings(answer)
+            if dates:
+                claims = knowledge_graph.get_entities_by_type('claim')
+                claim_id = claims[0].id if len(claims) == 1 else None
+                for date_str in dates:
+                    date_entity, created = self._add_entity_if_missing(
+                        knowledge_graph,
+                        'date',
+                        date_str,
+                        {},
+                        0.7
+                    )
+                    if created:
+                        updates['entities_updated'] += 1
+                    if claim_id and date_entity:
+                        _, rel_created = self._add_relationship_if_missing(
+                            knowledge_graph,
+                            claim_id,
+                            date_entity.id,
+                            'occurred_on',
+                            0.6
+                        )
+                        if rel_created:
+                            updates['relationships_added'] += 1
         
         elif question_type == 'requirement':
             # Mark requirement as addressed

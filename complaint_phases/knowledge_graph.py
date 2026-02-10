@@ -356,8 +356,10 @@ class KnowledgeGraphBuilder:
         # Additional heuristic extraction for dates (timeline) and common claims
         date_patterns = [
             r'\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{1,2},\s+\d{4}\b',
+            r'\b(?:Jan|January|Feb|February|Mar|March|Apr|April|May|Jun|June|Jul|July|Aug|August|Sep|Sept|September|Oct|October|Nov|November|Dec|December)\s+\d{4}\b',
             r'\b\d{1,2}/\d{1,2}/\d{2,4}\b',
             r'\b\d{4}-\d{2}-\d{2}\b',
+            r'\b(?:in|on|since|during|around|by|from)\s+(?:19|20)\d{2}\b',
         ]
         found_dates: set[str] = set()
         for pattern in date_patterns:
@@ -517,6 +519,53 @@ class KnowledgeGraphBuilder:
                         'target_id': claim.id,
                         'type': 'makes_claim',
                         'confidence': 0.9
+                    })
+
+        # Link claims to respondent organizations when unambiguous
+        if claims and orgs:
+            if len(claims) == 1:
+                claim = claims[0]
+                for org in orgs:
+                    relationships.append({
+                        'source_id': claim.id,
+                        'target_id': org.id,
+                        'type': 'involves',
+                        'confidence': 0.6
+                    })
+            elif len(orgs) == 1:
+                org = orgs[0]
+                for claim in claims:
+                    relationships.append({
+                        'source_id': claim.id,
+                        'target_id': org.id,
+                        'type': 'involves',
+                        'confidence': 0.6
+                    })
+
+        # Link claims to respondent-role people when unambiguous
+        respondent_roles = {'manager', 'supervisor', 'boss', 'owner', 'landlord', 'hr', 'human resources'}
+        respondent_people = [
+            person for person in persons
+            if person.attributes.get('role', '').lower() in respondent_roles
+        ]
+        if claims and respondent_people:
+            if len(claims) == 1:
+                claim = claims[0]
+                for person in respondent_people:
+                    relationships.append({
+                        'source_id': claim.id,
+                        'target_id': person.id,
+                        'type': 'involves',
+                        'confidence': 0.6
+                    })
+            elif len(respondent_people) == 1:
+                person = respondent_people[0]
+                for claim in claims:
+                    relationships.append({
+                        'source_id': claim.id,
+                        'target_id': person.id,
+                        'type': 'involves',
+                        'confidence': 0.6
                     })
         
         # Link claims to extracted dates to build a timeline
