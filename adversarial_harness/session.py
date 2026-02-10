@@ -278,6 +278,14 @@ class AdversarialSession:
             'what happened first',
             'before',
             'after',
+            'when did',
+            'date range',
+            'how long',
+            'start date',
+            'end date',
+            'first happened',
+            'step by step',
+            'walk me through',
         )
         return any(term in text for term in timeline_terms)
 
@@ -299,6 +307,17 @@ class AdversarialSession:
             'want',
             'relief',
             'fix',
+            'refund',
+            'reimburse',
+            'compensation',
+            'cost',
+            'out of pocket',
+            'financial',
+            'lost wages',
+            'make you whole',
+            'repair',
+            'replace',
+            'accommodation',
         )
         return any(term in text for term in harm_remedy_terms)
 
@@ -315,6 +334,17 @@ class AdversarialSession:
             'person',
             'individual',
             'name',
+            'landlord',
+            'owner',
+            'employer',
+            'staff',
+            'employee',
+            'representative',
+            'agent',
+            'contractor',
+            'provider',
+            'point of contact',
+            'contact person',
         )
         return any(term in text for term in actor_terms)
 
@@ -329,6 +359,7 @@ class AdversarialSession:
             'letter',
             'written',
             'record',
+            'records',
             'screenshot',
             'attachment',
             'paperwork',
@@ -352,6 +383,15 @@ class AdversarialSession:
             'payment',
             'check',
             'bank statement',
+            'message',
+            'messages',
+            'chat',
+            'communication',
+            'communications',
+            'call',
+            'call log',
+            'voicemail',
+            'report',
         )
         return any(term in text for term in document_terms)
 
@@ -367,6 +407,10 @@ class AdversarialSession:
             'heard',
             'observer',
             'coworker',
+            'anyone with you',
+            'anyone there',
+            'others there',
+            'bystander',
         )
         return any(term in text for term in witness_terms)
 
@@ -703,7 +747,7 @@ class AdversarialSession:
             last_question_key: str | None = None
             last_question_intent_key: str | None = None
             recent_intent_keys: List[str] = []
-            recent_intent_window = 2
+            recent_intent_window = 3
             has_timeline_question = False
             has_harm_remedy_question = False
             has_actor_or_decisionmaker_question = False
