@@ -440,8 +440,8 @@ On each turn, output exactly ONE of the following:
 
 2) A single JSON object returning the final patch:
 {{
-  "type": "final",
-  "patch": "*** Begin Patch\n...\n*** End Patch"
+    "type": "final",
+    "patch": "*** Begin Patch\\n...\\n*** End Patch"
 }}
 
 3) (Backward compatible) Output a raw apply_patch patch starting with '*** Begin Patch' and ending with '*** End Patch'.
@@ -562,8 +562,8 @@ On each turn, output exactly ONE of the following:
 
 2) A single JSON object returning the final patch:
 {{
-  "type": "final",
-  "patch": "*** Begin Patch\n...\n*** End Patch"
+    "type": "final",
+    "patch": "*** Begin Patch\\n...\\n*** End Patch"
 }}
 
 3) (Backward compatible) Output a raw apply_patch patch starting with '*** Begin Patch' and ending with '*** End Patch'.
@@ -1719,6 +1719,177 @@ def _run_codex_with_tools_logged(
                 },
             )
 
+        # IMPORTANT: Prefer handling JSON tool/final outputs first.
+        # Otherwise, apply_patch blocks embedded inside JSON string fields (escaped "\\n")
+        # get misinterpreted as raw patches and will always fail validation.
+        obj = _try_parse_json_object(last_output)
+        if obj:
+            typ = obj.get("type")
+            if typ == "final":
+                patch = obj.get("patch")
+                if isinstance(patch, str):
+                    json_candidate, json_report = _pick_best_valid_patch_with_report(patch)
+                    if json_candidate is not None:
+                        if chat_jsonl_path and json_report.get("block_count", 0) > 1:
+                            _append_jsonl(
+                                chat_jsonl_path,
+                                {
+                                    "event": "patch_blocks",
+                                    "ts": _utc_iso(),
+                                    "step": step + 1,
+                                    "kind": "json_final",
+                                    "report": json_report,
+                                },
+                            )
+                        would_update = []
+                        selected_index = json_report.get("selected_index")
+                        if isinstance(selected_index, int):
+                            for b in json_report.get("blocks", []):
+                                if b.get("index") == selected_index and b.get("ok") is True:
+                                    would_update = b.get("would_update_files", []) or []
+                                    break
+                        if chat_jsonl_path:
+                            _append_jsonl(
+                                chat_jsonl_path,
+                                {
+                                    "event": "patch_candidate",
+                                    "ts": _utc_iso(),
+                                    "step": step + 1,
+                                    "kind": "json_final",
+                                    "ok": True,
+                                    "would_update_files": would_update,
+                                    "block_index": json_report.get("selected_index"),
+                                    "block_count": json_report.get("block_count"),
+                                    "valid_count": json_report.get("valid_count"),
+                                },
+                            )
+                        return json_candidate
+
+                    if json_report.get("block_count", 0) > 1 and json_report.get("valid_count", 0) > 1:
+                        blocks = _extract_apply_patch_blocks(patch)
+                        valid_indices = [
+                            int(b["index"]) for b in json_report.get("blocks", [])
+                            if b.get("ok") is True and isinstance(b.get("index"), int)
+                        ]
+                        valid_blocks = [blocks[i] for i in valid_indices if 0 <= i < len(blocks)]
+                        try:
+                            combined_text = _combine_apply_patch_blocks(valid_blocks)
+                        except Exception:
+                            combined_text = ""
+                        if combined_text:
+                            validation = _tool_patch(patch=combined_text)
+                            involved = _extract_update_files_from_patch_text(combined_text)
+                            context = _multi_file_excerpts_for_prompt(involved, patch_text=combined_text)
+                            tool_log.append(
+                                "SYSTEM: Your JSON final included multiple independently-valid patch blocks, "
+                                "but they did not combine into a single transactional patch. Return ONE coherent patch block "
+                                "that includes ALL intended changes across files."
+                            )
+                            tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(validation))
+                            if context:
+                                tool_log.append(
+                                    "MULTI_FILE_CONTEXT:\n" + _compact_for_prompt(context, max_chars=2200, max_lines=120)
+                                )
+                            if chat_jsonl_path:
+                                _append_jsonl(
+                                    chat_jsonl_path,
+                                    {
+                                        "event": "combined_patch_failed",
+                                        "ts": _utc_iso(),
+                                        "step": step + 1,
+                                        "validation": json.loads(validation),
+                                        "multi_file_context": context,
+                                        "report": json_report,
+                                    },
+                                )
+                            continue
+
+                    json_blocks = _extract_apply_patch_blocks(patch)
+                    if json_blocks:
+                        first = json_blocks[0]
+                        if chat_jsonl_path:
+                            _append_jsonl(
+                                chat_jsonl_path,
+                                {
+                                    "event": "patch_candidate",
+                                    "ts": _utc_iso(),
+                                    "step": step + 1,
+                                    "kind": "json_final",
+                                    "ok": False,
+                                    "validation": json.loads(_tool_patch(patch=first)),
+                                },
+                            )
+                        tool_log.append(
+                            "SYSTEM: Your JSON final patch failed dry-run validation. Fix it, and consider calling the patch tool before finalizing."
+                        )
+                        tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=first)))
+                        continue
+
+                tool_log.append(
+                    "SYSTEM: Your previous JSON final did not include a valid apply_patch patch. Return ONLY a corrected final patch."
+                )
+                continue
+
+            if typ != "tool":
+                tool_log.append("SYSTEM: Invalid JSON. 'type' must be 'tool' or 'final'.")
+                continue
+
+            tool = obj.get("tool")
+            args = obj.get("args")
+            if not isinstance(tool, str) or not isinstance(args, dict):
+                tool_log.append("SYSTEM: Invalid tool request. Must include string 'tool' and object 'args'.")
+                continue
+
+            try:
+                if tool == "ls":
+                    result = _tool_ls(path=str(args.get("path", ".")))
+                elif tool == "cat":
+                    result = _tool_cat(
+                        path=str(args.get("path", "")),
+                        start_line=int(args.get("start_line", 1) or 1),
+                        end_line=int(args.get("end_line", 200) or 200),
+                    )
+                elif tool == "grep":
+                    result = _tool_grep(
+                        pattern=str(args.get("pattern", "")),
+                        path=str(args.get("path", ".")),
+                        max_matches=int(args.get("max_matches", 50) or 50),
+                    )
+                elif tool == "patch":
+                    result = _tool_patch(patch=str(args.get("patch", "")))
+                else:
+                    result = f"ERROR: unknown tool: {tool}"
+            except Exception as e:
+                result = f"ERROR: tool execution failed: {e}"
+
+            if chat_jsonl_path:
+                _append_jsonl(
+                    chat_jsonl_path,
+                    {
+                        "event": "tool_call",
+                        "ts": _utc_iso(),
+                        "step": step + 1,
+                        "tool": tool,
+                        "args": args,
+                    },
+                )
+                _append_jsonl(
+                    chat_jsonl_path,
+                    {
+                        "event": "tool_result",
+                        "ts": _utc_iso(),
+                        "step": step + 1,
+                        "tool": tool,
+                        "result": result,
+                    },
+                )
+
+            tool_log.append(
+                f"TOOL_CALL(step={step+1}): {json.dumps(obj, ensure_ascii=False)}\nTOOL_RESULT:\n{_compact_for_prompt(result)}".strip()
+            )
+            continue
+
+        # No JSON: treat as raw patch output.
         raw_candidate, raw_report = _pick_best_valid_patch_with_report(last_output)
         if raw_candidate is not None:
             if chat_jsonl_path and raw_report.get("block_count", 0) > 1:
@@ -1834,177 +2005,12 @@ def _run_codex_with_tools_logged(
             tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=first)))
             continue
 
-        obj = _try_parse_json_object(last_output)
-        if not obj:
-            # Try one nudge toward valid output formats.
-            tool_log.append(
-                "SYSTEM: Your previous output was not valid JSON or an apply_patch patch. "
-                "Return either a JSON tool request or a JSON final patch."
-            )
-            continue
-
-        typ = obj.get("type")
-        if typ == "final":
-            patch = obj.get("patch")
-            if isinstance(patch, str):
-                json_candidate, json_report = _pick_best_valid_patch_with_report(patch)
-                if json_candidate is not None:
-                    if chat_jsonl_path and json_report.get("block_count", 0) > 1:
-                        _append_jsonl(
-                            chat_jsonl_path,
-                            {
-                                "event": "patch_blocks",
-                                "ts": _utc_iso(),
-                                "step": step + 1,
-                                "kind": "json_final",
-                                "report": json_report,
-                            },
-                        )
-                    would_update = []
-                    selected_index = json_report.get("selected_index")
-                    if isinstance(selected_index, int):
-                        for b in json_report.get("blocks", []):
-                            if b.get("index") == selected_index and b.get("ok") is True:
-                                would_update = b.get("would_update_files", []) or []
-                                break
-                    if chat_jsonl_path:
-                        _append_jsonl(
-                            chat_jsonl_path,
-                            {
-                                "event": "patch_candidate",
-                                "ts": _utc_iso(),
-                                "step": step + 1,
-                                "kind": "json_final",
-                                "ok": True,
-                                "would_update_files": would_update,
-                                "block_index": json_report.get("selected_index"),
-                                "block_count": json_report.get("block_count"),
-                                "valid_count": json_report.get("valid_count"),
-                            },
-                        )
-                    return json_candidate
-
-                if json_report.get("block_count", 0) > 1 and json_report.get("valid_count", 0) > 1:
-                    blocks = _extract_apply_patch_blocks(patch)
-                    valid_indices = [
-                        int(b["index"]) for b in json_report.get("blocks", [])
-                        if b.get("ok") is True and isinstance(b.get("index"), int)
-                    ]
-                    valid_blocks = [blocks[i] for i in valid_indices if 0 <= i < len(blocks)]
-                    try:
-                        combined_text = _combine_apply_patch_blocks(valid_blocks)
-                    except Exception:
-                        combined_text = ""
-                    if combined_text:
-                        validation = _tool_patch(patch=combined_text)
-                        involved = _extract_update_files_from_patch_text(combined_text)
-                        context = _multi_file_excerpts_for_prompt(involved, patch_text=combined_text)
-                        tool_log.append(
-                            "SYSTEM: Your JSON final included multiple independently-valid patch blocks, "
-                            "but they did not combine into a single transactional patch. Return ONE coherent patch block "
-                            "that includes ALL intended changes across files."
-                        )
-                        tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(validation))
-                        if context:
-                            tool_log.append(
-                                "MULTI_FILE_CONTEXT:\n" + _compact_for_prompt(context, max_chars=2200, max_lines=120)
-                            )
-                        if chat_jsonl_path:
-                            _append_jsonl(
-                                chat_jsonl_path,
-                                {
-                                    "event": "combined_patch_failed",
-                                    "ts": _utc_iso(),
-                                    "step": step + 1,
-                                    "validation": json.loads(validation),
-                                    "multi_file_context": context,
-                                    "report": json_report,
-                                },
-                            )
-                        continue
-
-                json_blocks = _extract_apply_patch_blocks(patch)
-                if json_blocks:
-                    first = json_blocks[0]
-                    if chat_jsonl_path:
-                        _append_jsonl(
-                            chat_jsonl_path,
-                            {
-                                "event": "patch_candidate",
-                                "ts": _utc_iso(),
-                                "step": step + 1,
-                                "kind": "json_final",
-                                "ok": False,
-                                "validation": json.loads(_tool_patch(patch=first)),
-                            },
-                        )
-                    tool_log.append(
-                        "SYSTEM: Your JSON final patch failed dry-run validation. Fix it, and consider calling the patch tool before finalizing."
-                    )
-                    tool_log.append("PATCH_VALIDATION:\n" + _compact_for_prompt(_tool_patch(patch=first)))
-                    continue
-            tool_log.append(
-                "SYSTEM: Your previous JSON final did not include a valid apply_patch patch. Return ONLY a corrected final patch."
-            )
-            continue
-
-        if typ != "tool":
-            tool_log.append("SYSTEM: Invalid JSON. 'type' must be 'tool' or 'final'.")
-            continue
-
-        tool = obj.get("tool")
-        args = obj.get("args")
-        if not isinstance(tool, str) or not isinstance(args, dict):
-            tool_log.append("SYSTEM: Invalid tool request. Must include string 'tool' and object 'args'.")
-            continue
-
-        try:
-            if tool == "ls":
-                result = _tool_ls(path=str(args.get("path", ".")))
-            elif tool == "cat":
-                result = _tool_cat(
-                    path=str(args.get("path", "")),
-                    start_line=int(args.get("start_line", 1) or 1),
-                    end_line=int(args.get("end_line", 200) or 200),
-                )
-            elif tool == "grep":
-                result = _tool_grep(
-                    pattern=str(args.get("pattern", "")),
-                    path=str(args.get("path", ".")),
-                    max_matches=int(args.get("max_matches", 50) or 50),
-                )
-            elif tool == "patch":
-                result = _tool_patch(patch=str(args.get("patch", "")))
-            else:
-                result = f"ERROR: unknown tool: {tool}"
-        except Exception as e:
-            result = f"ERROR: tool execution failed: {e}"
-
-        if chat_jsonl_path:
-            _append_jsonl(
-                chat_jsonl_path,
-                {
-                    "event": "tool_call",
-                    "ts": _utc_iso(),
-                    "step": step + 1,
-                    "tool": tool,
-                    "args": args,
-                },
-            )
-            _append_jsonl(
-                chat_jsonl_path,
-                {
-                    "event": "tool_result",
-                    "ts": _utc_iso(),
-                    "step": step + 1,
-                    "tool": tool,
-                    "result": result,
-                },
-            )
-
+        # If the model output is neither JSON nor apply_patch, nudge toward valid output formats.
         tool_log.append(
-            f"TOOL_CALL(step={step+1}): {json.dumps(obj, ensure_ascii=False)}\nTOOL_RESULT:\n{_compact_for_prompt(result)}".strip()
+            "SYSTEM: Your previous output was not valid JSON or an apply_patch patch. "
+            "Return either a JSON tool request or a JSON final patch."
         )
+        continue
 
     # Final forced attempt
     # Important: include the tool_log tail so the model has the evidence/context
