@@ -623,6 +623,12 @@ python examples/codex_autopatch_from_run.py
 **Usage:**
 ```bash
 python examples/codex_multi_run_autopatch.py
+
+# If Codex is rate-limited, wait indefinitely and optionally tune the fallback backoff:
+python examples/codex_multi_run_autopatch.py \
+    --codex-wait-forever-on-429 \
+    --codex-wait-on-429-fallback-s 60 \
+    --codex-wait-on-429-fallback-max-s 900
 ```
 
 ---
@@ -640,6 +646,12 @@ python examples/codex_multi_run_autopatch.py
 **Usage:**
 ```bash
 python examples/codex_multi_run_autopatch_loop.py
+
+# Loop wrapper always enables --codex-wait-forever-on-429 when calling the orchestrator.
+# You can tune fallback backoff for 429s without a reset timestamp:
+python examples/codex_multi_run_autopatch_loop.py \
+    --codex-wait-on-429-fallback-s 60 \
+    --codex-wait-on-429-fallback-max-s 900
 ```
 
 ---

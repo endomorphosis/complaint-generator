@@ -275,6 +275,8 @@ def _generate_codex_patch_for_run(
     backend_id: str,
     context_mode: str = "rich",
     wait_forever_on_429: bool = False,
+    wait_on_429_fallback_s: Optional[int] = None,
+    wait_on_429_fallback_max_s: Optional[int] = None,
 ) -> str:
     def _find_latest_rate_limit_artifact() -> Optional[str]:
         try:
@@ -352,6 +354,10 @@ def _generate_codex_patch_for_run(
             "--wait-on-429-max-retries",
             "0",
         ]
+        if wait_on_429_fallback_s is not None:
+            cmd += ["--wait-on-429-fallback-s", str(int(wait_on_429_fallback_s))]
+        if wait_on_429_fallback_max_s is not None:
+            cmd += ["--wait-on-429-fallback-max-s", str(int(wait_on_429_fallback_max_s))]
 
     proc = _run_streaming(cmd)
     if proc.returncode != 0:
@@ -1013,6 +1019,24 @@ def main() -> int:
             "(sleep+retry until success) instead of exiting with code 2."
         ),
     )
+    parser.add_argument(
+        "--codex-wait-on-429-fallback-s",
+        type=int,
+        default=None,
+        help=(
+            "Pass through to codex_autopatch_from_run.py as --wait-on-429-fallback-s (only relevant with "
+            "--codex-wait-forever-on-429). If omitted, uses the driver default."
+        ),
+    )
+    parser.add_argument(
+        "--codex-wait-on-429-fallback-max-s",
+        type=int,
+        default=None,
+        help=(
+            "Pass through to codex_autopatch_from_run.py as --wait-on-429-fallback-max-s (only relevant with "
+            "--codex-wait-forever-on-429). If omitted, uses the driver default."
+        ),
+    )
     parser.add_argument("--runs", type=int, default=10)
     parser.add_argument("--sessions-per-run", type=int, default=10)
     parser.add_argument("--max-turns", type=int, default=8)
@@ -1289,6 +1313,8 @@ def main() -> int:
                         backend_id=args.codex_backend_id,
                         context_mode=str(args.codex_context_mode),
                         wait_forever_on_429=bool(args.codex_wait_forever_on_429),
+                        wait_on_429_fallback_s=args.codex_wait_on_429_fallback_s,
+                        wait_on_429_fallback_max_s=args.codex_wait_on_429_fallback_max_s,
                     )
                     patch_text = _normalize_patch_text(_read_text(patch_path))
 

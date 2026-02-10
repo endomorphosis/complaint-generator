@@ -35,16 +35,18 @@ def _run_streaming(cmd: list[str], *, cwd: Optional[str] = None) -> subprocess.C
     )
     assert proc.stdout is not None
     lines: list[str] = []
-    printed_waiting = False
     for line in proc.stdout:
         sys.stdout.write(line)
         sys.stdout.flush()
         lines.append(line)
 
-        if (not printed_waiting) and ("Codex usage-limit:" in line and "sleeping" in line):
-            printed_waiting = True
+        if "Codex usage-limit:" in line and "sleeping" in line:
             artifact_path = None
             reset_at = None
+            reset_source = None
+            provider_reset_at = None
+            sleep_s = None
+            attempt = None
 
             # Child line format includes: "(wrote /abs/path/to/codex_rate_limit_*.json);"
             m = re.search(r"\(wrote\s+([^\)]+)\)", line)
@@ -58,6 +60,8 @@ def _run_streaming(cmd: list[str], *, cwd: Optional[str] = None) -> subprocess.C
                     with open(artifact_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
                     reset_at = data.get("reset_at")
+                    reset_source = data.get("reset_source")
+                    provider_reset_at = data.get("provider_reset_at")
                 except Exception:
                     reset_at = None
 
@@ -66,10 +70,37 @@ def _run_streaming(cmd: list[str], *, cwd: Optional[str] = None) -> subprocess.C
                 if m2:
                     reset_at = m2.group(1).strip()
 
-            if reset_at:
-                msg = f"[loop] waiting on Codex rate limit until {reset_at}"
+            ms = re.search(r"sleeping\s+(\d+)s", line)
+            if ms:
+                try:
+                    sleep_s = int(ms.group(1))
+                except Exception:
+                    sleep_s = None
+
+            ma = re.search(r"attempt=(\d+)", line)
+            if ma:
+                try:
+                    attempt = int(ma.group(1))
+                except Exception:
+                    attempt = None
+
+            # Prefer provider reset time when available (credits reset), otherwise treat as backoff next-retry time.
+            effective_reset_at = provider_reset_at or reset_at
+            if effective_reset_at and reset_source in {"try_again_at", "reset_at"}:
+                msg = f"[loop] Codex credits reset at {effective_reset_at}"
+            elif effective_reset_at:
+                msg = f"[loop] waiting to retry Codex until {effective_reset_at}"
             else:
-                msg = "[loop] waiting on Codex rate limit (reset ETA unknown)"
+                msg = "[loop] waiting to retry Codex (reset ETA unknown)"
+
+            details: list[str] = []
+            if sleep_s is not None:
+                details.append(f"sleep_s={sleep_s}")
+            if attempt is not None:
+                details.append(f"attempt={attempt}")
+            if details:
+                msg += " (" + ", ".join(details) + ")"
+
             if artifact_path:
                 msg += f" (artifact={artifact_path})"
             print(msg)
@@ -133,6 +164,25 @@ def main() -> int:
     parser.add_argument("--sessions-per-run", type=int, default=10)
     parser.add_argument("--max-turns", type=int, default=8)
     parser.add_argument("--max-parallel", type=int, default=2)
+
+    parser.add_argument(
+        "--codex-wait-on-429-fallback-s",
+        type=int,
+        default=None,
+        help=(
+            "When Codex 429 does not include a reset timestamp, sleep this many seconds on the first retry and then back off. "
+            "If omitted, uses the driver default."
+        ),
+    )
+    parser.add_argument(
+        "--codex-wait-on-429-fallback-max-s",
+        type=int,
+        default=None,
+        help=(
+            "Maximum sleep seconds when using fallback/exponential backoff because Codex reset timing is unknown. "
+            "If omitted, uses the driver default."
+        ),
+    )
 
     parser.add_argument("--generate-fix-max-attempts", type=int, default=2)
     parser.add_argument("--apply-fix-max-attempts", type=int, default=2)
@@ -213,6 +263,12 @@ def main() -> int:
             else:
                 next_loop_index = loop_index + 1
                 if args.loops and next_loop_index > args.loops:
+                    if active_orchestrator_id and not args.resume:
+                        print(
+                            "[loop] loops limit reached but an orchestrator is still active; rerun with --resume "
+                            + f"to continue orchestrator_id={active_orchestrator_id}",
+                            flush=True,
+                        )
                     print(
                         "[loop] exiting (loops limit reached) "
                         + f"loop_index={loop_index} loops_target={int(args.loops)}"
@@ -261,6 +317,10 @@ def main() -> int:
                 str(args.apply_fix_max_attempts),
                 "--undo-on-test-failure",
             ]
+            if args.codex_wait_on_429_fallback_s is not None:
+                cmd += ["--codex-wait-on-429-fallback-s", str(int(args.codex_wait_on_429_fallback_s))]
+            if args.codex_wait_on_429_fallback_max_s is not None:
+                cmd += ["--codex-wait-on-429-fallback-max-s", str(int(args.codex_wait_on_429_fallback_max_s))]
             if is_resume:
                 cmd += ["--resume"]
             if args.batch_backend_id:

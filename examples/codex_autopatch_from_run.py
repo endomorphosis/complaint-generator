@@ -46,6 +46,101 @@ def _get_llm_router_backend_config(config: Dict[str, Any], backend_id: str | Non
     return backend_kwargs
 
 
+def _parse_iso_dt(s: str) -> Optional[datetime]:
+    if not isinstance(s, str):
+        return None
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _parse_codex_human_reset_at(msg: str) -> Optional[datetime]:
+    """Parse Codex CLI human reset time like: 'try again at Feb 11th, 2026 11:46 PM.'
+
+    Codex strings typically omit timezone. We treat them as UTC for consistency.
+    """
+    if not isinstance(msg, str) or not msg:
+        return None
+    m = re.search(r"try again at\s+([^\.\n]+)", msg, flags=re.IGNORECASE)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    if not raw:
+        return None
+
+    cleaned = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", raw, flags=re.IGNORECASE)
+    for fmt in ("%b %d, %Y %I:%M %p", "%B %d, %Y %I:%M %p"):
+        try:
+            dt = datetime.strptime(cleaned, fmt)
+            return dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+    return None
+
+
+def _extract_rate_limit_reset_info(msg: str) -> Tuple[Optional[int], Optional[datetime], Optional[str]]:
+    """Extract (resets_in_seconds, reset_at_dt, source) from a Codex error message.
+
+    - source is one of: 'resets_in_seconds', 'reset_at', 'try_again_at', or None.
+    """
+    if not isinstance(msg, str):
+        return None, None, None
+
+    reset_s: Optional[int] = None
+    source: Optional[str] = None
+
+    m = re.search(r"resets_in_seconds\"\s*:\s*(\d+)", msg)
+    if not m:
+        m = re.search(r"resets_in_seconds\s*[:=]\s*(\d+)", msg)
+    if m:
+        try:
+            reset_s = int(m.group(1))
+            source = "resets_in_seconds"
+        except Exception:
+            reset_s = None
+
+    reset_at: Optional[datetime] = None
+    m_at = re.search(r"reset_at\"\s*:\s*\"([^\"]+)\"", msg)
+    if not m_at:
+        m_at = re.search(r"reset_at\s*[:=]\s*([^\s\)]+)", msg)
+    if m_at:
+        reset_at = _parse_iso_dt(m_at.group(1))
+        if reset_at is not None:
+            source = "reset_at"
+
+    if reset_at is None:
+        reset_at = _parse_codex_human_reset_at(msg)
+        if reset_at is not None:
+            source = "try_again_at"
+
+    if reset_at is not None and (reset_s is None or reset_s <= 0):
+        try:
+            remaining = int((reset_at - datetime.now(timezone.utc)).total_seconds())
+            if remaining > 0:
+                reset_s = remaining
+        except Exception:
+            pass
+
+    return reset_s, reset_at, source
+
+
+def _debug_extract_reset_info_from_message(msg: str) -> Dict[str, Any]:
+    """Debug helper: extract reset timing from a Codex rate-limit error message."""
+    reset_s, reset_at, source = _extract_rate_limit_reset_info(msg)
+    return {
+        "reset_at_iso": (reset_at.isoformat() if isinstance(reset_at, datetime) else None),
+        "resets_in_seconds": reset_s,
+        "source": source,
+    }
+
+
 def _find_session_jsons(run_dir: str) -> List[str]:
     out: List[str] = []
     if not os.path.isdir(run_dir):
@@ -338,6 +433,11 @@ Goal:
 - Do NOT add dependencies.
 - Ensure existing tests keep passing.
 
+Quality constraints (important):
+- Do NOT invent legal elements/requirements or factual content. Prefer extracting/deriving structure from the session text, existing artifacts, and deterministic heuristics.
+- Avoid creating dense graphs by linking every claim to every entity (no cartesian-product relationships). Add relationships only when a clear textual or structural signal exists.
+- Prefer small, high-signal changes over broad refactors.
+
 Implementation constraints:
 - Only modify Python files.
 - Prefer changing adversarial harness behavior (e.g., question selection logic) rather than core mediator logic.
@@ -432,6 +532,11 @@ Goal:
 - Keep changes minimal and localized.
 - Do NOT add dependencies.
 - Ensure existing tests keep passing.
+
+Quality constraints (important):
+- Do NOT invent legal elements/requirements or factual content. Prefer extracting/deriving structure from the session text, existing artifacts, and deterministic heuristics.
+- Avoid creating dense graphs by linking every claim to every entity (no cartesian-product relationships). Add relationships only when a clear textual or structural signal exists.
+- Prefer small, high-signal changes over broad refactors.
 
 Implementation constraints:
 - Only modify Python files.
@@ -2093,6 +2198,23 @@ def main() -> int:
         ),
     )
 
+    parser.add_argument(
+        "--debug-rate-limit-jsonl",
+        default=None,
+        help=(
+            "Debug: parse a Codex exec JSONL (type=error message) for reset timing and print the extracted reset_at + resets_in_seconds, "
+            "then exit without making any Codex calls."
+        ),
+    )
+    parser.add_argument(
+        "--debug-rate-limit-message",
+        default=None,
+        help=(
+            "Debug: parse a provided rate-limit error message string for reset timing and print extracted reset_at + resets_in_seconds, "
+            "then exit without making any Codex calls."
+        ),
+    )
+
     parser.set_defaults(apply_patch=True)
     parser.add_argument(
         "--apply",
@@ -2166,6 +2288,34 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    # Debug-only: verify reset timestamp parsing without calling Codex.
+    if args.debug_rate_limit_message or args.debug_rate_limit_jsonl:
+        msg = None
+        if args.debug_rate_limit_message:
+            msg = str(args.debug_rate_limit_message)
+        elif args.debug_rate_limit_jsonl:
+            try:
+                with open(str(args.debug_rate_limit_jsonl), "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            obj = json.loads(line)
+                        except Exception:
+                            continue
+                        if isinstance(obj, dict) and obj.get("type") == "error" and isinstance(obj.get("message"), str):
+                            msg = obj.get("message")
+            except Exception as e:
+                print(f"[debug] failed to read jsonl: {e}")
+                return 1
+
+        if not msg:
+            print("[debug] no error message found")
+            return 1
+
+        info = _debug_extract_reset_info_from_message(msg)
+        print("[debug] parsed reset info:")
+        print(json.dumps(info, indent=2))
+        return 0
+
     run_dir = args.run_dir
     cycle_summary_path = os.path.join(run_dir, "cycle_summary.json")
     if not os.path.isfile(cycle_summary_path):
@@ -2229,31 +2379,21 @@ def main() -> int:
     ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     chat_jsonl_path = os.path.join(out_dir, f"codex_chat_{ts}.jsonl")
 
-    def _parse_iso_dt(s: str) -> Optional[datetime]:
-        if not isinstance(s, str):
-            return None
-        s = s.strip()
-        if not s:
-            return None
-        try:
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except Exception:
-            return None
-
     def _write_rate_limit_artifact(
         *,
         transcript_path: str,
         reset_s: Optional[int],
+        reset_at_override: Optional[str] = None,
+        reset_source: Optional[str] = None,
         will_retry: bool,
         sleep_s: Optional[int] = None,
         attempt_index: int = 0,
     ) -> str:
         now = datetime.now(timezone.utc)
         reset_at = None
-        if isinstance(reset_s, int) and reset_s > 0:
+        if isinstance(reset_at_override, str) and reset_at_override.strip():
+            reset_at = reset_at_override.strip()
+        elif isinstance(reset_s, int) and reset_s > 0:
             reset_at = (now + timedelta(seconds=int(reset_s))).isoformat()
         elif isinstance(sleep_s, int) and sleep_s > 0:
             # Fallback when Codex doesn't provide resets_in_seconds: record the wait window we chose.
@@ -2266,6 +2406,10 @@ def main() -> int:
             "transcript_path": os.path.abspath(transcript_path),
             "resets_in_seconds": reset_s,
             "reset_at": reset_at,
+            "reset_source": (str(reset_source) if reset_source else None),
+            "provider_reset_at": (
+                reset_at_override.strip() if isinstance(reset_at_override, str) and reset_at_override.strip() else None
+            ),
             "will_retry": bool(will_retry),
             "sleep_seconds": sleep_s,
         }
@@ -2415,40 +2559,18 @@ def main() -> int:
             if not is_rate_limit:
                 raise
 
-            # Best-effort parse for Codex usage-limit reset window.
-            reset_s = None
-            m = re.search(r"resets_in_seconds\"\s*:\s*(\d+)", msg)
-            if not m:
-                m = re.search(r"resets_in_seconds\s*[:=]\s*(\d+)", msg)
-            if m:
-                try:
-                    reset_s = int(m.group(1))
-                except Exception:
-                    reset_s = None
-
-            reset_at = None
-            # Best-effort parse for provider-supplied reset_at. Handle both JSON-ish and key=value forms.
-            m_at = re.search(r"reset_at\"\s*:\s*\"([^\"]+)\"", msg)
-            if not m_at:
-                m_at = re.search(r"reset_at\s*[:=]\s*([^\s\)]+)", msg)
-            if m_at:
-                reset_at = _parse_iso_dt(m_at.group(1))
-
-            # If reset_at is present, it should drive the wait window even if resets_in_seconds is None.
-            if reset_at is not None and (not isinstance(reset_s, int) or reset_s <= 0):
-                try:
-                    remaining = int((reset_at - datetime.now(timezone.utc)).total_seconds())
-                    if remaining > 0:
-                        reset_s = remaining
-                except Exception:
-                    pass
+            reset_s, reset_at, _source = _extract_rate_limit_reset_info(msg)
+            reset_source = _source
 
             if (not bool(args.wait_on_429)) or (
                 int(args.wait_on_429_max_retries) > 0 and attempt >= int(args.wait_on_429_max_retries)
             ):
+                reset_at_override = reset_at.isoformat() if isinstance(reset_at, datetime) else None
                 artifact_path = _write_rate_limit_artifact(
                     transcript_path=current_chat_path,
                     reset_s=reset_s,
+                    reset_at_override=reset_at_override,
+                    reset_source=reset_source,
                     will_retry=False,
                     attempt_index=int(attempt),
                 )
@@ -2457,6 +2579,7 @@ def main() -> int:
                         reset_s=reset_s,
                         transcript_path=current_chat_path,
                         artifact_path=artifact_path,
+                        reset_at=(reset_at_override or None),
                     ),
                     file=sys.stderr,
                 )
@@ -2481,9 +2604,12 @@ def main() -> int:
             if max_wait_s <= 0:
                 max_wait_s = -1
             if max_wait_s > 0 and sleep_s > max_wait_s:
+                reset_at_override = reset_at.isoformat() if isinstance(reset_at, datetime) else None
                 artifact_path = _write_rate_limit_artifact(
                     transcript_path=current_chat_path,
                     reset_s=reset_s,
+                    reset_at_override=reset_at_override,
+                    reset_source=reset_source,
                     will_retry=False,
                     attempt_index=int(attempt),
                 )
@@ -2492,20 +2618,26 @@ def main() -> int:
                         reset_s=reset_s,
                         transcript_path=current_chat_path,
                         artifact_path=artifact_path,
+                        reset_at=(reset_at_override or None),
                     )
                     + f"\nNot waiting: resets_in_seconds+buffer={sleep_s} exceeds --wait-on-429-max-s={max_wait_s}.",
                     file=sys.stderr,
                 )
                 return 2
 
+            reset_at_override = None
+            if isinstance(reset_at, datetime):
+                reset_at_override = reset_at.isoformat()
             artifact_path = _write_rate_limit_artifact(
                 transcript_path=current_chat_path,
                 reset_s=reset_s,
+                reset_at_override=reset_at_override,
+                reset_source=reset_source,
                 will_retry=True,
                 sleep_s=sleep_s,
                 attempt_index=int(attempt),
             )
-            reset_at_str = (datetime.now(timezone.utc) + timedelta(seconds=int(sleep_s))).isoformat()
+            reset_at_str = reset_at_override or (datetime.now(timezone.utc) + timedelta(seconds=int(sleep_s))).isoformat()
             next_attempt = int(attempt) + 1
             print(
                 f"Codex usage-limit: resets_in_seconds={reset_s} reset_at={reset_at_str} (wrote {os.path.abspath(artifact_path)}); sleeping {sleep_s}s then retrying (attempt={next_attempt})...",

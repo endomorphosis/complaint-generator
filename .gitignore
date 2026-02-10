@@ -6,6 +6,7 @@ statefiles/*.json
 .pytest_cache/
 .coverage
 statefiles/
+statefiles_*
 htmlcov/
 *.pyc
 *.pyo
