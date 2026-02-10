@@ -88,10 +88,26 @@ def _parse_codex_human_reset_at(msg: str) -> Optional[datetime]:
 def _extract_rate_limit_reset_info(msg: str) -> Tuple[Optional[int], Optional[datetime], Optional[str]]:
     """Extract (resets_in_seconds, reset_at_dt, source) from a Codex error message.
 
-    - source is one of: 'resets_in_seconds', 'reset_at', 'try_again_at', or None.
+    - source is one of: 'resets_in_seconds', 'reset_at', 'try_again_at', 'quota_exceeded', or None.
     """
     if not isinstance(msg, str):
         return None, None, None
+
+    low = msg.lower()
+    # Quota/billing exhaustion is not a backoff-able usage limit.
+    quota_markers = (
+        "insufficient_quota",
+        "exceeded your current quota",
+        "quota has been exceeded",
+        "check your plan and billing",
+        "billing",
+        "hard limit",
+        "billing limit",
+        "add a payment method",
+        "your account is not active",
+    )
+    if any(m in low for m in quota_markers) and ("usage limit" not in low) and ("usage_limit" not in low):
+        return None, None, "quota_exceeded"
 
     reset_s: Optional[int] = None
     source: Optional[str] = None
@@ -169,6 +185,8 @@ def _extract_rate_limit_reset_info_with_exec_fallback(
     codex_exec_*.jsonl error message.
     """
     reset_s, reset_at, source = _extract_rate_limit_reset_info(msg)
+    if source == "quota_exceeded":
+        return reset_s, reset_at, source
     if reset_at is not None or (isinstance(reset_s, int) and reset_s > 0):
         return reset_s, reset_at, source
 
@@ -176,6 +194,8 @@ def _extract_rate_limit_reset_info_with_exec_fallback(
         provider_msg = _extract_first_error_message_from_exec_jsonl(exec_jsonl_path.strip())
         if provider_msg:
             s2, at2, src2 = _extract_rate_limit_reset_info(provider_msg)
+            if src2 == "quota_exceeded":
+                return s2, at2, src2
             if at2 is not None or (isinstance(s2, int) and s2 > 0):
                 return s2, at2, src2
 
@@ -2685,12 +2705,20 @@ def main() -> int:
         except Exception as e:
             msg = str(e or "")
             low = msg.lower()
+            is_quota_exceeded = (
+                "codex_error_kind=quota_exceeded" in low
+                or "insufficient_quota" in low
+                or "exceeded your current quota" in low
+                or "quota has been exceeded" in low
+                or "check your plan and billing" in low
+                or ("billing" in low and "usage limit" not in low and "usage_limit" not in low)
+            )
             is_rate_limit = (
                 "usage_limit_reached" in low
                 or ("http 429" in low)
                 or ("too many requests" in low)
             )
-            if not is_rate_limit:
+            if not is_rate_limit and not is_quota_exceeded:
                 raise
 
             exec_jsonl_path: Optional[str] = None
@@ -2715,6 +2743,28 @@ def main() -> int:
                 msg=msg,
                 exec_jsonl_path=exec_jsonl_path,
             )
+
+            if reset_source == "quota_exceeded" or is_quota_exceeded:
+                artifact_path = _write_rate_limit_artifact(
+                    transcript_path=current_chat_path,
+                    reset_s=None,
+                    reset_at_override=None,
+                    reset_source="quota_exceeded",
+                    provider_error_message=provider_error_message,
+                    will_retry=False,
+                    attempt_index=int(attempt),
+                )
+                provider_msg_snip = _truncate_for_log(provider_error_message, 800)
+                print(
+                    "Codex quota/billing limit exceeded (not retrying).\n"
+                    + "Transcript (including tool loop prompts) is saved at: "
+                    + os.path.abspath(current_chat_path)
+                    + "\nMetadata is saved at: "
+                    + os.path.abspath(artifact_path)
+                    + ("\nProvider error message: " + provider_msg_snip if provider_msg_snip else ""),
+                    file=sys.stderr,
+                )
+                return 2
 
             if (not bool(args.wait_on_429)) or (
                 int(args.wait_on_429_max_retries) > 0 and attempt >= int(args.wait_on_429_max_retries)

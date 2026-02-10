@@ -57,6 +57,14 @@ def test_parse_resets_in_seconds_jsonish() -> None:
     assert info["resets_in_seconds"] == 123
 
 
+def test_parse_quota_exceeded_is_not_backoff() -> None:
+    msg = "You exceeded your current quota, please check your plan and billing details."
+    info = _debug_extract_reset_info_from_message(msg)
+    assert info["source"] == "quota_exceeded"
+    assert info["reset_at_iso"] is None
+    assert info["resets_in_seconds"] is None
+
+
 def test_parse_real_codex_exec_jsonl_if_present() -> None:
     """Optional local test: verify parsing against a real Codex exec JSONL artifact.
 
@@ -163,6 +171,29 @@ def test_exec_jsonl_fallback_provides_try_again_at_human_timestamp() -> None:
         assert reset_at.isoformat() == expected_iso
         assert isinstance(reset_s, int)
         assert 0 < reset_s <= 3 * 3600
+
+
+def test_exec_jsonl_quota_exceeded_short_circuits() -> None:
+    msg = "HTTP 429"
+    exec_jsonl = {
+        "type": "error",
+        "message": "insufficient_quota: You exceeded your current quota, please check your plan and billing details.",
+    }
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "codex_exec_test.jsonl")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(json.dumps(exec_jsonl) + "\n")
+
+        reset_s, reset_at, source = _extract_rate_limit_reset_info_with_exec_fallback(
+            msg=msg,
+            exec_jsonl_path=p,
+        )
+        assert source == "quota_exceeded"
+        assert reset_s is None
+        assert reset_at is None
 
 
 def test_pick_reset_at_prefers_provider_reset_at() -> None:
