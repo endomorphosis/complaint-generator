@@ -333,6 +333,25 @@ class AdversarialSession:
             'attachment',
             'paperwork',
             'file',
+            'contract',
+            'agreement',
+            'estimate',
+            'invoice',
+            'receipt',
+            'lease',
+            'application',
+            'screening criteria',
+            'policy',
+            'warranty',
+            'change order',
+            'work order',
+            'photo',
+            'photos',
+            'picture',
+            'video',
+            'payment',
+            'check',
+            'bank statement',
         )
         return any(term in text for term in document_terms)
 
@@ -535,6 +554,19 @@ class AdversarialSession:
                 recent_intent_keys=recent_intent_keys,
             )
         ]
+        if need_timeline:
+            has_timeline_candidate = any(
+                self._is_timeline_question(c[1]) for c in non_redundant_candidates
+            )
+            if not has_timeline_candidate:
+                return None
+
+        if need_documentary_evidence:
+            has_document_candidate = any(
+                self._is_documentary_evidence_question(c[1]) for c in non_redundant_candidates
+            )
+            if not has_document_candidate:
+                return None
         # Prefer filling high-value information gaps before exploring lower-value variants.
         non_redundant_candidates.sort(
             key=lambda c: (
@@ -559,6 +591,16 @@ class AdversarialSession:
                     and intent_count == 0
                     and similarity_to_seen < novel_similarity_threshold
                     and self._is_harm_or_remedy_question(text)
+                ):
+                    return q
+
+        if need_timeline:
+            for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
+                if (
+                    asked_count == 0
+                    and intent_count == 0
+                    and similarity_to_seen < novel_similarity_threshold
+                    and self._is_timeline_question(text)
                 ):
                     return q
 
@@ -589,16 +631,6 @@ class AdversarialSession:
                     and intent_count == 0
                     and similarity_to_seen < novel_similarity_threshold
                     and self._is_witness_question(text)
-                ):
-                    return q
-
-        if need_timeline:
-            for q, text, _, _, asked_count, intent_count, similarity_to_seen in non_redundant_candidates:
-                if (
-                    asked_count == 0
-                    and intent_count == 0
-                    and similarity_to_seen < novel_similarity_threshold
-                    and self._is_timeline_question(text)
                 ):
                     return q
 

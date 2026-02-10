@@ -492,6 +492,22 @@ class KnowledgeGraphBuilder:
             'lease': 'Lease',
             'voicemail': 'Voicemail',
             'meeting notes': 'Meeting notes',
+            'contract': 'Contract',
+            'agreement': 'Agreement',
+            'estimate': 'Estimate',
+            'invoice': 'Invoice',
+            'change order': 'Change order',
+            'work order': 'Work order',
+            'warranty': 'Warranty',
+            'screening criteria': 'Screening criteria',
+            'policy': 'Policy',
+            'photo': 'Photos',
+            'photos': 'Photos',
+            'picture': 'Photos',
+            'video': 'Video',
+            'payment': 'Payment record',
+            'check': 'Payment record',
+            'bank statement': 'Bank statement',
         }
         for keyword, label in evidence_keywords.items():
             if keyword in lower_text:
