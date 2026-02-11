@@ -3,686 +3,331 @@
 
 ![Complaint Generator Overview](https://user-images.githubusercontent.com/13929820/159738867-25593733-fc54-4683-abc7-a0703ce7d4a7.svg)
 
-## Overview
+An AI-powered legal automation system that assists in preparing legal complaints through intelligent question-driven intake, evidence gathering, and formal complaint generation.
 
-The Complaint Generator is an AI-powered legal automation system that assists users in preparing legal complaints by:
+---
 
-- **Three-Phase Processing** - Intake with denoising, evidence gathering, formal complaint generation (NEW)
-- **Knowledge Graphs** - Extract entities and relationships from complaints (NEW)
-- **Dependency Graphs** - Track claim requirements and satisfaction (NEW)
-- **Neurosymbolic AI** - Combine symbolic and semantic reasoning for legal matching (NEW)
-- **Classifying legal issues** from complaint text
-- **Researching applicable laws** from multiple authoritative sources
-- **Managing evidence** with immutable IPFS storage and DuckDB metadata
-- **Discovering web evidence** automatically using search engines and archives
-- **Generating targeted questions** for evidence gathering
-- **Analyzing requirements** for legal motions
+## 🎯 What It Does
 
-The system integrates [ipfs_datasets_py](https://github.com/endomorphosis/ipfs_datasets_py) for LLM routing, IPFS storage, legal research tools, and web archiving capabilities.
+The Complaint Generator helps users create comprehensive legal complaints by:
 
-## Features
+1. **Understanding Your Situation** - Intelligent question-driven dialogue to gather facts
+2. **Analyzing Legal Issues** - Automated classification of claim types and applicable laws
+3. **Organizing Evidence** - Systematic evidence management with gap analysis
+4. **Researching Authorities** - Multi-source legal research (statutes, regulations, case law)
+5. **Generating Complaints** - Formal complaint documents meeting legal requirements
 
-### 🔄 Three-Phase Complaint Processing (NEW)
-Sophisticated multi-phase workflow inspired by denoising diffusion:
-- **Phase 1: Intake & Denoising** - Build knowledge/dependency graphs, iteratively ask questions to fill gaps
-- **Phase 2: Evidence Gathering** - Enhance graphs with evidence, track satisfaction of requirements  
-- **Phase 3: Formalization** - Neurosymbolic matching against legal requirements, generate formal complaint
-- **Convergence Detection** - Automatically detect when complaint is complete
-- **Graph Persistence** - Save/load knowledge, dependency, and legal graphs as JSON
-- **33 Tests** - Comprehensive test coverage for all three phases
+---
 
-See [docs/THREE_PHASE_SYSTEM.md](docs/THREE_PHASE_SYSTEM.md) and [examples/three_phase_example.py](examples/three_phase_example.py)
+## ✨ Key Features
 
-### 🤖 LLM Router Backend
-- Multi-provider LLM routing (OpenRouter, HuggingFace, Codex, Copilot, Gemini, Claude)
-- Automatic fallback between providers
-- Unified interface for all LLM operations
-- See [docs/LLM_ROUTER.md](docs/LLM_ROUTER.md)
+### 🔄 Three-Phase Intelligent Processing
 
-### 📊 DEI Policy Analysis (NEW)
-Comprehensive DEI (Diversity, Equity, Inclusion) policy analysis integrated from [HACC repository](https://github.com/endomorphosis/HACC):
-- **Risk Scoring** - 0-3 algorithm detecting DEI mandates with binding language
-- **Provision Extraction** - Context-aware extraction with binding vs aspirational detection
-- **Report Generation** - Executive summaries, technical reports, CSV/JSON exports
-- **100+ Keywords** - Direct DEI terms, proxy/euphemisms, procurement, training, etc.
-- **9 Applicability Domains** - Housing, employment, procurement, training, community engagement, etc.
+A sophisticated workflow inspired by denoising diffusion:
 
-See [docs/HACC_INTEGRATION.md](docs/HACC_INTEGRATION.md) and [examples/hacc_dei_analysis_example.py](examples/hacc_dei_analysis_example.py)
+- **Phase 1: Intake & Denoising** - Build knowledge and dependency graphs through iterative questioning
+- **Phase 2: Evidence Gathering** - Identify and fill evidence gaps with intelligent web discovery
+- **Phase 3: Formalization** - Generate formal complaints using neurosymbolic legal matching
 
-### 📋 Complaint Analysis System (NEW)
-Extensible framework for analyzing 14+ legal complaint types:
-- **14 Complaint Types** - DEI, housing, employment, civil rights, consumer, healthcare, free speech, immigration, family law, criminal defense, tax, IP, environmental, probate
-- **390+ Keywords** - Comprehensive legal terminology per domain
-- **90+ Legal Patterns** - Regex-based extraction of provisions and citations
-- **Decision Trees** - Automated classification with 76+ questions across all types
-- **Seed Generation** - Template-based complaint generation for testing
-- **Risk Scoring** - 0-3 algorithm for assessment
-- **Prompt Templates** - LLM-ready structured prompts for analysis
-- **Response Parsers** - Parse LLM output into structured data (entities, relationships, claims, questions)
+Includes convergence detection, graph persistence, and 33 comprehensive tests.
 
-See [complaint_analysis/README.md](complaint_analysis/README.md) and [docs/COMPLAINT_ANALYSIS_INTEGRATION.md](docs/COMPLAINT_ANALYSIS_INTEGRATION.md)
+[Learn more →](docs/THREE_PHASE_SYSTEM.md) | [Example →](examples/three_phase_example.py)
 
-### 🎯 Adversarial Testing & Optimization (NEW)
-LLM-based adversarial framework for testing and optimizing complaint generation:
-- **Complainant Agent** - Simulates real complainants with different personalities
-- **Critic Agent** - Evaluates quality across 5 dimensions (question quality, information extraction, empathy, efficiency, coverage)
-- **Optimizer** - SGD cycle optimization with convergence detection
-- **Session Management** - Multi-round adversarial testing with parallelism
-- **Seed Library** - Pre-built complaint templates for bootstrapping
-- **Search Integration** - Enriched seeds with legal corpus and web research
-- **18 Tests** - Comprehensive test coverage
+### 📋 14 Legal Complaint Types
 
-See [docs/ADVERSARIAL_HARNESS.md](docs/ADVERSARIAL_HARNESS.md) and [examples/adversarial_harness_example.py](examples/adversarial_harness_example.py)
+Comprehensive support for:
+- Civil Rights (Discrimination, Housing, Employment)
+- Consumer Protection, Healthcare Law
+- Immigration, Family Law
+- Criminal Defense, Tax Law
+- Intellectual Property, Environmental Law
+- Probate & Estate
+- **DEI Policy Analysis** (Special focus)
 
-### ⚖️ Legal Analysis Pipeline
-Four-stage automated legal analysis:
-1. **Classification** - Extract claim types, jurisdiction, and legal areas
-2. **Statute Retrieval** - Identify applicable laws and regulations
-3. **Summary Judgment** - Generate required elements per claim type
-4. **Question Generation** - Create evidence-gathering questions
+Each type includes 390+ domain keywords, 90+ legal patterns, and automated decision trees.
 
-See [docs/LEGAL_HOOKS.md](docs/LEGAL_HOOKS.md)
+[Complaint Analysis →](docs/COMPLAINT_ANALYSIS_INTEGRATION.md) | [DEI Analysis →](docs/HACC_INTEGRATION.md)
 
-### 📂 Evidence Management
-- **IPFS Storage** - Immutable content-addressable evidence storage
-- **DuckDB State** - Fast SQL queries for evidence metadata
-- **CID References** - Track evidence by cryptographic content hash
-- **Analysis Tools** - AI-powered evidence gap identification
+### 🤖 Multi-Provider LLM Support
 
-See [docs/EVIDENCE_MANAGEMENT.md](docs/EVIDENCE_MANAGEMENT.md)
+Flexible AI backend integration with automatic fallback:
 
-### 🔍 Legal Authority Research
-Multi-source legal research with automated discovery:
-- **US Code** - Federal statutes via legal scrapers
-- **Federal Register** - Regulations and notices
+- OpenAI (GPT-4, GPT-3.5)
+- Anthropic Claude (via OpenRouter)
+- Google Gemini
+- GitHub Copilot
+- HuggingFace Models
+
+[LLM Router Guide →](docs/LLM_ROUTER.md)
+
+### 🔍 Comprehensive Legal Research
+
+Automated research from authoritative sources:
+
+- **US Code** - Federal statutes
+- **Federal Register** - Regulations and notices  
 - **RECAP Archive** - Court decisions and case law
-- **Web Archives** - Common Crawl Search Engine
-- **DuckDB Storage** - Organized citation database
+- **Brave Search** - Current web content
+- **Common Crawl** - Historical web archives
 
-See [docs/LEGAL_AUTHORITY_RESEARCH.md](docs/LEGAL_AUTHORITY_RESEARCH.md)
+[Legal Research →](docs/LEGAL_AUTHORITY_RESEARCH.md) | [Web Evidence Discovery →](docs/WEB_EVIDENCE_DISCOVERY.md)
 
-### 🌐 Web Evidence Discovery
-Automated evidence discovery from web sources:
-- **Brave Search API** - Current web content (requires API key)
-- **Common Crawl** - Billions of archived web pages
-- **AI Validation** - LLM-powered relevance scoring
-- **Auto-Discovery** - Generate keywords from claims
+### 📂 Evidence Management System
 
-See [docs/WEB_EVIDENCE_DISCOVERY.md](docs/WEB_EVIDENCE_DISCOVERY.md)
+Robust evidence handling with IPFS and DuckDB:
 
-## Architecture
+- Immutable, content-addressable storage
+- Fast SQL queries for organization
+- AI-powered gap analysis
+- Automated web discovery
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Complaint Input                             │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    LLM Router Backend                            │
-│   (Multi-provider LLM: OpenRouter, HuggingFace, Claude, etc.)   │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Legal Analysis Hooks                          │
-│  ┌──────────────────┐  ┌──────────────────┐                     │
-│  │ Classification   │  │ Statute Retrieval│                     │
-│  └──────────────────┘  └──────────────────┘                     │
-│  ┌──────────────────┐  ┌──────────────────┐                     │
-│  │ Requirements     │  │ Question Gen     │                     │
-│  └──────────────────┘  └──────────────────┘                     │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              Legal Authority Research Hooks                      │
-│  ┌────────────┐  ┌──────────────┐  ┌──────────────┐             │
-│  │  US Code   │  │ Fed Register │  │ RECAP Archive│             │
-│  └────────────┘  └──────────────┘  └──────────────┘             │
-│  ┌────────────┐                                                  │
-│  │Web Archives│  (Common Crawl Search Engine)                    │
-│  └────────────┘                                                  │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              Web Evidence Discovery Hooks                        │
-│  ┌────────────┐  ┌──────────────┐                               │
-│  │Brave Search│  │ Common Crawl │                               │
-│  └────────────┘  └──────────────┘                               │
-│         │                │                                       │
-│         └────────┬───────┘                                       │
-│                  ▼                                               │
-│         ┌────────────────┐                                       │
-│         │ AI Validation  │                                       │
-│         └────────────────┘                                       │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Storage Layer                                 │
-│  ┌─────────────────────┐  ┌──────────────────────┐              │
-│  │  IPFS (Evidence)    │  │   DuckDB (Metadata)  │              │
-│  │  - Content CIDs     │  │   - Evidence table   │              │
-│  │  - Immutable        │  │   - Authorities table│              │
-│  └─────────────────────┘  └──────────────────────┘              │
-└─────────────────────────────────────────────────────────────────┘
-```
+[Evidence Management →](docs/EVIDENCE_MANAGEMENT.md)
 
-## Installation
+### 🎯 Adversarial Testing Framework
 
-### Prerequisites
+Quality assurance through adversarial AI:
 
-- Python 3.8+
-- Git
-- (Optional) Brave Search API key for web evidence discovery
+- Complainant agents simulate diverse user personas
+- Critic agents evaluate across 5 dimensions
+- SGD optimization with convergence detection
+- 18+ comprehensive tests
 
-### Quick Start
+[Adversarial Testing →](docs/ADVERSARIAL_HARNESS.md)
 
-1. **Clone the repository:**
+---
+
+## 🚀 Quick Start
+
+### Installation
+
 ```bash
+# Clone and setup
 git clone https://github.com/endomorphosis/complaint-generator.git
 cd complaint-generator
-```
-
-2. **Initialize the ipfs_datasets_py submodule:**
-```bash
 git submodule update --init --recursive
-```
-
-3. **Install dependencies:**
-```bash
 pip install -r requirements.txt
+
+# (Optional) Configure API keys
+export OPENAI_API_KEY="your-key"
+export BRAVE_SEARCH_API_KEY="your-key"
 ```
 
-4. **(Optional) Set up Brave Search API:**
-```bash
-export BRAVE_SEARCH_API_KEY="your_api_key_here"
-```
+### Running
 
-### Running the Application
-
-**Basic run:**
-```bash
-python run.py
-```
-
-**Run with specific config:**
+**CLI Mode (Interactive):**
 ```bash
 python run.py --config config.llm_router.json
 ```
 
-## Configuration
-
-The generator's behavior is defined by a JSON configuration file.
-
-### Configuration Structure
-
-```json
-{
-  "BACKENDS": [
-    {
-      "id": "llm-router",
-      "type": "llm_router",
-      "provider": "copilot_cli",
-      "model": "gpt-5-mini",
-      "max_tokens": 128
-    }
-  ],
-  "MEDIATOR": {
-    "backends": ["llm-router"]
-  },
-  "APPLICATION": {
-    "type": "console"
-  }
-}
+**Web Server Mode:**
+```bash
+# Edit config.llm_router.json: "APPLICATION": {"type": ["server"]}
+python run.py --config config.llm_router.json
+# Access at http://localhost:8000
 ```
 
-### Configuration Sections
+[Complete setup guide →](docs/DEPLOYMENT.md) | [Configuration →](docs/CONFIGURATION.md)
 
-- **`BACKENDS`** - Defines backend adapters (LLM providers, models, credentials)
-- **`MEDIATOR`** - Core logic configuration (which backends to use)
-- **`APPLICATION`** - Frontend application settings
+---
 
-### Example Configurations
+## 📖 Usage Examples
 
-- `config.llm_router.json` - Canonical configuration (LLM Router + legacy backends)
-
-## Usage Examples
-
-### Basic Complaint Analysis
+### Basic Complaint Processing
 
 ```python
 from mediator import Mediator
 from backends import LLMRouterBackend
 
 # Initialize
-backend = LLMRouterBackend(id='llm-router', provider='copilot_cli', model='gpt-5-mini')
+backend = LLMRouterBackend(id='llm-router', provider='copilot_cli', model='gpt-4')
 mediator = Mediator(backends=[backend])
 
-# Set complaint text
-mediator.state.complaint = """
-    I was terminated from my job after reporting safety violations
-    to OSHA. My employer claimed it was due to poor performance,
-    but I had received excellent reviews for 5 years.
-"""
-
-# Run legal analysis
+# Process complaint
+mediator.state.complaint = "I was fired after reporting safety violations..."
 result = mediator.analyze_complaint_legal_issues()
 
 print("Claim Types:", result['classification']['claim_types'])
-print("Applicable Statutes:", result['statutes'])
-print("Evidence Questions:", result['questions'][:3])
+print("Applicable Laws:", result['statutes'])
 ```
 
-### Evidence Management
+### Three-Phase Workflow
 
 ```python
-# Submit evidence
-result = mediator.submit_evidence(
-    data=b"Performance review document...",
-    evidence_type='document',
-    description='5 years of excellent performance reviews',
-    claim_type='wrongful termination'
-)
-print(f"Evidence stored with CID: {result['cid']}")
+from complaint_phases import PhaseManager
 
-# Retrieve user's evidence
-evidence_list = mediator.get_user_evidence()
-print(f"Total evidence items: {len(evidence_list)}")
+manager = PhaseManager(mediator=mediator)
 
-# Analyze evidence for specific claim
-analysis = mediator.analyze_evidence(claim_type='wrongful termination')
-print(f"Recommendations: {analysis['recommendation']}")
+# Phase 1: Intake
+manager.start_three_phase_process(initial_text)
+while manager.current_phase == 'denoising':
+    question = manager.get_next_question()
+    answer = input(question)
+    manager.process_answer(question, answer)
+
+# Phase 2 & 3: Evidence gathering and formalization
+manager.advance_to_evidence_phase()
+manager.discover_web_evidence()
+manager.advance_to_formalization_phase()
+complaint = manager.generate_formal_complaint()
 ```
 
-### Automatic Legal Research
+[More examples →](docs/EXAMPLES.md) - 21 complete examples
 
-```python
-# Research applicable laws automatically
-results = mediator.research_case_automatically()
-print(f"Found {results['total_authorities']} legal authorities")
+---
 
-# Get stored authorities
-authorities = mediator.get_legal_authorities(claim_type='retaliation')
-for auth in authorities:
-    print(f"- {auth['citation']}: {auth['title']}")
+## 🏗️ Architecture
+
+```
+User Interface (CLI/Web) → Mediator → LLM Router Backend
+                              ↓
+                    Complaint Phases (3-Phase)
+                     ├─ Knowledge Graphs
+                     ├─ Dependency Graphs
+                     └─ Legal Graphs
+                              ↓
+        Analysis & Research (14 types, Multi-source, IPFS+DuckDB)
+                              ↓
+              Storage Layer (IPFS Evidence + DuckDB Metadata)
 ```
 
-### Web Evidence Discovery
+[Detailed architecture →](docs/ARCHITECTURE.md)
 
-```python
-# Automatically discover evidence
-results = mediator.discover_evidence_automatically()
-print(f"Discovered: {results['total_discovered']}")
-```
+---
 
-### DEI Policy Analysis
+## 📚 Documentation
 
-```python
-from complaint_analysis import (
-    DEIRiskScorer,
-    DEIProvisionExtractor,
-    DEIReportGenerator
-)
+### Getting Started
+- [Configuration Guide](docs/CONFIGURATION.md) - System configuration
+- [Deployment Guide](docs/DEPLOYMENT.md) - Production deployment
+- [Applications Guide](docs/APPLICATIONS.md) - CLI and web server
+- [Security Guide](docs/SECURITY.md) - Security best practices
 
-# Analyze policy for DEI compliance risks
-policy_text = """
-All contractors shall implement diversity, equity, and inclusion 
-initiatives. Cultural competence training is mandatory for all staff.
-"""
+### Core Systems
+- [Three-Phase System](docs/THREE_PHASE_SYSTEM.md) - Processing workflow
+- [LLM Router](docs/LLM_ROUTER.md) - Multi-provider integration
+- [Architecture](docs/ARCHITECTURE.md) - System design
 
-# Risk assessment
-scorer = DEIRiskScorer()
-risk = scorer.calculate_risk(policy_text)
-print(f"Risk Level: {risk['level']} ({risk['score']}/3)")
-print(f"Issues: {risk['issues']}")
+### Features
+- [Complaint Analysis](docs/COMPLAINT_ANALYSIS_INTEGRATION.md) - 14 complaint types
+- [Legal Research](docs/LEGAL_AUTHORITY_RESEARCH.md) - Multi-source research
+- [Evidence Management](docs/EVIDENCE_MANAGEMENT.md) - IPFS and DuckDB
+- [Web Evidence](docs/WEB_EVIDENCE_DISCOVERY.md) - Automated discovery
+- [Adversarial Testing](docs/ADVERSARIAL_HARNESS.md) - Quality assurance
+- [DEI Analysis](docs/HACC_INTEGRATION.md) - Policy analysis
 
-# Extract specific provisions
-extractor = DEIProvisionExtractor()
-provisions = extractor.extract_provisions(policy_text, document_type='policy')
-for prov in provisions:
-    print(f"{prov['section']}: {prov['is_binding']}")
+[Complete documentation index →](DOCUMENTATION_INDEX.md) - 42+ guides, 250+ pages
 
-# Generate comprehensive report
-generator = DEIReportGenerator(project_name="Policy Review")
-generator.add_document_analysis(risk, provisions, {'source': 'Contract XYZ'})
-reports = generator.save_reports('output/')
-print(f"Reports saved: {list(reports.keys())}")
-```
+---
 
-See [docs/HACC_INTEGRATION.md](docs/HACC_INTEGRATION.md) for complete API reference.
-print(f"Stored: {results['total_stored']}")
+## 🧪 Testing
 
-# Manual search with specific keywords
-search_results = mediator.search_web_for_evidence(
-    keywords=['OSHA retaliation', 'whistleblower protection'],
-    domains=['osha.gov', 'dol.gov'],
-    max_results=10
-)
-```
-
-## Testing
-
-The project includes a comprehensive test suite following Test-Driven Development (TDD) principles.
-
-### Run All Tests
+- **150+ Tests** across all components
+- **60+ Test Classes** organized by feature
+- **Unit & Integration Tests** with pytest
 
 ```bash
-pytest
+pytest                          # Run all tests
+pytest -m "not integration"     # Unit tests only
+pytest --cov=. --cov-report=html  # With coverage
 ```
 
-### Run with Coverage
+[Testing guide →](TESTING.md)
 
-```bash
-pytest --cov=. --cov-report=html
-```
+---
 
-### Run Specific Test Categories
+## 🔒 Security Notice
 
-```bash
-# Integration tests only
-pytest -m integration
+⚠️ **Before production deployment:**
+- Move hardcoded JWT secret to environment variables
+- Configure HTTPS with SSL certificates
+- Harden authentication mechanisms
+- Enhance input validation
 
-# Exclude integration tests (faster)
-pytest -m "not integration"
-```
+[Security Guide →](docs/SECURITY.md) - Complete hardening checklist
 
-### Test Structure
+---
 
-```
-tests/ (22 files, 60+ test classes)
-├── Complaint Processing Tests
-│   ├── test_complaint_phases.py           # Three-phase system (7 classes, 27 tests)
-│   ├── test_mediator_three_phase.py       # Three-phase integration (1 class, 6 tests)
-│   └── test_enhanced_denoising.py         # Advanced denoising (4 classes)
-├── Complaint Analysis Tests
-│   ├── test_complaint_analysis.py         # Core analysis (5 classes)
-│   ├── test_complaint_analysis_integration.py # Integration features (5 classes)
-│   ├── test_complaint_taxonomies.py       # All 14 complaint types (10 classes)
-│   ├── test_dei_analysis.py               # DEI analysis (5 classes, 19 tests)
-│   └── test_hacc_integration.py           # DEI/HACC features (5 classes)
-├── Adversarial Testing Tests
-│   ├── test_adversarial_harness.py        # Adversarial framework (6 classes, 18 tests)
-│   ├── test_sgd_cycle_integration.py      # SGD cycle integration
-│   └── test_sweep_ranker.py               # Sweep ranking tests
-├── Mediator & Hooks Tests
-│   ├── test_mediator.py                   # Core orchestration (2 classes, 4 tests)
-│   ├── test_legal_hooks.py                # Legal analysis pipeline (5 classes, 12 tests)
-│   ├── test_legal_authority_hooks.py      # Legal research (4 classes, 11 tests)
-│   ├── test_web_evidence_hooks.py         # Web evidence (3 classes, 12 tests)
-│   ├── test_evidence_hooks.py             # Evidence management (4 classes, 12 tests)
-│   └── test_search_hooks.py               # Search integration (5 classes)
-├── Core Tests
-│   ├── test_state.py                      # State management (1 class, 2 tests)
-│   ├── test_llm_router_backend.py         # LLM routing (1 class, 7 tests)
-│   ├── test_integration.py                # End-to-end (1 class, 2 tests)
-│   └── test_log.py                        # Logging (6 tests)
-└── __init__.py                            # Test package initialization
-```
+## 📊 System Requirements
 
-**Total Coverage:**
-- 22 test files
-- 60+ test classes
-- 150+ individual tests
-- All major features covered
+**Minimum:** Python 3.8+, 4 GB RAM, 10 GB storage  
+**Recommended:** Python 3.10+, 8 GB RAM, 50 GB SSD  
+**For Local LLMs:** 16+ GB RAM, GPU with CUDA, 100+ GB storage
 
-See [TESTING.md](TESTING.md) and [tests/README.md](tests/README.md) for detailed testing documentation.
+---
 
-## Database Schema
+## 🤝 Contributing
 
-### Evidence Table
+We welcome contributions! [Contributing Guidelines →](CONTRIBUTING.md)
 
-Stores evidence metadata with references to IPFS content.
+1. Fork the repository
+2. Create a feature branch
+3. Write tests for changes
+4. Run test suite (`pytest`)
+5. Submit Pull Request
 
-```sql
-CREATE TABLE evidence (
-    id BIGINT PRIMARY KEY,
-    user_id VARCHAR,
-    username VARCHAR,
-    evidence_cid VARCHAR NOT NULL,         -- IPFS Content ID
-    evidence_type VARCHAR NOT NULL,         -- document, image, video, etc.
-    evidence_size INTEGER,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    metadata JSON,                          -- source_type, relevance_score, etc.
-    complaint_id VARCHAR,
-    claim_type VARCHAR,
-    description TEXT
-)
-```
+---
 
-**Indexes:**
-- `idx_evidence_cid` - Fast CID lookups
-- `idx_evidence_user` - User-specific queries
-
-### Legal Authorities Table
-
-Stores researched legal authorities (statutes, regulations, case law).
-
-```sql
-CREATE TABLE legal_authorities (
-    id BIGINT PRIMARY KEY,
-    user_id VARCHAR,
-    complaint_id VARCHAR,
-    claim_type VARCHAR,
-    authority_type VARCHAR NOT NULL,        -- statute, regulation, case_law
-    source VARCHAR NOT NULL,                -- us_code, federal_register, recap
-    citation VARCHAR,                       -- e.g., "42 U.S.C. § 1983"
-    title TEXT,
-    content TEXT,
-    url VARCHAR,
-    metadata JSON,
-    relevance_score FLOAT,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    search_query VARCHAR
-)
-```
-
-**Indexes:**
-- `idx_authorities_user` - User-specific queries
-- `idx_authorities_claim` - Claim type filtering
-- `idx_authorities_citation` - Citation lookups
-
-## Documentation
-
-### Core Documentation
-- [TESTING.md](TESTING.md) - Testing guide and TDD workflow
-- [tests/README.md](tests/README.md) - Detailed test documentation
-- [complaint_analysis/README.md](complaint_analysis/README.md) - Complaint analysis module
-
-### System Documentation
-- [docs/THREE_PHASE_SYSTEM.md](docs/THREE_PHASE_SYSTEM.md) - Three-phase complaint processing
-- [docs/ADVERSARIAL_HARNESS.md](docs/ADVERSARIAL_HARNESS.md) - Adversarial testing framework
-- [docs/COMPLAINT_ANALYSIS_INTEGRATION.md](docs/COMPLAINT_ANALYSIS_INTEGRATION.md) - Complaint analysis integration
-- [docs/SEARCH_HOOKS.md](docs/SEARCH_HOOKS.md) - Search and RAG integration
-
-### Feature Documentation
-- [docs/LLM_ROUTER.md](docs/LLM_ROUTER.md) - LLM routing configuration
-- [docs/LEGAL_HOOKS.md](docs/LEGAL_HOOKS.md) - Legal analysis system
-- [docs/EVIDENCE_MANAGEMENT.md](docs/EVIDENCE_MANAGEMENT.md) - Evidence handling
-- [docs/LEGAL_AUTHORITY_RESEARCH.md](docs/LEGAL_AUTHORITY_RESEARCH.md) - Legal research
-- [docs/WEB_EVIDENCE_DISCOVERY.md](docs/WEB_EVIDENCE_DISCOVERY.md) - Web evidence discovery
-- [docs/HACC_INTEGRATION.md](docs/HACC_INTEGRATION.md) - DEI policy analysis
-- [docs/IPFS_DATASETS_INTEGRATION.md](docs/IPFS_DATASETS_INTEGRATION.md) - IPFS integration guide
-
-### Example Scripts (21 Total)
-
-#### Core System Examples
-- [examples/three_phase_example.py](examples/three_phase_example.py) - Complete three-phase workflow
-- [examples/legal_analysis_demo.py](examples/legal_analysis_demo.py) - Legal analysis pipeline
-- [examples/evidence_management_demo.py](examples/evidence_management_demo.py) - Evidence storage & analysis
-- [examples/legal_authority_research_demo.py](examples/legal_authority_research_demo.py) - Legal research
-- [examples/web_evidence_discovery_demo.py](examples/web_evidence_discovery_demo.py) - Web evidence discovery
-- [examples/search_hooks_demo.py](examples/search_hooks_demo.py) - Search & RAG integration
-
-#### Complaint Analysis Examples
-- [examples/complaint_analysis_integration_demo.py](examples/complaint_analysis_integration_demo.py) - End-to-end analysis
-- [examples/complaint_analysis_taxonomies_demo.py](examples/complaint_analysis_taxonomies_demo.py) - All 14 complaint types
-- [examples/dei_taxonomy_example.py](examples/dei_taxonomy_example.py) - DEI analysis
-- [examples/hacc_integration_example.py](examples/hacc_integration_example.py) - Full DEI pipeline
-- [examples/hacc_dei_analysis_example.py](examples/hacc_dei_analysis_example.py) - DEI with synthetic policies
-
-#### Adversarial Testing Examples
-- [examples/adversarial_harness_example.py](examples/adversarial_harness_example.py) - Basic harness usage
-- [examples/adversarial_harness_standalone.py](examples/adversarial_harness_standalone.py) - Standalone session
-- [examples/adversarial_optimization_demo.py](examples/adversarial_optimization_demo.py) - SGD optimization
-- [examples/batch_sgd_cycle.py](examples/batch_sgd_cycle.py) - Batch SGD testing
-- [examples/session_sgd_report.py](examples/session_sgd_report.py) - Report generation
-- [examples/parallelism_backoff_sweep.py](examples/parallelism_backoff_sweep.py) - Parameter sweeping
-- [examples/sweep_ranker.py](examples/sweep_ranker.py) - Ranking sweeps
-
-#### Advanced Examples
-- [examples/codex_autopatch_from_run.py](examples/codex_autopatch_from_run.py) - Code autopatch
-- [examples/codex_multi_run_autopatch.py](examples/codex_multi_run_autopatch.py) - Multi-run autopatch
-- [examples/codex_multi_run_autopatch_loop.py](examples/codex_multi_run_autopatch_loop.py) - Autopatch loop
-
-## Development
-
-### Project Structure
+## 📦 Project Structure
 
 ```
 complaint-generator/
-├── adversarial_harness/  # Adversarial testing framework
-│   ├── harness.py        # Core adversarial harness
-│   ├── complainant.py    # LLM-based complainant agent
-│   ├── critic.py         # Quality evaluation agent
-│   ├── optimizer.py      # SGD cycle optimization
-│   ├── session.py        # Multi-round session management
-│   ├── seed_complaints.py # Seed complaint templates
-│   └── search_hooks.py   # Search integration for seeds
-├── complaint_analysis/   # Complaint analysis framework (14 types)
-│   ├── complaint_types.py # Type registration
-│   ├── legal_patterns.py  # Regex-based pattern extraction
-│   ├── keywords.py        # Keyword registries (390+ keywords)
-│   ├── risk_scoring.py    # Risk assessment
-│   ├── decision_trees.py  # Classification decision trees
-│   ├── seed_generator.py  # Seed complaint generation
-│   ├── prompt_templates.py # LLM prompt templates
-│   ├── response_parsers.py # Parse LLM responses
-│   ├── indexer.py         # Hybrid document indexing
-│   ├── analyzer.py        # Unified analysis interface
-│   ├── dei_risk_scoring.py # DEI-specific risk scoring
-│   ├── dei_provision_extractor.py # DEI provision extraction
-│   ├── dei_report_generator.py # DEI report generation
-│   └── decision_trees/    # JSON decision tree configs (14 files)
-├── complaint_phases/     # Three-phase complaint processing
-│   ├── phase_manager.py  # Phase orchestration
-│   ├── knowledge_graph.py # Entity & relationship extraction
-│   ├── dependency_graph.py # Claim requirement tracking
-│   ├── legal_graph.py     # Legal requirement matching
-│   ├── denoiser.py        # Iterative gap reduction
-│   └── neurosymbolic_matcher.py # Symbolic + semantic matching
-├── applications/         # Frontend applications
-├── backends/             # Backend adapters (OpenAI, LLM Router, etc.)
-├── docs/                 # Documentation (24 markdown files)
-├── examples/             # Example scripts (21 demos)
-├── ipfs_datasets_py/     # Submodule: IPFS, LLM routing, legal scrapers
-├── lib/                  # Core utilities (logging)
-├── mediator/             # Core orchestration & research
-│   ├── mediator.py       # Main mediator class
-│   ├── state.py          # State management (DuckDB)
-│   ├── complaint.py      # Complaint data structure
-│   ├── legal_hooks.py    # Legal analysis hooks (4-stage pipeline)
-│   ├── evidence_hooks.py # Evidence management (IPFS + DuckDB)
-│   ├── legal_authority_hooks.py # Legal research (multi-source)
-│   ├── legal_corpus_hooks.py # Legal corpus RAG
-│   └── web_evidence_hooks.py # Web discovery hooks
-├── scripts/              # Utility scripts
-├── statefiles/           # Persistent state storage
-├── templates/            # Application templates
-├── tests/                # Test suite (19 files, 60+ test classes)
-├── config.llm_router.json # Canonical configuration
-├── pytest.ini            # Pytest configuration
-├── requirements.txt      # Python dependencies
-└── run.py               # Application entry point
+├── adversarial_harness/    # Adversarial testing
+├── applications/            # CLI and web server
+├── backends/                # LLM integrations
+├── complaint_analysis/      # 14 complaint types
+├── complaint_phases/        # 3-phase processing
+├── docs/                    # 32 documentation files
+├── examples/                # 21 usage examples
+├── mediator/                # Core orchestration
+├── templates/               # Web UI
+├── tests/                   # 150+ tests
+└── config.llm_router.json   # Configuration
 ```
 
-### Adding New Features (TDD Workflow)
+---
 
-1. **Write a failing test**
-```python
-def test_new_feature():
-    result = new_feature()
-    assert result == expected_value
-```
+## 🐛 Troubleshooting
 
-2. **Run the test** (verify it fails)
-```bash
-pytest tests/test_new_feature.py -v
-```
-
-3. **Implement minimal code** to pass the test
-
-4. **Run the test again** (verify it passes)
-
-5. **Refactor** while keeping tests green
-
-6. **Repeat** for next feature
-
-### Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Write tests for your changes
-4. Implement your changes
-5. Run the test suite (`pytest`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
-
-## Dependencies
-
-### Core Dependencies
-- `duckdb>=0.9.0` - Fast SQL database for state management
-- `pytest>=7.0.0` - Testing framework
-- `pytest-cov>=4.0.0` - Coverage reporting
-- `pytest-asyncio>=0.21.0` - Async test support
-
-### Submodule: ipfs_datasets_py
-Provides:
-- LLM routing (`llm_router`)
-- IPFS storage (`ipfs_backend_router`)
-- Legal scrapers (`legal_scrapers`)
-- Web archiving tools (`web_archiving`)
-
-## Troubleshooting
-
-### Submodule Not Initialized
+**Submodule not initialized:**
 ```bash
 git submodule update --init --recursive
 ```
 
-### Import Errors from ipfs_datasets_py
-The application automatically adds `ipfs_datasets_py` to the Python path. If you encounter import errors:
+**Import errors:**
 ```bash
 export PYTHONPATH="${PYTHONPATH}:$(pwd)/ipfs_datasets_py"
 ```
 
-### DuckDB File Locked
-If you see database locking errors:
+**Database locked:**
 ```bash
-rm statefiles/*.duckdb  # Remove existing database files
+rm statefiles/*.duckdb-wal
 ```
-
-### Missing Brave Search Results
-Web evidence discovery requires a Brave Search API key:
-```bash
-export BRAVE_SEARCH_API_KEY="your_key"
-```
-Get a free API key at: https://brave.com/search/api/
-
-## Support
-
-- **Issues**: https://github.com/endomorphosis/complaint-generator/issues
-- **Discussions**: https://github.com/endomorphosis/complaint-generator/discussions
-
-## Acknowledgments
-
-- Built with [ipfs_datasets_py](https://github.com/endomorphosis/ipfs_datasets_py)
-- Developed by JusticeDAO
-- Powered by multiple LLM providers through the LLM Router
 
 ---
 
-**Note**: This system is designed to assist legal professionals and should not be considered a replacement for professional legal advice. Always consult with a qualified attorney for legal matters.
+## 📈 Project Status
+
+✅ Core systems implemented  
+✅ 150+ tests passing  
+🚧 Web UI polish (in progress)  
+📋 Mobile app (planned)
+
+---
+
+## 📬 Support
+
+- **Issues:** https://github.com/endomorphosis/complaint-generator/issues
+- **Discussions:** https://github.com/endomorphosis/complaint-generator/discussions
+
+---
+
+## ⚖️ Legal Disclaimer
+
+**This system assists legal professionals but does not replace professional legal advice. Always consult with a qualified attorney for legal matters.**
+
+The Complaint Generator helps organize information and generate documents. It does not provide legal advice, representation, or counseling. Users are responsible for reviewing all generated content for accuracy and legal compliance.
+
+---
+
+**Developed by JusticeDAO** | Built with [ipfs_datasets_py](https://github.com/endomorphosis/ipfs_datasets_py)  
+**Version 1.0** | Last Updated: 2026-02-10

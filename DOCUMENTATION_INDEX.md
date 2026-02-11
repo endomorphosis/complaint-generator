@@ -5,6 +5,8 @@ Complete index of all documentation in the complaint-generator repository.
 ## Quick Start
 
 - [README.md](README.md) - Main project overview and getting started guide
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) - Complete configuration reference
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - Production deployment guide
 - [TESTING.md](TESTING.md) - Testing guide and TDD workflow
 - [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute to the project
 
@@ -29,9 +31,15 @@ Complete index of all documentation in the complaint-generator repository.
 
 ### System Architecture
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture, data flows, and integration points
+- [docs/APPLICATIONS.md](docs/APPLICATIONS.md) - CLI and web server applications guide
 
 ### Three-Phase System
 - [docs/THREE_PHASE_SYSTEM.md](docs/THREE_PHASE_SYSTEM.md) - Detailed three-phase workflow documentation
+
+### Configuration & Deployment
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) - Complete configuration reference
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) - Production deployment guide (Docker, K8s, Cloud)
+- [docs/SECURITY.md](docs/SECURITY.md) - Security best practices and hardening
 
 ### Adversarial Testing
 - [docs/ADVERSARIAL_HARNESS.md](docs/ADVERSARIAL_HARNESS.md) - Adversarial testing framework details
@@ -110,19 +118,22 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for detailed documentation of all 21 ex
 
 ## Documentation Statistics
 
-- **Total Markdown Files**: 38+
+- **Total Markdown Files**: 42+
 - **Module READMEs**: 4 (adversarial_harness, complaint_analysis, complaint_phases, tests)
 - **Core Documentation**: 3 (README.md, TESTING.md, CONTRIBUTING.md)
-- **Feature Documentation**: 28 docs/*.md files
+- **Feature Documentation**: 32 docs/*.md files
 - **Example Scripts Documented**: 21
 - **Test Files Documented**: 19
 - **Complaint Types Covered**: 14
-- **Total Pages of Documentation**: 200+
+- **Total Pages of Documentation**: 250+
 
 ## Documentation by Topic
 
 ### Getting Started
 - README.md - Project overview
+- docs/CONFIGURATION.md - Configuration guide
+- docs/DEPLOYMENT.md - Deployment guide
+- docs/APPLICATIONS.md - CLI and server guide
 - TESTING.md - Testing guide
 - CONTRIBUTING.md - Contribution guide
 - docs/BACKENDS.md - Backend setup
@@ -149,12 +160,17 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for detailed documentation of all 21 ex
 - tests/README.md - Test documentation
 - TESTING.md - Testing workflow
 - CONTRIBUTING.md - Development workflow
+- docs/SECURITY.md - Security practices
 
 ## Finding What You Need
 
 ### "I want to..."
 
 - **Get started with the project** → README.md
+- **Configure the system** → docs/CONFIGURATION.md
+- **Deploy to production** → docs/DEPLOYMENT.md
+- **Use CLI or web server** → docs/APPLICATIONS.md
+- **Secure the system** → docs/SECURITY.md
 - **Understand the architecture** → docs/ARCHITECTURE.md
 - **Use the three-phase system** → docs/THREE_PHASE_SYSTEM.md, complaint_phases/README.md
 - **Analyze complaints** → complaint_analysis/README.md
@@ -197,5 +213,5 @@ Found an issue with documentation? Please:
 
 ---
 
-**Last Updated**: 2026-02-09
-**Total Documentation**: 38+ markdown files, 200+ pages
+**Last Updated**: 2026-02-10
+**Total Documentation**: 42+ markdown files, 250+ pages
