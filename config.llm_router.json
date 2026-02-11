@@ -3,8 +3,8 @@
         {
             "id": "llm-router",
             "type": "llm_router",
-            "provider": "copilot_cli",
-            "model": "gpt-5-mini",
+            "provider": "accelerate",
+            "model": "gpt2",
             "max_tokens": 128
         },
         {

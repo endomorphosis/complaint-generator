@@ -17,6 +17,11 @@ ipfs_datasets_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'i
 if os.path.exists(ipfs_datasets_path) and ipfs_datasets_path not in sys.path:
     sys.path.insert(0, ipfs_datasets_path)
 
+# Also add vendored ipfs_accelerate_py (nested package layout) if present.
+ipfs_accelerate_repo_path = os.path.join(ipfs_datasets_path, 'ipfs_accelerate_py')
+if os.path.exists(ipfs_accelerate_repo_path) and ipfs_accelerate_repo_path not in sys.path:
+    sys.path.insert(0, ipfs_accelerate_repo_path)
+
 logger = logging.getLogger(__name__)
 
 try:
