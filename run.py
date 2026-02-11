@@ -3,7 +3,7 @@ import json
 import os
 
 from lib.log import init_logging, make_logger
-from backends import OpenAIBackend, WorkstationBackendModels, WorkstationBackendDatabases, LLMRouterBackend
+from backends import WorkstationBackendModels, WorkstationBackendDatabases, LLMRouterBackend
 from mediator import Mediator, Inquiries, Complaint, State 
 from applications import CLI
 from applications import SERVER
@@ -47,7 +47,20 @@ for backend_id in config_mediator['backends']:
 		exit(-1)
 
 	if backend_config['type'] == 'openai':
-		backend = OpenAIBackend(**backend_config)
+		log.warning('backend type "openai" is deprecated; routing via llm_router instead')
+		cfg = dict(backend_config)
+		model = cfg.get('model') or cfg.get('engine')
+		# llm_router reads secrets from env; ignore explicit api_key fields.
+		cfg.pop('api_key', None)
+		cfg.pop('engine', None)
+		backend = LLMRouterBackend(id=cfg.get('id', backend_id), provider=cfg.get('provider', 'openai'), model=model, **{k: v for k, v in cfg.items() if k not in ('id', 'type', 'provider', 'model')})
+	elif backend_config['type'] == 'huggingface':
+		log.warning('backend type "huggingface" is deprecated; routing via llm_router instead')
+		cfg = dict(backend_config)
+		model = cfg.get('model') or cfg.get('engine')
+		cfg.pop('api_key', None)
+		cfg.pop('engine', None)
+		backend = LLMRouterBackend(id=cfg.get('id', backend_id), provider=cfg.get('provider', 'huggingface'), model=model, **{k: v for k, v in cfg.items() if k not in ('id', 'type', 'provider', 'model')})
 	elif backend_config['type'] == 'workstation':
 		backendDatabases  = WorkstationBackendDatabases(**backend_config)
 		backendModels = WorkstationBackendModels(**backend_config)

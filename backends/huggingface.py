@@ -1,33 +1,50 @@
-import requests
-import json
+"""Deprecated legacy HuggingFace backend.
 
-def install_pip_module(module_name):
-	import subprocess
-	import sys
+Prefer routing via `ipfs_datasets_py.llm_router`.
 
-	try:
-		subprocess.check_call([sys.executable, '-m', 'pip', 'install', module_name])
-	except subprocess.CalledProcessError as e:
-		print('Failed to install module %s' % module_name)
-		raise e
+This module remains importable for backward compatibility, but it routes
+through `LLMRouterBackend` and emits a DeprecationWarning.
+"""
 
-# install_pip_module('huggingface_hub')
-# install_pip_module('huggingface_inference')
+from __future__ import annotations
 
-class HuggingFaceBackend:
-	def __init__(self, id, api_key, engine, **config):
-		self.id = id
-		self.api_key = api_key
-		self.engine = engine
-		self.config = config
+import warnings
+from typing import Any, Mapping
 
-		self.API_URL = "https://api-inference.huggingface.co/models/" + self.engine
-		self.headers = {"Authorization": f"Bearer {self.api_key}"}
+from .llm_router_backend import LLMRouterBackend
 
-	def __call__(self, payload):
-		data = json.dumps(payload)
-		response = requests.request("POST", self.API_URL , headers=self.headers, data=data)
-		return json.loads(response.content.decode("utf-8"))
 
-# data = HuggingFaceBackend('huggingface', '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', 'EleutherAI/gpt-j-6B').__call__({"inputs": "Hello, world!"})
-# print(data)
+warnings.warn(
+	"`backends.huggingface.HuggingFaceBackend` is deprecated in complaint-generator; "
+	"use `backends.LLMRouterBackend` (ipfs_datasets_py.llm_router) instead.",
+	DeprecationWarning,
+	stacklevel=2,
+)
+
+
+class HuggingFaceBackend(LLMRouterBackend):
+	"""Compatibility wrapper that routes HF-style configs via llm_router."""
+
+	def __init__(
+		self,
+		id: str,
+		api_key: str | None = None,
+		engine: str | None = None,
+		**config: Any,
+	):
+		# `api_key` is intentionally ignored; llm_router providers read secrets from env.
+		if api_key:
+			warnings.warn(
+				"`api_key` passed to HuggingFaceBackend is ignored; set HF_TOKEN/HUGGINGFACE_HUB_TOKEN in the environment instead.",
+				DeprecationWarning,
+				stacklevel=2,
+			)
+
+		model = config.pop("model", None) or engine
+		super().__init__(id=id, provider=config.pop("provider", "huggingface"), model=model, **config)
+
+	def __call__(self, payload: str | Mapping[str, Any]):
+		# Legacy HF usage sometimes calls with {"inputs": "..."}.
+		if isinstance(payload, dict):
+			payload = str(payload.get("inputs") or payload.get("prompt") or "")
+		return super().__call__(str(payload))
