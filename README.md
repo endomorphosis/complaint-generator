@@ -1,8 +1,6 @@
 # Complaint Generator
 ### by JusticeDAO
 
-![Complaint Generator Overview](https://user-images.githubusercontent.com/13929820/159738867-25593733-fc54-4683-abc7-a0703ce7d4a7.svg)
-
 An AI-powered legal automation system that assists in preparing legal complaints through intelligent question-driven intake, evidence gathering, and formal complaint generation.
 
 ---
