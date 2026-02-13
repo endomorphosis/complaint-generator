@@ -16,13 +16,13 @@ The system uses stochastic gradient descent (SGD) cycles with parallel batch pro
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   Seed Complaint Library                     │
-│         (Templates + Pre-defined Complaint Scenarios)        │
+│                   Seed Complaint Library                    │
+│         (Templates + Pre-defined Complaint Scenarios)       │
 └────────────────────────┬────────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                  Adversarial Harness                         │
+│                  Adversarial Harness                        │
 │  ┌────────────────────────────────────────────────────┐     │
 │  │  Parallel Session Executor (LLM Router)            │     │
 │  │  - Runs multiple sessions concurrently             │     │
@@ -39,13 +39,13 @@ The system uses stochastic gradient descent (SGD) cycles with parallel batch pro
          │  │     - Generates complaint   │  │
          │  │     - Answers questions     │  │
          │  └─────────────────────────────┘  │
-         │            ↕                       │
+         │            ↕                      │
          │  ┌─────────────────────────────┐  │
          │  │  2. Mediator (SUT)          │  │
          │  │     - Processes complaint   │  │
          │  │     - Asks questions        │  │
          │  └─────────────────────────────┘  │
-         │            ↓                       │
+         │            ↓                      │
          │  ┌─────────────────────────────┐  │
          │  │  3. Critic (LLM)            │  │
          │  │     - Evaluates interaction │  │
@@ -55,7 +55,7 @@ The system uses stochastic gradient descent (SGD) cycles with parallel batch pro
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                       Optimizer                              │
+│                       Optimizer                             │
 │  - Analyzes critic scores across sessions                   │
 │  - Identifies patterns and trends                           │
 │  - Generates optimization recommendations                   │
