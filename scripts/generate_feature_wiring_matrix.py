@@ -236,9 +236,17 @@ def _detect_public_exports_for_package(pkg_dir: Path) -> Tuple[List[str], str]:
 
 
 def _safe_parse_tool_module_functions(py_file: Path) -> List[str]:
-    """Return public top-level function names for a tool module (AST-based).
+    """Return public tool symbols for a tool module (AST-based).
 
-    This intentionally does not import the module.
+    We intentionally avoid importing the module.
+
+    Historically, many tool categories expose tools as top-level functions.
+    Other categories expose tools via:
+    - re-exported callables (e.g. wrapper modules with a populated __all__)
+    - tool classes (subclassing ClaudeMCPTool / EnhancedBaseMCPTool) where the
+      tool name is stored in a string literal (self.name = "...")
+
+    We approximate all of these as a list of "tool symbols".
     """
 
     try:
@@ -251,13 +259,71 @@ def _safe_parse_tool_module_functions(py_file: Path) -> List[str]:
     except Exception:
         return []
 
-    names: List[str] = []
+    names: Set[str] = set()
+
+    def _extract_all_names(value: ast.AST) -> List[str]:
+        # __all__ = ["a", "b"]
+        if isinstance(value, (ast.List, ast.Tuple)):
+            out: List[str] = []
+            for elt in value.elts:
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                    out.append(elt.value)
+            return out
+        return []
+
+    def _is_tool_base(base: ast.AST) -> bool:
+        # ClaudeMCPTool / EnhancedBaseMCPTool
+        if isinstance(base, ast.Name):
+            return base.id in {"ClaudeMCPTool", "EnhancedBaseMCPTool"}
+        if isinstance(base, ast.Attribute):
+            return base.attr in {"ClaudeMCPTool", "EnhancedBaseMCPTool"}
+        return False
+
+    def _extract_tool_name_from_init(init_fn: ast.AST) -> Optional[str]:
+        if not isinstance(init_fn, ast.FunctionDef):
+            return None
+        for stmt in ast.walk(init_fn):
+            if not isinstance(stmt, ast.Assign):
+                continue
+            for tgt in stmt.targets or []:
+                if not isinstance(tgt, ast.Attribute):
+                    continue
+                if not isinstance(tgt.value, ast.Name) or tgt.value.id != "self":
+                    continue
+                if tgt.attr != "name":
+                    continue
+                if isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+                    return stmt.value.value
+        return None
+
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if not node.name.startswith("_"):
-                names.append(node.name)
+                names.add(node.name)
+            continue
 
-    return sorted(set(names))
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "__all__" for t in (node.targets or [])
+        ):
+            for n in _extract_all_names(node.value):
+                if n and not n.startswith("_"):
+                    names.add(n)
+            continue
+
+        if isinstance(node, ast.ClassDef) and any(_is_tool_base(b) for b in (node.bases or [])):
+            # Record class name as a symbol.
+            if node.name and not node.name.startswith("_"):
+                names.add(node.name)
+            # If we can statically see the tool name, record that too.
+            init_methods = [
+                b for b in (node.body or []) if isinstance(b, ast.FunctionDef) and b.name == "__init__"
+            ]
+            for init_fn in init_methods:
+                tool_name = _extract_tool_name_from_init(init_fn)
+                if tool_name and not tool_name.startswith("_"):
+                    names.add(tool_name)
+
+    return sorted(names)
 
 
 def _is_testish_python_file(py_file: Path) -> bool:

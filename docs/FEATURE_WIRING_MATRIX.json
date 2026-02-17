@@ -162,6 +162,10 @@
           "audit_tools"
         ],
         "mcp_tool_functions": [
+          "AuditCategory",
+          "AuditEvent",
+          "AuditLevel",
+          "AuditLogger",
           "audit_tools",
           "generate_audit_report",
           "record_audit_event"
@@ -212,6 +216,10 @@
           "audit_tools"
         ],
         "mcp_tool_functions": [
+          "AuditCategory",
+          "AuditEvent",
+          "AuditLevel",
+          "AuditLogger",
           "audit_tools",
           "generate_audit_report",
           "record_audit_event"
@@ -612,9 +620,14 @@
         "import_module": "ipfs_datasets_py.ipfs_backend_router",
         "likely_extras": [],
         "mcp_tool_categories": [
+          "ipfs_cluster_tools",
           "ipfs_tools"
         ],
         "mcp_tool_functions": [
+          "EnhancedIPFSClusterManagementTool",
+          "EnhancedIPFSContentTool",
+          "enhanced_ipfs_cluster_management",
+          "enhanced_ipfs_content",
           "get_from_ipfs",
           "ipfs_tools_claudes",
           "pin_to_ipfs"
@@ -638,9 +651,14 @@
         "import_module": "ipfs_datasets_py.ipfs_datasets",
         "likely_extras": [],
         "mcp_tool_categories": [
+          "ipfs_cluster_tools",
           "ipfs_tools"
         ],
         "mcp_tool_functions": [
+          "EnhancedIPFSClusterManagementTool",
+          "EnhancedIPFSContentTool",
+          "enhanced_ipfs_cluster_management",
+          "enhanced_ipfs_content",
           "get_from_ipfs",
           "ipfs_tools_claudes",
           "pin_to_ipfs"
@@ -727,12 +745,20 @@
           "logic"
         ],
         "mcp_tool_categories": [
-          "dataset_tools"
+          "dataset_tools",
+          "logic_tools"
         ],
         "mcp_tool_functions": [
+          "AddTheoremTool",
+          "BulkProcessCaselawTool",
+          "CheckDocumentConsistencyTool",
+          "QueryTheoremsTool",
+          "add_theorem",
           "analyze_normative_sentence",
           "build_deontic_formula",
           "build_fol_formula",
+          "bulk_process_caselaw",
+          "check_document_consistency",
           "convert_dataset_format",
           "convert_to_defeasible_format",
           "convert_to_prolog",
@@ -771,6 +797,7 @@
           "parse_quantifiers",
           "parse_simple_predicate",
           "process_dataset",
+          "query_theorems",
           "save_dataset",
           "text_to_fol",
           "validate_fol_syntax"
@@ -884,6 +911,15 @@
           "monitoring_tools"
         ],
         "mcp_tool_functions": [
+          "Alert",
+          "AlertSeverity",
+          "EnhancedAlertManagementTool",
+          "EnhancedHealthCheckTool",
+          "EnhancedMetricsCollectionTool",
+          "HealthStatus",
+          "MockMonitoringService",
+          "ServiceMetrics",
+          "SystemMetrics",
           "generate_monitoring_report",
           "get_performance_metrics",
           "health_check",
@@ -1122,9 +1158,13 @@
           "ipld"
         ],
         "mcp_tool_categories": [
-          "medical_research_scrapers"
+          "medical_research_scrapers",
+          "search_tools"
         ],
         "mcp_tool_functions": [
+          "FacetedSearchTool",
+          "SemanticSearchTool",
+          "SimilaritySearchTool",
           "analyze_dataset_with_ai",
           "analyze_medical_dataset",
           "build_dataset_from_scraped_data",
@@ -1134,6 +1174,7 @@
           "discover_enzyme_inhibitors",
           "discover_pathway_biomolecules",
           "discover_protein_binders",
+          "faceted_search",
           "generate_medical_theorems_from_trials",
           "generate_synthetic_dataset",
           "generate_synthetic_medical_data",
@@ -1142,6 +1183,8 @@
           "scrape_clinical_trials",
           "scrape_population_health_data",
           "scrape_pubmed_medical_research",
+          "semantic_search",
+          "similarity_search",
           "transform_dataset_with_ai",
           "transform_medical_dataset",
           "validate_medical_theorem_fuzzy"
@@ -1172,6 +1215,12 @@
           "session_tools"
         ],
         "mcp_tool_functions": [
+          "EnhancedAuthenticationTool",
+          "EnhancedSessionCreationTool",
+          "EnhancedSessionManagementTool",
+          "EnhancedSessionStateTool",
+          "EnhancedTokenValidationTool",
+          "EnhancedUserInfoTool",
           "authenticate_user",
           "check_access_permission",
           "cleanup_sessions",
@@ -1236,20 +1285,33 @@
           "vector_tools"
         ],
         "mcp_tool_functions": [
+          "EnhancedVectorIndexTool",
+          "EnhancedVectorSearchTool",
+          "EnhancedVectorStorageTool",
+          "VectorIndexTool",
+          "VectorMetadataTool",
+          "VectorRetrievalTool",
           "add_embeddings_to_store_tool",
           "create_vector_index",
           "create_vector_store_tool",
           "delete_from_vector_store_tool",
           "delete_vector_index",
+          "enhanced_vector_index",
+          "enhanced_vector_search",
+          "enhanced_vector_storage",
           "get_global_manager",
           "get_vector_store_stats_tool",
           "list_vector_indexes",
+          "manage_vector_index",
+          "manage_vector_metadata",
           "manage_vector_store",
           "optimize_vector_store",
           "optimize_vector_store_tool",
           "reset_global_manager",
+          "retrieve_vectors",
           "search_vector_index",
-          "search_vector_store_tool"
+          "search_vector_store_tool",
+          "vector_metadata"
         ],
         "notes": [
           "no_cli_detected"
@@ -1442,9 +1504,151 @@
           "workflow_tools"
         ],
         "mcp_tool_functions": [
+          "APNewsScraper",
+          "AddTheoremTool",
+          "Alert",
+          "AlertSeverity",
+          "AnalyzePRTool",
+          "AuditCategory",
+          "AuditEvent",
+          "AuditLevel",
+          "AuditLogger",
+          "AutomatedPRReviewTool",
+          "BatchEmbeddingTool",
+          "BloombergScraper",
+          "BraveLegalSearchEntitiesTool",
+          "BraveLegalSearchExplainTool",
+          "BraveLegalSearchGenerateTermsTool",
+          "BraveLegalSearchTool",
+          "BuildPatentDatasetTool",
+          "BulkProcessCaselawTool",
+          "CacheEntry",
+          "CacheStats",
+          "CacheStrategy",
+          "CacheType",
+          "CheckDocumentConsistencyTool",
+          "ClaudeCLIConfigTool",
+          "ClaudeCLIExecuteTool",
+          "ClaudeCLIInstallTool",
+          "ClaudeCLIStatusTool",
+          "CommitInfo",
+          "CompanyPerformance",
+          "CopilotCLIExplainTool",
+          "CopilotCLIInstallTool",
+          "CopilotCLIStatusTool",
+          "CopilotCLISuggestCommandTool",
+          "CopilotCLISuggestGitTool",
+          "CorporateAction",
+          "DIVIDEND_EX_DATE_THEOREM",
+          "DocumentEmbedding",
+          "EARNINGS_ANNOUNCEMENT_THEOREM",
+          "EmbeddingGenerationTool",
+          "EnhancedAlertManagementTool",
+          "EnhancedAuthenticationTool",
+          "EnhancedBackgroundTaskTool",
+          "EnhancedBatchProcessingTool",
+          "EnhancedCacheManagementTool",
+          "EnhancedCacheMonitoringTool",
+          "EnhancedCacheStatsTool",
+          "EnhancedConfigurationTool",
+          "EnhancedDataPipelineTool",
+          "EnhancedHealthCheckTool",
+          "EnhancedIPFSClusterManagementTool",
+          "EnhancedIPFSContentTool",
+          "EnhancedMetricsCollectionTool",
+          "EnhancedResourceCleanupTool",
+          "EnhancedServiceManagementTool",
+          "EnhancedSessionCreationTool",
+          "EnhancedSessionManagementTool",
+          "EnhancedSessionStateTool",
+          "EnhancedSystemStatusTool",
+          "EnhancedTaskStatusTool",
+          "EnhancedTokenValidationTool",
+          "EnhancedUserInfoTool",
+          "EnhancedVectorIndexTool",
+          "EnhancedVectorSearchTool",
+          "EnhancedVectorStorageTool",
+          "EnhancedWorkflowManagementTool",
+          "ExecutiveProfile",
+          "FFmpegError",
+          "FFmpegUtilsCompatibility",
+          "FacetedSearchTool",
+          "FinancialEventType",
+          "FinancialTheorem",
+          "FinancialTheoremLibrary",
+          "FunctionTool",
+          "GeminiCLIConfigTool",
+          "GeminiCLIExecuteTool",
+          "GeminiCLIInstallTool",
+          "GeminiCLIStatusTool",
+          "GitHubCLIAuthTool",
+          "GitHubCLIExecuteTool",
+          "GitHubCLIInstallTool",
+          "GitHubCLIRepoTool",
+          "GitHubCLIStatusTool",
+          "GraphRAGNewsAnalyzer",
+          "HealthStatus",
+          "HfApi",
+          "HfHubHTTPError",
+          "HypothesisTest",
+          "InvokeCopilotOnPRTool",
+          "LegalArchiveResultsTool",
+          "LegalGetArchiveStatsTool",
+          "LegalSearchArchivesOnlyTool",
+          "LegalWebArchiveSearchTool",
+          "ListScrapingJobsTool",
+          "MERGER_PRICE_CONVERGENCE_THEOREM",
+          "MaintenanceMode",
+          "MarketEmbeddingCorrelation",
+          "MockAdminService",
+          "MockCacheService",
+          "MockMonitoringService",
+          "MockWorkflowService",
+          "MultimodalEmbeddingTool",
+          "NewsArticle",
+          "NewsScraperBase",
+          "QueryTheoremsTool",
+          "REVERSE_SPLIT_THEOREM",
+          "RateLimiter",
+          "ReutersScraper",
+          "STOCK_SPLIT_THEOREM",
+          "ScrapeMunicipalCodesTool",
+          "ScrapeRECAPArchiveTool",
+          "ScrapeStateLawsTool",
+          "ScrapeUSCodeTool",
+          "ScrapeUSPTOPatentsTool",
+          "SearchPatentsByAssigneeTool",
+          "SearchPatentsByInventorTool",
+          "SearchPatentsByKeywordTool",
+          "SearchRECAPDocumentsTool",
+          "SemanticSearchTool",
+          "ServiceMetrics",
+          "ServiceStatus",
+          "SimilaritySearchTool",
+          "StepStatus",
+          "StockDataPoint",
+          "StockDataScraper",
+          "SystemInfo",
+          "SystemMetrics",
+          "TheoremApplication",
+          "UploadToHuggingFaceInParallel",
+          "VSCodeCLIExecuteTool",
+          "VSCodeCLIExtensionsTool",
+          "VSCodeCLIInstallTool",
+          "VSCodeCLIStatusTool",
+          "VSCodeCLITunnelTool",
+          "VectorEmbeddingAnalyzer",
+          "VectorIndexTool",
+          "VectorMetadataTool",
+          "VectorRetrievalTool",
+          "WorkflowDefinition",
+          "WorkflowStatus",
+          "WorkflowStep",
+          "YahooFinanceScraper",
           "add_alert_rule",
           "add_embeddings_to_store_tool",
           "add_p2p_peer",
+          "add_theorem",
           "analyze_all_failed_states",
           "analyze_citation_network",
           "analyze_code_for_pr",
@@ -1457,11 +1661,14 @@
           "analyze_embedding_market_correlation",
           "analyze_entities",
           "analyze_entity_timeline",
+          "analyze_executive_performance",
           "analyze_github_actions",
           "analyze_http_response",
           "analyze_medical_dataset",
+          "analyze_news_with_graphrag",
           "analyze_normative_sentence",
           "analyze_pod_health",
+          "analyze_pr",
           "analyze_repository_health",
           "analyze_resource_utilization",
           "analyze_service_health",
@@ -1474,10 +1681,12 @@
           "assess_embedding_quality",
           "audit_tools",
           "authenticate_user",
+          "automated_pr_review",
           "base_tool",
           "batch_archive_to_archive_is",
           "batch_convert_tool",
           "batch_detect_file_types",
+          "batch_process_datasets",
           "batch_scrape_with_autoscraper",
           "batch_search_brave",
           "batch_search_github",
@@ -1485,10 +1694,16 @@
           "batch_search_huggingface",
           "batch_search_openverse",
           "batch_search_serpstack",
+          "brave_legal_search",
+          "brave_legal_search_entities",
+          "brave_legal_search_explain",
+          "brave_legal_search_generate_terms",
           "build_dataset_from_scraped_data",
           "build_deontic_formula",
           "build_fol_formula",
           "build_medical_dataset",
+          "build_patent_dataset",
+          "bulk_process_caselaw",
           "cache_clear",
           "cache_delete",
           "cache_embeddings",
@@ -1499,11 +1714,13 @@
           "calculate_update_parameters",
           "check_access_permission",
           "check_archive_status",
+          "check_document_consistency",
           "check_rate_limit",
           "check_scraper_methods_tool",
           "check_task_status",
           "chunk_text",
           "claude_analyze_code_quality",
+          "claude_cli_config",
           "claude_cli_config_set_api_key",
           "claude_cli_execute",
           "claude_cli_install",
@@ -1540,16 +1757,24 @@
           "convert_to_tptp",
           "convert_to_tptp_format",
           "coordinate_auto_healing",
+          "copilot_cli_explain",
+          "copilot_cli_install",
+          "copilot_cli_status",
+          "copilot_cli_suggest_command",
+          "copilot_cli_suggest_git",
           "create_ai_agent_pr",
           "create_autoscraper_model",
           "create_embeddings",
+          "create_financial_knowledge_graph",
           "create_legal_knowledge_graph",
           "create_schedule",
           "create_session",
+          "create_template",
           "create_vector_index",
           "create_vector_store",
           "create_vector_store_tool",
           "create_warc",
+          "create_workflow",
           "create_workflow_dag",
           "cross_language_legal_search",
           "dataset_tools_claudes",
@@ -1597,6 +1822,11 @@
           "email_search_export",
           "email_test_connection",
           "enable_disable_schedule",
+          "enhanced_ipfs_cluster_management",
+          "enhanced_ipfs_content",
+          "enhanced_vector_index",
+          "enhanced_vector_search",
+          "enhanced_vector_storage",
           "evaluate_alert_rules",
           "execute_audit_report_step",
           "execute_cache_optimization_step",
@@ -1615,6 +1845,7 @@
           "extract_dataset_from_cdxj",
           "extract_deontic_metadata",
           "extract_exceptions",
+          "extract_executive_profiles_from_archives",
           "extract_fol_metadata",
           "extract_geographic_entities",
           "extract_knowledge_graph_tool",
@@ -1629,6 +1860,7 @@
           "extract_temporal_constraints",
           "extract_text_from_warc",
           "extract_variables",
+          "faceted_search",
           "fetch_corporate_actions",
           "fetch_financial_news",
           "fetch_stock_data",
@@ -1646,6 +1878,7 @@
           "ffmpeg_splice",
           "ffmpeg_stream_input",
           "ffmpeg_stream_output",
+          "ffmpeg_utils",
           "file_info_tool",
           "filter_legal_results",
           "find_predictive_embedding_patterns",
@@ -1658,6 +1891,7 @@
           "format_trials_table",
           "format_xml_output",
           "gemini_analyze_code",
+          "gemini_cli_config",
           "gemini_cli_config_set_api_key",
           "gemini_cli_execute",
           "gemini_cli_install",
@@ -1678,6 +1912,7 @@
           "generate_legal_report",
           "generate_medical_theorems_from_trials",
           "generate_monitoring_report",
+          "generate_multimodal_embedding",
           "generate_sparse_embedding",
           "generate_summary_tool",
           "generate_synthetic_dataset",
@@ -1720,11 +1955,15 @@
           "get_user_info",
           "get_vector_store_stats_tool",
           "get_wayback_content",
+          "get_workflow_metrics",
+          "get_workflow_status",
           "get_workflow_tags",
+          "github_cli_auth",
           "github_cli_auth_login",
           "github_cli_auth_status",
           "github_cli_execute",
           "github_cli_install",
+          "github_cli_repo",
           "github_cli_repo_list",
           "github_cli_status",
           "github_create_issue",
@@ -1760,10 +1999,15 @@
           "ingest_news_feed",
           "ingest_website",
           "initialize_p2p_scheduler",
+          "invoke_copilot_on_pr",
           "ipfs_tools_claudes",
           "json_to_pydantic",
           "json_to_python_file",
+          "legal_archive_results",
+          "legal_get_archive_stats",
+          "legal_search_archives_only",
           "legal_text_to_deontic",
+          "legal_web_archive_search",
           "lint_python_codebase",
           "linting_tools",
           "list_alert_rules",
@@ -1774,14 +2018,18 @@
           "list_financial_theorems",
           "list_indices",
           "list_schedules",
+          "list_scraping_jobs",
           "list_software_theorems",
+          "list_templates",
           "list_tools_in_cli_dir",
           "list_tools_in_functions_dir",
           "list_vector_indexes",
+          "list_workflows",
           "load_dataset",
           "load_index",
           "load_mysql_config",
           "load_sql_file",
+          "login",
           "main",
           "make_citation_validator",
           "make_results_analyzer",
@@ -1797,6 +2045,8 @@
           "manage_shards",
           "manage_sparse_models",
           "manage_task_queue",
+          "manage_vector_index",
+          "manage_vector_metadata",
           "manage_vector_store",
           "map_relationships",
           "map_spatiotemporal_events",
@@ -1847,6 +2097,7 @@
           "parse_simple_predicate",
           "parse_systemd_logs",
           "parse_workflow_logs",
+          "pause_workflow",
           "pdf_analyze_relationships",
           "pdf_batch_process",
           "pdf_cross_document_analysis",
@@ -1868,6 +2119,7 @@
           "query_geographic_context",
           "query_knowledge_graph",
           "query_storage",
+          "query_theorems",
           "record_audit_event",
           "record_provenance",
           "reduce_dimensionality",
@@ -1880,30 +2132,40 @@
           "reset_alert_suppression",
           "reset_config",
           "reset_global_manager",
+          "resume_workflow",
           "retrieve_data",
+          "retrieve_vectors",
           "run_in_thread_pool",
           "run_schedule_now",
           "run_verification",
+          "run_workflow",
           "save_dataset",
           "schedule_p2p_workflow",
           "schedule_report_generation",
+          "schedule_workflow",
           "scrape_biochemical_research",
           "scrape_clinical_trials",
           "scrape_clinical_trials_cli",
           "scrape_financial_news",
           "scrape_github_repository",
           "scrape_multiple_urls_tool",
+          "scrape_municipal_codes",
           "scrape_population_health_data",
           "scrape_pubmed_cli",
           "scrape_pubmed_medical_research",
+          "scrape_recap_archive",
           "scrape_recap_incremental",
+          "scrape_state_laws",
           "scrape_stock_data",
           "scrape_url_tool",
+          "scrape_us_code",
+          "scrape_uspto_patents",
           "scrape_with_autoscraper",
           "scrape_with_fallbacks",
           "scrape_with_incremental_update",
           "search_archive_is",
           "search_archive_news",
+          "search_archive_newsscrape_financial_news",
           "search_brave",
           "search_brave_images",
           "search_brave_news",
@@ -1927,6 +2189,7 @@
           "search_patents_by_assignee",
           "search_patents_by_inventor",
           "search_patents_by_keyword",
+          "search_recap_documents",
           "search_serpstack",
           "search_serpstack_images",
           "search_vector_index",
@@ -1948,6 +2211,7 @@
           "shard_embeddings_tool",
           "shard_info_tool",
           "shard_management_tool",
+          "similarity_search",
           "sparse_search",
           "start_ipwb_replay",
           "store_data",
@@ -1978,13 +2242,16 @@
           "validate_session_type",
           "validate_token",
           "validate_user_id",
+          "vector_metadata",
           "verify_ipwb_archive",
           "visualize_legal_graph",
           "vscode_cli_execute",
+          "vscode_cli_extensions",
           "vscode_cli_install",
           "vscode_cli_install_extension",
           "vscode_cli_list_extensions",
           "vscode_cli_status",
+          "vscode_cli_tunnel",
           "vscode_cli_tunnel_install_service",
           "vscode_cli_tunnel_login",
           "vscode_cli_uninstall_extension",
@@ -2308,6 +2575,16 @@
           "system_health",
           "system_maintenance",
           "system_status"
+        ],
+        "enhanced_admin_tools": [
+          "EnhancedConfigurationTool",
+          "EnhancedResourceCleanupTool",
+          "EnhancedServiceManagementTool",
+          "EnhancedSystemStatusTool",
+          "MaintenanceMode",
+          "MockAdminService",
+          "ServiceStatus",
+          "SystemInfo"
         ]
       },
       "alert_tools": {
@@ -2339,6 +2616,10 @@
       },
       "audit_tools": {
         "audit_tools": [
+          "AuditCategory",
+          "AuditEvent",
+          "AuditLevel",
+          "AuditLogger",
           "audit_tools"
         ],
         "generate_audit_report": [
@@ -2353,6 +2634,11 @@
           "authenticate_user",
           "get_user_info",
           "validate_token"
+        ],
+        "enhanced_auth_tools": [
+          "EnhancedAuthenticationTool",
+          "EnhancedTokenValidationTool",
+          "EnhancedUserInfoTool"
         ]
       },
       "background_task_tools": {
@@ -2360,6 +2646,10 @@
           "check_task_status",
           "manage_background_tasks",
           "manage_task_queue"
+        ],
+        "enhanced_background_task_tools": [
+          "EnhancedBackgroundTaskTool",
+          "EnhancedTaskStatusTool"
         ]
       },
       "bespoke_tools": {
@@ -2403,6 +2693,14 @@
           "optimize_cache"
         ],
         "enhanced_cache_tools": [
+          "CacheEntry",
+          "CacheStats",
+          "CacheStrategy",
+          "CacheType",
+          "EnhancedCacheManagementTool",
+          "EnhancedCacheMonitoringTool",
+          "EnhancedCacheStatsTool",
+          "MockCacheService",
           "clear_cache",
           "get_cache_stats",
           "monitor_cache"
@@ -2507,6 +2805,14 @@
         ]
       },
       "development_tools": {
+        "automated_pr_review_tools": [
+          "AnalyzePRTool",
+          "AutomatedPRReviewTool",
+          "InvokeCopilotOnPRTool",
+          "analyze_pr",
+          "automated_pr_review",
+          "invoke_copilot_on_pr"
+        ],
         "base_tool": [
           "base_tool",
           "development_tool_mcp_wrapper"
@@ -2525,6 +2831,16 @@
           "claude_refactor_suggestions",
           "claude_review_pull_request"
         ],
+        "claude_cli_tools": [
+          "ClaudeCLIConfigTool",
+          "ClaudeCLIExecuteTool",
+          "ClaudeCLIInstallTool",
+          "ClaudeCLIStatusTool",
+          "claude_cli_config",
+          "claude_cli_execute",
+          "claude_cli_install",
+          "claude_cli_status"
+        ],
         "codebase_search": [
           "codebase_search"
         ],
@@ -2533,6 +2849,18 @@
           "get_config",
           "reset_config",
           "set_config"
+        ],
+        "copilot_cli_tools": [
+          "CopilotCLIExplainTool",
+          "CopilotCLIInstallTool",
+          "CopilotCLIStatusTool",
+          "CopilotCLISuggestCommandTool",
+          "CopilotCLISuggestGitTool",
+          "copilot_cli_explain",
+          "copilot_cli_install",
+          "copilot_cli_status",
+          "copilot_cli_suggest_command",
+          "copilot_cli_suggest_git"
         ],
         "documentation_generator": [
           "documentation_generator"
@@ -2554,6 +2882,16 @@
           "gemini_summarize_text",
           "gemini_translate_text"
         ],
+        "gemini_cli_tools": [
+          "GeminiCLIConfigTool",
+          "GeminiCLIExecuteTool",
+          "GeminiCLIInstallTool",
+          "GeminiCLIStatusTool",
+          "gemini_cli_config",
+          "gemini_cli_execute",
+          "gemini_cli_install",
+          "gemini_cli_status"
+        ],
         "github_cli_server_tools": [
           "github_cli_auth_login",
           "github_cli_auth_status",
@@ -2569,6 +2907,18 @@
           "github_get_user_info",
           "github_search_repos",
           "github_update_pull_request"
+        ],
+        "github_cli_tools": [
+          "GitHubCLIAuthTool",
+          "GitHubCLIExecuteTool",
+          "GitHubCLIInstallTool",
+          "GitHubCLIRepoTool",
+          "GitHubCLIStatusTool",
+          "github_cli_auth",
+          "github_cli_execute",
+          "github_cli_install",
+          "github_cli_repo",
+          "github_cli_status"
         ],
         "linting_tools": [
           "lint_python_codebase",
@@ -2706,20 +3056,52 @@
       },
       "finance_data_tools": {
         "embedding_correlation": [
+          "DocumentEmbedding",
+          "MarketEmbeddingCorrelation",
+          "VectorEmbeddingAnalyzer",
           "analyze_embedding_market_correlation",
           "find_predictive_embedding_patterns"
         ],
         "finance_theorems": [
+          "DIVIDEND_EX_DATE_THEOREM",
+          "EARNINGS_ANNOUNCEMENT_THEOREM",
+          "FinancialEventType",
+          "FinancialTheorem",
+          "FinancialTheoremLibrary",
+          "MERGER_PRICE_CONVERGENCE_THEOREM",
+          "REVERSE_SPLIT_THEOREM",
+          "STOCK_SPLIT_THEOREM",
+          "TheoremApplication",
           "apply_financial_theorem",
           "list_financial_theorems"
         ],
+        "graphrag_news_analyzer": [
+          "CompanyPerformance",
+          "ExecutiveProfile",
+          "GraphRAGNewsAnalyzer",
+          "HypothesisTest",
+          "analyze_executive_performance",
+          "analyze_news_with_graphrag",
+          "create_financial_knowledge_graph",
+          "extract_executive_profiles_from_archives"
+        ],
         "news_scrapers": [
+          "APNewsScraper",
+          "BloombergScraper",
+          "NewsArticle",
+          "NewsScraperBase",
+          "ReutersScraper",
           "fetch_financial_news",
           "scrape_financial_news",
           "search_archive_news",
+          "search_archive_newsscrape_financial_news",
           "search_financial_news"
         ],
         "stock_scrapers": [
+          "CorporateAction",
+          "StockDataPoint",
+          "StockDataScraper",
+          "YahooFinanceScraper",
           "fetch_corporate_actions",
           "fetch_stock_data",
           "get_stock_quote",
@@ -2813,7 +3195,14 @@
           "track_provenance"
         ]
       },
-      "ipfs_cluster_tools": {},
+      "ipfs_cluster_tools": {
+        "enhanced_ipfs_cluster_tools": [
+          "EnhancedIPFSClusterManagementTool",
+          "EnhancedIPFSContentTool",
+          "enhanced_ipfs_cluster_management",
+          "enhanced_ipfs_content"
+        ]
+      },
       "ipfs_tools": {
         "get_from_ipfs": [
           "get_from_ipfs"
@@ -2826,29 +3215,152 @@
         ]
       },
       "legacy_mcp_tools": {
+        "automated_pr_review_tools": [
+          "AnalyzePRTool",
+          "AutomatedPRReviewTool",
+          "InvokeCopilotOnPRTool",
+          "analyze_pr",
+          "automated_pr_review",
+          "invoke_copilot_on_pr"
+        ],
+        "claude_cli_tools": [
+          "ClaudeCLIConfigTool",
+          "ClaudeCLIExecuteTool",
+          "ClaudeCLIInstallTool",
+          "ClaudeCLIStatusTool",
+          "claude_cli_config",
+          "claude_cli_execute",
+          "claude_cli_install",
+          "claude_cli_status"
+        ],
+        "copilot_cli_tools": [
+          "CopilotCLIExplainTool",
+          "CopilotCLIInstallTool",
+          "CopilotCLIStatusTool",
+          "CopilotCLISuggestCommandTool",
+          "CopilotCLISuggestGitTool",
+          "copilot_cli_explain",
+          "copilot_cli_install",
+          "copilot_cli_status",
+          "copilot_cli_suggest_command",
+          "copilot_cli_suggest_git"
+        ],
+        "embedding_tools": [
+          "BatchEmbeddingTool",
+          "EmbeddingGenerationTool",
+          "MultimodalEmbeddingTool",
+          "generate_batch_embeddings",
+          "generate_embedding",
+          "generate_multimodal_embedding"
+        ],
+        "gemini_cli_tools": [
+          "GeminiCLIConfigTool",
+          "GeminiCLIExecuteTool",
+          "GeminiCLIInstallTool",
+          "GeminiCLIStatusTool",
+          "gemini_cli_config",
+          "gemini_cli_execute",
+          "gemini_cli_install",
+          "gemini_cli_status"
+        ],
         "geospatial_tools": [
           "extract_geographic_entities",
           "map_spatiotemporal_events",
           "query_geographic_context"
         ],
+        "github_cli_tools": [
+          "GitHubCLIAuthTool",
+          "GitHubCLIExecuteTool",
+          "GitHubCLIInstallTool",
+          "GitHubCLIRepoTool",
+          "GitHubCLIStatusTool",
+          "github_cli_auth",
+          "github_cli_execute",
+          "github_cli_install",
+          "github_cli_repo",
+          "github_cli_status"
+        ],
+        "legal_dataset_mcp_tools": [
+          "ListScrapingJobsTool",
+          "ScrapeMunicipalCodesTool",
+          "ScrapeRECAPArchiveTool",
+          "ScrapeStateLawsTool",
+          "ScrapeUSCodeTool",
+          "SearchRECAPDocumentsTool",
+          "list_scraping_jobs",
+          "scrape_municipal_codes",
+          "scrape_recap_archive",
+          "scrape_state_laws",
+          "scrape_us_code",
+          "search_recap_documents"
+        ],
         "municipal_scraper_fallbacks": [
           "scrape_with_fallbacks"
+        ],
+        "patent_dataset_mcp_tools": [
+          "BuildPatentDatasetTool",
+          "ScrapeUSPTOPatentsTool",
+          "SearchPatentsByAssigneeTool",
+          "SearchPatentsByInventorTool",
+          "SearchPatentsByKeywordTool",
+          "build_patent_dataset",
+          "scrape_uspto_patents",
+          "search_patents_by_assignee",
+          "search_patents_by_inventor",
+          "search_patents_by_keyword"
         ],
         "patent_scraper": [
           "search_patents_by_assignee",
           "search_patents_by_inventor",
           "search_patents_by_keyword"
         ],
+        "search_tools": [
+          "FacetedSearchTool",
+          "SemanticSearchTool",
+          "SimilaritySearchTool",
+          "faceted_search",
+          "semantic_search",
+          "similarity_search"
+        ],
+        "temporal_deontic_logic_tools": [
+          "AddTheoremTool",
+          "BulkProcessCaselawTool",
+          "CheckDocumentConsistencyTool",
+          "QueryTheoremsTool",
+          "add_theorem",
+          "bulk_process_caselaw",
+          "check_document_consistency",
+          "query_theorems"
+        ],
         "tool_wrapper": [
+          "FunctionTool",
           "wrap_function_as_tool"
         ],
         "vector_store_tools": [
+          "VectorIndexTool",
+          "VectorMetadataTool",
+          "VectorRetrievalTool",
           "add_embeddings_to_store_tool",
           "create_vector_store_tool",
           "delete_from_vector_store_tool",
           "get_vector_store_stats_tool",
+          "manage_vector_index",
+          "manage_vector_metadata",
           "optimize_vector_store_tool",
+          "retrieve_vectors",
           "search_vector_store_tool"
+        ],
+        "vscode_cli_tools": [
+          "VSCodeCLIExecuteTool",
+          "VSCodeCLIExtensionsTool",
+          "VSCodeCLIInstallTool",
+          "VSCodeCLIStatusTool",
+          "VSCodeCLITunnelTool",
+          "vscode_cli_execute",
+          "vscode_cli_extensions",
+          "vscode_cli_install",
+          "vscode_cli_status",
+          "vscode_cli_tunnel"
         ]
       },
       "legal_dataset_tools": {
@@ -2859,6 +3371,14 @@
           "main"
         ],
         "brave_legal_search_tools": [
+          "BraveLegalSearchEntitiesTool",
+          "BraveLegalSearchExplainTool",
+          "BraveLegalSearchGenerateTermsTool",
+          "BraveLegalSearchTool",
+          "brave_legal_search",
+          "brave_legal_search_entities",
+          "brave_legal_search_explain",
+          "brave_legal_search_generate_terms",
           "register_brave_legal_search_tools"
         ],
         "citation_extraction_tool": [
@@ -2888,7 +3408,29 @@
           "schedule_report_generation"
         ],
         "legal_web_archive_tools": [
+          "LegalArchiveResultsTool",
+          "LegalGetArchiveStatsTool",
+          "LegalSearchArchivesOnlyTool",
+          "LegalWebArchiveSearchTool",
+          "legal_archive_results",
+          "legal_get_archive_stats",
+          "legal_search_archives_only",
+          "legal_web_archive_search",
           "register_legal_web_archive_tools"
+        ],
+        "mcp_tools": [
+          "ListScrapingJobsTool",
+          "ScrapeMunicipalCodesTool",
+          "ScrapeRECAPArchiveTool",
+          "ScrapeStateLawsTool",
+          "ScrapeUSCodeTool",
+          "SearchRECAPDocumentsTool",
+          "list_scraping_jobs",
+          "scrape_municipal_codes",
+          "scrape_recap_archive",
+          "scrape_state_laws",
+          "scrape_us_code",
+          "search_recap_documents"
         ],
         "multi_engine_legal_search": [
           "get_multi_engine_stats",
@@ -2900,8 +3442,28 @@
           "get_legal_term_translations",
           "translate_legal_query"
         ],
+        "municipal_law_database_scrapers.hugging_face_pipeline": [
+          "CommitInfo",
+          "HfApi",
+          "HfHubHTTPError",
+          "RateLimiter",
+          "UploadToHuggingFaceInParallel",
+          "login"
+        ],
         "municipal_scraper_fallbacks": [
           "scrape_with_fallbacks"
+        ],
+        "patent_dataset_mcp_tools": [
+          "BuildPatentDatasetTool",
+          "ScrapeUSPTOPatentsTool",
+          "SearchPatentsByAssigneeTool",
+          "SearchPatentsByInventorTool",
+          "SearchPatentsByKeywordTool",
+          "build_patent_dataset",
+          "scrape_uspto_patents",
+          "search_patents_by_assignee",
+          "search_patents_by_inventor",
+          "search_patents_by_keyword"
         ],
         "quick_test_fixes": [
           "main",
@@ -3019,7 +3581,18 @@
           "python_file_to_json"
         ]
       },
-      "logic_tools": {},
+      "logic_tools": {
+        "temporal_deontic_logic_tools": [
+          "AddTheoremTool",
+          "BulkProcessCaselawTool",
+          "CheckDocumentConsistencyTool",
+          "QueryTheoremsTool",
+          "add_theorem",
+          "bulk_process_caselaw",
+          "check_document_consistency",
+          "query_theorems"
+        ]
+      },
       "media_tools": {
         "ffmpeg_batch": [
           "ffmpeg_batch_process",
@@ -3059,6 +3632,9 @@
           "main"
         ],
         "ffmpeg_utils": [
+          "FFmpegError",
+          "FFmpegUtilsCompatibility",
+          "ffmpeg_utils",
           "get_ffmpeg_utils"
         ],
         "ytdlp_download": [
@@ -3099,6 +3675,17 @@
         ]
       },
       "monitoring_tools": {
+        "enhanced_monitoring_tools": [
+          "Alert",
+          "AlertSeverity",
+          "EnhancedAlertManagementTool",
+          "EnhancedHealthCheckTool",
+          "EnhancedMetricsCollectionTool",
+          "HealthStatus",
+          "MockMonitoringService",
+          "ServiceMetrics",
+          "SystemMetrics"
+        ],
         "monitoring_tools": [
           "generate_monitoring_report",
           "get_performance_metrics",
@@ -3187,7 +3774,16 @@
           "manage_rate_limits"
         ]
       },
-      "search_tools": {},
+      "search_tools": {
+        "search_tools": [
+          "FacetedSearchTool",
+          "SemanticSearchTool",
+          "SimilaritySearchTool",
+          "faceted_search",
+          "semantic_search",
+          "similarity_search"
+        ]
+      },
       "security_tools": {
         "check_access_permission": [
           "check_access_permission"
@@ -3195,6 +3791,9 @@
       },
       "session_tools": {
         "enhanced_session_tools": [
+          "EnhancedSessionCreationTool",
+          "EnhancedSessionManagementTool",
+          "EnhancedSessionStateTool",
           "validate_session_id",
           "validate_session_type",
           "validate_user_id"
@@ -3272,12 +3871,28 @@
         ]
       },
       "vector_store_tools": {
+        "enhanced_vector_store_tools": [
+          "EnhancedVectorIndexTool",
+          "EnhancedVectorSearchTool",
+          "EnhancedVectorStorageTool",
+          "VectorMetadataTool",
+          "enhanced_vector_index",
+          "enhanced_vector_search",
+          "enhanced_vector_storage",
+          "vector_metadata"
+        ],
         "vector_store_tools": [
+          "VectorIndexTool",
+          "VectorMetadataTool",
+          "VectorRetrievalTool",
           "add_embeddings_to_store_tool",
           "create_vector_store_tool",
           "delete_from_vector_store_tool",
           "get_vector_store_stats_tool",
+          "manage_vector_index",
+          "manage_vector_metadata",
           "optimize_vector_store_tool",
+          "retrieve_vectors",
           "search_vector_store_tool"
         ]
       },
@@ -3404,7 +4019,42 @@
           "scrape_url_tool"
         ]
       },
-      "workflow_tools": {}
+      "workflow_tools": {
+        "enhanced_workflow_tools": [
+          "EnhancedBatchProcessingTool",
+          "EnhancedDataPipelineTool",
+          "EnhancedWorkflowManagementTool",
+          "MockWorkflowService",
+          "StepStatus",
+          "WorkflowDefinition",
+          "WorkflowStatus",
+          "WorkflowStep"
+        ],
+        "workflow_tools": [
+          "add_p2p_peer",
+          "batch_process_datasets",
+          "calculate_peer_distance",
+          "create_template",
+          "create_workflow",
+          "execute_workflow",
+          "get_assigned_workflows",
+          "get_next_p2p_workflow",
+          "get_p2p_scheduler_status",
+          "get_workflow_metrics",
+          "get_workflow_status",
+          "get_workflow_tags",
+          "initialize_p2p_scheduler",
+          "list_templates",
+          "list_workflows",
+          "merge_merkle_clock",
+          "pause_workflow",
+          "remove_p2p_peer",
+          "resume_workflow",
+          "run_workflow",
+          "schedule_p2p_workflow",
+          "schedule_workflow"
+        ]
+      }
     }
   }
 }
