@@ -414,9 +414,10 @@ def _map_feature_to_tool_categories(
 
     manual: Dict[str, List[str]] = {
         "processors": ["data_processing_tools", "file_converter_tools", "file_detection_tools"],
-        "web_archiving": ["web_archive_tools", "search_tools"],
+        "web_archiving": ["web_archive_tools", "web_scraping_tools"],
         "legal_scrapers": ["web_scraping_tools", "legal_dataset_tools"],
-        "logic": ["logic_tools"],
+        # The bulk of "logic" tools live under dataset_tools (logic_utils.*).
+        "logic": ["dataset_tools", "logic_tools"],
         "audit": ["audit_tools"],
         "alerts": ["alert_tools"],
         "security": ["security_tools", "auth_tools", "session_tools"],
@@ -426,7 +427,8 @@ def _map_feature_to_tool_categories(
         "multimedia": ["media_tools"],
         "p2p_networking": ["p2p_tools", "p2p_workflow_tools"],
         "knowledge_graphs": ["graph_tools"],
-        "search": ["search_tools"],
+        # Current search implementations are primarily medical research scrapers.
+        "search": ["medical_research_scrapers", "search_tools"],
         "dashboards": ["dashboard_tools"],
         "monitoring": ["monitoring_tools"],
         "error_reporting": ["investigation_tools"],

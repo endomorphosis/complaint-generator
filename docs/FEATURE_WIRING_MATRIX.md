@@ -5,8 +5,8 @@ It is a static filesystem scan (no imports), intended to guide refactors.
 
 - Total: 36
 - Wired: 3
-- Partial: 16
-- Missing: 17
+- Partial: 17
+- Missing: 16
 
 ## Console Scripts
 
@@ -113,7 +113,7 @@ Parsed from `ipfs_datasets_py/setup.py` without executing it.
 | ipfs_datasets | module | ipfs_datasets_py/ipfs_datasets_py/ipfs_datasets.py | ipfs_datasets_py.ipfs_datasets |  |  | get_from_ipfs, ipfs_tools_claudes, pin_to_ipfs |  |  | ipfs_tools | partial | no_cli_detected |
 | knowledge_graphs | package | ipfs_datasets_py/ipfs_datasets_py/knowledge_graphs | ipfs_datasets_py.knowledge_graphs |  | accelerate, ipld, provenance | graph_add_entity, graph_add_relationship, graph_constraint_add, graph_create, graph_index_create, graph_query_cypher (+5) |  |  | graph_tools | partial | no_cli_detected |
 | llm_router | module | ipfs_datasets_py/ipfs_datasets_py/llm_router.py | ipfs_datasets_py.llm_router |  |  |  |  |  |  | missing | no_cli_detected<br>no_mcp_tools_mapped |
-| logic | package | ipfs_datasets_py/ipfs_datasets_py/logic | ipfs_datasets_py.logic | __all__:api, integration, integrations, tools | accelerate, alerts, logic |  |  |  |  | missing | no_cli_detected<br>no_mcp_tools_mapped |
+| logic | package | ipfs_datasets_py/ipfs_datasets_py/logic | ipfs_datasets_py.logic | __all__:api, integration, integrations, tools | accelerate, alerts, logic | analyze_normative_sentence, build_deontic_formula, build_fol_formula, convert_dataset_format, convert_to_defeasible_format, convert_to_prolog (+38) |  |  | dataset_tools | partial | no_cli_detected |
 | ml | package | ipfs_datasets_py/ipfs_datasets_py/ml | ipfs_datasets_py.ml | __all__:BatchPredictionResult, ContentAnalysis, ContentAnalysisReport, ContentAnomalyDetector, ContentClassificationPipeline, ModelMetadata (+10) | accelerate, ml, pdf, vectors | chunk_text, create_embeddings, create_vector_index, delete_vector_index, generate_batch_embeddings, generate_embedding (+29) |  |  | embedding_tools<br>sparse_embedding_tools<br>vector_tools | partial | no_cli_detected |
 | monitoring | module | ipfs_datasets_py/ipfs_datasets_py/monitoring.py | ipfs_datasets_py.monitoring |  |  | generate_monitoring_report, get_performance_metrics, health_check, monitor_services |  |  | monitoring_tools | partial | no_cli_detected |
 | optimizers | package | ipfs_datasets_py/ipfs_datasets_py/optimizers | ipfs_datasets_py.optimizers |  | provenance |  |  | module:ipfs_datasets_py.optimizers.cli<br>path:ipfs_datasets_py/ipfs_datasets_py/optimizers/cli.py |  | partial | no_mcp_tools_mapped |
