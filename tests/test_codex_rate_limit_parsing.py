@@ -23,13 +23,28 @@ _pick_reset_at_raw_from_rate_limit_artifact = _codex_autopatch._pick_reset_at_ra
 
 
 def test_parse_try_again_at_human_timestamp() -> None:
-    msg = (
-        "You've hit your usage limit. "
-        "Upgrade to Pro, or try again at Feb 11th, 2026 11:46 PM."
+    def _ordinal_suffix(n: int) -> str:
+        if 11 <= (n % 100) <= 13:
+            return "th"
+        return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+
+    now = datetime.now(timezone.utc)
+    future = datetime.fromtimestamp(now.timestamp() + 2 * 3600, tz=timezone.utc).replace(
+        microsecond=0, second=0
     )
+    expected_iso = future.isoformat()
+
+    month = future.strftime("%b")
+    day_i = int(future.strftime("%d"))
+    day = f"{future.strftime('%d')}{_ordinal_suffix(day_i)}"
+    year = future.strftime("%Y")
+    time_part = future.strftime("%I:%M %p")
+    human = f"{month} {day}, {year} {time_part}"
+
+    msg = "You've hit your usage limit. Upgrade to Pro, or try again at " + human + "."
     info = _debug_extract_reset_info_from_message(msg)
     assert info["source"] == "try_again_at"
-    assert info["reset_at_iso"] == "2026-02-11T23:46:00+00:00"
+    assert info["reset_at_iso"] == expected_iso
     assert isinstance(info["resets_in_seconds"], int)
     assert info["resets_in_seconds"] > 0
 

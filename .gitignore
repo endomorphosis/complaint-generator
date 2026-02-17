@@ -13,3 +13,6 @@ htmlcov/
 *.pyd
 .tox/
 .cache/
+
+# Local stray artifact seen during config debugging
+test_extended_config.log

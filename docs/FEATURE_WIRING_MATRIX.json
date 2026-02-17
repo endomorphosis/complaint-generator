@@ -1,0 +1,3364 @@
+{
+  "rows": [
+    {
+      "feature_id": "_dependencies",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/_dependencies.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py._dependencies",
+        "likely_extras": [
+          "ipld"
+        ],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "accelerate_integration",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/accelerate_integration",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.accelerate_integration",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [
+          "Any",
+          "annotations"
+        ],
+        "public_exports_source": "reexports"
+      }
+    },
+    {
+      "feature_id": "alerts",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/alerts",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.alerts",
+        "likely_extras": [
+          "alerts"
+        ],
+        "mcp_tool_categories": [
+          "alert_tools"
+        ],
+        "mcp_tool_functions": [
+          "add_alert_rule",
+          "evaluate_alert_rules",
+          "get_suppression_status",
+          "list_alert_rules",
+          "remove_alert_rule",
+          "reset_alert_suppression",
+          "send_discord_embed",
+          "send_discord_message"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [
+          "AlertManager",
+          "AlertRule",
+          "BotClient",
+          "DiscordEmbed",
+          "DiscordNotifier",
+          "RuleEngine",
+          "RuleEvaluationError",
+          "WebhookClient"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "analytics",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/analytics",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.analytics",
+        "likely_extras": [
+          "provenance"
+        ],
+        "mcp_tool_categories": [
+          "analysis_tools"
+        ],
+        "mcp_tool_functions": [
+          "analyze_data_distribution",
+          "analyze_diversity",
+          "analyze_similarity_patterns",
+          "assess_embedding_quality",
+          "cluster_analysis",
+          "detect_drift",
+          "detect_outliers",
+          "dimensionality_reduction",
+          "perform_clustering_analysis",
+          "quality_assessment",
+          "reduce_dimensionality"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [
+          "AnalysisEngine",
+          "ClusterResult",
+          "ClusteringAlgorithm",
+          "ContentSimilarityAnalyzer",
+          "CrossSiteAnalysisReport",
+          "CrossWebsiteAnalyzer",
+          "DimensionalityMethod",
+          "DimensionalityResult",
+          "GlobalKnowledgeGraph",
+          "GlobalKnowledgeGraphIntegrator",
+          "GlobalTrend",
+          "QualityAssessment",
+          "QualityMetric",
+          "TrendDetectionEngine",
+          "WebsiteCorrelation",
+          "analyze_multiple_websites",
+          "create_global_knowledge_graph",
+          "get_analysis_engine"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "audit#package",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/audit",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.audit",
+        "likely_extras": [
+          "audit",
+          "provenance"
+        ],
+        "mcp_tool_categories": [
+          "audit_tools"
+        ],
+        "mcp_tool_functions": [
+          "audit_tools",
+          "generate_audit_report",
+          "record_audit_event"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [
+          "AdaptiveSecurityManager",
+          "AlertingAuditHandler",
+          "AnomalyDetector",
+          "AuditCategory",
+          "AuditEvent",
+          "AuditHandler",
+          "AuditLevel",
+          "AuditLogger",
+          "ComplianceReport",
+          "ComplianceStandard",
+          "ElasticsearchAuditHandler",
+          "FileAuditHandler",
+          "GDPRComplianceReporter",
+          "HIPAAComplianceReporter",
+          "IntrusionDetection",
+          "JSONAuditHandler",
+          "ResponseAction",
+          "ResponseRule",
+          "RuleCondition",
+          "SOC2ComplianceReporter",
+          "SecurityAlertManager",
+          "SecurityResponse",
+          "SyslogAuditHandler"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "audit#module",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/audit.py",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.audit",
+        "likely_extras": [],
+        "mcp_tool_categories": [
+          "audit_tools"
+        ],
+        "mcp_tool_functions": [
+          "audit_tools",
+          "generate_audit_report",
+          "record_audit_event"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "auto_installer",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/auto_installer.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.auto_installer",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "caching",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/caching",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.caching",
+        "likely_extras": [
+          "p2p"
+        ],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [
+          "cache",
+          "codeql_cache",
+          "distributed_cache",
+          "router_remote_cache"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "cli",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/cli",
+      "status": "wired",
+      "surfaces": {
+        "cli_commands": [
+          "ipfs-datasets",
+          "ipfs-datasets-cli"
+        ],
+        "cli_modules": [
+          "module:ipfs_datasets_py.cli"
+        ],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.cli",
+        "likely_extras": [],
+        "mcp_tool_categories": [
+          "cli"
+        ],
+        "mcp_tool_functions": [
+          "discover_biomolecules_rag_cli",
+          "discover_enzyme_inhibitors_cli",
+          "discover_protein_binders_cli",
+          "execute_command",
+          "format_articles_table",
+          "format_candidates_table",
+          "format_trials_table",
+          "scrape_clinical_trials_cli",
+          "scrape_pubmed_cli"
+        ],
+        "notes": [],
+        "public_exports": [
+          "add_p2p_peer",
+          "batch_process_datasets",
+          "cached_github_cli",
+          "calculate_peer_distance",
+          "create_template",
+          "create_workflow",
+          "discord_cli",
+          "email_cli",
+          "execute_workflow",
+          "finance_cli",
+          "get_assigned_workflows",
+          "get_next_p2p_workflow",
+          "get_p2p_scheduler_status",
+          "get_workflow_metrics",
+          "get_workflow_status",
+          "get_workflow_tags",
+          "github_cli_init",
+          "initialize_p2p_scheduler",
+          "list_templates",
+          "list_workflows",
+          "merge_merkle_clock",
+          "pause_workflow",
+          "remove_p2p_peer",
+          "resume_workflow",
+          "run_workflow",
+          "schedule_p2p_workflow",
+          "schedule_workflow",
+          "scraper_cli"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "config#package",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/config",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.config",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [
+          "config"
+        ],
+        "public_exports_source": "reexports"
+      }
+    },
+    {
+      "feature_id": "config#module",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/config.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.config",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "content_discovery",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/content_discovery.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.content_discovery",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "core_operations",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/core_operations",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.core_operations",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [
+          "DataProcessor",
+          "DatasetConverter",
+          "DatasetLoader",
+          "DatasetSaver",
+          "IPFSGetter",
+          "IPFSPinner",
+          "KnowledgeGraphManager"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "dashboards",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/dashboards",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.dashboards",
+        "likely_extras": [
+          "api",
+          "provenance"
+        ],
+        "mcp_tool_categories": [
+          "dashboard_tools"
+        ],
+        "mcp_tool_functions": [
+          "get_js_error_reporter"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [
+          "admin_dashboard",
+          "advanced_analytics_dashboard",
+          "common_crawl_dashboard",
+          "discord_dashboard",
+          "mcp_dashboard",
+          "mcp_investigation_dashboard",
+          "news_analysis_dashboard",
+          "patent_dashboard",
+          "provenance_dashboard",
+          "unified_monitoring_dashboard"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "database_utils",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/database_utils.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.database_utils",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "dataset_manager",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/dataset_manager.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.dataset_manager",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "deps_resolver",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/deps_resolver.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.deps_resolver",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "embeddings_router",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/embeddings_router.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.embeddings_router",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "error_reporting",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/error_reporting",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.error_reporting",
+        "likely_extras": [
+          "api"
+        ],
+        "mcp_tool_categories": [
+          "investigation_tools"
+        ],
+        "mcp_tool_functions": [
+          "analyze_deontological_conflicts",
+          "analyze_entities",
+          "analyze_entity_timeline",
+          "detect_patterns",
+          "explore_entity",
+          "extract_geographic_entities",
+          "ingest_document_collection",
+          "ingest_news_article",
+          "ingest_news_feed",
+          "ingest_website",
+          "map_relationships",
+          "map_spatiotemporal_events",
+          "query_deontic_conflicts",
+          "query_deontic_statements",
+          "query_geographic_context",
+          "track_provenance"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [
+          "ErrorReporter",
+          "GitHubIssueClient",
+          "get_global_error_reporter",
+          "get_recent_logs",
+          "install_error_handlers",
+          "uninstall_error_handlers"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "ipfs_backend_router",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/ipfs_backend_router.py",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.ipfs_backend_router",
+        "likely_extras": [],
+        "mcp_tool_categories": [
+          "ipfs_tools"
+        ],
+        "mcp_tool_functions": [
+          "get_from_ipfs",
+          "ipfs_tools_claudes",
+          "pin_to_ipfs"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "ipfs_datasets",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/ipfs_datasets.py",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.ipfs_datasets",
+        "likely_extras": [],
+        "mcp_tool_categories": [
+          "ipfs_tools"
+        ],
+        "mcp_tool_functions": [
+          "get_from_ipfs",
+          "ipfs_tools_claudes",
+          "pin_to_ipfs"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "knowledge_graphs",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/knowledge_graphs",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.knowledge_graphs",
+        "likely_extras": [
+          "accelerate",
+          "ipld",
+          "provenance"
+        ],
+        "mcp_tool_categories": [
+          "graph_tools"
+        ],
+        "mcp_tool_functions": [
+          "graph_add_entity",
+          "graph_add_relationship",
+          "graph_constraint_add",
+          "graph_create",
+          "graph_index_create",
+          "graph_query_cypher",
+          "graph_search_hybrid",
+          "graph_transaction_begin",
+          "graph_transaction_commit",
+          "graph_transaction_rollback",
+          "query_knowledge_graph"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "llm_router",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/llm_router.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.llm_router",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "logic",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/logic",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.logic",
+        "likely_extras": [
+          "accelerate",
+          "alerts",
+          "logic"
+        ],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [
+          "api",
+          "integration",
+          "integrations",
+          "tools"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "ml",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/ml",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.ml",
+        "likely_extras": [
+          "accelerate",
+          "ml",
+          "pdf",
+          "vectors"
+        ],
+        "mcp_tool_categories": [
+          "embedding_tools",
+          "sparse_embedding_tools",
+          "vector_tools"
+        ],
+        "mcp_tool_functions": [
+          "chunk_text",
+          "create_embeddings",
+          "create_vector_index",
+          "delete_vector_index",
+          "generate_batch_embeddings",
+          "generate_embedding",
+          "generate_embeddings",
+          "generate_embeddings_from_file",
+          "generate_sparse_embedding",
+          "get_available_tools",
+          "get_global_manager",
+          "get_tool_manifest",
+          "hybrid_search",
+          "index_dataset",
+          "index_sparse_collection",
+          "list_vector_indexes",
+          "manage_endpoints",
+          "manage_sparse_models",
+          "manage_vector_store",
+          "merge_embedding_shards",
+          "merge_shards_tool",
+          "multi_modal_search",
+          "optimize_vector_store",
+          "register_enhanced_embedding_tools",
+          "reset_global_manager",
+          "search_embeddings",
+          "search_vector_index",
+          "search_with_filters",
+          "semantic_search",
+          "shard_embeddings",
+          "shard_embeddings_by_cluster",
+          "shard_embeddings_by_dimension",
+          "shard_embeddings_tool",
+          "shard_info_tool",
+          "sparse_search"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [
+          "BatchPredictionResult",
+          "ContentAnalysis",
+          "ContentAnalysisReport",
+          "ContentAnomalyDetector",
+          "ContentClassificationPipeline",
+          "ModelMetadata",
+          "ModelPrediction",
+          "ProductionMLModelServer",
+          "ProductionQualityModel",
+          "ProductionTopicModel",
+          "QualityClassifier",
+          "SentimentAnalyzer",
+          "TopicClassifier",
+          "analyze_website_content",
+          "quick_quality_assessment",
+          "quick_topic_classification"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "monitoring",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/monitoring.py",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.monitoring",
+        "likely_extras": [],
+        "mcp_tool_categories": [
+          "monitoring_tools"
+        ],
+        "mcp_tool_functions": [
+          "generate_monitoring_report",
+          "get_performance_metrics",
+          "health_check",
+          "monitor_services"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "optimizers",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/optimizers",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [
+          "module:ipfs_datasets_py.optimizers.cli",
+          "path:ipfs_datasets_py/ipfs_datasets_py/optimizers/cli.py"
+        ],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.optimizers",
+        "likely_extras": [
+          "provenance"
+        ],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "p2p_networking",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/p2p_networking",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.p2p_networking",
+        "likely_extras": [],
+        "mcp_tool_categories": [
+          "p2p_tools",
+          "p2p_workflow_tools"
+        ],
+        "mcp_tool_functions": [
+          "add_p2p_peer",
+          "calculate_peer_distance",
+          "get_assigned_workflows",
+          "get_next_p2p_workflow",
+          "get_p2p_scheduler_status",
+          "get_workflow_tags",
+          "initialize_p2p_scheduler",
+          "merge_merkle_clock",
+          "p2p_cache_delete",
+          "p2p_cache_get",
+          "p2p_cache_has",
+          "p2p_cache_set",
+          "p2p_remote_cache_delete",
+          "p2p_remote_cache_get",
+          "p2p_remote_cache_has",
+          "p2p_remote_cache_set",
+          "p2p_remote_call_tool",
+          "p2p_remote_status",
+          "p2p_remote_submit_task",
+          "p2p_scheduler_get_next_task",
+          "p2p_scheduler_init",
+          "p2p_scheduler_mark_complete",
+          "p2p_scheduler_status",
+          "p2p_scheduler_submit_task",
+          "p2p_service_status",
+          "p2p_task_delete",
+          "p2p_task_get",
+          "p2p_task_submit",
+          "remove_p2p_peer",
+          "schedule_p2p_workflow"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [
+          "libp2p_kit",
+          "libp2p_kit_full",
+          "libp2p_kit_stub",
+          "p2p_connectivity",
+          "p2p_peer_registry",
+          "p2p_workflow_scheduler"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "processors",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/processors",
+      "status": "wired",
+      "surfaces": {
+        "cli_commands": [
+          "fc",
+          "file-converter"
+        ],
+        "cli_modules": [
+          "module:ipfs_datasets_py.processors.cli",
+          "path:ipfs_datasets_py/ipfs_datasets_py/processors/cli.py"
+        ],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.processors",
+        "likely_extras": [
+          "file_conversion_full",
+          "pdf",
+          "accelerate",
+          "alerts",
+          "file_conversion",
+          "ipld",
+          "logic",
+          "ml",
+          "multimedia"
+        ],
+        "mcp_tool_categories": [
+          "data_processing_tools",
+          "file_converter_tools",
+          "file_detection_tools"
+        ],
+        "mcp_tool_functions": [
+          "analyze_detection_accuracy",
+          "batch_convert_tool",
+          "batch_detect_file_types",
+          "chunk_text",
+          "convert_file_tool",
+          "convert_format",
+          "detect_file_type",
+          "download_url_tool",
+          "extract_archive_tool",
+          "extract_knowledge_graph_tool",
+          "file_info_tool",
+          "generate_embeddings_tool",
+          "generate_summary_tool",
+          "transform_data",
+          "validate_data"
+        ],
+        "notes": [],
+        "public_exports": [
+          "BatchProcessor",
+          "BatchStatus",
+          "EasyOCR",
+          "Entity",
+          "GraphRAGIntegrator",
+          "InputDetector",
+          "InputType",
+          "KnowledgeGraph",
+          "LLMChunk",
+          "LLMDocument",
+          "LLMOptimizer",
+          "MultiEngineOCR",
+          "PDFProcessor",
+          "ProcessingJob",
+          "ProcessingMetadata",
+          "ProcessingResult",
+          "ProcessingStatus",
+          "ProcessorConfig",
+          "ProcessorProtocol",
+          "ProcessorRegistry",
+          "QueryEngine",
+          "QueryResponse",
+          "QueryResult",
+          "Relationship",
+          "RelationshipAnalyzer",
+          "SuryaOCR",
+          "TesseractOCR",
+          "UnifiedEntity",
+          "UnifiedKnowledgeGraph",
+          "UnifiedRelationship",
+          "UniversalProcessor",
+          "VectorStore",
+          "advanced_graphrag_website_processor",
+          "advanced_media_processing",
+          "advanced_web_archiving",
+          "classify_input",
+          "cli",
+          "debug_tools",
+          "detect_input_type",
+          "enhanced_multimodal_processor",
+          "geospatial_analysis",
+          "get_global_registry",
+          "graphrag_processor",
+          "multimodal_processor",
+          "patent_dataset_api",
+          "patent_scraper",
+          "profiling",
+          "web_archiving",
+          "website_graphrag_processor",
+          "wikipedia_x"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "router_deps",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/router_deps.py",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.router_deps",
+        "likely_extras": [],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "search",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/search",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.search",
+        "likely_extras": [
+          "ipld"
+        ],
+        "mcp_tool_categories": [
+          "medical_research_scrapers"
+        ],
+        "mcp_tool_functions": [
+          "analyze_dataset_with_ai",
+          "analyze_medical_dataset",
+          "build_dataset_from_scraped_data",
+          "build_medical_dataset",
+          "discover_biomolecules_for_target",
+          "discover_biomolecules_rag",
+          "discover_enzyme_inhibitors",
+          "discover_pathway_biomolecules",
+          "discover_protein_binders",
+          "generate_medical_theorems_from_trials",
+          "generate_synthetic_dataset",
+          "generate_synthetic_medical_data",
+          "get_trial_outcomes_for_theorems",
+          "scrape_biochemical_research",
+          "scrape_clinical_trials",
+          "scrape_population_health_data",
+          "scrape_pubmed_medical_research",
+          "transform_dataset_with_ai",
+          "transform_medical_dataset",
+          "validate_medical_theorem_fuzzy"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "security",
+      "kind": "module",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/security.py",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.security",
+        "likely_extras": [
+          "security"
+        ],
+        "mcp_tool_categories": [
+          "auth_tools",
+          "security_tools",
+          "session_tools"
+        ],
+        "mcp_tool_functions": [
+          "authenticate_user",
+          "check_access_permission",
+          "cleanup_sessions",
+          "create_session",
+          "get_user_info",
+          "manage_session_state",
+          "validate_session_id",
+          "validate_session_type",
+          "validate_token",
+          "validate_user_id"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "utils",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/utils",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.utils",
+        "likely_extras": [
+          "logic",
+          "accelerate",
+          "security",
+          "alerts",
+          "pdf"
+        ],
+        "mcp_tool_categories": [],
+        "mcp_tool_functions": [],
+        "notes": [
+          "no_cli_detected",
+          "no_mcp_tools_mapped"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "vector_stores",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/vector_stores",
+      "status": "partial",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.vector_stores",
+        "likely_extras": [
+          "vectors",
+          "ipld"
+        ],
+        "mcp_tool_categories": [
+          "vector_store_tools",
+          "vector_tools"
+        ],
+        "mcp_tool_functions": [
+          "add_embeddings_to_store_tool",
+          "create_vector_index",
+          "create_vector_store_tool",
+          "delete_from_vector_store_tool",
+          "delete_vector_index",
+          "get_global_manager",
+          "get_vector_store_stats_tool",
+          "list_vector_indexes",
+          "manage_vector_store",
+          "optimize_vector_store",
+          "optimize_vector_store_tool",
+          "reset_global_manager",
+          "search_vector_index",
+          "search_vector_store_tool"
+        ],
+        "notes": [
+          "no_cli_detected"
+        ],
+        "public_exports": [
+          "BaseVectorStore",
+          "CollectionMetadata",
+          "ElasticsearchVectorStore",
+          "EmbeddingResult",
+          "FAISSVectorStore",
+          "IPLDEmbeddingResult",
+          "IPLDSearchResult",
+          "IPLDVectorStore",
+          "QdrantVectorStore",
+          "RouterIntegration",
+          "SearchResult",
+          "UnifiedVectorStoreConfig",
+          "VectorBlock",
+          "VectorStoreBridge",
+          "VectorStoreConnectionError",
+          "VectorStoreError",
+          "VectorStoreManager",
+          "VectorStoreOperationError",
+          "VectorStoreType",
+          "add_texts_to_store",
+          "create_bridge",
+          "create_faiss_config",
+          "create_ipld_config",
+          "create_manager",
+          "create_qdrant_config",
+          "create_router_integration",
+          "create_vector_store",
+          "export_collection_to_ipfs",
+          "import_collection_from_ipfs",
+          "migrate_collection",
+          "search_texts"
+        ],
+        "public_exports_source": "__all__"
+      }
+    },
+    {
+      "feature_id": "web_archiving",
+      "kind": "dir",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/web_archiving",
+      "status": "missing",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [],
+        "import_exists": false,
+        "import_module": "ipfs_datasets_py.web_archiving",
+        "likely_extras": [
+          "api"
+        ],
+        "mcp_tool_categories": [
+          "web_archive_tools",
+          "web_scraping_tools"
+        ],
+        "mcp_tool_functions": [
+          "archive_to_archive_is",
+          "archive_to_wayback",
+          "batch_archive_to_archive_is",
+          "batch_scrape_with_autoscraper",
+          "batch_search_brave",
+          "batch_search_github",
+          "batch_search_google",
+          "batch_search_huggingface",
+          "batch_search_openverse",
+          "batch_search_serpstack",
+          "check_archive_status",
+          "check_scraper_methods_tool",
+          "clear_brave_cache",
+          "create_autoscraper_model",
+          "create_warc",
+          "extract_dataset_from_cdxj",
+          "extract_links_from_warc",
+          "extract_metadata_from_warc",
+          "extract_text_from_warc",
+          "fetch_warc_record_advanced",
+          "get_archive_is_content",
+          "get_brave_cache_stats",
+          "get_common_crawl_collection_info_advanced",
+          "get_common_crawl_content",
+          "get_huggingface_model_info",
+          "get_ipwb_content",
+          "get_wayback_content",
+          "index_warc",
+          "index_warc_to_ipwb",
+          "list_autoscraper_models",
+          "list_common_crawl_collections_advanced",
+          "list_common_crawl_indexes",
+          "optimize_autoscraper_model",
+          "scrape_multiple_urls_tool",
+          "scrape_url_tool",
+          "scrape_with_autoscraper",
+          "search_archive_is",
+          "search_brave",
+          "search_brave_images",
+          "search_brave_news",
+          "search_common_crawl",
+          "search_common_crawl_advanced",
+          "search_github_code",
+          "search_github_issues",
+          "search_github_repositories",
+          "search_github_users",
+          "search_google",
+          "search_google_images",
+          "search_huggingface_datasets",
+          "search_huggingface_models",
+          "search_huggingface_spaces",
+          "search_ipwb_archive",
+          "search_openverse_audio",
+          "search_openverse_images",
+          "search_serpstack",
+          "search_serpstack_images",
+          "search_wayback_machine",
+          "start_ipwb_replay",
+          "verify_ipwb_archive"
+        ],
+        "notes": [
+          "not_importable_package",
+          "no_cli_detected"
+        ],
+        "public_exports": [],
+        "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "mcp_server",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/mcp_server",
+      "status": "wired",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [
+          "ipfs_datasets_py.mcp_server.__main__"
+        ],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.mcp_server",
+        "likely_extras": [],
+        "mcp_tool_categories": [
+          "admin_tools",
+          "alert_tools",
+          "analysis_tools",
+          "audit_tools",
+          "auth_tools",
+          "background_task_tools",
+          "bespoke_tools",
+          "cache_tools",
+          "cli",
+          "dashboard_tools",
+          "data_processing_tools",
+          "dataset_tools",
+          "development_tools",
+          "discord_tools",
+          "email_tools",
+          "embedding_tools",
+          "file_converter_tools",
+          "file_detection_tools",
+          "finance_data_tools",
+          "functions",
+          "geospatial_tools",
+          "graph_tools",
+          "index_management_tools",
+          "investigation_tools",
+          "ipfs_cluster_tools",
+          "ipfs_tools",
+          "legacy_mcp_tools",
+          "legal_dataset_tools",
+          "lizardperson_argparse_programs",
+          "lizardpersons_function_tools",
+          "logic_tools",
+          "media_tools",
+          "medical_research_scrapers",
+          "monitoring_tools",
+          "p2p_tools",
+          "p2p_workflow_tools",
+          "pdf_tools",
+          "provenance_tools",
+          "rate_limiting_tools",
+          "search_tools",
+          "security_tools",
+          "session_tools",
+          "software_engineering_tools",
+          "sparse_embedding_tools",
+          "storage_tools",
+          "vector_store_tools",
+          "vector_tools",
+          "web_archive_tools",
+          "web_scraping_tools",
+          "workflow_tools"
+        ],
+        "mcp_tool_functions": [
+          "add_alert_rule",
+          "add_embeddings_to_store_tool",
+          "add_p2p_peer",
+          "analyze_all_failed_states",
+          "analyze_citation_network",
+          "analyze_code_for_pr",
+          "analyze_data_distribution",
+          "analyze_dataset_with_ai",
+          "analyze_deontological_conflicts",
+          "analyze_dependency_chain",
+          "analyze_detection_accuracy",
+          "analyze_diversity",
+          "analyze_embedding_market_correlation",
+          "analyze_entities",
+          "analyze_entity_timeline",
+          "analyze_github_actions",
+          "analyze_http_response",
+          "analyze_medical_dataset",
+          "analyze_normative_sentence",
+          "analyze_pod_health",
+          "analyze_repository_health",
+          "analyze_resource_utilization",
+          "analyze_service_health",
+          "analyze_similarity_patterns",
+          "analyze_state_scraper",
+          "apply_financial_theorem",
+          "apply_theorem_actions",
+          "archive_to_archive_is",
+          "archive_to_wayback",
+          "assess_embedding_quality",
+          "audit_tools",
+          "authenticate_user",
+          "base_tool",
+          "batch_archive_to_archive_is",
+          "batch_convert_tool",
+          "batch_detect_file_types",
+          "batch_scrape_with_autoscraper",
+          "batch_search_brave",
+          "batch_search_github",
+          "batch_search_google",
+          "batch_search_huggingface",
+          "batch_search_openverse",
+          "batch_search_serpstack",
+          "build_dataset_from_scraped_data",
+          "build_deontic_formula",
+          "build_fol_formula",
+          "build_medical_dataset",
+          "cache_clear",
+          "cache_delete",
+          "cache_embeddings",
+          "cache_get",
+          "cache_set",
+          "cache_stats",
+          "calculate_peer_distance",
+          "calculate_update_parameters",
+          "check_access_permission",
+          "check_archive_status",
+          "check_rate_limit",
+          "check_scraper_methods_tool",
+          "check_task_status",
+          "chunk_text",
+          "claude_analyze_code_quality",
+          "claude_cli_config_set_api_key",
+          "claude_cli_execute",
+          "claude_cli_install",
+          "claude_cli_list_models",
+          "claude_cli_status",
+          "claude_cli_test_connection",
+          "claude_explain_code",
+          "claude_generate_documentation",
+          "claude_generate_tests",
+          "claude_refactor_suggestions",
+          "claude_review_pull_request",
+          "cleanup_database_connections",
+          "cleanup_sessions",
+          "clear_brave_cache",
+          "clear_cache",
+          "cluster_analysis",
+          "cmd_add",
+          "cmd_daemon",
+          "cmd_disable",
+          "cmd_enable",
+          "cmd_list",
+          "cmd_remove",
+          "cmd_run",
+          "codebase_search",
+          "config",
+          "configure_rate_limits",
+          "configure_system",
+          "convert_dataset_format",
+          "convert_file_tool",
+          "convert_format",
+          "convert_to_defeasible_format",
+          "convert_to_prolog",
+          "convert_to_prolog_format",
+          "convert_to_tptp",
+          "convert_to_tptp_format",
+          "coordinate_auto_healing",
+          "create_ai_agent_pr",
+          "create_autoscraper_model",
+          "create_embeddings",
+          "create_legal_knowledge_graph",
+          "create_schedule",
+          "create_session",
+          "create_vector_index",
+          "create_vector_store",
+          "create_vector_store_tool",
+          "create_warc",
+          "create_workflow_dag",
+          "cross_language_legal_search",
+          "dataset_tools_claudes",
+          "delete_from_vector_store_tool",
+          "delete_index",
+          "delete_vector_index",
+          "detect_drift",
+          "detect_error_patterns",
+          "detect_file_type",
+          "detect_normative_conflicts",
+          "detect_outliers",
+          "detect_patterns",
+          "detect_query_language",
+          "development_tool_mcp_wrapper",
+          "dimensionality_reduction",
+          "discord_analyze_channel",
+          "discord_analyze_export",
+          "discord_analyze_guild",
+          "discord_batch_convert_exports",
+          "discord_convert_export",
+          "discord_export_all_channels",
+          "discord_export_channel",
+          "discord_export_dm_channels",
+          "discord_export_dm_channels_individual",
+          "discord_export_guild",
+          "discord_list_channels",
+          "discord_list_dm_channels",
+          "discord_list_guilds",
+          "discover_biomolecules_for_target",
+          "discover_biomolecules_rag",
+          "discover_biomolecules_rag_cli",
+          "discover_enzyme_inhibitors",
+          "discover_enzyme_inhibitors_cli",
+          "discover_pathway_biomolecules",
+          "discover_protein_binders",
+          "discover_protein_binders_cli",
+          "documentation_generator",
+          "documentation_generator_simple",
+          "download_url_tool",
+          "email_analyze_export",
+          "email_export_folder",
+          "email_fetch_emails",
+          "email_list_folders",
+          "email_parse_eml",
+          "email_search_export",
+          "email_test_connection",
+          "enable_disable_schedule",
+          "evaluate_alert_rules",
+          "execute_audit_report_step",
+          "execute_cache_optimization_step",
+          "execute_command",
+          "execute_data_ingestion_step",
+          "execute_dataset_migration_step",
+          "execute_python_snippet",
+          "execute_vector_optimization_step",
+          "execute_workflow",
+          "expand_legal_query",
+          "explore_entity",
+          "export_citations",
+          "export_legal_report",
+          "extract_archive_tool",
+          "extract_conditions",
+          "extract_dataset_from_cdxj",
+          "extract_deontic_metadata",
+          "extract_exceptions",
+          "extract_fol_metadata",
+          "extract_geographic_entities",
+          "extract_knowledge_graph_tool",
+          "extract_legal_action",
+          "extract_legal_citations",
+          "extract_legal_subject",
+          "extract_links_from_warc",
+          "extract_logical_relations",
+          "extract_metadata_from_warc",
+          "extract_normative_elements",
+          "extract_predicates",
+          "extract_temporal_constraints",
+          "extract_text_from_warc",
+          "extract_variables",
+          "fetch_corporate_actions",
+          "fetch_financial_news",
+          "fetch_stock_data",
+          "fetch_warc_record_advanced",
+          "ffmpeg_analyze",
+          "ffmpeg_apply_filters",
+          "ffmpeg_batch_process",
+          "ffmpeg_concat",
+          "ffmpeg_convert",
+          "ffmpeg_cut",
+          "ffmpeg_demux",
+          "ffmpeg_extract_audio",
+          "ffmpeg_mux",
+          "ffmpeg_probe",
+          "ffmpeg_splice",
+          "ffmpeg_stream_input",
+          "ffmpeg_stream_output",
+          "file_info_tool",
+          "filter_legal_results",
+          "find_predictive_embedding_patterns",
+          "format_articles_table",
+          "format_candidates_table",
+          "format_deontic",
+          "format_fol",
+          "format_output",
+          "format_text_output",
+          "format_trials_table",
+          "format_xml_output",
+          "gemini_analyze_code",
+          "gemini_cli_config_set_api_key",
+          "gemini_cli_execute",
+          "gemini_cli_install",
+          "gemini_cli_list_models",
+          "gemini_cli_status",
+          "gemini_cli_test_connection",
+          "gemini_extract_structured_data",
+          "gemini_generate_text",
+          "gemini_summarize_text",
+          "gemini_translate_text",
+          "generate_audit_report",
+          "generate_batch_embeddings",
+          "generate_compliance_checklist",
+          "generate_embedding",
+          "generate_embeddings",
+          "generate_embeddings_from_file",
+          "generate_embeddings_tool",
+          "generate_legal_report",
+          "generate_medical_theorems_from_trials",
+          "generate_monitoring_report",
+          "generate_sparse_embedding",
+          "generate_summary_tool",
+          "generate_synthetic_dataset",
+          "generate_synthetic_medical_data",
+          "get_archive_is_content",
+          "get_assigned_workflows",
+          "get_available_filters",
+          "get_available_tools",
+          "get_batch_status",
+          "get_brave_cache_stats",
+          "get_cache_stats",
+          "get_cached_embeddings",
+          "get_common_crawl_collection_info_advanced",
+          "get_common_crawl_content",
+          "get_config",
+          "get_current_time",
+          "get_ffmpeg_utils",
+          "get_ffmpeg_wrapper",
+          "get_filter_statistics",
+          "get_from_ipfs",
+          "get_global_manager",
+          "get_huggingface_model_info",
+          "get_ipwb_content",
+          "get_js_error_reporter",
+          "get_legal_relationships",
+          "get_legal_synonyms",
+          "get_legal_term_translations",
+          "get_multi_engine_stats",
+          "get_next_p2p_workflow",
+          "get_p2p_scheduler_status",
+          "get_performance_metrics",
+          "get_regulation_at_date",
+          "get_regulation_changes",
+          "get_regulation_timeline",
+          "get_stock_quote",
+          "get_suppression_status",
+          "get_timestamp",
+          "get_tool_manifest",
+          "get_trial_outcomes_for_theorems",
+          "get_user_info",
+          "get_vector_store_stats_tool",
+          "get_wayback_content",
+          "get_workflow_tags",
+          "github_cli_auth_login",
+          "github_cli_auth_status",
+          "github_cli_execute",
+          "github_cli_install",
+          "github_cli_repo_list",
+          "github_cli_status",
+          "github_create_issue",
+          "github_create_pull_request",
+          "github_get_pull_requests",
+          "github_get_repo_info",
+          "github_get_repo_issues",
+          "github_get_user_info",
+          "github_search_repos",
+          "github_update_pull_request",
+          "graph_add_entity",
+          "graph_add_relationship",
+          "graph_constraint_add",
+          "graph_create",
+          "graph_index_create",
+          "graph_query_cypher",
+          "graph_search_hybrid",
+          "graph_transaction_begin",
+          "graph_transaction_commit",
+          "graph_transaction_rollback",
+          "health_check",
+          "hybrid_search",
+          "identify_obligations",
+          "index_config_tool",
+          "index_dataset",
+          "index_loading_tool",
+          "index_sparse_collection",
+          "index_status_tool",
+          "index_warc",
+          "index_warc_to_ipwb",
+          "ingest_document_collection",
+          "ingest_news_article",
+          "ingest_news_feed",
+          "ingest_website",
+          "initialize_p2p_scheduler",
+          "ipfs_tools_claudes",
+          "json_to_pydantic",
+          "json_to_python_file",
+          "legal_text_to_deontic",
+          "lint_python_codebase",
+          "linting_tools",
+          "list_alert_rules",
+          "list_autoscraper_models",
+          "list_common_crawl_collections_advanced",
+          "list_common_crawl_indexes",
+          "list_existing_schedules",
+          "list_financial_theorems",
+          "list_indices",
+          "list_schedules",
+          "list_software_theorems",
+          "list_tools_in_cli_dir",
+          "list_tools_in_functions_dir",
+          "list_vector_indexes",
+          "load_dataset",
+          "load_index",
+          "load_mysql_config",
+          "load_sql_file",
+          "main",
+          "make_citation_validator",
+          "make_results_analyzer",
+          "make_setup_database_and_files",
+          "make_stratified_sampler",
+          "manage_background_tasks",
+          "manage_cache",
+          "manage_collections",
+          "manage_endpoints",
+          "manage_index_configuration",
+          "manage_rate_limits",
+          "manage_session_state",
+          "manage_shards",
+          "manage_sparse_models",
+          "manage_task_queue",
+          "manage_vector_store",
+          "map_relationships",
+          "map_spatiotemporal_events",
+          "merge_embedding_shards",
+          "merge_merkle_clock",
+          "merge_shards_tool",
+          "monitor_cache",
+          "monitor_healing_effectiveness",
+          "monitor_index_status",
+          "monitor_services",
+          "multi_engine_legal_search",
+          "multi_modal_search",
+          "normalize_predicate",
+          "normalize_predicate_name",
+          "optimize_autoscraper_model",
+          "optimize_cache",
+          "optimize_vector_store",
+          "optimize_vector_store_tool",
+          "p2p_cache_delete",
+          "p2p_cache_get",
+          "p2p_cache_has",
+          "p2p_cache_set",
+          "p2p_remote_cache_delete",
+          "p2p_remote_cache_get",
+          "p2p_remote_cache_has",
+          "p2p_remote_cache_set",
+          "p2p_remote_call_tool",
+          "p2p_remote_status",
+          "p2p_remote_submit_task",
+          "p2p_scheduler_get_next_task",
+          "p2p_scheduler_init",
+          "p2p_scheduler_mark_complete",
+          "p2p_scheduler_status",
+          "p2p_scheduler_submit_task",
+          "p2p_service_status",
+          "p2p_task_delete",
+          "p2p_task_get",
+          "p2p_task_submit",
+          "parse_arguments",
+          "parse_deontic_to_json",
+          "parse_fol",
+          "parse_fol_to_json",
+          "parse_kubernetes_logs",
+          "parse_logical_operators",
+          "parse_package_json_dependencies",
+          "parse_quantifiers",
+          "parse_requirements_txt",
+          "parse_simple_predicate",
+          "parse_systemd_logs",
+          "parse_workflow_logs",
+          "pdf_analyze_relationships",
+          "pdf_batch_process",
+          "pdf_cross_document_analysis",
+          "pdf_extract_entities",
+          "pdf_ingest_to_graphrag",
+          "pdf_optimize_for_llm",
+          "pdf_query_corpus",
+          "pdf_query_knowledge_graph",
+          "perform_clustering_analysis",
+          "pin_to_ipfs",
+          "plan_speculative_execution",
+          "predict_gpu_needs",
+          "process_dataset",
+          "provenance_tools_claudes",
+          "python_file_to_json",
+          "quality_assessment",
+          "query_deontic_conflicts",
+          "query_deontic_statements",
+          "query_geographic_context",
+          "query_knowledge_graph",
+          "query_storage",
+          "record_audit_event",
+          "record_provenance",
+          "reduce_dimensionality",
+          "register_brave_legal_search_tools",
+          "register_enhanced_embedding_tools",
+          "register_legal_web_archive_tools",
+          "remove_alert_rule",
+          "remove_p2p_peer",
+          "remove_schedule",
+          "reset_alert_suppression",
+          "reset_config",
+          "reset_global_manager",
+          "retrieve_data",
+          "run_in_thread_pool",
+          "run_schedule_now",
+          "run_verification",
+          "save_dataset",
+          "schedule_p2p_workflow",
+          "schedule_report_generation",
+          "scrape_biochemical_research",
+          "scrape_clinical_trials",
+          "scrape_clinical_trials_cli",
+          "scrape_financial_news",
+          "scrape_github_repository",
+          "scrape_multiple_urls_tool",
+          "scrape_population_health_data",
+          "scrape_pubmed_cli",
+          "scrape_pubmed_medical_research",
+          "scrape_recap_incremental",
+          "scrape_stock_data",
+          "scrape_url_tool",
+          "scrape_with_autoscraper",
+          "scrape_with_fallbacks",
+          "scrape_with_incremental_update",
+          "search_archive_is",
+          "search_archive_news",
+          "search_brave",
+          "search_brave_images",
+          "search_brave_news",
+          "search_common_crawl",
+          "search_common_crawl_advanced",
+          "search_embeddings",
+          "search_financial_news",
+          "search_github_code",
+          "search_github_issues",
+          "search_github_repositories",
+          "search_github_users",
+          "search_google",
+          "search_google_images",
+          "search_huggingface_datasets",
+          "search_huggingface_models",
+          "search_huggingface_spaces",
+          "search_ipwb_archive",
+          "search_legal_graph",
+          "search_openverse_audio",
+          "search_openverse_images",
+          "search_patents_by_assignee",
+          "search_patents_by_inventor",
+          "search_patents_by_keyword",
+          "search_serpstack",
+          "search_serpstack_images",
+          "search_vector_index",
+          "search_vector_store_tool",
+          "search_wayback_machine",
+          "search_with_filters",
+          "semantic_search",
+          "send_discord_embed",
+          "send_discord_message",
+          "set_config",
+          "setup_custom_schedule",
+          "setup_daily_federal_register",
+          "setup_daily_state_laws",
+          "setup_daily_us_code",
+          "setup_weekly_all_states",
+          "shard_embeddings",
+          "shard_embeddings_by_cluster",
+          "shard_embeddings_by_dimension",
+          "shard_embeddings_tool",
+          "shard_info_tool",
+          "shard_management_tool",
+          "sparse_search",
+          "start_ipwb_replay",
+          "store_data",
+          "suggest_dependency_improvements",
+          "suggest_fixes",
+          "system_health",
+          "system_maintenance",
+          "system_status",
+          "test_scraper",
+          "test_scraper_output",
+          "text_to_fol",
+          "track_provenance",
+          "track_regulation_version",
+          "transform_data",
+          "transform_dataset_with_ai",
+          "transform_medical_dataset",
+          "translate_legal_query",
+          "update_ai_agent_pr",
+          "use_cli_program_as_tool",
+          "use_function_as_tool",
+          "validate_against_theorem",
+          "validate_data",
+          "validate_files",
+          "validate_fol_syntax",
+          "validate_medical_theorem_fuzzy",
+          "validate_scraper_classes",
+          "validate_session_id",
+          "validate_session_type",
+          "validate_token",
+          "validate_user_id",
+          "verify_ipwb_archive",
+          "visualize_legal_graph",
+          "vscode_cli_execute",
+          "vscode_cli_install",
+          "vscode_cli_install_extension",
+          "vscode_cli_list_extensions",
+          "vscode_cli_status",
+          "vscode_cli_tunnel_install_service",
+          "vscode_cli_tunnel_login",
+          "vscode_cli_uninstall_extension",
+          "wrap_function_as_tool",
+          "ytdlp_batch_download",
+          "ytdlp_download_playlist",
+          "ytdlp_download_video",
+          "ytdlp_extract_info",
+          "ytdlp_search_videos"
+        ],
+        "notes": [],
+        "public_exports": [
+          "Configs",
+          "IPFSDatasetsMCPClient",
+          "IPFSDatasetsMCPServer",
+          "SimpleIPFSDatasetsMCPServer",
+          "configs",
+          "load_config_from_yaml",
+          "start_server",
+          "start_stdio_server"
+        ],
+        "public_exports_source": "__all__"
+      }
+    }
+  ],
+  "summary": {
+    "console_scripts": [
+      {
+        "command": "fc",
+        "module_exists": true,
+        "target": "ipfs_datasets_py.processors.file_converter.cli:main"
+      },
+      {
+        "command": "file-converter",
+        "module_exists": true,
+        "target": "ipfs_datasets_py.processors.file_converter.cli:main"
+      },
+      {
+        "command": "ipfs-datasets",
+        "module_exists": true,
+        "target": "ipfs_datasets_cli:cli_main"
+      },
+      {
+        "command": "ipfs-datasets-cli",
+        "module_exists": true,
+        "target": "ipfs_datasets_cli:cli_main"
+      }
+    ],
+    "console_scripts_orphaned": [],
+    "counts": {
+      "missing": 17,
+      "partial": 16,
+      "total": 36,
+      "wired": 3
+    },
+    "extras_available": [
+      "accelerate",
+      "alerts",
+      "all",
+      "api",
+      "audit",
+      "dev",
+      "email",
+      "file_conversion",
+      "file_conversion_full",
+      "ipld",
+      "legal",
+      "linux",
+      "logic",
+      "macos",
+      "ml",
+      "multimedia",
+      "p2p",
+      "pdf",
+      "provenance",
+      "scraping",
+      "security",
+      "test",
+      "vectors",
+      "web_archive",
+      "windows"
+    ],
+    "extras_index": {
+      "accelerate": [
+        "ipfs_accelerate_py",
+        "sentence-transformers",
+        "torch",
+        "transformers"
+      ],
+      "alerts": [
+        "PyYAML",
+        "aiohttp",
+        "discord.py"
+      ],
+      "all": [
+        "PyYAML",
+        "aiohttp",
+        "archivenow",
+        "autoscraper",
+        "beautifulsoup4",
+        "cdx-toolkit",
+        "cryptography",
+        "dash",
+        "dash-cytoscape",
+        "discord.py",
+        "elasticsearch",
+        "faiss-cpu",
+        "fastapi",
+        "ffmpeg-python",
+        "flask",
+        "internetarchive",
+        "ipld-car",
+        "ipld-dag-pb",
+        "ipwb",
+        "keyring",
+        "markitdown",
+        "mcp",
+        "moviepy",
+        "nltk",
+        "pdfplumber",
+        "pillow",
+        "plotly",
+        "pymupdf",
+        "pysbd",
+        "pytesseract",
+        "pytest",
+        "pytest-asyncio",
+        "pytest-benchmark",
+        "pytest-cov",
+        "pytest-parallel",
+        "pytest-timeout",
+        "pytest-xdist",
+        "qdrant-client",
+        "scrapy",
+        "selenium",
+        "symbolicai",
+        "tiktoken",
+        "uvicorn",
+        "warcio",
+        "wayback",
+        "yt-dlp"
+      ],
+      "api": [
+        "fastapi",
+        "flask",
+        "mcp",
+        "uvicorn"
+      ],
+      "audit": [
+        "cryptography",
+        "elasticsearch"
+      ],
+      "dev": [
+        "Faker",
+        "coverage",
+        "flake8",
+        "mypy",
+        "pyfakefs",
+        "reportlab"
+      ],
+      "email": [
+        "beautifulsoup4"
+      ],
+      "file_conversion": [
+        "aiohttp",
+        "markitdown",
+        "playwright"
+      ],
+      "file_conversion_full": [
+        "PyPDF2",
+        "aiohttp",
+        "beautifulsoup4",
+        "markitdown",
+        "openpyxl",
+        "playwright",
+        "pytesseract",
+        "python-docx",
+        "python-pptx"
+      ],
+      "ipld": [
+        "ipld-car",
+        "ipld-dag-pb"
+      ],
+      "legal": [],
+      "linux": [
+        "python-magic"
+      ],
+      "logic": [
+        "nltk",
+        "symbolicai"
+      ],
+      "macos": [
+        "python-magic"
+      ],
+      "ml": [
+        "llama-index",
+        "openai",
+        "surya-ocr",
+        "torch"
+      ],
+      "multimedia": [
+        "ffmpeg-python",
+        "moviepy",
+        "pillow",
+        "yt-dlp"
+      ],
+      "p2p": [
+        "libp2p",
+        "pymultihash"
+      ],
+      "pdf": [
+        "pdfplumber",
+        "pymupdf",
+        "pysbd",
+        "pytesseract",
+        "tiktoken"
+      ],
+      "provenance": [
+        "dash",
+        "dash-cytoscape",
+        "plotly"
+      ],
+      "scraping": [
+        "autoscraper",
+        "beautifulsoup4",
+        "cdx-toolkit",
+        "internetarchive",
+        "scrapy",
+        "selenium",
+        "wayback"
+      ],
+      "security": [
+        "cryptography",
+        "keyring"
+      ],
+      "test": [
+        "pytest",
+        "pytest-asyncio",
+        "pytest-benchmark",
+        "pytest-cov",
+        "pytest-parallel",
+        "pytest-timeout",
+        "pytest-trio",
+        "pytest-xdist"
+      ],
+      "vectors": [
+        "elasticsearch",
+        "faiss-cpu",
+        "qdrant-client"
+      ],
+      "web_archive": [
+        "archivenow",
+        "beautifulsoup4",
+        "ipwb",
+        "warcio"
+      ],
+      "windows": [
+        "python-magic-bin",
+        "pywin32"
+      ]
+    },
+    "package_root": "/home/barberb/complaint-generator/ipfs_datasets_py/ipfs_datasets_py",
+    "repo_root": "/home/barberb/complaint-generator",
+    "tool_categories": [
+      "admin_tools",
+      "alert_tools",
+      "analysis_tools",
+      "audit_tools",
+      "auth_tools",
+      "background_task_tools",
+      "bespoke_tools",
+      "cache_tools",
+      "cli",
+      "dashboard_tools",
+      "data_processing_tools",
+      "dataset_tools",
+      "development_tools",
+      "discord_tools",
+      "email_tools",
+      "embedding_tools",
+      "file_converter_tools",
+      "file_detection_tools",
+      "finance_data_tools",
+      "functions",
+      "geospatial_tools",
+      "graph_tools",
+      "index_management_tools",
+      "investigation_tools",
+      "ipfs_cluster_tools",
+      "ipfs_tools",
+      "legacy_mcp_tools",
+      "legal_dataset_tools",
+      "lizardperson_argparse_programs",
+      "lizardpersons_function_tools",
+      "logic_tools",
+      "media_tools",
+      "medical_research_scrapers",
+      "monitoring_tools",
+      "p2p_tools",
+      "p2p_workflow_tools",
+      "pdf_tools",
+      "provenance_tools",
+      "rate_limiting_tools",
+      "search_tools",
+      "security_tools",
+      "session_tools",
+      "software_engineering_tools",
+      "sparse_embedding_tools",
+      "storage_tools",
+      "vector_store_tools",
+      "vector_tools",
+      "web_archive_tools",
+      "web_scraping_tools",
+      "workflow_tools"
+    ],
+    "tool_index": {
+      "admin_tools": {
+        "admin_tools": [
+          "configure_system",
+          "manage_endpoints",
+          "system_health",
+          "system_maintenance",
+          "system_status"
+        ]
+      },
+      "alert_tools": {
+        "discord_alert_tools": [
+          "add_alert_rule",
+          "evaluate_alert_rules",
+          "get_suppression_status",
+          "list_alert_rules",
+          "remove_alert_rule",
+          "reset_alert_suppression",
+          "send_discord_embed",
+          "send_discord_message"
+        ]
+      },
+      "analysis_tools": {
+        "analysis_tools": [
+          "analyze_data_distribution",
+          "analyze_diversity",
+          "analyze_similarity_patterns",
+          "assess_embedding_quality",
+          "cluster_analysis",
+          "detect_drift",
+          "detect_outliers",
+          "dimensionality_reduction",
+          "perform_clustering_analysis",
+          "quality_assessment",
+          "reduce_dimensionality"
+        ]
+      },
+      "audit_tools": {
+        "audit_tools": [
+          "audit_tools"
+        ],
+        "generate_audit_report": [
+          "generate_audit_report"
+        ],
+        "record_audit_event": [
+          "record_audit_event"
+        ]
+      },
+      "auth_tools": {
+        "auth_tools": [
+          "authenticate_user",
+          "get_user_info",
+          "validate_token"
+        ]
+      },
+      "background_task_tools": {
+        "background_task_tools": [
+          "check_task_status",
+          "manage_background_tasks",
+          "manage_task_queue"
+        ]
+      },
+      "bespoke_tools": {
+        "cache_stats": [
+          "cache_stats"
+        ],
+        "create_vector_store": [
+          "create_vector_store"
+        ],
+        "delete_index": [
+          "delete_index"
+        ],
+        "execute_workflow": [
+          "execute_audit_report_step",
+          "execute_cache_optimization_step",
+          "execute_data_ingestion_step",
+          "execute_dataset_migration_step",
+          "execute_vector_optimization_step",
+          "execute_workflow"
+        ],
+        "list_indices": [
+          "list_indices"
+        ],
+        "system_health": [
+          "system_health"
+        ],
+        "system_status": [
+          "system_status"
+        ]
+      },
+      "cache_tools": {
+        "cache_tools": [
+          "cache_clear",
+          "cache_delete",
+          "cache_embeddings",
+          "cache_get",
+          "cache_set",
+          "cache_stats",
+          "get_cached_embeddings",
+          "manage_cache",
+          "optimize_cache"
+        ],
+        "enhanced_cache_tools": [
+          "clear_cache",
+          "get_cache_stats",
+          "monitor_cache"
+        ]
+      },
+      "cli": {
+        "execute_command": [
+          "execute_command"
+        ],
+        "medical_research_cli": [
+          "discover_biomolecules_rag_cli",
+          "discover_enzyme_inhibitors_cli",
+          "discover_protein_binders_cli",
+          "format_articles_table",
+          "format_candidates_table",
+          "format_trials_table",
+          "scrape_clinical_trials_cli",
+          "scrape_pubmed_cli"
+        ]
+      },
+      "dashboard_tools": {
+        "js_error_reporter": [
+          "get_js_error_reporter"
+        ]
+      },
+      "data_processing_tools": {
+        "data_processing_tools": [
+          "chunk_text",
+          "convert_format",
+          "transform_data",
+          "validate_data"
+        ]
+      },
+      "dataset_tools": {
+        "convert_dataset_format": [
+          "convert_dataset_format"
+        ],
+        "dataset_tools_claudes": [
+          "dataset_tools_claudes"
+        ],
+        "legal_text_to_deontic": [
+          "legal_text_to_deontic",
+          "main"
+        ],
+        "load_dataset": [
+          "load_dataset"
+        ],
+        "logic_utils.deontic_parser": [
+          "analyze_normative_sentence",
+          "build_deontic_formula",
+          "detect_normative_conflicts",
+          "extract_conditions",
+          "extract_exceptions",
+          "extract_legal_action",
+          "extract_legal_subject",
+          "extract_normative_elements",
+          "extract_temporal_constraints",
+          "identify_obligations",
+          "normalize_predicate_name"
+        ],
+        "logic_utils.fol_parser": [
+          "build_fol_formula",
+          "convert_to_prolog",
+          "convert_to_tptp",
+          "normalize_predicate_name",
+          "parse_fol",
+          "parse_logical_operators",
+          "parse_quantifiers",
+          "parse_simple_predicate",
+          "validate_fol_syntax"
+        ],
+        "logic_utils.logic_formatter": [
+          "convert_to_defeasible_format",
+          "convert_to_prolog_format",
+          "convert_to_tptp_format",
+          "extract_deontic_metadata",
+          "extract_fol_metadata",
+          "format_deontic",
+          "format_fol",
+          "format_output",
+          "format_text_output",
+          "format_xml_output",
+          "get_timestamp",
+          "parse_deontic_to_json",
+          "parse_fol_to_json"
+        ],
+        "logic_utils.predicate_extractor": [
+          "extract_logical_relations",
+          "extract_predicates",
+          "extract_variables",
+          "normalize_predicate"
+        ],
+        "process_dataset": [
+          "process_dataset"
+        ],
+        "save_dataset": [
+          "save_dataset"
+        ],
+        "text_to_fol": [
+          "main",
+          "text_to_fol"
+        ]
+      },
+      "development_tools": {
+        "base_tool": [
+          "base_tool",
+          "development_tool_mcp_wrapper"
+        ],
+        "claude_cli_server_tools": [
+          "claude_analyze_code_quality",
+          "claude_cli_config_set_api_key",
+          "claude_cli_execute",
+          "claude_cli_install",
+          "claude_cli_list_models",
+          "claude_cli_status",
+          "claude_cli_test_connection",
+          "claude_explain_code",
+          "claude_generate_documentation",
+          "claude_generate_tests",
+          "claude_refactor_suggestions",
+          "claude_review_pull_request"
+        ],
+        "codebase_search": [
+          "codebase_search"
+        ],
+        "config": [
+          "config",
+          "get_config",
+          "reset_config",
+          "set_config"
+        ],
+        "documentation_generator": [
+          "documentation_generator"
+        ],
+        "documentation_generator_simple": [
+          "documentation_generator",
+          "documentation_generator_simple"
+        ],
+        "gemini_cli_server_tools": [
+          "gemini_analyze_code",
+          "gemini_cli_config_set_api_key",
+          "gemini_cli_execute",
+          "gemini_cli_install",
+          "gemini_cli_list_models",
+          "gemini_cli_status",
+          "gemini_cli_test_connection",
+          "gemini_extract_structured_data",
+          "gemini_generate_text",
+          "gemini_summarize_text",
+          "gemini_translate_text"
+        ],
+        "github_cli_server_tools": [
+          "github_cli_auth_login",
+          "github_cli_auth_status",
+          "github_cli_execute",
+          "github_cli_install",
+          "github_cli_repo_list",
+          "github_cli_status",
+          "github_create_issue",
+          "github_create_pull_request",
+          "github_get_pull_requests",
+          "github_get_repo_info",
+          "github_get_repo_issues",
+          "github_get_user_info",
+          "github_search_repos",
+          "github_update_pull_request"
+        ],
+        "linting_tools": [
+          "lint_python_codebase",
+          "linting_tools"
+        ],
+        "vscode_cli_tools": [
+          "vscode_cli_execute",
+          "vscode_cli_install",
+          "vscode_cli_install_extension",
+          "vscode_cli_list_extensions",
+          "vscode_cli_status",
+          "vscode_cli_tunnel_install_service",
+          "vscode_cli_tunnel_login",
+          "vscode_cli_uninstall_extension"
+        ]
+      },
+      "discord_tools": {
+        "discord_analyze": [
+          "discord_analyze_channel",
+          "discord_analyze_export",
+          "discord_analyze_guild"
+        ],
+        "discord_convert": [
+          "discord_batch_convert_exports",
+          "discord_convert_export"
+        ],
+        "discord_export": [
+          "discord_export_all_channels",
+          "discord_export_channel",
+          "discord_export_dm_channels",
+          "discord_export_dm_channels_individual",
+          "discord_export_guild"
+        ],
+        "discord_list": [
+          "discord_list_channels",
+          "discord_list_dm_channels",
+          "discord_list_guilds"
+        ]
+      },
+      "email_tools": {
+        "email_analyze": [
+          "email_analyze_export",
+          "email_search_export"
+        ],
+        "email_connect": [
+          "email_list_folders",
+          "email_test_connection"
+        ],
+        "email_export": [
+          "email_export_folder",
+          "email_fetch_emails",
+          "email_parse_eml"
+        ]
+      },
+      "embedding_tools": {
+        "advanced_embedding_generation": [
+          "generate_batch_embeddings",
+          "generate_embedding",
+          "generate_embeddings_from_file"
+        ],
+        "advanced_search": [
+          "hybrid_search",
+          "multi_modal_search",
+          "search_with_filters",
+          "semantic_search"
+        ],
+        "embedding_generation": [
+          "generate_batch_embeddings",
+          "generate_embedding",
+          "generate_embeddings_from_file",
+          "get_available_tools"
+        ],
+        "embedding_tools": [
+          "generate_embeddings",
+          "shard_embeddings"
+        ],
+        "enhanced_embedding_tools": [
+          "chunk_text",
+          "create_embeddings",
+          "index_dataset",
+          "manage_endpoints",
+          "search_embeddings"
+        ],
+        "shard_embeddings": [
+          "merge_embedding_shards",
+          "shard_embeddings_by_cluster",
+          "shard_embeddings_by_dimension"
+        ],
+        "shard_embeddings_tool": [
+          "merge_shards_tool",
+          "shard_embeddings_tool",
+          "shard_info_tool"
+        ],
+        "tool_registration": [
+          "get_tool_manifest",
+          "register_enhanced_embedding_tools"
+        ]
+      },
+      "file_converter_tools": {
+        "batch_convert": [
+          "batch_convert_tool"
+        ],
+        "convert_file": [
+          "convert_file_tool"
+        ],
+        "download_url": [
+          "download_url_tool"
+        ],
+        "extract_archive": [
+          "extract_archive_tool"
+        ],
+        "extract_knowledge_graph": [
+          "extract_knowledge_graph_tool"
+        ],
+        "file_info": [
+          "file_info_tool"
+        ],
+        "generate_embeddings": [
+          "generate_embeddings_tool"
+        ],
+        "generate_summary": [
+          "generate_summary_tool"
+        ]
+      },
+      "file_detection_tools": {
+        "analyze_detection_accuracy": [
+          "analyze_detection_accuracy"
+        ],
+        "batch_detect_file_types": [
+          "batch_detect_file_types"
+        ],
+        "detect_file_type": [
+          "detect_file_type"
+        ]
+      },
+      "finance_data_tools": {
+        "embedding_correlation": [
+          "analyze_embedding_market_correlation",
+          "find_predictive_embedding_patterns"
+        ],
+        "finance_theorems": [
+          "apply_financial_theorem",
+          "list_financial_theorems"
+        ],
+        "news_scrapers": [
+          "fetch_financial_news",
+          "scrape_financial_news",
+          "search_archive_news",
+          "search_financial_news"
+        ],
+        "stock_scrapers": [
+          "fetch_corporate_actions",
+          "fetch_stock_data",
+          "get_stock_quote",
+          "scrape_stock_data"
+        ]
+      },
+      "functions": {
+        "execute_python_snippet": [
+          "execute_python_snippet"
+        ]
+      },
+      "geospatial_tools": {
+        "geospatial_tools": [
+          "extract_geographic_entities",
+          "map_spatiotemporal_events",
+          "query_geographic_context"
+        ]
+      },
+      "graph_tools": {
+        "graph_add_entity": [
+          "graph_add_entity"
+        ],
+        "graph_add_relationship": [
+          "graph_add_relationship"
+        ],
+        "graph_constraint_add": [
+          "graph_constraint_add"
+        ],
+        "graph_create": [
+          "graph_create"
+        ],
+        "graph_index_create": [
+          "graph_index_create"
+        ],
+        "graph_query_cypher": [
+          "graph_query_cypher"
+        ],
+        "graph_search_hybrid": [
+          "graph_search_hybrid"
+        ],
+        "graph_transaction_begin": [
+          "graph_transaction_begin"
+        ],
+        "graph_transaction_commit": [
+          "graph_transaction_commit"
+        ],
+        "graph_transaction_rollback": [
+          "graph_transaction_rollback"
+        ],
+        "query_knowledge_graph": [
+          "query_knowledge_graph"
+        ]
+      },
+      "index_management_tools": {
+        "index_management_tools": [
+          "index_config_tool",
+          "index_loading_tool",
+          "index_status_tool",
+          "load_index",
+          "manage_index_configuration",
+          "manage_shards",
+          "monitor_index_status",
+          "shard_management_tool"
+        ]
+      },
+      "investigation_tools": {
+        "data_ingestion_tools": [
+          "ingest_document_collection",
+          "ingest_news_article",
+          "ingest_news_feed",
+          "ingest_website"
+        ],
+        "deontological_reasoning_tools": [
+          "analyze_deontological_conflicts",
+          "query_deontic_conflicts",
+          "query_deontic_statements"
+        ],
+        "entity_analysis_tools": [
+          "analyze_entities",
+          "explore_entity"
+        ],
+        "geospatial_analysis_tools": [
+          "extract_geographic_entities",
+          "map_spatiotemporal_events",
+          "query_geographic_context"
+        ],
+        "relationship_timeline_tools": [
+          "analyze_entity_timeline",
+          "detect_patterns",
+          "map_relationships",
+          "track_provenance"
+        ]
+      },
+      "ipfs_cluster_tools": {},
+      "ipfs_tools": {
+        "get_from_ipfs": [
+          "get_from_ipfs"
+        ],
+        "ipfs_tools_claudes": [
+          "ipfs_tools_claudes"
+        ],
+        "pin_to_ipfs": [
+          "pin_to_ipfs"
+        ]
+      },
+      "legacy_mcp_tools": {
+        "geospatial_tools": [
+          "extract_geographic_entities",
+          "map_spatiotemporal_events",
+          "query_geographic_context"
+        ],
+        "municipal_scraper_fallbacks": [
+          "scrape_with_fallbacks"
+        ],
+        "patent_scraper": [
+          "search_patents_by_assignee",
+          "search_patents_by_inventor",
+          "search_patents_by_keyword"
+        ],
+        "tool_wrapper": [
+          "wrap_function_as_tool"
+        ],
+        "vector_store_tools": [
+          "add_embeddings_to_store_tool",
+          "create_vector_store_tool",
+          "delete_from_vector_store_tool",
+          "get_vector_store_stats_tool",
+          "optimize_vector_store_tool",
+          "search_vector_store_tool"
+        ]
+      },
+      "legal_dataset_tools": {
+        "analyze_failed_state": [
+          "analyze_all_failed_states",
+          "analyze_http_response",
+          "analyze_state_scraper",
+          "main"
+        ],
+        "brave_legal_search_tools": [
+          "register_brave_legal_search_tools"
+        ],
+        "citation_extraction_tool": [
+          "analyze_citation_network",
+          "export_citations",
+          "extract_legal_citations"
+        ],
+        "enhanced_query_expander": [
+          "expand_legal_query",
+          "get_legal_relationships",
+          "get_legal_synonyms"
+        ],
+        "incremental_updates": [
+          "calculate_update_parameters",
+          "scrape_recap_incremental",
+          "scrape_with_incremental_update"
+        ],
+        "legal_graphrag_tool": [
+          "create_legal_knowledge_graph",
+          "search_legal_graph",
+          "visualize_legal_graph"
+        ],
+        "legal_report_generator_tool": [
+          "export_legal_report",
+          "generate_compliance_checklist",
+          "generate_legal_report",
+          "schedule_report_generation"
+        ],
+        "legal_web_archive_tools": [
+          "register_legal_web_archive_tools"
+        ],
+        "multi_engine_legal_search": [
+          "get_multi_engine_stats",
+          "multi_engine_legal_search"
+        ],
+        "multilanguage_support_tool": [
+          "cross_language_legal_search",
+          "detect_query_language",
+          "get_legal_term_translations",
+          "translate_legal_query"
+        ],
+        "municipal_scraper_fallbacks": [
+          "scrape_with_fallbacks"
+        ],
+        "quick_test_fixes": [
+          "main",
+          "test_scraper"
+        ],
+        "regulation_version_tracker_tool": [
+          "get_regulation_at_date",
+          "get_regulation_changes",
+          "get_regulation_timeline",
+          "track_regulation_version"
+        ],
+        "result_filter": [
+          "filter_legal_results",
+          "get_filter_statistics"
+        ],
+        "setup_periodic_updates": [
+          "list_existing_schedules",
+          "main",
+          "setup_custom_schedule",
+          "setup_daily_federal_register",
+          "setup_daily_state_laws",
+          "setup_daily_us_code",
+          "setup_weekly_all_states"
+        ],
+        "state_laws_cron": [
+          "cmd_add",
+          "cmd_daemon",
+          "cmd_disable",
+          "cmd_enable",
+          "cmd_list",
+          "cmd_remove",
+          "cmd_run",
+          "main"
+        ],
+        "state_laws_scheduler": [
+          "create_schedule",
+          "enable_disable_schedule",
+          "list_schedules",
+          "remove_schedule",
+          "run_schedule_now"
+        ],
+        "validate_all_state_scrapers": [
+          "main",
+          "test_scraper_output",
+          "validate_files",
+          "validate_scraper_classes"
+        ],
+        "verify_all_scrapers": [
+          "main",
+          "run_verification"
+        ],
+        "verify_federal_register_scraper": [
+          "main"
+        ],
+        "verify_us_code_scraper": [
+          "main"
+        ]
+      },
+      "lizardperson_argparse_programs": {
+        "municipal_bluebook_citation_validator._setup_databases_and_files.factory": [
+          "make_setup_database_and_files"
+        ],
+        "municipal_bluebook_citation_validator.citation_validator.factory": [
+          "make_citation_validator"
+        ],
+        "municipal_bluebook_citation_validator.main": [
+          "cleanup_database_connections",
+          "main"
+        ],
+        "municipal_bluebook_citation_validator.results_analyzer.factory": [
+          "make_results_analyzer"
+        ],
+        "municipal_bluebook_citation_validator.stratified_sampler.factory": [
+          "make_stratified_sampler"
+        ],
+        "municipal_bluebook_citation_validator.utils.load_mysql_config": [
+          "load_mysql_config"
+        ],
+        "municipal_bluebook_citation_validator.utils.load_sql_file": [
+          "load_sql_file"
+        ],
+        "municipal_bluebook_citation_validator.utils.parse_arguments": [
+          "parse_arguments"
+        ],
+        "municipal_bluebook_citation_validator.utils.run_in_thread_pool": [
+          "run_in_thread_pool"
+        ]
+      },
+      "lizardpersons_function_tools": {
+        "cli.sample_tool": [
+          "main"
+        ],
+        "llm_context_tools.get_current_time": [
+          "get_current_time"
+        ],
+        "meta_tools.list_tools_in_cli_dir": [
+          "list_tools_in_cli_dir"
+        ],
+        "meta_tools.list_tools_in_functions_dir": [
+          "list_tools_in_functions_dir"
+        ],
+        "meta_tools.use_cli_program_as_tool": [
+          "use_cli_program_as_tool"
+        ],
+        "meta_tools.use_function_as_tool": [
+          "use_function_as_tool"
+        ],
+        "prototyping_tools.json_to_pydantic": [
+          "json_to_pydantic"
+        ],
+        "prototyping_tools.json_to_python_file": [
+          "json_to_python_file"
+        ],
+        "prototyping_tools.python_file_to_json": [
+          "python_file_to_json"
+        ]
+      },
+      "logic_tools": {},
+      "media_tools": {
+        "ffmpeg_batch": [
+          "ffmpeg_batch_process",
+          "get_batch_status",
+          "main"
+        ],
+        "ffmpeg_convert": [
+          "ffmpeg_analyze",
+          "ffmpeg_convert",
+          "ffmpeg_extract_audio",
+          "get_ffmpeg_wrapper"
+        ],
+        "ffmpeg_edit": [
+          "ffmpeg_concat",
+          "ffmpeg_cut",
+          "ffmpeg_splice",
+          "main"
+        ],
+        "ffmpeg_filters": [
+          "ffmpeg_apply_filters",
+          "get_available_filters",
+          "main"
+        ],
+        "ffmpeg_info": [
+          "ffmpeg_analyze",
+          "ffmpeg_probe",
+          "main"
+        ],
+        "ffmpeg_mux_demux": [
+          "ffmpeg_demux",
+          "ffmpeg_mux",
+          "main"
+        ],
+        "ffmpeg_stream": [
+          "ffmpeg_stream_input",
+          "ffmpeg_stream_output",
+          "main"
+        ],
+        "ffmpeg_utils": [
+          "get_ffmpeg_utils"
+        ],
+        "ytdlp_download": [
+          "main",
+          "ytdlp_batch_download",
+          "ytdlp_download_playlist",
+          "ytdlp_download_video",
+          "ytdlp_extract_info",
+          "ytdlp_search_videos"
+        ]
+      },
+      "medical_research_scrapers": {
+        "ai_dataset_builder": [
+          "analyze_medical_dataset",
+          "build_medical_dataset",
+          "generate_synthetic_medical_data",
+          "transform_medical_dataset"
+        ],
+        "biomolecule_discovery": [
+          "discover_biomolecules_for_target"
+        ],
+        "medical_research_mcp_tools": [
+          "analyze_dataset_with_ai",
+          "build_dataset_from_scraped_data",
+          "discover_biomolecules_rag",
+          "discover_enzyme_inhibitors",
+          "discover_pathway_biomolecules",
+          "discover_protein_binders",
+          "generate_medical_theorems_from_trials",
+          "generate_synthetic_dataset",
+          "get_trial_outcomes_for_theorems",
+          "scrape_biochemical_research",
+          "scrape_clinical_trials",
+          "scrape_population_health_data",
+          "scrape_pubmed_medical_research",
+          "transform_dataset_with_ai",
+          "validate_medical_theorem_fuzzy"
+        ]
+      },
+      "monitoring_tools": {
+        "monitoring_tools": [
+          "generate_monitoring_report",
+          "get_performance_metrics",
+          "health_check",
+          "monitor_services"
+        ]
+      },
+      "p2p_tools": {
+        "p2p_tools": [
+          "p2p_cache_delete",
+          "p2p_cache_get",
+          "p2p_cache_has",
+          "p2p_cache_set",
+          "p2p_remote_cache_delete",
+          "p2p_remote_cache_get",
+          "p2p_remote_cache_has",
+          "p2p_remote_cache_set",
+          "p2p_remote_call_tool",
+          "p2p_remote_status",
+          "p2p_remote_submit_task",
+          "p2p_service_status",
+          "p2p_task_delete",
+          "p2p_task_get",
+          "p2p_task_submit"
+        ],
+        "workflow_scheduler_tools": [
+          "p2p_scheduler_get_next_task",
+          "p2p_scheduler_init",
+          "p2p_scheduler_mark_complete",
+          "p2p_scheduler_status",
+          "p2p_scheduler_submit_task"
+        ]
+      },
+      "p2p_workflow_tools": {
+        "p2p_workflow_tools": [
+          "add_p2p_peer",
+          "calculate_peer_distance",
+          "get_assigned_workflows",
+          "get_next_p2p_workflow",
+          "get_p2p_scheduler_status",
+          "get_workflow_tags",
+          "initialize_p2p_scheduler",
+          "merge_merkle_clock",
+          "remove_p2p_peer",
+          "schedule_p2p_workflow"
+        ]
+      },
+      "pdf_tools": {
+        "pdf_analyze_relationships": [
+          "pdf_analyze_relationships"
+        ],
+        "pdf_batch_process": [
+          "pdf_batch_process"
+        ],
+        "pdf_cross_document_analysis": [
+          "pdf_cross_document_analysis"
+        ],
+        "pdf_extract_entities": [
+          "pdf_extract_entities"
+        ],
+        "pdf_ingest_to_graphrag": [
+          "pdf_ingest_to_graphrag"
+        ],
+        "pdf_optimize_for_llm": [
+          "pdf_optimize_for_llm"
+        ],
+        "pdf_query_corpus": [
+          "pdf_query_corpus"
+        ],
+        "pdf_query_knowledge_graph": [
+          "pdf_query_knowledge_graph"
+        ]
+      },
+      "provenance_tools": {
+        "provenance_tools_claudes": [
+          "provenance_tools_claudes"
+        ],
+        "record_provenance": [
+          "record_provenance"
+        ]
+      },
+      "rate_limiting_tools": {
+        "rate_limiting_tools": [
+          "check_rate_limit",
+          "configure_rate_limits",
+          "manage_rate_limits"
+        ]
+      },
+      "search_tools": {},
+      "security_tools": {
+        "check_access_permission": [
+          "check_access_permission"
+        ]
+      },
+      "session_tools": {
+        "enhanced_session_tools": [
+          "validate_session_id",
+          "validate_session_type",
+          "validate_user_id"
+        ],
+        "session_tools": [
+          "cleanup_sessions",
+          "create_session",
+          "manage_session_state"
+        ]
+      },
+      "software_engineering_tools": {
+        "ai_agent_pr_creator": [
+          "analyze_code_for_pr",
+          "create_ai_agent_pr",
+          "update_ai_agent_pr"
+        ],
+        "auto_healing_coordinator": [
+          "coordinate_auto_healing",
+          "monitor_healing_effectiveness"
+        ],
+        "dag_workflow_planner": [
+          "create_workflow_dag",
+          "plan_speculative_execution"
+        ],
+        "dependency_chain_analyzer": [
+          "analyze_dependency_chain",
+          "parse_package_json_dependencies",
+          "parse_requirements_txt",
+          "suggest_dependency_improvements"
+        ],
+        "error_pattern_detector": [
+          "detect_error_patterns",
+          "suggest_fixes"
+        ],
+        "github_actions_analyzer": [
+          "analyze_github_actions",
+          "parse_workflow_logs"
+        ],
+        "github_repository_scraper": [
+          "analyze_repository_health",
+          "scrape_github_repository"
+        ],
+        "gpu_provisioning_predictor": [
+          "analyze_resource_utilization",
+          "predict_gpu_needs"
+        ],
+        "kubernetes_log_analyzer": [
+          "analyze_pod_health",
+          "parse_kubernetes_logs"
+        ],
+        "software_theorems": [
+          "apply_theorem_actions",
+          "list_software_theorems",
+          "validate_against_theorem"
+        ],
+        "systemd_log_parser": [
+          "analyze_service_health",
+          "parse_systemd_logs"
+        ]
+      },
+      "sparse_embedding_tools": {
+        "sparse_embedding_tools": [
+          "generate_sparse_embedding",
+          "index_sparse_collection",
+          "manage_sparse_models",
+          "sparse_search"
+        ]
+      },
+      "storage_tools": {
+        "storage_tools": [
+          "manage_collections",
+          "query_storage",
+          "retrieve_data",
+          "store_data"
+        ]
+      },
+      "vector_store_tools": {
+        "vector_store_tools": [
+          "add_embeddings_to_store_tool",
+          "create_vector_store_tool",
+          "delete_from_vector_store_tool",
+          "get_vector_store_stats_tool",
+          "optimize_vector_store_tool",
+          "search_vector_store_tool"
+        ]
+      },
+      "vector_tools": {
+        "create_vector_index": [
+          "create_vector_index"
+        ],
+        "search_vector_index": [
+          "search_vector_index"
+        ],
+        "shared_state": [
+          "get_global_manager",
+          "reset_global_manager"
+        ],
+        "vector_store_management": [
+          "create_vector_index",
+          "delete_vector_index",
+          "list_vector_indexes",
+          "search_vector_index"
+        ],
+        "vector_stores": [
+          "manage_vector_store",
+          "optimize_vector_store"
+        ]
+      },
+      "web_archive_tools": {
+        "archive_is_integration": [
+          "archive_to_archive_is",
+          "batch_archive_to_archive_is",
+          "check_archive_status",
+          "get_archive_is_content",
+          "search_archive_is"
+        ],
+        "autoscraper_integration": [
+          "batch_scrape_with_autoscraper",
+          "create_autoscraper_model",
+          "list_autoscraper_models",
+          "optimize_autoscraper_model",
+          "scrape_with_autoscraper"
+        ],
+        "brave_search": [
+          "batch_search_brave",
+          "clear_brave_cache",
+          "get_brave_cache_stats",
+          "search_brave",
+          "search_brave_images",
+          "search_brave_news"
+        ],
+        "common_crawl_advanced": [
+          "fetch_warc_record_advanced",
+          "get_common_crawl_collection_info_advanced",
+          "list_common_crawl_collections_advanced",
+          "search_common_crawl_advanced"
+        ],
+        "common_crawl_search": [
+          "get_common_crawl_content",
+          "list_common_crawl_indexes",
+          "search_common_crawl"
+        ],
+        "create_warc": [
+          "create_warc"
+        ],
+        "extract_dataset_from_cdxj": [
+          "extract_dataset_from_cdxj"
+        ],
+        "extract_links_from_warc": [
+          "extract_links_from_warc"
+        ],
+        "extract_metadata_from_warc": [
+          "extract_metadata_from_warc"
+        ],
+        "extract_text_from_warc": [
+          "extract_text_from_warc"
+        ],
+        "github_search": [
+          "batch_search_github",
+          "search_github_code",
+          "search_github_issues",
+          "search_github_repositories",
+          "search_github_users"
+        ],
+        "google_search": [
+          "batch_search_google",
+          "search_google",
+          "search_google_images"
+        ],
+        "huggingface_search": [
+          "batch_search_huggingface",
+          "get_huggingface_model_info",
+          "search_huggingface_datasets",
+          "search_huggingface_models",
+          "search_huggingface_spaces"
+        ],
+        "index_warc": [
+          "index_warc"
+        ],
+        "ipwb_integration": [
+          "get_ipwb_content",
+          "index_warc_to_ipwb",
+          "search_ipwb_archive",
+          "start_ipwb_replay",
+          "verify_ipwb_archive"
+        ],
+        "openverse_search": [
+          "batch_search_openverse",
+          "search_openverse_audio",
+          "search_openverse_images"
+        ],
+        "serpstack_search": [
+          "batch_search_serpstack",
+          "search_serpstack",
+          "search_serpstack_images"
+        ],
+        "wayback_machine_search": [
+          "archive_to_wayback",
+          "get_wayback_content",
+          "search_wayback_machine"
+        ]
+      },
+      "web_scraping_tools": {
+        "unified_scraper_tool": [
+          "check_scraper_methods_tool",
+          "scrape_multiple_urls_tool",
+          "scrape_url_tool"
+        ]
+      },
+      "workflow_tools": {}
+    }
+  }
+}
