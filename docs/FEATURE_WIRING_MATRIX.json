@@ -51,10 +51,13 @@
       "feature_id": "alerts",
       "kind": "package",
       "path": "ipfs_datasets_py/ipfs_datasets_py/alerts",
-      "status": "partial",
+      "status": "wired",
       "surfaces": {
         "cli_commands": [],
-        "cli_modules": [],
+        "cli_modules": [
+          "module:ipfs_datasets_py.alerts.cli",
+          "path:ipfs_datasets_py/ipfs_datasets_py/alerts/cli.py"
+        ],
         "import_exists": true,
         "import_module": "ipfs_datasets_py.alerts",
         "likely_extras": [
@@ -73,9 +76,7 @@
           "send_discord_embed",
           "send_discord_message"
         ],
-        "notes": [
-          "no_cli_detected"
-        ],
+        "notes": [],
         "public_exports": [
           "AlertManager",
           "AlertRule",
@@ -681,7 +682,7 @@
         "import_exists": true,
         "import_module": "ipfs_datasets_py.knowledge_graphs",
         "likely_extras": [
-          "accelerate",
+          "knowledge_graphs",
           "ipld",
           "provenance"
         ],
@@ -704,8 +705,19 @@
         "notes": [
           "no_cli_detected"
         ],
-        "public_exports": [],
-        "public_exports_source": "none"
+        "public_exports": [
+          "EntityExtractionError",
+          "EntityNotFoundError",
+          "ExtractionError",
+          "KnowledgeGraphError",
+          "QueryError",
+          "QueryExecutionError",
+          "QueryParseError",
+          "RelationshipExtractionError",
+          "RelationshipNotFoundError",
+          "ValidationError"
+        ],
+        "public_exports_source": "reexports"
       }
     },
     {
@@ -733,15 +745,19 @@
       "feature_id": "logic",
       "kind": "package",
       "path": "ipfs_datasets_py/ipfs_datasets_py/logic",
-      "status": "partial",
+      "status": "wired",
       "surfaces": {
         "cli_commands": [],
-        "cli_modules": [],
+        "cli_modules": [
+          "module:ipfs_datasets_py.logic.cli",
+          "path:ipfs_datasets_py/ipfs_datasets_py/logic/cli.py"
+        ],
         "import_exists": true,
         "import_module": "ipfs_datasets_py.logic",
         "likely_extras": [
           "accelerate",
           "alerts",
+          "knowledge_graphs",
           "logic"
         ],
         "mcp_tool_categories": [
@@ -753,6 +769,8 @@
           "BulkProcessCaselawTool",
           "CheckDocumentConsistencyTool",
           "QueryTheoremsTool",
+          "TEMPORAL_DEONTIC_LOGIC_TOOLS",
+          "TOOL_VERSION",
           "add_theorem",
           "analyze_normative_sentence",
           "build_deontic_formula",
@@ -802,11 +820,10 @@
           "text_to_fol",
           "validate_fol_syntax"
         ],
-        "notes": [
-          "no_cli_detected"
-        ],
+        "notes": [],
         "public_exports": [
           "api",
+          "cli",
           "integration",
           "integrations",
           "tools"
@@ -961,10 +978,13 @@
       "feature_id": "p2p_networking",
       "kind": "package",
       "path": "ipfs_datasets_py/ipfs_datasets_py/p2p_networking",
-      "status": "partial",
+      "status": "wired",
       "surfaces": {
         "cli_commands": [],
-        "cli_modules": [],
+        "cli_modules": [
+          "module:ipfs_datasets_py.p2p_networking.cli",
+          "path:ipfs_datasets_py/ipfs_datasets_py/p2p_networking/cli.py"
+        ],
         "import_exists": true,
         "import_module": "ipfs_datasets_py.p2p_networking",
         "likely_extras": [],
@@ -1004,10 +1024,9 @@
           "remove_p2p_peer",
           "schedule_p2p_workflow"
         ],
-        "notes": [
-          "no_cli_detected"
-        ],
+        "notes": [],
         "public_exports": [
+          "cli",
           "libp2p_kit",
           "libp2p_kit_full",
           "libp2p_kit_stub",
@@ -1148,10 +1167,13 @@
       "feature_id": "search",
       "kind": "package",
       "path": "ipfs_datasets_py/ipfs_datasets_py/search",
-      "status": "partial",
+      "status": "wired",
       "surfaces": {
         "cli_commands": [],
-        "cli_modules": [],
+        "cli_modules": [
+          "module:ipfs_datasets_py.search.cli",
+          "path:ipfs_datasets_py/ipfs_datasets_py/search/cli.py"
+        ],
         "import_exists": true,
         "import_module": "ipfs_datasets_py.search",
         "likely_extras": [
@@ -1189,9 +1211,7 @@
           "transform_medical_dataset",
           "validate_medical_theorem_fuzzy"
         ],
-        "notes": [
-          "no_cli_detected"
-        ],
+        "notes": [],
         "public_exports": [],
         "public_exports_source": "none"
       }
@@ -1251,8 +1271,8 @@
         "import_module": "ipfs_datasets_py.utils",
         "likely_extras": [
           "logic",
-          "accelerate",
           "security",
+          "accelerate",
           "alerts",
           "pdf"
         ],
@@ -1436,6 +1456,71 @@
         ],
         "public_exports": [],
         "public_exports_source": "none"
+      }
+    },
+    {
+      "feature_id": "workflow_automation",
+      "kind": "package",
+      "path": "ipfs_datasets_py/ipfs_datasets_py/workflow_automation",
+      "status": "wired",
+      "surfaces": {
+        "cli_commands": [],
+        "cli_modules": [
+          "module:ipfs_datasets_py.workflow_automation.cli",
+          "path:ipfs_datasets_py/ipfs_datasets_py/workflow_automation/cli.py"
+        ],
+        "import_exists": true,
+        "import_module": "ipfs_datasets_py.workflow_automation",
+        "likely_extras": [],
+        "mcp_tool_categories": [
+          "p2p_workflow_tools",
+          "workflow_tools"
+        ],
+        "mcp_tool_functions": [
+          "EnhancedBatchProcessingTool",
+          "EnhancedDataPipelineTool",
+          "EnhancedWorkflowManagementTool",
+          "MockWorkflowService",
+          "StepStatus",
+          "WorkflowDefinition",
+          "WorkflowStatus",
+          "WorkflowStep",
+          "add_p2p_peer",
+          "batch_process_datasets",
+          "calculate_peer_distance",
+          "create_template",
+          "create_workflow",
+          "enhanced_batch_processing",
+          "enhanced_data_pipeline",
+          "enhanced_workflow_management",
+          "execute_workflow",
+          "get_assigned_workflows",
+          "get_next_p2p_workflow",
+          "get_p2p_scheduler_status",
+          "get_workflow_metrics",
+          "get_workflow_status",
+          "get_workflow_tags",
+          "initialize_p2p_scheduler",
+          "list_templates",
+          "list_workflows",
+          "merge_merkle_clock",
+          "pause_workflow",
+          "remove_p2p_peer",
+          "resume_workflow",
+          "run_workflow",
+          "schedule_p2p_workflow",
+          "schedule_workflow"
+        ],
+        "notes": [],
+        "public_exports": [
+          "MockWorkflowService",
+          "StepStatus",
+          "WorkflowDefinition",
+          "WorkflowStatus",
+          "WorkflowStep",
+          "get_default_workflow_service"
+        ],
+        "public_exports_source": "__all__"
       }
     },
     {
@@ -1630,6 +1715,8 @@
           "StockDataScraper",
           "SystemInfo",
           "SystemMetrics",
+          "TEMPORAL_DEONTIC_LOGIC_TOOLS",
+          "TOOL_VERSION",
           "TheoremApplication",
           "UploadToHuggingFaceInParallel",
           "VSCodeCLIExecuteTool",
@@ -1822,11 +1909,14 @@
           "email_search_export",
           "email_test_connection",
           "enable_disable_schedule",
+          "enhanced_batch_processing",
+          "enhanced_data_pipeline",
           "enhanced_ipfs_cluster_management",
           "enhanced_ipfs_content",
           "enhanced_vector_index",
           "enhanced_vector_search",
           "enhanced_vector_storage",
+          "enhanced_workflow_management",
           "evaluate_alert_rules",
           "execute_audit_report_step",
           "execute_cache_optimization_step",
@@ -2303,9 +2393,9 @@
     "console_scripts_orphaned": [],
     "counts": {
       "missing": 16,
-      "partial": 17,
-      "total": 36,
-      "wired": 3
+      "partial": 13,
+      "total": 37,
+      "wired": 8
     },
     "extras_available": [
       "accelerate",
@@ -2318,6 +2408,7 @@
       "file_conversion",
       "file_conversion_full",
       "ipld",
+      "knowledge_graphs",
       "legal",
       "linux",
       "logic",
@@ -2434,6 +2525,10 @@
       "ipld": [
         "ipld-car",
         "ipld-dag-pb"
+      ],
+      "knowledge_graphs": [
+        "spacy",
+        "transformers"
       ],
       "legal": [],
       "linux": [
@@ -3587,6 +3682,8 @@
           "BulkProcessCaselawTool",
           "CheckDocumentConsistencyTool",
           "QueryTheoremsTool",
+          "TEMPORAL_DEONTIC_LOGIC_TOOLS",
+          "TOOL_VERSION",
           "add_theorem",
           "bulk_process_caselaw",
           "check_document_consistency",
@@ -4028,7 +4125,10 @@
           "StepStatus",
           "WorkflowDefinition",
           "WorkflowStatus",
-          "WorkflowStep"
+          "WorkflowStep",
+          "enhanced_batch_processing",
+          "enhanced_data_pipeline",
+          "enhanced_workflow_management"
         ],
         "workflow_tools": [
           "add_p2p_peer",
