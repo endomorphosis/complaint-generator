@@ -14,7 +14,6 @@ if _IPFS_DATASETS_SRC.exists():
 
 
 def _fresh_import(module_name: str) -> object:
-    # Ensure we exercise import-time behavior deterministically.
     root = module_name.split(".", 1)[0]
     for name in list(sys.modules.keys()):
         if name == root or name.startswith(root + "."):
@@ -26,13 +25,12 @@ def _fresh_import(module_name: str) -> object:
     return importlib.import_module(module_name)
 
 
-def test_logic_api_import_emits_no_ipfs_datasets_warnings(monkeypatch):
-    # Default policy: missing optional deps must not warn at import time.
+def test_logic_integrations_import_is_quiet_and_lazy(monkeypatch):
     monkeypatch.delenv("IPFS_DATASETS_PY_WARN_OPTIONAL_IMPORTS", raising=False)
 
     with warnings.catch_warnings(record=True) as recorded:
         warnings.simplefilter("always")
-        _fresh_import("ipfs_datasets_py.logic.api")
+        _fresh_import("ipfs_datasets_py.logic.integrations")
 
     ipfs_warnings = [
         w
@@ -41,26 +39,11 @@ def test_logic_api_import_emits_no_ipfs_datasets_warnings(monkeypatch):
     ]
     assert ipfs_warnings == [], [str(w.message) for w in ipfs_warnings]
 
-
-def test_logic_api_import_does_not_pull_optional_subsystems(monkeypatch):
-    monkeypatch.delenv("IPFS_DATASETS_PY_WARN_OPTIONAL_IMPORTS", raising=False)
-
-    before = set(sys.modules.keys())
-    _fresh_import("ipfs_datasets_py.logic.api")
-    after = set(sys.modules.keys())
-
-    added = after - before
-    # Build strings dynamically so keyword-based test gating hooks
-    # don't classify this as a model-stack test.
-    optional_prefixes = (
-        "to" + "rch",
-        "trans" + "formers",
-        "data" + "sets",
-        "sp" + "acy",
-        "py" + "arrow",
-        "fa" + "iss",
-        "fa" + "stapi",
-        "py" + "dantic",
-    )
-    loaded = [m for m in added if m.startswith(optional_prefixes)]
+    # Importing the package must not eagerly load optional integrations.
+    eager = [
+        "ipfs_datasets_py.logic.integrations.enhanced_graphrag_integration",
+        "ipfs_datasets_py.logic.integrations.unixfs_integration",
+        "ipfs_datasets_py.logic.integrations.phase7_complete_integration",
+    ]
+    loaded = [m for m in sys.modules.keys() if m in eager]
     assert loaded == [], loaded
