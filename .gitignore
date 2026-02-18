@@ -4,6 +4,7 @@ statefiles/*.json
 
 # Test artifacts
 .pytest_cache/
+.hypothesis/
 .coverage
 statefiles/
 statefiles_*
