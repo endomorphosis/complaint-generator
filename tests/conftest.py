@@ -85,18 +85,44 @@ def pytest_configure() -> None:
     if os.path.isdir(submodule_root) and submodule_root not in sys.path:
         sys.path.insert(0, submodule_root)
 
+    # With pytest --import-mode=importlib, the repository root isn't guaranteed to be on
+    # sys.path. Add it so first-party modules (e.g. adversarial_harness/) import cleanly.
+    # Keep it AFTER the submodule path to avoid resolving `ipfs_datasets_py` to the
+    # submodule repo root directory.
+    if repo_root not in sys.path:
+        insert_at = 1 if sys.path and sys.path[0] == submodule_root else 0
+        sys.path.insert(insert_at, repo_root)
+
     # If something imported `ipfs_datasets_py` before we adjusted sys.path, Python may have
-    # created a namespace package that points at the submodule repo root (which does not
-    # export `llm_router`). Reset it so subsequent imports resolve to the actual package at
-    # ipfs_datasets_py/ipfs_datasets_py/.
+    # created a namespace-like module rooted at complaint-generator/ipfs_datasets_py/ (the
+    # submodule repo root), which does not export `llm_router`. Reset it so subsequent
+    # imports resolve to the actual package at ipfs_datasets_py/ipfs_datasets_py/.
+    expected_init = os.path.join(submodule_root, "ipfs_datasets_py", "__init__.py")
     mod = sys.modules.get("ipfs_datasets_py")
-    if mod is not None and getattr(mod, "__file__", None) is None and hasattr(mod, "__path__"):
-        del sys.modules["ipfs_datasets_py"]
+    if mod is not None:
+        mod_file = os.path.abspath(getattr(mod, "__file__", "") or "")
+        is_namespace_like = getattr(mod, "__file__", None) is None and hasattr(mod, "__path__")
+        is_wrong_location = os.path.isfile(expected_init) and mod_file and mod_file != os.path.abspath(expected_init)
+        if is_namespace_like or is_wrong_location:
+            for name in list(sys.modules.keys()):
+                if name == "ipfs_datasets_py" or name.startswith("ipfs_datasets_py."):
+                    sys.modules.pop(name, None)
 
     # Vendored dependency layout: ipfs_accelerate_py/ipfs_accelerate_py/
     accelerate_repo_root = os.path.join(submodule_root, "ipfs_accelerate_py")
     if os.path.isdir(accelerate_repo_root) and accelerate_repo_root not in sys.path:
         sys.path.insert(0, accelerate_repo_root)
+
+    # Best-effort: import the real package now that sys.path is set, so tests can safely
+    # do `from ipfs_datasets_py import llm_router` during collection.
+    if os.path.isfile(expected_init):
+        try:
+            import importlib
+
+            importlib.invalidate_caches()
+            import ipfs_datasets_py  # noqa: F401
+        except Exception:
+            pass
 
 
 def pytest_collection_modifyitems(config, items):
