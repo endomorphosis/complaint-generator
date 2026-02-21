@@ -330,7 +330,9 @@ DOCUMENT BREAKDOWN
         findings = []
         
         if high > 0:
-            findings.append(f"• {high} document(s) contain CLEAR DEI MANDATES with enforcement language")
+            msg = f"• {high} document(s) contain CLEAR DEI MANDATES "
+            msg += "with enforcement language"
+            findings.append(msg)
             findings.append("  These require immediate legal review and compliance assessment")
         
         if medium > 0:
@@ -338,7 +340,9 @@ DOCUMENT BREAKDOWN
             findings.append("  These should be analyzed for applicability and enforceability")
         
         if total_provisions > 0:
-            findings.append(f"• {total_provisions} total DEI provisions identified across all documents")
+            msg = f"• {total_provisions} total DEI provisions "
+            msg += "identified across all documents"
+            findings.append(msg)
             findings.append(f"• {binding_provisions} provisions contain binding/mandatory language")
         
         return '\n'.join(findings) if findings else "  No significant DEI requirements identified"
@@ -381,7 +385,9 @@ DOCUMENT BREAKDOWN
             items.append("   - Document compliance posture")
         
         if medium_risk:
-            items.append(f"2. HIGH PRIORITY: Analysis of {len(medium_risk)} medium-risk document(s)")
+            msg = f"2. HIGH PRIORITY: Analysis of {len(medium_risk)} "
+            msg += "medium-risk document(s)"
+            items.append(msg)
             items.append("   - Review policy language and requirements")
             items.append("   - Assess compliance obligations")
             items.append("   - Consider requesting clarifications")

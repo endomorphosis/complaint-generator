@@ -150,17 +150,23 @@ class DEIRiskScorer:
         issues = []
         
         if dei_count > 0 and binding_count > 0:
-            issues.append(f"Document contains {dei_count} direct DEI references with binding language")
+            msg = f"Document contains {dei_count} direct DEI references "
+            msg += "with binding language"
+            issues.append(msg)
             if flagged_dei:
                 issues.append(f"DEI terms found: {', '.join(flagged_dei[:5])}")
         
         if proxy_count > 0 and binding_count > 0:
-            issues.append(f"Document contains {proxy_count} DEI proxy/euphemism terms with binding language")
+            msg = f"Document contains {proxy_count} DEI proxy/euphemism "
+            msg += "terms with binding language"
+            issues.append(msg)
             if flagged_proxy:
                 issues.append(f"Proxy terms found: {', '.join(flagged_proxy[:5])}")
         
         if binding_count > 0:
-            issues.append(f"Document contains {binding_count} binding/mandatory language indicators")
+            msg = f"Document contains {binding_count} binding/mandatory "
+            msg += "language indicators"
+            issues.append(msg)
             if flagged_binding:
                 issues.append(f"Binding terms: {', '.join(flagged_binding[:5])}")
         

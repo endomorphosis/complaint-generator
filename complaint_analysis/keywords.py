@@ -293,14 +293,24 @@ def _get_applicability_keywords() -> Dict[str, List[str]]:
     """
     return {
         'housing': get_keywords('applicability_housing', complaint_type='dei'),
-        'employment': get_keywords('applicability_employment', complaint_type='dei'),
-        'public_accommodation': get_keywords('applicability_public_accommodation', complaint_type='dei'),
+        'employment': get_keywords(
+            'applicability_employment', complaint_type='dei'
+        ),
+        'public_accommodation': get_keywords(
+            'applicability_public_accommodation', complaint_type='dei'
+        ),
         'lending': get_keywords('applicability_lending', complaint_type='dei'),
         'education': get_keywords('applicability_education', complaint_type='dei'),
-        'government_services': get_keywords('applicability_government_services', complaint_type='dei'),
-        'procurement': get_keywords('applicability_procurement', complaint_type='dei'),
+        'government_services': get_keywords(
+            'applicability_government_services', complaint_type='dei'
+        ),
+        'procurement': get_keywords(
+            'applicability_procurement', complaint_type='dei'
+        ),
         'training': get_keywords('applicability_training', complaint_type='dei'),
-        'community_engagement': get_keywords('applicability_community_engagement', complaint_type='dei'),
+        'community_engagement': get_keywords(
+            'applicability_community_engagement', complaint_type='dei'
+        ),
     }
 
 

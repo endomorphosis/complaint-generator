@@ -438,7 +438,10 @@ class StateFileIngester:
         with open(statefile_path, 'w') as f:
             json.dump(kg, f, indent=2)
         
-        logger.info(f"Ingested {len(parsed.data['relationships'])} relationships to {statefile_path}")
+        logger.info(
+            f"Ingested {len(parsed.data['relationships'])} relationships "
+            f"to {statefile_path}"
+        )
         return True
     
     def ingest_claims(self, parsed: ParsedResponse, session_id: str) -> bool:

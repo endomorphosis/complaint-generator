@@ -412,7 +412,8 @@ class LegalPatternExtractor(BaseLegalPatternExtractor):
         
         # Legacy categorization for backward compatibility
         # Disability
-        if 'disability' in text_lower or 'ada' in text_lower or 'reasonable accommodation' in text_lower:
+        if ('disability' in text_lower or 'ada' in text_lower or
+                'reasonable accommodation' in text_lower):
             if 'disability' not in categories:
                 categories.append('disability')
         

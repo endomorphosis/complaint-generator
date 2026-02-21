@@ -849,7 +849,12 @@ class DecisionTreeGenerator:
             optional_fields={'location', 'environmental_impact'}
         )
     
-    def _generate_generic_tree(self, complaint_type: str, category: str, keywords: List[str]) -> DecisionTree:
+    def _generate_generic_tree(
+        self,
+        complaint_type: str,
+        category: str,
+        keywords: List[str]
+    ) -> DecisionTree:
         """Generate a generic decision tree."""
         questions = {
             'q1': QuestionNode(
