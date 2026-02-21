@@ -1,24 +1,24 @@
-from re import search
-from urllib import request
+import os
+import json
+import sys
+from datetime import datetime, timedelta
+
+import jwt
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Cookie, WebSocket, WebSocketDisconnect, Response
+
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, Cookie, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse
-from datetime import datetime, timedelta
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.status import HTTP_403_FORBIDDEN
-from starlette.responses import RedirectResponse, Response, JSONResponse
-from starlette.requests import Request
-import sys
-import os
-import json
-import jwt
-import this
-import uvicorn 
+from starlette.responses import RedirectResponse
+import uvicorn
+
+
 class SERVER:
        
-    def __init__( mediator):
+    def __init__(self, mediator):
  
         app = FastAPI()
         

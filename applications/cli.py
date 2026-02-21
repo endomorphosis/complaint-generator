@@ -29,18 +29,18 @@ class CLI:
 		while True:
 			
 			if self.mediator.state.hashed_username is not None and self.mediator.state.hashed_password is not None:
-				profile = self.mediator.state.load_profile(self,{"hashed_username": self.mediator.state.hashed_username, "hashed_password": self.mediator.state.hashed_password})
+				profile = self.mediator.state.load_profile(self, {"hashed_username": self.mediator.state.hashed_username, "hashed_password": self.mediator.state.hashed_password})
 			else:
 				if self.mediator.state.username is None:	
 					self.mediator.state.username = input('Username:\n> ')
 			
 				if self.mediator.state.password is None:
 					self.mediator.state.password = input('Password:\n> ')
-				profile = self.mediator.state.load_profile(self, {"request", {"username": self.mediator.state.username, "password": self.mediator.state.password}})
+				profile = self.mediator.state.load_profile(self, {"username": self.mediator.state.username, "password": self.mediator.state.password})
 
 			last_question = self.mediator.state.last_question
 
-			text = input( last_question + '> ')
+			text = input(last_question + '> ')
 			self.mediator.state.answered_questions["last_question"] = text
 
 			if text == '':
@@ -48,7 +48,7 @@ class CLI:
 			elif text[0] != '!':
 				self.feed(text)
 			else:
-				self.interpret_command(self, text[str( last_question + '> ').__len__():])
+				self.interpret_command(text[len(last_question + '> '):])
 
 			self.mediator.state.last_question.pop(0)
 			self.mediator.state.store_profile(self, profile)
@@ -80,12 +80,12 @@ class CLI:
 			self.print_commands()
 
 
-	def save(self, data):
+	def save(self):
 		request = dict({"username": self.mediator.state.username, "password": self.mediator.state.password})
-		profile = self.mediator.state.load_profile(self,request)
-		profile["data"] = data
+		profile = self.mediator.state.load_profile(self, request)
+		profile["data"] = self.mediator.state.answered_questions
 		profile["data"]["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-		self.mediator.state.store_profile(self,profile)
+		self.mediator.state.store_profile(self, profile)
 		print("Profile saved")
 	
 	def resume(self):
