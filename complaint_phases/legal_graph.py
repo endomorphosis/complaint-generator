@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +55,8 @@ class LegalGraph:
         self.elements: Dict[str, LegalElement] = {}
         self.relations: Dict[str, LegalRelation] = {}
         self.metadata = {
-            'created_at': datetime.utcnow().isoformat(),
-            'last_updated': datetime.utcnow().isoformat(),
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'last_updated': datetime.now(timezone.utc).isoformat(),
             'version': '1.0'
         }
     
@@ -149,7 +149,7 @@ class LegalGraph:
     
     def _update_metadata(self):
         """Update last_updated timestamp."""
-        self.metadata['last_updated'] = datetime.utcnow().isoformat()
+        self.metadata['last_updated'] = datetime.now(timezone.utc).isoformat()
     
     def summary(self) -> Dict[str, Any]:
         """Get a summary of the legal graph."""
