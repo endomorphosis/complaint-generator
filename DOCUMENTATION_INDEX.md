@@ -90,6 +90,9 @@ Complete index of all documentation in the complaint-generator repository.
 ### Probate Integration
 - [docs/PROBATE_INTEGRATION.md](docs/PROBATE_INTEGRATION.md) - Probate complaint type integration
 
+### GraphRAG Ontology Extraction
+- [ipfs_datasets_py/EXTRACTION_CONFIG_GUIDE.md](ipfs_datasets_py/EXTRACTION_CONFIG_GUIDE.md) - Comprehensive reference for ExtractionConfig configuration options, presets, validation, and best practices
+
 ### Additional Documentation
 - [docs/EXAMPLES.md](docs/EXAMPLES.md) - Complete reference for all 21 example scripts
 - [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md) - Implementation summary
