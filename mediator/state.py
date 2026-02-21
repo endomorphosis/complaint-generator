@@ -1,21 +1,14 @@
-# from asyncio.windows_events import NULL
-from ast import Return
-from cgitb import text
-from dataclasses import fields
-# from lib2to3.pytree import _Results
-import profile
-from readline import append_history_file
-from time import sleep
-from urllib import response
+"""State management for complaint mediator workflow."""
 import json
-import datetime
-import glob
-import requests
-import datetime 
+import os
 import sys
 import time
-
 import warnings
+from dataclasses import fields
+from datetime import datetime
+from glob import glob
+
+import requests
 
 from backends.llm_router_backend import LLMRouterBackend
 
@@ -54,8 +47,8 @@ class State:
 		)
 
 		response_message = ''
-		now = datetime.datetime.now()
-		time = now.strftime("%Y-%m-%d %H:%M:%S")
+		now = datetime.now()
+		time_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
 		provider = os.environ.get("COMPLAINT_GENERATOR_LLM_PROVIDER", "copilot_cli")
 		model = os.environ.get("COMPLAINT_GENERATOR_LLM_MODEL", "gpt-5-mini")
@@ -64,7 +57,7 @@ class State:
 
 		if "chat_history" not in self.data:
 			self.data["chat_history"] = {}
-		self.data["chat_history"][time] = response_message
+		self.data["chat_history"][time_str] = response_message
 		return response_message
 
 	def resume(self):
@@ -110,7 +103,7 @@ class State:
 
 	def save(self):
 		state = self.mediator.get_state()
-		date = datetime.strftime(datetime.now(), '%d-%m-%Y %H+%M+%S')
+		date = datetime.now().strftime('%d-%m-%Y %H+%M+%S')
 		peek = state['inquiries'][0]['answer'][0:20]
 		file = 'statefiles/%s %s.json' % (date, peek)
 
@@ -252,11 +245,11 @@ class State:
 
 
 	def message(self, message):
-		now = datetime.datetime.now()
-		time = now.strftime("%Y-%m-%d %H:%M:%S")
+		now = datetime.now()
+		time_str = now.strftime("%Y-%m-%d %H:%M:%S")
 		if "chat_history" not in self.data:
 			self.data["chat_history"] = {}
-		self.data["chat_history"][time] = message
+		self.data["chat_history"][time_str] = message
 		return None
 
 
