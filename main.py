@@ -1,8 +1,8 @@
-from fastapi import (
-    FastAPI, WebSocket, WebSocketDisconnect, Request, Response
-)
-from typing import List
-from pydantic import BaseModel
+import json
+import os
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 app = FastAPI()
@@ -11,8 +11,9 @@ app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 
+
 @app.get("/home", response_class=HTMLResponse)
-async def read_items(request: Request ):
+async def read_home(request: Request):
     template = ""
     filename = os.getcwd() + "/templates/home.html"
     if os.path.isfile(filename):
@@ -20,8 +21,9 @@ async def read_items(request: Request ):
             template = f.read()
     return template
 
+
 @app.get("/chat", response_class=HTMLResponse)
-async def read_items(request: Request ):
+async def read_chat(request: Request):
     template = ""
     filename = os.getcwd() + "/templates/chat.html"
 
@@ -30,8 +32,9 @@ async def read_items(request: Request ):
             template = f.read()
     return template
 
+
 @app.get("/", response_class=HTMLResponse)
-async def read_items(request: Request ):
+async def read_index(request: Request):
     template = ""
     filename = os.getcwd() + "/templates/index.html"
 
@@ -39,9 +42,10 @@ async def read_items(request: Request ):
         with open(filename, "r") as f:
             template = f.read()
     return template
+
 
 @app.get("", response_class=HTMLResponse)
-async def read_items(request: Request ):
+async def read_root(request: Request):
     template = ""
     filename = os.getcwd() + "/templates/index.html"
 
@@ -50,8 +54,9 @@ async def read_items(request: Request ):
             template = f.read()
     return template
 
+
 @app.get("/cookies", response_class=HTMLResponse)
-async def read_items( request: Request ):
+async def read_cookies(request: Request):
     cookie = request.cookies
     if cookie is not None:
         return json.dumps(cookie)
@@ -60,7 +65,7 @@ async def read_items( request: Request ):
 
 
 @app.get("/test", response_class=HTMLResponse)
-async def read_items( request: Request ):
+async def read_test(request: Request):
     cookie = request.cookies
     if cookie is not None:
         if "hashed_username" in cookie.keys():
@@ -82,6 +87,7 @@ async def read_items( request: Request ):
         return "No Cookie found"
 
 
+
 class SocketManager:
     def __init__(self):
         self.active_connections: list[(WebSocket, str)] = []
@@ -99,8 +105,10 @@ class SocketManager:
 
 manager = SocketManager()
 
+
 def test(data):
     return None
+
 
 @app.websocket("/api/chat")
 async def chat(websocket: WebSocket):
@@ -126,7 +134,3 @@ async def chat(websocket: WebSocket):
             manager.disconnect(websocket, token)
             response['message'] = "left"
             await manager.broadcast(response)
-
-
-
-manager = SocketManager()

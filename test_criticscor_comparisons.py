@@ -12,6 +12,7 @@ score1 = CriticScore(
     consistency=0.85,
     clarity=0.75,
     granularity=0.80,
+    relationship_coherence=0.82,
     domain_alignment=0.88
 )
 
@@ -20,6 +21,7 @@ score2 = CriticScore(
     consistency=0.75,
     clarity=0.70,
     granularity=0.72,
+    relationship_coherence=0.71,
     domain_alignment=0.78
 )
 
@@ -28,6 +30,7 @@ score3 = CriticScore(
     consistency=0.85,
     clarity=0.75,
     granularity=0.80,
+    relationship_coherence=0.82,
     domain_alignment=0.88
 )
 
