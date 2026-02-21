@@ -12,9 +12,7 @@ Complete index of all documentation in the complaint-generator repository.
 
 ## MCP++ Integration
 
-- [MCPPLUSPLUS_INTEGRATION_TODO.md](MCPPLUSPLUS_INTEGRATION_TODO.md) - Entry point for MCP++ integration work
-- [MCPPLUSPLUS_INTEGRATION_INFINITE_TODO.md](MCPPLUSPLUS_INTEGRATION_INFINITE_TODO.md) - Infinite backlog for MCP++/P2P integration
-- [plan-mcpPlusPlusIntegration.prompt.md](plan-mcpPlusPlusIntegration.prompt.md) - High-level integration plan
+- [plan-mcpPlusPlusIntegration.prompt.md](plan-mcpPlusPlusIntegration.prompt.md) - High-level integration plan and specifications for MCP++ integration
 
 ## Core Module Documentation
 
