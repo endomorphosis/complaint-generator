@@ -13,7 +13,7 @@ This module helps identify:
 """
 
 import re
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any
 from datetime import datetime
 
 

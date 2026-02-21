@@ -349,9 +349,6 @@ DOCUMENT BREAKDOWN
     
     def _summarize_applicability(self) -> str:
         """Summarize applicability areas across documents."""
-        from complaint_analysis import DEIRiskScorer
-        
-        scorer = DEIRiskScorer()
         all_tags = []
         
         for doc in self.documents:

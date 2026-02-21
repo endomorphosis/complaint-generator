@@ -84,7 +84,7 @@ class DecisionTree:
         """
         candidates = []
         
-        for qid, question in self.questions.items():
+        for question in self.questions.values():
             # Skip if already answered
             if question.field_name in answered_fields:
                 continue
