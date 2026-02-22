@@ -331,7 +331,7 @@ class DEIRiskScorer:
         problematic = sum(1 for r in self._analysis_history if r.get('score', 0) >= threshold)
         return problematic / len(self._analysis_history)
 
-        def tag_applicability(self, text: str) -> List[str]:
+    def tag_applicability(self, text: str) -> List[str]:
         """
         Tag document with applicability areas (hiring, procurement, etc.).
         

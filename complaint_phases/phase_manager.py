@@ -295,3 +295,113 @@ class PhaseManager:
         manager.iteration_count = data['iteration_count']
         manager.loss_history = data['loss_history']
         return manager
+
+    # ============================================================================
+    # Batch 211: PhaseManager Analysis Methods
+    # ============================================================================
+    
+    def total_phase_transitions(self) -> int:
+        """Return the total number of phase transitions recorded.
+        
+        Returns:
+            Count of phase transitions in history.
+        """
+        return len(self.phase_history)
+    
+    def transitions_to_phase(self, phase: ComplaintPhase) -> int:
+        """Count transitions to a specific phase.
+        
+        Args:
+            phase: The phase to count transitions to.
+            
+        Returns:
+            Number of times transitioned to this phase.
+        """
+        return sum(1 for t in self.phase_history if t.get('to_phase') == phase.value)
+    
+    def phase_transition_frequency(self) -> Dict[str, int]:
+        """Calculate frequency distribution of phase transitions.
+        
+        Returns:
+            Dict mapping phase names to transition counts.
+        """
+        freq = {}
+        for transition in self.phase_history:
+            to_phase = transition.get('to_phase')
+            freq[to_phase] = freq.get(to_phase, 0) + 1
+        return freq
+    
+    def most_visited_phase(self) -> str:
+        """Find the phase that has been transitioned to most often.
+        
+        Returns:
+            Phase name with most transitions, or 'none' if no transitions.
+        """
+        if not self.phase_history:
+            return 'none'
+        freq = self.phase_transition_frequency()
+        return max(freq, key=freq.get)
+    
+    def total_iterations(self) -> int:
+        """Return the total number of iterations recorded.
+        
+        Returns:
+            Current iteration count.
+        """
+        return self.iteration_count
+    
+    def iterations_in_phase(self, phase: ComplaintPhase) -> int:
+        """Count iterations that occurred in a specific phase.
+        
+        Args:
+            phase: The phase to count iterations for.
+            
+        Returns:
+            Number of iterations in this phase.
+        """
+        return sum(1 for h in self.loss_history if h.get('phase') == phase.value)
+    
+    def average_loss(self) -> float:
+        """Calculate the average loss across all recorded iterations.
+        
+        Returns:
+            Mean loss value, or 0.0 if no iterations.
+        """
+        if not self.loss_history:
+            return 0.0
+        total_loss = sum(h.get('loss', 0.0) for h in self.loss_history)
+        return total_loss / len(self.loss_history)
+    
+    def minimum_loss(self) -> float:
+        """Find the minimum loss value across all iterations.
+        
+        Returns:
+            Minimum loss achieved, or float('inf') if no iterations.
+        """
+        if not self.loss_history:
+            return float('inf')
+        return min(h.get('loss', float('inf')) for h in self.loss_history)
+    
+    def has_phase_data_key(self, phase: ComplaintPhase, key: str) -> bool:
+        """Check if a specific data key exists for a phase.
+        
+        Args:
+            phase: The phase to check.
+            key: The data key to look for.
+            
+        Returns:
+            True if the key exists in phase data, False otherwise.
+        """
+        return key in self.phase_data.get(phase, {})
+    
+    def phase_data_coverage(self) -> float:
+        """Calculate what fraction of phases have any data recorded.
+        
+        Returns:
+            Ratio of phases with data (0.0 to 1.0).
+        """
+        total_phases = len(self.phase_data)
+        if total_phases == 0:
+            return 0.0
+        phases_with_data = sum(1 for data in self.phase_data.values() if data)
+        return phases_with_data / total_phases
