@@ -466,3 +466,141 @@ class LegalPatternExtractor(BaseLegalPatternExtractor):
                 found_classes.append(class_name)
         
         return found_classes
+    
+    # ============================================================================
+    # Batch 215: LegalPatternExtractor Analysis Methods
+    # ============================================================================
+    
+    def total_analyses_performed(self) -> int:
+        """Return total number of analyses performed.
+        
+        Returns:
+            Count of analyses in history.
+        """
+        return len(self._analysis_history)
+    
+    def average_provisions_per_analysis(self) -> float:
+        """Calculate average number of provisions found per analysis.
+        
+        Returns:
+            Mean provision count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total = sum(a.get('provision_count', 0) for a in self._analysis_history)
+        return total / len(self._analysis_history)
+    
+    def average_unique_terms_per_analysis(self) -> float:
+        """Calculate average number of unique terms found per analysis.
+        
+        Returns:
+            Mean unique term count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total = sum(a.get('unique_terms', 0) for a in self._analysis_history)
+        return total / len(self._analysis_history)
+    
+    def protected_class_frequency_distribution(self) -> Dict[str, int]:
+        """Get frequency distribution of protected classes found across analyses.
+        
+        Returns:
+            Dict mapping protected class names to occurrence counts.
+        """
+        return dict(self._protected_class_frequency)
+    
+    def complaint_type_frequency_distribution(self) -> Dict[str, int]:
+        """Get frequency distribution of complaint types identified.
+        
+        Returns:
+            Dict mapping complaint types to occurrence counts.
+        """
+        return dict(self._complaint_type_frequency)
+    
+    def most_common_protected_class(self) -> str:
+        """Find the most frequently identified protected class.
+        
+        Returns:
+            Protected class name with highest frequency, or 'none' if none found.
+        """
+        if not self._protected_class_frequency:
+            return 'none'
+        return max(self._protected_class_frequency, key=self._protected_class_frequency.get)
+    
+    def most_common_complaint_type(self) -> str:
+        """Find the most frequently identified complaint type.
+        
+        Returns:
+            Complaint type with highest frequency, or 'none' if none identified.
+        """
+        if not self._complaint_type_frequency:
+            return 'none'
+        return max(self._complaint_type_frequency, key=self._complaint_type_frequency.get)
+    
+    def total_citations_found(self) -> int:
+        """Return total number of citations found across all analyses.
+        
+        Returns:
+            Count of all citations identified.
+        """
+        return sum(a.get('citation_count', 0) for a in self._analysis_history)
+    
+    def average_citations_per_analysis(self) -> float:
+        """Calculate average number of citations per analysis.
+        
+        Returns:
+            Mean citation count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        return self.total_citations_found() / len(self._analysis_history)
+    
+    def maximum_provisions_found(self) -> int:
+        """Find the highest number of provisions found in any single analysis.
+        
+        Returns:
+            Maximum provision count, or 0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0
+        return max(a.get('provision_count', 0) for a in self._analysis_history)
+    
+    def minimum_provisions_found(self) -> int:
+        """Find the lowest number of provisions found in any analysis.
+        
+        Returns:
+            Minimum provision count, or 0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0
+        return min(a.get('provision_count', 0) for a in self._analysis_history)
+    
+    def analyses_with_protected_classes(self) -> int:
+        """Count how many analyses identified at least one protected class.
+        
+        Returns:
+            Number of analyses with protected class findings.
+        """
+        return sum(1 for a in self._analysis_history if a.get('protected_classes', []))
+    
+    def unique_protected_classes_found(self) -> int:
+        """Count total number of unique protected classes identified.
+        
+        Returns:
+            Number of distinct protected classes found.
+        """
+        return len(self._protected_class_frequency)
+    
+    def unique_complaint_types_identified(self) -> int:
+        """Count total number of unique complaint types identified.
+        
+        Returns:
+            Number of distinct complaint types found.
+        """
+        return len(self._complaint_type_frequency)
+    
+    def clear_analysis_history(self) -> None:
+        """Clear all analysis history and frequency data."""
+        self._analysis_history.clear()
+        self._protected_class_frequency.clear()
+        self._complaint_type_frequency.clear()
