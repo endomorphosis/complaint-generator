@@ -289,6 +289,11 @@ class LegalPatternExtractor(BaseLegalPatternExtractor):
         
         if custom_patterns:
             self.patterns.extend([re.compile(p, re.IGNORECASE) for p in custom_patterns])
+
+        # Batch 215: Analysis tracking
+        self._analysis_history: List[Dict[str, Any]] = []
+        self._protected_class_frequency: Dict[str, int] = {}
+        self._complaint_type_frequency: Dict[str, int] = {}
     
     def extract_provisions(self, text: str, context_chars: int = 200) -> Dict[str, Any]:
         """
@@ -466,6 +471,63 @@ class LegalPatternExtractor(BaseLegalPatternExtractor):
                 found_classes.append(class_name)
         
         return found_classes
+
+    def analyze_text(self, text: str, context_chars: int = 200) -> Dict[str, Any]:
+        """
+        Run full analysis and track the results.
+
+        Args:
+            text: Text to analyze
+            context_chars: Number of characters to include before/after match
+
+        Returns:
+            Dictionary with provisions, citations, categories, and protected classes
+        """
+        provisions = self.extract_provisions(text, context_chars=context_chars)
+        citations = self.extract_citations(text)
+        categories = self.categorize_complaint_type(text)
+        protected_classes = self.find_protected_classes(text)
+
+        self._record_analysis(
+            provisions=provisions,
+            citations=citations,
+            categories=categories,
+            protected_classes=protected_classes,
+        )
+
+        return {
+            'provisions': provisions,
+            'citations': citations,
+            'categories': categories,
+            'protected_classes': protected_classes,
+        }
+
+    def _record_analysis(
+        self,
+        provisions: Dict[str, Any],
+        citations: List[Dict[str, str]],
+        categories: List[str],
+        protected_classes: List[str],
+    ) -> None:
+        """Record analysis results for aggregate metrics."""
+        entry = {
+            'provision_count': provisions.get('provision_count', 0),
+            'unique_terms': provisions.get('unique_terms', 0),
+            'citation_count': len(citations),
+            'protected_classes': list(protected_classes),
+            'complaint_types': list(categories),
+        }
+        self._analysis_history.append(entry)
+
+        for protected_class in protected_classes:
+            self._protected_class_frequency[protected_class] = (
+                self._protected_class_frequency.get(protected_class, 0) + 1
+            )
+
+        for complaint_type in categories:
+            self._complaint_type_frequency[complaint_type] = (
+                self._complaint_type_frequency.get(complaint_type, 0) + 1
+            )
     
     # ============================================================================
     # Batch 215: LegalPatternExtractor Analysis Methods
