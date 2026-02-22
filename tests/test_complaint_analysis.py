@@ -9,6 +9,7 @@ import pytest
 from complaint_analysis import (
     LegalPatternExtractor,
     ComplaintRiskScorer,
+    ComplaintAnalyzer,
     COMPLAINT_KEYWORDS,
     EVIDENCE_KEYWORDS,
     LEGAL_AUTHORITY_KEYWORDS,
@@ -193,6 +194,54 @@ class TestKeywords:
         assert 'employment' in APPLICABILITY_KEYWORDS
         assert len(APPLICABILITY_KEYWORDS['housing']) > 0
         assert 'tenant' in APPLICABILITY_KEYWORDS['housing']
+
+
+class TestComplaintAnalyzer:
+    """Tests for ComplaintAnalyzer analysis tracking."""
+
+    def test_analysis_history_tracking(self):
+        """Test analysis history stores results and supports limits."""
+        analyzer = ComplaintAnalyzer(complaint_type='housing')
+
+        analyzer.analyze(SAMPLE_FAIR_HOUSING_TEXT)
+        analyzer.analyze(SAMPLE_EMPLOYMENT_TEXT)
+
+        history = analyzer.get_analysis_history()
+        assert len(history) == 2
+
+        recent = analyzer.get_analysis_history(limit=1)
+        assert len(recent) == 1
+        assert 'risk_level' in recent[0]
+
+    def test_keyword_frequency_and_top_keywords(self):
+        """Test keyword frequency tracking and top keyword selection."""
+        analyzer = ComplaintAnalyzer()
+
+        text_one = "Discrimination and harassment occurred in the workplace."
+        text_two = "Discrimination continues despite warnings."
+
+        analyzer.analyze(text_one)
+        analyzer.analyze(text_two)
+
+        freq = analyzer.get_keyword_frequency()
+        assert freq.get('discrimination', 0) == 2
+        assert freq.get('harassment', 0) == 1
+
+        top = analyzer.get_top_keywords(top_n=2)
+        assert top[0]['keyword'] == 'discrimination'
+        assert top[0]['count'] == 2
+
+    def test_reset_history(self):
+        """Test reset clears history and keyword counts."""
+        analyzer = ComplaintAnalyzer()
+        analyzer.analyze(SAMPLE_FAIR_HOUSING_TEXT)
+
+        assert len(analyzer.get_analysis_history()) == 1
+        assert analyzer.get_keyword_frequency()
+
+        analyzer.reset_history()
+        assert analyzer.get_analysis_history() == []
+        assert analyzer.get_keyword_frequency() == {}
 
 
 class TestIntegration:

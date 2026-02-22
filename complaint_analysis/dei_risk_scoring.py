@@ -371,3 +371,128 @@ class DEIRiskScorer:
         """
         risk = self.calculate_risk(text)
         return risk['score'] >= threshold
+
+    # ============================================================================
+    # Batch 213: DEIRiskScorer Additional Analysis Methods
+    # ============================================================================
+    
+    def maximum_risk_score(self) -> int:
+        """Find the highest risk score across all analyses.
+        
+        Returns:
+            Maximum risk score, or 0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0
+        return max(r.get('score', 0) for r in self._analysis_history)
+    
+    def minimum_risk_score(self) -> int:
+        """Find the lowest risk score across all analyses.
+        
+        Returns:
+            Minimum risk score, or 0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0
+        return min(r.get('score', 0) for r in self._analysis_history)
+    
+    def most_common_risk_level(self) -> str:
+        """Find the risk level that appears most frequently.
+        
+        Returns:
+            Most common risk level name, or 'none' if no analyses.
+        """
+        if not self._analysis_history:
+            return 'none'
+        dist = self.risk_level_distribution()
+        return max(dist, key=dist.get)
+    
+    def average_proxy_keyword_count(self) -> float:
+        """Calculate average proxy keyword count across analyses.
+        
+        Returns:
+            Mean proxy keyword count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total = sum(r.get('proxy_count', 0) for r in self._analysis_history)
+        return total / len(self._analysis_history)
+    
+    def documents_with_issues(self) -> int:
+        """Count how many analyses identified any issues.
+        
+        Returns:
+            Number of documents with non-empty issues list.
+        """
+        return sum(1 for r in self._analysis_history if r.get('issues', []))
+    
+    def average_issues_per_document(self) -> float:
+        """Calculate the average number of issues per document.
+        
+        Returns:
+            Mean issue count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total_issues = sum(len(r.get('issues', [])) for r in self._analysis_history)
+        return total_issues / len(self._analysis_history)
+    
+    def most_flagged_dei_keyword(self) -> str:
+        """Find the DEI keyword that appeared most frequently across analyses.
+        
+        Returns:
+            Most common DEI keyword, or 'none' if no flagged keywords.
+        """
+        if not self._analysis_history:
+            return 'none'
+        
+        keyword_freq = {}
+        for r in self._analysis_history:
+            for kw in r.get('flagged_keywords', {}).get('dei', []):
+                keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
+        
+        if not keyword_freq:
+            return 'none'
+        return max(keyword_freq, key=keyword_freq.get)
+    
+    def most_flagged_binding_keyword(self) -> str:
+        """Find the binding keyword that appeared most frequently across analyses.
+        
+        Returns:
+            Most common binding keyword, or 'none' if no flagged keywords.
+        """
+        if not self._analysis_history:
+            return 'none'
+        
+        keyword_freq = {}
+        for r in self._analysis_history:
+            for kw in r.get('flagged_keywords', {}).get('binding', []):
+                keyword_freq[kw] = keyword_freq.get(kw, 0) + 1
+        
+        if not keyword_freq:
+            return 'none'
+        return max(keyword_freq, key=keyword_freq.get)
+    
+    def score_variance(self) -> float:
+        """Calculate variance in risk scores across analyses.
+        
+        Returns:
+            Variance of risk scores, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        
+        mean = self.average_risk_score()
+        variance = sum((r.get('score', 0) - mean) ** 2 for r in self._analysis_history)
+        return variance / len(self._analysis_history)
+    
+    def high_score_percentage(self) -> float:
+        """Calculate percentage of documents with score >= 2 (medium or high risk).
+        
+        Returns:
+            Percentage (0.0 to 100.0), or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        high_count = sum(1 for r in self._analysis_history if r.get('score', 0) >= 2)
+        return (high_count / len(self._analysis_history)) * 100.0

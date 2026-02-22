@@ -239,7 +239,7 @@
 - [ ] API_REFERENCE.md (P3) - Comprehensive API documentation
 
 ### PERF - High Priority
-- [ ] Profile infer_relationships() optimization (Priority 1) (P2)
+- [x] Profile infer_relationships() optimization (Priority 1) (P2) — DONE 2025-02-20: Profiling complete, analysis documented in docs/profiling/INFER_RELATIONSHIPS_PERFORMANCE_ANALYSIS.md
 - [ ] Implement regex pattern pre-compilation (Priority 1) (P2)
 - [ ] Implement .lower() caching for stopwords (Priority 2) (P2)
 - [ ] Benchmark optimizations delta (P2)
