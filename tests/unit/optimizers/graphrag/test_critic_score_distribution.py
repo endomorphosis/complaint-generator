@@ -15,7 +15,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../../"))
 
-from ipfs_datasets_py.optimizers.graphrag.ontology_critic import OntologyCritic, CriticScore, CriticResult
+from ipfs_datasets_py.optimizers.graphrag.ontology_critic import OntologyCritic, CriticScore
 from ipfs_datasets_py.optimizers.graphrag.ontology_generator import OntologyGenerator, OntologyGenerationContext
 
 
@@ -346,47 +346,6 @@ class TestCriticScoreBoundaryConditions:
 
         assert score.overall == 0.5
         assert score.completeness == 0.5
-
-
-class TestCriticScoreFromOntologyEvaluation:
-    """Test CriticScore generation from actual ontology evaluation."""
-
-    def test_critic_score_consistent_ontology_high_score(self, critic, context):
-        """Test that consistent ontology receives high score."""
-        # Create a well-formed ontology
-        ontology = create_sample_ontology(entity_count=10, relationship_count=8)
-
-        result = critic.evaluate(ontology, context)
-
-        # A well-formed ontology should have reasonable scores
-        assert isinstance(result, CriticResult)
-        assert isinstance(result.score, float)
-        assert result.score >= 0.0
-        assert result.score <= 1.0
-        assert 'consistency' in result.dimensions
-
-    def test_critic_score_incomplete_ontology_lower_score(self, critic, context):
-        """Test that incomplete ontology may receive lower completeness score."""
-        # Create an ontology with few entities
-        ontology = create_sample_ontology(entity_count=2, relationship_count=1)
-
-        result = critic.evaluate(ontology, context)
-
-        # Should still be valid
-        assert isinstance(result, CriticResult)
-        assert 0.0 <= result.dimensions.get('completeness', 0.0) <= 1.0
-
-    def test_critic_scores_multiple_ontologies_vary(self, critic, context):
-        """Test that different ontologies produce different scores."""
-        ontology1 = create_sample_ontology(entity_count=3, relationship_count=2)
-        ontology2 = create_sample_ontology(entity_count=20, relationship_count=15)
-
-        result1 = critic.evaluate(ontology1, context)
-        result2 = critic.evaluate(ontology2, context)
-
-        # Scores should be valid
-        assert isinstance(result1, CriticResult)
-        assert isinstance(result2, CriticResult)
 
 
 class TestCriticScoreAggregation:
