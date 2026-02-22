@@ -245,13 +245,14 @@ class TestBatchApplyStrategiesParallel:
         assert len(result_serial["refined_ontologies"]) == 5
 
     def test_batch_apply_strategies_worker_count(self, mediator, context):
-        """Test different worker counts don't affect success rate."""
+        import copy
         ontologies = [create_test_ontology(5, 3) for _ in range(8)]
         feedbacks = [create_test_feedback() for _ in range(8)]
 
         for worker_count in [1, 2, 4, 8]:
             result = mediator.batch_apply_strategies(
-                ontologies=[o.copy() for o in ontologies],
+                ontologies=[copy.deepcopy(o) for o in ontologies],
+                feedbacks=[copy.deepcopy(f) for f in feedbacks] in ontologies],
                 feedbacks=feedbacks.copy(),
                 context=context,
                 max_workers=worker_count,

@@ -319,11 +319,11 @@ class TestMostDependentNode:
     
     def test_tie_returns_one(self):
         graph = DependencyGraph()
-        graph.add_node("n1", NodeType.CLAIM)
-        graph.add_node("n2", NodeType.CLAIM)
-        graph.add_node("n3", NodeType.EVIDENCE)
-        graph.add_dependency("d1", "n1", "n3", DependencyType.SUPPORTS)
-        graph.add_dependency("d2", "n2", "n3", DependencyType.SUPPORTS)
+        graph.add_node(DependencyNode(id="n1", node_type=NodeType.CLAIM, name="Node 1"))
+        graph.add_node(DependencyNode(id="n2", node_type=NodeType.CLAIM, name="Node 2"))
+        graph.add_node(DependencyNode(id="n3", node_type=NodeType.EVIDENCE, name="Node 3"))
+        graph.add_dependency(Dependency(id="d1", source_id="n1", target_id="n3", dependency_type=DependencyType.SUPPORTS))
+        graph.add_dependency(Dependency(id="d2", source_id="n2", target_id="n3", dependency_type=DependencyType.SUPPORTS))
         # n1 and n2 each have 1 dependency, n3 has 2
         most = graph.most_dependent_node()
         assert most == "n3"

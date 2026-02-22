@@ -36,6 +36,7 @@ class DEIRiskScorer:
         self.dei_keywords = get_keywords('complaint', complaint_type='dei')
         self.proxy_keywords = get_keywords('dei_proxy', complaint_type='dei')
         self.binding_keywords = get_keywords('binding', complaint_type='dei')
+        self._analysis_history: List[Dict[str, Any]] = []  # Batch 210: Track analysis results
     
     def calculate_risk(self, text: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         """
@@ -218,7 +219,119 @@ class DEIRiskScorer:
         
         return recommendations
     
-    def tag_applicability(self, text: str) -> List[str]:
+
+    # ------------------------------------------------------------------ #
+    # Batch 210: Risk analysis and statistics methods                    #
+    # ------------------------------------------------------------------ #
+
+    def add_to_history(self, result: Dict[str, Any]) -> None:
+        """Add a risk assessment result to analysis history.
+
+        Args:
+            result: Result dictionary from calculate_risk()
+        """
+        self._analysis_history.append(result)
+
+    def total_analyses(self) -> int:
+        """Return total number of risk analyses performed.
+
+        Returns:
+            Count of analyses in history.
+        """
+        return len(self._analysis_history)
+
+    def risk_level_distribution(self) -> Dict[str, int]:
+        """Calculate distribution of risk levels.
+
+        Returns:
+            Dict mapping risk levels to counts.
+        """
+        distribution: Dict[str, int] = {}
+        for result in self._analysis_history:
+            level = result.get('level', 'unknown')
+            distribution[level] = distribution.get(level, 0) + 1
+        return distribution
+
+    def average_risk_score(self) -> float:
+        """Calculate average risk score across all analyses.
+
+        Returns:
+            Mean risk score, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total = sum(r.get('score', 0) for r in self._analysis_history)
+        return total / len(self._analysis_history)
+
+    def high_risk_count(self) -> int:
+        """Count analyses with high risk (score=3).
+
+        Returns:
+            Number of high risk assessments.
+        """
+        return sum(1 for r in self._analysis_history if r.get('score') == 3)
+
+    def medium_risk_count(self) -> int:
+        """Count analyses with medium risk (score=2).
+
+        Returns:
+            Number of medium risk assessments.
+        """
+        return sum(1 for r in self._analysis_history if r.get('score') == 2)
+
+    def low_risk_count(self) -> int:
+        """Count analyses with low risk (score=1).
+
+        Returns:
+            Number of low risk assessments.
+        """
+        return sum(1 for r in self._analysis_history if r.get('score') == 1)
+
+    def compliant_count(self) -> int:
+        """Count analyses with compliant rating (score=0).
+
+        Returns:
+            Number of compliant assessments.
+        """
+        return sum(1 for r in self._analysis_history if r.get('score') == 0)
+
+    def average_dei_keyword_count(self) -> float:
+        """Calculate average DEI keyword count across analyses.
+
+        Returns:
+            Mean DEI keyword count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total = sum(r.get('dei_count', 0) for r in self._analysis_history)
+        return total / len(self._analysis_history)
+
+    def average_binding_keyword_count(self) -> float:
+        """Calculate average binding keyword count across analyses.
+
+        Returns:
+            Mean binding keyword count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total = sum(r.get('binding_count', 0) for r in self._analysis_history)
+        return total / len(self._analysis_history)
+
+    def problematic_document_ratio(self, threshold: int = 2) -> float:
+        """Calculate ratio of documents meeting or exceeding risk threshold.
+
+        Args:
+            threshold: Minimum risk score to be considered problematic.
+
+        Returns:
+            Ratio of problematic documents (0.0 to 1.0), or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        problematic = sum(1 for r in self._analysis_history if r.get('score', 0) >= threshold)
+        return problematic / len(self._analysis_history)
+
+        def tag_applicability(self, text: str) -> List[str]:
         """
         Tag document with applicability areas (hiring, procurement, etc.).
         
