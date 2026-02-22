@@ -135,6 +135,144 @@ class KeywordRegistry(BaseKeywordRegistry):
                 types.update(t for t in category_types.keys() if t is not None)
         
         return sorted(list(types))
+    
+    # ============================================================================
+    # Batch 214: KeywordRegistry Analysis Methods
+    # ============================================================================
+    
+    def total_categories(self) -> int:
+        """Return the total number of registered categories.
+        
+        Returns:
+            Count of categories in the registry.
+        """
+        return len(self._registry)
+    
+    def total_keywords_in_category(self, category: str) -> int:
+        """Count all keywords in a category (global + type-specific).
+        
+        Args:
+            category: Category name.
+            
+        Returns:
+            Total number of unique keywords in this category.
+        """
+        if category not in self._registry:
+            return 0
+        
+        all_keywords = set()
+        for keywords_set in self._registry[category].values():
+            all_keywords.update(keywords_set)
+        return len(all_keywords)
+    
+    def category_with_most_keywords(self) -> str:
+        """Find the category with the most keywords.
+        
+        Returns:
+            Category name with most keywords, or 'none' if no categories.
+        """
+        if not self._registry:
+            return 'none'
+        
+        max_category = None
+        max_count = 0
+        for category in self._registry:
+            count = self.total_keywords_in_category(category)
+            if count > max_count:
+                max_count = count
+                max_category = category
+        
+        return max_category if max_category else 'none'
+    
+    def keywords_by_type(self, complaint_type: str) -> Dict[str, int]:
+        """Get keyword counts for a specific complaint type across all categories.
+        
+        Args:
+            complaint_type: The complaint type to analyze.
+            
+        Returns:
+            Dict mapping category names to keyword counts for this type.
+        """
+        result = {}
+        for category in self._registry:
+            if complaint_type in self._registry[category]:
+                result[category] = len(self._registry[category][complaint_type])
+        return result
+    
+    def global_keywords_count(self) -> int:
+        """Count total number of global keywords (not type-specific) across all categories.
+        
+        Returns:
+            Number of global keywords.
+        """
+        count = 0
+        for category_data in self._registry.values():
+            if None in category_data:
+                count += len(category_data[None])
+        return count
+    
+    def type_specific_keywords_count(self) -> int:
+        """Count total number of type-specific keywords across all categories.
+        
+        Returns:
+            Number of type-specific keywords.
+        """
+        count = 0
+        for category_data in self._registry.values():
+            for complaint_type, keywords_set in category_data.items():
+                if complaint_type is not None:
+                    count += len(keywords_set)
+        return count
+    
+    def has_keywords_for_type(self, complaint_type: str) -> bool:
+        """Check if any category has keywords registered for a complaint type.
+        
+        Args:
+            complaint_type: The complaint type to check.
+            
+        Returns:
+            True if any keywords exist for this type, False otherwise.
+        """
+        for category_data in self._registry.values():
+            if complaint_type in category_data:
+                return True
+        return False
+    
+    def average_keywords_per_category(self) -> float:
+        """Calculate the average number of keywords per category.
+        
+        Returns:
+            Mean keyword count per category, or 0.0 if no categories.
+        """
+        if not self._registry:
+            return 0.0
+        
+        total = sum(self.total_keywords_in_category(cat) for cat in self._registry)
+        return total / len(self._registry)
+    
+    def categories_with_type_specific_keywords(self) -> int:
+        """Count how many categories have type-specific keywords (not just global).
+        
+        Returns:
+            Number of categories with at least one type-specific keyword set.
+        """
+        count = 0
+        for category_data in self._registry.values():
+            has_type_specific = any(t is not None for t in category_data.keys())
+            if has_type_specific:
+                count += 1
+        return count
+    
+    def keyword_coverage_ratio(self) -> float:
+        """Calculate ratio of type-specific to total keywords.
+        
+        Returns:
+            Ratio (0.0 to 1.0) of type-specific keywords to all keywords.
+        """
+        total = self.global_keywords_count() + self.type_specific_keywords_count()
+        if total == 0:
+            return 0.0
+        return self.type_specific_keywords_count() / total
 
 
 # Create global registry instance

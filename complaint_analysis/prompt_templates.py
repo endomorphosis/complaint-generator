@@ -83,6 +83,8 @@ class PromptLibrary:
     def __init__(self):
         """Initialize the prompt library."""
         self.templates: Dict[str, PromptTemplate] = {}
+        self._template_usage_count: Dict[str, int] = {}
+        self._format_history: List[str] = []
         self._initialize_templates()
     
     def _initialize_templates(self):
@@ -360,4 +362,82 @@ Your task is to evaluate how likely each claim is to succeed based on available 
         if not template:
             raise KeyError(f"Template not found: {template_name}")
         
+        # Track usage
+        self._template_usage_count[template_name] = self._template_usage_count.get(template_name, 0) + 1
+        self._format_history.append(template_name)
+        
         return template.format(payload_data)
+
+    # =====================================================================
+    # Batch 216: Template library analysis methods
+    # =====================================================================
+    
+    def total_templates(self) -> int:
+        """Return the total number of registered templates."""
+        return len(self.templates)
+    
+    def templates_by_format_type(self, format_type: ReturnFormat) -> int:
+        """
+        Return count of templates using a specific return format type.
+        
+        Args:
+            format_type: The ReturnFormat to filter by
+            
+        Returns:
+            Count of templates with that format type
+        """
+        return sum(1 for t in self.templates.values() 
+                  if t.return_format_type == format_type)
+    
+    def format_type_distribution(self) -> Dict[str, int]:
+        """
+        Return frequency distribution of return format types.
+        
+        Returns:
+            Dict mapping format type to count
+        """
+        dist = {}
+        for template in self.templates.values():
+            format_name = template.return_format_type.value
+            dist[format_name] = dist.get(format_name, 0) + 1
+        return dist
+    
+    def templates_with_warnings(self) -> int:
+        """Return count of templates that have warnings defined."""
+        return sum(1 for t in self.templates.values() if t.warnings)
+    
+    def average_warnings_per_template(self) -> float:
+        """Return average number of warnings per template."""
+        if not self.templates:
+            return 0.0
+        total_warnings = sum(len(t.warnings) for t in self.templates.values())
+        return total_warnings / len(self.templates)
+    
+    def maximum_warnings_count(self) -> int:
+        """Return the maximum number of warnings in any single template."""
+        if not self.templates:
+            return 0
+        return max(len(t.warnings) for t in self.templates.values())
+    
+    def warning_coverage_percentage(self) -> float:
+        """Return percentage of templates that have at least one warning."""
+        if not self.templates:
+            return 0.0
+        return (self.templates_with_warnings() / len(self.templates)) * 100
+    
+    def most_common_format_type(self) -> Optional[str]:
+        """Return the most frequently used return format type."""
+        dist = self.format_type_distribution()
+        if not dist:
+            return None
+        return max(dist.items(), key=lambda x: x[1])[0]
+    
+    def total_format_operations(self) -> int:
+        """Return total number of times format_prompt has been called."""
+        return len(self._format_history)
+    
+    def most_used_template(self) -> Optional[str]:
+        """Return the name of the most frequently used template."""
+        if not self._template_usage_count:
+            return None
+        return max(self._template_usage_count.items(), key=lambda x: x[1])[0]

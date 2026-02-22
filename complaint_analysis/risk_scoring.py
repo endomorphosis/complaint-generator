@@ -28,6 +28,10 @@ class ComplaintRiskScorer:
     
     def __init__(self):
         self.legal_extractor = LegalPatternExtractor()
+        
+        # Batch 215: Risk assessment tracking
+        self._assessment_history = []  # Store all risk assessments
+        self._text_analyzed_count = 0  # Count of texts analyzed
     
     def calculate_risk(self, text: str, 
                       legal_provisions: Optional[List[Dict]] = None) -> Dict[str, Any]:
@@ -94,7 +98,7 @@ class ComplaintRiskScorer:
         # Generate recommendations
         recommendations = self._generate_recommendations(score, factors)
         
-        return {
+        result = {
             'score': score,
             'level': level_names[score],
             'factors': factors,
@@ -104,6 +108,12 @@ class ComplaintRiskScorer:
             'severity_indicators': severity_high + severity_medium,
             'recommendations': recommendations
         }
+        
+        # Batch 215: Track this assessment
+        self._assessment_history.append(result)
+        self._text_analyzed_count += 1
+        
+        return result
     
     def _count_keywords(self, text: str, keywords: List[str]) -> int:
         """Count occurrences of keywords in text (case-insensitive)."""
@@ -177,3 +187,118 @@ class ComplaintRiskScorer:
         """
         risk_result = self.calculate_risk(text)
         return risk_result['score'] >= threshold
+
+    # ============================================================================
+    # Batch 215: ComplaintRiskScorer Analysis Methods
+    # ============================================================================
+    
+    def total_assessments(self) -> int:
+        """Return the total number of risk assessments performed.
+        
+        Returns:
+            Count of assessments in history.
+        """
+        return len(self._assessment_history)
+    
+    def assessments_by_risk_level(self, level: str) -> int:
+        """Count assessments with a specific risk level.
+        
+        Args:
+            level: Risk level to count ('minimal', 'low', 'medium', 'high').
+            
+        Returns:
+            Number of assessments with this risk level.
+        """
+        return sum(1 for a in self._assessment_history if a.get('level') == level)
+    
+    def risk_level_distribution(self) -> Dict[str, int]:
+        """Calculate frequency distribution of risk levels.
+        
+        Returns:
+            Dict mapping risk levels to counts.
+        """
+        dist = {}
+        for assessment in self._assessment_history:
+            level = assessment.get('level')
+            if level:
+                dist[level] = dist.get(level, 0) + 1
+        return dist
+    
+    def average_risk_score(self) -> float:
+        """Calculate the average risk score across all assessments.
+        
+        Returns:
+            Mean risk score, or 0.0 if no assessments.
+        """
+        if not self._assessment_history:
+            return 0.0
+        total_score = sum(a.get('score', 0) for a in self._assessment_history)
+        return total_score / len(self._assessment_history)
+    
+    def maximum_risk_score(self) -> int:
+        """Find the highest risk score across all assessments.
+        
+        Returns:
+            Maximum risk score, or 0 if no assessments.
+        """
+        if not self._assessment_history:
+            return 0
+        return max(a.get('score', 0) for a in self._assessment_history)
+    
+    def average_complaint_keywords(self) -> float:
+        """Calculate average complaint keyword count across assessments.
+        
+        Returns:
+            Mean complaint keyword count, or 0.0 if no assessments.
+        """
+        if not self._assessment_history:
+            return 0.0
+        total = sum(a.get('complaint_keywords', 0) for a in self._assessment_history)
+        return total / len(self._assessment_history)
+    
+    def average_binding_keywords(self) -> float:
+        """Calculate average binding keyword count across assessments.
+        
+        Returns:
+            Mean binding keyword count, or 0.0 if no assessments.
+        """
+        if not self._assessment_history:
+            return 0.0
+        total = sum(a.get('binding_keywords', 0) for a in self._assessment_history)
+        return total / len(self._assessment_history)
+    
+    def average_legal_provisions(self) -> float:
+        """Calculate average legal provision count across assessments.
+        
+        Returns:
+            Mean legal provision count, or 0.0 if no assessments.
+        """
+        if not self._assessment_history:
+            return 0.0
+        total = sum(a.get('legal_provisions', 0) for a in self._assessment_history)
+        return total / len(self._assessment_history)
+    
+    def high_risk_percentage(self) -> float:
+        """Calculate percentage of assessments classified as high risk.
+        
+        Returns:
+            Percentage (0.0 to 100.0), or 0.0 if no assessments.
+        """
+        if not self._assessment_history:
+            return 0.0
+        high_count = self.assessments_by_risk_level('high')
+        return (high_count / len(self._assessment_history)) * 100.0
+    
+    def actionable_complaints_ratio(self, threshold: int = 2) -> float:
+        """Calculate ratio of complaints meeting actionability threshold.
+        
+        Args:
+            threshold: Minimum risk score to be considered actionable.
+            
+        Returns:
+            Ratio of actionable complaints (0.0 to 1.0), or 0.0 if no assessments.
+        """
+        if not self._assessment_history:
+            return 0.0
+        actionable = sum(1 for a in self._assessment_history if a.get('score', 0) >= threshold)
+        return actionable / len(self._assessment_history)

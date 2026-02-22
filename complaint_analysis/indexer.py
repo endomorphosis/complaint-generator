@@ -75,6 +75,9 @@ class HybridDocumentIndexer:
         # Initialize HACC components
         self.legal_extractor = LegalPatternExtractor()
         self.risk_scorer = ComplaintRiskScorer()
+        
+        # Batch 218: Track indexed documents
+        self._indexed_documents: List[Dict[str, Any]] = []
     
     async def index_document(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -140,6 +143,9 @@ class HybridDocumentIndexer:
         
         # Calculate combined relevance score
         result['relevance_score'] = self._calculate_relevance(result)
+        
+        # Batch 218: Track indexed document
+        self._indexed_documents.append(result)
         
         return result
     

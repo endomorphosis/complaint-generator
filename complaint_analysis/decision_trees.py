@@ -932,3 +932,81 @@ class DecisionTreeGenerator:
     def get_tree(self, complaint_type: str) -> Optional[DecisionTree]:
         """Get a decision tree by complaint type."""
         return self.trees.get(complaint_type)
+
+
+    # =====================================================================
+    # Batch 217: Decision tree analysis methods
+    # =====================================================================
+    
+    def total_trees(self) -> int:
+        """Return the total number of generated decision trees."""
+        return len(self.trees)
+    
+    def trees_by_category(self, category: str) -> int:
+        """
+        Return count of trees in a specific category.
+        
+        Args:
+            category: The category to filter by
+            
+        Returns:
+            Count of trees in that category
+        """
+        return sum(1 for tree in self.trees.values() if tree.category == category)
+    
+    def category_distribution(self) -> Dict[str, int]:
+        """
+        Return frequency distribution of tree categories.
+        
+        Returns:
+            Dict mapping category to count
+        """
+        dist = {}
+        for tree in self.trees.values():
+            dist[tree.category] = dist.get(tree.category, 0) + 1
+        return dist
+    
+    def total_questions(self) -> int:
+        """Return total number of questions across all trees."""
+        return sum(len(tree.questions) for tree in self.trees.values())
+    
+    def average_questions_per_tree(self) -> float:
+        """Return average number of questions per tree."""
+        if not self.trees:
+            return 0.0
+        return self.total_questions() / len(self.trees)
+    
+    def maximum_questions_count(self) -> int:
+        """Return the maximum number of questions in any single tree."""
+        if not self.trees:
+            return 0
+        return max(len(tree.questions) for tree in self.trees.values())
+    
+    def total_required_fields(self) -> int:
+        """Return total number of required fields across all trees."""
+        return sum(len(tree.required_fields) for tree in self.trees.values())
+    
+    def average_required_fields_per_tree(self) -> float:
+        """Return average number of required fields per tree."""
+        if not self.trees:
+            return 0.0
+        return self.total_required_fields() / len(self.trees)
+    
+    def trees_with_root_questions(self) -> int:
+        """Return count of trees that have root questions defined."""
+        return sum(1 for tree in self.trees.values() if tree.root_questions)
+    
+    def tree_coverage_percentage(self, complaint_types: List[str]) -> float:
+        """
+        Return percentage of complaint types that have generated trees.
+        
+        Args:
+            complaint_types: List of all expected complaint types
+            
+        Returns:
+            Percentage of types with trees (0-100)
+        """
+        if not complaint_types:
+            return 0.0
+        covered = sum(1 for ctype in complaint_types if ctype in self.trees)
+        return (covered / len(complaint_types)) * 100

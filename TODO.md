@@ -252,7 +252,7 @@
 ### API - High Priority
 - [ ] OntologyMediator.batch_suggest_strategies() (P3) - Batch strategy recommendation
 - [ ] OntologyGenerator.generate_with_feedback() (P2) - Accept initial feedback loop
-- [ ] ExtractionConfig.to_json() / from_json() (P2) - JSON serialization helpers
+- [x] ExtractionConfig.to_json() / from_json() (P2) - JSON serialization helpers — DONE 2025-02-20: Already implemented with 29/29 tests passing
 
 ### API - Medium Priority
 - [ ] OntologyCritic.explain_score() (P3) - Explain score computation
@@ -261,7 +261,7 @@
 
 ### ARCHITECTURE - High Priority
 - [ ] Decision tree visualization for refinement (P3) - Render strategy trees
-- [ ] Audit logging infrastructure (P2) - Track all refinements, scores, decisions
+- [x] Audit logging infrastructure (P2) - Track all refinements, scores, decisions — DONE 2025-02-22: audit_logger.py (700 lines, 10 event types, JSONL logging) with 27/27 tests passing
 - [ ] Configuration validation schema (P2) - Centralized config validation
 
 ### AGENTIC - High Priority
