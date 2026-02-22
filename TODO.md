@@ -9,6 +9,13 @@
 - [x] OntologyCritic.failing_scores() (P2) - `2026-02-21 15:20` - 7/7 tests PASSED
 - **Batch 200 Total:** 21 tests, ~150 LOC, commit 2ca668b
 
+### GRAPHRAG - Batch 202
+- [x] Profile infer_relationships() optimization (PERF - P2) - `2026-02-21 21:30` - 16/16 tests PASSED (commit 69bbe5f)
+- [x] OntologyGenerator.generate_with_feedback() (API - P2) - `2026-02-21 22:30` - 22/22 tests PASSED (commit 97269f9)
+- [x] OntologyMediator.batch_apply_strategies() (API - P2) - `2026-02-21 23:15` - 20/20 tests PASSED (commit 0652ecb)
+- [x] CriticScore distribution tests (TESTS - P2) - `2026-02-21 23:45` - 18/18 tests PASSED (commit bb7b206)
+- **Batch 202 Total:** 76 tests, ~1,250 LOC, 4 commits
+
 ### TESTS Track
 - [x] test_end_to_end_pipeline.py fixes (P1) - `2026-02-21 10:15`
 - [x] test_ontology_pipeline_logging.py (P2) - `2026-02-21 11:30`
