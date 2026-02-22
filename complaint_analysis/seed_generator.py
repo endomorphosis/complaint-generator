@@ -502,3 +502,122 @@ class SeedGenerator:
             raise KeyError(f"Template not found: {template_id}")
         
         return template.instantiate(values)
+
+
+    # ------------------------------------------------------------------ #
+    # Batch 210: Template analysis and statistics methods                #
+    # ------------------------------------------------------------------ #
+
+    def total_templates(self) -> int:
+        """Return total number of templates available.
+
+        Returns:
+            Count of all templates.
+        """
+        return len(self.templates)
+
+    def templates_by_category(self, category: str) -> int:
+        """Count templates for a specific category.
+
+        Args:
+            category: Category to count (e.g., 'housing', 'employment').
+
+        Returns:
+            Number of templates in the category.
+        """
+        return sum(1 for t in self.templates.values() if t.category == category)
+
+    def category_distribution(self) -> dict:
+        """Calculate distribution of templates across categories.
+
+        Returns:
+            Dict mapping category names to template counts.
+        """
+        dist: dict = {}
+        for template in self.templates.values():
+            dist[template.category] = dist.get(template.category, 0) + 1
+        return dist
+
+    def most_common_category(self) -> str:
+        """Identify the category with the most templates.
+
+        Returns:
+            Category name with most templates, or 'none' if no templates.
+        """
+        dist = self.category_distribution()
+        if not dist:
+            return 'none'
+        return max(dist.items(), key=lambda x: x[1])[0]
+
+    def type_distribution(self) -> dict:
+        """Calculate distribution of templates across complaint types.
+
+        Returns:
+            Dict mapping complaint types to template counts.
+        """
+        dist: dict = {}
+        for template in self.templates.values():
+            dist[template.type] = dist.get(template.type, 0) + 1
+        return dist
+
+    def templates_with_required_fields(self) -> int:
+        """Count templates that have required fields defined.
+
+        Returns:
+            Number of templates with non-empty required_fields list.
+        """
+        return sum(
+            1 for t in self.templates.values()
+            if hasattr(t, 'required_fields') and len(t.required_fields) > 0
+        )
+
+    def average_required_fields_per_template(self) -> float:
+        """Calculate average number of required fields per template.
+
+        Returns:
+            Mean required field count, or 0.0 if no templates.
+        """
+        if not self.templates:
+            return 0.0
+        total_fields = sum(
+            len(t.required_fields) for t in self.templates.values()
+            if hasattr(t, 'required_fields')
+        )
+        return total_fields / len(self.templates)
+
+    def templates_with_optional_fields(self) -> int:
+        """Count templates that have optional fields defined.
+
+        Returns:
+            Number of templates with non-empty optional_fields list.
+        """
+        return sum(
+            1 for t in self.templates.values()
+            if hasattr(t, 'optional_fields') and len(t.optional_fields) > 0
+        )
+
+    def has_template_for_type(self, complaint_type: str) -> bool:
+        """Check if any template exists for a specific complaint type.
+
+        Args:
+            complaint_type: Complaint type to check.
+
+        Returns:
+            True if at least one template exists for the type.
+        """
+        return any(t.type == complaint_type for t in self.templates.values())
+
+    def template_coverage_score(self) -> float:
+        """Calculate template coverage as ratio of types with templates.
+
+        Returns:
+            Ratio (0.0-1.0) of registered types that have templates.
+        """
+        from .complaint_types import get_registered_types
+        registered_types = get_registered_types()
+        if not registered_types:
+            return 0.0
+        
+        types_with_templates = set(t.type for t in self.templates.values())
+        coverage = len(types_with_templates) / len(registered_types)
+        return min(coverage, 1.0)
