@@ -441,3 +441,256 @@ Your task is to evaluate how likely each claim is to succeed based on available 
         if not self._template_usage_count:
             return None
         return max(self._template_usage_count.items(), key=lambda x: x[1])[0]
+    
+    # =====================================================================
+    # Batch 214: PromptLibrary Validation and Caching Methods
+    # =====================================================================
+    
+    def template_usage_count(self, template_name: str) -> int:
+        """
+        Get the usage count for a specific template.
+        
+        Args:
+            template_name: Name of template to check
+            
+        Returns:
+            Number of times this template has been formatted
+        """
+        return self._template_usage_count.get(template_name, 0)
+    
+    def validate_template_fields(self, template_name: str, payload_data: Dict[str, Any]) -> list[str]:
+        """
+        Validate that payload data contains all required fields for a template.
+        
+        Args:
+            template_name: Name of template to validate against
+            payload_data: Data to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        template = self.get_template(template_name)
+        if not template:
+            return [f"Template not found: {template_name}"]
+        
+        errors = []
+        
+        # Check for required fields in payload_template
+        # Simple heuristic: look for {field_name} patterns
+        import re
+        field_pattern = re.compile(r'\{(\w+)\}')
+        required_fields = set(field_pattern.findall(template.payload_template))
+        
+        for field in required_fields:
+            if field not in payload_data:
+                errors.append(f"Missing required field '{field}' for template '{template_name}'")
+            elif payload_data[field] is None or (isinstance(payload_data[field], str) and not payload_data[field].strip()):
+                errors.append(f"Field '{field}' is empty for template '{template_name}'")
+        
+        return errors
+    
+    def get_template_metadata(self, template_name: str) -> Dict[str, Any]:
+        """
+        Get metadata about a template (usage, format type, warnings).
+        
+        Args:
+            template_name: Name of template
+            
+        Returns:
+            Dictionary with template metadata
+        """
+        template = self.get_template(template_name)
+        if not template:
+            return {}
+        
+        return {
+            'name': template.name,
+            'format_type': template.return_format_type.value,
+            'usage_count': self.template_usage_count(template_name),
+            'warning_count': len(template.warnings),
+            'has_payload': bool(template.payload_template),
+            'system_prompt_length': len(template.system_prompt),
+            'return_format_length': len(template.return_format)
+        }
+    
+    def templates_by_usage(self, top_n: Optional[int] = None) -> list[tuple[str, int]]:
+        """
+        Get templates sorted by usage count (most used first).
+        
+        Args:
+            top_n: Optional limit on number of results
+            
+        Returns:
+            List of (template_name, usage_count) tuples sorted by usage
+        """
+        items = sorted(self._template_usage_count.items(), key=lambda x: x[1], reverse=True)
+        if top_n is None:
+            return items
+        return items[:top_n]
+    
+    def unused_templates(self) -> list[str]:
+        """
+        Get list of templates that have never been used.
+        
+        Returns:
+            Names of templates with zero usage count
+        """
+        used_templates = set(self._template_usage_count.keys())
+        all_templates = set(self.templates.keys())
+        return sorted(list(all_templates - used_templates))
+    
+    def templates_needing_payload(self) -> list[str]:
+        """
+        Get templates that expect payload data (have placeholders).
+        
+        Returns:
+            List of template names that require payload data
+        """
+        result = []
+        import re
+        field_pattern = re.compile(r'\{(\w+)\}')
+        
+        for name, template in self.templates.items():
+            if field_pattern.search(template.payload_template):
+                result.append(name)
+        
+        return sorted(result)
+    
+    def templates_without_payload(self) -> list[str]:
+        """
+        Get templates that don't require payload data.
+        
+        Returns:
+            List of template names with no placeholders
+        """
+        all_names = set(self.templates.keys())
+        with_payload = set(self.templates_needing_payload())
+        return sorted(list(all_names - with_payload))
+    
+    def warning_distribution(self) -> Dict[int, int]:
+        """
+        Get distribution of warning counts across templates.
+        
+        Returns:
+            Dict mapping warning count to number of templates with that count
+        """
+        dist = {}
+        for template in self.templates.values():
+            warning_count = len(template.warnings)
+            dist[warning_count] = dist.get(warning_count, 0) + 1
+        return dist
+    
+    def templates_with_most_warnings(self) -> Optional[str]:
+        """
+        Find the template that has the most warnings.
+        
+        Returns:
+            Template name with most warnings, or None if no templates
+        """
+        if not self.templates:
+            return None
+        
+        max_template = None
+        max_count = 0
+        
+        for name, template in self.templates.items():
+            warning_count = len(template.warnings)
+            if warning_count > max_count:
+                max_count = warning_count
+                max_template = name
+        
+        return max_template
+    
+    def system_prompt_length_distribution(self) -> Dict[str, int]:
+        """
+        Get distribution of system prompt lengths.
+        
+        Returns:
+            Dict with statistics about system prompt lengths
+        """
+        lengths = [len(t.system_prompt) for t in self.templates.values()]
+        
+        if not lengths:
+            return {'total_templates': 0}
+        
+        return {
+            'total_templates': len(lengths),
+            'average_length': int(sum(lengths) / len(lengths)),
+            'min_length': min(lengths),
+            'max_length': max(lengths),
+            'total_chars': sum(lengths)
+        }
+    
+    def clear_usage_statistics(self) -> None:
+        """Clear all usage tracking and history data."""
+        self._template_usage_count.clear()
+        self._format_history.clear()
+    
+    def get_usage_history(self, limit: Optional[int] = None) -> list[str]:
+        """
+        Get history of template usage.
+        
+        Args:
+            limit: Optional limit on number of most recent entries
+            
+        Returns:
+            List of template names in usage order
+        """
+        if limit is None:
+            return list(self._format_history)
+        if limit <= 0:
+            return []
+        return self._format_history[-limit:]
+    
+    def template_format_type_breakdown(self) -> Dict[str, list[str]]:
+        """
+        Get templates grouped by their return format type.
+        
+        Returns:
+            Dict mapping format type names to lists of template names
+        """
+        breakdown = {}
+        for name, template in self.templates.items():
+            format_name = template.return_format_type.value
+            if format_name not in breakdown:
+                breakdown[format_name] = []
+            breakdown[format_name].append(name)
+        
+        # Sort template lists
+        for format_name in breakdown:
+            breakdown[format_name].sort()
+        
+        return breakdown
+    
+    def total_characters_in_templates(self) -> int:
+        """
+        Calculate total characters across all template content.
+        
+        Returns:
+            Sum of characters in all system prompts, return formats, and payloads
+        """
+        total = 0
+        for template in self.templates.values():
+            total += len(template.system_prompt)
+            total += len(template.return_format)
+            total += len(template.payload_template)
+        return total
+    
+    def cache_efficiency_ratio(self) -> float:
+        """
+        Calculate ratio of successful cached template retrievals.
+        
+        Returns:
+            Ratio (0.0 to 1.0) of format operations to unique template count
+        """
+        if not self.templates:
+            return 0.0
+        
+        total_formats = len(self._format_history)
+        if total_formats == 0:
+            return 0.0
+        
+        # Efficiency: how many times we format vs how many unique templates we have
+        # Higher ratio = more reuse of templates
+        unique_templates_used = len(set(self._format_history))
+        return unique_templates_used / max(1, total_formats)

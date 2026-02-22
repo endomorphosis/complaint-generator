@@ -393,6 +393,10 @@ class KnowledgeGraphBuilder:
         self.mediator = mediator
         self.entity_counter = 0
         self.relationship_counter = 0
+        
+        # Batch 220: Track graph building operations
+        self._built_graphs: List[KnowledgeGraph] = []
+        self._text_processed_count = 0
     
     def build_from_text(self, text: str) -> KnowledgeGraph:
         """
@@ -434,6 +438,11 @@ class KnowledgeGraphBuilder:
             graph.add_relationship(rel)
         
         logger.info(f"Built knowledge graph: {graph.summary()}")
+        
+        # Batch 220: Track graph building
+        self._built_graphs.append(graph)
+        self._text_processed_count += 1
+        
         return graph
     
     def _extract_entities(self, text: str) -> List[Dict[str, Any]]:
@@ -988,3 +997,102 @@ class KnowledgeGraphBuilder:
         """Generate unique relationship ID."""
         self.relationship_counter += 1
         return f"rel_{self.relationship_counter}"
+
+
+    # =====================================================================
+    # Batch 220: Graph building analytics methods
+    # =====================================================================
+    
+    def total_graphs_built(self) -> int:
+        """Return total number of knowledge graphs built.
+        
+        Returns:
+            Count of graphs in _built_graphs.
+        """
+        return len(self._built_graphs)
+    
+    def total_texts_processed(self) -> int:
+        """Return total number of texts processed.
+        
+        Returns:
+            Count of build_from_text calls.
+        """
+        return self._text_processed_count
+    
+    def average_entities_per_graph(self) -> float:
+        """Calculate average number of entities per graph.
+        
+        Returns:
+            Mean entity count, or 0.0 if no graphs.
+        """
+        if not self._built_graphs:
+            return 0.0
+        total = sum(g.total_entities() for g in self._built_graphs)
+        return total / len(self._built_graphs)
+    
+    def average_relationships_per_graph(self) -> float:
+        """Calculate average number of relationships per graph.
+        
+        Returns:
+            Mean relationship count, or 0.0 if no graphs.
+        """
+        if not self._built_graphs:
+            return 0.0
+        total = sum(g.total_relationships() for g in self._built_graphs)
+        return total / len(self._built_graphs)
+    
+    def maximum_entities_in_graph(self) -> int:
+        """Find maximum number of entities in any graph.
+        
+        Returns:
+            Max entity count, or 0 if no graphs.
+        """
+        if not self._built_graphs:
+            return 0
+        return max(g.total_entities() for g in self._built_graphs)
+    
+    def maximum_relationships_in_graph(self) -> int:
+        """Find maximum number of relationships in any graph.
+        
+        Returns:
+            Max relationship count, or 0 if no graphs.
+        """
+        if not self._built_graphs:
+            return 0
+        return max(g.total_relationships() for g in self._built_graphs)
+    
+    def total_entities_extracted(self) -> int:
+        """Sum total entities across all built graphs.
+        
+        Returns:
+            Total entity count.
+        """
+        return sum(g.total_entities() for g in self._built_graphs)
+    
+    def total_relationships_extracted(self) -> int:
+        """Sum total relationships across all built graphs.
+        
+        Returns:
+            Total relationship count.
+        """
+        return sum(g.total_relationships() for g in self._built_graphs)
+    
+    def entity_extraction_rate(self) -> float:
+        """Calculate average entities extracted per text.
+        
+        Returns:
+            Entities per text, or 0.0 if no texts processed.
+        """
+        if self._text_processed_count == 0:
+            return 0.0
+        return self.total_entities_extracted() / self._text_processed_count
+    
+    def relationship_extraction_rate(self) -> float:
+        """Calculate average relationships extracted per text.
+        
+        Returns:
+            Relationships per text, or 0.0 if no texts processed.
+        """
+        if self._text_processed_count == 0:
+            return 0.0
+        return self.total_relationships_extracted() / self._text_processed_count
