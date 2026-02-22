@@ -283,6 +283,118 @@ class DependencyGraph:
         }
 
 
+    # ------------------------------------------------------------------ #
+    # Batch 209: Dependency graph analysis and statistics methods        #
+    # ------------------------------------------------------------------ #
+
+    def total_nodes(self) -> int:
+        """Return total number of nodes in the graph.
+
+        Returns:
+            Count of nodes.
+        """
+        return len(self.nodes)
+
+    def total_dependencies(self) -> int:
+        """Return total number of dependencies in the graph.
+
+        Returns:
+            Count of dependencies.
+        """
+        return len(self.dependencies)
+
+    def node_type_distribution(self) -> dict:
+        """Calculate frequency distribution of node types.
+
+        Returns:
+            Dict mapping node type names to counts.
+        """
+        type_counts: dict = {}
+        for node in self.nodes.values():
+            ntype = node.node_type.value  # Get enum value (string)
+            type_counts[ntype] = type_counts.get(ntype, 0) + 1
+        return type_counts
+
+    def dependency_type_distribution(self) -> dict:
+        """Calculate frequency distribution of dependency types.
+
+        Returns:
+            Dict mapping dependency type names to counts.
+        """
+        type_counts: dict = {}
+        for dep in self.dependencies.values():
+            dtype = dep.dependency_type.value  # Get enum value (string)
+            type_counts[dtype] = type_counts.get(dtype, 0) + 1
+        return type_counts
+
+    def satisfied_node_count(self) -> int:
+        """Count nodes marked as satisfied.
+
+        Returns:
+            Number of satisfied nodes.
+        """
+        return sum(1 for node in self.nodes.values() if node.satisfied)
+
+    def unsatisfied_node_count(self) -> int:
+        """Count nodes not marked as satisfied.
+
+        Returns:
+            Number of unsatisfied nodes.
+        """
+        return sum(1 for node in self.nodes.values() if not node.satisfied)
+
+    def average_confidence(self) -> float:
+        """Calculate average confidence across all nodes.
+
+        Returns:
+            Mean confidence score, or 0.0 if no nodes.
+        """
+        if not self.nodes:
+            return 0.0
+        return sum(n.confidence for n in self.nodes.values()) / len(self.nodes)
+
+    def required_dependency_count(self) -> int:
+        """Count dependencies marked as required.
+
+        Returns:
+            Number of required dependencies.
+        """
+        return sum(1 for dep in self.dependencies.values() if dep.required)
+
+    def average_dependencies_per_node(self) -> float:
+        """Calculate average number of dependencies per node.
+
+        Returns:
+            Mean dependency count, or 0.0 if no nodes.
+        """
+        if not self.nodes:
+            return 0.0
+        total_connections = sum(
+            len(self.get_dependencies_for_node(nid))
+            for nid in self.nodes.keys()
+        )
+        # Each dependency is counted twice (source and target), so divide by 2
+        return (total_connections / 2) / len(self.nodes)
+
+    def most_dependent_node(self) -> str:
+        """Find node ID with the most dependencies.
+
+        Returns:
+            Node ID with most dependencies, or 'none' if no nodes.
+        """
+        if not self.nodes:
+            return 'none'
+        
+        dependency_counts: dict = {}
+        for node_id in self.nodes.keys():
+            dependency_counts[node_id] = len(self.get_dependencies_for_node(node_id))
+        
+        if not dependency_counts:
+            return 'none'
+        
+        return max(dependency_counts.items(), key=lambda x: x[1])[0]
+
+
 class DependencyGraphBuilder:
     """
     Builds dependency graphs from claims and requirements.
