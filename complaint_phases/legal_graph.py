@@ -169,6 +169,149 @@ class LegalGraph:
         }
 
 
+    # ------------------------------------------------------------------ #
+    # Batch 207: Legal graph analysis and statistics methods             #
+    # ------------------------------------------------------------------ #
+
+    def total_elements(self) -> int:
+        """Return total number of legal elements in the graph.
+
+        Returns:
+            Count of elements.
+        """
+        return len(self.elements)
+
+    def total_relations(self) -> int:
+        """Return total number of legal relations in the graph.
+
+        Returns:
+            Count of relations.
+        """
+        return len(self.relations)
+
+    def element_type_frequency(self) -> dict:
+        """Count frequency of each element type.
+
+        Returns:
+            Dict mapping element types to counts.
+        """
+        type_counts: dict = {}
+        for element in self.elements.values():
+            etype = element.element_type
+            type_counts[etype] = type_counts.get(etype, 0) + 1
+        return type_counts
+
+    def most_common_element_type(self) -> str:
+        """Identify the most common element type.
+
+        Returns:
+            Most frequent element type, or 'none' if no elements.
+        """
+        freq = self.element_type_frequency()
+        if not freq:
+            return 'none'
+        return max(freq.items(), key=lambda x: x[1])[0]
+
+    def relation_type_frequency(self) -> dict:
+        """Count frequency of each relation type.
+
+        Returns:
+            Dict mapping relation types to counts.
+        """
+        type_counts: dict = {}
+        for relation in self.relations.values():
+            rtype = relation.relation_type
+            type_counts[rtype] = type_counts.get(rtype, 0) + 1
+        return type_counts
+
+    def most_connected_element(self) -> str:
+        """Find element ID with the most relations.
+
+        Returns:
+            Element ID with most relations, or 'none' if no elements.
+        """
+        if not self.elements:
+            return 'none'
+        
+        connection_counts: dict = {}
+        for element_id in self.elements.keys():
+            connection_counts[element_id] = len(self.get_relations_for_element(element_id))
+        
+        if not connection_counts:
+            return 'none'
+        
+        return max(connection_counts.items(), key=lambda x: x[1])[0]
+
+    def average_relations_per_element(self) -> float:
+        """Calculate average number of relations per element.
+
+        Returns:
+            Mean relation count, or 0.0 if no elements.
+        """
+        if not self.elements:
+            return 0.0
+        total_connections = sum(
+            len(self.get_relations_for_element(eid))
+            for eid in self.elements.keys()
+        )
+        # Each relation is counted twice (source and target), so divide by 2
+        return (total_connections / 2) / len(self.elements)
+
+    def requirements_coverage(self) -> dict:
+        """Analyze requirement coverage across claim types.
+
+        Returns:
+            Dict with 'total_requirements', 'claim_types_covered', 'avg_requirements_per_claim'.
+        """
+        requirements = [e for e in self.elements.values() 
+                       if e.element_type in ('requirement', 'procedural_requirement')]
+        
+        claim_types_with_reqs: set = set()
+        for req in requirements:
+            applicable_claims = req.attributes.get('applicable_claim_types', [])
+            claim_types_with_reqs.update(applicable_claims)
+        
+        avg_per_claim = 0.0
+        if claim_types_with_reqs:
+            total_req_mappings = sum(
+                len(req.attributes.get('applicable_claim_types', []))
+                for req in requirements
+            )
+            avg_per_claim = total_req_mappings / len(claim_types_with_reqs)
+        
+        return {
+            'total_requirements': len(requirements),
+            'claim_types_covered': len(claim_types_with_reqs),
+            'avg_requirements_per_claim': avg_per_claim
+        }
+
+    def elements_with_citations(self) -> int:
+        """Count elements that have citation information.
+
+        Returns:
+            Number of elements with non-empty citation field.
+        """
+        return sum(
+            1 for element in self.elements.values()
+            if element.citation and len(element.citation) > 0
+        )
+
+    def graph_density(self) -> float:
+        """Calculate graph density (ratio of existing to possible relations).
+
+        Returns:
+            Density ratio (0.0-1.0), or 0.0 if fewer than 2 elements.
+        """
+        n = len(self.elements)
+        if n < 2:
+            return 0.0
+        
+        max_possible_relations = n * (n - 1) / 2  # Undirected graph
+        actual_relations = len(self.relations)
+        
+        return actual_relations / max_possible_relations
+
+
 class LegalGraphBuilder:
     """
     Builds legal requirement graphs from statutes, regulations, and case law.

@@ -1171,3 +1171,103 @@ class ComplaintDenoiser:
         summary_parts.append(f"**Complaint Status:** Information gathering {completeness}ly complete with {kg_summary['total_entities']} key elements identified.")
         
         return "\n".join(summary_parts)
+
+
+    # ------------------------------------------------------------------ #
+    # Batch 206: Question history and policy analysis methods            #
+    # ------------------------------------------------------------------ #
+
+    def total_questions_asked(self) -> int:
+        """Return total number of questions asked during denoising.
+
+        Returns:
+            Count of questions in history.
+        """
+        return len(self.questions_asked)
+
+    def question_pool_size(self) -> int:
+        """Return current size of the question pool.
+
+        Returns:
+            Number of candidate questions available.
+        """
+        return len(self.questions_pool)
+
+    def question_type_frequency(self) -> dict:
+        """Count frequency of each question type asked.
+
+        Returns:
+            Dict mapping question types to occurrence counts.
+        """
+        type_counts: dict = {}
+        for q in self.questions_asked:
+            qtype = q.get('type', 'unknown')
+            type_counts[qtype] = type_counts.get(qtype, 0) + 1
+        return type_counts
+
+    def most_frequent_question_type(self) -> str:
+        """Identify the most frequently asked question type.
+
+        Returns:
+            Name of most common question type, or 'none' if no questions asked.
+        """
+        freq = self.question_type_frequency()
+        if not freq:
+            return 'none'
+        return max(freq.items(), key=lambda x: x[1])[0]
+
+    def average_gain_per_question(self) -> float:
+        """Calculate average gain across recent questions.
+
+        Returns:
+            Mean of recent gains, or 0.0 if no gains recorded.
+        """
+        if not self._recent_gains:
+            return 0.0
+        return sum(self._recent_gains) / len(self._recent_gains)
+
+    def gain_variance(self) -> float:
+        """Calculate variance of gains across recent questions.
+
+        Returns:
+            Variance of _recent_gains, or 0.0 if fewer than 2 gains.
+        """
+        if len(self._recent_gains) < 2:
+            return 0.0
+        mean = sum(self._recent_gains) / len(self._recent_gains)
+        variance = sum((g - mean) ** 2 for g in self._recent_gains) / len(self._recent_gains)
+        return variance
+
+    def momentum_enabled_for_types(self) -> list:
+        """List question types with momentum tracking enabled.
+
+        Returns:
+            List of question types with EMA state.
+        """
+        return list(self._type_gain_ema.keys())
+
+    def highest_momentum_type(self) -> str:
+        """Identify question type with highest momentum (EMA gain).
+
+        Returns:
+            Question type with max EMA, or 'none' if no momentum tracked.
+        """
+        if not self._type_gain_ema:
+            return 'none'
+        return max(self._type_gain_ema.items(), key=lambda x: x[1])[0]
+
+    def is_exploration_active(self) -> bool:
+        """Check if exploration mode is currently enabled.
+
+        Returns:
+            True if exploration_enabled is True.
+        """
+        return self.exploration_enabled
+
+    def stagnation_detection_window(self) -> int:
+        """Return the configured stagnation detection window size.
+
+        Returns:
+            Number of recent gains to check for stagnation.
+        """
+        return self.stagnation_window

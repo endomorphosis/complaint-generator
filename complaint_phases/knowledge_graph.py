@@ -259,6 +259,128 @@ class KnowledgeGraph:
         }
 
 
+    # ------------------------------------------------------------------ #
+    # Batch 208: Knowledge graph analysis and statistics methods         #
+    # ------------------------------------------------------------------ #
+
+    def total_entities(self) -> int:
+        """Return total number of entities in the graph.
+
+        Returns:
+            Count of entities.
+        """
+        return len(self.entities)
+
+    def total_relationships(self) -> int:
+        """Return total number of relationships in the graph.
+
+        Returns:
+            Count of relationships.
+        """
+        return len(self.relationships)
+
+    def entity_type_distribution(self) -> dict:
+        """Calculate frequency distribution of entity types.
+
+        Returns:
+            Dict mapping entity types to counts.
+        """
+        type_counts: dict = {}
+        for entity in self.entities.values():
+            etype = entity.type
+            type_counts[etype] = type_counts.get(etype, 0) + 1
+        return type_counts
+
+    def most_common_entity_type(self) -> str:
+        """Identify the most common entity type.
+
+        Returns:
+            Most frequent entity type, or 'none' if no entities.
+        """
+        dist = self.entity_type_distribution()
+        if not dist:
+            return 'none'
+        return max(dist.items(), key=lambda x: x[1])[0]
+
+    def relationship_type_distribution(self) -> dict:
+        """Calculate frequency distribution of relationship types.
+
+        Returns:
+            Dict mapping relationship types to counts.
+        """
+        type_counts: dict = {}
+        for rel in self.relationships.values():
+            rtype = rel.relation_type
+            type_counts[rtype] = type_counts.get(rtype, 0) + 1
+        return type_counts
+
+    def average_confidence(self) -> float:
+        """Calculate average confidence across all entities.
+
+        Returns:
+            Mean confidence score, or 0.0 if no entities.
+        """
+        if not self.entities:
+            return 0.0
+        return sum(e.confidence for e in self.entities.values()) / len(self.entities)
+
+    def low_confidence_entity_count(self, threshold: float = 0.7) -> int:
+        """Count entities below confidence threshold.
+
+        Args:
+            threshold: Confidence threshold (default: 0.7).
+
+        Returns:
+            Number of entities with confidence < threshold.
+        """
+        return sum(1 for e in self.entities.values() if e.confidence < threshold)
+
+    def isolated_entity_count(self) -> int:
+        """Count entities with no relationships.
+
+        Returns:
+            Number of entities not involved in any relationships.
+        """
+        count = 0
+        for entity_id in self.entities.keys():
+            if len(self.get_relationships_for_entity(entity_id)) == 0:
+                count += 1
+        return count
+
+    def average_relationships_per_entity(self) -> float:
+        """Calculate average number of relationships per entity.
+
+        Returns:
+            Mean relationship count, or 0.0 if no entities.
+        """
+        if not self.entities:
+            return 0.0
+        total_connections = sum(
+            len(self.get_relationships_for_entity(eid))
+            for eid in self.entities.keys()
+        )
+        # Each relationship is counted twice (source and target), so divide by 2
+        return (total_connections / 2) / len(self.entities)
+
+    def most_connected_entity(self) -> str:
+        """Find entity ID with the most relationships.
+
+        Returns:
+            Entity ID with most relationships, or 'none' if no entities.
+        """
+        if not self.entities:
+            return 'none'
+        
+        connection_counts: dict = {}
+        for entity_id in self.entities.keys():
+            connection_counts[entity_id] = len(self.get_relationships_for_entity(entity_id))
+        
+        if not connection_counts:
+            return 'none'
+        
+        return max(connection_counts.items(), key=lambda x: x[1])[0]
+
+
 class KnowledgeGraphBuilder:
     """
     Builds knowledge graphs from complaint text using LLM extraction.

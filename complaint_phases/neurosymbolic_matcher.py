@@ -351,3 +351,150 @@ class NeurosymbolicMatcher:
         viability['recommendations'] = self.generate_fact_finding_recommendations(matching_results)
         
         return viability
+
+
+    # ------------------------------------------------------------------ #
+    # Batch 205: Matching analysis and diagnostic methods                #
+    # ------------------------------------------------------------------ #
+
+    def matching_history_size(self) -> int:
+        """Return number of matching results stored in history.
+
+        Returns:
+            Count of historical matching results.
+        """
+        return len(self.matching_results)
+
+    def average_satisfaction_score(self) -> float:
+        """Calculate average satisfaction across all matching results.
+
+        Returns:
+            Mean overall_satisfaction, or 0.0 if no results.
+        """
+        if not self.matching_results:
+            return 0.0
+        scores = [r.get('overall_satisfaction', 0.0) for r in self.matching_results]
+        return sum(scores) / len(scores)
+
+    def total_claims_processed(self) -> int:
+        """Sum total claims processed across all matching results.
+
+        Returns:
+            Total number of claims evaluated in history.
+        """
+        return sum(r.get('total_claims', 0) for r in self.matching_results)
+
+    def total_satisfied_claims(self) -> int:
+        """Sum satisfied claims across all matching results.
+
+        Returns:
+            Total number of satisfied claims in history.
+        """
+        return sum(r.get('satisfied_claims', 0) for r in self.matching_results)
+
+    def satisfaction_improvement_trend(self) -> str:
+        """Determine if satisfaction scores are improving over time.
+
+        Returns:
+            'improving' if recent results better than older ones,
+            'declining' if trend is downward,
+            'stable' if variance is low,
+            'insufficient_data' if fewer than 2 results.
+        """
+        if len(self.matching_results) < 2:
+            return 'insufficient_data'
+        
+        scores = [r.get('overall_satisfaction', 0.0) for r in self.matching_results]
+        
+        if len(scores) < 4:
+            # Simple comparison: first half vs second half
+            mid = len(scores) // 2
+            first_avg = sum(scores[:mid]) / mid if mid > 0 else 0.0
+            second_avg = sum(scores[mid:]) / (len(scores) - mid)
+            
+            if second_avg > first_avg + 0.05:
+                return 'improving'
+            elif first_avg > second_avg + 0.05:
+                return 'declining'
+            else:
+                return 'stable'
+        
+        # Linear trend: compare recent window to older window
+        window_size = min(3, len(scores) // 2)
+        recent = scores[-window_size:]
+        older = scores[:window_size]
+        
+        recent_avg = sum(recent) / len(recent)
+        older_avg = sum(older) / len(older)
+        
+        if recent_avg > older_avg + 0.05:
+            return 'improving'
+        elif older_avg > recent_avg + 0.05:
+            return 'declining'
+        else:
+            return 'stable'
+
+    def gap_frequency_distribution(self) -> dict:
+        """Count frequency of each gap type across all results.
+
+        Returns:
+            Dict mapping requirement names to occurrence counts.
+        """
+        gap_counts: dict = {}
+        for result in self.matching_results:
+            for gap in result.get('gaps', []):
+                req_name = gap.get('requirement_name', 'unknown')
+                gap_counts[req_name] = gap_counts.get(req_name, 0) + 1
+        return gap_counts
+
+    def most_common_gap(self) -> str:
+        """Identify the most frequently occurring gap across results.
+
+        Returns:
+            Name of most common gap requirement, or 'none' if no gaps.
+        """
+        freq = self.gap_frequency_distribution()
+        if not freq:
+            return 'none'
+        return max(freq.items(), key=lambda x: x[1])[0]
+
+    def satisfaction_variance(self) -> float:
+        """Calculate variance in satisfaction scores across results.
+
+        Returns:
+            Variance of overall_satisfaction scores, or 0.0 if <2 results.
+        """
+        if len(self.matching_results) < 2:
+            return 0.0
+        scores = [r.get('overall_satisfaction', 0.0) for r in self.matching_results]
+        mean = sum(scores) / len(scores)
+        variance = sum((s - mean) ** 2 for s in scores) / len(scores)
+        return variance
+
+    def high_viability_percentage(self, threshold: float = 0.8) -> float:
+        """Calculate percentage of results with high satisfaction.
+
+        Args:
+            threshold: Minimum satisfaction score for high viability (default: 0.8).
+
+        Returns:
+            Percentage (0.0-1.0) of results above threshold, or 0.0 if no results.
+        """
+        if not self.matching_results:
+            return 0.0
+        high_viability = sum(
+            1 for r in self.matching_results
+            if r.get('overall_satisfaction', 0.0) >= threshold
+        )
+        return high_viability / len(self.matching_results)
+
+    def average_gaps_per_result(self) -> float:
+        """Calculate average number of gaps per matching result.
+
+        Returns:
+            Mean gap count, or 0.0 if no results.
+        """
+        if not self.matching_results:
+            return 0.0
+        total_gaps = sum(len(r.get('gaps', [])) for r in self.matching_results)
+        return total_gaps / len(self.matching_results)
