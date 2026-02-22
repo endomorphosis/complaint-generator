@@ -2,6 +2,13 @@
 
 ## Completed (2026-02-21)
 
+### GRAPHRAG - Batch 200
+- [x] EntityExtractionResult.entity_count @property (P2) - `2026-02-21 15:10` - 4/4 tests PASSED
+- [x] EntityExtractionResult.relationship_count @property (P2) - `2026-02-21 15:10` - 4/4 tests PASSED
+- [x] EntityExtractionResult.from_dict() @classmethod (P2) - `2026-02-21 15:15` - 6/6 tests PASSED
+- [x] OntologyCritic.failing_scores() (P2) - `2026-02-21 15:20` - 7/7 tests PASSED
+- **Batch 200 Total:** 21 tests, ~150 LOC, commit 2ca668b
+
 ### TESTS Track
 - [x] test_end_to_end_pipeline.py fixes (P1) - `2026-02-21 10:15`
 - [x] test_ontology_pipeline_logging.py (P2) - `2026-02-21 11:30`
@@ -44,7 +51,12 @@
 
 ## In-Progress
 
-(None - ready to select next pick from backlog)
+### Batch 201 (Selected 2026-02-21 ~15:30)
+- [ ] test_ontology_batch_processing.py (TESTS - P2) - Batch processing edge cases
+- [ ] ExtractionConfig.to_json() / from_json() (API - P2) - JSON serialization helpers
+- [ ] OntologyCritic.explain_score() (API - P3) - Explain score computation
+- [ ] Implement .lower() caching for stopwords (PERF - P2) - Quick win optimization
+- [ ] REFINEMENT_STRATEGY_GUIDE.md (DOCUMENTATION - P3) - Explain refinement strategy logic
 
 ---
 
