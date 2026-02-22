@@ -283,3 +283,97 @@ class HybridDocumentIndexer:
         stats['avg_relevance'] = total_relevance / len(documents)
         
         return stats
+
+
+    # =====================================================================
+    # Batch 218: Document indexing analysis methods
+    # =====================================================================
+    
+    def total_indexed_documents(self) -> int:
+        """Return the total number of indexed documents."""
+        return len(self._indexed_documents)
+    
+    def documents_by_risk_level(self, level: str) -> int:
+        """
+        Return count of documents with a specific risk level.
+        
+        Args:
+            level: Risk level to filter by (minimal, low, medium, high)
+            
+        Returns:
+            Count of documents with that risk level
+        """
+        return sum(1 for doc in self._indexed_documents 
+                  if doc.get('risk_level') == level)
+    
+    def risk_level_distribution(self) -> Dict[str, int]:
+        """
+        Return frequency distribution of risk levels.
+        
+        Returns:
+            Dict mapping risk level to count
+        """
+        dist = {}
+        for doc in self._indexed_documents:
+            level = doc.get('risk_level', 'minimal')
+            dist[level] = dist.get(level, 0) + 1
+        return dist
+    
+    def average_relevance_score(self) -> float:
+        """Return average relevance score across all indexed documents."""
+        if not self._indexed_documents:
+            return 0.0
+        total = sum(doc.get('relevance_score', 0) for doc in self._indexed_documents)
+        return total / len(self._indexed_documents)
+    
+    def maximum_relevance_score(self) -> float:
+        """Return the maximum relevance score among all indexed documents."""
+        if not self._indexed_documents:
+            return 0.0
+        return max(doc.get('relevance_score', 0) for doc in self._indexed_documents)
+    
+    def documents_by_applicability(self, tag: str) -> int:
+        """
+        Return count of documents tagged with a specific applicability.
+        
+        Args:
+            tag: Applicability tag to filter by
+            
+        Returns:
+            Count of documents with that tag
+        """
+        return sum(1 for doc in self._indexed_documents 
+                  if tag in doc.get('applicability', []))
+    
+    def applicability_distribution(self) -> Dict[str, int]:
+        """
+        Return frequency distribution of applicability tags.
+        
+        Returns:
+            Dict mapping applicability tag to count
+        """
+        dist = {}
+        for doc in self._indexed_documents:
+            for tag in doc.get('applicability', []):
+                dist[tag] = dist.get(tag, 0) + 1
+        return dist
+    
+    def average_legal_provisions(self) -> float:
+        """Return average number of legal provisions per document."""
+        if not self._indexed_documents:
+            return 0.0
+        total = sum(doc.get('legal_provisions', {}).get('provision_count', 0) 
+                   for doc in self._indexed_documents)
+        return total / len(self._indexed_documents)
+    
+    def high_risk_documents_percentage(self) -> float:
+        """Return percentage of documents classified as high risk."""
+        if not self._indexed_documents:
+            return 0.0
+        high_risk_count = self.documents_by_risk_level('high')
+        return (high_risk_count / len(self._indexed_documents)) * 100
+    
+    def documents_with_embeddings(self) -> int:
+        """Return count of documents that have embeddings available."""
+        return sum(1 for doc in self._indexed_documents 
+                  if doc.get('embedding_available', False))
