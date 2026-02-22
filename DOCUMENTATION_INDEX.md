@@ -93,6 +93,12 @@ Complete index of all documentation in the complaint-generator repository.
 ### GraphRAG Ontology Extraction
 - [docs/EXTRACTION_CONFIG_GUIDE.md](docs/EXTRACTION_CONFIG_GUIDE.md) - Comprehensive configuration reference for ExtractionConfig: field descriptions, valid ranges, use cases, performance tuning, common patterns, and troubleshooting
 
+### 🔧 Optimizers API Documentation
+- [docs/API_REFERENCE_GRAPHRAG.md](docs/API_REFERENCE_GRAPHRAG.md) - Complete GraphRAG optimizer API with OntologyGenerator, QueryUnifiedOptimizer, WikipediaOptimizer, StreamingExtractor, QueryBudget, QueryMetrics, and all statistical methods (confidence_min, confidence_max, confidence_range, confidence_percentile, confidence_iqr, history_kurtosis, score_ewma)
+- [docs/API_REFERENCE_COMMON.md](docs/API_REFERENCE_COMMON.md) - Common optimizer components: BaseOptimizer, OptimizerConfig, QueryValidationMixin, AsyncBatchProcessor, PerformanceMetricsCollector with best practices and performance tuning
+- [docs/API_REFERENCE_AGENTIC.md](docs/API_REFERENCE_AGENTIC.md) - Agentic optimizer API: AgenticOptimizer, AgenticCLI, Session management, FeedbackLoop, and integration examples for iterative artifact optimization
+- [docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md) - Comprehensive usage examples for all optimizers with real-world scenarios, code patterns, troubleshooting, and performance tips
+
 ### Additional Documentation
 - [docs/EXAMPLES.md](docs/EXAMPLES.md) - Complete reference for all 21 example scripts
 - [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md) - Implementation summary
@@ -162,6 +168,9 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for detailed documentation of all 21 ex
 - mediator/readme.md - Mediator API
 - docs/SEARCH_HOOKS.md - Search API
 - docs/LEGAL_HOOKS.md - Legal analysis API
+- [docs/API_REFERENCE_GRAPHRAG.md](docs/API_REFERENCE_GRAPHRAG.md) - GraphRAG Optimizer API
+- [docs/API_REFERENCE_COMMON.md](docs/API_REFERENCE_COMMON.md) - Common Optimizer API
+- [docs/API_REFERENCE_AGENTIC.md](docs/API_REFERENCE_AGENTIC.md) - Agentic Optimizer API
 
 ### Integration & Usage
 - docs/COMPLAINT_ANALYSIS_INTEGRATION.md - Analysis integration
@@ -185,6 +194,8 @@ See [docs/EXAMPLES.md](docs/EXAMPLES.md) for detailed documentation of all 21 ex
 - **Secure the system** → docs/SECURITY.md
 - **Understand the architecture** → docs/ARCHITECTURE.md
 - **Use the three-phase system** → docs/THREE_PHASE_SYSTEM.md, complaint_phases/README.md
+- **Use optimizer APIs** → docs/API_REFERENCE_GRAPHRAG.md, docs/API_REFERENCE_COMMON.md, docs/API_REFERENCE_AGENTIC.md
+- **See optimizer examples** → docs/USAGE_EXAMPLES.md
 - **Analyze complaints** → complaint_analysis/README.md
 - **Test the system** → adversarial_harness/README.md, TESTING.md
 - **Configure backends** → docs/BACKENDS.md, docs/LLM_ROUTER.md
