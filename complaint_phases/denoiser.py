@@ -1271,3 +1271,128 @@ class ComplaintDenoiser:
             Number of recent gains to check for stagnation.
         """
         return self.stagnation_window
+
+
+    # =====================================================================
+    # Batch 219: Question-answer interaction analysis methods
+    # =====================================================================
+    
+    def total_answers_received(self) -> int:
+        """Return total number of answers received.
+        
+        Returns:
+            Count of questions with answers in history.
+        """
+        return len(self.questions_asked)
+    
+    def questions_by_priority(self, priority: str) -> int:
+        """Count questions asked with a specific priority level.
+        
+        Args:
+            priority: Priority level to filter by (e.g., 'high', 'medium', 'low')
+            
+        Returns:
+            Number of questions with that priority.
+        """
+        count = 0
+        for item in self.questions_asked:
+            q = item.get('question', {})
+            if q.get('priority') == priority:
+                count += 1
+        return count
+    
+    def priority_distribution(self) -> Dict[str, int]:
+        """Get frequency distribution of question priorities.
+        
+        Returns:
+            Dict mapping priority levels to occurrence counts.
+        """
+        dist: Dict[str, int] = {}
+        for item in self.questions_asked:
+            q = item.get('question', {})
+            priority = q.get('priority', 'unknown')
+            dist[priority] = dist.get(priority, 0) + 1
+        return dist
+    
+    def unanswered_pool_questions(self) -> int:
+        """Return count of questions in pool waiting to be asked.
+        
+        Returns:
+            Size of the questions_pool.
+        """
+        return len(self.questions_pool)
+    
+    def questions_with_context(self) -> int:
+        """Count questions that have context information.
+        
+        Returns:
+            Number of asked questions with non-empty context dict.
+        """
+        count = 0
+        for item in self.questions_asked:
+            q = item.get('question', {})
+            context = q.get('context', {})
+            if context:
+                count += 1
+        return count
+    
+    def average_answer_length(self) -> float:
+        """Calculate average length of answers received.
+        
+        Returns:
+            Mean character count of answers, or 0.0 if none.
+        """
+        if not self.questions_asked:
+            return 0.0
+        total_length = sum(len(item.get('answer', '')) for item in self.questions_asked)
+        return total_length / len(self.questions_asked)
+    
+    def shortest_answer(self) -> int:
+        """Find the length of the shortest answer received.
+        
+        Returns:
+            Minimum answer length, or 0 if no answers.
+        """
+        if not self.questions_asked:
+            return 0
+        return min(len(item.get('answer', '')) for item in self.questions_asked)
+    
+    def longest_answer(self) -> int:
+        """Find the length of the longest answer received.
+        
+        Returns:
+            Maximum answer length, or 0 if no answers.
+        """
+        if not self.questions_asked:
+            return 0
+        return max(len(item.get('answer', '')) for item in self.questions_asked)
+    
+    def question_type_priority_matrix(self) -> Dict[str, Dict[str, int]]:
+        """Build matrix showing priority distribution per question type.
+        
+        Returns:
+            Nested dict: {question_type: {priority: count}}
+        """
+        matrix: Dict[str, Dict[str, int]] = {}
+        for item in self.questions_asked:
+            q = item.get('question', {})
+            qtype = q.get('type', 'unknown')
+            priority = q.get('priority', 'unknown')
+            
+            if qtype not in matrix:
+                matrix[qtype] = {}
+            matrix[qtype][priority] = matrix[qtype].get(priority, 0) + 1
+        
+        return matrix
+    
+    def recent_question_types(self, n: int = 5) -> List[str]:
+        """Get the types of the most recent n questions.
+        
+        Args:
+            n: Number of recent questions to examine
+            
+        Returns:
+            List of question types in reverse chronological order.
+        """
+        recent = self.questions_asked[-n:] if n <= len(self.questions_asked) else self.questions_asked
+        return [item.get('question', {}).get('type', 'unknown') for item in reversed(recent)]

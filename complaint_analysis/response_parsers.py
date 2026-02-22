@@ -505,30 +505,184 @@ class StateFileIngester:
 
 
 class ResponseParserFactory:
-    """Factory for creating appropriate parsers."""
+    """Factory for creating appropriate parsers with caching and history tracking."""
     
-    @staticmethod
-    def get_parser(parser_type: str) -> BaseResponseParser:
+    def __init__(self):
+        """Initialize the parser factory with caching."""
+        self._parser_instances = {}  # Cache parser instances
+        self._parsing_history = []  # Track all parsing operations
+        self._parse_success_count = 0  # Counter for successful parses
+        self._parse_failure_count = 0  # Counter for failed parses
+    
+    def get_parser(self, parser_type: str) -> BaseResponseParser:
         """
-        Get appropriate parser for response type.
+        Get appropriate parser for response type with caching.
         
         Args:
             parser_type: Type of parser needed
             
         Returns:
-            Parser instance
+            Parser instance (cached if already created)
         """
-        parsers = {
-            'json': JSONResponseParser(),
-            'structured_text': StructuredTextParser(),
-            'entities': EntityParser(),
-            'relationships': RelationshipParser(),
-            'questions': QuestionParser(),
-            'claims': ClaimParser()
+        # Return cached instance if available
+        if parser_type in self._parser_instances:
+            return self._parser_instances[parser_type]
+        
+        # Create new instance based on type
+        parser_map = {
+            'json': JSONResponseParser,
+            'structured_text': StructuredTextParser,
+            'entities': EntityParser,
+            'relationships': RelationshipParser,
+            'questions': QuestionParser,
+            'claims': ClaimParser
         }
         
-        parser = parsers.get(parser_type)
-        if not parser:
+        if parser_type not in parser_map:
             raise ValueError(f"Unknown parser type: {parser_type}")
         
+        # Create and cache the parser
+        parser = parser_map[parser_type]()
+        self._parser_instances[parser_type] = parser
+        
         return parser
+    
+    def parse_with_tracking(self, response: str, parser_type: str) -> ParsedResponse:
+        """
+        Parse response and track the operation.
+        
+        Args:
+            response: Raw response to parse
+            parser_type: Type of parser to use
+            
+        Returns:
+            ParsedResponse with tracking
+        """
+        parser = self.get_parser(parser_type)
+        parsed = parser.parse(response)
+        
+        # Track the operation
+        history_entry = {
+            'parser_type': parser_type,
+            'response_length': len(response),
+            'success': parsed.success,
+            'errors': len(parsed.errors),
+            'warnings': len(parsed.warnings)
+        }
+        self._parsing_history.append(history_entry)
+        
+        # Update counters
+        if parsed.success:
+            self._parse_success_count += 1
+        else:
+            self._parse_failure_count += 1
+        
+        return parsed
+    
+    def total_parsing_operations(self) -> int:
+        """Get total number of parsing operations.
+        
+        Returns:
+            Count of all parse operations.
+        """
+        return len(self._parsing_history)
+    
+    def successful_parse_count(self) -> int:
+        """Get count of successful parsing operations.
+        
+        Returns:
+            Number of successful parses.
+        """
+        return self._parse_success_count
+    
+    def failed_parse_count(self) -> int:
+        """Get count of failed parsing operations.
+        
+        Returns:
+            Number of failed parses.
+        """
+        return self._parse_failure_count
+    
+    def success_rate(self) -> float:
+        """Calculate success rate of parsing operations.
+        
+        Returns:
+            Success rate (0.0 to 1.0), or 0.0 if no operations.
+        """
+        total = self.total_parsing_operations()
+        if total == 0:
+            return 0.0
+        return self._parse_success_count / total
+    
+    def parser_type_distribution(self) -> Dict[str, int]:
+        """Get distribution of parser types used.
+        
+        Returns:
+            Dict mapping parser types to usage counts.
+        """
+        distribution = {}
+        for entry in self._parsing_history:
+            parser_type = entry['parser_type']
+            distribution[parser_type] = distribution.get(parser_type, 0) + 1
+        return distribution
+    
+    def average_response_length(self) -> float:
+        """Calculate average response length across all operations.
+        
+        Returns:
+            Mean response length, or 0.0 if no operations.
+        """
+        if not self._parsing_history:
+            return 0.0
+        total_length = sum(entry['response_length'] for entry in self._parsing_history)
+        return total_length / len(self._parsing_history)
+    
+    def error_ratio(self) -> float:
+        """Calculate ratio of operations with errors.
+        
+        Returns:
+            Ratio of operations with errors (0.0 to 1.0).
+        """
+        if not self._parsing_history:
+            return 0.0
+        error_ops = sum(1 for entry in self._parsing_history if entry['errors'] > 0)
+        return error_ops / len(self._parsing_history)
+    
+    def most_used_parser(self) -> str:
+        """Find the most frequently used parser type.
+        
+        Returns:
+            Parser type used most often, or 'none' if no operations.
+        """
+        dist = self.parser_type_distribution()
+        if not dist:
+            return 'none'
+        return max(dist, key=dist.get)
+    
+    def clear_history(self) -> None:
+        """Clear all parsing history and reset counters."""
+        self._parsing_history.clear()
+        self._parse_success_count = 0
+        self._parse_failure_count = 0
+    
+    def get_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Retrieve parsing history.
+        
+        Args:
+            limit: Optional limit on number of most recent entries to return
+            
+        Returns:
+            List of history entries.
+        """
+        history = list(self._parsing_history)
+        if limit is None:
+            return history
+        if limit <= 0:
+            return []
+        return history[-limit:]
+    
+    @staticmethod
+    def create() -> 'ResponseParserFactory':
+        """Create a new ResponseParserFactory instance."""
+        return ResponseParserFactory()
