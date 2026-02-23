@@ -647,6 +647,128 @@ class ResponseParserFactory:
             return 0.0
         error_ops = sum(1 for entry in self._parsing_history if entry['errors'] > 0)
         return error_ops / len(self._parsing_history)
+
+    def warning_ratio(self) -> float:
+        """Calculate ratio of operations with warnings.
+
+        Returns:
+            Ratio of operations with warnings (0.0 to 1.0).
+        """
+        if not self._parsing_history:
+            return 0.0
+        warning_ops = sum(1 for entry in self._parsing_history if entry['warnings'] > 0)
+        return warning_ops / len(self._parsing_history)
+
+    def total_response_length(self) -> int:
+        """Get total response length across all operations.
+
+        Returns:
+            Sum of response lengths.
+        """
+        return sum(entry['response_length'] for entry in self._parsing_history)
+
+    def min_response_length(self) -> int:
+        """Get minimum response length.
+
+        Returns:
+            Minimum response length, or 0 if no operations.
+        """
+        if not self._parsing_history:
+            return 0
+        return min(entry['response_length'] for entry in self._parsing_history)
+
+    def max_response_length(self) -> int:
+        """Get maximum response length.
+
+        Returns:
+            Maximum response length, or 0 if no operations.
+        """
+        if not self._parsing_history:
+            return 0
+        return max(entry['response_length'] for entry in self._parsing_history)
+
+    def average_errors_per_operation(self) -> float:
+        """Calculate average number of errors per operation.
+
+        Returns:
+            Mean error count, or 0.0 if no operations.
+        """
+        if not self._parsing_history:
+            return 0.0
+        total_errors = sum(entry['errors'] for entry in self._parsing_history)
+        return total_errors / len(self._parsing_history)
+
+    def average_warnings_per_operation(self) -> float:
+        """Calculate average number of warnings per operation.
+
+        Returns:
+            Mean warning count, or 0.0 if no operations.
+        """
+        if not self._parsing_history:
+            return 0.0
+        total_warnings = sum(entry['warnings'] for entry in self._parsing_history)
+        return total_warnings / len(self._parsing_history)
+
+    def success_count_by_parser_type(self) -> Dict[str, int]:
+        """Get count of successful parses per parser type.
+
+        Returns:
+            Dict mapping parser types to success counts.
+        """
+        counts: Dict[str, int] = {}
+        for entry in self._parsing_history:
+            if entry['success']:
+                parser_type = entry['parser_type']
+                counts[parser_type] = counts.get(parser_type, 0) + 1
+        return counts
+
+    def failure_count_by_parser_type(self) -> Dict[str, int]:
+        """Get count of failed parses per parser type.
+
+        Returns:
+            Dict mapping parser types to failure counts.
+        """
+        counts: Dict[str, int] = {}
+        for entry in self._parsing_history:
+            if not entry['success']:
+                parser_type = entry['parser_type']
+                counts[parser_type] = counts.get(parser_type, 0) + 1
+        return counts
+
+    def parser_success_rate(self, parser_type: str) -> float:
+        """Calculate success rate for a specific parser type.
+
+        Args:
+            parser_type: Parser type to evaluate
+
+        Returns:
+            Success rate for the parser type, or 0.0 if no operations.
+        """
+        total = 0
+        successes = 0
+        for entry in self._parsing_history:
+            if entry['parser_type'] == parser_type:
+                total += 1
+                if entry['success']:
+                    successes += 1
+        if total == 0:
+            return 0.0
+        return successes / total
+
+    def recent_success_rate(self, window_size: int) -> float:
+        """Calculate success rate for the most recent operations.
+
+        Args:
+            window_size: Number of most recent entries to consider
+
+        Returns:
+            Success rate for the window, or 0.0 if no operations.
+        """
+        if window_size <= 0 or not self._parsing_history:
+            return 0.0
+        window = self._parsing_history[-window_size:]
+        successes = sum(1 for entry in window if entry['success'])
+        return successes / len(window)
     
     def most_used_parser(self) -> str:
         """Find the most frequently used parser type.

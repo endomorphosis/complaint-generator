@@ -382,6 +382,83 @@ class TestResponseParserFactoryHistoryManagement:
         assert factory.average_response_length() == 0.0
 
 
+class TestResponseParserFactoryAdditionalAnalytics:
+    """Test additional analytics methods added to the factory."""
+
+    def test_warning_ratio_and_average_warnings(self):
+        """Verify warning ratio and average warnings per operation."""
+        factory = ResponseParserFactory()
+
+        factory.parse_with_tracking('{"x": 1}', 'json')
+        factory.parse_with_tracking('{bad}', 'json')
+
+        assert factory.warning_ratio() == 0.0
+        assert factory.average_warnings_per_operation() == 0.0
+
+    def test_response_length_stats(self):
+        """Verify total/min/max response length calculations."""
+        factory = ResponseParserFactory()
+        response_one = '{"x": 1}'
+        response_two = '{"longer": "value"}'
+
+        factory.parse_with_tracking(response_one, 'json')
+        factory.parse_with_tracking(response_two, 'json')
+
+        expected_total = len(response_one) + len(response_two)
+        assert factory.total_response_length() == expected_total
+        assert factory.min_response_length() == min(len(response_one), len(response_two))
+        assert factory.max_response_length() == max(len(response_one), len(response_two))
+
+    def test_average_errors_per_operation(self):
+        """Verify average error count per operation."""
+        factory = ResponseParserFactory()
+
+        factory.parse_with_tracking('{"x": 1}', 'json')
+        factory.parse_with_tracking('{bad}', 'json')
+
+        assert factory.average_errors_per_operation() == pytest.approx(0.5)
+
+    def test_success_failure_counts_by_parser_type(self):
+        """Verify per-parser success and failure counts."""
+        factory = ResponseParserFactory()
+
+        factory.parse_with_tracking('{"x": 1}', 'json')
+        factory.parse_with_tracking('{bad}', 'json')
+        factory.parse_with_tracking('{"entities": []}', 'entities')
+
+        assert factory.success_count_by_parser_type() == {
+            'json': 1,
+            'entities': 1,
+        }
+        assert factory.failure_count_by_parser_type() == {
+            'json': 1,
+        }
+
+    def test_parser_success_rate(self):
+        """Verify success rate per parser type."""
+        factory = ResponseParserFactory()
+
+        factory.parse_with_tracking('{"x": 1}', 'json')
+        factory.parse_with_tracking('{bad}', 'json')
+        factory.parse_with_tracking('{"entities": []}', 'entities')
+
+        assert factory.parser_success_rate('json') == pytest.approx(0.5)
+        assert factory.parser_success_rate('entities') == 1.0
+        assert factory.parser_success_rate('structured_text') == 0.0
+
+    def test_recent_success_rate(self):
+        """Verify recent success rate uses window size."""
+        factory = ResponseParserFactory()
+
+        factory.parse_with_tracking('{"x": 1}', 'json')
+        factory.parse_with_tracking('{bad}', 'json')
+        factory.parse_with_tracking('{"y": 2}', 'json')
+
+        assert factory.recent_success_rate(2) == pytest.approx(0.5)
+        assert factory.recent_success_rate(5) == pytest.approx(2 / 3)
+        assert factory.recent_success_rate(0) == 0.0
+
+
 class TestResponseParserFactoryCreation:
     """Test factory creation methods."""
     
