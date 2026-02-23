@@ -204,6 +204,15 @@
   - **Tests:** test_ontology_refinement_agent.py (3/3 PASSED)
 - **Batch 233 Total:** 1 new agent class + 3 tests
 
+### GRAPHRAG - Batch 234 (AGENTIC - LLM Feedback Refinement Loop)
+- [x] Add LLM-driven refinement cycle - `2026-02-23 00:08`
+  - **Method:** OntologyMediator.run_llm_refinement_cycle()
+  - **Behavior:** Uses agent feedback to call generate_with_feedback() each round
+  - **Metadata:** Records agent feedback in refinement history entries
+  - **Stop Conditions:** Convergence threshold, min improvement, or score degradation
+  - **Tests:** test_ontology_mediator_llm_cycle.py (1/1 PASSED)
+- **Batch 234 Total:** 1 method + 1 test
+
 ---
 
 ## In-Progress
