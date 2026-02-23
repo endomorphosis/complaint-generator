@@ -769,6 +769,141 @@ class ResponseParserFactory:
         window = self._parsing_history[-window_size:]
         successes = sum(1 for entry in window if entry['success'])
         return successes / len(window)
+
+    def average_response_length_by_parser_type(self, parser_type: str) -> float:
+        """Calculate average response length for a specific parser type.
+
+        Args:
+            parser_type: Parser type to evaluate
+
+        Returns:
+            Mean response length for the parser type, or 0.0 if no operations.
+        """
+        lengths = [
+            entry['response_length']
+            for entry in self._parsing_history
+            if entry['parser_type'] == parser_type
+        ]
+        if not lengths:
+            return 0.0
+        return sum(lengths) / len(lengths)
+
+    def max_response_length_by_parser_type(self, parser_type: str) -> int:
+        """Find maximum response length for a parser type.
+
+        Args:
+            parser_type: Parser type to evaluate
+
+        Returns:
+            Maximum response length, or 0 if no operations.
+        """
+        lengths = [
+            entry['response_length']
+            for entry in self._parsing_history
+            if entry['parser_type'] == parser_type
+        ]
+        if not lengths:
+            return 0
+        return max(lengths)
+
+    def min_response_length_by_parser_type(self, parser_type: str) -> int:
+        """Find minimum response length for a parser type.
+
+        Args:
+            parser_type: Parser type to evaluate
+
+        Returns:
+            Minimum response length, or 0 if no operations.
+        """
+        lengths = [
+            entry['response_length']
+            for entry in self._parsing_history
+            if entry['parser_type'] == parser_type
+        ]
+        if not lengths:
+            return 0
+        return min(lengths)
+
+    def warning_count_by_parser_type(self) -> Dict[str, int]:
+        """Get total warning counts per parser type.
+
+        Returns:
+            Dict mapping parser types to warning counts.
+        """
+        counts: Dict[str, int] = {}
+        for entry in self._parsing_history:
+            parser_type = entry['parser_type']
+            counts[parser_type] = counts.get(parser_type, 0) + entry['warnings']
+        return counts
+
+    def error_count_by_parser_type(self) -> Dict[str, int]:
+        """Get total error counts per parser type.
+
+        Returns:
+            Dict mapping parser types to error counts.
+        """
+        counts: Dict[str, int] = {}
+        for entry in self._parsing_history:
+            parser_type = entry['parser_type']
+            counts[parser_type] = counts.get(parser_type, 0) + entry['errors']
+        return counts
+
+    def parser_type_usage_ratio(self, parser_type: str) -> float:
+        """Calculate usage ratio for a parser type.
+
+        Args:
+            parser_type: Parser type to evaluate
+
+        Returns:
+            Ratio of operations using the parser type, or 0.0 if no operations.
+        """
+        total = self.total_parsing_operations()
+        if total == 0:
+            return 0.0
+        used = sum(1 for entry in self._parsing_history if entry['parser_type'] == parser_type)
+        return used / total
+
+    def operations_with_errors(self) -> int:
+        """Count operations that had at least one error.
+
+        Returns:
+            Number of operations with errors.
+        """
+        return sum(1 for entry in self._parsing_history if entry['errors'] > 0)
+
+    def operations_with_warnings(self) -> int:
+        """Count operations that had at least one warning.
+
+        Returns:
+            Number of operations with warnings.
+        """
+        return sum(1 for entry in self._parsing_history if entry['warnings'] > 0)
+
+    def error_to_warning_ratio(self) -> float:
+        """Calculate ratio of total errors to total warnings.
+
+        Returns:
+            Error-to-warning ratio, or 0.0 if no warnings.
+        """
+        total_warnings = sum(entry['warnings'] for entry in self._parsing_history)
+        if total_warnings == 0:
+            return 0.0
+        total_errors = sum(entry['errors'] for entry in self._parsing_history)
+        return total_errors / total_warnings
+
+    def most_error_prone_parser(self) -> str:
+        """Find parser type with the highest total error count.
+
+        Returns:
+            Parser type with most errors, or 'none' if no errors.
+        """
+        counts = self.error_count_by_parser_type()
+        if not counts:
+            return 'none'
+        max_errors = max(counts.values())
+        if max_errors == 0:
+            return 'none'
+        return max(counts, key=counts.get)
     
     def most_used_parser(self) -> str:
         """Find the most frequently used parser type.
