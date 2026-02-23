@@ -146,6 +146,28 @@
   - **File:** test_batch_228_pattern_caching.py
 - **Batch 228 Total:** 1 optimization, 17 tests, commit 479112f
 
+### GRAPHRAG - Batch 229 (PERF - Config Caching with Weakref GC Detection)
+- [x] Cache _resolve_rule_config() results (P2 PERF) - `2026-02-22 23:45` - 19/19 tests PASSED (commit 4b52fe9)
+  - **Optimization Details:**
+    - Added instance-level cache for config parsing results
+    - Uses weakref to detect garbage-collected objects and avoid id() collisions
+    - Caches (min_len, stopwords, allowed_types, max_confidence) tuples
+    - Avoids recomputing .lower() on stopwords for repeated extractions with same config
+    - Handles None config gracefully
+  - **Test Coverage:** 19 comprehensive tests covering:
+    - Cache hit/miss with same and different config objects
+    - Weakref collision detection (objects GC'd and recreated at same address)
+    - Type conversion edge cases (0, negative values, invalid strings)
+    - Large stopwords lists (1000+ words)
+    - Unicode and special characters in stopwords
+    - Integration with extract_entities and real ExtractionConfig objects
+    - None config handling and defaults
+    - Cache persistence across calls
+  - **Status:** 19/19 tests PASSED
+  - **File:** test_batch_229_config_caching.py
+  - **Expected Benefit:** 3-5% speedup on repeated extractions with same config (avoids redundant config parsing)
+- **Batch 229 Total:** 1 optimization, 19 tests, commit 4b52fe9
+
 ---
 
 ## In-Progress
