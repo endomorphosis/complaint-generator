@@ -196,6 +196,14 @@
   - **Tests:** test_ontology_mediator_agentic_cycle.py (1/1 PASSED)
 - **Batch 232 Total:** 1 method + 1 test
 
+### GRAPHRAG - Batch 233 (AGENTIC - LLM Refinement Agent Scaffold)
+- [x] Add OntologyRefinementAgent scaffold - `2026-02-23 00:05`
+  - **File:** ontology_refinement_agent.py
+  - **Capabilities:** build prompt, parse JSON feedback, invoke LLM backend
+  - **Fallbacks:** handles dict responses and JSON extraction from text
+  - **Tests:** test_ontology_refinement_agent.py (3/3 PASSED)
+- **Batch 233 Total:** 1 new agent class + 3 tests
+
 ---
 
 ## In-Progress
