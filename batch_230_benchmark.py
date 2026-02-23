@@ -17,13 +17,13 @@ import statistics
 from pathlib import Path
 
 sys.path.insert(0, '/home/barberb/complaint-generator')
+sys.path.insert(0, '/home/barberb/complaint-generator/ipfs_datasets_py')
 
 from ipfs_datasets_py.optimizers.graphrag.ontology_generator import (
     OntologyGenerator,
     OntologyGenerationContext,
     ExtractionConfig,
     DataType,
-    ExtractionStrategy,
 )
 
 
@@ -270,32 +270,6 @@ def main():
     # Initialize generator
     generator = OntologyGenerator(use_ipfs_accelerate=False)
     print("\nOntologyGenerator initialized (rule-based extraction)")
-    
-    # Create extraction contexts for different scenarios
-    scenario_configs = [
-        {
-            "name": "Single Config (Cache Hit)",
-            "config": ExtractionConfig(
-                min_entity_length=3,
-                stopwords=['the', 'a', 'and', 'or', 'is', 'are', 'in', 'of', 'to'],
-                allowed_entity_types=['LegalConcept', 'Obligation', 'Payment', 'Duration'],
-            ),
-            "num_calls": 3,  # Test cache hits
-        },
-        {
-            "name": "Multiple Configs (No Cache Hits)",
-            "config": None,  # Will create new configs
-            "num_configs": 3,
-        },
-        {
-            "name": "Legal Domain (Default Config)",
-            "config": ExtractionConfig(
-                domain_specific=True,
-                min_entity_length=2,
-            ),
-            "num_calls": 2,
-        },
-    ]
     
     all_results = []
     

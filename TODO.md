@@ -168,6 +168,15 @@
   - **Expected Benefit:** 3-5% speedup on repeated extractions with same config (avoids redundant config parsing)
 - **Batch 229 Total:** 1 optimization, 19 tests, commit 4b52fe9
 
+### GRAPHRAG - Batch 230 (PERF - Benchmark Optimization Deltas)
+- [x] Benchmark extraction deltas for Batches 228-229 - `2026-02-22 23:55`
+  - **Benchmark Script:** batch_230_benchmark.py
+  - **Dataset:** Fallback generated legal text (17.2 KB) — fixture not found at tests/fixtures/data/legal_document_48kb.txt
+  - **Key Result:** Config caching speedup ~2.43% on repeated calls (7.70ms -> 7.51ms)
+  - **Output:** batch_230_benchmarks.json (local run artifact)
+  - **Notes:** Pattern caching benefits observed on larger rule-based runs (75-84ms range)
+- **Batch 230 Total:** Benchmarking complete, 1 script + 1 results artifact
+
 ---
 
 ## In-Progress
