@@ -608,6 +608,117 @@ class DependencyGraph:
         return sum(strengths) / len(strengths)
 
 
+    # ------------------------------------------------------------------ #
+    # Batch 227: Dependency graph analysis and statistics methods        #
+    # ------------------------------------------------------------------ #
+
+    def node_ids(self) -> List[str]:
+        """Return sorted list of node IDs.
+
+        Returns:
+            Sorted list of node identifiers.
+        """
+        return sorted(self.nodes.keys())
+
+    def dependency_ids(self) -> List[str]:
+        """Return sorted list of dependency IDs.
+
+        Returns:
+            Sorted list of dependency identifiers.
+        """
+        return sorted(self.dependencies.keys())
+
+    def satisfied_node_ratio(self) -> float:
+        """Calculate ratio of satisfied nodes.
+
+        Returns:
+            Ratio of satisfied nodes, or 0.0 if no nodes.
+        """
+        if not self.nodes:
+            return 0.0
+        return self.satisfied_node_count() / len(self.nodes)
+
+    def dependency_density(self) -> float:
+        """Calculate dependency density for directed graph.
+
+        Returns:
+            Density ratio (0.0 to 1.0), or 0.0 if fewer than 2 nodes.
+        """
+        n = len(self.nodes)
+        if n < 2:
+            return 0.0
+        max_possible = n * (n - 1)
+        return len(self.dependencies) / max_possible
+
+    def average_dependencies_per_satisfied_node(self) -> float:
+        """Calculate average dependencies per satisfied node.
+
+        Returns:
+            Mean dependency count, or 0.0 if no satisfied nodes.
+        """
+        satisfied_nodes = [node_id for node_id, node in self.nodes.items() if node.satisfied]
+        if not satisfied_nodes:
+            return 0.0
+        total = sum(len(self.get_dependencies_for_node(node_id)) for node_id in satisfied_nodes)
+        return total / len(satisfied_nodes)
+
+    def average_dependencies_per_unsatisfied_node(self) -> float:
+        """Calculate average dependencies per unsatisfied node.
+
+        Returns:
+            Mean dependency count, or 0.0 if no unsatisfied nodes.
+        """
+        unsatisfied_nodes = [node_id for node_id, node in self.nodes.items() if not node.satisfied]
+        if not unsatisfied_nodes:
+            return 0.0
+        total = sum(len(self.get_dependencies_for_node(node_id)) for node_id in unsatisfied_nodes)
+        return total / len(unsatisfied_nodes)
+
+    def dependency_strength_min_required(self) -> float:
+        """Get minimum strength among required dependencies.
+
+        Returns:
+            Minimum strength, or 0.0 if none.
+        """
+        strengths = [dep.strength for dep in self.dependencies.values() if dep.required]
+        if not strengths:
+            return 0.0
+        return min(strengths)
+
+    def dependency_strength_max_required(self) -> float:
+        """Get maximum strength among required dependencies.
+
+        Returns:
+            Maximum strength, or 0.0 if none.
+        """
+        strengths = [dep.strength for dep in self.dependencies.values() if dep.required]
+        if not strengths:
+            return 0.0
+        return max(strengths)
+
+    def dependency_strength_min_optional(self) -> float:
+        """Get minimum strength among optional dependencies.
+
+        Returns:
+            Minimum strength, or 0.0 if none.
+        """
+        strengths = [dep.strength for dep in self.dependencies.values() if not dep.required]
+        if not strengths:
+            return 0.0
+        return min(strengths)
+
+    def dependency_strength_max_optional(self) -> float:
+        """Get maximum strength among optional dependencies.
+
+        Returns:
+            Maximum strength, or 0.0 if none.
+        """
+        strengths = [dep.strength for dep in self.dependencies.values() if not dep.required]
+        if not strengths:
+            return 0.0
+        return max(strengths)
+
+
 class DependencyGraphBuilder:
     """
     Builds dependency graphs from claims and requirements.
