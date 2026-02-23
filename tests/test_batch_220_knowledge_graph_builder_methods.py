@@ -35,17 +35,26 @@ def create_mock_graph(num_entities=3, num_relationships=2):
         graph.add_entity(entity)
     
     for i in range(num_relationships):
-        if i * 2 + 1 < num_entities:
-            rel = Relationship(
-                id=f'r{i+1}',
-                source_id=f'e{i*2+1}',
-                target_id=f'e{i*2+2}',
-                relation_type='knows',
-                attributes={},
-                confidence=0.8,
-                source='test'
-            )
-            graph.add_relationship(rel)
+        if num_entities <= 0:
+            break
+
+        # Always create the requested number of relationships by reusing
+        # available entities (the tests assert exact relationship counts).
+        source_idx = (i % num_entities) + 1
+        target_idx = ((i + 1) % num_entities) + 1
+        if target_idx == source_idx:
+            target_idx = ((i + 2) % num_entities) + 1
+
+        rel = Relationship(
+            id=f'r{i+1}',
+            source_id=f'e{source_idx}',
+            target_id=f'e{target_idx}',
+            relation_type='knows',
+            attributes={},
+            confidence=0.8,
+            source='test'
+        )
+        graph.add_relationship(rel)
     
     return graph
 
