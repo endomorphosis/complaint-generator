@@ -666,3 +666,103 @@ class LegalPatternExtractor(BaseLegalPatternExtractor):
         self._analysis_history.clear()
         self._protected_class_frequency.clear()
         self._complaint_type_frequency.clear()
+
+    # ============================================================================
+    # Batch 225: LegalPatternExtractor Analysis Methods
+    # ============================================================================
+
+    def total_provisions_found(self) -> int:
+        """Return total number of provisions found across analyses.
+
+        Returns:
+            Sum of provision counts.
+        """
+        return sum(a.get('provision_count', 0) for a in self._analysis_history)
+
+    def total_unique_terms_counted(self) -> int:
+        """Return total number of unique terms counted across analyses.
+
+        Returns:
+            Sum of per-analysis unique term counts.
+        """
+        return sum(a.get('unique_terms', 0) for a in self._analysis_history)
+
+    def average_protected_classes_per_analysis(self) -> float:
+        """Calculate average protected classes identified per analysis.
+
+        Returns:
+            Mean protected class count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total = sum(len(a.get('protected_classes', [])) for a in self._analysis_history)
+        return total / len(self._analysis_history)
+
+    def average_complaint_types_per_analysis(self) -> float:
+        """Calculate average complaint types identified per analysis.
+
+        Returns:
+            Mean complaint type count, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        total = sum(len(a.get('complaint_types', [])) for a in self._analysis_history)
+        return total / len(self._analysis_history)
+
+    def analyses_with_citations(self) -> int:
+        """Count analyses that include at least one citation.
+
+        Returns:
+            Number of analyses with citations.
+        """
+        return sum(1 for a in self._analysis_history if a.get('citation_count', 0) > 0)
+
+    def citation_rate(self) -> float:
+        """Calculate fraction of analyses that include citations.
+
+        Returns:
+            Ratio of analyses with citations, or 0.0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0.0
+        return self.analyses_with_citations() / len(self._analysis_history)
+
+    def max_unique_terms_found(self) -> int:
+        """Find maximum unique term count in any analysis.
+
+        Returns:
+            Maximum unique term count, or 0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0
+        return max(a.get('unique_terms', 0) for a in self._analysis_history)
+
+    def min_unique_terms_found(self) -> int:
+        """Find minimum unique term count in any analysis.
+
+        Returns:
+            Minimum unique term count, or 0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0
+        return min(a.get('unique_terms', 0) for a in self._analysis_history)
+
+    def max_citations_found(self) -> int:
+        """Find maximum citation count in any analysis.
+
+        Returns:
+            Maximum citation count, or 0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0
+        return max(a.get('citation_count', 0) for a in self._analysis_history)
+
+    def min_citations_found(self) -> int:
+        """Find minimum citation count in any analysis.
+
+        Returns:
+            Minimum citation count, or 0 if no analyses.
+        """
+        if not self._analysis_history:
+            return 0
+        return min(a.get('citation_count', 0) for a in self._analysis_history)
