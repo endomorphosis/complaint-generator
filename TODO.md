@@ -197,7 +197,7 @@
 - **Batch 232 Total:** 1 method + 1 test
 
 ### GRAPHRAG - Batch 233 (AGENTIC - LLM Refinement Agent Scaffold)
-- [x] Add OntologyRefinementAgent scaffold - `2026-02-23 00:05`
+- [x] Add OntologyRefinementAgent scaffold - `2026-02-22 00:05`
   - **File:** ontology_refinement_agent.py
   - **Capabilities:** build prompt, parse JSON feedback, invoke LLM backend
   - **Fallbacks:** handles dict responses and JSON extraction from text
@@ -205,13 +205,20 @@
 - **Batch 233 Total:** 1 new agent class + 3 tests
 
 ### GRAPHRAG - Batch 234 (AGENTIC - LLM Feedback Refinement Loop)
-- [x] Add LLM-driven refinement cycle - `2026-02-23 00:08`
+- [x] Add LLM-driven refinement cycle - `2026-02-22 00:08`
   - **Method:** OntologyMediator.run_llm_refinement_cycle()
   - **Behavior:** Uses agent feedback to call generate_with_feedback() each round
   - **Metadata:** Records agent feedback in refinement history entries
   - **Stop Conditions:** Convergence threshold, min improvement, or score degradation
   - **Tests:** test_ontology_mediator_llm_cycle.py (1/1 PASSED)
 - **Batch 234 Total:** 1 method + 1 test
+
+### GRAPHRAG - Batch 235 (AGENTIC - Pipeline Refine Modes)
+- [x] Add refine_mode support to OntologyPipeline.run() - `2026-02-22 00:12`
+  - **Modes:** rule_based (default), agentic, llm
+  - **Agent:** Optional refinement_agent for llm mode
+  - **Tests:** test_ontology_pipeline_refine_modes.py (1/1 PASSED)
+- **Batch 235 Total:** 1 pipeline update + 1 test
 
 ---
 
