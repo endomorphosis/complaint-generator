@@ -514,7 +514,22 @@ class ResponseParserFactory:
         self._parse_success_count = 0  # Counter for successful parses
         self._parse_failure_count = 0  # Counter for failed parses
     
-    def get_parser(self, parser_type: str) -> BaseResponseParser:
+    _default_factory: "ResponseParserFactory | None" = None
+
+    @classmethod
+    def get_parser(cls, parser_type: str) -> BaseResponseParser:
+        """Get an appropriate parser by type.
+
+        This method is intentionally a classmethod to support simple usage:
+        `ResponseParserFactory.get_parser('json')`.
+
+        Internally, it uses a shared default factory instance for caching.
+        """
+        if cls._default_factory is None:
+            cls._default_factory = cls()
+        return cls._default_factory._get_parser(parser_type)
+
+    def _get_parser(self, parser_type: str) -> BaseResponseParser:
         """
         Get appropriate parser for response type with caching.
         
@@ -558,7 +573,10 @@ class ResponseParserFactory:
         Returns:
             ParsedResponse with tracking
         """
-        parser = self.get_parser(parser_type)
+        # Use the instance cache so callers/tests can inject parser instances
+        # (e.g., via `factory._parser_instances["json"] = mock_parser`).
+        # The class-level `get_parser` convenience API is still supported.
+        parser = self._get_parser(parser_type)
         parsed = parser.parse(response)
         
         # Track the operation
