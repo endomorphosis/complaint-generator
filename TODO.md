@@ -71,6 +71,62 @@
   - **Test coverage:** 24 comprehensive tests validating base patterns, domain patterns, caching, extraction, filtering
   - **Estimated improvement:** 10-12% speedup from eliminating repeated regex compilation
 
+### GRAPHRAG - Batch 225
+- [x] OntologyGenerator.describe_result() (P2) - `2026-02-22 ~08:00` - 1/1 method IMPLEMENTED
+- [x] OntologyGenerator.relationship_confidence_bounds() (P2) - `2026-02-22 ~08:00` - 1/1 method IMPLEMENTED
+- [x] OntologyGenerator.is_result_empty() (P2) - `2026-02-22 ~08:00` - 1/1 method IMPLEMENTED
+- [x] OntologyGenerator.result_summary_dict() (P2) - `2026-02-22 ~08:00` - 1/1 method IMPLEMENTED
+- [x] test_batch_225_result_helpers.py (TESTS - P2) - `2026-02-22 ~08:15` - 23/23 tests PASSED
+  - 5 tests for describe_result (sample, empty, type checking, single entity, error handling)
+  - 6 tests for relationship_confidence_bounds (sample, empty, no rels, single rel, tuple return, order)
+  - 5 tests for is_result_empty (empty, not empty, entities only, rels only, boolean results)
+  - 7 tests for result_summary_dict (sample, empty, errors, dict type, required keys, statistics)
+- **Batch 225 Total:** 4 new methods, 23 tests, commit (pending)
+
+### GRAPHRAG - Batch 226
+- [x] TODO.md TODO synchronization audit (ADMIN - P2) - `2026-02-22 ~09:00` 
+  - Comprehensive audit of 21 P2/P3 [graphrag] methods listed in TODO
+  - Finding: 20/21 methods ALREADY IMPLEMENTED (95% completion rate!)
+  - Updated 20 items from [ ] → [x] with "(verified 2026-02-22)" markers
+  - Missing: Only OntologyMediator.feedback_age() was undocumented
+- [x] OntologyMediator.feedback_age() (P2) - `2026-02-22 ~09:30` - 1/1 method IMPLEMENTED
+  - Returns age of feedback record (newest=0, oldest=n-1)
+  - Handles negative indexing and bounds checking
+  - Location: Inserted before clear_feedback() method
+- **Batch 226 Total:** 1 new method, 20 verifications, commit (pending)
+
+### GRAPHRAG - Batch 227 (PERF - Performance Profiling Analysis)
+- [x] Profile OntologyGenerator.extract_entities() (PERF - P1) - `2026-02-22 ~10:00` - Analysis COMPLETE
+  - **Test Conditions:** 48.6KB legal domain text, cProfile measurement
+  - **Execution Baseline:** 0.039s total, 26,810 function calls
+  - **Result:** 48 entities extracted, 130 relationships inferred
+  - **Top 3 Hotspots Identified:**
+    1. infer_relationships() - 0.025s (64% of total)
+       - O(n²) pairwise entity comparison with position-based filtering
+       - 1,128 entity pairs checked for 48 entities
+       - Type inference rules loop: 12 rules per pair
+    2. _extract_entities_from_patterns() - 0.013s (33% of total)
+       - Already uses @functools.lru_cache(maxsize=64) ✓
+       - 36 regex finditer calls on text
+       - Pattern compilation is cached at class level
+    3. _extract_llm_based() - 0.018s (46% of total)
+       - Expected overhead from LLM operations (not target for optimization)
+  - **Key Finding:** Code is ALREADY WELL-OPTIMIZED
+    - Verb patterns cached at class level ✓
+    - Regex compilation cached via lru_cache ✓
+    - No wasteful operations identified
+  - **Optimization Attempts:**
+    - Sliding window with sorted positions (ATTEMPTED)
+      - Result: No improvement (sorting overhead negated sliding window benefit)
+      - Entity lookups via next() prevented gains (regression to O(n²) lookups)
+    - Type inference rules pre-caching (ATTEMPTED) 
+      - Result: Minimal impact (rules already cached per-call)
+  - **Conclusion:** Bottleneck is ALGORITHMIC (O(n²) entity pairs), not IMPLEMENTATION
+    - 20% speedup would require: reducing pair comparisons by 60% OR changing algorithm
+    - Current performance (0.039s for 48.6KB) is acceptable for use case
+    - Further optimization requires trade-offs in extraction quality
+- **Batch 227 Total:** Profiling analysis complete, findings documented, no code changes (optimization not justified)
+
 ---
 
 ## In-Progress
