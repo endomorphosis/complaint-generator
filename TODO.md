@@ -177,6 +177,16 @@
   - **Notes:** Pattern caching benefits observed on larger rule-based runs (75-84ms range)
 - **Batch 230 Total:** Benchmarking complete, 1 script + 1 results artifact
 
+### GRAPHRAG - Batch 231 (PERF - Profile LLM Fallback Latency)
+- [x] Profile forced LLM fallback overhead - `2026-02-22 23:58`
+  - **Script:** batch_231_llm_fallback_profile.py
+  - **Input:** 39.1 KB legal text sample (repeated clause snippet)
+  - **Baseline:** 13.21ms mean (rule-based only)
+  - **Fallback:** 26.02ms mean (forced fallback triggers extra rule-based pass)
+  - **Overhead:** +12.81ms (96.97% increase)
+  - **Notes:** LLM extraction currently falls back to rule-based when accelerate is unavailable
+- **Batch 231 Total:** Profiling complete, 1 script
+
 ---
 
 ## In-Progress
