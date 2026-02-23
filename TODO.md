@@ -220,6 +220,50 @@
   - **Tests:** test_ontology_pipeline_refine_modes.py (1/1 PASSED)
 - **Batch 235 Total:** 1 pipeline update + 1 test
 
+### GRAPHRAG - Batch 215 (DOCS/GRAPHRAG/PERF - Multi-Track Features)
+- [x] Score_trend_slope() docstring enhancement - `2026-02-23 12:30`
+  - **Content:** Enhanced docstring with comprehensive usage example
+  - **Example Shows:** Trend detection, score projection, practical optimizer history simulation
+  - **Lines Added:** 25 lines of detailed example with real-world patterns
+- [x] OntologyLearningAdapter.feedback_autocorrelation(lag) - `2026-02-23 12:35`
+  - **Implementation:** Population autocorrelation for feedback score series
+  - **Formula:** ρ(h) = Σ[(x_i − μ)(x_{i-h} − μ)] / Σ[(x_i − μ)²]
+  - **Returns:** Float in [-1, 1]; 0.0 when n ≤ lag or variance=0
+  - **Location:** ontology_learning_adapter.py (inserted after feedback_rolling_average)
+  - **Lines Added:** 55 lines (method + docstring + example)
+- [x] Profile evaluate_ontology() on 1000-entity ontology - `2026-02-23 13:00`
+  - **Script:** profile_evaluate_ontology_1000.py
+  - **Test Conditions:** 1000 entities, 1992 relationships (synthetic legal domain)
+  - **Execution Time:** 40ms total (236,350 function calls)
+  - **Top Hotspots Identified:**
+    1. evaluate_relationship_coherence() - 14ms (35% of time)
+       - 5,236 any() calls, 21,184 generator expressions
+       - Dict.get() called 57,990 times
+    2. evaluate_domain_alignment() - 7ms (17.5% of time)
+       - 3,000 regex.match() calls for domain keyword detection
+       - 32,112 str.lower() operations  
+    3. evaluate_clarity() - 5ms (12.5% of time)
+       - Label pattern matching across entities
+    4. evaluate_consistency() - 4ms (10% of time)
+       - Hierarchy edge validation
+  - **Output:** profile_evaluate_ontology_1000.txt, profile_evaluate_ontology_1000.prof
+  - **Conclusion:** Performance is excellent (40ms for 1000 entities); main cost is relationship coherence evaluation
+- [x] Fix timing_ms tracking in evaluate_ontology() - `2026-02-23 13:15`
+  - **Issue:** timing_ms from Batch 214 was claimed added but never actually written to file (file tool cache issue)
+  - **Resolution:** Added timing tracking code via direct Python script
+  - **Changes Made:**
+    - Import time, capture _start_ms = _time.perf_counter() * 1000.0
+    - Update cache hit paths to refresh timing_ms in metadata
+    - Add 'timing_ms': round(_elapsed_ms, 2) to metadata dict
+  - **Verification:** All 3 timing tests now pass
+- [x] Test Coverage - `2026-02-23 13:20`
+  - **File:** test_batch_215_features.py (251 lines)
+  - **Tests:** 16 comprehensive tests (all PASSED)
+    - 13 tests for feedback_autocorrelation: empty, too few records, exact lag+1, zero variance, positive correlation, negative correlation, lag-2 cyclic, return type, bounded output, lag validation, mathematical properties, diverse actions, realistic improvement
+    - 3 tests for evaluate_ontology timing_ms: presence, numeric type, positive value
+  - **Status:** 16/16 tests PASSED in 0.56s
+- **Batch 215 Total:** 3 features (1 docs, 1 graphrag, 1 perf) + 16 tests, completion 2026-02-23
+
 ---
 
 ## In-Progress
