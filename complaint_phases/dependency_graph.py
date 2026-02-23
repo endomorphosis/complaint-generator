@@ -502,6 +502,112 @@ class DependencyGraph:
         return (required_connections / 2) / len(self.nodes)
 
 
+    # ------------------------------------------------------------------ #
+    # Batch 224: Dependency graph analysis and statistics methods        #
+    # ------------------------------------------------------------------ #
+
+    def node_confidence_min(self) -> float:
+        """Get minimum confidence across nodes.
+
+        Returns:
+            Minimum confidence, or 0.0 if no nodes.
+        """
+        if not self.nodes:
+            return 0.0
+        return min(node.confidence for node in self.nodes.values())
+
+    def node_confidence_max(self) -> float:
+        """Get maximum confidence across nodes.
+
+        Returns:
+            Maximum confidence, or 0.0 if no nodes.
+        """
+        if not self.nodes:
+            return 0.0
+        return max(node.confidence for node in self.nodes.values())
+
+    def node_confidence_range(self) -> float:
+        """Get range of confidence values across nodes.
+
+        Returns:
+            Max minus min confidence, or 0.0 if no nodes.
+        """
+        if not self.nodes:
+            return 0.0
+        return self.node_confidence_max() - self.node_confidence_min()
+
+    def average_satisfied_confidence(self) -> float:
+        """Calculate average confidence for satisfied nodes.
+
+        Returns:
+            Mean confidence for satisfied nodes, or 0.0 if none.
+        """
+        satisfied = [node.confidence for node in self.nodes.values() if node.satisfied]
+        if not satisfied:
+            return 0.0
+        return sum(satisfied) / len(satisfied)
+
+    def average_unsatisfied_confidence(self) -> float:
+        """Calculate average confidence for unsatisfied nodes.
+
+        Returns:
+            Mean confidence for unsatisfied nodes, or 0.0 if none.
+        """
+        unsatisfied = [node.confidence for node in self.nodes.values() if not node.satisfied]
+        if not unsatisfied:
+            return 0.0
+        return sum(unsatisfied) / len(unsatisfied)
+
+    def optional_dependency_count(self) -> int:
+        """Count dependencies marked as optional.
+
+        Returns:
+            Number of optional dependencies.
+        """
+        return sum(1 for dep in self.dependencies.values() if not dep.required)
+
+    def required_dependency_count_for_node(self, node_id: str) -> int:
+        """Count required dependencies involving a node.
+
+        Args:
+            node_id: Node identifier
+
+        Returns:
+            Number of required dependencies involving the node.
+        """
+        return len([dep for dep in self.get_dependencies_for_node(node_id) if dep.required])
+
+    def nodes_without_dependencies_count(self) -> int:
+        """Count nodes that have no dependencies.
+
+        Returns:
+            Number of nodes with zero dependencies.
+        """
+        return sum(1 for node_id in self.nodes.keys() if not self.get_dependencies_for_node(node_id))
+
+    def dependency_strength_average_required(self) -> float:
+        """Calculate average strength of required dependencies.
+
+        Returns:
+            Mean strength of required dependencies, or 0.0 if none.
+        """
+        strengths = [dep.strength for dep in self.dependencies.values() if dep.required]
+        if not strengths:
+            return 0.0
+        return sum(strengths) / len(strengths)
+
+    def dependency_strength_average_optional(self) -> float:
+        """Calculate average strength of optional dependencies.
+
+        Returns:
+            Mean strength of optional dependencies, or 0.0 if none.
+        """
+        strengths = [dep.strength for dep in self.dependencies.values() if not dep.required]
+        if not strengths:
+            return 0.0
+        return sum(strengths) / len(strengths)
+
+
 class DependencyGraphBuilder:
     """
     Builds dependency graphs from claims and requirements.
