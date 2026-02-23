@@ -252,8 +252,7 @@ class TestBatchApplyStrategiesParallel:
         for worker_count in [1, 2, 4, 8]:
             result = mediator.batch_apply_strategies(
                 ontologies=[copy.deepcopy(o) for o in ontologies],
-                feedbacks=[copy.deepcopy(f) for f in feedbacks] in ontologies],
-                feedbacks=feedbacks.copy(),
+                feedbacks=[copy.deepcopy(f) for f in feedbacks],
                 context=context,
                 max_workers=worker_count,
             )
