@@ -312,6 +312,116 @@ class LegalGraph:
         return actual_relations / max_possible_relations
 
 
+    # ------------------------------------------------------------------ #
+    # Batch 222: Legal graph analysis and statistics methods             #
+    # ------------------------------------------------------------------ #
+
+    def element_jurisdiction_frequency(self) -> dict:
+        """Count frequency of elements by jurisdiction.
+
+        Returns:
+            Dict mapping jurisdiction to element counts.
+        """
+        counts: dict = {}
+        for element in self.elements.values():
+            jurisdiction = element.jurisdiction or ""
+            counts[jurisdiction] = counts.get(jurisdiction, 0) + 1
+        return counts
+
+    def required_elements_count(self) -> int:
+        """Count required elements in the graph.
+
+        Returns:
+            Number of elements marked as required.
+        """
+        return sum(1 for element in self.elements.values() if element.required)
+
+    def optional_elements_count(self) -> int:
+        """Count optional (non-required) elements in the graph.
+
+        Returns:
+            Number of elements marked as optional.
+        """
+        return sum(1 for element in self.elements.values() if not element.required)
+
+    def elements_with_attributes_count(self) -> int:
+        """Count elements that have non-empty attributes.
+
+        Returns:
+            Number of elements with attributes.
+        """
+        return sum(1 for element in self.elements.values() if element.attributes)
+
+    def elements_missing_citation_count(self) -> int:
+        """Count elements missing citation information.
+
+        Returns:
+            Number of elements with empty citation fields.
+        """
+        return sum(1 for element in self.elements.values() if not element.citation)
+
+    def relation_type_set(self) -> List[str]:
+        """Return sorted list of unique relation types.
+
+        Returns:
+            Sorted list of relation type strings.
+        """
+        return sorted({rel.relation_type for rel in self.relations.values()})
+
+    def average_elements_per_type(self) -> float:
+        """Calculate average number of elements per element type.
+
+        Returns:
+            Mean elements per type, or 0.0 if no elements.
+        """
+        if not self.elements:
+            return 0.0
+        type_counts = self.element_type_frequency()
+        if not type_counts:
+            return 0.0
+        return len(self.elements) / len(type_counts)
+
+    def elements_by_jurisdiction(self, jurisdiction: str) -> List[LegalElement]:
+        """Get elements that match a jurisdiction string.
+
+        Args:
+            jurisdiction: Jurisdiction value to match
+
+        Returns:
+            List of matching legal elements.
+        """
+        return [
+            element for element in self.elements.values()
+            if element.jurisdiction == jurisdiction
+        ]
+
+    def relation_count_for_element(self, element_id: str) -> int:
+        """Count relations involving a specific element.
+
+        Args:
+            element_id: Element identifier
+
+        Returns:
+            Number of relations involving the element.
+        """
+        return len(self.get_relations_for_element(element_id))
+
+    def claim_type_requirement_counts(self) -> dict:
+        """Count requirements per claim type.
+
+        Returns:
+            Dict mapping claim type to requirement counts.
+        """
+        counts: dict = {}
+        for element in self.elements.values():
+            if element.element_type not in ('requirement', 'procedural_requirement'):
+                continue
+            claim_types = element.attributes.get('applicable_claim_types', [])
+            for claim_type in claim_types:
+                counts[claim_type] = counts.get(claim_type, 0) + 1
+        return counts
+
+
 class LegalGraphBuilder:
     """
     Builds legal requirement graphs from statutes, regulations, and case law.
