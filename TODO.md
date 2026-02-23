@@ -187,6 +187,15 @@
   - **Notes:** LLM extraction currently falls back to rule-based when accelerate is unavailable
 - **Batch 231 Total:** Profiling complete, 1 script
 
+### GRAPHRAG - Batch 232 (AGENTIC - Strategy-Guided Refinement Loop)
+- [x] Add agentic refinement control loop - `2026-02-22 23:59`
+  - **Method:** OntologyMediator.run_agentic_refinement_cycle()
+  - **Behavior:** Uses suggest_refinement_strategy() each round to guide stopping decisions
+  - **Metadata:** Records strategy details in refinement history entries
+  - **Stop Conditions:** Convergence threshold, low-priority/stable trend, min improvement, or score degradation
+  - **Tests:** test_ontology_mediator_agentic_cycle.py (1/1 PASSED)
+- **Batch 232 Total:** 1 method + 1 test
+
 ---
 
 ## In-Progress
