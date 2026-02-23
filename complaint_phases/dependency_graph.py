@@ -719,6 +719,133 @@ class DependencyGraph:
         return max(strengths)
 
 
+    # ------------------------------------------------------------------ #
+    # Batch 228: Dependency graph analysis and statistics methods        #
+    # ------------------------------------------------------------------ #
+
+    def nodes_with_confidence_above(self, threshold: float) -> int:
+        """Count nodes with confidence above a threshold.
+
+        Args:
+            threshold: Confidence threshold
+
+        Returns:
+            Number of nodes with confidence above threshold.
+        """
+        return sum(1 for node in self.nodes.values() if node.confidence > threshold)
+
+    def nodes_with_confidence_below(self, threshold: float) -> int:
+        """Count nodes with confidence below a threshold.
+
+        Args:
+            threshold: Confidence threshold
+
+        Returns:
+            Number of nodes with confidence below threshold.
+        """
+        return sum(1 for node in self.nodes.values() if node.confidence < threshold)
+
+    def dependency_strength_range(self) -> float:
+        """Calculate range of dependency strengths.
+
+        Returns:
+            Max minus min strength, or 0.0 if no dependencies.
+        """
+        if not self.dependencies:
+            return 0.0
+        strengths = [dep.strength for dep in self.dependencies.values()]
+        return max(strengths) - min(strengths)
+
+    def dependency_strength_range_required(self) -> float:
+        """Calculate range of strengths for required dependencies.
+
+        Returns:
+            Max minus min strength, or 0.0 if none.
+        """
+        strengths = [dep.strength for dep in self.dependencies.values() if dep.required]
+        if not strengths:
+            return 0.0
+        return max(strengths) - min(strengths)
+
+    def dependency_strength_range_optional(self) -> float:
+        """Calculate range of strengths for optional dependencies.
+
+        Returns:
+            Max minus min strength, or 0.0 if none.
+        """
+        strengths = [dep.strength for dep in self.dependencies.values() if not dep.required]
+        if not strengths:
+            return 0.0
+        return max(strengths) - min(strengths)
+
+    def average_dependencies_per_claim_node(self) -> float:
+        """Calculate average dependencies per claim node.
+
+        Returns:
+            Mean dependency count for claim nodes, or 0.0 if none.
+        """
+        claim_nodes = [node.id for node in self.get_nodes_by_type(NodeType.CLAIM)]
+        if not claim_nodes:
+            return 0.0
+        total = sum(len(self.get_dependencies_for_node(node_id)) for node_id in claim_nodes)
+        return total / len(claim_nodes)
+
+    def average_dependencies_per_evidence_node(self) -> float:
+        """Calculate average dependencies per evidence node.
+
+        Returns:
+            Mean dependency count for evidence nodes, or 0.0 if none.
+        """
+        evidence_nodes = [node.id for node in self.get_nodes_by_type(NodeType.EVIDENCE)]
+        if not evidence_nodes:
+            return 0.0
+        total = sum(len(self.get_dependencies_for_node(node_id)) for node_id in evidence_nodes)
+        return total / len(evidence_nodes)
+
+    def average_dependencies_per_requirement_node(self) -> float:
+        """Calculate average dependencies per requirement node.
+
+        Returns:
+            Mean dependency count for requirement nodes, or 0.0 if none.
+        """
+        requirement_nodes = [node.id for node in self.get_nodes_by_type(NodeType.REQUIREMENT)]
+        if not requirement_nodes:
+            return 0.0
+        total = sum(len(self.get_dependencies_for_node(node_id)) for node_id in requirement_nodes)
+        return total / len(requirement_nodes)
+
+    def node_type_distribution_for_satisfaction(self, satisfied: bool = True) -> Dict[str, int]:
+        """Get node type distribution for satisfied or unsatisfied nodes.
+
+        Args:
+            satisfied: Whether to count satisfied or unsatisfied nodes
+
+        Returns:
+            Dict mapping node types to counts.
+        """
+        counts: Dict[str, int] = {}
+        for node in self.nodes.values():
+            if node.satisfied != satisfied:
+                continue
+            ntype = node.node_type.value
+            counts[ntype] = counts.get(ntype, 0) + 1
+        return counts
+
+    def dependency_strength_median(self) -> float:
+        """Calculate median dependency strength.
+
+        Returns:
+            Median strength, or 0.0 if no dependencies.
+        """
+        if not self.dependencies:
+            return 0.0
+        strengths = sorted(dep.strength for dep in self.dependencies.values())
+        mid = len(strengths) // 2
+        if len(strengths) % 2 == 1:
+            return strengths[mid]
+        return (strengths[mid - 1] + strengths[mid]) / 2
+
+
 class DependencyGraphBuilder:
     """
     Builds dependency graphs from claims and requirements.
