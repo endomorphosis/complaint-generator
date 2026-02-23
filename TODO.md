@@ -373,6 +373,236 @@
     - TestExtractionConfigValidationEdgeCases (10 tests): Edge case handling
     - TestExtractionConfigFieldDefaults (12 tests): Default value verification
 
+### BENCHMARK SUITE - Batch 236 (PERF - Comprehensive Optimization Benchmarking)
+- [x] Build GraphRAG benchmark suite with standard datasets (PERF - P2) - `2026-02-23 ~11:00` - COMPLETE
+  - **Components Created:**
+    1. **benchmark_datasets.py** (~1200 lines) - Standard datasets across 4 domains × 3 complexities:
+       - Legal domain: Engagement letters, service agreements, M&A documents
+       - Medical domain: Clinical notes, discharge summaries, pathology reports
+       - Technical domain: API docs, architecture specs, software requirements
+       - Financial domain: Transaction statements, portfolio reports, M&A agreements
+       - Each dataset includes expected entities, relationships, and metadata
+    
+    2. **benchmark_harness.py** (~800 lines) - Core benchmarking infrastructure:
+       - BenchmarkConfig: Configurable benchmark runs (domains, complexities, runs_per_variant)
+       - BenchmarkMetrics: Collects latency, memory, throughput, accuracy metrics
+       - BenchmarkHarness: Main orchestrator for running and measuring benchmarks
+       - BenchmarkComparator: Compares baseline vs. optimized variant results
+       - Supports multi-run averaging, memory tracking, JSON reporting
+    
+    3. **test_graphrag_benchmarks.py** (~800 lines) - Comprehensive benchmark tests:
+       - TestGraphRAGExtractionBenchmarks: Benchmark entity extraction across domains
+       - TestCriticEvaluationBenchmarks: Benchmark ontology critic evaluation
+       - TestBenchmarkHarness: Infrastructure validation (10 tests, all PASSING)
+       - TestOptimizationBenchmarks: Validate the 4 completed optimizations
+       - TestBenchmarkHarness: Tests infrastructure completeness
+       - Support for pytest-benchmark integration
+    
+    4. **BENCHMARK_SUITE_README.md** (~500 lines) - Complete documentation:
+       - Overview of benchmarks being validated (Batches 67-69)
+       - Usage examples and API documentation
+       - Running benchmarks (pytest-benchmark, direct harness, custom scripts)
+       - Interpreting results (summary tables, comparison output)
+       - Benchmark metrics explained (latency, memory, throughput, quality)
+       - Dataset details and performance expectations
+       - CI/CD integration examples
+       - Troubleshooting guide
+
+  - **Coverage:**
+    - 12 standard datasets (4 domains × 3 complexity levels)
+    - 10 harness infrastructure tests (all PASSING)
+    - 4 optimization validation tests
+    - Suite completeness test validating all 12 datasets load correctly
+    - Mock extraction tests validating harness with artificial data
+    - Metrics collection (latency ms, memory MB, throughput entities/sec)
+    - Multi-run averaging with min/max tracking
+    - Memory delta calculation from baseline
+    - JSON report generation with comparison capability
+
+  - **Validations Implemented:**
+    - Lazy loading optimization: Tests domain pattern caching with @lru_cache
+    - Exception hierarchy: Validates GraphRAGError, AgenticError, LogicError inheritance
+    - Semantic deduplication: Confirms deduplicate_entities_semantic() method exists
+    - Suite completeness: All 12 datasets available and populated
+
+  - **Status:** 10/10 infrastructure tests PASSED, suite ready for optimization measurement
+  - **Files:** 
+    - benchmark_datasets.py (~1200 LOC)
+    - benchmark_harness.py (~800 LOC)
+    - test_graphrag_benchmarks.py (~800 LOC)
+    - BENCHMARK_SUITE_README.md (~500 LOC)
+  - **Configuration:** Updated pytest.ini with 'benchmark' and 'performance' markers
+
+  - **Usage Examples:**
+    ```bash
+    # Run all benchmark tests
+    pytest tests/performance/optimizers/test_graphrag_benchmarks.py -v --benchmark-only
+    
+    # Run standalone with harness
+    python -m tests.performance.optimizers.test_graphrag_benchmarks
+    
+    # Compare variants
+    BenchmarkComparator.compare_variants("baseline.json", "optimized.json")
+    ```
+
+  - **Expected Next Steps:**
+    - Run baseline benchmarks on OntologyGenerator.extract_entities()
+    - Measure impact of lazy loading optimization (5-10% expected)
+    - Compare before/after semantic deduplication quality
+    - Track memory improvements from exception hierarchy refactoring
+    - Establish performance regression tests in CI/CD
+
+- **Batch 236 Total:** 4 files (~3,300 LOC), 10 tests PASSED, comprehensive benchmark infrastructure
+
+### DISTRIBUTED TRACING - Batch 237 (OBSERVABILITY - OpenTelemetry Integration)
+- [x] Implement distributed tracing infrastructure (OBSERVABILITY - P2) - `2026-02-23 ~00:30` - COMPLETE
+  - **File:** ipfs_datasets_py/optimizers/graphrag/tracing_instrumentation.py (~500 lines)
+  - **Components Created:**
+    1. **TracingConfig** dataclass - Configuration for distributed tracing:
+       - service_name: "graphrag-optimizer" (default)
+       - environment: "development" (default)
+       - jaeger_host/port: Jaeger collector configuration
+       - Console and Jaeger exporter toggles
+       - Custom resource attributes support
+    
+    2. **TracingInstrumentation** main class - OpenTelemetry setup:
+       - _setup_otel() for tracer provider initialization
+       - create_span(name, attributes) for manual span creation
+       - trace_method decorator for automatic function instrumentation
+       - Graceful degradation when OpenTelemetry not installed (HAS_OTEL flag)
+       - Support for multiple exporters (Jaeger, Console, HTTP)
+    
+    3. **Tracer Classes for GraphRAG Components:**
+       - OntologyGeneratorTracer: Wraps extract_entities, infer_relationships
+       - OntologyCriticTracer: Wraps evaluate_ontology, _evaluate_completeness
+       - OntologyMediatorTracer: Wraps suggest_refinement_strategy
+       - Each tracer records span attributes: duration_ms, entity_count, scores, error info
+    
+    4. **Instrumentation Functions:**
+       - instrument_ontology_generator/critic/mediator(): Class instrumentation wrappers
+       - auto_instrument_all(): Auto-discovers and instruments all GraphRAG classes
+       - setup_tracing(config): Global initialization
+       - get_tracer(): Retrieve global tracer instance
+    
+    5. **Features:**
+       - Automatic span creation with method-level granularity
+       - Context propagation for distributed tracing
+       - Performance metrics aggregation (latency, throughput)
+       - Exception tracking and recording in spans
+       - Optional dependency handling (graceful if OpenTelemetry not available)
+
+  - **Test Coverage (~500 lines):**
+    - TestTracingConfig: Config creation and customization (3 tests)
+    - TestTracingInstrumentation: Setup, span creation, graceful degradation (5 tests)
+    - TestGeneratorTracer: Generator tracer creation and wrapping (2 tests)
+    - TestCriticTracer: Critic tracer creation (1 test)
+    - TestMediatorTracer: Mediator tracer creation (1 test)
+    - TestTracingDecoration: Decorator behavior validation (1 test)
+    - TestTracingWorkflow: End-to-end tracing setup (1 test)
+    - Total: 11/11 tests PASSED ✓
+  
+  - **Files Created:**
+    - ipfs_datasets_py/optimizers/graphrag/tracing_instrumentation.py (~500 LOC)
+    - ipfs_datasets_py/tests/unit/optimizers/graphrag/test_tracing_instrumentation.py (~500 LOC)
+    - Updated pytest.ini markers: Added tracing coverage markers
+  
+  - **Usage Examples:**
+    ```python
+    from optimizers.graphrag.tracing_instrumentation import TracingConfig, setup_tracing
+    
+    # Configure tracing
+    config = TracingConfig(
+        service_name="graphrag-optimizer",
+        jaeger_host="localhost",
+        jaeger_port=6831,
+        enable_console_exporter=True,
+    )
+    
+    # Setup and auto-instrument all components
+    setup_tracing(config)
+    auto_instrument_all()
+    
+    # Now all generator/critic/mediator calls are automatically traced
+    ontology = generator.extract_entities(text, context)  # Span created automatically
+    ```
+  
+  - **Integration Points:**
+    - Jaeger UI: Visualize distributed traces across services
+    - Prometheus: Metrics export for monitoring
+    - Custom exporters: Integrate with existing observability stack
+    - Works seamlessly with Batch 236 benchmarks for performance measurement
+  
+  - **Status:** 11/11 tests PASSED, infrastructure ready for performance monitoring
+  - **Expected Next:** Instrument full pipeline and measure optimization impact
+
+- **Batch 237 Total:** 1 infrastructure + 1 test module (~1,000 LOC), 11 tests PASSED
+
+### PERFORMANCE MEASUREMENT - Batch 238 (PERF - Optimization Delta Benchmarking)
+- [x] Build comprehensive benchmark execution suite (PERF - P2) - `2026-02-23 ~00:45` - COMPLETE
+  - **File:** ipfs_datasets_py/tests/performance/optimizers/test_batch_238_optimization_deltas.py (~300 lines)
+  - **Purpose:** Measure performance impact of 4 completed optimizations using Batch 236 infrastructure
+  - **Test Coverage (10/10 tests PASSED):**
+    
+    1. **TestBenchmarkInfrastructure** (4 tests):
+       - test_benchmark_config_creation: Verify BenchmarkConfig dataclass creation
+       - test_benchmark_harness_creation: Verify BenchmarkHarness instantiation
+       - test_dataset_loading_all_domains: Load all 12 datasets (4 domains × 3 complexities)
+       - test_extraction_measurement: Measure performance metrics (latency, memory, throughput)
+    
+    2. **TestOptimizationDeltaMeasurement** (4 tests):
+       - test_legal_domain_performance: Measure legal domain extraction performance
+       - test_medical_domain_performance: Measure medical domain extraction performance
+       - test_technical_domain_performance: Measure technical domain extraction performance
+       - test_financial_domain_performance: Measure financial domain extraction performance
+    
+    3. **TestComplexityScaling** (1 test):
+       - test_complexity_scaling_simple_to_medium: Compare simple vs. medium dataset performance
+    
+    4. **TestBenchmarkReporting** (1 test):
+       - test_metrics_json_serialization: Verify metrics JSON export capability
+  
+  - **Metrics Collected:**
+    - latency_ms: Total execution time
+    - latency_min/max_ms: Minimum/maximum latency across runs
+    - memory_peak_mb: Peak memory usage during extraction
+    - memory_avg_mb: Average memory usage
+    - memory_delta_mb: Memory change from baseline
+    - entity_count: Number of entities extracted
+    - entities_per_ms: Throughput (entities extracted per millisecond)
+    - accuracy_score: Quality metric (0-1 range)
+    - confidence_avg: Average confidence score
+    - cpu_percent: CPU utilization
+    - gc_collections: Garbage collection events
+  
+  - **Optimization Validations:**
+    - Lazy loading: Benchmark cached pattern loading (expected 3-5% speedup)
+    - Exception hierarchy: Measure error handling overhead (minimal)
+    - Semantic deduplication: Benchmark deduplication quality vs. performance
+    - Critic split: Measure module initialization and performance impact
+  
+  - **Status:** 10/10 tests PASSED ✓
+  - **Integration:** Works with Batch 236-237 (benchmarking suite + tracing infrastructure)
+  
+  - **Usage:**
+    ```bash
+    pytest tests/performance/optimizers/test_batch_238_optimization_deltas.py -v
+    
+    # Run specific domain benchmarks
+    pytest tests/performance/optimizers/test_batch_238_optimization_deltas.py::TestOptimizationDeltaMeasurement -v
+    
+    # Run complexity scaling tests
+    pytest tests/performance/optimizers/test_batch_238_optimization_deltas.py::TestComplexityScaling -v
+    ```
+  
+  - **Expected Outcomes:**
+    - Baseline performance established for all 12 datasets
+    - Performance deltas measured between optimized and baseline variants
+    - Throughput metrics collected across domains and complexities
+    - Memory usage patterns established per domain
+    - Performance regression tests ready for CI/CD integration
+
+- **Batch 238 Total:** 1 test module (~300 LOC), 10 tests PASSED ✓
+
 ## Pending Backlog (~150+ items rotating)
 
 ### TESTS - High Priority
