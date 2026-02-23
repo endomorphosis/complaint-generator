@@ -395,6 +395,113 @@ class DependencyGraph:
         return max(dependency_counts.items(), key=lambda x: x[1])[0]
 
 
+    # ------------------------------------------------------------------ #
+    # Batch 223: Dependency graph analysis and statistics methods        #
+    # ------------------------------------------------------------------ #
+
+    def node_type_set(self) -> List[str]:
+        """Return sorted list of unique node types.
+
+        Returns:
+            Sorted list of node type strings.
+        """
+        return sorted({node.node_type.value for node in self.nodes.values()})
+
+    def dependency_type_set(self) -> List[str]:
+        """Return sorted list of unique dependency types.
+
+        Returns:
+            Sorted list of dependency type strings.
+        """
+        return sorted({dep.dependency_type.value for dep in self.dependencies.values()})
+
+    def nodes_with_attributes_count(self) -> int:
+        """Count nodes with non-empty attributes.
+
+        Returns:
+            Number of nodes with attributes.
+        """
+        return sum(1 for node in self.nodes.values() if node.attributes)
+
+    def nodes_with_description_count(self) -> int:
+        """Count nodes with non-empty description.
+
+        Returns:
+            Number of nodes with descriptions.
+        """
+        return sum(1 for node in self.nodes.values() if node.description)
+
+    def nodes_missing_description_count(self) -> int:
+        """Count nodes missing a description.
+
+        Returns:
+            Number of nodes with empty description fields.
+        """
+        return sum(1 for node in self.nodes.values() if not node.description)
+
+    def nodes_by_satisfaction(self, satisfied: bool = True) -> List[DependencyNode]:
+        """Get nodes filtered by satisfaction flag.
+
+        Args:
+            satisfied: Whether to return satisfied or unsatisfied nodes
+
+        Returns:
+            List of dependency nodes matching the flag.
+        """
+        return [node for node in self.nodes.values() if node.satisfied == satisfied]
+
+    def dependency_count_for_node(self, node_id: str) -> int:
+        """Count dependencies involving a specific node.
+
+        Args:
+            node_id: Node identifier
+
+        Returns:
+            Number of dependencies involving the node.
+        """
+        return len(self.get_dependencies_for_node(node_id))
+
+    def dependencies_required_ratio(self) -> float:
+        """Calculate ratio of required dependencies.
+
+        Returns:
+            Ratio of required dependencies (0.0 to 1.0).
+        """
+        if not self.dependencies:
+            return 0.0
+        required = sum(1 for dep in self.dependencies.values() if dep.required)
+        return required / len(self.dependencies)
+
+    def dependency_strength_stats(self) -> Dict[str, float]:
+        """Calculate average, min, and max dependency strengths.
+
+        Returns:
+            Dict with avg, min, and max strength values.
+        """
+        if not self.dependencies:
+            return {"avg": 0.0, "min": 0.0, "max": 0.0}
+        strengths = [dep.strength for dep in self.dependencies.values()]
+        return {
+            "avg": sum(strengths) / len(strengths),
+            "min": min(strengths),
+            "max": max(strengths),
+        }
+
+    def average_required_dependencies_per_node(self) -> float:
+        """Calculate average required dependencies per node.
+
+        Returns:
+            Mean required dependency count, or 0.0 if no nodes.
+        """
+        if not self.nodes:
+            return 0.0
+        required_connections = sum(
+            len([dep for dep in self.get_dependencies_for_node(nid) if dep.required])
+            for nid in self.nodes.keys()
+        )
+        return (required_connections / 2) / len(self.nodes)
+
+
 class DependencyGraphBuilder:
     """
     Builds dependency graphs from claims and requirements.
