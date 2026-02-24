@@ -141,6 +141,13 @@ def pytest_collection_modifyitems(config, items):
         is_llm = False
         is_network = False
         is_heavy = False
+        
+        # Exclude specific test files from auto-detection
+        # (files containing "llm" in code but not actually requiring LLM features)
+        if "test_lazy_backend_loader" in path:
+            file_cache[path] = (False, False, False)
+            return file_cache[path]
+        
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 text = f.read().lower()

@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,8 @@ class KnowledgeGraph:
         self.entities: Dict[str, Entity] = {}
         self.relationships: Dict[str, Relationship] = {}
         self.metadata = {
-            'created_at': datetime.utcnow().isoformat(),
-            'last_updated': datetime.utcnow().isoformat(),
+            'created_at': datetime.now(UTC).isoformat(),
+            'last_updated': datetime.now(UTC).isoformat(),
             'version': '1.0'
         }
     
@@ -238,7 +238,7 @@ class KnowledgeGraph:
     
     def _update_metadata(self):
         """Update last_updated timestamp."""
-        self.metadata['last_updated'] = datetime.utcnow().isoformat()
+        self.metadata['last_updated'] = datetime.now(UTC).isoformat()
     
     def summary(self) -> Dict[str, Any]:
         """Get a summary of the knowledge graph."""

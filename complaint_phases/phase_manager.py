@@ -7,7 +7,7 @@ Manages the three-phase complaint process and transitions between phases.
 import logging
 from enum import Enum
 from typing import Dict, Any
-from datetime import datetime
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class PhaseManager:
             self.phase_history.append({
                 'from_phase': self.current_phase.value,
                 'to_phase': phase.value,
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': datetime.now(UTC).isoformat(),
                 'iteration': self.iteration_count
             })
             self.current_phase = phase
@@ -179,7 +179,7 @@ class PhaseManager:
             'loss': loss,
             'phase': self.current_phase.value,
             'metrics': metrics,
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(UTC).isoformat()
         })
         logger.info(f"Iteration {self.iteration_count}: loss={loss:.4f}, phase={self.current_phase.value}")
     
