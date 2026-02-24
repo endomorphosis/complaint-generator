@@ -339,6 +339,75 @@ class TestMultilingualExtraction:
             # If confidence exists, it should be valid
             assert 0.0 <= result.entities[0]['confidence'] <= 1.0
 
+    def test_confidence_adjustment_flag_true_only_when_changed(self, router):
+        """Flag should be true only when at least one confidence value is changed."""
+        router.register_language_config(
+            'en',
+            LanguageConfig(
+                language_code='en',
+                language_name='English',
+                min_confidence_adjustment=-0.1,
+            ),
+        )
+
+        def extractor(text, cfg):
+            return [{'text': 'party', 'confidence': 0.8}], []
+
+        result = router.extract_with_language_awareness(
+            "The party must comply.",
+            extractor,
+            apply_confidence_adjustment=True,
+        )
+
+        assert result.confidence_adjustments_applied is True
+        assert len(result.language_processing_notes) >= 1
+
+    def test_confidence_adjustment_flag_false_when_no_confidence_fields(self, router):
+        """Flag should remain false when no entity confidence field exists."""
+        router.register_language_config(
+            'en',
+            LanguageConfig(
+                language_code='en',
+                language_name='English',
+                min_confidence_adjustment=-0.1,
+            ),
+        )
+
+        def extractor(text, cfg):
+            return [{'text': 'party'}], []
+
+        result = router.extract_with_language_awareness(
+            "The party must comply.",
+            extractor,
+            apply_confidence_adjustment=True,
+        )
+
+        assert result.confidence_adjustments_applied is False
+        assert result.language_processing_notes == []
+
+    def test_confidence_adjustment_flag_false_when_disabled(self, router):
+        """Flag should remain false when adjustments are disabled by caller."""
+        router.register_language_config(
+            'en',
+            LanguageConfig(
+                language_code='en',
+                language_name='English',
+                min_confidence_adjustment=-0.1,
+            ),
+        )
+
+        def extractor(text, cfg):
+            return [{'text': 'party', 'confidence': 0.8}], []
+
+        result = router.extract_with_language_awareness(
+            "The party must comply.",
+            extractor,
+            apply_confidence_adjustment=False,
+        )
+
+        assert result.confidence_adjustments_applied is False
+        assert result.language_processing_notes == []
+
 
 class TestMultilingualExtractionResultClass:
     """Test MultilingualExtractionResult dataclass functionality."""

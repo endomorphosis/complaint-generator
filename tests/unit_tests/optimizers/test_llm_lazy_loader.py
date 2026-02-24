@@ -21,6 +21,16 @@ from ipfs_datasets_py.optimizers.llm_lazy_loader import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _reset_llm_state(monkeypatch):
+    """Keep tests order-independent when pytest-randomly reorders execution."""
+    monkeypatch.delenv("LLM_ENABLED", raising=False)
+    get_global_llm_backend.cache_clear()
+    yield
+    monkeypatch.delenv("LLM_ENABLED", raising=False)
+    get_global_llm_backend.cache_clear()
+
+
 class TestLazyLLMBackendBasics:
     """Test basic lazy-loader functionality."""
 

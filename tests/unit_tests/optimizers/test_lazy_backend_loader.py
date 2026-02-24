@@ -42,6 +42,18 @@ def _load_backends():
         disable_llm_backend = module.disable_llm_backend
         enable_llm_backend = module.enable_llm_backend
 
+
+@pytest.fixture(autouse=True)
+def _reset_llm_state(monkeypatch):
+    """Keep tests order-independent when pytest-randomly reorders execution."""
+    monkeypatch.delenv("LLM_ENABLED", raising=False)
+    if _backends is not None:
+        _backends.get_global_llm_backend.cache_clear()
+    yield
+    monkeypatch.delenv("LLM_ENABLED", raising=False)
+    if _backends is not None:
+        _backends.get_global_llm_backend.cache_clear()
+
 class TestBackendBasics:
     """Test basic lazy-loader functionality."""
 
