@@ -4,11 +4,24 @@ Tests the combined behavior of LazyLLMBackend with circuit-breaker protection.
 """
 
 import pytest
-from ipfs_datasets_py.optimizers.llm_lazy_loader import LazyLLMBackend
+from ipfs_datasets_py.optimizers.llm_lazy_loader import (
+    LazyLLMBackend,
+    get_global_llm_backend,
+)
 from ipfs_datasets_py.optimizers.common.circuit_breaker import (
     CircuitBreakerOpen,
     CircuitState,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_llm_state(monkeypatch):
+    """Keep tests order-independent when pytest-randomly reorders execution."""
+    monkeypatch.delenv("LLM_ENABLED", raising=False)
+    get_global_llm_backend.cache_clear()
+    yield
+    monkeypatch.delenv("LLM_ENABLED", raising=False)
+    get_global_llm_backend.cache_clear()
 
 
 class TestLazyLoaderWithCircuitBreaker:

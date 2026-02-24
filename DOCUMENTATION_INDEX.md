@@ -92,6 +92,8 @@ Complete index of all documentation in the complaint-generator repository.
 
 ### GraphRAG Ontology Extraction
 - [docs/EXTRACTION_CONFIG_GUIDE.md](docs/EXTRACTION_CONFIG_GUIDE.md) - Comprehensive configuration reference for ExtractionConfig: field descriptions, valid ranges, use cases, performance tuning, common patterns, and troubleshooting
+- [docs/optimizers/HOW_TO_ADD_NEW_OPTIMIZER.md](docs/optimizers/HOW_TO_ADD_NEW_OPTIMIZER.md) - Implementation checklist for adding new optimizers (contracts, tests, observability, docs)
+- [ipfs_datasets_py/ipfs_datasets_py/optimizers/docs/GLOSSARY.md](ipfs_datasets_py/ipfs_datasets_py/optimizers/docs/GLOSSARY.md) - Shared ontology, pipeline, and optimization terminology
 
 ### 🔧 Optimizers API Documentation
 - [docs/API_REFERENCE_GRAPHRAG.md](docs/API_REFERENCE_GRAPHRAG.md) - Complete GraphRAG optimizer API with OntologyGenerator, QueryUnifiedOptimizer, WikipediaOptimizer, StreamingExtractor, QueryBudget, QueryMetrics, and all statistical methods (confidence_min, confidence_max, confidence_range, confidence_percentile, confidence_iqr, history_kurtosis, score_ewma)

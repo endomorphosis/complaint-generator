@@ -2,6 +2,29 @@
 
 This guide provides practical integration examples for using the GraphRAG optimizer in various real-world scenarios.
 
+Related guides:
+- [Performance Tuning Guide](./PERFORMANCE_TUNING_GUIDE.md)
+- [How To Add a New Optimizer](./HOW_TO_ADD_NEW_OPTIMIZER.md)
+- [Sandboxed Prover Policy](./SANDBOXED_PROVER_POLICY.md)
+- [Troubleshooting Dashboards](./TROUBLESHOOTING_DASHBOARDS.md)
+- [Alerting Examples](./ALERTING_EXAMPLES.md)
+
+## CLI Path Safety Policy
+
+Optimizer CLIs validate user-supplied file paths through `_safe_resolve(...)`
+helpers to block traversal into restricted system areas.
+
+Restricted roots:
+- `/proc`
+- `/sys`
+- `/dev`
+- `/etc`
+
+Current coverage:
+- GraphRAG CLI: `optimizers/graphrag/cli_wrapper.py::_safe_resolve`
+- Logic CLI: `optimizers/logic_theorem_optimizer/cli_wrapper.py::_safe_resolve`
+- Tests: `tests/unit/optimizers/test_safe_resolve_path_traversal.py`
+
 ## Table of Contents
 
 1. [FastAPI Web Service](#fastapi-web-service)
@@ -1193,6 +1216,15 @@ if __name__ == "__main__":
 - **[PERFORMANCE_TUNING_GUIDE.md](PERFORMANCE_TUNING_GUIDE.md)** - Optimization strategies
 - **[TROUBLESHOOTING_GUIDE.md](TROUBLESHOOTING_GUIDE.md)** - Solutions to common issues
 - **[README.md](../ipfs_datasets_py/optimizers/README.md)** - Main documentation
+
+## Prometheus Metrics Scrape
+
+Enable metrics and scrape the REST API for Prometheus-compatible output:
+
+```bash
+export ENABLE_PROMETHEUS=true
+curl http://localhost:8000/metrics
+```
 
 ## Version History
 

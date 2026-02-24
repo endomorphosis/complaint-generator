@@ -58,6 +58,27 @@ From comprehensive profiling ([PROFILING_BATCH_262_ANALYSIS.md](../docs/PROFILIN
 
 **Key Finding**: 70% of execution time is spent in `_promote_person_entities()` performing 122 separate regex searches to identify person entities.
 
+### Consistency Scoring Scalability (Batch 270)
+
+`OntologyCritic._evaluate_consistency()` delegates to
+`ontology_critic_consistency.evaluate_consistency()`. For large hierarchy
+chains, recursive DFS can hit Python recursion limits and fail.
+
+Applied optimization:
+- Replaced recursive cycle detection with iterative Kahn topological-sort cycle detection.
+- Removed duplicate cycle-detection pass in `evaluate_consistency()`.
+- Kept LRU caching over normalized hierarchy edge tuples.
+
+Impact:
+- Eliminates recursion-depth failures on deep ontologies (2,500+ entities).
+- Reduces repeated work in cycle checks.
+
+Validation:
+- `test_batch_270_consistency_cycle_scaling.py` verifies deep acyclic and cyclic
+  chains score correctly without recursion errors.
+- Existing profiling script/tests in `tests/performance/profile_batch_269_consistency_cycles.py`
+  and `test_batch_269_consistency_profiling.py` remain green.
+
 ## Optimization Strategies
 
 ### 1. Pre-compile Regex Patterns (Est. 15-20% speedup)
@@ -413,7 +434,36 @@ if throughput < 30000:  # Below acceptable threshold
     logger.warning(f"Low throughput: {throughput:.0f} t/s")
 ```
 
-### 4. Use Caching Effectively
+### 4. Micro-benchmark Smoke Test
+
+Use the lightweight smoke benchmark to track regressions or verify improvements
+after refactors. It prints a small timing table you can paste below.
+
+```bash
+python -m ipfs_datasets_py.optimizers.tests.performance.perf_ontology_generate_smoke
+```
+
+**Before/After Timing Table (update after changes)**
+
+| Run | Mean (ms) | P95 (ms) | Min (ms) | Max (ms) | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Baseline | TBD | TBD | TBD | TBD | Record before optimization |
+| After | TBD | TBD | TBD | TBD | Record after optimization |
+
+**Regex Hot Paths Table (update after regex/entity optimizations)**
+
+Run:
+```bash
+python -m ipfs_datasets_py.optimizers.tests.performance.perf_ontology_regex_hotpaths
+```
+
+| Segment | Mean (ms) | P95 (ms) | Notes |
+| --- | --- | --- | --- |
+| Pattern build | TBD | TBD | Rule pattern construction |
+| Pattern extract | TBD | TBD | Regex finditer extraction |
+| Person promotion | TBD | TBD | `_promote_person_entities` |
+
+### 5. Use Caching Effectively
 
 ```python
 # Enable caching for repeated documents
@@ -425,7 +475,7 @@ for doc in similar_documents:
     ontology = generator.generate_ontology(doc, context)
 ```
 
-### 5. Batch Processing for Multiple Documents
+### 6. Batch Processing for Multiple Documents
 
 ```python
 # Process efficiently
@@ -437,7 +487,7 @@ results = generator.generate_ontology_batch(
 )
 ```
 
-### 6. Tune for Your Hardware
+### 7. Tune for Your Hardware
 
 **CPU-Bound (2-4 cores)**:
 - Use RULE_BASED strategy

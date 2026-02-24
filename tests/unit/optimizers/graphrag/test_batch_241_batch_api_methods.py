@@ -7,7 +7,6 @@ Covers:
 """
 
 import pytest
-from typing import List, Dict, Any
 
 from ipfs_datasets_py.optimizers.graphrag import (
     OntologyMediator,
@@ -51,34 +50,6 @@ def mediator(generator, critic):
     )
 
 
-def create_test_ontology(entity_count: int = 5, relationship_count: int = 3) -> Dict[str, Any]:
-    """Create a minimal test ontology."""
-    entities = [
-        {
-            "id": f"e{i}",
-            "text": f"Entity{i}",
-            "type": "Person" if i % 2 == 0 else "Organization",
-            "confidence": 0.6 + (i * 0.08)
-        }
-        for i in range(entity_count)
-    ]
-    relationships = [
-        {
-            "id": f"r{i}",
-            "source_id": f"e{i % entity_count}",
-            "target_id": f"e{(i + 1) % entity_count}",
-            "type": "works_for",
-            "confidence": 0.75 + (i * 0.05)
-        }
-        for i in range(relationship_count)
-    ]
-    return {
-        "entities": entities,
-        "relationships": relationships,
-        "metadata": {"domain": "legal"}
-    }
-
-
 def create_test_score(
     completeness: float = 0.7,
     consistency: float = 0.75,
@@ -104,7 +75,7 @@ def create_test_score(
 class TestBatchSuggestStrategies:
     """Test the batch_suggest_strategies() method."""
 
-    def test_batch_suggest_strategies_returns_list(self, mediator, context):
+    def test_batch_suggest_strategies_returns_list(self, mediator, context, create_test_ontology):
         """Test that batch_suggest_strategies returns a list of strategies."""
         ontologies = [
             create_test_ontology(5, 3),
@@ -123,7 +94,7 @@ class TestBatchSuggestStrategies:
         assert len(strategies) == 3
         assert all(isinstance(s, dict) for s in strategies)
 
-    def test_batch_suggest_strategies_each_has_required_fields(self, mediator, context):
+    def test_batch_suggest_strategies_each_has_required_fields(self, mediator, context, create_test_ontology):
         """Test that each strategy has required fields."""
         ontologies = [
             create_test_ontology(5, 3),
@@ -149,7 +120,7 @@ class TestBatchSuggestStrategies:
         strategies = mediator.batch_suggest_strategies([], [], context)
         assert strategies == []
 
-    def test_batch_suggest_strategies_single_item(self, mediator, context):
+    def test_batch_suggest_strategies_single_item(self, mediator, context, create_test_ontology):
         """Test batch_suggest_strategies with single item."""
         ontologies = [create_test_ontology(5, 3)]
         scores = [create_test_score(0.7, 0.75, 0.65)]
@@ -160,7 +131,7 @@ class TestBatchSuggestStrategies:
         assert isinstance(strategies[0], dict)
         assert "action" in strategies[0]
 
-    def test_batch_suggest_strategies_respects_score_differences(self, mediator, context):
+    def test_batch_suggest_strategies_respects_score_differences(self, mediator, context, create_test_ontology):
         """Test that different scores produce different strategies."""
         ontology = create_test_ontology(5, 3)
         ont_list = [ontology] * 3
@@ -179,7 +150,7 @@ class TestBatchSuggestStrategies:
         if excellent_strategy["action"] != "converged":
             assert excellent_strategy["priority"] in ["low", "medium"]
 
-    def test_batch_suggest_strategies_large_batch(self, mediator, context):
+    def test_batch_suggest_strategies_large_batch(self, mediator, context, create_test_ontology):
         """Test batch_suggest_strategies with larger batch."""
         import random
         random.seed(42)
@@ -208,7 +179,7 @@ class TestBatchSuggestStrategies:
 class TestCompareStrategies:
     """Test the compare_strategies() method."""
 
-    def test_compare_strategies_returns_ranking(self, mediator, context):
+    def test_compare_strategies_returns_ranking(self, mediator, context, create_test_ontology):
         """Test that compare_strategies returns ranked alternatives."""
         ontologies = [
             create_test_ontology(5, 3),
@@ -226,7 +197,7 @@ class TestCompareStrategies:
         assert isinstance(comparison, list)
         assert len(comparison) == 3
 
-    def test_compare_strategies_has_ranking_info(self, mediator, context):
+    def test_compare_strategies_has_ranking_info(self, mediator, context, create_test_ontology):
         """Test that comparison includes ranking information."""
         ontologies = [
             create_test_ontology(5, 3),
@@ -248,7 +219,7 @@ class TestCompareStrategies:
             assert isinstance(item["rank"], int)
             assert item["rank"] >= 1
 
-    def test_compare_strategies_ordering(self, mediator, context):
+    def test_compare_strategies_ordering(self, mediator, context, create_test_ontology):
         """Test that strategies are ordered by effectiveness."""
         ontology = create_test_ontology(10, 5)
         ontologies = [ontology] * 3
@@ -276,7 +247,7 @@ class TestCompareStrategies:
         comparison = mediator.compare_strategies([], [], context)
         assert comparison == []
 
-    def test_compare_strategies_single_item(self, mediator, context):
+    def test_compare_strategies_single_item(self, mediator, context, create_test_ontology):
         """Test compare_strategies with single ontology."""
         ontologies = [create_test_ontology(5, 3)]
         scores = [create_test_score(0.7, 0.75, 0.65)]
@@ -286,7 +257,7 @@ class TestCompareStrategies:
         assert len(comparison) == 1
         assert comparison[0]["rank"] == 1
 
-    def test_compare_strategies_includes_priority_score(self, mediator, context):
+    def test_compare_strategies_includes_priority_score(self, mediator, context, create_test_ontology):
         """Test that priority scores are reasonable."""
         ontologies = [
             create_test_ontology(5, 3),
@@ -308,7 +279,7 @@ class TestCompareStrategies:
 class TestBatchMethodsIntegration:
     """Integration tests for batch methods."""
 
-    def test_batch_and_compare_consistency(self, mediator, context):
+    def test_batch_and_compare_consistency(self, mediator, context, create_test_ontology):
         """Test that batch and compare methods are consistent."""
         ontologies = [
             create_test_ontology(5, 3),
@@ -336,7 +307,7 @@ class TestBatchMethodsIntegration:
             assert "strategy" in comp_item
             assert "action" in comp_item["strategy"]
 
-    def test_prioritization_reflects_scores(self, mediator, context):
+    def test_prioritization_reflects_scores(self, mediator, context, create_test_ontology):
         """Test that worse scores get higher priority."""
         ontology = create_test_ontology(5, 3)
         ont_list = [ontology] * 2
@@ -359,7 +330,7 @@ class TestBatchMethodsIntegration:
 class TestBatchMethodsEdgeCases:
     """Test edge cases for batch methods."""
 
-    def test_batch_suggest_with_extreme_scores(self, mediator, context):
+    def test_batch_suggest_with_extreme_scores(self, mediator, context, create_test_ontology):
         """Test batch methods with extreme score values."""
         ontologies = [
             create_test_ontology(5, 3),
@@ -374,7 +345,7 @@ class TestBatchMethodsEdgeCases:
         assert len(strategies) == 2
         assert all("action" in s for s in strategies)
 
-    def test_batch_suggest_with_many_recommendations(self, mediator, context):
+    def test_batch_suggest_with_many_recommendations(self, mediator, context, create_test_ontology):
         """Test batch methods when scores have many recommendations."""
         ontologies = [create_test_ontology(5, 3)]
         
@@ -403,7 +374,7 @@ class TestBatchMethodsEdgeCases:
         assert len(strategies) == 1
         assert "action" in strategies[0]
 
-    def test_compare_strategies_with_tied_scores(self, mediator, context):
+    def test_compare_strategies_with_tied_scores(self, mediator, context, create_test_ontology):
         """Test comparison when multiple ontologies have identical scores."""
         ontologies = [create_test_ontology(5, 3)] * 3  # Three identical ontologies
         scores = [create_test_score(0.7, 0.75, 0.65)] * 3  # Same scores
