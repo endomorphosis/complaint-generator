@@ -25,6 +25,17 @@ Current coverage:
 - Logic CLI: `optimizers/logic_theorem_optimizer/cli_wrapper.py::_safe_resolve`
 - Tests: `tests/unit/optimizers/test_safe_resolve_path_traversal.py`
 
+## Metrics Persistence Error Handling
+
+Query metrics persistence emits structured error codes when write paths degrade:
+- `QMETRICS_SERIALIZATION_ERROR`: metrics payload could not be serialized; fallback JSON payload was written.
+- `QMETRICS_FALLBACK_WRITE_ERROR`: fallback write also failed; check logger output and metrics directory health.
+
+Recommended operator flow:
+1. Alert on repeated `QMETRICS_SERIALIZATION_ERROR` to catch schema/type drift in metrics payloads.
+2. Treat any `QMETRICS_FALLBACK_WRITE_ERROR` as urgent storage/permissions incident for the metrics path.
+3. Correlate spikes with deployment windows and changes to query metadata fields.
+
 ## Table of Contents
 
 1. [FastAPI Web Service](#fastapi-web-service)

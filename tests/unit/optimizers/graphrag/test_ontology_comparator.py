@@ -87,6 +87,16 @@ class TestRankingMethods:
         ranked = comparator.rank_by_dimension(ontologies, scores, 'completeness')
         assert ranked[0]['completeness'] == 0.9
         assert ranked[1]['completeness'] == 0.7
+
+    def test_rank_by_missing_dimension(self):
+        """Test ranking when dimension is missing from score objects."""
+        comparator = OntologyComparator()
+        ontologies = [create_ontology("ont1"), create_ontology("ont2")]
+        scores = [create_score(overall=0.7), create_score(overall=0.9)]
+
+        ranked = comparator.rank_by_dimension(ontologies, scores, 'missing_dim')
+        assert ranked[0]['missing_dim'] == 0
+        assert ranked[1]['missing_dim'] == 0
     
     def test_get_top_n(self):
         """Test getting top N ontologies."""
@@ -132,6 +142,17 @@ class TestComparisonMethods:
         result = comparator.compare_pair(create_ontology("ont1"), score1,
                                         create_ontology("ont2"), score2)
         assert 'dimension_deltas' in result
+
+    def test_compare_pair_equal_scores(self):
+        """Test pairwise comparison where scores are equal."""
+        comparator = OntologyComparator()
+        score1 = create_score(overall=0.6)
+        score2 = create_score(overall=0.6)
+
+        result = comparator.compare_pair(create_ontology("ont1"), score1,
+                                        create_ontology("ont2"), score2)
+        assert result['better'] == 0
+        assert result['overall_delta'] == 0
     
     def test_compare_to_baseline(self):
         """Test comparison to baseline."""
@@ -142,6 +163,16 @@ class TestComparisonMethods:
         result = comparator.compare_to_baseline(create_ontology("target"), target_score,
                                                create_ontology("baseline"), baseline_score)
         assert result['improvement_percent'] > 0
+
+    def test_compare_to_baseline_zero_baseline(self):
+        """Test comparison when baseline overall is zero."""
+        comparator = OntologyComparator()
+        baseline_score = create_score(overall=0.0)
+        target_score = create_score(overall=0.8)
+
+        result = comparator.compare_to_baseline(create_ontology("target"), target_score,
+                                               create_ontology("baseline"), baseline_score)
+        assert result['improvement_percent'] == 0
     
     def test_filter_by_threshold(self):
         """Test filtering ontologies by threshold."""
@@ -247,6 +278,14 @@ class TestStatisticalSummaries:
         histograms = comparator.histogram_by_dimension(scores, bins=5)
         assert 'completeness' in histograms
         assert len(histograms['completeness']) == 5
+
+    def test_histogram_counts_total(self):
+        """Test histogram bucket counts sum to total scores."""
+        comparator = OntologyComparator()
+        scores = [create_score(completeness=x/10) for x in range(1, 11)]
+
+        histograms = comparator.histogram_by_dimension(scores, bins=4)
+        assert sum(histograms['completeness']) == len(scores)
     
     def test_summary_statistics(self):
         """Test summary statistics generation."""
@@ -294,6 +333,15 @@ class TestCustomScoring:
         
         weighted = comparator.reweight_score(score, weights)
         assert weighted > 0.7  # Closer to consistency value
+
+    def test_reweight_score_zero_weights(self):
+        """Test reweighting with zero weights returns default."""
+        comparator = OntologyComparator()
+        score = create_score(completeness=0.9)
+        weights = {"completeness": 0.0, "consistency": 0.0}
+
+        weighted = comparator.reweight_score(score, weights)
+        assert weighted == 0.5
     
     def test_evaluate_against_rubric(self):
         """Test evaluation against custom rubric."""
@@ -304,6 +352,14 @@ class TestCustomScoring:
         result = comparator.evaluate_against_rubric(score, rubric)
         assert isinstance(result, float)
         assert 0.0 <= result <= 1.0
+
+    def test_evaluate_against_empty_rubric(self):
+        """Test rubric evaluation with empty rubric returns default."""
+        comparator = OntologyComparator()
+        score = create_score(completeness=0.8)
+
+        result = comparator.evaluate_against_rubric(score, {})
+        assert result == 0.5
     
     def test_evaluate_against_rubric_perfect_match(self):
         """Test rubric evaluation with perfect match."""

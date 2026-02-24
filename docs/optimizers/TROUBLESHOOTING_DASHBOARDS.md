@@ -64,6 +64,42 @@ Suggested queries:
 - Lowest score runs by `domain`
 - Correlation between `actions_count` and quality score
 
+## Query Metrics Persistence Error Codes
+
+When query metrics persistence falls back or fails, monitor these structured codes:
+- `QMETRICS_SERIALIZATION_ERROR`: primary metrics payload could not be serialized; fallback file payload was written.
+- `QMETRICS_FALLBACK_WRITE_ERROR`: both primary and fallback metric writes failed; only logger output is available.
+
+Operational guidance:
+1. If `QMETRICS_SERIALIZATION_ERROR` appears repeatedly, inspect recent schema/type changes in emitted metrics payloads.
+2. If `QMETRICS_FALLBACK_WRITE_ERROR` appears, prioritize filesystem/permissions/disk-health checks for the metrics directory.
+
+Example log filters:
+- Loki: `{app="optimizers"} |= "QMETRICS_SERIALIZATION_ERROR"`
+- Loki: `{app="optimizers"} |= "QMETRICS_FALLBACK_WRITE_ERROR"`
+- ELK/KQL: `message : "QMETRICS_SERIALIZATION_ERROR" OR message : "QMETRICS_FALLBACK_WRITE_ERROR"`
+
+Prometheus alert rule snippets (when mirrored into a counter metric):
+```yaml
+- alert: QueryMetricsFallbackWriteErrorBurst
+  expr: sum(rate(optimizer_errors_total{error_code="QMETRICS_FALLBACK_WRITE_ERROR"}[5m])) > 0
+  for: 10m
+  labels:
+    severity: critical
+  annotations:
+    summary: "Query metrics fallback writes are failing"
+    description: "Fallback metrics writes have been failing for at least 10m."
+
+- alert: QueryMetricsSerializationErrorSustained
+  expr: sum(rate(optimizer_errors_total{error_code="QMETRICS_SERIALIZATION_ERROR"}[15m])) > 0.05
+  for: 20m
+  labels:
+    severity: warning
+  annotations:
+    summary: "Sustained query metrics serialization failures"
+    description: "Investigate metrics payload schema/type drift."
+```
+
 ## Triage Playbook
 
 When alerts fire:
