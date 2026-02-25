@@ -1,6 +1,6 @@
 """Tests for validation_cache type contracts.
 
-This module tests the CacheStatsDict and MultiLayerCacheStatsDict TypedDict
+This module tests the CacheStatsDict and ValidationCacheStatsDict TypedDict
 contracts to ensure proper type safety for cache statistics.
 """
 
@@ -8,7 +8,7 @@ import pytest
 from ipfs_datasets_py.optimizers.graphrag.validation_cache import (
     CacheStats,
     CacheStatsDict,
-    MultiLayerCacheStatsDict,
+    ValidationCacheStatsDict,
     LRUCache,
     ValidationCache,
 )
@@ -76,12 +76,12 @@ class TestCacheStatsDictType:
         assert len(empty_stats) == 0
 
 
-class TestMultiLayerCacheStatsDictType:
-    """Tests for MultiLayerCacheStatsDict TypedDict structure."""
+class TestValidationCacheStatsDictType:
+    """Tests for ValidationCacheStatsDict TypedDict structure."""
     
     def test_multi_layer_cache_stats_dict_has_correct_fields(self):
-        """Verify MultiLayerCacheStatsDict has expected field names."""
-        stats: MultiLayerCacheStatsDict = {
+        """Verify ValidationCacheStatsDict has expected field names."""
+        stats: ValidationCacheStatsDict = {
             "tdfol_cache": {"hits": 10, "misses": 2, "hit_rate": 0.8333},
             "consistency_cache": {"hits": 20, "misses": 5, "hit_rate": 0.8},
             "incremental_cache": {"hits": 30, "misses": 10, "hit_rate": 0.75},
@@ -94,8 +94,8 @@ class TestMultiLayerCacheStatsDictType:
         assert "total_hit_rate" in stats
     
     def test_multi_layer_cache_stats_nested_types(self):
-        """Verify nested CacheStatsDict in MultiLayerCacheStatsDict."""
-        stats: MultiLayerCacheStatsDict = {
+        """Verify nested CacheStatsDict in ValidationCacheStatsDict."""
+        stats: ValidationCacheStatsDict = {
             "tdfol_cache": {"hits": 5, "misses": 1, "hit_rate": 0.8333},
             "consistency_cache": {"hits": 10, "misses": 2, "hit_rate": 0.8333},
             "incremental_cache": {"hits": 15, "misses": 3, "hit_rate": 0.8333},
@@ -112,8 +112,8 @@ class TestMultiLayerCacheStatsDictType:
         assert isinstance(stats["total_hit_rate"], float)
     
     def test_multi_layer_cache_stats_optional_fields(self):
-        """Verify fields are optional in MultiLayerCacheStatsDict."""
-        partial_stats: MultiLayerCacheStatsDict = {
+        """Verify fields are optional in ValidationCacheStatsDict."""
+        partial_stats: ValidationCacheStatsDict = {
             "total_hit_rate": 0.75,
         }
         
@@ -230,12 +230,8 @@ class TestValidationCacheIntegration:
     """Integration tests for ValidationCache.get_stats()."""
     
     def test_multi_layer_cache_get_stats_returns_typed_dict(self):
-        """Verify ValidationCache.get_stats() returns MultiLayerCacheStatsDict."""
-        cache = ValidationCache(
-            tdfol_max_size=100,
-            consistency_max_size=50,
-            incremental_max_size=75,
-        )
+        """Verify ValidationCache.get_stats() returns ValidationCacheStatsDict."""
+        cache = ValidationCache(max_size=100)
         
         result = cache.get_stats()
         
@@ -257,11 +253,7 @@ class TestValidationCacheIntegration:
     
     def test_multi_layer_cache_total_hit_rate_calculation(self):
         """Verify total_hit_rate is calculated correctly across layers."""
-        cache = ValidationCache(
-            tdfol_max_size=100,
-            consistency_max_size=50,
-            incremental_max_size=75,
-        )
+        cache = ValidationCache(max_size=100)
         
         # Perform operations on different layers
         cache.set_tdfol("key1", ["formula1"])
@@ -281,11 +273,7 @@ class TestValidationCacheIntegration:
     
     def test_multi_layer_cache_empty_stats(self):
         """Verify get_stats() works with empty caches."""
-        cache = ValidationCache(
-            tdfol_max_size=10,
-            consistency_max_size=10,
-            incremental_max_size=10,
-        )
+        cache = ValidationCache(max_size=100)
         
         result = cache.get_stats()
         
@@ -374,9 +362,8 @@ class TestCacheStatsDictStructure:
         assert set(result.keys()) == expected_fields
     
     def test_multi_layer_stats_nested_structure(self):
-        """Verify MultiLayerCacheStatsDict nested structure correctness."""
-        cache = ValidationCache(tdfol_max_size=10, consistency_max_size=10, incremental_max_size=10)
-        result = cache.get_stats()
+        """Verify ValidationCacheStatsDict nested structure correctness."""
+        cache = ValidationCache(max_size=100)
         
         # Verify top-level keys
         expected_top_level = {"tdfol_cache", "consistency_cache", "incremental_cache", "total_hit_rate"}
