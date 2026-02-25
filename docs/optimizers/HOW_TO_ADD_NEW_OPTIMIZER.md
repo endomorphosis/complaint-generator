@@ -32,9 +32,9 @@ Minimal class template:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
-from ipfs_datasets_py.optimizers.common.base_optimizer import BaseOptimizer
+from ipfs_datasets_py.optimizers.common.base_optimizer import BaseOptimizer, OptimizationContext
 
 
 @dataclass
@@ -48,16 +48,24 @@ class NewOptimizer(BaseOptimizer):
     def __init__(self, config: NewOptimizerConfig | None = None, **kwargs: Any) -> None:
         super().__init__(config=config or NewOptimizerConfig(), **kwargs)
 
-    def generate(self, source_data: Any, context: Dict[str, Any]) -> Dict[str, Any]:
-        return {"artifact": source_data}
+    def generate(self, input_data: Any, context: OptimizationContext) -> Any:
+        """Generate initial artifact from input data."""
+        return {"artifact": input_data}
 
-    def critique(self, artifact: Dict[str, Any], context: Dict[str, Any]):
-        return {"overall": 1.0, "recommendations": []}
+    def critique(self, artifact: Any, context: OptimizationContext) -> Tuple[float, List[str]]:
+        """Evaluate artifact quality.
+        
+        Returns:
+            Tuple of (score, feedback_list) where score is 0-1 and feedback is list of suggestions.
+        """
+        return (1.0, [])
 
-    def optimize(self, artifact: Dict[str, Any], feedback: Dict[str, Any], context: Dict[str, Any]):
+    def optimize(self, artifact: Any, score: float, feedback: List[str], context: OptimizationContext) -> Any:
+        """Improve artifact based on critique feedback."""
         return artifact
 
-    def validate(self, artifact: Dict[str, Any], context: Dict[str, Any]) -> bool:
+    def validate(self, artifact: Any, context: OptimizationContext) -> bool:
+        """Validate that artifact meets requirements."""
         return True
 ```
 
