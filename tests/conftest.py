@@ -153,6 +153,7 @@ def pytest_collection_modifyitems(config, items):
             or "test_mcplusplus_v39_session84_concurrency" in path
             or "test_mcplusplus_v39_session84_observability" in path
             or "test_integration_observability_core" in path
+            or "test_batch_264_api_type_contracts" in path
         ):
             file_cache[path] = (False, False, False)
             return file_cache[path]
