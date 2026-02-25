@@ -149,6 +149,7 @@ def pytest_collection_modifyitems(config, items):
             or "test_circuit_breaker" in path
             or "test_mcplusplus_v38_session83" in path
             or "test_mcplusplus_v39_session84_properties" in path
+            or "test_mcplusplus_v39_session84_recovery" in path
         ):
             file_cache[path] = (False, False, False)
             return file_cache[path]
