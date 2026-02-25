@@ -144,7 +144,11 @@ def pytest_collection_modifyitems(config, items):
         
         # Exclude specific test files from auto-detection
         # (files containing "llm" in code but not actually requiring LLM features)
-        if "test_lazy_backend_loader" in path or "test_circuit_breaker" in path:
+        if (
+            "test_lazy_backend_loader" in path
+            or "test_circuit_breaker" in path
+            or "test_mcplusplus_v38_session83" in path
+        ):
             file_cache[path] = (False, False, False)
             return file_cache[path]
         

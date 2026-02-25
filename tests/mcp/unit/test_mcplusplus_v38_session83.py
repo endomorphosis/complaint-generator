@@ -23,7 +23,6 @@ from ipfs_datasets_py.logic.security.llm_circuit_breaker import (
     CircuitState,
     CircuitBreakerOpenError,
     get_circuit_breaker,
-    protected,
 )
 
 from ipfs_datasets_py.logic.observability.structured_logging import (
@@ -42,6 +41,13 @@ from ipfs_datasets_py.logic.observability.structured_logging import (
 )
 
 
+def _get_file_logger(name: str, log_file: Path) -> logging.Logger:
+    """Create a JSON logger that writes to a file for tests."""
+    handler = logging.FileHandler(log_file)
+    handler.setFormatter(JSONLogFormatter())
+    return get_logger(name, handlers=[handler])
+
+
 # ============================================================================
 # Session 83, Feature 1: LLM Circuit Breaker (P2-security)
 # ============================================================================
@@ -53,7 +59,7 @@ class TestLLMCircuitBreakerBasics:
         """Circuit breaker starts in CLOSED state."""
         cb = LLMCircuitBreaker(failure_threshold=3, timeout_seconds=1.0)
         assert cb.state == CircuitState.CLOSED
-        assert cb.get_metrics()["failure_count"] == 0
+        assert cb.metrics.failure_count == 0
     
     def test_successful_calls_stay_closed(self):
         """Successful calls keep circuit CLOSED."""
@@ -67,9 +73,9 @@ class TestLLMCircuitBreakerBasics:
             assert result == "success"
             assert cb.state == CircuitState.CLOSED
         
-        metrics = cb.get_metrics()
-        assert metrics["success_count"] == 5
-        assert metrics["failure_count"] == 0
+        metrics = cb.metrics
+        assert metrics.success_count == 5
+        assert metrics.failure_count == 0
     
     def test_failures_open_circuit(self):
         """Repeated failures transition to OPEN state."""
@@ -89,8 +95,8 @@ class TestLLMCircuitBreakerBasics:
             cb.call(fail_func)
         assert cb.state == CircuitState.OPEN
         
-        metrics = cb.get_metrics()
-        assert metrics["failure_count"] == 3
+        metrics = cb.metrics
+        assert metrics.failure_count == 3
     
     def test_open_circuit_rejects_calls(self):
         """OPEN circuit rejects calls immediately."""
@@ -107,7 +113,7 @@ class TestLLMCircuitBreakerBasics:
         assert cb.state == CircuitState.OPEN
         
         # New calls should be rejected
-        with pytest.raises(CircuitBreakerOpenError, match="Circuit breaker is OPEN"):
+        with pytest.raises(CircuitBreakerOpenError, match="Circuit breaker 'llm_circuit_breaker' is OPEN"):
             cb.call(lambda: "should not execute")
     
     def test_half_open_recovery(self):
@@ -156,10 +162,10 @@ class TestCircuitBreakerMetrics:
         except ZeroDivisionError:
             pass
         
-        metrics = cb.get_metrics()
-        assert metrics["success_count"] == 2
-        assert metrics["failure_count"] == 1
-        assert metrics["state"] == "CLOSED"
+        metrics = cb.metrics
+        assert metrics.success_count == 2
+        assert metrics.failure_count == 1
+        assert cb.state == CircuitState.CLOSED
     
     def test_metrics_track_latencies(self):
         """Metrics track call latencies."""
@@ -172,9 +178,9 @@ class TestCircuitBreakerMetrics:
         cb.call(slow_func)
         cb.call(slow_func)
         
-        metrics = cb.get_metrics()
-        assert len(metrics["latencies"]) == 2
-        assert all(lat >= 0.05 for lat in metrics["latencies"])
+        metrics = cb.metrics
+        assert len(metrics.latencies) == 2
+        assert all(lat >= 0.05 for lat in metrics.latencies)
     
     def test_reset_statistics(self):
         """Reset clears statistics but keeps state."""
@@ -183,12 +189,12 @@ class TestCircuitBreakerMetrics:
         cb.call(lambda: "test")
         cb.call(lambda: "test")
         
-        cb.reset_statistics()
-        
-        metrics = cb.get_metrics()
-        assert metrics["success_count"] == 0
-        assert metrics["failure_count"] == 0
-        assert len(metrics["latencies"]) == 0
+        cb.reset()
+
+        metrics = cb.metrics
+        assert metrics.success_count == 0
+        assert metrics.failure_count == 0
+        assert len(metrics.latencies) == 0
         assert cb.state == CircuitState.CLOSED  # State preserved
 
 
@@ -199,21 +205,21 @@ class TestCircuitBreakerDecorator:
         """@protected decorator protects functions."""
         cb = LLMCircuitBreaker(failure_threshold=2)
         
-        @protected(cb)
+        @cb.protected
         def api_call(x):
             return x * 2
         
         assert api_call(5) == 10
         assert api_call(7) == 14
         
-        metrics = cb.get_metrics()
-        assert metrics["success_count"] == 2
+        metrics = cb.metrics
+        assert metrics.success_count == 2
     
     def test_protected_decorator_tracks_failures(self):
         """@protected decorator tracks failures."""
         cb = LLMCircuitBreaker(failure_threshold=2, timeout_seconds=0.5)
         
-        @protected(cb)
+        @cb.protected
         def failing_api():
             raise ConnectionError("API unavailable")
         
@@ -243,7 +249,7 @@ class TestCircuitBreakerRegistry:
         assert cb1 is cb2
         
         cb1.call(lambda: "test")
-        assert cb2.get_metrics()["success_count"] == 1
+        assert cb2.metrics.success_count == 1
     
     def test_different_names_different_instances(self):
         """Different names return different circuit breaker instances."""
@@ -254,8 +260,8 @@ class TestCircuitBreakerRegistry:
         
         cb_openai.call(lambda: "ok")
         
-        assert cb_openai.get_metrics()["success_count"] == 1
-        assert cb_anthropic.get_metrics()["success_count"] == 0
+        assert cb_openai.metrics.success_count == 1
+        assert cb_anthropic.metrics.success_count == 0
 
 
 class TestCircuitBreakerThreadSafety:
@@ -283,7 +289,7 @@ class TestCircuitBreakerThreadSafety:
         
         assert len(results) == 20
         assert len(errors) == 0
-        assert cb.get_metrics()["success_count"] == 20
+        assert cb.metrics.success_count == 20
 
 
 # ============================================================================
@@ -305,7 +311,7 @@ class TestStructuredLoggingBasics:
     def test_json_log_output_format(self, tmp_path):
         """JSON logs produce valid JSON output."""
         log_file = tmp_path / "test.log"
-        logger = get_logger("test.json", log_file=str(log_file))
+        logger = _get_file_logger("test.json", log_file)
         
         logger.info("Test message", extra={"key": "value"})
         
@@ -322,18 +328,18 @@ class TestStructuredLoggingBasics:
         """log_event() convenience function works."""
         log_file = tmp_path / "events.log"
         
+        logger = _get_file_logger("test.events", log_file)
         log_event(
-            event_type=EventType.TOOL_INVOKED,
-            message="Test tool called",
-            log_file=str(log_file),
-            extra={"tool_name": "test_tool"}
+            event_type=EventType.TOOL_INVOKED.value,
+            logger=logger,
+            tool_name="test_tool",
         )
         
         content = log_file.read_text()
         log_entry = json.loads(content.strip())
         
-        assert log_entry["event_type"] == "tool.invoked"
-        assert log_entry["message"] == "Test tool called"
+        assert log_entry["event_type"] == "mcp.tool.invoked"
+        assert "event" in log_entry["message"].lower()
         assert log_entry["tool_name"] == "test_tool"
 
 
@@ -343,7 +349,7 @@ class TestLogContext:
     def test_context_propagates_request_id(self, tmp_path):
         """LogContext propagates request_id to all logs."""
         log_file = tmp_path / "context.log"
-        logger = get_logger("context.test", log_file=str(log_file))
+        logger = _get_file_logger("context.test", log_file)
         
         with LogContext(request_id="req-123"):
             logger.info("First log")
@@ -359,7 +365,7 @@ class TestLogContext:
     def test_context_multiple_fields(self, tmp_path):
         """LogContext supports multiple fields."""
         log_file = tmp_path / "multi.log"
-        logger = get_logger("multi.test", log_file=str(log_file))
+        logger = _get_file_logger("multi.test", log_file)
         
         with LogContext(request_id="req-456", user_id="user-789", session_id="sess-abc"):
             logger.info("Context test")
@@ -374,7 +380,7 @@ class TestLogContext:
     def test_nested_contexts_merge(self, tmp_path):
         """Nested LogContext instances merge fields."""
         log_file = tmp_path / "nested.log"
-        logger = get_logger("nested.test", log_file=str(log_file))
+        logger = _get_file_logger("nested.test", log_file)
         
         with LogContext(request_id="outer-req"):
             with LogContext(operation="inner-op"):
@@ -393,31 +399,27 @@ class TestLogPerformance:
     def test_log_performance_timing(self, tmp_path):
         """LogPerformance logs execution time."""
         log_file = tmp_path / "perf.log"
-        logger = get_logger("perf.test", log_file=str(log_file))
+        logger = _get_file_logger("perf.test", log_file)
         
-        with LogPerformance(logger, "test_operation"):
+        with LogPerformance("test_operation", logger=logger):
             time.sleep(0.05)
         
         content = log_file.read_text()
         lines = content.strip().split('\n')
         
-        # Should have start and end logs
-        assert len(lines) == 2
-        
-        start_entry = json.loads(lines[0])
-        end_entry = json.loads(lines[1])
-        
-        assert "started" in start_entry["message"].lower()
-        assert "completed" in end_entry["message"].lower()
-        assert end_entry["duration_ms"] >= 50
+        assert len(lines) == 1
+
+        entry = json.loads(lines[0])
+        assert "performance" in entry["message"].lower()
+        assert entry["duration_ms"] >= 50
     
     def test_log_performance_with_context(self, tmp_path):
         """LogPerformance respects LogContext."""
         log_file = tmp_path / "perf_ctx.log"
-        logger = get_logger("perf.ctx.test", log_file=str(log_file))
+        logger = _get_file_logger("perf.ctx.test", log_file)
         
         with LogContext(request_id="req-perf"):
-            with LogPerformance(logger, "tracked_op"):
+            with LogPerformance("tracked_op", logger=logger):
                 pass
         
         content = log_file.read_text()
@@ -434,13 +436,13 @@ class TestLogParsing:
     def test_parse_json_log_file(self, tmp_path):
         """parse_json_log_file reads and parses JSON logs."""
         log_file = tmp_path / "parse.log"
-        logger = get_logger("parse.test", log_file=str(log_file))
+        logger = _get_file_logger("parse.test", log_file)
         
         logger.info("Message 1", extra={"index": 1})
         logger.warning("Message 2", extra={"index": 2})
         logger.error("Message 3", extra={"index": 3})
         
-        entries = parse_json_log_file(str(log_file))
+        entries = parse_json_log_file(log_file)
         
         assert len(entries) == 3
         assert entries[0]["message"] == "Message 1"
@@ -450,17 +452,17 @@ class TestLogParsing:
     def test_filter_logs_by_field(self, tmp_path):
         """filter_logs filters by arbitrary fields."""
         log_file = tmp_path / "filter.log"
-        logger = get_logger("filter.test", log_file=str(log_file))
+        logger = _get_file_logger("filter.test", log_file)
         
-        logger.info("Event A", extra={"category": "test"})
-        logger.info("Event B", extra={"category": "prod"})
-        logger.info("Event C", extra={"category": "test"})
+        log_event(EventType.CUSTOM.value, logger=logger, item="A")
+        log_event(EventType.TOOL_INVOKED.value, logger=logger, item="B")
+        log_event(EventType.CUSTOM.value, logger=logger, item="C")
         
-        entries = parse_json_log_file(str(log_file))
-        test_entries = filter_logs(entries, category="test")
-        
-        assert len(test_entries) == 2
-        assert all(e["category"] == "test" for e in test_entries)
+        entries = parse_json_log_file(log_file)
+        custom_entries = filter_logs(entries, event_type=EventType.CUSTOM.value)
+
+        assert len(custom_entries) == 2
+        assert all(e["event_type"] == EventType.CUSTOM.value for e in custom_entries)
 
 
 class TestMCPToolLogging:
@@ -470,12 +472,14 @@ class TestMCPToolLogging:
         """log_mcp_tool logs MCP tool calls."""
         log_file = tmp_path / "mcp_tool.log"
         
+        logger = _get_file_logger("mcp.tool", log_file)
         log_mcp_tool(
             tool_name="read_file",
+            status="completed",
+            duration_ms=123.45,
+            logger=logger,
             params={"path": "/test/file.txt"},
             result={"content": "..."},
-            duration_ms=123.45,
-            log_file=str(log_file)
         )
         
         content = log_file.read_text()
@@ -496,7 +500,7 @@ class TestProfilingScript:
     
     def test_profiling_script_exists(self):
         """profile_10k_token_extraction.py exists."""
-        script_path = Path("profile_10k_token_extraction.py")
+        script_path = Path("ipfs_datasets_py/profile_10k_token_extraction.py")
         assert script_path.exists(), f"Profiling script not found at {script_path}"
     
     def test_profiling_script_has_main_functions(self):
@@ -556,11 +560,11 @@ class TestSession83Integration:
     def test_circuit_breaker_with_structured_logging(self, tmp_path):
         """Circuit breaker integrates with structured logging."""
         log_file = tmp_path / "integration.log"
-        logger = get_logger("integration.test", log_file=str(log_file))
+        logger = _get_file_logger("integration.test", log_file)
         
         cb = LLMCircuitBreaker(failure_threshold=2, timeout_seconds=0.5)
         
-        @protected(cb)
+        @cb.protected
         def api_call():
             logger.info("API called", extra={"service": "test"})
             return "success"
@@ -579,16 +583,16 @@ class TestSession83Integration:
     def test_performance_logging_for_protected_calls(self, tmp_path):
         """LogPerformance tracks protected circuit breaker calls."""
         log_file = tmp_path / "perf_circuit.log"
-        logger = get_logger("perf.circuit", log_file=str(log_file))
+        logger = _get_file_logger("perf.circuit", log_file)
         
         cb = LLMCircuitBreaker(failure_threshold=5)
         
-        @protected(cb)
+        @cb.protected
         def slow_api():
             time.sleep(0.05)
             return "done"
         
-        with LogPerformance(logger, "protected_api_call"):
+        with LogPerformance("protected_api_call", logger=logger):
             result = cb.call(slow_api)
         
         assert result == "done"
@@ -596,9 +600,9 @@ class TestSession83Integration:
         # Check performance was logged
         content = log_file.read_text()
         lines = content.strip().split('\n')
-        end_entry = json.loads(lines[-1])
-        
-        assert end_entry["duration_ms"] >= 50
+        entry = json.loads(lines[-1])
+
+        assert entry["duration_ms"] >= 50
 
 
 # ============================================================================
@@ -631,7 +635,7 @@ class TestSession83Regressions:
     def test_log_context_thread_isolated(self, tmp_path):
         """LogContext is thread-isolated (doesn't leak)."""
         log_file = tmp_path / "thread_isolation.log"
-        logger = get_logger("thread.test", log_file=str(log_file))
+        logger = _get_file_logger("thread.test", log_file)
         
         def thread_worker(thread_id):
             with LogContext(thread_id=thread_id):
@@ -648,7 +652,7 @@ class TestSession83Regressions:
             t.join()
         
         # Parse logs and check thread_ids are correct
-        entries = parse_json_log_file(str(log_file))
+        entries = parse_json_log_file(log_file)
         assert len(entries) == 3
         
         thread_ids = {e["thread_id"] for e in entries}

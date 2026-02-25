@@ -12,6 +12,7 @@ This guide provides solutions to common issues encountered when using the GraphR
 6. [LLM Integration Issues](#llm-integration-issues)
 7. [Memory & Resource Constraints](#memory--resource-constraints)
 8. [Validation & Quality Problems](#validation--quality-problems)
+9. [Backend Resilience Exceptions](#backend-resilience-exceptions)
 
 ## Installation & Setup Issues
 
@@ -277,6 +278,44 @@ config = ExtractionConfig(
     relationship_confidence_threshold=0.3,  # Lower threshold
 )
 ```
+
+## Backend Resilience Exceptions
+
+These exceptions come from shared resilience wrappers in optimizer backend paths.
+
+### `OptimizerTimeoutError`
+
+**Meaning**: a backend call exceeded configured timeout.
+
+**Immediate actions**:
+- Reduce per-request payload size (shorter prompt/text batch).
+- Lower concurrency (`max_workers`) for the affected pipeline.
+- Retry with a larger timeout only if backend latency is known to be high.
+
+### `RetryableBackendError`
+
+**Meaning**: a retryable backend failure occurred after retry policy was applied.
+
+**Immediate actions**:
+- Inspect root cause in `details.last_error` (if present in logs/telemetry).
+- Verify backend credentials, rate limits, and service health.
+- Keep retries bounded; prefer fixing upstream availability/config issues.
+
+### `CircuitBreakerOpenError`
+
+**Meaning**: circuit breaker is open due to repeated failures; calls are being short-circuited.
+
+**Immediate actions**:
+- Stop high-rate retries from callers and allow recovery timeout window.
+- Check recent failure burst in logs around the same backend service name.
+- Trigger fallback mode (rule-based extraction or deferred processing) until half-open recovery succeeds.
+
+### Operational note
+
+Use these exceptions as control signals, not generic failures:
+- timeout => tune workload/timeout
+- retryable backend error => inspect dependency health/config
+- circuit open => reduce pressure and wait for recovery window
 
 3. **Check entity proximity**:
 ```python

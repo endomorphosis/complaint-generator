@@ -28,23 +28,26 @@ Goal: track timeout/retry/circuit-breaker policy coverage for external/backend c
   - `_query_llm(...)` uses shared wrapper around backend adapter calls.
 - `logic_theorem_optimizer/llm_backend.py`
   - `LLMBackendAdapter.generate(...)` uses per-backend policy + persistent breaker map.
-
-### Uses circuit-breaker style protection (non-shared wrapper path)
+- `logic_theorem_optimizer/formula_translation.py`
+  - Translator parse and NL-generation backend calls route through shared wrapper.
 - `llm_lazy_loader.py`
-  - lazy backend call wrappers protect calls with local circuit-breaker mechanism.
-  - Follow-up: evaluate migration to `execute_with_resilience(...)` for policy consistency.
+  - Lazy loader call surfaces (`__call__`, wrapped `__getattr__` methods) route through
+    `execute_with_resilience(...)` with explicit `BackendCallPolicy` and circuit-breaker.
 
 ## Gaps / Follow-Ups
 - Verify all remaining external-call surfaces that do not currently route through:
   - `execute_with_resilience(...)`, or
   - an equivalent policy object with explicit timeout/retry/breaker settings.
-- Add a policy-conformance test that scans production modules (excluding tests/docs)
-  for known backend invocation patterns and asserts they are covered by a resilience path.
+- Keep policy-conformance tests enforcing:
+  - wrapper usage,
+  - policy/breaker wiring markers, and
+  - service-name convention markers on critical backend modules.
+- Keep resilience outcome conformance checks enforcing that timeout/retry/circuit-open
+  exception paths map to explicit fallback/error-accounting behavior.
 - Document default policy values per optimizer type and define allowed overrides.
 - Ensure error code mapping for timeout/retry/circuit-open outcomes is consistent in logs/metrics.
 
 ## Suggested Next Execution Order
-1. Add a lightweight conformance test for backend-call wrappers (security lane).
-2. Normalize `llm_lazy_loader.py` to shared policy primitives (architecture/security lane).
-3. Add troubleshooting docs section mapping resilience exceptions to operator actions (docs/obs lane).
-
+1. Keep conformance tests enforcing policy defaults and resilience outcome mappings.
+2. Add troubleshooting docs section mapping resilience exceptions to operator actions (docs/obs lane).
+3. Validate log/metric status mapping consistency for timeout/retry/circuit-open outcomes.

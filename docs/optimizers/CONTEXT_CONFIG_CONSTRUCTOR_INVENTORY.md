@@ -45,3 +45,67 @@ Purpose: baseline signatures for unifying context/config dataclasses across Grap
 2. Add adapter helpers to map existing constructor kwargs into the dataclass without breaking API compatibility.
 3. Add constructor conformance tests for core GraphRAG/logic/agentic entrypoints.
 
+## Progress 2026-02-25
+- Added shared metadata normalization helper in `optimizers/common/unified_config.py`:
+  - `ensure_shared_context_metadata(...)`
+- Added shared backend-config normalization helper in `optimizers/common/unified_config.py`:
+  - `ensure_shared_backend_config(...)`
+  - `backend_config_from_constructor_kwargs(...)`
+- Unified context adapters now ensure minimum shared metadata keys are present:
+  - `session_id`
+  - `data_source`
+  - `data_type`
+  - `trace_id`
+- Added/updated conformance tests in
+  `tests/unit/optimizers/common/test_unified_config.py` to assert:
+  - adapter outputs contain shared metadata keys,
+  - existing metadata values are preserved,
+  - shared backend-config helper fills minimum keys while preserving existing values,
+  - helpers are exported via `optimizers.common`.
+- Added constructor inventory conformance tests in
+  `tests/unit/optimizers/common/test_constructor_inventory_conformance.py`
+  using `inspect.signature(...)` subset assertions for core entrypoints:
+  - GraphRAG: `OntologyGenerator`, `OntologyPipeline`, `OntologyCritic`, `OntologyMediator`
+  - Logic: `LogicExtractor`, `LogicTheoremOptimizer`
+  - Agentic: `OptimizerLLMRouter`, `AgenticOptimizer`
+- Added adapter-level backend config conformance tests in
+  `tests/unit/optimizers/common/test_unified_config.py` for constructor-style kwargs:
+  - GraphRAG `OntologyGenerator` mapping (`ipfs_accelerate_config`, `use_ipfs_accelerate`)
+  - GraphRAG `OntologyPipeline` mapping (`use_llm`)
+  - GraphRAG `OntologyCritic` mapping (`backend_config`, `use_llm`)
+  - Logic `LogicExtractor` mapping (`model`, `backend`)
+  - Logic `LogicTheoremOptimizer` mapping (`llm_backend`, `llm_backend_config`)
+  - Agentic `OptimizerLLMRouter` mapping (`preferred_provider`)
+- Added property-based backend adapter invariants in
+  `tests/unit/optimizers/common/test_unified_backend_config_hypothesis.py`
+  (auto-skip safe when Hypothesis is unavailable):
+  - GraphRAG constructor mapping preserves config values,
+  - Logic constructor mapping emits required defaults when config is partial,
+  - Unknown adapter sources still return full shared backend key set.
+- Added backend adapter source-alias registry and alias-equivalence conformance:
+  - `supported_backend_config_source_aliases()` in `optimizers/common/unified_config.py`
+  - Conformance checks in `tests/unit/optimizers/common/test_unified_config.py`
+    ensure alias variants map to identical normalized backend config payloads.
+
+## Backend Adapter Source Aliases (Doc/Code Sync)
+- `graphrag_generator`:
+  - `graphrag.ontology_generator`
+  - `ontology_generator`
+  - `graphrag`
+- `graphrag_pipeline`:
+  - `graphrag.ontology_pipeline`
+  - `ontology_pipeline`
+- `graphrag_critic`:
+  - `graphrag.ontology_critic`
+  - `ontology_critic`
+- `logic_extractor`:
+  - `logic.logic_extractor`
+  - `logic_extractor`
+- `logic_unified_optimizer`:
+  - `logic.unified_optimizer`
+  - `logic_theorem_optimizer`
+  - `logic_theorem_optimizer.unified_optimizer`
+- `agentic_llm_router`:
+  - `agentic.llm_router`
+  - `optimizer_llm_router`
+  - `agentic`
