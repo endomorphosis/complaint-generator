@@ -150,6 +150,7 @@ def pytest_collection_modifyitems(config, items):
             or "test_mcplusplus_v38_session83" in path
             or "test_mcplusplus_v39_session84_properties" in path
             or "test_mcplusplus_v39_session84_recovery" in path
+            or "test_mcplusplus_v39_session84_concurrency" in path
         ):
             file_cache[path] = (False, False, False)
             return file_cache[path]
