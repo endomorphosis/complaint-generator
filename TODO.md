@@ -1339,7 +1339,7 @@
 - [x] Integration with GraphQL endpoint (P3) — **2026-02-25**: ontology_graphql.py (400 LOC, 35/35 tests PASSED) ✅
 - [x] Elasticsearch indexing for extracted entities (P3) — **2026-02-25**: Verified elasticsearch_indexer.py (35/35 tests PASSED) ✅
 - [x] Neo4j graph loading (P3) — **2026-02-25**: neo4j_loader.py (700 LOC, 41/41 tests PASSED) ✅
-- [ ] Kafka streaming pipeline integration (P3)
+- [x] Kafka streaming pipeline integration (P3) — **2026-02-25**: kafka_ontology_stream.py (650 LOC, 32/32 tests PASSED) ✅
 
 ---
 
