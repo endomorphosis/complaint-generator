@@ -2018,9 +2018,22 @@
     - `ipfs_datasets_py/tests/unit/optimizers/graphrag/test_batch_301_pipeline_prometheus_hooks.py` (2/2)
   - **Outcome:** Prometheus-compatible optimizer metrics are implemented, wired, and test-verified.
 
-**Session Summary (Batches 254-280):**
-- **Total Batches:** 27 complete batches (17 this continuation: 264 PERF, 265 ARCH, 266 API, 267 OBS, 268 OBS, 269 GRAPHRAG, 270 TESTS, 271 ARCH, 272 ARCH, 273 OBS, 274 TESTS, 275 TESTS, 276 TESTS, 277 ARCH, 278 DOCS, 279 ARCH, 280 OBS)
-- **Total Tests:** 794 comprehensive tests (all PASSED, added 5 + 24 + 7 + 4 + 5 + 18 + 31 + 23 + 130 + 4 + 49 + 153 + 21 + 36 + 9 + 13 + 32 = 564 this continuation)
+### OBS - Batch 281 (STRUCTURED JSON PIPELINE LOGGING AUDIT - LIFECYCLE EVENTS VERIFIED)
+- [x] Structured JSON logging for every pipeline run (OBS - P2) - 35/35 tests PASSED ✓
+  - **Purpose:** Close remaining structured-logging backlog by validating that pipeline run lifecycle events and structured logging helpers are implemented and stable.
+  - **Verified Coverage:**
+    - Pipeline run start and terminal structured events (`PIPELINE_RUN_START`, `PIPELINE_RUN`) in ontology pipeline flow.
+    - Shared structured logging schema/envelope utilities used across optimizer components.
+    - Logic theorem optimizer structured logging paths remain green.
+  - **Validation Suites:**
+    - `ipfs_datasets_py/tests/unit/optimizers/graphrag/test_ontology_pipeline_logging.py` (5/5)
+    - `ipfs_datasets_py/tests/unit/optimizers/common/test_structured_logging.py` (21/21)
+    - `ipfs_datasets_py/tests/unit/optimizers/logic_theorem_optimizer/test_structured_logging.py` (9/9)
+  - **Outcome:** Structured JSON logging is active and test-verified across pipeline/common/logic paths.
+
+**Session Summary (Batches 254-281):**
+- **Total Batches:** 28 complete batches (18 this continuation: 264 PERF, 265 ARCH, 266 API, 267 OBS, 268 OBS, 269 GRAPHRAG, 270 TESTS, 271 ARCH, 272 ARCH, 273 OBS, 274 TESTS, 275 TESTS, 276 TESTS, 277 ARCH, 278 DOCS, 279 ARCH, 280 OBS, 281 OBS)
+- **Total Tests:** 829 comprehensive tests (all PASSED, added 5 + 24 + 7 + 4 + 5 + 18 + 31 + 23 + 130 + 4 + 49 + 153 + 21 + 36 + 9 + 13 + 32 + 35 = 599 this continuation)
 - **Code & Documentation Generated:** 7,700+ LOC (tests + profiling + config/context updates) + 64KB documentation (guides)
 - **Architectures:** Performance profiling, agent integration, configuration validation, statistical analysis, test infrastructure, factory patterns
 - **Documentation:** Performance tuning, troubleshooting, integration examples, profiling analysis
