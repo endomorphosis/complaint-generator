@@ -1325,7 +1325,7 @@
 - [ ] OntologyMediator.compare_strategies() (P3) - Compare alternative refinement actions — **2026-02-23 Batch 241**: COMPLETED (17/17 tests) ✅
 
 ### ARCHITECTURE - High Priority
-- [x] Decision tree visualization for refinement (P3) - Render strategy trees — **2026-02-25**: refinement_visualizer.py (480 LOC, 29/29 tests PASSED) ✅
+- [ ] Decision tree visualization for refinement (P3) - Render strategy trees
 - [x] Audit logging infrastructure (P2) - Track all refinements, scores, decisions — DONE 2025-02-22: audit_logger.py (700 lines, 10 event types, JSONL logging) with 27/27 tests passing
 - [x] Configuration validation schema (P2) - Centralized config validation — **2026-02-23 Batch 243**: config_validation.py (475 LOC, 54/54 tests PASSED) ✅
 
@@ -1336,10 +1336,10 @@
 - [ ] Create refinement playbook system (P3) - Predefined refinement sequences
 
 ### INTEGRATIONS - Medium Priority
-- [x] Integration with GraphQL endpoint (P3) — **2026-02-25**: ontology_graphql.py (400 LOC, 35/35 tests PASSED) ✅
-- [x] Elasticsearch indexing for extracted entities (P3) — **2026-02-25**: Verified elasticsearch_indexer.py (35/35 tests PASSED) ✅
-- [x] Neo4j graph loading (P3) — **2026-02-25**: neo4j_loader.py (700 LOC, 41/41 tests PASSED) ✅
-- [x] Kafka streaming pipeline integration (P3) — **2026-02-25**: kafka_ontology_stream.py (650 LOC, 32/32 tests PASSED) ✅
+- [ ] Integration with GraphQL endpoint (P3)
+- [ ] Elasticsearch indexing for extracted entities (P3)
+- [ ] Neo4j graph loading (P3)
+- [ ] Kafka streaming pipeline integration (P3)
 
 ---
 
