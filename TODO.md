@@ -4,9 +4,9 @@
 
 ## Completed (2026-02-23 - Latest Session)
 
-### Session Summary: Batch 243-262 Complete ✅
+### Session Summary: Batch 243-263 Complete ✅
 
-**TOTAL SESSION ACCOMPLISHMENTS: 990 TESTS (100% PASS RATE)**
+**TOTAL SESSION ACCOMPLISHMENTS: 1057 TESTS (100% PASS RATE)**
 
 **Comprehensive Test Suite Expansion:**
 - **Batch 243**: 150+ tests (inventory & API verification)
@@ -29,13 +29,14 @@
 - **Batch 260**: 56 tests (StreamingExtractor streaming document processing) - **COMPLETED THIS SESSION**
 - **Batch 261**: 66 tests (TraversalOptimizer graph traversal optimization) - **COMPLETED THIS SESSION**
 - **Batch 262**: 65 tests (QueryPlanner query planning and optimization) - **COMPLETED THIS SESSION**
+- **Batch 263**: 67 tests (QueryMetricsCollector metrics collection and analysis) - **COMPLETED THIS SESSION**
 
 **Session Statistics:**
-- Files Created: 26 comprehensive test suites
-- Tests Created: 990 (all passing)
-- LOC Written: 16,050+ lines of test code
-- Pass Rate: 100% (990/990)
-- Execution Time: ~228s total
+- Files Created: 27 comprehensive test suites
+- Tests Created: 1057 (all passing)
+- LOC Written: 17,090+ lines of test code
+- Pass Rate: 100% (1057/1057)
+- Execution Time: ~230s total
 
 ---
 
@@ -556,6 +557,200 @@
 - Fixed IPLD detection from entity_ids: Requires proper CID prefix length, adjusted test to accept general fallback
 - Fixed complexity estimation: Scoring is more conservative, adjusted test to accept medium/high range
 - Fixed entity type detection: Names alone don't trigger person detection, needs explicit patterns like "who" or "person"
+
+---
+
+### Batch 263: QueryMetricsCollector Metrics Collection and Analysis (67/67 tests PASSING) ✅
+**Purpose:** Test comprehensive query metrics collection, analysis, and reporting for GraphRAG queries
+
+- **TESTS Track (Complete):**
+  - [x] test_batch_263_query_metrics_collector.py (67/67 tests PASSED) — Query tracking, phase timing, resource monitoring, health checks, analysis, export
+
+**Test Coverage (20 test classes, 67 tests):**
+- **TestQueryMetricsCollectorInitialization (5 tests)**: Default initialization, custom history size, metrics directory creation, existing directory, resource tracking disabled
+- **TestStartQueryTracking (4 tests)**: Query ID generation, custom ID usage, parameter storage, structure initialization
+- **TestEndQueryTracking (6 tests)**: Duration calculation, results recording, error recording, history addition, state reset, error handling
+- **TestGetHealthCheck (4 tests)**: Empty history, successful queries, high error rate detection (degraded status), custom window size
+- **TestPhaseTimingContextManager (4 tests)**: Basic timing, metadata attachment, nested phases, error handling
+- **TestManualPhaseTimers (4 tests)**: Manual start/end, metadata attachment, nonexistent phase error, repeated phase counting
+- **TestResourceUsageTracking (3 tests)**: Memory/CPU capture (mocked), peak memory tracking, disabled tracking
+- **TestRecordAdditionalMetric (3 tests)**: Custom metric storage, multiple categories, error handling
+- **TestGetQueryMetrics (2 tests)**: Retrieval by ID, nonexistent ID returns None
+- **TestGetRecentMetrics (2 tests)**: Limited results, newest queries first
+- **TestGetPhaseTimingSummary (3 tests)**: Single query summary, all queries summary, complete statistics calculation
+- **TestGeneratePerformanceReport (4 tests)**: Report structure, timing summary, recommendations generation, empty metrics
+- **TestExportMetricsCSV (4 tests)**: String export, file writing, phase columns inclusion, empty metrics handling
+- **TestExportMetricsJSON (4 tests)**: String export, file writing, numpy array handling, empty metrics handling
+- **TestNumpyJsonSerialization (6 tests)**: None handling, dicts/lists, small numpy arrays, numpy scalars, datetime conversion
+- **TestPersistMetrics (2 tests)**: File writing with metrics_dir, no-op without metrics_dir
+- **TestHistorySizeManagement (2 tests)**: Max size enforcement, most recent storage
+- **TestIntegrationScenarios (2 tests)**: Complete query lifecycle (tracking + phases + custom metrics + persistence), multiple queries with analysis
+- **TestEdgeCases (3 tests)**: Zero max history size, multiple active queries handling, serialization error resilience
+
+**Batch 263 Summary:**
+- Tests Created: 67 tests across 20 test classes
+- Tests Passing: 67/67 (100%)
+- Coverage: Query lifecycle tracking, phase timing (context manager + manual), resource usage monitoring (memory/CPU), health checks with error rate detection, custom metric recording, metrics retrieval, phase timing analysis, performance reporting, CSV/JSON export, numpy serialization, metrics persistence, history management
+- Key Features Tested: Start/end query tracking with duration calculation, nested phase timing with hierarchical paths, peak memory tracking and CPU sampling, health check with degraded status detection (error rate >=20%), custom metric categorization, phase timing statistics (avg/min/max/total/call_count), performance report generation with recommendations, CSV/JSON export with numpy handling, deque-based history with max size enforcement
+- LOC: 1040 lines of test code
+- Execution Time: ~1.46s
+
+**Key API Discovered:**
+- `QueryMetricsCollector(max_history_size=1000, metrics_dir=None, track_resources=True, logger=None)` — Initialize metrics collector
+  - Creates metrics directory if specified
+  - Initializes deque with max_history_size
+  - Enables resource tracking if psutil available
+  
+- `start_query_tracking(query_id=None, query_params=None)` → str
+  - Generates UUID if query_id not provided
+  - Initializes query metrics structure: start_time, phases, resources, results, metadata
+  - Starts resource sampling if track_resources enabled
+  - Returns query_id
+
+- `end_query_tracking(results_count=0, quality_score=0.0, error_message=None)` → Dict
+  - Calculates duration from start_time to end_time
+  - Records results count and quality score
+  - Sets success=False if error_message provided
+  - Stops resource sampling
+  - Adds metrics to query_metrics deque
+  - Persists to file if metrics_dir configured
+  - Resets current query state
+  - Returns completed metrics record
+
+- `get_health_check(window_size=100)` → Dict
+  - Returns: {status, memory_usage_bytes, last_session_duration_seconds, error_rate_last_100, evaluated_sessions, window_size, timestamp}
+  - status = "degraded" if error_rate >= 0.20, else "ok"
+  - error_rate = failures / recent_metrics count
+  - memory_usage_bytes from psutil.Process().memory_info().rss (best effort)
+  
+- `time_phase(phase_name, metadata=None)` — Context manager for phase timing
+  - Calls start_phase_timer on entry
+  - Calls end_phase_timer on exit
+  - Supports nested phases with hierarchical paths (parent.child)
+  - Raises ValueError if no active query
+
+- `start_phase_timer(phase_name, metadata=None)` → None
+  - Creates full phase path with parent phases (e.g., "query_execution.vector_search")
+  - Records: start_time, end_time=None, duration=0, metadata, count=0
+  - Increments count for repeated phases
+  - Increments current_depth for nesting
+  
+- `end_phase_timer(phase_name)` → float
+  - Finds matching active timer by phase name and depth
+  - Calculates duration from start_time to end_time
+  - Accumulates duration for repeated phases
+  - Decrements current_depth
+  - Returns phase duration
+  - Raises ValueError if no active timer found
+
+- `record_resource_usage()` → Dict
+  - Returns: {timestamp, memory_rss, memory_vms, cpu_percent}
+  - Updates peak_memory if current RSS exceeds
+  - Appends to memory_samples and cpu_samples lists
+  - Returns empty dict if track_resources disabled
+  
+- `record_additional_metric(name, value, category="custom")` → None
+  - Stores custom metric in metadata[category][name]
+  - Creates category dict if not exists
+  - Raises ValueError if no active query
+  
+- `get_query_metrics(query_id)` → Optional[Dict]
+  - Searches query_metrics deque for matching query_id
+  - Returns metrics record or None
+  
+- `get_recent_metrics(count=10)` → List[Dict]
+  - Returns last 'count' metrics from query_metrics deque
+  
+- `get_phase_timing_summary(query_id=None)` → Dict[str, Dict]
+  - Returns: {phase_name: {avg_duration, min_duration, max_duration, total_duration, call_count, avg_calls_per_query}}
+  - If query_id specified: analyzes single query
+  - If query_id is None: analyzes all queries
+  - call_count sums 'count' fields (within-query repetitions)
+  
+- `generate_performance_report(query_id=None)` → Dict
+  - Returns: {timestamp, query_count, timing_summary, resource_usage, phase_breakdown, recommendations}
+  - timing_summary: avg/min/max/total/std_deviation of query durations
+  - resource_usage: avg/max/min peak memory
+  - phase_breakdown: from get_phase_timing_summary
+  - recommendations: optimization/consistency/resource suggestions
+    - Recommends optimization if phase > 0.5s (high) or > 1.0s (critical)
+    - Detects high variability (std_dev > 0.5 * avg_duration)
+    - Warns if avg_peak_memory > 500MB
+
+- `export_metrics_csv(filepath=None)` → Optional[str]
+  - Exports to CSV with columns: query_id, start_time, end_time, duration, results_count, quality_score, peak_memory, phase_*
+  - Dynamically adds phase columns from all phase names
+  - Returns CSV string if filepath=None
+  - Writes to file if filepath provided
+  - Returns None for empty metrics
+  
+- `export_metrics_json(filepath=None)` → Optional[str]
+  - Exports to JSON with _numpy_json_serializable preprocessing
+  - Returns JSON string if filepath=None
+  - Writes to file if filepath provided
+  - Returns None for empty metrics
+  - Handles serialization errors gracefully with fallback {error, metrics_count, timestamp}
+  
+- `_numpy_json_serializable(obj)` → Any
+  - Recursively converts numpy arrays/types to JSON-safe types
+  - None → None
+  - dict/list/tuple/set → recursive processing
+  - datetime → isoformat()
+  - Small numpy arrays (≤1000 elements) → list
+  - Large numpy arrays → summary dict {type, shape, dtype, size, summary}
+  - numpy scalars (int64/float64/bool_/str_/bytes_/datetime64/complex128) → Python primitives
+  - NaN/Inf → string representation
+  - Fallback → str(obj) or "<unserializable object>"
+  
+- `_persist_metrics(metrics)` → None
+  - Creates filename: query_{timestamp}_{query_id}.json
+  - Applies _numpy_json_serializable preprocessing
+  - Writes to metrics_dir/{filename}
+  - Handles errors gracefully with fallback {error_code, error, query_id, timestamp}
+  - No-op if metrics_dir not configured
+
+**Query Metrics Structure:**
+```python
+{
+    "query_id": str,
+    "start_time": float,
+    "end_time": float,
+    "duration": float,
+    "params": Dict,
+    "phases": {
+        "phase_name": {
+            "start_time": float,
+            "end_time": float,
+            "duration": float,
+            "metadata": Dict,
+            "count": int  # Repetitions within this query
+        }
+    },
+    "resources": {
+        "initial_memory": int,
+        "peak_memory": int,
+        "memory_samples": List[Tuple[float, int]],
+        "cpu_samples": List[Tuple[float, float]]
+    },
+    "results": {
+        "count": int,
+        "quality_score": float
+    },
+    "success": bool,
+    "error_message": Optional[str],
+    "metadata": Dict[str, Dict]  # category -> {metric_name: value}
+}
+```
+
+**Phase Timing Nested Paths:**
+- Single phase: "vector_search"
+- Nested phase: "query_execution.vector_search"
+- Double nested: "query_execution.optimization.vector_search"
+- Depth tracking ensures proper parent-child relationships
+
+**Challenges Resolved:**
+- Fixed test assertion: call_count sums within-query repetitions (count field), not total phase invocations across queries. Changed to check total_duration and avg_duration instead for cross-query validation.
+- All tests passing 67/67 after fix ✅
 
 ---
 

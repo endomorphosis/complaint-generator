@@ -19,6 +19,7 @@ from ipfs_datasets_py.logic.observability.metrics_prometheus import (
 )
 from ipfs_datasets_py.logic.observability.otel_integration import (
     get_otel_tracer,
+    SpanStatus,
 )
 
 
@@ -101,7 +102,8 @@ class TestMetricsPropertyBased:
         p99 = summary['latency_percentiles']['p99']
         
         assert p50 <= p95, "P50 should be <= P95"
-        assert p95 <= p99, "P95 should be <= P99"
+        # Allow for floating point rounding errors (< 1e-10)
+        assert p95 <= p99 or abs(p95 - p99) < 1e-10, f"P95 should be <= P99 ({p95} vs {p99})"
     
     @given(st.lists(success_flags, min_size=10, max_size=100))
     @settings(max_examples=50)
@@ -113,7 +115,7 @@ class TestMetricsPropertyBased:
         success rate matches the mathematical definition.
         """
         metrics = get_prometheus_collector()
-        component = f"success_rate_test_{id(success_list)}"
+        component = f"success_rate_test_{time.time_ns()}"
         
         for success in success_list:
             metrics.record_circuit_breaker_call(component, 0.01, success=success)
@@ -147,12 +149,12 @@ class TestTracingPropertyBased:
         spans = []
         for i in range(num_spans):
             span = tracer.start_span(op_name)
-            span.set_attribute("index", i)
-            span.end(success=True)
+            span.attributes["index"] = i
+            tracer.end_span(span, status=SpanStatus.OK)
             spans.append(span)
         
         # Verify trace exists and contains spans
-        assert len(tracer.completed_traces) > 0, "No traces created"
+        assert len(tracer.get_completed_traces()) > 0, "No traces created"
     
     @given(st.lists(operation_names, min_size=1, max_size=10))
     @settings(max_examples=50)
@@ -167,14 +169,14 @@ class TestTracingPropertyBased:
         
         for op in operation_sequence:
             span = tracer.start_span(op)
-            span.end(success=True)
+            tracer.end_span(span, status=SpanStatus.OK)
         
         # Check trace consistency
-        for trace in tracer.completed_traces:
+        for trace in tracer.get_completed_traces():
             for span in trace.spans:
                 # Parent must exist in same trace
-                if span.parent_id:
-                    parents = [s for s in trace.spans if s.span_id == span.parent_id]
+                if span.parent_span_id:
+                    parents = [s for s in trace.spans if s.span_id == span.parent_span_id]
                     assert len(parents) > 0, "Parent span not found in trace"
 
 
@@ -213,7 +215,7 @@ class TestCircuitBreakerPropertyBased:
         
         # Should have opened around threshold
         assert opened, f"Circuit didn't open after {threshold} failures"
-        assert cb.failure_count >= threshold, "Failure count doesn't match"
+        assert cb.metrics.failure_count >= threshold, "Failure count doesn't match"
     
     @given(st.lists(success_flags, min_size=5, max_size=50))
     @settings(max_examples=50)
@@ -243,7 +245,8 @@ class TestCircuitBreakerPropertyBased:
                 pass
         
         # With high threshold, state shouldn't change much
-        assert cb.state.value in ["CLOSED", "OPEN"], "Invalid state"
+        # CircuitState enum uses lowercase values
+        assert cb.state.value in ["closed", "open"], "Invalid state"
 
 
 # ============================================================================
@@ -292,8 +295,8 @@ class TestFuzzingInvalidInputs:
         try:
             span = tracer.start_span(op_name[:100] or "unnamed")
             if -1000 <= value <= 1000:
-                span.set_attribute("value", value)
-            span.end(success=True)
+                span.attributes["value"] = value
+            tracer.end_span(span, status=SpanStatus.OK)
         except (ValueError, OverflowError, TypeError):
             # Acceptable to reject invalid input
             pass
@@ -330,7 +333,8 @@ class TestTemporalProperties:
             assert span.start_time >= previous_start, "Timestamps not monotonic"
             previous_start = span.start_time
             
-            span.end(success=success)
+            status = SpanStatus.OK if success else SpanStatus.ERROR
+            tracer.end_span(span, status=status)
     
     @given(st.integers(min_value=1, max_value=10))
     @settings(max_examples=50)
