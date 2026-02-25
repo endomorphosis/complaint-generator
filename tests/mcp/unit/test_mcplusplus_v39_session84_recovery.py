@@ -75,7 +75,7 @@ class TestCircuitBreakerErrorRecovery:
         2. Timeout passes → HALF_OPEN
         3. Single success → CLOSED (recovered)
         """
-        cb = LLMCircuitBreaker(failure_threshold=2, timeout_seconds=0.1)
+        cb = LLMCircuitBreaker(failure_threshold=2, timeout_seconds=0.1, success_threshold=1)
         
         # Cause two failures
         def failing_func():
@@ -90,6 +90,7 @@ class TestCircuitBreakerErrorRecovery:
         # Wait for timeout
         time.sleep(0.15)
         
+        cb.refresh_state()
         # Circuit should be HALF_OPEN now
         assert cb.state.value == "half_open"
         
@@ -99,7 +100,7 @@ class TestCircuitBreakerErrorRecovery:
         
         result = cb.call(success_func)
         assert result == "recovered"
-        assert cb.state.value == "CLOSED"
+        assert cb.state.value == "closed"
 
     def test_circuit_breaker_reopens_on_failure_in_half_open(self):
         """
@@ -120,6 +121,7 @@ class TestCircuitBreakerErrorRecovery:
         
         # Wait for HALF_OPEN
         time.sleep(0.1)
+        cb.refresh_state()
         assert cb.state.value == "half_open"
         
         # Fail again in HALF_OPEN
@@ -171,7 +173,7 @@ class TestCircuitBreakerErrorRecovery:
         
         Verify that failure counts survive OPEN→HALF_OPEN→CLOSED transitions.
         """
-        cb = LLMCircuitBreaker(failure_threshold=2, timeout_seconds=0.1)
+        cb = LLMCircuitBreaker(failure_threshold=2, timeout_seconds=0.1, success_threshold=1)
         
         # Trigger failures
         def failing_func():
@@ -454,6 +456,7 @@ class TestTimeoutAndClockHandling:
         # Simulate clock jump forward by 5 seconds
         with mock.patch("time.time", return_value=5.0):
             # Should be HALF_OPEN
+            cb.refresh_state()
             assert cb.state.value == "half_open"
             
             def success_func():
