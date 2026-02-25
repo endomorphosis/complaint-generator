@@ -10,7 +10,7 @@ from ipfs_datasets_py.optimizers.graphrag.validation_cache import (
     CacheStatsDict,
     MultiLayerCacheStatsDict,
     LRUCache,
-    MultiLayerCache,
+    ValidationCache,
 )
 
 
@@ -226,12 +226,12 @@ class TestLRUCacheIntegration:
         assert result["evictions"] >= 1
 
 
-class TestMultiLayerCacheIntegration:
-    """Integration tests for MultiLayerCache.get_stats()."""
+class TestValidationCacheIntegration:
+    """Integration tests for ValidationCache.get_stats()."""
     
     def test_multi_layer_cache_get_stats_returns_typed_dict(self):
-        """Verify MultiLayerCache.get_stats() returns MultiLayerCacheStatsDict."""
-        cache = MultiLayerCache(
+        """Verify ValidationCache.get_stats() returns MultiLayerCacheStatsDict."""
+        cache = ValidationCache(
             tdfol_max_size=100,
             consistency_max_size=50,
             incremental_max_size=75,
@@ -257,7 +257,7 @@ class TestMultiLayerCacheIntegration:
     
     def test_multi_layer_cache_total_hit_rate_calculation(self):
         """Verify total_hit_rate is calculated correctly across layers."""
-        cache = MultiLayerCache(
+        cache = ValidationCache(
             tdfol_max_size=100,
             consistency_max_size=50,
             incremental_max_size=75,
@@ -281,7 +281,7 @@ class TestMultiLayerCacheIntegration:
     
     def test_multi_layer_cache_empty_stats(self):
         """Verify get_stats() works with empty caches."""
-        cache = MultiLayerCache(
+        cache = ValidationCache(
             tdfol_max_size=10,
             consistency_max_size=10,
             incremental_max_size=10,
@@ -375,7 +375,7 @@ class TestCacheStatsDictStructure:
     
     def test_multi_layer_stats_nested_structure(self):
         """Verify MultiLayerCacheStatsDict nested structure correctness."""
-        cache = MultiLayerCache(tdfol_max_size=10, consistency_max_size=10, incremental_max_size=10)
+        cache = ValidationCache(tdfol_max_size=10, consistency_max_size=10, incremental_max_size=10)
         result = cache.get_stats()
         
         # Verify top-level keys
