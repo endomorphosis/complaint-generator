@@ -65,13 +65,21 @@ class TestMetricsPropertyBased:
         """
         metrics = get_prometheus_collector()
         
+        # Create unique component per example to avoid cross-example contamination
+        unique_component = f"{component}_{id(success)}_{time.time_ns()}"
+        
         # Record metric
-        metrics.record_circuit_breaker_call(component, latency, success=success)
+        metrics.record_circuit_breaker_call(unique_component, latency, success=success)
         
         # Retrieve and verify
-        summary = metrics.get_metrics_summary(component)
-        assert summary['total_calls'] > 0, "Metric not recorded"
-        assert summary['success_rate'] in [0.0, 100.0], "Success rate should be 0 or 100 for single metric"
+        summary = metrics.get_metrics_summary(unique_component)
+        assert summary['total_calls'] >= 1, "Metric not recorded"
+        assert summary['total_calls'] == summary['successful_calls'] + summary['failed_calls'], \
+            "Metric accounting inconsistent"
+        # With unique component, should have exactly count that matches success
+        expected_success_count = 1 if success else 0
+        assert summary['successful_calls'] == expected_success_count, \
+            f"Expected {expected_success_count} successful calls, got {summary['successful_calls']}"
     
     @given(st.lists(latencies, min_size=10, max_size=100))
     @settings(max_examples=50)
