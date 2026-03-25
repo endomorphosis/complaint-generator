@@ -1,5 +1,6 @@
 (function () {
     const readinessStorageKey = 'complaintGenerator.uiReadiness';
+    const lastToolCallStorageKey = 'complaintGenerator.sdkLastToolCall';
     const navItems = [
         ['Landing', '/'],
         ['Account', '/home'],
@@ -57,6 +58,58 @@
         };
     }
 
+    function deriveWorkflowState(payload) {
+        const review = payload && payload.review ? payload.review : {};
+        const overview = review.overview || {};
+        const session = payload && payload.session ? payload.session : {};
+        const summary = buildSummary(payload || {});
+        const draft = session.draft || null;
+        const answeredQuestions = Number(summary.answeredQuestions || 0);
+        const totalQuestions = Array.isArray(payload && payload.questions) ? payload.questions.length : 0;
+        const evidenceCount = Number(summary.evidenceCount || 0);
+        const missingElements = Number(summary.missingElements || 0);
+        const caseSynopsis = String((payload && payload.case_synopsis) || session.case_synopsis || '').trim();
+        const intakeComplete = totalQuestions > 0 ? answeredQuestions >= totalQuestions : answeredQuestions > 0;
+        const reviewReady = intakeComplete || answeredQuestions >= Math.max(2, Math.ceil(totalQuestions * 0.6)) || evidenceCount > 0;
+        const builderReady = Boolean(draft) || (intakeComplete && missingElements === 0 && evidenceCount > 0);
+        const mediatorReady = Boolean(caseSynopsis) || answeredQuestions > 0;
+        const phaseLabel = draft
+            ? 'draft refinement'
+            : !reviewReady
+                ? 'intake first'
+                : missingElements > 0 || evidenceCount === 0
+                    ? 'support building'
+                    : 'ready for drafting';
+        return {
+            summary,
+            reviewReady,
+            builderReady,
+            mediatorReady,
+            phaseLabel,
+            reviewGateReason: reviewReady
+                ? `Support review is available with ${answeredQuestions} answered intake prompt${answeredQuestions === 1 ? '' : 's'} and ${evidenceCount} evidence item${evidenceCount === 1 ? '' : 's'}.`
+                : 'Finish more intake in the workspace before opening review from the shared shell.',
+            builderGateReason: builderReady
+                ? (draft
+                    ? 'A complaint draft already exists for this shared session.'
+                    : 'The record is coherent enough to justify formal drafting.')
+                : (!intakeComplete
+                    ? 'Finish intake before opening the formal builder from the shared shell.'
+                    : evidenceCount === 0
+                        ? 'Add evidence before opening the formal builder from the shared shell.'
+                        : 'Close the remaining support gaps before opening the formal builder from the shared shell.'),
+            mediatorGateReason: mediatorReady
+                ? 'The shared case framing is ready for mediator coaching.'
+                : 'Capture at least one intake answer or synopsis detail before opening the mediator.',
+        };
+    }
+
+    function buildGatedLink(className, label, href, enabled, reason) {
+        const disabledClass = enabled ? '' : ' is-disabled';
+        const disabledAttr = enabled ? 'false' : 'true';
+        return '<a class="' + className + disabledClass + '" href="' + href + '" aria-disabled="' + disabledAttr + '" data-disabled-reason="' + safeText(reason, '') + '">' + label + '</a>';
+    }
+
     function findPageTitle() {
         const heading = document.querySelector('h1');
         if (heading && heading.textContent.trim()) {
@@ -83,6 +136,22 @@
         }
         try {
             const raw = localStorage.getItem(readinessStorageKey);
+            if (!raw) {
+                return null;
+            }
+            const parsed = JSON.parse(raw);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function loadCachedLastToolCall() {
+        if (typeof localStorage === 'undefined') {
+            return null;
+        }
+        try {
+            const raw = localStorage.getItem(lastToolCallStorageKey);
             if (!raw) {
                 return null;
             }
@@ -138,6 +207,7 @@
         }
 
         const summary = buildSummary(state.sessionPayload);
+        const workflowState = deriveWorkflowState(state.sessionPayload || {});
         const shell = document.createElement('aside');
         shell.id = 'cg-app-shell';
         shell.className = 'cg-app-shell';
@@ -146,10 +216,16 @@
         const context = readShellContext(state);
 
         const navHtml = navItems.map(([label, href]) => {
+            const targetUrl = buildShellSurfaceUrl(href, context);
             const active = window.location.pathname === href ? ' is-active' : '';
-            return '<a class="cg-app-shell__nav-link' + active + '" href="' + buildShellSurfaceUrl(href, context) + '">' + label + '</a>';
+            const gatedReview = href === '/claim-support-review';
+            const gatedBuilder = href === '/document';
+            const enabled = gatedReview ? workflowState.reviewReady : (gatedBuilder ? workflowState.builderReady : true);
+            const reason = gatedReview ? workflowState.reviewGateReason : (gatedBuilder ? workflowState.builderGateReason : '');
+            return '<a class="cg-app-shell__nav-link' + active + (enabled ? '' : ' is-disabled') + '" href="' + targetUrl + '" aria-disabled="' + (enabled ? 'false' : 'true') + '" data-disabled-reason="' + safeText(reason, '') + '">' + label + '</a>';
         }).join('');
         const readiness = state.uiReadiness || loadCachedReadiness();
+        const lastToolCall = loadCachedLastToolCall();
         const readinessVerdict = readiness && readiness.verdict ? readiness.verdict : 'No UI verdict cached';
         const readinessScore = readiness && Number.isFinite(Number(readiness.score)) ? String(readiness.score) + '/100' : 'pending';
         const readinessUpdated = readiness && readiness.updated_at ? readiness.updated_at : '';
@@ -197,6 +273,19 @@
             '<div class="cg-app-shell__readiness-meta">Answered intake: ' + safeText(complaintReadiness.answered_questions, summary.answeredQuestions) + '. Supported elements: ' + safeText(complaintReadiness.supported_elements, summary.supportedElements) + '. Evidence items: ' + safeText(complaintReadiness.evidence_count, summary.evidenceCount) + '.</div>',
             '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/workspace', context) + '">Continue complaint workflow</a>',
             '</div>',
+            '<div class="cg-app-shell__section-title">Workflow Phase</div>',
+            '<div class="cg-app-shell__readiness" id="cg-app-shell-workflow-phase">',
+            '<div class="cg-app-shell__readiness-header"><strong>' + safeText(workflowState.phaseLabel, 'phase unavailable') + '</strong><span>' + safeText(state.did, 'no DID') + '</span></div>',
+            '<div class="cg-app-shell__readiness-copy">The shared shell now gates review and builder links so every page respects the same complaint phase.</div>',
+            '<div class="cg-app-shell__phase-note">' + safeText(workflowState.builderReady ? 'The session is coherent enough for cross-surface drafting.' : workflowState.builderGateReason, '') + '</div>',
+            '</div>',
+            '<div class="cg-app-shell__section-title">Session Sync</div>',
+            '<div class="cg-app-shell__readiness" id="cg-app-shell-session-sync">',
+            '<div class="cg-app-shell__readiness-header"><strong>' + safeText(state.did ? 'Shared session synced' : 'Session not loaded', 'Session not loaded') + '</strong><span>' + safeText(workflowState.phaseLabel, 'unknown') + '</span></div>',
+            '<div class="cg-app-shell__readiness-copy">' + safeText(lastToolCall && lastToolCall.tool_name ? ('Last MCP tool: ' + lastToolCall.tool_name) : 'No MCP tool calls have been cached for this browser session yet.') + '</div>',
+            '<div class="cg-app-shell__phase-note">' + safeText(lastToolCall && lastToolCall.finished_at ? ('Updated: ' + lastToolCall.finished_at) : 'Updated: waiting for the next shared SDK action.') + '</div>',
+            (lastToolCall && lastToolCall.status ? '<div class="cg-app-shell__phase-note">Status: ' + safeText(lastToolCall.status, 'unknown') + (lastToolCall.error_message ? ' (' + safeText(lastToolCall.error_message, '') + ')' : '') + '</div>' : ''),
+            '</div>',
             '<div class="cg-app-shell__section-title">UI Readiness</div>',
             '<div class="cg-app-shell__readiness' + readinessTone + '" id="cg-app-shell-readiness">',
             '<div class="cg-app-shell__readiness-header"><strong>' + safeText(readinessVerdict, 'No UI verdict cached') + '</strong><span>' + safeText(readinessScore, 'pending') + '</span></div>',
@@ -209,8 +298,8 @@
             '<div class="cg-app-shell__section-title">Next Actions</div>',
             '<div class="cg-app-shell__actions">',
             '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/workspace', context) + '">Open Workspace</a>',
-            '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/document', context) + '">Open Builder</a>',
-            '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/claim-support-review', context) + '">Open Review</a>',
+            buildGatedLink('cg-app-shell__action', 'Open Builder', buildShellSurfaceUrl('/document', context), workflowState.builderReady, workflowState.builderGateReason),
+            buildGatedLink('cg-app-shell__action', 'Open Review', buildShellSurfaceUrl('/claim-support-review', context), workflowState.reviewReady, workflowState.reviewGateReason),
             '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/mlwysiwyg', context) + '">Edit Draft</a>',
             '</div>',
             '<div class="cg-app-shell__meta">This sidebar is backed by the same cached DID and complaint workspace session used by the CLI, MCP tools, and browser SDK.</div>',
@@ -225,6 +314,17 @@
         } else {
             document.body.appendChild(shell);
         }
+        shell.addEventListener('click', (event) => {
+            const gatedLink = event.target.closest('a[aria-disabled="true"]');
+            if (!gatedLink) {
+                return;
+            }
+            event.preventDefault();
+            const statusNode = shell.querySelector('#cg-app-shell-status');
+            if (statusNode) {
+                statusNode.textContent = gatedLink.dataset.disabledReason || 'That surface is intentionally gated until the case reaches the next phase.';
+            }
+        });
         window.__complaintAppShell = {
             did: state.did,
             toolCount: state.toolCount,

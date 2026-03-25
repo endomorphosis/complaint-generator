@@ -221,6 +221,26 @@
             box-shadow: 0 10px 22px rgba(141, 61, 23, 0.08);
         }
 
+        .surface-link.is-disabled,
+        .tab-button.is-disabled,
+        button:disabled,
+        .quick-action-button:disabled {
+            opacity: 0.52;
+            cursor: not-allowed;
+            pointer-events: none;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .surface-link.is-disabled:hover,
+        .tab-button.is-disabled:hover,
+        button:disabled:hover,
+        .quick-action-button:disabled:hover {
+            border-color: var(--line);
+            transform: none;
+            box-shadow: none;
+        }
+
         .tab-button.is-active,
         button.primary {
             background: linear-gradient(135deg, #9a3412, #c2410c);
@@ -1209,17 +1229,55 @@
                         <div class="shortcut-card">
                             <strong>Coach testimony with mediator</strong>
                             <span id="handoff-chat-summary">Open Chat with a prepared testimony prompt based on the current case synopsis and support gaps.</span>
+                            <div class="helper-text" id="handoff-chat-gating-note">The mediator stays tied to the same DID-backed session and should open once there is enough context to coach the story.</div>
                             <a class="surface-link surface-handoff-button" id="handoff-chat-button" href="/chat" data-handoff-url="/chat">Open Chat Mediator</a>
+                        </div>
+                        <div class="shortcut-card">
+                            <strong>Keep the same session across surfaces</strong>
+                            <span id="continuity-gating-summary">Every page should stay on the same DID-backed complaint session, and cross-surface links should only open once the case is ready for that phase.</span>
+                            <div class="chip-row">
+                                <span class="chip good" id="continuity-session-chip">session: loading</span>
+                                <span class="chip" id="continuity-phase-chip">phase: loading</span>
+                            </div>
+                            <div class="helper-text" id="continuity-phase-note">The workspace will explain when the review dashboard and formal builder are intentionally held back.</div>
                         </div>
                         <div class="shortcut-card">
                             <strong>Review the proof posture</strong>
                             <span id="handoff-review-summary">Open the review dashboard with the same complaint session so the support matrix and shared synopsis stay aligned.</span>
+                            <div class="helper-text" id="handoff-review-gating-note">The review dashboard should stay gated until the intake record is coherent enough to make the support matrix meaningful.</div>
                             <a class="surface-link surface-handoff-button" id="handoff-review-button" href="/claim-support-review" data-handoff-url="/claim-support-review">Open Review Dashboard</a>
                         </div>
                         <div class="shortcut-card">
                             <strong>Shape the formal filing</strong>
                             <span id="handoff-builder-summary">Open the builder with the shared complaint session so the draft can be refined without re-entering context.</span>
+                            <div class="helper-text" id="handoff-builder-gating-note">The formal builder should stay gated until the complaint record is coherent enough to justify drafting.</div>
                             <a class="surface-link surface-handoff-button" id="handoff-builder-button" href="/document" data-handoff-url="/document">Open Formal Builder</a>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="section-intro" aria-label="Session sync and tool activity">
+                    <strong>Session sync and tool activity</strong>
+                    <span>Use this readout to confirm the browser is still acting on the same complaint session and to see which MCP action last changed the shared state.</span>
+                    <div class="shortcut-grid">
+                        <div class="shortcut-card">
+                            <strong>Shared session consistency</strong>
+                            <span id="session-sync-summary">The workspace will confirm when the current DID, phase, and draft state are synchronized.</span>
+                            <div class="chip-row">
+                                <span class="chip good" id="session-sync-did-chip">did: loading</span>
+                                <span class="chip" id="session-sync-phase-chip">phase: loading</span>
+                                <span class="chip" id="session-sync-draft-chip">draft: loading</span>
+                            </div>
+                            <div class="helper-text" id="session-sync-note">The browser will update this card after shared complaint actions complete.</div>
+                        </div>
+                        <div class="shortcut-card">
+                            <strong>Latest MCP tool activity</strong>
+                            <span id="session-tool-activity-summary">No shared MCP tool activity has been recorded for this browser session yet.</span>
+                            <div class="chip-row">
+                                <span class="chip" id="session-tool-activity-tool-chip">tool: pending</span>
+                                <span class="chip" id="session-tool-activity-status-chip">status: idle</span>
+                            </div>
+                            <div class="helper-text" id="session-tool-activity-note">When the workspace calls the SDK, the latest tool name and completion status will appear here.</div>
                         </div>
                     </div>
                 </section>
@@ -1313,6 +1371,15 @@
                     <div class="callout">
                         <h3>What counts as helpful support</h3>
                         <p class="muted">Prefer concrete sources: emails, messages, witness accounts, meeting notes, timeline records, HR filings, performance reviews, and anything that helps anchor protected activity, employer knowledge, causation, or damages.</p>
+                    </div>
+                    <div class="tool-card" id="evidence-action-lane">
+                        <h3>Start with the strongest next proof move</h3>
+                        <p class="muted" id="evidence-primary-guidance">Choose one primary evidence action so the complaint record gets stronger before draft or export steps pull attention away.</p>
+                        <div class="button-row">
+                            <button class="primary" id="evidence-add-testimony-button" type="button">Add Testimony</button>
+                            <button class="secondary" id="evidence-add-document-button" type="button">Attach Document</button>
+                            <button class="secondary" id="evidence-open-review-button" type="button">Review Open Gaps</button>
+                        </div>
                     </div>
                     <div class="panel-split">
                         <div class="workbench-card">
@@ -1527,10 +1594,11 @@
                                     <div>
                                         <label for="local-evidence-claim-element">Claim Element</label>
                                         <select id="local-evidence-claim-element">
+                                            <option value="auto">Auto-suggest from content</option>
                                             <option value="protected_activity">Protected activity</option>
                                             <option value="employer_knowledge">Employer knowledge</option>
                                             <option value="adverse_action">Adverse action</option>
-                                            <option value="causation" selected>Causal link</option>
+                                            <option value="causation">Causal link</option>
                                             <option value="harm">Damages</option>
                                         </select>
                                     </div>
@@ -1599,6 +1667,15 @@
                     <div class="callout">
                         <h3>Draft when the case theory is coherent</h3>
                         <p class="muted">A usable draft needs a stable plaintiff identity, an opposing party, protected activity, adverse action, timing, and harm. If one of those pieces is weak, use Review and Evidence first.</p>
+                    </div>
+                    <div class="tool-card" id="draft-export-safety-card">
+                        <h3>Draft and export safety rail</h3>
+                        <p class="muted" id="draft-export-guidance">Keep the next step visible: if support or release-gate warnings are still open, strengthen the record before treating download as the main action.</p>
+                        <div class="status draft-preview-shell"><pre id="draft-export-safety-preview">Export safety guidance will appear here once the record and release gate are available.</pre></div>
+                        <div class="button-row">
+                            <button class="secondary" id="draft-review-before-export-button" type="button">Review Before Export</button>
+                            <button class="secondary" id="draft-evidence-before-export-button" type="button">Add Support Before Export</button>
+                        </div>
                     </div>
                     <div class="draft-layout">
                         <div class="draft-sidebar-card">
@@ -1720,6 +1797,8 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                         </div>
                         <div class="tool-card">
                             <h3>Available MCP Tools</h3>
+                            <p class="muted" id="tool-list-summary">The browser will group the visible MCP tools by workflow stage once the shared session is loaded.</p>
+                            <div class="chip-row" id="tool-list-phase-chips"></div>
                             <div class="list" id="tool-list"></div>
                         </div>
                         <div class="tool-card">
@@ -1730,6 +1809,21 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                         <div class="tool-card">
                             <h3>Workflow Operations</h3>
                             <p class="muted">Use the same JavaScript MCP SDK path to inspect capabilities, prepare the mediator brief, and export the current lawsuit packet without leaving the workspace.</p>
+                            <div class="tool-card" id="integrations-operations-lane" style="margin-bottom: 16px;">
+                                <h3>Run the next cross-surface tool workflow</h3>
+                                <p class="muted" id="integrations-operations-guidance">The workspace will recommend the most useful MCP-backed tool operation after the shared complaint session is loaded.</p>
+                                <div class="chip-row">
+                                    <span class="chip good" id="integrations-operations-phase-chip">phase: loading</span>
+                                    <span class="chip" id="integrations-operations-tool-chip">tools: loading</span>
+                                </div>
+                                <div class="button-row">
+                                    <button class="primary" id="operations-tool-readiness-button" type="button">Check Tool Readiness</button>
+                                    <button class="secondary" id="operations-mediator-tool-button" type="button">Prepare Mediator Handoff</button>
+                                    <button class="secondary" id="operations-export-tool-button" type="button">Export and Review Packet</button>
+                                    <button class="secondary" id="operations-ui-audit-tool-button" type="button">Open UX Audit Workflow</button>
+                                </div>
+                                <div class="status draft-preview-shell"><pre id="integrations-operations-preview">No operational tool workflow has been run yet.</pre></div>
+                            </div>
                             <div class="button-row">
                                 <button class="secondary" id="refresh-capabilities-button" type="button">Refresh Capabilities</button>
                                 <button class="secondary" id="refresh-tooling-contract-button" type="button">Refresh Tooling Contract</button>
@@ -1954,8 +2048,10 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let latestComplaintOutputAnalysis = null;
         let latestUiReviewResult = null;
         let sdkPrimitiveSnapshot = null;
+        let latestSdkToolActivity = null;
         let gmailImportDetectedAddresses = [];
         const readinessStorageKey = 'complaintGenerator.uiReadiness';
+        const lastToolCallStorageKey = 'complaintGenerator.sdkLastToolCall';
 
         function setStatus(message) {
             const statusNode = document.getElementById('workspace-status');
@@ -1967,6 +2063,18 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             const statusNode = document.getElementById('workspace-status');
             statusNode.textContent = message;
             statusNode.classList.add('is-busy');
+        }
+
+        function loadLastSdkToolActivity() {
+            if (typeof localStorage === 'undefined') {
+                return null;
+            }
+            try {
+                const raw = localStorage.getItem(lastToolCallStorageKey);
+                return raw ? JSON.parse(raw) : null;
+            } catch (error) {
+                return null;
+            }
         }
 
         async function copyTextToClipboard(text, successMessage) {
@@ -2465,10 +2573,84 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             return `${currentSynopsis}\n\nMediator, help turn this into testimony-ready narrative for the complaint record. Ask the single most useful next follow-up question, keep the tone calm, and explain what support would strengthen the case. ${gapFocus}`;
         }
 
+        function deriveWorkflowState(sessionPayload) {
+            const session = (sessionPayload && sessionPayload.session) || {};
+            const review = (sessionPayload && sessionPayload.review) || {};
+            const overview = review.overview || {};
+            const draft = (sessionPayload && sessionPayload.draft) || session.draft || null;
+            const answers = session.intake_answers || {};
+            const answeredCount = Object.values(answers).filter((value) => String(value || '').trim()).length;
+            const totalQuestions = (sessionPayload && Array.isArray(sessionPayload.questions)) ? sessionPayload.questions.length : 0;
+            const evidenceCount = Number(overview.testimony_items || 0) + Number(overview.document_items || 0);
+            const missingCount = Number(overview.missing_elements || 0);
+            const synopsis = resolveCurrentCaseSynopsis(sessionPayload || {});
+            const intakeComplete = totalQuestions > 0 ? answeredCount >= totalQuestions : answeredCount > 0;
+            const reviewReady = intakeComplete || (answeredCount >= Math.max(2, Math.ceil(totalQuestions * 0.6))) || evidenceCount > 0;
+            const builderReady = Boolean(draft) || (intakeComplete && missingCount === 0 && evidenceCount > 0);
+            const mediatorReady = Boolean(synopsis) || answeredCount > 0;
+            const phaseLabel = draft
+                ? 'draft refinement'
+                : !reviewReady
+                    ? 'intake first'
+                    : missingCount > 0 || evidenceCount === 0
+                        ? 'support building'
+                        : 'ready for drafting';
+            const reviewGateReason = reviewReady
+                ? `The review dashboard can open with ${answeredCount} answered intake prompt${answeredCount === 1 ? '' : 's'} and ${evidenceCount} evidence item${evidenceCount === 1 ? '' : 's'} attached to this session.`
+                : 'Finish more intake first so the review dashboard opens with a coherent case theory instead of a sparse support matrix.';
+            const builderGateReason = builderReady
+                ? (draft
+                    ? 'A complaint draft already exists, so the builder can open directly on the shared session.'
+                    : 'Intake, evidence, and support review are strong enough to justify formal drafting.')
+                : (!intakeComplete
+                    ? 'Finish intake before opening the formal builder so the filing caption, chronology, and requested relief do not start from missing basics.'
+                    : evidenceCount === 0
+                        ? 'Add at least one strong evidence item before opening the formal builder so the complaint is not drafted from unsupported facts alone.'
+                        : 'Close the remaining support gaps before opening the formal builder so the filing feels formal and grounded.');
+            const mediatorGateReason = mediatorReady
+                ? 'The shared synopsis is strong enough for a testimony coaching handoff.'
+                : 'Save at least one intake answer or synopsis detail before opening the chat mediator so the prompt can coach a real case narrative.';
+
+            return {
+                answeredCount,
+                totalQuestions,
+                evidenceCount,
+                missingCount,
+                intakeComplete,
+                reviewReady,
+                builderReady,
+                mediatorReady,
+                phaseLabel,
+                reviewGateReason,
+                builderGateReason,
+                mediatorGateReason,
+            };
+        }
+
+        function setButtonGateState(button, enabled, reason) {
+            if (!button) {
+                return;
+            }
+            button.disabled = !enabled;
+            button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+            button.title = reason || '';
+        }
+
+        function setLinkGateState(link, enabled, reason) {
+            if (!link) {
+                return;
+            }
+            link.classList.toggle('is-disabled', !enabled);
+            link.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+            link.dataset.disabledReason = reason || '';
+            link.title = reason || '';
+        }
+
         function renderConnectedHandoffs(sessionPayload) {
             const session = (sessionPayload && sessionPayload.session) || {};
             const review = (sessionPayload && sessionPayload.review) || {};
             const overview = review.overview || {};
+            const state = deriveWorkflowState(sessionPayload);
             const claimType = String(session.claim_type || sessionPayload.claim_type || 'retaliation').trim() || 'retaliation';
             const synopsis = resolveCurrentCaseSynopsis(sessionPayload);
             const missingCount = Number(overview.missing_elements || 0);
@@ -2531,8 +2713,27 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 : (missingCount > 0
                     ? `Open Chat with the current case framing and a prepared testimony prompt that targets ${missingCount} remaining support gap${missingCount === 1 ? '' : 's'}.`
                     : 'Open Chat with the current case framing and a prepared testimony prompt so the mediator can tighten the narrative before filing.');
-            document.getElementById('handoff-review-summary').textContent = `Open the review dashboard with the same complaint session so ${supportedCount} supported elements and ${missingCount} remaining gaps stay visible.`;
-            document.getElementById('handoff-builder-summary').textContent = 'Open the formal builder with the same DID-backed session so the draft can be generated or refined without losing context.';
+            document.getElementById('handoff-chat-gating-note').textContent = state.mediatorGateReason;
+            document.getElementById('handoff-review-summary').textContent = state.reviewReady
+                ? `Open the review dashboard with the same complaint session so ${supportedCount} supported elements and ${missingCount} remaining gaps stay visible.`
+                : 'Stay in the workspace a little longer so review opens with a coherent case theory instead of an early empty matrix.';
+            document.getElementById('handoff-review-gating-note').textContent = state.reviewGateReason;
+            document.getElementById('handoff-builder-summary').textContent = state.builderReady
+                ? 'Open the formal builder with the same DID-backed session so the draft can be generated or refined without losing context.'
+                : 'Keep intake, evidence, and support review in focus first. The formal builder is intentionally held back until the complaint record can support a real filing draft.';
+            document.getElementById('handoff-builder-gating-note').textContent = state.builderGateReason;
+            document.getElementById('continuity-gating-summary').textContent = `This workspace and every handoff are tied to ${workspaceUserId || session.user_id || 'the current DID-backed session'}, so phase gating follows the same shared complaint record everywhere.`;
+            document.getElementById('continuity-session-chip').textContent = `session: ${workspaceUserId || session.user_id || 'unknown'}`;
+            document.getElementById('continuity-phase-chip').textContent = `phase: ${state.phaseLabel}`;
+            document.getElementById('continuity-phase-note').textContent = state.builderReady
+                ? 'The case record is coherent enough to let review and builder handoffs stay open across surfaces.'
+                : `The review and builder handoffs stay intentionally gated while the complaint is still in ${state.phaseLabel}.`;
+
+            setLinkGateState(document.getElementById('handoff-chat-button'), state.mediatorReady, state.mediatorGateReason);
+            setLinkGateState(document.getElementById('handoff-review-button'), state.reviewReady, state.reviewGateReason);
+            setLinkGateState(document.getElementById('handoff-builder-button'), state.builderReady, state.builderGateReason);
+            setLinkGateState(document.getElementById('workspace-nav-review'), state.reviewReady, state.reviewGateReason);
+            setLinkGateState(document.getElementById('workspace-nav-builder'), state.builderReady, state.builderGateReason);
         }
 
         function renderIntake(sessionPayload) {
@@ -2623,6 +2824,11 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             document.getElementById('workbench-testimony-count').textContent = `${testimony.length} saved items`;
             document.getElementById('workbench-document-count').textContent = `${documents.length} saved items`;
             document.getElementById('workbench-gap-count').textContent = `${overview.missing_elements || 0} elements need support`;
+            document.getElementById('evidence-primary-guidance').textContent = (overview.missing_elements || 0) > 0
+                ? `There are ${overview.missing_elements || 0} open support gaps. Add the next testimony or document that closes the weakest element before returning to Draft.`
+                : items.length
+                    ? 'The core support record is taking shape. Add the next best corroborating item, then return to Review to check whether the theory still has weak spots.'
+                    : 'Start with one focused testimony or document item that explains what it proves and why it matters.';
             if (!items.length) {
                 container.innerHTML = '<div class="item">No evidence saved yet.</div>';
                 return;
@@ -2757,6 +2963,22 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             return `COUNT I - ${String(rawClaimType || 'retaliation').replace(/_/g, ' ').toUpperCase()}`;
         }
 
+        function activateEvidenceComposer(kind) {
+            const kindField = document.getElementById('evidence-kind');
+            if (kindField) {
+                kindField.value = kind;
+            }
+            activateTab('evidence');
+            const focusSelector = kind === 'document' ? '#evidence-attachment' : '#evidence-title';
+            const focusTarget = document.querySelector(focusSelector) || document.getElementById('evidence-title');
+            if (focusTarget && typeof focusTarget.focus === 'function') {
+                focusTarget.focus();
+            }
+            setStatus(kind === 'document'
+                ? 'Opened Evidence to attach a document that directly strengthens the record.'
+                : 'Opened Evidence to add focused testimony tied to a claim element.');
+        }
+
         function renderDraftReadiness(sessionPayload) {
             const session = (sessionPayload || {}).session || {};
             const draft = (sessionPayload || {}).draft || session.draft || {};
@@ -2807,6 +3029,25 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                         : 'Next best move: keep the complaint aligned to the selected theory and requested relief while refining the filing language.',
                 ];
             document.getElementById('draft-readiness-preview').textContent = readinessLines.join('\n');
+            const exportSafetyLines = currentReleaseGate
+                ? [
+                    `Primary action right now: ${String(currentReleaseGate.verdict || '').toLowerCase() === 'pass' ? 'export is available, but keep the release gate visible while downloading.' : 'strengthen the record before treating export as the next step.'}`,
+                    `Release gate verdict: ${String(currentReleaseGate.verdict || 'unknown').toUpperCase()}`,
+                    currentReleaseGate.reason ? `Why this matters: ${currentReleaseGate.reason}` : 'Why this matters: the release gate has not yet explained the current blocker.',
+                    missingElements > 0 ? `Open support gaps: ${missingElements}` : 'Open support gaps: none detected in the current review snapshot.',
+                    `Evidence items in record: ${evidenceItemCount}`,
+                ]
+                : [
+                    'Primary action right now: review support and draft posture before treating download as the main next step.',
+                    missingElements > 0
+                        ? `There are still ${missingElements} support gaps in the current record.`
+                        : 'No release-gate payload is cached yet, so export should be treated as provisional.',
+                    `Evidence items in record: ${evidenceItemCount}`,
+                ];
+            document.getElementById('draft-export-safety-preview').textContent = exportSafetyLines.join('\n');
+            document.getElementById('draft-export-guidance').textContent = currentReleaseGate && String(currentReleaseGate.verdict || '').toLowerCase() === 'pass'
+                ? 'The complaint export path is available, but the safest flow still keeps release-gate context and next-step guidance beside the download buttons.'
+                : 'Review and evidence should stay easier to choose than download whenever support gaps or release-gate blockers remain.';
         }
 
         function renderSidebar(sessionPayload) {
@@ -2815,6 +3056,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             const overview = review.overview || {};
             const draft = sessionPayload.draft || (sessionPayload.session || {}).draft || null;
             const session = sessionPayload.session || {};
+            const state = deriveWorkflowState(sessionPayload);
             const answers = session.intake_answers || {};
             const supportMatrix = review.support_matrix || [];
             const answeredCount = (sessionPayload.questions || []).filter((question) => question && question.is_answered).length;
@@ -2986,6 +3228,8 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             document.getElementById('draft-soft-note').textContent = draft
                 ? 'The draft is now editable. Tighten wording carefully without removing the facts that give the complaint its support.'
                 : 'Treat the first draft as a working document. Review is still the place to decide whether the record behind it feels strong enough.';
+            setButtonGateState(document.getElementById('shortcut-review-button'), state.reviewReady, state.reviewGateReason);
+            setButtonGateState(document.getElementById('shortcut-draft-button'), state.builderReady, state.builderGateReason);
             renderDraftReadiness(sessionPayload);
             queue.innerHTML = `
                 <div class="queue-item">
@@ -3005,12 +3249,63 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             `).join('');
         }
 
+        function classifyToolFamily(toolName) {
+            const name = String(toolName || '');
+            if (name.includes('intake') || name.includes('start_session') || name.includes('claim_type') || name.includes('case_synopsis')) {
+                return 'Intake + framing';
+            }
+            if (name.includes('evidence') || name.includes('review_case') || name.includes('mediator')) {
+                return 'Evidence + review';
+            }
+            if (name.includes('generate_complaint') || name.includes('draft') || name.includes('export') || name.includes('formal') || name.includes('filing')) {
+                return 'Draft + export';
+            }
+            if (name.includes('ui') || name.includes('browser_audit') || name.includes('provider_diagnostics') || name.includes('tooling_contract') || name.includes('workflow_capabilities') || name.includes('release_gate')) {
+                return 'Optimizer + diagnostics';
+            }
+            return 'Shared platform';
+        }
+
         function renderTools(tools) {
             const toolList = document.getElementById('tool-list');
-            toolList.innerHTML = (tools || []).map((tool) => `
+            const toolSummary = document.getElementById('tool-list-summary');
+            const phaseChips = document.getElementById('tool-list-phase-chips');
+            const groups = new Map();
+            (tools || []).forEach((tool) => {
+                const family = classifyToolFamily(tool.name);
+                if (!groups.has(family)) {
+                    groups.set(family, []);
+                }
+                groups.get(family).push(tool);
+            });
+            const orderedFamilies = [
+                'Intake + framing',
+                'Evidence + review',
+                'Draft + export',
+                'Optimizer + diagnostics',
+                'Shared platform',
+            ].filter((family) => groups.has(family));
+            const topFamily = orderedFamilies[0] || 'Shared platform';
+
+            toolSummary.textContent = (tools || []).length
+                ? `The browser currently sees ${(tools || []).length} MCP tools. Start with ${topFamily.toLowerCase()} if you want the clearest next operational lane.`
+                : 'No MCP tools are currently visible to the browser workspace.';
+            phaseChips.innerHTML = orderedFamilies.length
+                ? orderedFamilies.map((family) => `<span class="chip">${escapeHtml(family)}: ${escapeHtml(String((groups.get(family) || []).length))}</span>`).join('')
+                : '<span class="chip warn">No MCP tools visible</span>';
+
+            toolList.innerHTML = orderedFamilies.map((family) => `
                 <div class="item">
-                    <strong>${escapeHtml(tool.name)}</strong>
-                    <div class="muted">${escapeHtml(tool.description)}</div>
+                    <strong>${escapeHtml(family)}</strong>
+                    <div class="muted">${escapeHtml(`These tools support the ${family.toLowerCase()} phase of the complaint workflow.`)}</div>
+                    <div class="list">
+                        ${(groups.get(family) || []).map((tool) => `
+                            <div class="item">
+                                <strong>${escapeHtml(tool.name)}</strong>
+                                <div class="muted">${escapeHtml(tool.description)}</div>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
             `).join('');
         }
@@ -3345,6 +3640,11 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 : Array.isArray(latestReview.review && latestReview.review.screenshot_findings)
                     ? latestReview.review.screenshot_findings
                     : [];
+            const carryForward = latestReview.carry_forward_assessment && typeof latestReview.carry_forward_assessment === 'object'
+                ? latestReview.carry_forward_assessment
+                : latestReview.review && latestReview.review.carry_forward_assessment && typeof latestReview.review.carry_forward_assessment === 'object'
+                    ? latestReview.review.carry_forward_assessment
+                    : {};
             const exportCritic = (latestComplaintOutputAnalysis || {}).export_critic || null;
             const aggregate = exportCritic && exportCritic.aggregate ? exportCritic.aggregate : {};
             const brief = aggregate && aggregate.optimizer_repair_brief ? aggregate.optimizer_repair_brief : null;
@@ -3363,6 +3663,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             const actorRiskSummary = String(brief.actor_risk_summary || '').trim();
             const criticGateVerdict = String(brief.critic_gate_verdict || '').trim();
             const routerPathSummary = String(brief.router_path_summary || '').trim();
+            const carryForwardSummary = String(carryForward.summary || '').trim();
             const repairActions = surfaceTargets.map((target) => {
                 const normalized = String(target || '').toLowerCase();
                 if (normalized.includes('draft')) {
@@ -3411,6 +3712,18 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                     </div>
                 `).join('')
                 : '';
+            const carryForwardCard = carryForwardSummary
+                ? `
+                    <div class="item">
+                        <strong>Carry-forward assessment</strong>
+                        <div class="chip-row">
+                            ${Array.isArray(carryForward.unresolved_findings) && carryForward.unresolved_findings.length ? `<span class="chip warn">unresolved: ${escapeHtml(String(carryForward.unresolved_findings.length))}</span>` : ''}
+                            ${Array.isArray(carryForward.resolved_findings) && carryForward.resolved_findings.length ? `<span class="chip good">resolved: ${escapeHtml(String(carryForward.resolved_findings.length))}</span>` : ''}
+                        </div>
+                        <div class="muted">${escapeHtml(carryForwardSummary)}</div>
+                    </div>
+                `
+                : '';
             const screenshotCriticismCard = screenshotFindings.length
                 ? `
                     <div class="item">
@@ -3446,7 +3759,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                     `).join('')}</div>` : ''}
                 </div>
             ` : '';
-            container.innerHTML = `${reviewBriefCards}${screenshotCriticismCard}${exportCriticCard}`;
+            container.innerHTML = `${reviewBriefCards}${carryForwardCard}${screenshotCriticismCard}${exportCriticCard}`;
             container.querySelectorAll('.repair-brief-action').forEach((button) => {
                 button.addEventListener('click', () => {
                     jumpToStage(
@@ -3568,6 +3881,46 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 : '<div class="item"><strong>No claim element payload loaded yet.</strong><div class="muted">Refresh SDK primitives to inspect the review and evidence support model.</div></div>';
         }
 
+        function renderSessionSyncStatus(sessionPayload) {
+            const state = deriveWorkflowState(sessionPayload || {});
+            const session = (sessionPayload && sessionPayload.session) || {};
+            const draft = (sessionPayload && sessionPayload.draft) || session.draft || null;
+            const didChip = document.getElementById('session-sync-did-chip');
+            const phaseChip = document.getElementById('session-sync-phase-chip');
+            const draftChip = document.getElementById('session-sync-draft-chip');
+            const summary = document.getElementById('session-sync-summary');
+            const note = document.getElementById('session-sync-note');
+            const activitySummary = document.getElementById('session-tool-activity-summary');
+            const activityToolChip = document.getElementById('session-tool-activity-tool-chip');
+            const activityStatusChip = document.getElementById('session-tool-activity-status-chip');
+            const activityNote = document.getElementById('session-tool-activity-note');
+            const lastActivity = latestSdkToolActivity || loadLastSdkToolActivity();
+
+            didChip.textContent = `did: ${workspaceUserId || session.user_id || 'unknown'}`;
+            phaseChip.textContent = `phase: ${state.phaseLabel}`;
+            draftChip.textContent = `draft: ${draft ? 'present' : 'not generated'}`;
+            summary.textContent = draft
+                ? 'Workspace, review, builder, and SDK surfaces are operating on a complaint session that already has a draft in progress.'
+                : `Workspace and connected surfaces are synchronized on the same DID-backed complaint session while the case remains in ${state.phaseLabel}.`;
+            note.textContent = state.builderReady
+                ? 'The shared session is coherent enough for cross-surface drafting and export actions.'
+                : `The shared session is synchronized, but the workflow is still intentionally focused on ${state.phaseLabel}.`;
+
+            if (lastActivity && lastActivity.tool_name) {
+                activitySummary.textContent = `Latest MCP activity: ${lastActivity.tool_name} finished with ${lastActivity.status || 'unknown'} status.`;
+                activityToolChip.textContent = `tool: ${lastActivity.tool_name}`;
+                activityStatusChip.textContent = `status: ${lastActivity.status || 'unknown'}`;
+                activityNote.textContent = lastActivity.finished_at
+                    ? `Updated at ${lastActivity.finished_at}.`
+                    : 'Updated after the last shared SDK action.';
+            } else {
+                activitySummary.textContent = 'No shared MCP tool activity has been recorded for this browser session yet.';
+                activityToolChip.textContent = 'tool: pending';
+                activityStatusChip.textContent = 'status: idle';
+                activityNote.textContent = 'When the workspace calls the SDK, the latest tool name and completion status will appear here.';
+            }
+        }
+
         function renderFeatureWalkthrough(sessionPayload, tools) {
             const walkthrough = document.getElementById('feature-walkthrough-list');
             const review = sessionPayload.review || {};
@@ -3641,6 +3994,97 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             `).join('');
         }
 
+        function renderOperationalToolLane(sessionPayload, tools) {
+            const state = deriveWorkflowState(sessionPayload || {});
+            const toolNames = new Set((tools || []).map((tool) => tool.name));
+            const availableToolCount = toolNames.size;
+            const phaseChip = document.getElementById('integrations-operations-phase-chip');
+            const toolChip = document.getElementById('integrations-operations-tool-chip');
+            const guidance = document.getElementById('integrations-operations-guidance');
+            const preview = document.getElementById('integrations-operations-preview');
+            const readinessButton = document.getElementById('operations-tool-readiness-button');
+            const mediatorButton = document.getElementById('operations-mediator-tool-button');
+            const exportButton = document.getElementById('operations-export-tool-button');
+            const auditButton = document.getElementById('operations-ui-audit-tool-button');
+            const hasMediatorPath = toolNames.has('complaint.build_mediator_prompt');
+            const hasExportPath = toolNames.has('complaint.export_packet') || toolNames.has('complaint.export_complaint_markdown');
+            const hasUiAuditPath = toolNames.has('complaint.review_ui') || toolNames.has('complaint.optimize_ui');
+
+            phaseChip.textContent = `phase: ${state.phaseLabel}`;
+            toolChip.textContent = `tools: ${availableToolCount} shared MCP tools`;
+            guidance.textContent = state.builderReady
+                ? 'The case is far enough along to treat export, release-gate review, and UX audit as operational actions from this panel.'
+                : state.reviewReady
+                    ? 'Use this lane to verify tool readiness, prepare the mediator handoff, and keep the shared workflow coherent before formal drafting.'
+                    : 'Start by checking the tool contract and mediator handoff so the shared session stays coherent while intake is still being built.';
+            preview.textContent = state.builderReady
+                ? 'Recommended tool workflow: export the packet through the MCP surface, review the release gate, then run UX audit on the resulting browser journey.'
+                : state.reviewReady
+                    ? 'Recommended tool workflow: check tool readiness, prepare the mediator brief, then use review and evidence to close the remaining support gaps.'
+                    : 'Recommended tool workflow: inspect the shared tooling contract first, then build the mediator handoff once intake and synopsis are less sparse.';
+
+            setButtonGateState(readinessButton, true, availableToolCount > 0
+                ? 'The shared MCP tooling contract is available for inspection.'
+                : 'Use this action to diagnose why no MCP tools are currently visible to the browser workspace.');
+            setButtonGateState(mediatorButton, hasMediatorPath && state.mediatorReady, hasMediatorPath
+                ? state.mediatorGateReason
+                : 'The mediator-brief tool is not visible in the current MCP tool list.');
+            setButtonGateState(exportButton, hasExportPath && state.builderReady, hasExportPath
+                ? state.builderGateReason
+                : 'The export tools are not visible in the current MCP tool list.');
+            setButtonGateState(auditButton, hasUiAuditPath, hasUiAuditPath
+                ? 'The actor/critic tool path is available through the shared MCP surface.'
+                : 'The UI review tools are not visible in the current MCP tool list.');
+        }
+
+        async function runOperationalToolReadiness() {
+            const preview = document.getElementById('integrations-operations-preview');
+            preview.textContent = 'Running tool readiness checks through the shared MCP workflow…';
+            try {
+                setBusyStatus('Refreshing the shared tool contract and workflow capabilities…');
+                await refreshToolingContractPanel();
+                await refreshCapabilitiesPanel();
+                preview.textContent = 'Tool readiness checked. Review the tooling contract and workflow capabilities in this panel before using downstream complaint actions.';
+                setStatus('Operational tool readiness refreshed.');
+            } catch (error) {
+                preview.textContent = `Tool readiness check failed: ${error.message}`;
+                setStatus(`Operational tool readiness failed: ${error.message}`);
+                throw error;
+            }
+        }
+
+        async function runOperationalMediatorHandoff() {
+            const preview = document.getElementById('integrations-operations-preview');
+            preview.textContent = 'Preparing the mediator handoff through the shared MCP workflow…';
+            try {
+                setBusyStatus('Preparing the mediator handoff through the shared MCP tools…');
+                await previewMediatorBrief();
+                preview.textContent = 'Mediator handoff prepared. The shared synopsis and MCP-built testimony prompt are now ready for the chat mediator path.';
+                setStatus('Operational mediator handoff prepared.');
+            } catch (error) {
+                preview.textContent = `Mediator handoff failed: ${error.message}`;
+                setStatus(`Operational mediator handoff failed: ${error.message}`);
+                throw error;
+            }
+        }
+
+        async function runOperationalExportReview() {
+            const preview = document.getElementById('integrations-operations-preview');
+            preview.textContent = 'Exporting and reviewing the complaint packet through the shared MCP workflow…';
+            try {
+                setBusyStatus('Exporting and reviewing the complaint packet through the shared MCP tools…');
+                await exportPacket();
+                await analyzeComplaintOutputPanel();
+                await reviewGeneratedExportsPanel();
+                preview.textContent = 'Packet export, complaint-output analysis, and export critic review completed through the shared MCP workflow.';
+                setStatus('Operational export workflow completed.');
+            } catch (error) {
+                preview.textContent = `Operational export workflow failed: ${error.message}`;
+                setStatus(`Operational export workflow failed: ${error.message}`);
+                throw error;
+            }
+        }
+
         function renderQuickActions(sessionPayload, tools) {
             const container = document.getElementById('quick-action-grid');
             const review = sessionPayload.review || {};
@@ -3691,24 +4135,17 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                     statusMessage: 'Focused the shared synopsis so the mediator handoff can be refined.',
                 });
             }
-            actions.push({
-                label: 'Review support posture',
-                detail: `The review matrix currently shows ${overview.supported_elements || 0} supported elements and ${missingCount} remaining gaps.`,
-                buttonLabel: 'Open Review',
-                targetTab: 'review',
-                focusSelector: '#support-grid',
-                statusMessage: 'Opened Review to inspect support coverage and proof gaps.',
-            });
-            if (!draft) {
+            if (answeredCount >= totalQuestions || evidenceCount > 0 || missingCount > 0) {
                 actions.push({
-                    label: 'Generate the complaint draft',
-                    detail: 'When the factual theory is coherent enough, move to Draft and generate the first complaint version.',
-                    buttonLabel: 'Open Draft',
-                    targetTab: 'draft',
-                    focusSelector: '#draft-title',
-                    statusMessage: 'Opened Draft so the complaint can be generated.',
+                    label: 'Review support posture',
+                    detail: `The review matrix currently shows ${overview.supported_elements || 0} supported elements and ${missingCount} remaining gaps.`,
+                    buttonLabel: 'Open Review',
+                    targetTab: 'review',
+                    focusSelector: '#support-grid',
+                    statusMessage: 'Opened Review to inspect support coverage and proof gaps.',
                 });
-            } else {
+            }
+            if (draft) {
                 actions.push({
                     label: 'Refine the draft',
                     detail: 'A complaint draft already exists. Review tone, facts, requested relief, and corroboration before filing.',
@@ -3716,6 +4153,15 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                     targetTab: 'draft',
                     focusSelector: '#draft-body',
                     statusMessage: 'Opened Draft so the complaint can be refined.',
+                });
+            } else if (answeredCount >= totalQuestions && missingCount === 0 && evidenceCount > 0) {
+                actions.push({
+                    label: 'Generate the complaint draft',
+                    detail: 'The record is coherent enough for a first draft. Generate the complaint, then keep release-gate and support guidance visible while editing.',
+                    buttonLabel: 'Open Draft',
+                    targetTab: 'draft',
+                    focusSelector: '#draft-title',
+                    statusMessage: 'Opened Draft so the complaint can be generated.',
                 });
             }
             if (toolNames.size > 0) {
@@ -3740,12 +4186,12 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 });
             }
 
-            container.innerHTML = actions.slice(0, 7).map((action) => `
+            container.innerHTML = actions.slice(0, 6).map((action, index) => `
                 <div class="quick-action-card">
                     <strong>${escapeHtml(action.label)}</strong>
                     <span>${escapeHtml(action.detail)}</span>
                     <button
-                        class="secondary quick-action-button"
+                        class="${index === 0 ? 'primary' : 'secondary'} quick-action-button"
                         type="button"
                         data-target-tab="${escapeHtml(action.targetTab)}"
                         data-focus-selector="${escapeHtml(action.focusSelector)}"
@@ -3778,11 +4224,16 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             renderSidebar(sessionPayload);
             renderFeatureCoverage(sessionPayload, workspaceSessionTools || []);
             renderFeatureWalkthrough(sessionPayload, workspaceSessionTools || []);
+            renderOperationalToolLane(sessionPayload, workspaceSessionTools || []);
             renderQuickActions(sessionPayload, workspaceSessionTools || []);
             renderConnectedHandoffs(sessionPayload);
+            renderSessionSyncStatus(sessionPayload);
             renderWorkflowOperations();
             renderSdkDiagnostics();
             renderGmailImportCommandExamples();
+            if (workspaceUiReadiness && typeof workspaceUiReadiness === 'object') {
+                renderUiReviewResult(normalizeUiReadinessResultForDisplay(workspaceUiReadiness));
+            }
         }
 
         async function loadSharedCapabilities() {
@@ -3840,6 +4291,37 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 return result.summary.trim();
             }
             return 'Review completed, but no summary text was returned.';
+        }
+
+        function normalizeUiReadinessResultForDisplay(result) {
+            if (!result || typeof result !== 'object') {
+                return result;
+            }
+            if (result.review && typeof result.review === 'object') {
+                return result;
+            }
+            return Object.assign({}, result, {
+                review: {
+                    summary: String(result.summary || result.latest_review || '').trim(),
+                    issues: Array.isArray(result.issues) ? result.issues : [],
+                    broken_controls: Array.isArray(result.broken_controls) ? result.broken_controls : [],
+                    recommended_changes: Array.isArray(result.recommended_changes) ? result.recommended_changes : [],
+                    playwright_followups: Array.isArray(result.playwright_followups) ? result.playwright_followups : [],
+                    stage_findings: result.stage_findings && typeof result.stage_findings === 'object' ? result.stage_findings : {},
+                    screenshot_findings: Array.isArray(result.screenshot_findings) ? result.screenshot_findings : [],
+                    optimization_targets: Array.isArray(result.optimization_targets) ? result.optimization_targets : [],
+                    carry_forward_assessment: result.carry_forward_assessment && typeof result.carry_forward_assessment === 'object' ? result.carry_forward_assessment : {},
+                    critic_review: {
+                        verdict: String(result.critic_verdict || 'warning').trim() || 'warning',
+                        acceptance_checks: Array.isArray(result.acceptance_checks) ? result.acceptance_checks : [],
+                    },
+                    complaint_journey: {
+                        tested_stages: Array.isArray(result.tested_stages) ? result.tested_stages : [],
+                        sdk_tool_invocations: Array.isArray(result.sdk_invocations) ? result.sdk_invocations : [],
+                        release_blockers: Array.isArray(result.release_blockers) ? result.release_blockers : [],
+                    },
+                },
+            });
         }
 
         function countIssuesBySeverity(items) {
@@ -4226,6 +4708,11 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 : Array.isArray(result && result.playwright_followups)
                     ? result.playwright_followups
                     : [];
+            const carryForward = result && result.review && result.review.carry_forward_assessment && typeof result.review.carry_forward_assessment === 'object'
+                ? result.review.carry_forward_assessment
+                : result && result.carry_forward_assessment && typeof result.carry_forward_assessment === 'object'
+                    ? result.carry_forward_assessment
+                    : {};
             const backendStrategy = result && result.backend && result.backend.strategy ? result.backend.strategy : '';
 
             metadata.innerHTML = [
@@ -4237,6 +4724,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 result && result.output_dir ? `<span class="chip">output: ${escapeHtml(String(result.output_dir))}</span>` : '',
                 screenshotFindings.length ? `<span class="chip">screenshot findings: ${escapeHtml(String(screenshotFindings.length))}</span>` : '',
                 optimizationTargets.length ? `<span class="chip">optimization targets: ${escapeHtml(String(optimizationTargets.length))}</span>` : '',
+                Array.isArray(carryForward.unresolved_findings) && carryForward.unresolved_findings.length ? `<span class="chip warn">unresolved prior findings: ${escapeHtml(String(carryForward.unresolved_findings.length))}</span>` : '',
                 result && result.latest_review_markdown_path ? `<span class="chip">latest markdown: ${escapeHtml(String(result.latest_review_markdown_path))}</span>` : '',
             ].filter(Boolean).join('');
 
@@ -4322,6 +4810,16 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                                 <div class="muted">${escapeHtml(String(item.reason || 'No optimization rationale returned.'))}</div>
                             </div>
                         `).join('')}
+                        ${carryForward.summary ? `
+                            <div class="item">
+                                <strong>Carry-forward assessment</strong>
+                                <div class="muted">${escapeHtml(String(carryForward.summary))}</div>
+                                <div class="chip-row">
+                                    ${Array.isArray(carryForward.unresolved_findings) && carryForward.unresolved_findings.length ? `<span class="chip warn">unresolved: ${escapeHtml(String(carryForward.unresolved_findings.length))}</span>` : ''}
+                                    ${Array.isArray(carryForward.resolved_findings) && carryForward.resolved_findings.length ? `<span class="chip good">resolved: ${escapeHtml(String(carryForward.resolved_findings.length))}</span>` : ''}
+                                </div>
+                            </div>
+                        ` : ''}
                     `
                 : '<div class="item"><strong>No optimizer artifacts yet.</strong><div class="muted">Run closed-loop optimization to capture patch paths, CIDs, and changed files.</div></div>';
 
@@ -4831,6 +5329,9 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
         document.getElementById('save-intake-button').addEventListener('click', saveIntake);
         document.getElementById('refresh-session-button').addEventListener('click', refreshWorkspace);
         document.getElementById('save-evidence-button').addEventListener('click', addEvidence);
+        document.getElementById('evidence-add-testimony-button').addEventListener('click', () => activateEvidenceComposer('testimony'));
+        document.getElementById('evidence-add-document-button').addEventListener('click', () => activateEvidenceComposer('document'));
+        document.getElementById('evidence-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so the current support gaps can be checked before more evidence is added.'));
         document.getElementById('import-gmail-evidence-button').addEventListener('click', importGmailEvidence);
         document.getElementById('import-local-evidence-button').addEventListener('click', importLocalEvidence);
         document.getElementById('copy-gmail-import-cli-command').addEventListener('click', () => {
@@ -4862,10 +5363,16 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
         document.getElementById('build-mediator-prompt-button').addEventListener('click', previewMediatorBrief);
         document.getElementById('analyze-complaint-output-button').addEventListener('click', analyzeComplaintOutputPanel);
         document.getElementById('review-generated-exports-button').addEventListener('click', reviewGeneratedExportsPanel);
+        document.getElementById('operations-tool-readiness-button').addEventListener('click', runOperationalToolReadiness);
+        document.getElementById('operations-mediator-tool-button').addEventListener('click', runOperationalMediatorHandoff);
+        document.getElementById('operations-export-tool-button').addEventListener('click', runOperationalExportReview);
+        document.getElementById('operations-ui-audit-tool-button').addEventListener('click', () => jumpToStage('ux-review', '#ux-review-notes', 'Opened UX Audit from the operational tool lane so the actor/critic workflow can continue.'));
         document.getElementById('export-packet-tool-button').addEventListener('click', exportPacket);
         document.getElementById('download-packet-tool-markdown-button').addEventListener('click', downloadPacket);
         document.getElementById('download-packet-tool-docx-button').addEventListener('click', downloadPacket);
         document.getElementById('download-packet-tool-pdf-button').addEventListener('click', downloadPacket);
+        document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));
+        document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));
         document.getElementById('refresh-sdk-primitives-button').addEventListener('click', refreshSdkPrimitivesPanel);
         document.getElementById('save-synopsis-button').addEventListener('click', saveSynopsis);
         document.getElementById('reset-session-button').addEventListener('click', resetSession);
@@ -4900,6 +5407,12 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
         document.getElementById('shortcut-draft-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Opened Draft so the complaint can be generated or refined.'));
         document.getElementById('shortcut-tools-button').addEventListener('click', () => jumpToStage('integrations', '#tool-list', 'Opened CLI + MCP surfaces for the shared complaint tools.'));
         document.getElementById('shortcut-optimizer-button').addEventListener('click', () => jumpToStage('ux-review', '#ux-review-notes', 'Opened UX Audit so the actor/critic optimizer workflow can be used.'));
+        window.addEventListener('complaint-mcp-sdk-call', (event) => {
+            latestSdkToolActivity = event && event.detail ? event.detail : loadLastSdkToolActivity();
+            if (workspaceSession) {
+                renderSessionSyncStatus(workspaceSession);
+            }
+        });
         document.addEventListener('click', (event) => {
             const gmailDetectedAddressChip = event.target.closest('[data-gmail-detected-address-chip]');
             if (gmailDetectedAddressChip) {
@@ -4911,8 +5424,18 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 removeGmailImportAddress(gmailAddressChip.dataset.gmailAddressChip || '');
                 return;
             }
+            const gatedSurfaceLink = event.target.closest('.surface-link.is-disabled');
+            if (gatedSurfaceLink) {
+                event.preventDefault();
+                setBusyStatus(gatedSurfaceLink.dataset.disabledReason || 'That surface is intentionally gated until the case reaches the next phase.');
+                return;
+            }
             const handoffButton = event.target.closest('.surface-handoff-button');
             if (handoffButton) {
+                if (handoffButton.getAttribute('aria-disabled') === 'true') {
+                    setBusyStatus(handoffButton.dataset.disabledReason || 'That handoff is intentionally gated until the case reaches the next phase.');
+                    return;
+                }
                 const targetUrl = handoffButton.dataset.handoffUrl || handoffButton.getAttribute('href') || '';
                 if (targetUrl) {
                     window.location.assign(targetUrl);
@@ -4977,6 +5500,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             workspaceUserId = bootstrap.did;
             workspaceSession = bootstrap.session;
             workspaceSessionTools = bootstrap.tools || [];
+            latestSdkToolActivity = client.getLastToolCall ? client.getLastToolCall() : loadLastSdkToolActivity();
             sdkPrimitiveSnapshot = {
                 identity: {
                     did: bootstrap.did,
@@ -4997,6 +5521,9 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 loadSharedCapabilities(),
                 loadSdkPrimitives(),
             ]);
+            if (workspaceSession) {
+                renderWorkspace(workspaceSession);
+            }
             const failedLoad = followOnLoads.find((result) => result.status === 'rejected');
             if (failedLoad && failedLoad.reason) {
                 console.warn('Workspace follow-on load failed', failedLoad.reason);

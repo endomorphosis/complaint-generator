@@ -40,6 +40,9 @@ class GmailEvidenceImportRequest(BaseModel):
     complaint_query: Optional[str] = None
     complaint_keywords: List[str] = Field(default_factory=list)
     min_relevance_score: float = 0.0
+    use_uid_checkpoint: bool = False
+    checkpoint_name: Optional[str] = None
+    uid_window_size: Optional[int] = None
 
 
 class LocalEvidenceImportRequest(BaseModel):
@@ -129,6 +132,9 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             complaint_query=request.complaint_query,
             complaint_keywords=list(request.complaint_keywords or []),
             min_relevance_score=request.min_relevance_score,
+            use_uid_checkpoint=request.use_uid_checkpoint,
+            checkpoint_name=request.checkpoint_name,
+            uid_window_size=request.uid_window_size,
         )
 
     @router.post("/api/complaint-workspace/import-local-evidence")

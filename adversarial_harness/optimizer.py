@@ -1,5 +1,3 @@
-
-from workflow_phase_guidance import build_workflow_phase_plan
 """
 Optimizer Module
 
@@ -9,12 +7,22 @@ Analyzes critic feedback and provides optimization recommendations.
 import json
 import logging
 import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from collections import Counter
+
+try:
+    from workflow_phase_guidance import build_workflow_phase_plan
+except ModuleNotFoundError:
+    _REPO_ROOT = Path(__file__).resolve().parent.parent
+    _REPO_ROOT_TEXT = str(_REPO_ROOT)
+    if _REPO_ROOT_TEXT not in sys.path:
+        sys.path.insert(0, _REPO_ROOT_TEXT)
+    from workflow_phase_guidance import build_workflow_phase_plan
 
 logger = logging.getLogger(__name__)
 
@@ -398,6 +406,105 @@ class Optimizer:
                 self.constraints = constraints
                 self.metadata = metadata
 
+        class FallbackOptimizerResult:
+            def __init__(self, *, success: bool, status: str, patch_path: str, metadata: Dict[str, Any]) -> None:
+                self.success = success
+                self.status = status
+                self.patch_path = patch_path
+                self.patch_cid = ""
+                self.metadata = metadata
+
+        class FallbackLocalOptimizer:
+            def __init__(self, agent_id: str, llm_router: Any = None) -> None:
+                self.agent_id = agent_id
+                self.llm_router = llm_router
+                self._last_generation_diagnostics: List[Dict[str, Any]] = []
+
+            def optimize(self, task: Any) -> Any:
+                constraints = dict(getattr(task, "constraints", {}) or {})
+                metadata = dict(getattr(task, "metadata", {}) or {})
+                output_dir = Path(str(constraints.get("review_output_dir") or constraints.get("output_dir") or "."))
+                output_dir.mkdir(parents=True, exist_ok=True)
+                patch_path = output_dir / "fallback-optimizer-plan.md"
+
+                actor_critic_review = dict(metadata.get("actor_critic_review") or {})
+                complaint_output_feedback = dict(metadata.get("complaint_output_feedback") or {})
+                release_gate = dict(metadata.get("complaint_output_release_gate") or {})
+                changed_files = [str(path) for path in list(getattr(task, "target_files", []) or [])[:5]]
+
+                recommendations = [
+                    str(item).strip()
+                    for item in (
+                        list(actor_critic_review.get("top_risks") or [])
+                        + list(actor_critic_review.get("high_impact_fixes") or [])
+                        + list(actor_critic_review.get("playwright_followups") or [])
+                    )
+                    if str(item).strip()
+                ][:10]
+                if not recommendations:
+                    recommendations = [
+                        "Promote the highest-value primary action for the current complaint stage.",
+                        "Keep complaint generation, export, and next-step guidance visible together.",
+                        "Add or strengthen Playwright assertions for the unresolved screenshot findings.",
+                    ]
+
+                lines = [
+                    "# Fallback UI/UX Optimizer Plan",
+                    "",
+                    f"Task ID: {getattr(task, 'task_id', '')}",
+                    f"Agent ID: {self.agent_id}",
+                    f"Status: fallback_recommendations_generated",
+                    "",
+                    "## Target Files",
+                    *[f"- {item}" for item in changed_files],
+                    "",
+                    "## Actor/Critic Summary",
+                    f"- Actor summary: {str(actor_critic_review.get('actor_summary') or 'No actor summary captured.').strip()}",
+                    f"- Critic summary: {str(actor_critic_review.get('critic_summary') or 'No critic summary captured.').strip()}",
+                    "",
+                    "## Recommended Changes",
+                    *[f"- {item}" for item in recommendations],
+                ]
+                release_verdict = str(release_gate.get("verdict") or "").strip()
+                if release_verdict:
+                    lines.extend(
+                        [
+                            "",
+                            "## Complaint Output Release Gate",
+                            f"- Verdict: {release_verdict}",
+                            f"- Reason: {str(release_gate.get('reason') or 'No reason captured.').strip()}",
+                        ]
+                    )
+                filing_shape_score = complaint_output_feedback.get("filing_shape_score")
+                if filing_shape_score is not None:
+                    lines.extend(
+                        [
+                            "",
+                            "## Complaint Output Signals",
+                            f"- Filing shape score: {filing_shape_score}",
+                            f"- Claim type alignment score: {complaint_output_feedback.get('claim_type_alignment_score')}",
+                        ]
+                    )
+
+                patch_path.write_text("\n".join(lines).strip() + "\n")
+                self._last_generation_diagnostics = [
+                    {
+                        "backend": "local_fallback_optimizer",
+                        "reason": "ipfs_datasets_py agentic optimizer classes were unavailable, so a deterministic optimizer plan was generated.",
+                        "patch_path": str(patch_path),
+                    }
+                ]
+                return FallbackOptimizerResult(
+                    success=True,
+                    status="fallback_recommendations_generated",
+                    patch_path=str(patch_path),
+                    metadata={
+                        "changed_files": changed_files,
+                        "recommendations": recommendations,
+                        "optimizer_backend": "local_fallback_optimizer",
+                    },
+                )
+
         fallback_method = SimpleNamespace(
             ACTOR_CRITIC="ACTOR_CRITIC",
             ADVERSARIAL="ADVERSARIAL",
@@ -408,7 +515,12 @@ class Optimizer:
             "OptimizationTask": FallbackOptimizationTask,
             "OptimizationMethod": fallback_method,
             "OptimizerLLMRouter": None,
-            "optimizer_classes": {},
+            "optimizer_classes": {
+                "actor_critic": FallbackLocalOptimizer,
+                "adversarial": FallbackLocalOptimizer,
+                "test_driven": FallbackLocalOptimizer,
+                "chaos": FallbackLocalOptimizer,
+            },
         }
 
     def _resolve_agentic_optimizer_components(self) -> Dict[str, Any]:

@@ -35,6 +35,8 @@ def test_build_email_graphrag_artifacts(tmp_path: Path) -> None:
     assert summary["attachment_total"] == 1
     assert Path(summary["graph_path"]).exists()
     assert Path(summary["corpus_records_path"]).exists()
+    duckdb_summary = summary.get("duckdb_index") or {}
+    assert duckdb_summary.get("status") in {"created", "duckdb_unavailable", "duckdb_index_unavailable"}
     graph_payload = json.loads(Path(summary["graph_path"]).read_text(encoding="utf-8"))
     entity_names = " ".join(
         (entity.get("name") or "")
@@ -76,6 +78,7 @@ def test_build_email_graphrag_artifacts_merges_participants_from_eml(tmp_path: P
 
     corpus_payload = json.loads(Path(summary["corpus_records_path"]).read_text(encoding="utf-8"))
     assert corpus_payload[0]["participants"] == ["ktilton@clackamas.us", "starworks5@gmail.com"]
+    assert "Orientation packet attached." in corpus_payload[0]["corpus_text"]
 
 
 def test_build_email_graphrag_artifacts_includes_attachment_extraction_text(tmp_path: Path, monkeypatch) -> None:

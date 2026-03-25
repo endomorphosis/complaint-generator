@@ -220,6 +220,99 @@ def _build_screenshot_findings(
     return screenshot_findings
 
 
+def _normalized_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _build_carry_forward_assessment(
+    *,
+    artifacts: list[dict[str, Any]],
+    screenshot_findings: list[dict[str, Any]],
+    optimization_targets: list[dict[str, Any]],
+    stage_findings: dict[str, str],
+) -> dict[str, Any]:
+    prior_review_artifact = next(
+        (
+            dict(item)
+            for item in artifacts
+            if isinstance(item, dict) and str(item.get("artifact_type") or "").strip() == "ui_readiness_review"
+        ),
+        {},
+    )
+    if not prior_review_artifact:
+        return {
+            "prior_review_available": False,
+            "unresolved_findings": [],
+            "resolved_findings": [],
+            "continued_optimization_targets": [],
+            "retired_optimization_targets": [],
+            "summary": "",
+        }
+
+    current_stage_keys = {_normalized_text(key) for key in stage_findings.keys()}
+    current_surface_keys = {
+        _normalized_text(item.get("surface") or item.get("name") or item.get("stage") or "")
+        for item in screenshot_findings
+    }
+    current_target_keys = {
+        _normalized_text(item.get("title") or item.get("target_surface") or item.get("reason") or "")
+        for item in optimization_targets
+    }
+
+    unresolved_findings: list[dict[str, Any]] = []
+    resolved_findings: list[dict[str, Any]] = []
+    for item in list(prior_review_artifact.get("screenshot_findings") or []):
+        if not isinstance(item, dict):
+            continue
+        stage_key = _normalized_text(item.get("stage") or "")
+        surface_key = _normalized_text(item.get("surface") or item.get("name") or "")
+        summary = str(item.get("summary") or item.get("stage_finding") or "").strip()
+        record = {
+            "stage": str(item.get("stage") or "").strip(),
+            "surface": str(item.get("surface") or item.get("name") or "").strip(),
+            "summary": summary,
+        }
+        if (stage_key and stage_key in current_stage_keys) or (surface_key and surface_key in current_surface_keys):
+            unresolved_findings.append(record)
+        else:
+            resolved_findings.append(record)
+
+    continued_targets: list[dict[str, Any]] = []
+    retired_targets: list[dict[str, Any]] = []
+    for item in list(prior_review_artifact.get("optimization_targets") or []):
+        if not isinstance(item, dict):
+            continue
+        target_key = _normalized_text(item.get("title") or item.get("target") or item.get("target_surface") or "")
+        record = {
+            "title": str(item.get("title") or item.get("target") or item.get("target_surface") or "").strip(),
+            "target_surface": str(item.get("target_surface") or "").strip(),
+            "reason": str(item.get("reason") or "").strip(),
+        }
+        if target_key and target_key in current_target_keys:
+            continued_targets.append(record)
+        else:
+            retired_targets.append(record)
+
+    summary_parts: list[str] = []
+    if unresolved_findings:
+        summary_parts.append(f"{len(unresolved_findings)} prior screenshot finding(s) still appear unresolved.")
+    if resolved_findings:
+        summary_parts.append(f"{len(resolved_findings)} prior screenshot finding(s) look improved or no longer visible.")
+    if continued_targets:
+        summary_parts.append(f"{len(continued_targets)} optimization target(s) carried forward into this pass.")
+    if retired_targets:
+        summary_parts.append(f"{len(retired_targets)} optimization target(s) were not repeated in the new review.")
+
+    return {
+        "prior_review_available": True,
+        "unresolved_findings": unresolved_findings,
+        "resolved_findings": resolved_findings,
+        "continued_optimization_targets": continued_targets,
+        "retired_optimization_targets": retired_targets,
+        "summary": " ".join(summary_parts).strip(),
+    }
+
+
 def structure_ui_ux_review(
     *,
     review_text: str,
@@ -327,6 +420,12 @@ def structure_ui_ux_review(
         }
         for item in recommended_changes[:5]
     ]
+    carry_forward_assessment = _build_carry_forward_assessment(
+        artifacts=artifacts,
+        screenshot_findings=screenshot_findings,
+        optimization_targets=optimization_targets,
+        stage_findings=stage_findings,
+    )
 
     return {
         "summary": _first_nonempty_line(sections.get("Top Risks", "")) or _first_nonempty_line(review_text),
@@ -360,6 +459,7 @@ def structure_ui_ux_review(
         "complaint_intake_language_fixes": language_lines,
         "screenshot_findings": screenshot_findings,
         "optimization_targets": optimization_targets,
+        "carry_forward_assessment": carry_forward_assessment,
         "review_sections": sections,
         "iteration": iteration,
     }
@@ -473,6 +573,26 @@ def build_ui_ux_review_prompt(
                     str(artifact.get("ui_suggestions_excerpt", "")).strip(),
                 ]
             )
+        if artifact.get("artifact_type") == "ui_readiness_review":
+            lines.extend(
+                [
+                    f"Cached review artifact type: {artifact.get('artifact_type')}",
+                    f"Cached UI verdict: {artifact.get('verdict', '')}",
+                    f"Cached UI score: {artifact.get('score', '')}",
+                    f"Cached critic verdict: {artifact.get('critic_verdict', '')}",
+                    f"Cached workflow type: {artifact.get('workflow_type', '')}",
+                    "Previously observed screenshot findings:",
+                    json.dumps(artifact.get("screenshot_findings", []), indent=2, sort_keys=True),
+                    "Previously proposed optimization targets:",
+                    json.dumps(artifact.get("optimization_targets", []), indent=2, sort_keys=True),
+                    "Previously proposed Playwright follow-ups:",
+                    "\n".join(f"- {item}" for item in list(artifact.get("playwright_followups", []))[:6]),
+                    "Previously recommended changes:",
+                    "\n".join(f"- {item}" for item in list(artifact.get("recommended_changes", []))[:6]),
+                    "Cached review excerpt:",
+                    str(artifact.get("review_excerpt", "")).strip(),
+                ]
+            )
         artifact_blocks.append("\n".join(lines))
 
     prompt_sections = [
@@ -484,6 +604,7 @@ def build_ui_ux_review_prompt(
         "Explicitly audit visible buttons, links, tabs, and handoff controls. Treat any dead, misleading, duplicated, or context-losing control as a release blocker until proven otherwise.",
         "Use an actor/critic lens: the actor should propose the smallest high-impact UX repair sequence, and the critic should decide whether the dashboard is actually safe to send legal clients through.",
         "Do not treat a workflow as successful unless the final complaint output still looks like a formal pleading and the export/download controls produce artifacts consistent with the selected claim type and draft strategy.",
+        "If cached screenshot-driven findings or optimization targets are supplied, treat them as prior unresolved hypotheses that should be confirmed, refined, or explicitly retired with evidence from the current screenshots.",
         f"Iteration: {iteration}",
     ]
     prompt_sections.extend(
@@ -656,6 +777,7 @@ def review_screenshot_audit_with_llm_router(
         "stage_findings": dict(structured_review.get("stage_findings") or {}),
         "screenshot_findings": list(structured_review.get("screenshot_findings") or []),
         "optimization_targets": list(structured_review.get("optimization_targets") or []),
+        "carry_forward_assessment": dict(structured_review.get("carry_forward_assessment") or {}),
     }
 
 
@@ -724,6 +846,7 @@ def run_iterative_ui_ux_workflow(
                 "issues_count": len(list(review.get("issues") or [])),
                 "broken_controls_count": len(list(review.get("broken_controls") or [])),
                 "optimization_target_count": len(list(review.get("optimization_targets") or [])),
+                "carry_forward_summary": str((review.get("carry_forward_assessment") or {}).get("summary") or "").strip(),
             }
         )
 
@@ -740,6 +863,7 @@ def run_iterative_ui_ux_workflow(
         "stage_findings": dict(latest_structured_review.get("stage_findings") or {}),
         "screenshot_findings": list(latest_structured_review.get("screenshot_findings") or []),
         "optimization_targets": list(latest_structured_review.get("optimization_targets") or []),
+        "carry_forward_assessment": dict(latest_structured_review.get("carry_forward_assessment") or {}),
         "latest_review_markdown_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.md") if run_reports else None,
         "latest_review_json_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.json") if run_reports else None,
         "runs": run_reports,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import importlib
+import sys
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -8,6 +10,26 @@ from typing import Any
 
 from complaint_phases.knowledge_graph import KnowledgeGraphBuilder
 from ipfs_datasets_py.processors.multimedia.attachment_text_extractor import extract_attachment_text
+
+try:
+    from ipfs_datasets_py.processors.multimedia.email_duckdb_index import (
+        build_email_duckdb_index as _build_email_duckdb_index,
+        search_email_duckdb_index as _search_email_duckdb_index,
+    )
+except Exception:
+    _repo_root = Path(__file__).resolve().parents[2] / "ipfs_datasets_py"
+    if _repo_root.exists():
+        sys.path.insert(0, str(_repo_root))
+        try:
+            _module = importlib.import_module("ipfs_datasets_py.processors.multimedia.email_duckdb_index")
+            _build_email_duckdb_index = getattr(_module, "build_email_duckdb_index", None)
+            _search_email_duckdb_index = getattr(_module, "search_email_duckdb_index", None)
+        except Exception:
+            _build_email_duckdb_index = None
+            _search_email_duckdb_index = None
+    else:
+        _build_email_duckdb_index = None
+        _search_email_duckdb_index = None
 
 
 def _participants_from_eml(bundle_dir: Path) -> list[str]:
@@ -35,6 +57,37 @@ def _participants_from_eml(bundle_dir: Path) -> list[str]:
             participants.append(address)
     return participants
 
+
+def _body_from_eml(bundle_dir: Path) -> str:
+    eml_path = bundle_dir / "message.eml"
+    if not eml_path.exists():
+        return ""
+    try:
+        message = BytesParser(policy=policy.default).parsebytes(eml_path.read_bytes())
+    except Exception:
+        return ""
+    body_parts: list[str] = []
+    if message.is_multipart():
+        for part in message.walk():
+            if part.get_content_maintype() == "multipart":
+                continue
+            if (part.get_content_disposition() or "").lower() == "attachment":
+                continue
+            if part.get_content_type() != "text/plain":
+                continue
+            try:
+                body_parts.append(str(part.get_content() or ""))
+            except Exception:
+                payload = part.get_payload(decode=True) or b""
+                body_parts.append(payload.decode("utf-8", errors="ignore"))
+    else:
+        try:
+            body_parts.append(str(message.get_content() or ""))
+        except Exception:
+            payload = message.get_payload(decode=True) or b""
+            body_parts.append(payload.decode("utf-8", errors="ignore"))
+    return "\n".join(part.strip() for part in body_parts if str(part or "").strip()).strip()
+
 def _email_record_to_corpus_text(record: dict[str, Any]) -> str:
     lines: list[str] = []
     lines.append(f"Email subject: {record.get('subject') or ''}")
@@ -47,6 +100,8 @@ def _email_record_to_corpus_text(record: dict[str, Any]) -> str:
         lines.append(f"Participants: {participants}")
     if record.get("message_id_header"):
         lines.append(f"Message-ID: {record.get('message_id_header')}")
+    if record.get("body_text"):
+        lines.extend(["Email body:", str(record.get("body_text") or "")])
     for path_str in record.get("attachment_paths") or []:
         path = Path(path_str)
         lines.append(f"Attachment filename: {path.name}")
@@ -63,6 +118,8 @@ def build_email_graphrag_artifacts(
     *,
     manifest_path: str | Path,
     output_dir: str | Path | None = None,
+    emit_duckdb_index: bool = True,
+    append_duckdb_index: bool = False,
 ) -> dict[str, Any]:
     manifest_file = Path(manifest_path).expanduser().resolve()
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
@@ -86,6 +143,7 @@ def build_email_graphrag_artifacts(
             merged_participants.append(cleaned)
         record_for_corpus = dict(record)
         record_for_corpus["participants"] = merged_participants
+        record_for_corpus["body_text"] = _body_from_eml(bundle_dir) if bundle_dir else ""
         corpus_text = _email_record_to_corpus_text(record_for_corpus)
         entry = {
             "index": index,
@@ -111,6 +169,21 @@ def build_email_graphrag_artifacts(
     corpus_path = graphrag_dir / "email_corpus_records.json"
     corpus_path.write_text(json.dumps(email_corpus_records, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    duckdb_index_summary: dict[str, Any] | None = None
+    if emit_duckdb_index:
+        if _build_email_duckdb_index is None:
+            duckdb_index_summary = {"status": "duckdb_index_unavailable"}
+        else:
+            try:
+                duckdb_index_summary = _build_email_duckdb_index(
+                    manifest_path=manifest_file,
+                    output_dir=graphrag_dir / "duckdb",
+                    include_attachment_text=False,
+                    append=append_duckdb_index,
+                )
+            except ImportError as exc:
+                duckdb_index_summary = {"status": "duckdb_unavailable", "error": str(exc)}
+
     summary = {
         "manifest_path": str(manifest_file),
         "graphrag_dir": str(graphrag_dir),
@@ -119,6 +192,7 @@ def build_email_graphrag_artifacts(
         "knowledge_graph_summary": graph.summary(),
         "graph_path": str(graph_path),
         "corpus_records_path": str(corpus_path),
+        "duckdb_index": duckdb_index_summary,
     }
     summary_path = graphrag_dir / "email_graphrag_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -126,4 +200,15 @@ def build_email_graphrag_artifacts(
     return summary
 
 
-__all__ = ["build_email_graphrag_artifacts"]
+def search_email_graphrag_duckdb(
+    *,
+    index_path: str | Path,
+    query: str,
+    limit: int = 20,
+) -> dict[str, Any]:
+    if _search_email_duckdb_index is None:
+        return {"status": "duckdb_index_unavailable", "query": query, "result_count": 0, "results": []}
+    return _search_email_duckdb_index(index_path=index_path, query=query, limit=limit)
+
+
+__all__ = ["build_email_graphrag_artifacts", "search_email_graphrag_duckdb"]

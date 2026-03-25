@@ -101,6 +101,9 @@ def import_gmail_evidence_command(
     complaint_query: Optional[str] = None,
     complaint_keyword: list[str] = typer.Option([], "--complaint-keyword", help="Complaint-specific keyword or phrase to improve relevance filtering. Repeat for multiple terms."),
     min_relevance_score: float = 0.0,
+    use_uid_checkpoint: bool = typer.Option(False, "--use-uid-checkpoint", help="Resume large Gmail imports by IMAP UID checkpoint instead of rescanning the same mailbox slice."),
+    checkpoint_name: Optional[str] = typer.Option(None, "--checkpoint-name", help="Optional checkpoint name when managing multiple Gmail import cursors."),
+    uid_window_size: Optional[int] = typer.Option(None, "--uid-window-size", help="Maximum number of newly discovered UID messages to import in this run."),
     evidence_root: Optional[str] = None,
     gmail_user: Optional[str] = typer.Option(os.environ.get("GMAIL_USER") or os.environ.get("EMAIL_USER"), "--gmail-user"),
     gmail_app_password: Optional[str] = typer.Option(os.environ.get("GMAIL_APP_PASSWORD") or os.environ.get("EMAIL_PASS"), "--gmail-app-password"),
@@ -139,6 +142,9 @@ def import_gmail_evidence_command(
             complaint_query=complaint_query,
             complaint_keywords=complaint_keyword,
             min_relevance_score=min_relevance_score,
+            use_uid_checkpoint=use_uid_checkpoint,
+            checkpoint_name=checkpoint_name,
+            uid_window_size=uid_window_size,
             gmail_user=resolved_gmail_user,
             gmail_app_password=resolved_gmail_app_password,
             service=service,
@@ -336,7 +342,10 @@ def review_ui(
     if iterations > 0:
         from complaint_generator.ui_ux_workflow import run_iterative_ui_ux_workflow
 
-        supplemental_artifacts = service._build_complaint_output_review_artifacts(user_id)
+        supplemental_artifacts = (
+            service._build_complaint_output_review_artifacts(user_id)
+            + service._build_cached_ui_readiness_artifacts(user_id)
+        )
         result = run_iterative_ui_ux_workflow(
             screenshot_dir=screenshot_dir,
             output_dir=str(Path(artifact_path).expanduser().resolve().parent),
@@ -383,7 +392,10 @@ def optimize_ui(
     from complaint_generator.ui_ux_workflow import run_closed_loop_ui_ux_improvement
 
     goal_items = _split_multiline_values(goals)
-    supplemental_artifacts = service._build_complaint_output_review_artifacts(user_id)
+    supplemental_artifacts = (
+        service._build_complaint_output_review_artifacts(user_id)
+        + service._build_cached_ui_readiness_artifacts(user_id)
+    )
     result = run_closed_loop_ui_ux_improvement(
         screenshot_dir=screenshot_dir,
         output_dir=output_path,

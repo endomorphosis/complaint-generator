@@ -327,7 +327,7 @@ test.describe('website surface navigation', () => {
 
     await expect(page.locator('#handoff-chat-summary')).toContainText(/Open Chat/i);
     await expect(page.locator('#handoff-review-summary')).toContainText(/Open the review dashboard/i);
-    await expect(page.locator('#handoff-builder-summary')).toContainText(/Open the formal builder/i);
+    await expect(page.locator('#handoff-builder-summary')).toContainText(/Open the formal builder|held back until the complaint record can support a real filing draft/i);
     await expect(page.locator('#handoff-chat-button')).toHaveAttribute('href', /\/chat\?/);
     await expect(page.locator('#handoff-chat-button')).toHaveAttribute('href', /source=workspace/);
     await expect(page.locator('#handoff-chat-button')).toHaveAttribute('href', /user_id=did%3Akey%3Aworkspace-handoff-demo/);

@@ -6,7 +6,7 @@ import email.policy
 import imaplib
 import json
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
 from email.utils import getaddresses, parsedate_to_datetime
@@ -142,17 +142,149 @@ def _default_evidence_root(workspace_root: Path) -> Path:
     return workspace_root / "evidence"
 
 
+def _checkpoint_path(artifact_root: Path, checkpoint_name: Optional[str]) -> Path:
+    name = _slugify_fragment(str(checkpoint_name or "default"), fallback="default")
+    return artifact_root / "_state" / f"{name}_checkpoint.json"
+
+
+def _load_checkpoint(artifact_root: Path, checkpoint_name: Optional[str]) -> dict[str, Any]:
+    path = _checkpoint_path(artifact_root, checkpoint_name)
+    if not path.exists():
+        return {"version": 1, "folders": {}}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": 1, "folders": {}}
+    payload.setdefault("version", 1)
+    payload.setdefault("folders", {})
+    return payload
+
+
+def _save_checkpoint(artifact_root: Path, checkpoint_name: Optional[str], payload: dict[str, Any]) -> Path:
+    path = _checkpoint_path(artifact_root, checkpoint_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _coerce_message_uid(value: bytes | str | int | None) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="ignore")
+    text = str(value or "").strip()
+    try:
+        return int(text)
+    except Exception:
+        return 0
+
+
+def _build_email_import_manifest(
+    *,
+    artifact_root: Path,
+    gmail_user: Optional[str],
+    folder: str,
+    folders: Sequence[str],
+    user_id: str,
+    claim_element_id: str,
+    workspace_root: Path,
+    evidence_root: Path,
+    matched_addresses: Sequence[str],
+    complaint_terms: Sequence[str],
+    min_relevance_score: float,
+    searched_message_count: int,
+    skipped_count: int,
+    relevance_filtered_count: int,
+    imported: Sequence[dict[str, Any]],
+    limit: Optional[int],
+    date_after: Optional[str],
+    date_before: Optional[str],
+    use_uid_checkpoint: bool = False,
+    uid_window_size: Optional[int] = None,
+    checkpoint_path: Optional[Path] = None,
+    checkpoint_payload: Optional[dict[str, Any]] = None,
+) -> Path:
+    manifest_payload = {
+        "status": "success",
+        "gmail_user": gmail_user or "",
+        "folder": folder,
+        "folders": list(folders),
+        "user_id": user_id,
+        "claim_element_id": claim_element_id,
+        "workspace_root": str(workspace_root),
+        "evidence_root": str(evidence_root),
+        "output_dir": str(artifact_root),
+        "matched_addresses": list(matched_addresses),
+        "complaint_terms": list(complaint_terms),
+        "min_relevance_score": float(min_relevance_score),
+        "limit": int(limit) if limit is not None else None,
+        "date_after": date_after,
+        "date_before": date_before,
+        "use_uid_checkpoint": bool(use_uid_checkpoint),
+        "uid_window_size": int(uid_window_size) if uid_window_size is not None else None,
+        "searched_message_count": int(searched_message_count),
+        "matched_email_count": len(imported),
+        "imported_count": len(imported),
+        "skipped_count": int(skipped_count),
+        "relevance_filtered_count": int(relevance_filtered_count),
+        "raw_email_total_bytes": sum(int(item.get("raw_size_bytes") or 0) for item in imported),
+        "attachment_total": sum(len(item.get("attachment_paths") or []) for item in imported),
+        "checkpoint_path": str(checkpoint_path) if checkpoint_path is not None else None,
+        "checkpoint": checkpoint_payload or None,
+        "emails": list(imported),
+        "mediator_evidence_records": [
+            {
+                "title": f"Email import: {item.get('subject') or 'Untitled email'}",
+                "kind": "document",
+                "source": f"gmail_imap_import:{item.get('folder') or folder}",
+                "content": (
+                    f"Subject: {item.get('subject') or ''}\n"
+                    f"From: {item.get('from') or ''}\n"
+                    f"To: {item.get('to') or ''}\n"
+                    f"Date: {item.get('date') or ''}\n"
+                    f"Saved email: {item.get('eml_path') or ''}"
+                ).strip(),
+                "attachment_names": [Path(path).name for path in list(item.get("attachment_paths") or [])],
+                "metadata": {
+                    "folder": item.get("folder"),
+                    "message_id": item.get("message_id"),
+                    "message_id_header": item.get("message_id_header"),
+                    "artifact_dir": item.get("artifact_dir"),
+                    "eml_path": item.get("eml_path"),
+                    "metadata_path": item.get("metadata_path"),
+                    "participants": list(item.get("participants") or []),
+                    "relevance_score": float(item.get("relevance_score") or 0.0),
+                },
+            }
+            for item in imported
+        ],
+    }
+    manifest_path = artifact_root / "email_import_manifest.json"
+    manifest_path.write_text(json.dumps(manifest_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return manifest_path
+
+
 async def _search_message_ids(
     connection: Any,
     *,
     folder: str,
     date_after: Optional[str],
     date_before: Optional[str],
+    limit: Optional[int] = None,
 ) -> list[bytes]:
     def _run() -> list[bytes]:
         status, _ = connection.select(folder, readonly=True)
         if status != "OK":
             raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
+        if limit is not None and limit > 0 and not date_after and not date_before:
+            status, count_data = connection.select(folder, readonly=True)
+            if status != "OK":
+                raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
+            total_messages = int((count_data or [b"0"])[0] or b"0")
+            start = max(1, total_messages - int(limit) + 1)
+            return [str(index).encode("ascii") for index in range(start, total_messages + 1)]
         criteria: list[str] = []
         if date_after:
             after_value = datetime.fromisoformat(str(date_after)).strftime("%d-%b-%Y")
@@ -183,6 +315,38 @@ async def _fetch_recent_message_ids(connection: Any, *, folder: str, limit: int)
     return await anyio.to_thread.run_sync(_run)
 
 
+async def _search_message_uids(
+    connection: Any,
+    *,
+    folder: str,
+    date_after: Optional[str],
+    date_before: Optional[str],
+    after_uid: Optional[int] = None,
+) -> list[bytes]:
+    def _run() -> list[bytes]:
+        status, _ = connection.select(folder, readonly=True)
+        if status != "OK":
+            raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
+        criteria: list[str] = []
+        if after_uid and int(after_uid) > 0:
+            criteria.extend(["UID", f"{int(after_uid) + 1}:*"])
+        if date_after:
+            after_value = datetime.fromisoformat(str(date_after)).strftime("%d-%b-%Y")
+            criteria.extend(["SINCE", after_value])
+        if date_before:
+            before_value = datetime.fromisoformat(str(date_before)).strftime("%d-%b-%Y")
+            criteria.extend(["BEFORE", before_value])
+        if not criteria:
+            criteria = ["ALL"]
+        status, data = connection.uid("search", None, *criteria)
+        if status != "OK":
+            raise RuntimeError(f"failed to UID search IMAP folder {folder!r}: {status}")
+        raw_ids = data[0] if data else b""
+        return [item for item in raw_ids.split() if item]
+
+    return await anyio.to_thread.run_sync(_run)
+
+
 async def _fetch_raw_message(connection: Any, message_id: bytes) -> bytes:
     def _run() -> bytes:
         status, data = connection.fetch(message_id, "(RFC822)")
@@ -192,6 +356,19 @@ async def _fetch_raw_message(connection: Any, message_id: bytes) -> bytes:
             if isinstance(item, tuple) and len(item) >= 2:
                 return bytes(item[1] or b"")
         raise RuntimeError(f"missing RFC822 payload for IMAP message {message_id!r}")
+
+    return await anyio.to_thread.run_sync(_run)
+
+
+async def _fetch_raw_message_by_uid(connection: Any, uid: bytes) -> bytes:
+    def _run() -> bytes:
+        status, data = connection.uid("fetch", uid, "(RFC822)")
+        if status != "OK":
+            raise RuntimeError(f"failed to fetch IMAP UID {uid!r}: {status}")
+        for item in data or []:
+            if isinstance(item, tuple) and len(item) >= 2:
+                return bytes(item[1] or b"")
+        raise RuntimeError(f"missing RFC822 payload for IMAP UID {uid!r}")
 
     return await anyio.to_thread.run_sync(_run)
 
@@ -214,6 +391,9 @@ async def import_gmail_evidence(
     complaint_keywords: Sequence[str] = (),
     complaint_keyword_files: Sequence[str] = (),
     min_relevance_score: float = 0.0,
+    use_uid_checkpoint: bool = False,
+    checkpoint_name: Optional[str] = None,
+    uid_window_size: Optional[int] = None,
     service: "ComplaintWorkspaceService" | None = None,
 ) -> dict[str, Any]:
     normalized_addresses = _normalize_addresses(addresses)
@@ -245,6 +425,8 @@ async def import_gmail_evidence(
 
     artifact_root = evidence_root_path / _slugify_fragment(user_id, fallback="anonymous-user") / "gmail-import"
     artifact_root.mkdir(parents=True, exist_ok=True)
+    checkpoint_payload = _load_checkpoint(artifact_root, checkpoint_name) if use_uid_checkpoint else None
+    checkpoint_file_path = _checkpoint_path(artifact_root, checkpoint_name) if use_uid_checkpoint else None
 
     await processor.connect()
     try:
@@ -255,23 +437,44 @@ async def import_gmail_evidence(
         seen_message_headers: set[str] = set()
         global_index = 0
         for folder_name in normalized_folders:
+            folder_last_processed_uid = 0
             try:
-                message_ids = await _search_message_ids(
-                    processor.connection,
-                    folder=folder_name,
-                    date_after=date_after,
-                    date_before=date_before,
-                )
-                if limit is not None and limit > 0:
-                    message_ids = message_ids[-int(limit) :]
+                if use_uid_checkpoint:
+                    folder_state = (checkpoint_payload or {}).setdefault("folders", {}).setdefault(folder_name, {})
+                    folder_last_processed_uid = int(folder_state.get("last_processed_uid") or 0)
+                    message_ids = await _search_message_uids(
+                        processor.connection,
+                        folder=folder_name,
+                        date_after=date_after,
+                        date_before=date_before,
+                        after_uid=folder_last_processed_uid,
+                    )
+                    cap = uid_window_size if uid_window_size is not None else limit
+                    if cap is not None and int(cap) > 0:
+                        message_ids = message_ids[: int(cap)]
+                else:
+                    message_ids = await _search_message_ids(
+                        processor.connection,
+                        folder=folder_name,
+                        date_after=date_after,
+                        date_before=date_before,
+                        limit=limit,
+                    )
+                    if limit is not None and limit > 0 and (date_after or date_before):
+                        message_ids = message_ids[-int(limit) :]
             except imaplib.IMAP4.error as exc:
                 if not (limit is not None and limit > 0 and "got more than 1000000 bytes" in str(exc)):
                     raise
                 message_ids = await _fetch_recent_message_ids(processor.connection, folder=folder_name, limit=int(limit))
 
             searched_message_count += len(message_ids)
-            for message_id in reversed(message_ids):
-                raw_message = await _fetch_raw_message(processor.connection, message_id)
+            iterable_message_ids = message_ids if use_uid_checkpoint else list(reversed(message_ids))
+            for message_id in iterable_message_ids:
+                if use_uid_checkpoint:
+                    folder_last_processed_uid = max(folder_last_processed_uid, _coerce_message_uid(message_id))
+                    raw_message = await _fetch_raw_message_by_uid(processor.connection, message_id)
+                else:
+                    raw_message = await _fetch_raw_message(processor.connection, message_id)
                 parsed_message = email.message_from_bytes(raw_message, policy=email.policy.default)
                 message_header_id = str(parsed_message.get("Message-ID") or "").strip().lower()
                 if message_header_id and message_header_id in seen_message_headers:
@@ -289,6 +492,7 @@ async def import_gmail_evidence(
                 email_date = str(parsed_message.get("Date") or "").strip()
                 body_text = _extract_body_text(parsed_message)
                 attachments = _extract_attachment_payloads(parsed_message)
+                participants = sorted(header_addresses)
                 relevance = score_email_relevance(
                     complaint_terms=complaint_terms,
                     subject=subject,
@@ -347,11 +551,17 @@ async def import_gmail_evidence(
                     "matched_fields": list(relevance["matched_fields"]),
                     "attachment_count": len(saved_attachments),
                     "attachments": saved_attachments,
+                    "participants": participants,
+                    "body_preview": body_text[:4000],
+                    "raw_size_bytes": len(raw_message),
                     "artifact_dir": str(message_dir),
                     "eml_path": str(eml_path),
                 }
                 metadata_path = message_dir / "message.json"
-                metadata_path.write_text(json.dumps(metadata_payload, indent=2, sort_keys=True))
+                metadata_path.write_text(
+                    json.dumps(metadata_payload, indent=2, sort_keys=True, ensure_ascii=False),
+                    encoding="utf-8",
+                )
                 attachment_names.append(metadata_path.name)
 
                 summary_lines = [
@@ -379,6 +589,7 @@ async def import_gmail_evidence(
                 imported.append(
                     {
                         "message_id": message_id.decode("utf-8", errors="ignore"),
+                        "imap_uid": _coerce_message_uid(message_id) if use_uid_checkpoint else None,
                         "message_id_header": str(parsed_message.get("Message-ID") or "").strip(),
                         "folder": folder_name,
                         "subject": subject,
@@ -388,13 +599,52 @@ async def import_gmail_evidence(
                         "relevance_score": float(relevance["score"]),
                         "matched_terms": list(relevance["matched_terms"]),
                         "matched_fields": list(relevance["matched_fields"]),
+                        "participants": participants,
+                        "raw_size_bytes": len(raw_message),
                         "artifact_dir": str(message_dir),
+                        "bundle_dir": str(message_dir),
                         "eml_path": str(eml_path),
+                        "email_path": str(eml_path),
+                        "metadata_path": str(metadata_path),
+                        "parsed_path": str(metadata_path),
                         "attachment_paths": [item["path"] for item in saved_attachments],
                         "workspace_evidence_id": ((workspace_record.get("saved") or {}).get("id")),
                     }
                 )
 
+            if use_uid_checkpoint and checkpoint_payload is not None:
+                folder_state = checkpoint_payload.setdefault("folders", {}).setdefault(folder_name, {})
+                folder_state["last_processed_uid"] = int(folder_last_processed_uid or 0)
+                folder_state["last_run_searched_message_count"] = len(message_ids)
+                folder_state["updated_at"] = datetime.now(UTC).isoformat()
+
+        if use_uid_checkpoint and checkpoint_payload is not None:
+            checkpoint_file_path = _save_checkpoint(artifact_root, checkpoint_name, checkpoint_payload)
+
+        manifest_path = _build_email_import_manifest(
+            artifact_root=artifact_root,
+            gmail_user=gmail_user,
+            folder=folder,
+            folders=normalized_folders,
+            user_id=user_id,
+            claim_element_id=claim_element_id,
+            workspace_root=workspace_root_path,
+            evidence_root=evidence_root_path,
+            matched_addresses=normalized_addresses,
+            complaint_terms=complaint_terms,
+            min_relevance_score=float(min_relevance_score),
+            searched_message_count=searched_message_count,
+            skipped_count=skipped_count,
+            relevance_filtered_count=relevance_filtered_count,
+            imported=imported,
+            limit=limit,
+            date_after=date_after,
+            date_before=date_before,
+            use_uid_checkpoint=use_uid_checkpoint,
+            uid_window_size=uid_window_size,
+            checkpoint_path=checkpoint_file_path,
+            checkpoint_payload=checkpoint_payload,
+        )
         return {
             "status": "success",
             "gmail_user": gmail_user or "",
@@ -407,10 +657,16 @@ async def import_gmail_evidence(
             "matched_addresses": normalized_addresses,
             "complaint_terms": complaint_terms,
             "min_relevance_score": float(min_relevance_score),
+            "use_uid_checkpoint": bool(use_uid_checkpoint),
+            "uid_window_size": int(uid_window_size) if uid_window_size is not None else None,
             "searched_message_count": searched_message_count,
             "imported_count": len(imported),
             "skipped_count": skipped_count,
             "relevance_filtered_count": relevance_filtered_count,
+            "raw_email_total_bytes": sum(int(item.get("raw_size_bytes") or 0) for item in imported),
+            "manifest_path": str(manifest_path),
+            "checkpoint_path": str(checkpoint_file_path) if checkpoint_file_path is not None else None,
+            "checkpoint": checkpoint_payload,
             "imported": imported,
         }
     finally:

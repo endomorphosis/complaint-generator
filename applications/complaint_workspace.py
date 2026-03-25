@@ -2184,6 +2184,9 @@ class ComplaintWorkspaceService:
         screenshot_findings = list(review.get("screenshot_findings") or (result or {}).get("screenshot_findings") or [])
         optimization_targets = list(review.get("optimization_targets") or (result or {}).get("optimization_targets") or [])
         stage_findings = dict(review.get("stage_findings") or (result or {}).get("stage_findings") or {})
+        carry_forward_assessment = dict(
+            review.get("carry_forward_assessment") or (result or {}).get("carry_forward_assessment") or {}
+        )
         release_blockers = list(complaint_journey.get("release_blockers") or [])
         acceptance_checks = list(critic_review.get("acceptance_checks") or [])
         tested_stages = list(complaint_journey.get("tested_stages") or [])
@@ -2244,6 +2247,7 @@ class ComplaintWorkspaceService:
             "stage_findings": stage_findings,
             "screenshot_findings": screenshot_findings,
             "optimization_targets": optimization_targets,
+            "carry_forward_assessment": carry_forward_assessment,
             "issue_counts": severity_counts,
             "summary": summary_text,
             "workflow_type": str((result or {}).get("workflow_type") or (result or {}).get("backend", {}).get("strategy") or "review"),
@@ -2286,6 +2290,7 @@ class ComplaintWorkspaceService:
             "stage_findings": {},
             "screenshot_findings": [],
             "optimization_targets": [],
+            "carry_forward_assessment": {},
             "issue_counts": {"high": 0, "medium": 0, "low": 0},
             "workflow_type": None,
             "review_backend": {},
@@ -3412,6 +3417,87 @@ class ComplaintWorkspaceService:
             }
         ]
 
+    def _build_cached_ui_readiness_artifacts(self, user_id: Optional[str]) -> List[Dict[str, Any]]:
+        if not user_id:
+            return []
+        ui_readiness = self.get_ui_readiness(user_id)
+        if str(ui_readiness.get("status") or "").strip().lower() != "cached":
+            return []
+        screenshot_findings = [
+            dict(item)
+            for item in list(ui_readiness.get("screenshot_findings") or [])
+            if isinstance(item, dict) and item
+        ]
+        optimization_targets = [
+            dict(item)
+            for item in list(ui_readiness.get("optimization_targets") or [])
+            if isinstance(item, dict) and item
+        ]
+        playwright_followups = [str(item).strip() for item in list(ui_readiness.get("playwright_followups") or []) if str(item).strip()]
+        recommended_changes = [str(item).strip() for item in list(ui_readiness.get("recommended_changes") or []) if str(item).strip()]
+        if not (screenshot_findings or optimization_targets or playwright_followups or recommended_changes):
+            return []
+
+        finding_lines: List[str] = []
+        for item in screenshot_findings[:4]:
+            stage = str(item.get("stage") or item.get("name") or "unknown stage").strip()
+            summary = str(item.get("summary") or item.get("stage_finding") or item.get("visible_text_excerpt") or "").strip()
+            criticism_items = list(item.get("criticisms") or [])
+            criticism_text: List[str] = []
+            for criticism in criticism_items[:2]:
+                if isinstance(criticism, dict):
+                    text = str(criticism.get("problem") or criticism.get("recommended_fix") or "").strip()
+                else:
+                    text = str(criticism or "").strip()
+                if text:
+                    criticism_text.append(text)
+            line = f"- {stage}: {summary or 'No summary returned.'}"
+            if criticism_text:
+                line += f" Criticisms: {'; '.join(criticism_text)}"
+            finding_lines.append(line)
+
+        target_lines = [
+            f"- {str(item.get('title') or item.get('target') or item.get('target_surface') or 'optimization target').strip()}"
+            + (
+                f": {str(item.get('reason') or '').strip()}"
+                if str(item.get("reason") or "").strip()
+                else ""
+            )
+            for item in optimization_targets[:4]
+        ]
+        followup_lines = [f"- {item}" for item in playwright_followups[:4]]
+        change_lines = [f"- {item}" for item in recommended_changes[:4]]
+        excerpt_sections = [
+            str(ui_readiness.get("summary") or "").strip(),
+            "Screenshot findings:\n" + "\n".join(finding_lines) if finding_lines else "",
+            "Optimization targets:\n" + "\n".join(target_lines) if target_lines else "",
+            "Playwright follow-ups:\n" + "\n".join(followup_lines) if followup_lines else "",
+            "Recommended changes:\n" + "\n".join(change_lines) if change_lines else "",
+        ]
+
+        return [
+            {
+                "name": "workspace-cached-ui-readiness",
+                "url": "/workspace?target_tab=ux-review",
+                "title": "Cached UX Audit Review",
+                "artifact_type": "ui_readiness_review",
+                "verdict": str(ui_readiness.get("verdict") or ""),
+                "score": ui_readiness.get("score"),
+                "critic_verdict": str(ui_readiness.get("critic_verdict") or ""),
+                "workflow_type": str(ui_readiness.get("workflow_type") or ""),
+                "review_backend": deepcopy(ui_readiness.get("review_backend") or {}),
+                "tested_stages": list(ui_readiness.get("tested_stages") or []),
+                "release_blockers": list(ui_readiness.get("release_blockers") or []),
+                "screenshot_findings": screenshot_findings,
+                "optimization_targets": optimization_targets,
+                "playwright_followups": playwright_followups,
+                "recommended_changes": recommended_changes,
+                "review_excerpt": "\n\n".join(section for section in excerpt_sections if section).strip()[:3000],
+                "latest_review_markdown_path": ui_readiness.get("latest_review_markdown_path"),
+                "latest_review_json_path": ui_readiness.get("latest_review_json_path"),
+            }
+        ]
+
     def export_complaint_markdown(self, user_id: Optional[str]) -> Dict[str, Any]:
         artifact = self.build_export_artifact(user_id, "markdown")
         packet_payload = self._build_packet_snapshot(user_id)
@@ -3557,6 +3643,9 @@ class ComplaintWorkspaceService:
         complaint_query: Optional[str] = None,
         complaint_keywords: Optional[List[str]] = None,
         min_relevance_score: float = 0.0,
+        use_uid_checkpoint: bool = False,
+        checkpoint_name: Optional[str] = None,
+        uid_window_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         async def _run_import() -> Dict[str, Any]:
             from complaint_generator.email_import import import_gmail_evidence
@@ -3577,6 +3666,9 @@ class ComplaintWorkspaceService:
                 complaint_query=complaint_query,
                 complaint_keywords=complaint_keywords or [],
                 min_relevance_score=min_relevance_score,
+                use_uid_checkpoint=use_uid_checkpoint,
+                checkpoint_name=checkpoint_name,
+                uid_window_size=uid_window_size,
                 service=self,
             )
 
@@ -3756,6 +3848,9 @@ class ComplaintWorkspaceService:
                 complaint_query=str(args.get("complaint_query") or "") or None,
                 complaint_keywords=[str(item).strip() for item in list(args.get("complaint_keywords") or []) if str(item).strip()],
                 min_relevance_score=float(args.get("min_relevance_score") or 0.0),
+                use_uid_checkpoint=bool(args.get("use_uid_checkpoint") or False),
+                checkpoint_name=str(args.get("checkpoint_name") or "") or None,
+                uid_window_size=int(args["uid_window_size"]) if args.get("uid_window_size") is not None else None,
             )
         if tool_name == "complaint.import_local_evidence":
             return self.import_local_evidence(
@@ -3853,7 +3948,10 @@ class ComplaintWorkspaceService:
             screenshot_dir = args.get("screenshot_dir")
             iterations = int(args.get("iterations") or 0)
             pytest_target = args.get("pytest_target")
-            supplemental_artifacts = self._build_complaint_output_review_artifacts(args.get("user_id"))
+            supplemental_artifacts = (
+                self._build_complaint_output_review_artifacts(args.get("user_id"))
+                + self._build_cached_ui_readiness_artifacts(args.get("user_id"))
+            )
             if isinstance(screenshot_paths, list):
                 return create_ui_review_report(
                     [str(item) for item in screenshot_paths],
@@ -3901,7 +3999,10 @@ class ComplaintWorkspaceService:
             screenshot_dir = args.get("screenshot_dir")
             if not screenshot_dir:
                 raise ValueError("complaint.optimize_ui requires screenshot_dir.")
-            supplemental_artifacts = self._build_complaint_output_review_artifacts(args.get("user_id"))
+            supplemental_artifacts = (
+                self._build_complaint_output_review_artifacts(args.get("user_id"))
+                + self._build_cached_ui_readiness_artifacts(args.get("user_id"))
+            )
             result = run_closed_loop_ui_ux_improvement(
                 screenshot_dir=str(screenshot_dir),
                 output_dir=str(args.get("output_path") or Path(str(screenshot_dir)).expanduser().resolve() / "closed-loop"),

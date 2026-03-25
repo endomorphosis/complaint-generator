@@ -115,6 +115,9 @@ def import_gmail_evidence(
     complaint_query: Optional[str] = None,
     complaint_keywords: Optional[list[str]] = None,
     min_relevance_score: float = 0.0,
+    use_uid_checkpoint: bool = False,
+    checkpoint_name: Optional[str] = None,
+    uid_window_size: Optional[int] = None,
     service: Optional[ComplaintWorkspaceService] = None,
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
@@ -133,6 +136,9 @@ def import_gmail_evidence(
         complaint_query=complaint_query,
         complaint_keywords=complaint_keywords or [],
         min_relevance_score=min_relevance_score,
+        use_uid_checkpoint=use_uid_checkpoint,
+        checkpoint_name=checkpoint_name,
+        uid_window_size=uid_window_size,
     )
 
 

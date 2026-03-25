@@ -304,6 +304,11 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
         "retaliation",
         "--min-relevance-score",
         "1.5",
+        "--use-uid-checkpoint",
+        "--checkpoint-name",
+        "gmail-resume",
+        "--uid-window-size",
+        "250",
         "--gmail-user",
         "user@gmail.com",
         "--gmail-app-password",
@@ -317,6 +322,9 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
     assert captured["complaint_query"] == "termination retaliation hr complaint"
     assert captured["complaint_keywords"] == ["termination", "retaliation"]
     assert captured["min_relevance_score"] == 1.5
+    assert captured["use_uid_checkpoint"] is True
+    assert captured["checkpoint_name"] == "gmail-resume"
+    assert captured["uid_window_size"] == 250
 
     session = service.get_session("cli-user")["session"]
     documents = session["evidence"]["documents"]
@@ -345,6 +353,9 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
         complaint_query=None,
         complaint_keywords=None,
         min_relevance_score=0.0,
+        use_uid_checkpoint=False,
+        checkpoint_name=None,
+        uid_window_size=None,
     ):
         captured.update(
             {
@@ -352,6 +363,9 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
                 "complaint_query": complaint_query,
                 "complaint_keywords": complaint_keywords,
                 "min_relevance_score": min_relevance_score,
+                "use_uid_checkpoint": use_uid_checkpoint,
+                "checkpoint_name": checkpoint_name,
+                "uid_window_size": uid_window_size,
             }
         )
         service.save_evidence(
@@ -393,6 +407,9 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
             "complaint_query": "termination retaliation hr complaint",
             "complaint_keywords": ["termination", "retaliation"],
             "min_relevance_score": 2.0,
+            "use_uid_checkpoint": True,
+            "checkpoint_name": "gmail-resume",
+            "uid_window_size": 100,
             "gmail_user": "user@gmail.com",
             "gmail_app_password": "app-password",
         },
@@ -405,6 +422,9 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
     assert captured["complaint_query"] == "termination retaliation hr complaint"
     assert captured["complaint_keywords"] == ["termination", "retaliation"]
     assert captured["min_relevance_score"] == 2.0
+    assert captured["use_uid_checkpoint"] is True
+    assert captured["checkpoint_name"] == "gmail-resume"
+    assert captured["uid_window_size"] == 100
 
     session = service.get_session("mcp-user")["session"]
     documents = session["evidence"]["documents"]
@@ -439,6 +459,9 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
         complaint_query=None,
         complaint_keywords=None,
         min_relevance_score=0.0,
+        use_uid_checkpoint=False,
+        checkpoint_name=None,
+        uid_window_size=None,
     ):
         captured.update(
             {
@@ -446,6 +469,9 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
                 "complaint_query": complaint_query,
                 "complaint_keywords": complaint_keywords,
                 "min_relevance_score": min_relevance_score,
+                "use_uid_checkpoint": use_uid_checkpoint,
+                "checkpoint_name": checkpoint_name,
+                "uid_window_size": uid_window_size,
             }
         )
         service.save_evidence(
@@ -479,6 +505,9 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
             "complaint_query": "termination retaliation hr complaint",
             "complaint_keywords": ["termination", "retaliation"],
             "min_relevance_score": 1.25,
+            "use_uid_checkpoint": True,
+            "checkpoint_name": "gmail-resume",
+            "uid_window_size": 50,
             "gmail_user": "user@gmail.com",
             "gmail_app_password": "app-password",
         },
@@ -492,6 +521,9 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
     assert captured["complaint_query"] == "termination retaliation hr complaint"
     assert captured["complaint_keywords"] == ["termination", "retaliation"]
     assert captured["min_relevance_score"] == 1.25
+    assert captured["use_uid_checkpoint"] is True
+    assert captured["checkpoint_name"] == "gmail-resume"
+    assert captured["uid_window_size"] == 50
     assert payload["imported_count"] == 1
 
     session = service.get_session("api-user")["session"]
@@ -2545,6 +2577,31 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
         "Jordan Example alleges retaliation after protected complaints about safety and scheduling.",
     )
     service.generate_complaint("iter-user", requested_relief=["Back pay"])
+    service._persist_ui_readiness(
+        "iter-user",
+        {
+            "workflow_type": "iterative_actor_critic_review",
+            "backend": {"strategy": "multimodal_router", "provider": "codex_cli", "model": "gpt-5.3-codex"},
+            "review": {
+                "summary": "Cached review says the draft stage still hides exports.",
+                "critic_review": {"verdict": "warning", "acceptance_checks": ["Keep export controls visible."]},
+                "complaint_journey": {"tested_stages": ["draft", "export"]},
+            },
+            "screenshot_findings": [
+                {
+                    "stage": "draft",
+                    "surface": "workspace-draft",
+                    "summary": "The export CTA drops below dense metadata.",
+                    "criticisms": [{"problem": "Actors miss the next step after draft generation."}],
+                }
+            ],
+            "optimization_targets": [
+                {"title": "Pin export controls beside the complaint preview", "reason": "The actor should not hunt for the next action."}
+            ],
+            "playwright_followups": ["Verify exports remain visible after testimony updates."],
+            "recommended_changes": ["Keep the export lane sticky within the draft panel."],
+        },
+    )
 
     def fake_iterative(**kwargs):
         assert kwargs["iterations"] == 2
@@ -2552,6 +2609,9 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
         assert kwargs["goals"] == ["reduce intake friction", "keep evidence and draft connected"]
         assert kwargs["supplemental_artifacts"][0]["artifact_type"] == "complaint_export"
         assert "Tighten review-to-draft gatekeeping" in kwargs["supplemental_artifacts"][0]["ui_suggestions_excerpt"]
+        assert kwargs["supplemental_artifacts"][1]["artifact_type"] == "ui_readiness_review"
+        assert "Screenshot findings:" in kwargs["supplemental_artifacts"][1]["review_excerpt"]
+        assert kwargs["supplemental_artifacts"][1]["screenshot_findings"][0]["surface"] == "workspace-draft"
         return {
             "iterations": 2,
             "screenshot_dir": str(tmp_path),
@@ -2597,6 +2657,14 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
                     "target": "Keep export buttons visible next to the generated complaint.",
                 }
             ],
+            "carry_forward_assessment": {
+                "prior_review_available": True,
+                "unresolved_findings": [{"stage": "draft", "surface": "workspace-draft", "summary": "Export CTA still hidden."}],
+                "resolved_findings": [],
+                "continued_optimization_targets": [{"title": "Keep export buttons visible next to the generated complaint."}],
+                "retired_optimization_targets": [],
+                "summary": "1 prior screenshot finding still appears unresolved.",
+            },
             "latest_review_markdown_path": str(tmp_path / "reviews" / "iteration-01-review.md"),
             "latest_review_json_path": str(tmp_path / "reviews" / "iteration-01-review.json"),
             "runs": [
@@ -2630,6 +2698,7 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
     assert cached_payload["screenshot_findings"][0]["surface"] == "workspace-draft"
     assert cached_payload["optimization_targets"][0]["stage"] == "draft"
     assert cached_payload["playwright_followups"] == ["Assert the export control stays enabled after evidence edits."]
+    assert cached_payload["carry_forward_assessment"]["unresolved_findings"][0]["surface"] == "workspace-draft"
     assert cached_payload["latest_review_json_path"] == str(tmp_path / "reviews" / "iteration-01-review.json")
     assert cached_payload["runs"][0]["iteration"] == 1
 
@@ -2669,6 +2738,14 @@ def test_ui_readiness_summary_preserves_screenshot_driven_optimizer_feedback(tmp
                     "target": "Move export controls adjacent to the complaint preview and mediator handoff panel.",
                 }
             ],
+            "carry_forward_assessment": {
+                "prior_review_available": True,
+                "unresolved_findings": [{"stage": "draft", "surface": "workspace-draft", "summary": "Export CTA still hidden."}],
+                "resolved_findings": [{"stage": "review", "surface": "workspace-review", "summary": "Support gap cue looks improved."}],
+                "continued_optimization_targets": [{"title": "Pin export actions in the draft sidebar."}],
+                "retired_optimization_targets": [],
+                "summary": "1 prior screenshot finding still appears unresolved. 1 prior screenshot finding looks improved or no longer visible.",
+            },
             "latest_review_markdown_path": str(tmp_path / "iteration-01-review.md"),
             "latest_review_json_path": str(tmp_path / "iteration-01-review.json"),
             "runs": [{"iteration": 1, "optimization_target_count": 1}],
@@ -2683,6 +2760,7 @@ def test_ui_readiness_summary_preserves_screenshot_driven_optimizer_feedback(tmp
     assert summarized["stage_findings"]["draft"] == ["Draft stage loses the export CTA after a refresh."]
     assert summarized["screenshot_findings"][0]["artifact_path"] == str(tmp_path / "workspace-draft.png")
     assert summarized["optimization_targets"][0]["stage"] == "draft"
+    assert summarized["carry_forward_assessment"]["resolved_findings"][0]["surface"] == "workspace-review"
     assert summarized["latest_review_markdown_path"] == str(tmp_path / "iteration-01-review.md")
     assert summarized["latest_review_json_path"] == str(tmp_path / "iteration-01-review.json")
     assert summarized["runs"][0]["optimization_target_count"] == 1
@@ -2696,6 +2774,54 @@ def test_optimize_ui_tool_supports_closed_loop_workflow_through_cli_and_mcp(monk
         "Jordan Example alleges retaliation after reporting payroll fraud and safety violations.",
     )
     service.generate_complaint("mcp-user", requested_relief=["Back pay"])
+    service._persist_ui_readiness(
+        "cli-user",
+        {
+            "workflow_type": "iterative_actor_critic_review",
+            "backend": {"strategy": "multimodal_router", "provider": "codex_cli", "model": "gpt-5.3-codex"},
+            "review": {
+                "summary": "Cached review says the workspace still needs calmer entry cues.",
+                "critic_review": {"verdict": "warning"},
+                "complaint_journey": {"tested_stages": ["intake", "draft", "export"]},
+            },
+            "screenshot_findings": [
+                {
+                    "stage": "intake",
+                    "surface": "workspace-intake",
+                    "summary": "The form hierarchy makes the next legal step feel unclear.",
+                    "criticisms": [{"problem": "The actor loses confidence before the evidence stage."}],
+                }
+            ],
+            "optimization_targets": [
+                {"title": "Reduce intake clutter", "reason": "A calmer entry path should lower abandonment risk."}
+            ],
+            "playwright_followups": ["Capture the intake hero after the next UI pass."],
+        },
+    )
+    service._persist_ui_readiness(
+        "mcp-user",
+        {
+            "workflow_type": "iterative_actor_critic_review",
+            "backend": {"strategy": "multimodal_router", "provider": "codex_cli", "model": "gpt-5.3-codex"},
+            "review": {
+                "summary": "Cached review says intake-to-draft flow still needs calmer cues.",
+                "critic_review": {"verdict": "warning"},
+                "complaint_journey": {"tested_stages": ["intake", "draft", "export"]},
+            },
+            "screenshot_findings": [
+                {
+                    "stage": "intake",
+                    "surface": "workspace-intake",
+                    "summary": "The form hierarchy makes the next legal step feel unclear.",
+                    "criticisms": [{"problem": "The actor loses confidence before the evidence stage."}],
+                }
+            ],
+            "optimization_targets": [
+                {"title": "Reduce intake clutter", "reason": "A calmer entry path should lower abandonment risk."}
+            ],
+            "playwright_followups": ["Capture the intake hero after the next UI pass."],
+        },
+    )
 
     def fake_closed_loop(**kwargs):
         assert kwargs["method"] == "adversarial"
@@ -2703,6 +2829,8 @@ def test_optimize_ui_tool_supports_closed_loop_workflow_through_cli_and_mcp(monk
         assert kwargs["goals"] == ["make intake calmer", "surface every complaint-generator feature"]
         assert kwargs["supplemental_artifacts"][0]["artifact_type"] == "complaint_export"
         assert "Tighten review-to-draft gatekeeping" in kwargs["supplemental_artifacts"][0]["ui_suggestions_excerpt"]
+        assert kwargs["supplemental_artifacts"][1]["artifact_type"] == "ui_readiness_review"
+        assert kwargs["supplemental_artifacts"][1]["optimization_targets"][0]["title"] == "Reduce intake clutter"
         return {
             "workflow_type": "ui_ux_closed_loop",
             "max_rounds": kwargs["max_rounds"],

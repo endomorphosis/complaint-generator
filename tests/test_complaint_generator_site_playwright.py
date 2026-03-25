@@ -591,6 +591,32 @@ def site_app(monkeypatch: pytest.MonkeyPatch):
                     "reason": "The screenshot review shows the actor can download too early unless readiness stays visually dominant.",
                 }
             ],
+            "carry_forward_assessment": {
+                "prior_review_available": True,
+                "unresolved_findings": [
+                    {
+                        "stage": "Draft",
+                        "surface": "/workspace?tab=draft",
+                        "summary": "Export messaging is still competing with other draft actions.",
+                    }
+                ],
+                "resolved_findings": [
+                    {
+                        "stage": "Review",
+                        "surface": "/workspace?tab=review",
+                        "summary": "Support-gap guidance is more visible than it was before.",
+                    }
+                ],
+                "continued_optimization_targets": [
+                    {
+                        "title": "Pin release-gate messaging beside exports",
+                        "target_surface": "templates/workspace.html",
+                        "reason": "The export lane still needs stronger readiness framing.",
+                    }
+                ],
+                "retired_optimization_targets": [],
+                "summary": "1 prior screenshot finding still appears unresolved. 1 prior screenshot finding looks improved or no longer visible. 1 optimization target carried forward into this pass.",
+            },
             "runs": [
                 {
                     "iteration": 1,
@@ -598,6 +624,7 @@ def site_app(monkeypatch: pytest.MonkeyPatch):
                     "issues_count": 1,
                     "broken_controls_count": 1,
                     "optimization_target_count": 1,
+                    "carry_forward_summary": "1 prior screenshot finding still appears unresolved.",
                 }
             ],
         }
@@ -888,6 +915,21 @@ def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_op
             page.wait_for_function(
                 "() => document.getElementById('workspace-status').textContent.includes('site-full-flow-user')"
             )
+            page.wait_for_function(
+                "() => document.getElementById('continuity-gating-summary').textContent.includes('same DID-backed complaint session') || document.getElementById('continuity-gating-summary').textContent.includes('same DID-backed') || document.getElementById('continuity-gating-summary').textContent.includes('shared complaint record')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('continuity-phase-note').textContent.length > 20"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('workspace-nav-builder').getAttribute('aria-disabled') !== null"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('session-sync-summary').textContent.length > 40 && document.getElementById('session-sync-did-chip').textContent.includes('did:')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('session-tool-activity-summary').textContent.includes('complaint.start_session') || document.getElementById('session-tool-activity-summary').textContent.includes('Latest MCP activity')"
+            )
 
             page.get_by_role('button', name='Evidence', exact=True).click()
             page.locator('#evidence-kind').select_option('testimony')
@@ -929,6 +971,12 @@ def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_op
             page.wait_for_function(
                 "() => { const text = document.getElementById('draft-preview').textContent || ''; return text.includes('COMPLAINT FOR RETALIATION') && text.includes('COUNT I - RETALIATION') && text.includes('SIGNATURE BLOCK'); }"
             )
+            page.wait_for_function(
+                "() => document.getElementById('handoff-builder-button').getAttribute('aria-disabled') === 'false'"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('workspace-nav-builder').getAttribute('aria-disabled') === 'false'"
+            )
 
             page.locator('#export-packet-button').click()
             page.wait_for_function(
@@ -956,6 +1004,21 @@ def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_op
             assert pdf_bytes.startswith(b'%PDF-1.4')
 
             page.get_by_role('button', name='CLI + MCP', exact=True).click()
+            page.wait_for_function(
+                "() => document.getElementById('integrations-operations-preview').textContent.includes('Recommended tool workflow')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('tool-list-summary').textContent.includes('MCP tools')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('tool-list-phase-chips').textContent.includes('Draft + export')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('operations-tool-readiness-button').getAttribute('aria-disabled') === 'false'"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('operations-ui-audit-tool-button').getAttribute('aria-disabled') === 'false'"
+            )
             page.locator('#analyze-complaint-output-button').click()
             page.wait_for_function(
                 "() => document.getElementById('complaint-output-analysis-preview').textContent.includes('\"filing_shape_score\": 96')"
@@ -990,6 +1053,39 @@ def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_op
             )
             page.wait_for_function(
                 "() => document.getElementById('ux-review-metadata').textContent.includes('optimization targets: 1')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Carry-forward assessment')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-artifacts').textContent.includes('Carry-forward assessment')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-metadata').textContent.includes('unresolved prior findings: 1')"
+            )
+
+            page.reload()
+            page.get_by_role('button', name='UX Audit', exact=True).click()
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-summary').textContent.includes('Multimodal actor/critic review complete')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-artifacts').textContent.includes('Screenshot critic: workspace-draft')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Screenshot-driven optimization target')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-metadata').textContent.includes('optimization targets: 1')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Carry-forward assessment')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-artifacts').textContent.includes('Carry-forward assessment')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-metadata').textContent.includes('unresolved prior findings: 1')"
             )
 
             page.locator('#run-browser-audit-button').click()

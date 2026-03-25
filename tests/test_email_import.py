@@ -33,10 +33,15 @@ class _FakeConnection:
         else:
             self._messages_by_folder = {"INBOX": messages}
         self._selected_folder = "INBOX"
+        self._uids_by_folder = {
+            folder_name: [str(101 + index).encode("ascii") for index in range(len(folder_messages))]
+            for folder_name, folder_messages in self._messages_by_folder.items()
+        }
 
     def select(self, folder: str, readonly: bool = True):
         self._selected_folder = folder
-        return "OK", [b""]
+        messages = self._messages_by_folder.get(self._selected_folder, [])
+        return "OK", [str(len(messages)).encode("ascii")]
 
     def search(self, charset, *criteria):
         messages = self._messages_by_folder.get(self._selected_folder, [])
@@ -47,6 +52,33 @@ class _FakeConnection:
         index = int(message_id.decode("ascii")) - 1
         messages = self._messages_by_folder.get(self._selected_folder, [])
         return "OK", [(b"RFC822", messages[index])]
+
+    def uid(self, command: str, *args):
+        command_name = str(command or "").lower()
+        if command_name == "search":
+            messages = self._messages_by_folder.get(self._selected_folder, [])
+            uids = list(self._uids_by_folder.get(self._selected_folder, []))
+            criteria = [str(item.decode("ascii") if isinstance(item, bytes) else item) for item in args[1:]]
+            if "UID" in criteria:
+                uid_index = criteria.index("UID")
+                if uid_index + 1 < len(criteria):
+                    range_text = str(criteria[uid_index + 1] or "")
+                    start_text = range_text.split(":", 1)[0]
+                    start_uid = int(start_text or "1")
+                    filtered_pairs = [
+                        (uid, message)
+                        for uid, message in zip(uids, messages)
+                        if int(uid.decode("ascii")) >= start_uid
+                    ]
+                    uids = [item[0] for item in filtered_pairs]
+            return "OK", [b" ".join(uids)]
+        if command_name == "fetch":
+            uid = args[0]
+            uids = self._uids_by_folder.get(self._selected_folder, [])
+            index = uids.index(uid)
+            messages = self._messages_by_folder.get(self._selected_folder, [])
+            return "OK", [(b"RFC822", messages[index])]
+        raise AssertionError(f"Unsupported IMAP UID command: {command}")
 
     def logout(self):
         return "BYE", [b""]
@@ -110,6 +142,8 @@ def test_import_gmail_evidence_saves_matching_emails_and_attachments(tmp_path, m
     assert payload["status"] == "success"
     assert payload["searched_message_count"] == 2
     assert payload["imported_count"] == 1
+    manifest_path = Path(payload["manifest_path"])
+    assert manifest_path.exists()
     imported = payload["imported"][0]
 
     message_dir = Path(imported["artifact_dir"])
@@ -120,6 +154,12 @@ def test_import_gmail_evidence_saves_matching_emails_and_attachments(tmp_path, m
     metadata = json.loads((message_dir / "message.json").read_text())
     assert metadata["subject"] == "Termination email"
     assert metadata["matched_addresses"] == ["hr@example.com", "employee@example.com"]
+    assert metadata["raw_size_bytes"] > 0
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["matched_email_count"] == 1
+    assert manifest["raw_email_total_bytes"] == payload["raw_email_total_bytes"]
+    assert manifest["emails"][0]["bundle_dir"] == imported["artifact_dir"]
+    assert manifest["emails"][0]["email_path"] == imported["eml_path"]
 
     session = service.get_session("case-user")["session"]
     documents = session["evidence"]["documents"]
@@ -174,6 +214,7 @@ def test_import_gmail_evidence_filters_by_complaint_relevance(tmp_path, monkeypa
     assert payload["searched_message_count"] == 2
     assert payload["imported_count"] == 1
     assert payload["relevance_filtered_count"] == 1
+    assert Path(payload["manifest_path"]).exists()
     assert payload["imported"][0]["subject"] == "Termination hearing request"
     assert payload["imported"][0]["relevance_score"] >= 2.0
 
@@ -227,3 +268,60 @@ def test_import_gmail_evidence_scans_multiple_folders_without_duplicate_message_
     assert payload["imported_count"] == 2
     assert sorted(item["subject"] for item in payload["imported"]) == ["Follow-up to counsel", "Termination email"]
     assert {item["folder"] for item in payload["imported"]} == {"INBOX", "[Gmail]/All Mail"}
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["folders"] == ["INBOX", "[Gmail]/All Mail"]
+    assert manifest["matched_email_count"] == 2
+
+
+def test_import_gmail_evidence_can_resume_by_uid_checkpoint(tmp_path, monkeypatch):
+    matching_messages = [
+        _build_email_bytes(
+            subject="Termination email 1",
+            sender="hr@example.com",
+            recipient="employee@example.com",
+            body="First message in mailbox.",
+        ),
+        _build_email_bytes(
+            subject="Termination email 2",
+            sender="hr@example.com",
+            recipient="employee@example.com",
+            body="Second message in mailbox.",
+        ),
+    ]
+
+    monkeypatch.setattr(
+        "complaint_generator.email_import.create_email_processor",
+        lambda **kwargs: _FakeProcessor(matching_messages),
+    )
+
+    workspace_root = tmp_path / "sessions"
+    evidence_root = tmp_path / "evidence"
+    service = ComplaintWorkspaceService(root_dir=workspace_root)
+
+    async def _run_import():
+        return await import_gmail_evidence(
+            addresses=["hr@example.com", "employee@example.com"],
+            user_id="case-user",
+            claim_element_id="causation",
+            workspace_root=workspace_root,
+            evidence_root=evidence_root,
+            folder="INBOX",
+            gmail_user="user@gmail.com",
+            gmail_app_password="app-password",
+            use_uid_checkpoint=True,
+            checkpoint_name="gmail-resume",
+            uid_window_size=1,
+            service=service,
+        )
+
+    first_payload = anyio.run(_run_import)
+    second_payload = anyio.run(_run_import)
+
+    assert first_payload["imported_count"] == 1
+    assert first_payload["imported"][0]["subject"] == "Termination email 1"
+    assert first_payload["checkpoint"]["folders"]["INBOX"]["last_processed_uid"] == 101
+    assert Path(first_payload["checkpoint_path"]).exists()
+
+    assert second_payload["imported_count"] == 1
+    assert second_payload["imported"][0]["subject"] == "Termination email 2"
+    assert second_payload["checkpoint"]["folders"]["INBOX"]["last_processed_uid"] == 102

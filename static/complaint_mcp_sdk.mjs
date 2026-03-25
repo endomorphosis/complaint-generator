@@ -6,6 +6,7 @@ class ComplaintMcpClient {
         this.fetchImpl = options.fetchImpl || (typeof fetch === 'function' ? fetch.bind(globalThis) : null);
         this._requestId = 1;
         this.didStorageKey = options.didStorageKey || 'complaintGenerator.did';
+        this.lastToolCallStorageKey = options.lastToolCallStorageKey || 'complaintGenerator.sdkLastToolCall';
     }
 
     initialize() {
@@ -54,6 +55,38 @@ class ComplaintMcpClient {
         return this._rpc(method, params);
     }
 
+    _cacheLastToolCall(detail) {
+        if (typeof localStorage === 'undefined') {
+            return detail;
+        }
+        try {
+            localStorage.setItem(this.lastToolCallStorageKey, JSON.stringify(detail));
+        } catch (error) {
+            return detail;
+        }
+        return detail;
+    }
+
+    _publishLastToolCall(detail) {
+        this._cacheLastToolCall(detail);
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+            window.dispatchEvent(new CustomEvent('complaint-mcp-sdk-call', { detail }));
+        }
+        return detail;
+    }
+
+    getLastToolCall() {
+        if (typeof localStorage === 'undefined') {
+            return null;
+        }
+        try {
+            const raw = localStorage.getItem(this.lastToolCallStorageKey);
+            return raw ? JSON.parse(raw) : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
     ping() {
         return this.callJsonRpc('ping', {});
     }
@@ -64,14 +97,32 @@ class ComplaintMcpClient {
     }
 
     async callTool(toolName, argumentsPayload) {
-        const result = await this._rpc('tools/call', {
-            name: toolName,
-            arguments: argumentsPayload || {},
-        });
-        if (result && result.structuredContent) {
-            return result.structuredContent;
+        const startedAt = new Date().toISOString();
+        try {
+            const result = await this._rpc('tools/call', {
+                name: toolName,
+                arguments: argumentsPayload || {},
+            });
+            this._publishLastToolCall({
+                tool_name: toolName,
+                status: 'success',
+                started_at: startedAt,
+                finished_at: new Date().toISOString(),
+            });
+            if (result && result.structuredContent) {
+                return result.structuredContent;
+            }
+            return result;
+        } catch (error) {
+            this._publishLastToolCall({
+                tool_name: toolName,
+                status: 'error',
+                started_at: startedAt,
+                finished_at: new Date().toISOString(),
+                error_message: error && error.message ? error.message : String(error),
+            });
+            throw error;
         }
-        return result;
     }
 
     startSession(userId) {

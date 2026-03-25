@@ -35,6 +35,7 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "local-evidence-note" in content
     assert "import-local-evidence-button" in content
     assert "Import local evidence artifacts" in content
+    assert "Auto-suggest from content" in content
     assert "Bring local PDFs, screenshots, text exports, mailbox files, or whole directories" in content
     assert "One local path per line. Directories are scanned recursively for files." in content
     assert "Pull likely correspondents from intake answers and saved evidence" in content
@@ -120,6 +121,7 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "provider-diagnostics-preview" in content
     assert "workspaceProviderDiagnostics = null;" in content
     assert "latestUiReviewResult = null;" in content
+    assert "normalizeUiReadinessResultForDisplay" in content
     assert "client.getProviderDiagnostics(workspaceUserId)" in content
     assert "client.getToolingContract(workspaceUserId)" in content
     assert "refreshProviderDiagnosticsPanel()" in content
@@ -128,7 +130,50 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Effective default:" in content
     assert "Preference order:" in content
     assert "Screenshot-driven optimization target" in content
+    assert "Carry-forward assessment" in content
+    assert "unresolved prior findings:" in content
+    assert "continuity-gating-summary" in content
+    assert "continuity-session-chip" in content
+    assert "continuity-phase-chip" in content
+    assert "continuity-phase-note" in content
+    assert "handoff-review-gating-note" in content
+    assert "handoff-builder-gating-note" in content
+    assert "integrations-operations-lane" in content
+    assert "integrations-operations-guidance" in content
+    assert "integrations-operations-preview" in content
+    assert "operations-tool-readiness-button" in content
+    assert "operations-mediator-tool-button" in content
+    assert "operations-export-tool-button" in content
+    assert "operations-ui-audit-tool-button" in content
+    assert "tool-list-summary" in content
+    assert "tool-list-phase-chips" in content
+    assert "classifyToolFamily" in content
+    assert "session-sync-summary" in content
+    assert "session-sync-did-chip" in content
+    assert "session-sync-phase-chip" in content
+    assert "session-sync-draft-chip" in content
+    assert "session-tool-activity-summary" in content
+    assert "session-tool-activity-tool-chip" in content
+    assert "session-tool-activity-status-chip" in content
+    assert "renderSessionSyncStatus" in content
+    assert "latestSdkToolActivity" in content
+    assert "loadLastSdkToolActivity" in content
+    assert "complaint-mcp-sdk-call" in content
+    assert "renderOperationalToolLane" in content
+    assert "runOperationalToolReadiness" in content
+    assert "runOperationalMediatorHandoff" in content
+    assert "runOperationalExportReview" in content
+    assert "setButtonGateState" in content
+    assert "setLinkGateState" in content
+    assert "deriveWorkflowState" in content
+    assert "workspace-nav-builder" in content
+    assert "workspace-nav-review" in content
+    assert "surface-link.is-disabled" in content
     assert "Screenshot-linked critic lanes" in content
+    assert "evidence-add-testimony-button" in content
+    assert "evidence-add-document-button" in content
+    assert "draft-export-safety-preview" in content
+    assert "activateEvidenceComposer" in content
     assert "screenshot findings:" in content
     assert "optimization targets:" in content
     assert "item.criticisms" in content

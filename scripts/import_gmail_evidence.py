@@ -29,6 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--complaint-keyword", action="append", default=[], help="Repeatable complaint keyword or phrase.")
     parser.add_argument("--complaint-keyword-file", action="append", default=[], help="Path to newline-delimited complaint keywords or phrases.")
     parser.add_argument("--min-relevance-score", type=float, default=0.0, help="Minimum complaint relevance score required to import a message.")
+    parser.add_argument("--use-uid-checkpoint", action="store_true", help="Resume Gmail imports by IMAP UID checkpoint instead of rescanning from scratch.")
+    parser.add_argument("--checkpoint-name", default=None, help="Optional checkpoint name when managing multiple Gmail import cursors.")
+    parser.add_argument("--uid-window-size", type=int, default=None, help="Maximum number of newly discovered UID messages to import in this run.")
     parser.add_argument("--workspace-root", default=".complaint_workspace/sessions", help="Workspace session root.")
     parser.add_argument("--evidence-root", default=None, help="Directory to write imported email artifacts to.")
     parser.add_argument("--gmail-user", default=os.environ.get("GMAIL_USER") or os.environ.get("EMAIL_USER"), help="Gmail address. Defaults to GMAIL_USER or EMAIL_USER.")
@@ -66,6 +69,9 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         complaint_keywords=args.complaint_keyword,
         complaint_keyword_files=args.complaint_keyword_file,
         min_relevance_score=args.min_relevance_score,
+        use_uid_checkpoint=args.use_uid_checkpoint,
+        checkpoint_name=args.checkpoint_name,
+        uid_window_size=args.uid_window_size,
         gmail_user=args.gmail_user,
         gmail_app_password=args.gmail_app_password,
     )
@@ -99,6 +105,8 @@ def main() -> int:
         if payload.get("complaint_terms"):
             print(f"Complaint terms: {', '.join(payload['complaint_terms'])}")
             print(f"Relevance filtered: {payload.get('relevance_filtered_count', 0)}")
+        if payload.get("checkpoint_path"):
+            print(f"Checkpoint: {payload['checkpoint_path']}")
         for item in payload.get("imported") or []:
             score = float(item.get("relevance_score", 0.0) or 0.0)
             matched_terms = ", ".join(item.get("matched_terms") or [])

@@ -93,6 +93,13 @@
     text-decoration: none;
 }
 
+.cg-app-shell__nav-link.is-disabled,
+.cg-app-shell__action.is-disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 .cg-app-shell__chip {
     padding: 10px 12px;
     background: #f8fafc;
@@ -220,6 +227,13 @@
 .cg-app-shell__meta {
     margin-top: 14px;
     color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.cg-app-shell__phase-note {
+    margin-top: 8px;
+    color: #475569;
     font-size: 12px;
     line-height: 1.5;
 }

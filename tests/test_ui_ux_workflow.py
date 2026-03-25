@@ -120,6 +120,62 @@ def test_build_ui_ux_review_prompt_includes_artifacts_and_surface_contract(tmp_p
     assert "claim type, draft strategy, and exported complaint filing quality remain aligned" in prompt
 
 
+def test_build_ui_ux_review_prompt_includes_cached_ui_readiness_artifacts(tmp_path):
+    _write_artifact(tmp_path, "workspace")
+
+    prompt = build_ui_ux_review_prompt(
+        iteration=3,
+        artifacts=workflow_module.collect_review_artifacts(
+            tmp_path,
+            supplemental_artifacts=[
+                {
+                    "name": "workspace-cached-ui-readiness",
+                    "url": "/workspace?target_tab=ux-review",
+                    "title": "Cached UX Audit Review",
+                    "artifact_type": "ui_readiness_review",
+                    "verdict": "Needs repair",
+                    "score": 72,
+                    "critic_verdict": "warning",
+                    "workflow_type": "iterative_actor_critic_review",
+                    "screenshot_findings": [
+                        {
+                            "stage": "Draft",
+                            "surface": "workspace-draft",
+                            "summary": "Export controls are visually buried beneath dense metadata.",
+                        }
+                    ],
+                    "optimization_targets": [
+                        {
+                            "title": "Pin export controls beside the complaint preview",
+                            "reason": "The actor should not hunt for the next step after draft generation.",
+                        }
+                    ],
+                    "playwright_followups": [
+                        "Verify the export controls stay visible after testimony edits.",
+                    ],
+                    "recommended_changes": [
+                        "Keep the export lane sticky within the draft panel.",
+                    ],
+                    "review_excerpt": "Cached review says the draft stage still hides exports.",
+                }
+            ],
+        ),
+    )
+
+    assert "Cached review artifact type: ui_readiness_review" in prompt
+    assert "Cached UI verdict: Needs repair" in prompt
+    assert "Previously observed screenshot findings:" in prompt
+    assert "workspace-draft" in prompt
+    assert "Previously proposed optimization targets:" in prompt
+    assert "Pin export controls beside the complaint preview" in prompt
+    assert "Previously proposed Playwright follow-ups:" in prompt
+    assert "Verify the export controls stay visible after testimony edits." in prompt
+    assert "Previously recommended changes:" in prompt
+    assert "Keep the export lane sticky within the draft panel." in prompt
+    assert "Cached review excerpt:" in prompt
+    assert "prior unresolved hypotheses" in prompt
+
+
 def test_build_ui_ux_review_prompt_uses_default_goals_and_notes_when_not_supplied(tmp_path):
     _write_artifact(tmp_path, "workspace")
 
@@ -301,6 +357,59 @@ Warning: the flow is usable, but the screenshots still show misleading hierarchy
     assert len(structured["screenshot_findings"]) == 2
     assert structured["screenshot_findings"][0]["criticisms"]
     assert structured["optimization_targets"][0]["target_surface"]
+
+
+def test_structure_ui_ux_review_builds_carry_forward_assessment_from_cached_ui_review_artifact(tmp_path):
+    artifacts = workflow_module.collect_screenshot_artifacts(tmp_path)
+    _write_artifact(tmp_path, "workspace-draft", url="http://example.test/workspace?tab=draft")
+    artifacts = workflow_module.collect_screenshot_artifacts(tmp_path)
+    artifacts.append(
+        {
+            "name": "workspace-cached-ui-readiness",
+            "artifact_type": "ui_readiness_review",
+            "screenshot_findings": [
+                {
+                    "stage": "Draft",
+                    "surface": "http://example.test/workspace?tab=draft",
+                    "summary": "Export controls are visually buried beneath dense metadata.",
+                },
+                {
+                    "stage": "Review",
+                    "surface": "http://example.test/workspace?tab=review",
+                    "summary": "Support gaps were too easy to miss.",
+                },
+            ],
+            "optimization_targets": [
+                {
+                    "title": "UX repair 1",
+                    "target_surface": "templates/workspace.html",
+                    "reason": "Pin export controls beside the complaint preview.",
+                }
+            ],
+        }
+    )
+
+    review_text = """# Top Risks
+- The export controls are still too easy to miss on the draft screen.
+
+# High-Impact UX Fixes
+- Pin export controls beside the complaint preview and mediator handoff panel.
+
+# Stage Findings
+## Draft
+The draft stage still buries the export action below metadata and secondary controls.
+
+# Critic Verdict
+Warning: the draft flow still needs a clearer next step.
+"""
+    structured = structure_ui_ux_review(review_text=review_text, artifacts=artifacts, iteration=2)
+
+    carry_forward = structured["carry_forward_assessment"]
+    assert carry_forward["prior_review_available"] is True
+    assert carry_forward["unresolved_findings"][0]["stage"] == "Draft"
+    assert carry_forward["resolved_findings"][0]["stage"] == "Review"
+    assert carry_forward["continued_optimization_targets"][0]["title"] == "UX repair 1"
+    assert "still appear unresolved" in carry_forward["summary"]
 
 
 def test_review_workflow_routes_complaint_output_analysis_into_multimodal_prompt(monkeypatch, tmp_path):
