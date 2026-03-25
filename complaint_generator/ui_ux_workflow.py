@@ -20,6 +20,7 @@ DEFAULT_UI_UX_REVIEW_GOALS = [
     "Expose every major complaint-generator capability with clearer next-step guidance so users can actually use the full system.",
     "Prefer calmer, trauma-informed language and remove friction that makes evidence capture or draft completion feel risky or confusing.",
     "Make the end-to-end actor journey work cleanly from testimony and intake through evidence upload, claim review, complaint generation, and final draft revision.",
+    "Make the final markdown, PDF, and docx outputs read like a filing-ready legal complaint with a coherent caption, jurisdiction section, counts, prayer for relief, signature block, and export/download affordances that match the selected claim type.",
 ]
 DEFAULT_COMPLAINT_WORKFLOW_CAPABILITIES = [
     "Intake questions can be understood and completed without legal coaching.",
@@ -33,7 +34,8 @@ DEFAULT_COMPLAINT_WORKFLOW_CAPABILITIES = [
 DEFAULT_UI_UX_REVIEW_NOTES = (
     "Review the interface as if a stressed first-time complainant and a complaint operator both need to succeed without hand-holding. "
     "Actively look for places where the user could miss a required step, misunderstand what evidence helps prove, lose track of progress, "
-    "or fail to discover package, CLI, MCP, and browser SDK capabilities that should remain part of one coherent complaint workflow."
+    "or fail to discover package, CLI, MCP, and browser SDK capabilities that should remain part of one coherent complaint workflow. "
+    "Treat any mismatch between the selected claim type, the visible complaint framing, and the exported pleading shape as a release blocker."
 )
 
 
@@ -201,6 +203,7 @@ def build_ui_ux_review_prompt(
         "Treat this as an actor/critic workflow audit with adversarial pressure-testing: identify where a real user could fail to complete the full complaint journey, where the UI hides the next best step, or where major product capabilities disappear from view.",
         "Explicitly audit visible buttons, links, tabs, and handoff controls. Treat any dead, misleading, duplicated, or context-losing control as a release blocker until proven otherwise.",
         "Use an actor/critic lens: the actor should propose the smallest high-impact UX repair sequence, and the critic should decide whether the dashboard is actually safe to send legal clients through.",
+        "Do not treat a workflow as successful unless the final complaint output still looks like a formal pleading and the export/download controls produce artifacts consistent with the selected claim type and draft strategy.",
         f"Iteration: {iteration}",
     ]
     prompt_sections.extend(
@@ -288,10 +291,17 @@ def build_ui_ux_review_prompt(
                 "If exported complaint markdown or PDF artifacts are present, critique whether the final complaint output is coherent, filing-shaped, and consistent with what the UI promised the user during intake, review, and draft generation."
             ),
             (
+                "Explicitly verify whether the generated complaint still presents a recognizable caption, civil action header, jurisdiction or venue section, factual allegations, count headings, prayer for relief, and signature block. "
+                "If any of those elements are missing, mislabeled, or generic, treat that as both a complaint-output defect and a UI/UX failure."
+            ),
+            (
                 "If complaint-output artifacts include claim-type alignment data, explicitly judge whether the UI let the selected claim type drift into the wrong complaint heading, wrong count heading, or a generic pleading shape."
             ),
             (
                 "If complaint-output-informed UI suggestions are present, use them to propose concrete changes to buttons, validation, warnings, panel hierarchy, and handoff copy that would make the generated complaint stronger before export."
+            ),
+            (
+                "Under `Playwright Assertions To Add`, include assertions that markdown, PDF, and docx downloads succeed, and that the markdown or PDF visibly contains the formal pleading sections the UI promised."
             ),
             (
                 "Use the screenshot evidence together with any complaint-output analysis excerpts as a single actor/critic review context: the multimodal router should reason across both when images are available, and the llm_router fallback should still preserve those complaint-output suggestions in the review."

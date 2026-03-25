@@ -1037,6 +1037,8 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "intake_history": [],
         "evidence": {"testimony": [], "documents": []},
         "draft": None,
+        "latest_packet_export": None,
+        "latest_export_critic": None,
         "ui_readiness": None,
     }
 
@@ -1065,6 +1067,8 @@ class ComplaintWorkspaceService:
         payload.setdefault("intake_history", [])
         payload.setdefault("evidence", {"testimony": [], "documents": []})
         payload.setdefault("draft", None)
+        payload.setdefault("latest_packet_export", None)
+        payload.setdefault("latest_export_critic", None)
         payload.setdefault("ui_readiness", None)
         return payload
 
@@ -2420,7 +2424,7 @@ class ComplaintWorkspaceService:
         ui_feedback = self._analyze_complaint_output(packet, artifact_analysis)
         draft_fallback_reason = str(draft.get("draft_fallback_reason") or "").strip()
         complaint_issues = list(ui_feedback.get("issues") or [])
-        return {
+        payload = {
             "packet": packet,
             "artifacts": artifacts,
             "artifact_analysis": artifact_analysis,
@@ -2441,6 +2445,25 @@ class ComplaintWorkspaceService:
                 "complaint_output_router_backend": deepcopy(((ui_feedback.get("router_review") or {}).get("backend") or {})),
             },
         }
+        persisted_state = self._load_state(str((session.get("session") or {}).get("user_id") or user_id or DEFAULT_USER_ID))
+        persisted_state["latest_packet_export"] = {
+            "packet": {
+                "title": str(packet.get("title") or "").strip(),
+                "claim_type": str(packet.get("claim_type") or "retaliation").strip() or "retaliation",
+                "exported_at": str(packet.get("exported_at") or _utc_now()),
+                "draft": {
+                    "title": str(draft.get("title") or "").strip(),
+                    "body": str(draft.get("body") or ""),
+                    "draft_strategy": str(draft.get("draft_strategy") or "template"),
+                    "draft_fallback_reason": draft_fallback_reason,
+                    "draft_normalizations": list(draft.get("draft_normalizations") or []),
+                },
+            },
+            "packet_summary": deepcopy(payload.get("packet_summary") or {}),
+            "ui_feedback": deepcopy(ui_feedback),
+        }
+        self._save_state(persisted_state)
+        return payload
 
     def _build_packet_snapshot(self, user_id: Optional[str]) -> Dict[str, Any]:
         session = self.get_session(user_id)
@@ -2995,6 +3018,35 @@ class ComplaintWorkspaceService:
                 pass
             return "unavailable"
 
+        def _resolve_openai_key() -> str:
+            resolver = getattr(llm_router, "_resolve_openai_api_key", None)
+            if callable(resolver):
+                try:
+                    resolved = str(resolver() or "").strip()
+                    if resolved:
+                        return resolved
+                except Exception:
+                    pass
+
+            resolved = _first_env("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
+            if resolved:
+                return resolved
+
+            resolved = _vault_value("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
+            if resolved:
+                return resolved
+
+            resolved = _keyring_value("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
+            if resolved:
+                return resolved
+
+            try:
+                from ipfs_datasets_py.utils.engine_env import _openai_key_from_common_files
+
+                return str(_openai_key_from_common_files() or "").strip()
+            except Exception:
+                return ""
+
         def _source_for_hf() -> str:
             if _first_env(
                 "IPFS_DATASETS_PY_HF_API_TOKEN",
@@ -3034,7 +3086,7 @@ class ComplaintWorkspaceService:
         forced_provider = str(os.getenv("IPFS_DATASETS_PY_LLM_PROVIDER", "") or "").strip()
         codex_path = shutil.which("codex") or ""
         copilot_path = shutil.which("copilot") or ""
-        openai_key = str(llm_router._resolve_openai_api_key() or "").strip()
+        openai_key = _resolve_openai_key()
         hf_token = str(llm_router._resolve_hf_api_token() or "").strip()
         copilot_provider = llm_router._builtin_provider_by_name("copilot_cli")
 

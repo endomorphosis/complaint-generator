@@ -92,6 +92,10 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "type": "object",
         "properties": {"user_id": {"type": "string"}},
     },
+    "complaint.get_tooling_contract": {
+        "type": "object",
+        "properties": {"user_id": {"type": "string"}},
+    },
     "complaint.generate_complaint": {
         "type": "object",
         "properties": {
@@ -141,6 +145,10 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "properties": {"user_id": {"type": "string"}},
     },
     "complaint.get_formal_diagnostics": {
+        "type": "object",
+        "properties": {"user_id": {"type": "string"}},
+    },
+    "complaint.get_filing_provenance": {
         "type": "object",
         "properties": {"user_id": {"type": "string"}},
     },

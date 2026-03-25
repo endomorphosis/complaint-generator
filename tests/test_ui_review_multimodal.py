@@ -164,6 +164,21 @@ def test_create_ui_review_report_times_out_multimodal_and_falls_back_to_text(mon
             time.sleep(0.05)
             return '{"summary":"too late","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
 
+def test_run_ui_review_workflow_falls_back_to_text_router_when_only_export_artifacts_exist(monkeypatch, tmp_path: Path):
+    (tmp_path / "workspace-export-artifacts.json").write_text(
+        (
+            '{'
+            '"artifact_type":"complaint_export",'
+            '"claim_type":"retaliation",'
+            '"draft_strategy":"llm_router",'
+            '"filing_shape_score":94, '
+            '"markdown_filename":"complaint.md",'
+            '"pdf_filename":"complaint.pdf",'
+            '"ui_suggestions_excerpt":"Keep formal pleading warnings visible before download."'
+            '}'
+        )
+    )
+
     class FakeTextBackend:
         def __init__(self, **kwargs):
             self.id = kwargs.get("id", "ui-review")
@@ -282,6 +297,17 @@ def test_aggregate_page_review_reports_merges_page_level_feedback():
     assert aggregated["critic_review"]["verdict"] == "warning"
     assert "workspace-intake: workspace-intake evidence finding" in aggregated["stage_findings"]["Evidence"]
     assert "workspace-evidence: workspace-evidence evidence finding" in aggregated["stage_findings"]["Evidence"]
+            assert "Keep formal pleading warnings visible before download." in prompt
+            return '{"summary":"Artifact-only review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    monkeypatch.setattr(ui_review_module, "LLMRouterBackend", FakeTextBackend)
+
+    report = ui_review_module.run_ui_review_workflow(str(tmp_path))
+
+    assert report["backend"]["strategy"] == "llm_router"
+    assert report["backend"]["fallback_from"] == "multimodal_router"
+    assert report["review"]["summary"] == "Artifact-only review."
+    assert report["complaint_output_feedback"]["export_artifact_count"] == 1
 
 
 def test_build_complaint_output_review_prompt_includes_claim_type_context():

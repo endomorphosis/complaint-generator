@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+import json
 
 from adversarial_harness import Optimizer, UIUXOptimizationBundle
 
@@ -140,6 +141,7 @@ def test_run_agentic_ui_ux_autopatch_executes_optimizer_against_ui_task(monkeypa
     assert result["task"]["target_files"] == ["templates/workspace.html"]
     assert captured["task"].metadata["workflow_type"] == "ui_ux_autopatch"
     assert captured["task"].metadata["complaint_output_release_gate"]["verdict"] == "blocked"
+    assert captured["task"].metadata["actor_critic_review"]["critic_test_obligations"] == []
 
 
 def test_run_agentic_ui_ux_feedback_loop_revalidates_and_stops_when_reviews_stabilize(monkeypatch, tmp_path):
@@ -218,9 +220,18 @@ def test_run_agentic_ui_ux_feedback_loop_revalidates_and_stops_when_reviews_stab
     assert result["workflow_type"] == "ui_ux_closed_loop"
     assert result["rounds_executed"] == 2
     assert result["stop_reason"] == "validation_review_stable"
+    assert result["complaint_output_release_gate"]["verdict"] == "pass"
     assert result["cycles"][0]["optimizer_result"]["changed_files"]
     assert result["cycles"][0]["complaint_output_pre_review"]["export_artifact_count"] == 1
     assert result["cycles"][0]["complaint_output_pre_review"]["release_gate"]["verdict"] == "pass"
+    patch_briefs_path = result["cycles"][0]["patch_briefs_path"]
+    round_summary_path = result["cycles"][0]["round_summary_path"]
+    patch_briefs_payload = json.loads((tmp_path / "reviews" / "round-01" / "patch-briefs.json").read_text())
+    round_summary_payload = json.loads((tmp_path / "reviews" / "round-01" / "round-summary.json").read_text())
+    assert patch_briefs_path.endswith("patch-briefs.json")
+    assert round_summary_path.endswith("round-summary.json")
+    assert "patch_briefs" in patch_briefs_payload
+    assert round_summary_payload["patch_briefs_path"] == patch_briefs_path
     assert result["complaint_output_feedback"]["export_artifact_count"] == 1
     assert result["complaint_output_release_gate"]["verdict"] == "pass"
     assert "actor_critic_summary" in result

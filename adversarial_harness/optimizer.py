@@ -235,6 +235,7 @@ class UIOptimizationBundle:
     playwright_followups: List[str]
     complaint_output_feedback: Dict[str, Any]
     target_files: List[str]
+    patch_briefs: List[Dict[str, Any]]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -252,6 +253,7 @@ class UIOptimizationBundle:
             "playwright_followups": list(self.playwright_followups or []),
             "complaint_output_feedback": dict(self.complaint_output_feedback or {}),
             "target_files": list(self.target_files or []),
+            "patch_briefs": list(self.patch_briefs or []),
         }
 
 
@@ -3139,10 +3141,43 @@ class Optimizer:
                 validation_review,
             )
             serialized_result = _serialize_optimizer_result(optimize_result)
+            patch_briefs_payload = {
+                "round": round_index,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "patch_briefs": list(getattr(bundle, "patch_briefs", []) or []),
+                "target_files": list(bundle.target_files or []),
+                "task_id": str(getattr(task, "task_id", "")),
+                "pytest_target": str(pytest_target),
+            }
+            patch_briefs_path = self._write_json_artifact(
+                round_dir / "patch-briefs.json",
+                patch_briefs_payload,
+            )
+            complaint_output_validation_review = {
+                **self._extract_complaint_output_feedback(validation_review_payload),
+                "release_gate": self._build_complaint_output_release_gate(
+                    self._extract_complaint_output_feedback(validation_review_payload)
+                ),
+            }
+            round_summary_path = self._write_json_artifact(
+                round_dir / "round-summary.json",
+                {
+                    "round": round_index,
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "task_id": str(getattr(task, "task_id", "")),
+                    "patch_briefs_path": patch_briefs_path,
+                    "pre_review_json_path": str(pre_workflow.get("latest_review_json_path") or ""),
+                    "validation_review_json_path": str(validation_workflow.get("latest_review_json_path") or ""),
+                    "complaint_output_validation_review": complaint_output_validation_review,
+                    "optimizer_result": serialized_result,
+                },
+            )
             cycles.append(
                 {
                     "round": round_index,
                     "bundle": bundle.to_dict(),
+                    "patch_briefs_path": patch_briefs_path,
+                    "round_summary_path": round_summary_path,
                     "task": {
                         "task_id": str(getattr(task, "task_id", "")),
                         "description": str(getattr(task, "description", "")),
@@ -3160,12 +3195,7 @@ class Optimizer:
                             self._extract_complaint_output_feedback(pre_review_payload)
                         ),
                     },
-                    "complaint_output_validation_review": {
-                        **self._extract_complaint_output_feedback(validation_review_payload),
-                        "release_gate": self._build_complaint_output_release_gate(
-                            self._extract_complaint_output_feedback(validation_review_payload)
-                        ),
-                    },
+                    "complaint_output_validation_review": complaint_output_validation_review,
                     "pre_review": pre_workflow,
                     "validation_review": validation_workflow,
                 }
@@ -3698,6 +3728,12 @@ class Optimizer:
                     "sdk_considerations": "Preserve MCP SDK draft generation while exposing claim-type alignment warnings before export.",
                 }
             )
+        patch_briefs = self._build_ui_patch_briefs(
+            review=review,
+            recommended_changes=recommended_changes,
+            complaint_output_feedback=complaint_output_feedback,
+            target_files=target_files,
+        )
         return UIOptimizationBundle(
             timestamp=datetime.now(UTC).isoformat(),
             screenshot_dir=str(report.get("screenshot_dir") or ""),
@@ -3719,7 +3755,169 @@ class Optimizer:
             playwright_followups=[str(item) for item in list(review.get("playwright_followups") or []) if str(item)],
             complaint_output_feedback=complaint_output_feedback,
             target_files=target_files,
+            patch_briefs=patch_briefs,
         )
+
+    @staticmethod
+    def _build_ui_patch_briefs(
+        *,
+        review: Dict[str, Any],
+        recommended_changes: List[Dict[str, Any]],
+        complaint_output_feedback: Dict[str, Any],
+        target_files: List[str],
+    ) -> List[Dict[str, Any]]:
+        briefs: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def add_brief(
+            *,
+            brief_id: str,
+            title: str,
+            surface: str,
+            problem: str,
+            recommended_action: str,
+            validation_checks: List[str],
+            files: List[str],
+            severity: str = "warning",
+            related_controls: List[str] | None = None,
+        ) -> None:
+            normalized = brief_id.strip().lower()
+            if not normalized or normalized in seen:
+                return
+            seen.add(normalized)
+            briefs.append(
+                {
+                    "id": brief_id,
+                    "title": title,
+                    "surface": surface,
+                    "severity": severity,
+                    "problem": problem,
+                    "recommended_action": recommended_action,
+                    "validation_checks": [str(item).strip() for item in validation_checks if str(item).strip()],
+                    "target_files": [str(item).strip() for item in files if str(item).strip()],
+                    "related_controls": [str(item).strip() for item in list(related_controls or []) if str(item).strip()],
+                }
+            )
+
+        for index, item in enumerate(list(review.get("broken_controls") or []), start=1):
+            if not isinstance(item, dict):
+                continue
+            control = str(item.get("control") or f"control-{index}").strip()
+            surface = str(item.get("surface") or "/workspace").strip()
+            add_brief(
+                brief_id=f"broken-control-{index}-{control.lower().replace(' ', '-')}",
+                title=f"Repair {control}",
+                surface=surface,
+                severity="critical",
+                problem=str(item.get("failure_mode") or item.get("problem") or "Broken or misleading UI control.").strip(),
+                recommended_action=str(item.get("repair") or "Repair the broken control and clarify the next state transition.").strip(),
+                validation_checks=[
+                    f"Click `{control}` on `{surface}` and confirm the next complaint step is visibly obvious.",
+                    "Ensure the actor journey can proceed without losing shared complaint state.",
+                ],
+                files=target_files,
+                related_controls=[control],
+            )
+
+        for index, item in enumerate(recommended_changes, start=1):
+            if not isinstance(item, dict):
+                continue
+            shared_code_path = str(item.get("shared_code_path") or "").strip()
+            validation_checks = [
+                str(item.get("sdk_considerations") or "").strip(),
+                "Re-run the Playwright complaint flow and verify complaint generation and exports still succeed.",
+            ]
+            files = [shared_code_path] if shared_code_path else list(target_files)
+            add_brief(
+                brief_id=f"recommended-change-{index}",
+                title=str(item.get("title") or f"Recommended change {index}").strip(),
+                surface="/workspace",
+                severity="warning",
+                problem=str(item.get("implementation_notes") or "Recommended UI/UX improvement from actor/critic review.").strip(),
+                recommended_action=str(item.get("implementation_notes") or "Apply the recommended UI/UX repair.").strip(),
+                validation_checks=validation_checks,
+                files=files,
+            )
+
+        formal_diagnostics = dict(complaint_output_feedback.get("formal_diagnostics") or {})
+        top_formal_findings = [
+            str(item).strip()
+            for item in list(formal_diagnostics.get("top_formal_findings") or [])
+            if str(item).strip()
+        ]
+        if top_formal_findings:
+            add_brief(
+                brief_id="complaint-output-formality",
+                title="Restore filing-ready complaint shape",
+                surface="/workspace?tab=draft",
+                severity="critical",
+                problem="The generated complaint output still has filing-quality defects.",
+                recommended_action="Adjust draft-stage guidance, release gating, and export warnings until the generated complaint consistently preserves formal pleading structure.",
+                validation_checks=[
+                    "Generate a complaint and confirm the preview and exported markdown/PDF include caption, jurisdiction or venue, counts, prayer for relief, and signature block.",
+                    *top_formal_findings[:3],
+                ],
+                files=["templates/workspace.html", "applications/complaint_workspace.py"],
+                related_controls=["Generate Draft", "Export Markdown", "Export PDF", "Analyze Output"],
+            )
+
+        alignment_score = int(complaint_output_feedback.get("claim_type_alignment_score") or 0)
+        if 0 <= alignment_score < 80:
+            add_brief(
+                brief_id="claim-type-alignment",
+                title="Prevent claim-type drift before export",
+                surface="/workspace?tab=draft",
+                severity="critical",
+                problem="The UI allowed the selected claim type and the final pleading shape to drift apart.",
+                recommended_action="Keep claim type, complaint heading, and expected count heading visible during draft and export, and block release when alignment drops.",
+                validation_checks=[
+                    "Switch claim types in the workspace and confirm the draft title, complaint heading, and count heading all update together.",
+                    "Verify exported markdown/PDF match the selected claim type.",
+                ],
+                files=["templates/workspace.html", "applications/complaint_workspace.py", "playwright/tests/complaint-flow.spec.js"],
+                related_controls=["Claim Type", "Generate Draft", "Export Packet"],
+            )
+
+        return briefs
+
+    @staticmethod
+    def _write_json_artifact(path: Path, payload: Dict[str, Any]) -> str:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        return str(path)
+
+    @staticmethod
+    def _load_patch_briefs_from_artifact(path: str | Path | None) -> List[Dict[str, Any]]:
+        candidate = Path(str(path or "").strip())
+        if not str(candidate):
+            return []
+        try:
+            payload = json.loads(candidate.read_text())
+        except Exception:
+            return []
+        briefs = payload.get("patch_briefs")
+        if not isinstance(briefs, list):
+            return []
+        return [dict(item) for item in briefs if isinstance(item, dict)]
+
+    @staticmethod
+    def _prioritize_ui_patch_briefs(briefs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        severity_rank = {"critical": 0, "warning": 1, "ready": 2}
+        normalized = [dict(item) for item in briefs if isinstance(item, dict)]
+
+        def _sort_key(item: Dict[str, Any]) -> tuple[Any, ...]:
+            severity = str(item.get("severity") or "warning").strip().lower()
+            controls = list(item.get("related_controls") or [])
+            checks = list(item.get("validation_checks") or [])
+            return (
+                severity_rank.get(severity, 9),
+                -len(controls),
+                -len(checks),
+                str(item.get("surface") or ""),
+                str(item.get("title") or ""),
+            )
+
+        return sorted(normalized, key=_sort_key)
 
     def build_ui_patch_tasks(
         self,
@@ -3749,14 +3947,39 @@ class Optimizer:
             if isinstance(item, dict)
         ]
         recommendations = [item for item in recommendations if item]
+        report_patch_briefs_path = str(
+            (ui_review_report or {}).get("patch_briefs_path")
+            or (metadata or {}).get("patch_briefs_path")
+            or ""
+        ).strip()
+        artifact_patch_briefs = self._load_patch_briefs_from_artifact(report_patch_briefs_path)
+        prioritized_patch_briefs = self._prioritize_ui_patch_briefs(
+            artifact_patch_briefs or list(bundle.patch_briefs or [])
+        )
+        top_patch_brief = dict(prioritized_patch_briefs[0]) if prioritized_patch_briefs else {}
+        narrowed_target_files = [
+            Path(path)
+            for path in list(top_patch_brief.get("target_files") or [])
+            if str(path).strip()
+        ] or [Path(path) for path in bundle.target_files]
+        if top_patch_brief:
+            top_brief_summary = (
+                f"Top patch brief: {str(top_patch_brief.get('title') or '').strip()}. "
+                f"Surface: {str(top_patch_brief.get('surface') or '').strip()}. "
+                f"Problem: {str(top_patch_brief.get('problem') or '').strip()} "
+                f"Recommended action: {str(top_patch_brief.get('recommended_action') or '').strip()} "
+                f"Validation: {' | '.join(str(item).strip() for item in list(top_patch_brief.get('validation_checks') or [])[:3])}."
+            ).strip()
+        else:
+            top_brief_summary = "No single patch brief outranked the others; use the overall report summary."
         task = task_cls(
             task_id=f"ui_ux_autopatch_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}",
             description=(
                 "Use the screenshot-driven UI optimization lane to improve the complaint MCP workspace, "
                 "preserve JavaScript MCP SDK usage, and keep the package/CLI/MCP contract coherent. "
-                f"Current review summary: {summary}"
+                f"Current review summary: {summary} {top_brief_summary}"
             ),
-            target_files=[Path(path) for path in bundle.target_files],
+            target_files=narrowed_target_files,
             method=getattr(method_enum, normalized_method.upper()),
             priority=int(priority),
             constraints=dict(constraints or {}),
@@ -3782,6 +4005,11 @@ class Optimizer:
                     "draft_fallback_reason": str((bundle.complaint_output_feedback or {}).get("draft_fallback_reason") or ""),
                     "draft_normalizations": list((bundle.complaint_output_feedback or {}).get("draft_normalizations") or []),
                     "recommended_target_files": list(bundle.target_files or []),
+                    "patch_briefs": list(bundle.patch_briefs or []),
+                    "patch_briefs_path": report_patch_briefs_path,
+                    "prioritized_patch_briefs": prioritized_patch_briefs,
+                    "top_patch_brief": top_patch_brief,
+                    "active_target_files": [str(path) for path in narrowed_target_files],
                 },
                 "ui_review_report": dict(ui_review_report or {}),
                 **dict(metadata or {}),

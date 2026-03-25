@@ -2072,15 +2072,18 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 return;
             }
             const selectedAddresses = new Set(currentGmailImportAddresses());
-            /* Legacy contract marker: data-gmail-detected-address-chip="${escapeHtml(address)}" */
-            container.innerHTML = gmailImportDetectedAddresses.map((item) => `
+            container.innerHTML = gmailImportDetectedAddresses.map((item) => {
+                const address = String(item.address || '');
+                const sourceLabel = (item.sources || []).join(', ') || 'case';
+                return `
                 <button
-                    class="chip ${selectedAddresses.has(item.address) ? 'good' : ''}"
+                    class="chip ${selectedAddresses.has(address) ? 'good' : ''}"
                     type="button"
-                    data-gmail-detected-address-chip="${escapeHtml(item.address)}"
-                    title="${selectedAddresses.has(item.address) ? `Remove ${escapeHtml(item.address)} from the Gmail import list` : `Add ${escapeHtml(item.address)} to the Gmail import list`}"
-                >${escapeHtml(item.address)} [${escapeHtml((item.sources || []).join(', ') || 'case')}] ${selectedAddresses.has(item.address) ? 'selected' : 'add'}</button>
-            `).join('');
+                    data-gmail-detected-address-chip="${escapeHtml(address)}"
+                    title="${selectedAddresses.has(address) ? `Remove ${escapeHtml(address)} from the Gmail import list` : `Add ${escapeHtml(address)} to the Gmail import list`}"
+                >${escapeHtml(address)} [${escapeHtml(sourceLabel)}] ${selectedAddresses.has(address) ? 'selected' : 'add'}</button>
+            `;
+            }).join('');
         }
 
         function renderGmailImportSuggestedAddressChips() {
@@ -2697,6 +2700,7 @@ ${cliAddressLines}
 
             const readinessLines = currentReleaseGate
                 ? [
+                    `Record support: ${supportedElements} supported / ${missingElements} missing elements`,
                     `Release gate verdict: ${String(currentReleaseGate.verdict || 'unknown').toUpperCase()}`,
                     currentReleaseGate.reason ? `Reason: ${currentReleaseGate.reason}` : 'Reason: No release-gate reason provided yet.',
                     `Filing shape score: ${Number(currentReleaseGate.filing_shape_score || 0)}`,
@@ -3667,6 +3671,17 @@ ${cliAddressLines}
             workspaceUiReadiness = await client.getUiReadiness(workspaceUserId);
             workspaceClientReleaseGate = await client.getClientReleaseGate(workspaceUserId);
             workspaceProviderDiagnostics = await client.getProviderDiagnostics(workspaceUserId);
+            if ((!latestPacketExport || !latestPacketExport.packet) && workspaceComplaintReadiness && workspaceComplaintReadiness.has_draft) {
+                try {
+                    latestPacketExport = await client.exportComplaintPacket(workspaceUserId);
+                    if (!latestComplaintOutputAnalysis && latestPacketExport && latestPacketExport.ui_feedback) {
+                        latestComplaintOutputAnalysis = latestPacketExport.ui_feedback;
+                    }
+                } catch (error) {
+                    console.warn('Workspace packet hydration failed', error);
+                }
+            }
+            syncPacketDownloadState();
             renderWorkflowOperations();
         }
 

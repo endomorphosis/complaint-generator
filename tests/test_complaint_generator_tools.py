@@ -51,6 +51,7 @@ def _call_mcp_tool(service: ComplaintWorkspaceService, request_id: int, tool_nam
 def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "tool-list-sessions")
     payload = tool_list_payload(service)
+    tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
     tool_names = [tool["name"] for tool in payload["tools"]]
 
     expected_tool_names = [
@@ -89,6 +90,8 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     assert tool_names == expected_tool_names or sorted(tool_names) == sorted(expected_tool_names)
     assert len(tool_names) == len(set(tool_names))
     assert all("inputSchema" in tool for tool in payload["tools"])
+    assert tools_by_name["complaint.get_tooling_contract"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.get_filing_provenance"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
 
 
 def test_client_release_gate_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp_path):
@@ -2576,3 +2579,42 @@ def test_workspace_download_route_serves_json_markdown_and_pdf_exports(tmp_path)
         document_xml = docx_archive.read("word/document.xml").decode("utf-8")
     assert "Jordan Example v. Acme Corporation Complaint" in document_xml
     assert "COMPLAINT FOR RETALIATION" in document_xml
+
+
+def test_exported_packet_snapshot_is_restored_in_session_state(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "restored-export-sessions")
+    user_id = "restored-export-user"
+    service.submit_intake_answers(
+        user_id,
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Was terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10",
+            "harm": "Lost wages and benefits",
+        },
+    )
+    service.save_evidence(
+        user_id,
+        kind="document",
+        claim_element_id="causation",
+        title="Termination email",
+        content="The termination email followed within two days of the HR complaint.",
+        source="Inbox export",
+    )
+    service.generate_complaint(
+        user_id,
+        requested_relief=["Back pay", "Compensatory damages"],
+        title_override="Jordan Example v. Acme Corporation Complaint",
+    )
+
+    export_payload = service.export_complaint_packet(user_id)
+    session_payload = service.get_session(user_id)
+    restored_export = session_payload["session"]["latest_packet_export"]
+
+    assert restored_export["packet"]["title"] == export_payload["packet"]["title"]
+    assert restored_export["packet"]["claim_type"] == export_payload["packet"]["claim_type"]
+    assert restored_export["packet"]["draft"]["body"] == export_payload["packet"]["draft"]["body"]
+    assert restored_export["packet_summary"]["artifact_formats"] == export_payload["packet_summary"]["artifact_formats"]
+    assert restored_export["ui_feedback"]["release_gate"] == export_payload["ui_feedback"]["release_gate"]

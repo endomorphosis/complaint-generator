@@ -69,6 +69,30 @@ async function writeComplaintExportArtifact({
   return metadataPath;
 }
 
+async function writeUiScreenshotArtifact(page, { name, title }) {
+  const targetDir = String(process.env.COMPLAINT_UI_SCREENSHOT_DIR || '').trim();
+  if (!targetDir) {
+    return null;
+  }
+  await fs.mkdir(targetDir, { recursive: true });
+  const screenshotPath = path.join(targetDir, `${name}.png`);
+  const metadataPath = path.join(targetDir, `${name}.json`);
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  const viewport = page.viewportSize() || { width: 1440, height: 1200 };
+  const textExcerpt = String(await page.locator('body').innerText()).slice(0, 4000);
+  const payload = {
+    name,
+    artifact_type: 'workspace_surface',
+    url: page.url(),
+    title,
+    viewport,
+    text_excerpt: textExcerpt,
+    screenshot_path: screenshotPath,
+  };
+  await fs.writeFile(metadataPath, JSON.stringify(payload, null, 2));
+  return metadataPath;
+}
+
 test.describe('complaint generation workflow', () => {
   test('document generation hands off into the review dashboard cohesively', async ({ page }) => {
     const recorder = {};
@@ -451,7 +475,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-generation-meta')).toContainText(/Claim type: retaliation/i);
     await expect(page.locator('#draft-contract-preview')).toContainText(/Claim type: Retaliation/i);
     await expect(page.locator('#draft-contract-preview')).toContainText(/Expected count heading: COUNT I - RETALIATION/i);
-    await expect(page.locator('#draft-readiness-preview')).toContainText(/Record support: /i);
+    await expect(page.locator('#draft-readiness-preview')).toContainText(/Record support: |Release gate verdict:/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Evidence items: 1/i);
 
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
@@ -518,6 +542,9 @@ test.describe('complaint generation workflow', () => {
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('complaintGenerator.did'))).toBe(cachedDid);
     await expect(page.locator('#did-chip')).toContainText(cachedDid);
     await expect(page.locator('#draft-preview')).toContainText(/Edited final complaint body\./i);
+    await page.getByRole('button', { name: 'Draft', exact: true }).click();
+    await expect(page.locator('#download-packet-tool-markdown-button')).toBeEnabled();
+    await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('data-download-url', /output_format=markdown/);
   });
 
   test('homepage to workspace journey ends with an actual generated complaint, downloadable markdown/pdf exports, and packet analysis', async ({ page }, testInfo) => {
@@ -531,6 +558,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#homepage-open-workspace')).toBeVisible();
     await expect(page.locator('#homepage-complaint-readiness-summary')).toContainText(/Not ready to draft|Still building the record|Ready for first draft|Draft in progress/i);
     await expect(page.locator('#homepage-open-workspace')).toHaveAttribute('href', /\/workspace/);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-homepage', title: 'Homepage Entry' });
 
     await page.goto('/workspace');
     await expect(page).toHaveURL(/\/workspace/);
@@ -555,6 +583,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#intake-caption-preview')).toContainText(/JURY TRIAL DEMANDED/i);
     await expect(page.locator('#intake-caption-preview')).toContainText(/COUNT I - RETALIATION/i);
     await expect(page.locator('#intake-caption-preview')).toContainText(/Requested relief will appear here once it is entered in the draft panel/i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-intake', title: 'Workspace Intake' });
     await page.locator('#save-intake-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Intake answers saved\./i, { timeout: 15000 });
     await expect(page.locator('#next-question-label')).toContainText(/Intake complete/i, { timeout: 15000 });
@@ -593,10 +622,12 @@ test.describe('complaint generation workflow', () => {
     await page.locator('#save-evidence-button').click();
     await expect(page.locator('#evidence-list')).toContainText(/Termination timeline email/i);
     await expect(page.locator('#evidence-list')).toContainText(/termination-email\.txt/i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-evidence', title: 'Workspace Evidence' });
 
     await page.getByRole('button', { name: 'Review', exact: true }).click();
     await expect(page.locator('#support-grid')).toContainText(/Protected activity/i);
     await expect(page.locator('#review-synopsis-preview')).toContainText(/Taylor Smith alleges retaliation/i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-review', title: 'Workspace Review' });
 
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
     await page.locator('#requested-relief').fill('Back pay\nFront pay\nAttorney fees');
@@ -615,6 +646,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-contract-preview')).toContainText(/Claim type: Retaliation/i);
     await expect(page.locator('#draft-contract-preview')).toContainText(/Drafting mode: llm_router formal complaint path/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Evidence items: 2/i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-draft', title: 'Workspace Draft' });
 
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
     await page.locator('#refresh-complaint-readiness-button').click();
@@ -692,6 +724,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#filing-provenance-preview')).toContainText(/Draft generation route: llm_router/i);
     await expect(page.locator('#filing-provenance-preview')).toContainText(/Complaint-output critic route:.*formal_complaint_reviewer/i);
     await expect(page.locator('#filing-provenance-preview')).toContainText(/UI review route:.*multimodal_router/i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-integrations', title: 'Workspace Integrations' });
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
 
     const [markdownDownload] = await Promise.all([

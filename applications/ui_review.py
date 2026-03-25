@@ -1017,7 +1017,7 @@ def create_ui_review_report(
     compact_page_prompt: bool = False,
 ) -> Dict[str, Any]:
     screenshots = _normalize_paths(screenshot_paths)
-    if not screenshots:
+    if not screenshots and not list(artifact_metadata or []):
         raise ValueError("No screenshot files were found for UI review.")
 
     complaint_output_feedback = _summarize_complaint_output_feedback(artifact_metadata or [])
@@ -1092,6 +1092,7 @@ def create_ui_review_report(
     provider_name = str(backend_kwargs.get("provider") or "").strip()
     skip_multimodal = _provider_prefers_text_ui_review(provider_name)
 
+    multimodal_exc: Exception | None = None
     try:
         if skip_multimodal:
             raise RuntimeError(
@@ -1103,6 +1104,16 @@ def create_ui_review_report(
             backend_kwargs=backend_kwargs,
         )
     except Exception as multimodal_exc:
+        if screenshots:
+            review_payload, backend_metadata = _review_with_multimodal_router(
+                screenshots=screenshots,
+                prompt=prompt,
+                backend_kwargs=backend_kwargs,
+            )
+        else:
+            raise RuntimeError("No screenshot files were available for multimodal review.")
+    except Exception as exc:
+        multimodal_exc = exc
         try:
             review_payload, backend_metadata = _review_with_text_router(
                 prompt=prompt,

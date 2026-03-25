@@ -468,6 +468,16 @@ test.describe('website surface navigation', () => {
     await expect(page).toHaveURL(/\/profile\?/);
     await expect(page).toHaveURL(/user_id=did%3Akey%3Areview-nav-demo/);
     await page.goto('/claim-support-review?claim_type=retaliation&user_id=did:key:review-nav-demo&workspace_user_id=did:key:review-nav-demo');
+    await page.locator('#review-open-workspace-link').click();
+    await expect(page).toHaveURL(/\/workspace\?/);
+    await expect(page).toHaveURL(/user_id=did%3Akey%3Areview-nav-demo/);
+    await expect(page).toHaveURL(/target_tab=review/);
+    await expect(page.locator('body')).toContainText(/Unified Complaint Workspace/i, { timeout: 30000 });
+    await expect(page.locator('#sdk-server-info')).toContainText(/complaint-workspace-mcp/i, { timeout: 20000 });
+    await expect(page.locator('#did-chip')).toContainText(/did:key:review-nav-demo/i);
+    await expect(page.locator('[data-tab-target="review"]')).toHaveClass(/is-active/);
+    await expect(page.locator('#workspace-status')).toContainText(/Returned from review to the workspace/i, { timeout: 20000 });
+    await page.goto('/claim-support-review?claim_type=retaliation&user_id=did:key:review-nav-demo&workspace_user_id=did:key:review-nav-demo');
     await page.locator('#review-open-builder-link').click();
     await expect(page).toHaveURL(/\/document/);
   });

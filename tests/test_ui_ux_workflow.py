@@ -39,8 +39,10 @@ def test_ui_ux_workflow_defaults_target_full_feature_audit_and_actor_critic_opti
     assert workflow_module.DEFAULT_OPTIMIZER_METHOD == "actor_critic"
     assert workflow_module.DEFAULT_OPTIMIZER_PRIORITY == 90
     assert any("first-time complainants" in goal for goal in workflow_module.DEFAULT_UI_UX_REVIEW_GOALS)
+    assert any("filing-ready legal complaint" in goal for goal in workflow_module.DEFAULT_UI_UX_REVIEW_GOALS)
     assert any("Evidence capture" in item for item in workflow_module.DEFAULT_COMPLAINT_WORKFLOW_CAPABILITIES)
     assert "package, CLI, MCP, and browser SDK" in workflow_module.DEFAULT_UI_UX_REVIEW_NOTES
+    assert "release blocker" in workflow_module.DEFAULT_UI_UX_REVIEW_NOTES
 
 
 def test_build_ui_ux_review_prompt_includes_artifacts_and_surface_contract(tmp_path):
@@ -100,6 +102,9 @@ def test_build_ui_ux_review_prompt_includes_artifacts_and_surface_contract(tmp_p
     assert "Claim type: retaliation" in prompt
     assert "Draft strategy: llm_router" in prompt
     assert "Filing shape score: 86" in prompt
+    assert "formal pleading" in prompt
+    assert "jurisdiction or venue section" in prompt
+    assert "markdown, PDF, and docx downloads succeed" in prompt
     assert "claim-type alignment data" in prompt
     assert "Add stronger export warnings when support gaps remain." in prompt
     assert "complaint_generator.analyze_complaint_output" in prompt

@@ -545,6 +545,8 @@ function createWorkspaceState(userId) {
     },
     draft: null,
     case_synopsis: '',
+    latest_packet_export: null,
+    latest_export_critic: null,
   };
 }
 
@@ -866,7 +868,10 @@ function buildWorkspaceSessionPayload(state) {
   const nextQuestion = questions.find((question) => !question.is_answered) || null;
   const review = buildWorkspaceReview(state);
   return {
-    session: clone(state),
+    session: Object.assign(clone(state), {
+      latest_packet_export: state.latest_packet_export ? clone(state.latest_packet_export) : null,
+      latest_export_critic: state.latest_export_critic ? clone(state.latest_export_critic) : null,
+    }),
     questions,
     next_question: nextQuestion,
     review,
@@ -1699,9 +1704,15 @@ async function installCommonMocks(page, recorder = {}, options = {}) {
     }
     if (name === 'complaint.export_complaint_packet') {
       const payload = buildWorkspacePacketExport(state);
-      return Object.assign({}, payload, {
+      const responsePayload = Object.assign({}, payload, {
         ui_feedback: buildWorkspaceComplaintOutputAnalysis(state).ui_feedback,
       });
+      state.latest_packet_export = {
+        packet: clone(responsePayload.packet),
+        packet_summary: clone(responsePayload.packet_summary),
+        ui_feedback: clone(responsePayload.ui_feedback),
+      };
+      return responsePayload;
     }
     if (name === 'complaint.export_complaint_markdown') {
       const payload = buildWorkspacePacketExport(state);
@@ -1754,7 +1765,7 @@ async function installCommonMocks(page, recorder = {}, options = {}) {
       const formalSectionGaps = Object.entries(analysis.ui_feedback.formal_sections_present || {})
         .filter(([, present]) => !present)
         .map(([name]) => name);
-      return {
+      const reviewPayload = {
         artifact_count: 1,
         complaint_output_feedback: {
           export_artifact_count: 1,
@@ -1827,6 +1838,8 @@ async function installCommonMocks(page, recorder = {}, options = {}) {
           },
         ],
       };
+      state.latest_export_critic = clone(reviewPayload);
+      return reviewPayload;
     }
     if (name === 'complaint.update_claim_type') {
       state.claim_type = String(toolArgs.claim_type || 'retaliation').trim() || 'retaliation';
