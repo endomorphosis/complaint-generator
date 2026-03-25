@@ -42,6 +42,14 @@ class GmailEvidenceImportRequest(BaseModel):
     min_relevance_score: float = 0.0
 
 
+class LocalEvidenceImportRequest(BaseModel):
+    user_id: Optional[str] = None
+    paths: List[str] = Field(default_factory=list)
+    claim_element_id: str = "causation"
+    kind: str = "document"
+    evidence_root: Optional[str] = None
+
+
 class GenerateRequest(BaseModel):
     user_id: Optional[str] = None
     requested_relief: List[str] = Field(default_factory=list)
@@ -121,6 +129,16 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             complaint_query=request.complaint_query,
             complaint_keywords=list(request.complaint_keywords or []),
             min_relevance_score=request.min_relevance_score,
+        )
+
+    @router.post("/api/complaint-workspace/import-local-evidence")
+    async def import_local_evidence_route(request: LocalEvidenceImportRequest) -> Dict[str, Any]:
+        return workspace.import_local_evidence(
+            request.user_id,
+            paths=list(request.paths or []),
+            claim_element_id=request.claim_element_id,
+            kind=request.kind,
+            evidence_root=request.evidence_root,
         )
 
     @router.post("/api/complaint-workspace/review")

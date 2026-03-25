@@ -78,6 +78,20 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
         "required": ["addresses"],
     },
+    "complaint.import_local_evidence": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "paths": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "claim_element_id": {"type": "string"},
+            "kind": {"type": "string", "enum": ["testimony", "document"]},
+            "evidence_root": {"type": "string"},
+        },
+        "required": ["paths"],
+    },
     "complaint.review_case": {
         "type": "object",
         "properties": {"user_id": {"type": "string"}},

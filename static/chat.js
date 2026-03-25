@@ -260,6 +260,7 @@ window.ChatPage = (function() {
     function initialize() {
         let cookies = "";
         $("body").css("background-color", "transparent");
+        applyWorkspaceHandoff();
         $.ajax({
             url: "/cookies",
             type: "get",
@@ -288,6 +289,7 @@ window.ChatPage = (function() {
 
         let socket = null;
         let socketReady = false;
+        let lastOptimisticMessage = null;
 
         async function sendViaFallback(message) {
             const response = await fetch("/api/chat/fallback", {
@@ -328,6 +330,14 @@ window.ChatPage = (function() {
             };
             socket.onmessage = function(event) {
                 const data = JSON.parse(event.data);
+                if (
+                    lastOptimisticMessage
+                    && String(data && data.sender || '').trim() === String(lastOptimisticMessage.sender || '').trim()
+                    && String(data && data.message || '').trim() === String(lastOptimisticMessage.message || '').trim()
+                ) {
+                    lastOptimisticMessage = null;
+                    return;
+                }
                 renderMessage(parent, data, hashedUsername);
             };
         } catch (error) {
@@ -344,6 +354,8 @@ window.ChatPage = (function() {
                             "sender": hashedUsername,
                             "message": message
                         };
+                        lastOptimisticMessage = data;
+                        renderMessage(parent, data, hashedUsername);
                         socket.send(JSON.stringify(data));
                     } else {
                         await sendViaFallback(message);

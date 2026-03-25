@@ -161,6 +161,10 @@ class ComplaintMcpClient {
         return this.callTool('complaint.import_gmail_evidence', payload || {});
     }
 
+    importLocalEvidence(payload) {
+        return this.callTool('complaint.import_local_evidence', payload || {});
+    }
+
     reviewCase(userId) {
         return this.callTool('complaint.review_case', {
             user_id: userId,

@@ -148,6 +148,24 @@ def import_gmail_evidence_command(
     _print(payload)
 
 
+@app.command("import-local-evidence")
+def import_local_evidence_command(
+    user_id: str = "demo-user",
+    path: list[str] = typer.Option(..., "--path", help="Local file or directory path to import. Repeat to collect multiple artifacts."),
+    claim_element_id: str = "causation",
+    kind: str = "document",
+    evidence_root: Optional[str] = None,
+) -> None:
+    payload = service.import_local_evidence(
+        user_id,
+        paths=path,
+        claim_element_id=claim_element_id,
+        kind=kind,
+        evidence_root=evidence_root,
+    )
+    _print(payload)
+
+
 @app.command("review")
 def review(user_id: str = "demo-user") -> None:
     _print(service.call_mcp_tool("complaint.review_case", {"user_id": user_id}))

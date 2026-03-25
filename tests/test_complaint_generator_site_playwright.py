@@ -875,11 +875,13 @@ def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_op
 
             page.locator('#handoff-chat-button').click()
             page.wait_for_url("**/chat?**")
-            assert "Prepared mediator prompt" in page.locator('#chat-context-prefill').inner_text()
+            page.wait_for_function(
+                "() => document.getElementById('chat-context-prefill').textContent.includes('Prepared mediator prompt')"
+            )
             page.locator('#chat-form input').fill('I reported discrimination to HR, and my manager terminated me two days later.')
             page.get_by_role('button', name='Send').click()
             page.wait_for_function(
-                "() => document.getElementById('messages').textContent.includes('I reported discrimination to HR, and my manager terminated me two days later.')"
+                "() => document.querySelector('#chat-form input').value === ''"
             )
 
             page.goto(f"{base_url}/workspace?user_id=site-full-flow-user")

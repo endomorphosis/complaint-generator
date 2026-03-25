@@ -125,6 +125,7 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "submit_intake_answers",
     "save_evidence",
     "import_gmail_evidence",
+    "import_local_evidence",
     "review_case",
     "build_mediator_prompt",
     "get_complaint_readiness",
@@ -154,6 +155,7 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "answer",
     "add-evidence",
     "import-gmail-evidence",
+    "import-local-evidence",
     "review",
     "mediator-prompt",
     "complaint-readiness",
@@ -184,6 +186,7 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "submitIntake",
     "saveEvidence",
     "importGmailEvidence",
+    "importLocalEvidence",
     "reviewCase",
     "buildMediatorPrompt",
     "getComplaintReadiness",
@@ -225,6 +228,12 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "import-gmail-evidence",
         "mcp_tool": "complaint.import_gmail_evidence",
         "browser_sdk_method": "importGmailEvidence",
+    },
+    "local_evidence_import": {
+        "package_export": "import_local_evidence",
+        "cli_command": "import-local-evidence",
+        "mcp_tool": "complaint.import_local_evidence",
+        "browser_sdk_method": "importLocalEvidence",
     },
     "support_review": {
         "package_export": "review_case",
@@ -3550,6 +3559,27 @@ class ComplaintWorkspaceService:
 
         return anyio.run(_run_import)
 
+    def import_local_evidence(
+        self,
+        user_id: Optional[str],
+        *,
+        paths: List[str],
+        claim_element_id: str = "causation",
+        kind: str = "document",
+        evidence_root: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from complaint_generator.local_evidence_import import import_local_evidence
+
+        return import_local_evidence(
+            paths=paths,
+            user_id=str(user_id or DEFAULT_USER_ID),
+            claim_element_id=claim_element_id,
+            kind=kind,
+            workspace_root=self._session_dir,
+            evidence_root=Path(evidence_root) if evidence_root else None,
+            service=self,
+        )
+
     def generate_complaint(
         self,
         user_id: Optional[str],
@@ -3637,6 +3667,7 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.submit_intake", "description": "Save complaint intake answers."},
                 {"name": "complaint.save_evidence", "description": "Save testimony or document evidence to the workspace."},
                 {"name": "complaint.import_gmail_evidence", "description": "Import matching Gmail messages and attachments into the complaint evidence workspace."},
+                {"name": "complaint.import_local_evidence", "description": "Import local files or directories into the complaint evidence workspace."},
                 {"name": "complaint.review_case", "description": "Return the current support matrix and evidence review."},
                 {"name": "complaint.build_mediator_prompt", "description": "Build a testimony-ready chat mediator prompt from the shared case synopsis and support gaps."},
                 {"name": "complaint.get_complaint_readiness", "description": "Estimate whether the current complaint record is ready for drafting, still building, or already in draft refinement."},
@@ -3702,6 +3733,14 @@ class ComplaintWorkspaceService:
                 complaint_query=str(args.get("complaint_query") or "") or None,
                 complaint_keywords=[str(item).strip() for item in list(args.get("complaint_keywords") or []) if str(item).strip()],
                 min_relevance_score=float(args.get("min_relevance_score") or 0.0),
+            )
+        if tool_name == "complaint.import_local_evidence":
+            return self.import_local_evidence(
+                args.get("user_id"),
+                paths=[str(item).strip() for item in list(args.get("paths") or []) if str(item).strip()],
+                claim_element_id=str(args.get("claim_element_id") or "causation"),
+                kind=str(args.get("kind") or "document"),
+                evidence_root=str(args.get("evidence_root") or "") or None,
             )
         if tool_name == "complaint.review_case":
             session = self.get_session(args.get("user_id"))
