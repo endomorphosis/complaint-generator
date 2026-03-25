@@ -2614,10 +2614,32 @@ ${cliAddressLines}
         function renderDraft(sessionPayload) {
             const draft = sessionPayload.draft || (sessionPayload.session || {}).draft || {};
             const claimType = String((sessionPayload.session || {}).claim_type || sessionPayload.claim_type || 'retaliation');
+            const packetDownloadButtons = [
+                document.getElementById('download-packet-markdown-button'),
+                document.getElementById('download-packet-docx-button'),
+                document.getElementById('download-packet-pdf-button'),
+                document.getElementById('download-packet-tool-markdown-button'),
+                document.getElementById('download-packet-tool-docx-button'),
+                document.getElementById('download-packet-tool-pdf-button'),
+            ].filter(Boolean);
             document.getElementById('draft-title').value = draft.title || '';
             document.getElementById('requested-relief').value = (draft.requested_relief || []).join('\n');
             document.getElementById('draft-body').value = draft.body || '';
             document.getElementById('draft-preview').textContent = draft.body || 'No complaint generated yet.';
+            document.getElementById('packet-preview').textContent = latestPacketExport
+                ? buildPacketPreviewText(latestPacketExport)
+                : draft.body
+                    ? [`Title: ${draft.title || 'Current complaint draft'}`, `Claim type: ${claimType}`, '', draft.body].join('\n')
+                : 'No complaint packet exported yet.';
+            if (!latestPacketExport && draft.body) {
+                packetDownloadButtons.forEach((button) => {
+                    const outputFormat = (button.dataset.outputFormat || '').trim() || 'markdown';
+                    const suffix = outputFormat === 'pdf' ? 'pdf' : outputFormat === 'docx' ? 'docx' : 'md';
+                    button.disabled = false;
+                    button.dataset.downloadFilename = `${slugifyFilename(draft.title || 'complaint-packet')}.${suffix}`;
+                    button.dataset.downloadUrl = client.downloadComplaintPacketUrl(workspaceUserId, outputFormat);
+                });
+            }
             renderCaptionPreview();
             document.getElementById('draft-claim-type').value = claimType;
             document.getElementById('draft-mode').value = draft.draft_strategy === 'template' ? 'template' : 'llm_router';
@@ -3317,7 +3339,13 @@ ${cliAddressLines}
                 document.getElementById('download-packet-tool-docx-button'),
                 document.getElementById('download-packet-tool-pdf-button'),
             ].filter(Boolean);
-            if (!latestPacketExport || !latestPacketExport.packet) {
+            const currentDraft = (((workspaceSession || {}).session) || {}).draft || (workspaceSession || {}).draft || null;
+            const packet = latestPacketExport && latestPacketExport.packet
+                ? latestPacketExport.packet
+                : currentDraft && currentDraft.title
+                    ? { title: currentDraft.title }
+                    : null;
+            if (!packet) {
                 downloadButtons.forEach((button) => {
                     button.disabled = true;
                     button.dataset.downloadFilename = '';
@@ -3325,7 +3353,6 @@ ${cliAddressLines}
                 });
                 return;
             }
-            const packet = latestPacketExport.packet;
             downloadButtons.forEach((button) => {
                 const outputFormat = (button.dataset.outputFormat || '').trim() || 'markdown';
                 const suffix = outputFormat === 'pdf' ? 'pdf' : outputFormat === 'docx' ? 'docx' : 'md';
@@ -3333,6 +3360,46 @@ ${cliAddressLines}
                 button.dataset.downloadFilename = `${slugifyFilename(packet.title || 'complaint-packet')}.${suffix}`;
                 button.dataset.downloadUrl = client.downloadComplaintPacketUrl(workspaceUserId, outputFormat);
             });
+        }
+
+        function buildPacketPreviewText(packetPayload) {
+            const packet = (packetPayload && packetPayload.packet) || {};
+            const summary = (packetPayload && packetPayload.packet_summary) || {};
+            const draft = packet.draft || {};
+            const releaseGate = ((packetPayload && packetPayload.ui_feedback) || {}).release_gate || {};
+            const lines = [
+                draft.title ? `Title: ${draft.title}` : '',
+                packet.claim_type ? `Claim type: ${packet.claim_type}` : '',
+                releaseGate.verdict ? `Release gate: ${String(releaseGate.verdict).toUpperCase()}` : '',
+                releaseGate.reason ? `Release gate reason: ${releaseGate.reason}` : '',
+                draft.body ? `\n${draft.body}` : '',
+            ].filter(Boolean);
+            return lines.join('\n') || JSON.stringify(summary, null, 2);
+        }
+
+        function hydratePersistedWorkflowArtifacts(sessionPayload) {
+            const session = (sessionPayload && sessionPayload.session) || {};
+            const persistedPacketExport = session && typeof session.latest_packet_export === 'object'
+                ? session.latest_packet_export
+                : null;
+            const persistedExportCritic = session && typeof session.latest_export_critic === 'object'
+                ? session.latest_export_critic
+                : null;
+            latestPacketExport = persistedPacketExport || null;
+            if (persistedPacketExport && persistedPacketExport.ui_feedback) {
+                latestComplaintOutputAnalysis = Object.assign(
+                    {},
+                    persistedPacketExport.ui_feedback,
+                    persistedExportCritic ? { export_critic: persistedExportCritic } : {},
+                );
+            } else if (persistedExportCritic) {
+                latestComplaintOutputAnalysis = Object.assign({}, latestComplaintOutputAnalysis || {}, {
+                    export_critic: persistedExportCritic,
+                });
+            } else {
+                latestComplaintOutputAnalysis = null;
+            }
+            syncPacketDownloadState();
         }
 
         function renderSdkDiagnostics() {
@@ -3561,19 +3628,6 @@ ${cliAddressLines}
             `).join('');
         }
 
-        function renderWorkspace(sessionPayload) {
-            renderIntake(sessionPayload);
-            renderEvidence(sessionPayload);
-            renderReview(sessionPayload);
-            renderDraft(sessionPayload);
-            refreshSynopsisEditor(sessionPayload);
-            renderSidebar(sessionPayload);
-            renderFeatureCoverage(sessionPayload, workspaceSessionTools || []);
-            renderFeatureWalkthrough(sessionPayload, workspaceSessionTools || []);
-            renderQuickActions(sessionPayload, workspaceSessionTools || []);
-            renderWorkflowOperations();
-        }
-
         function renderSdkServerInfo(initializationPayload, tools) {
             const serverInfo = (initializationPayload && initializationPayload.serverInfo) || {};
             const protocolVersion = (initializationPayload && initializationPayload.protocolVersion) || 'unknown';
@@ -3587,6 +3641,7 @@ ${cliAddressLines}
         }
 
         function renderWorkspace(sessionPayload) {
+            hydratePersistedWorkflowArtifacts(sessionPayload);
             renderIntake(sessionPayload);
             renderEvidence(sessionPayload);
             renderReview(sessionPayload);
@@ -4341,18 +4396,8 @@ ${cliAddressLines}
             const packetPayload = await client.exportComplaintPacket(workspaceUserId);
             latestPacketExport = packetPayload;
             latestComplaintOutputAnalysis = packetPayload.ui_feedback || null;
-            const summary = packetPayload.packet_summary || {};
-            const packet = packetPayload.packet || {};
-            const draft = packet.draft || {};
             const releaseGate = (packetPayload.ui_feedback || {}).release_gate || {};
-            const exportedComplaint = [
-                draft.title ? `Title: ${draft.title}` : '',
-                packet.claim_type ? `Claim type: ${packet.claim_type}` : '',
-                releaseGate.verdict ? `Release gate: ${String(releaseGate.verdict).toUpperCase()}` : '',
-                releaseGate.reason ? `Release gate reason: ${releaseGate.reason}` : '',
-                draft.body ? `\n${draft.body}` : '',
-            ].filter(Boolean).join('\n');
-            document.getElementById('packet-preview').textContent = exportedComplaint || JSON.stringify(summary, null, 2);
+            document.getElementById('packet-preview').textContent = buildPacketPreviewText(packetPayload);
             syncPacketDownloadState();
             renderWorkflowOperations();
             setStatus(releaseGate.verdict
