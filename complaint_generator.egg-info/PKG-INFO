@@ -283,6 +283,24 @@ The standard regression workflow runs that helper in a separate `package-install
 
 The repo also includes a separate Node Playwright compatibility suite available through `npm test:e2e`, but that path runs against a stubbed server for browser-level compatibility checks. The Python regression runners remain the authoritative browser gate for the real FastAPI site surface.
 
+The browser-focused UI/UX optimizer and screenshot-audit workflow now default to the full JavaScript complaint journey:
+
+```bash
+npm test
+npm run test:e2e:list
+npm run test:e2e:complaint-flow
+npm run test:e2e:navigation
+
+.venv/bin/python -m complaint_generator.ui_ux_workflow \
+  --screenshot-dir artifacts/ui-audit/screenshots \
+  --output-dir artifacts/ui-audit/reviews
+
+complaint-workspace browser-audit --screenshot-dir artifacts/ui-audit/screenshots
+complaint-workspace optimize-ui --screenshot-dir artifacts/ui-audit/screenshots
+```
+
+That browser journey explicitly drives intake, evidence capture, claim review, draft generation, export downloads, complaint-output analysis, actor/critic review, and browser-audit handoffs. The Playwright spec at `playwright/tests/complaint-flow.spec.js` now asserts that the generated markdown and PDF still read like a formal pleading rather than a generic summary.
+
 **Claim Support Regression:**
 
 ```bash

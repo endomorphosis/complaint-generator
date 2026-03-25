@@ -9,7 +9,7 @@ const staticDir = path.join(root, 'static');
 const sdkPreviewPath = path.join(root, 'ipfs_datasets_py', 'ipfs_accelerate_py', 'SDK_PLAYGROUND_PREVIEW.html');
 const ipfsDatasetsTemplatesDir = path.join(root, 'ipfs_datasets_py', 'ipfs_datasets_py', 'templates');
 const ipfsDatasetsStaticDir = path.join(root, 'ipfs_datasets_py', 'ipfs_datasets_py', 'static');
-const port = 19000;
+const port = Number(process.env.PLAYWRIGHT_TEST_PORT || 19000);
 
 function slugifyFilename(value) {
   return String(value || 'complaint-packet')
@@ -750,13 +750,17 @@ function toolingContractPayload(userId = 'did:key:playwright-demo') {
     'start_session',
     'submit_intake_answers',
     'save_evidence',
+    'import_gmail_evidence',
     'review_case',
     'build_mediator_prompt',
     'get_complaint_readiness',
     'get_ui_readiness',
     'get_client_release_gate',
     'get_workflow_capabilities',
+    'get_tooling_contract',
     'generate_complaint',
+    'update_claim_type',
+    'update_case_synopsis',
     'export_complaint_packet',
     'export_complaint_markdown',
     'export_complaint_docx',
@@ -775,12 +779,16 @@ function toolingContractPayload(userId = 'did:key:playwright-demo') {
     'session',
     'answer',
     'add-evidence',
+    'import-gmail-evidence',
     'review',
     'mediator-prompt',
     'complaint-readiness',
     'ui-readiness',
     'client-release-gate',
     'capabilities',
+    'tooling-contract',
+    'set-claim-type',
+    'update-synopsis',
     'generate',
     'export-packet',
     'export-markdown',
@@ -802,6 +810,7 @@ function toolingContractPayload(userId = 'did:key:playwright-demo') {
     'complaint.start_session',
     'complaint.submit_intake',
     'complaint.save_evidence',
+    'complaint.import_gmail_evidence',
     'complaint.review_case',
     'complaint.build_mediator_prompt',
     'complaint.get_complaint_readiness',
@@ -833,6 +842,7 @@ function toolingContractPayload(userId = 'did:key:playwright-demo') {
     'getSession',
     'submitIntake',
     'saveEvidence',
+    'importGmailEvidence',
     'reviewCase',
     'buildMediatorPrompt',
     'getComplaintReadiness',
@@ -850,6 +860,8 @@ function toolingContractPayload(userId = 'did:key:playwright-demo') {
     'getFilingProvenance',
     'getProviderDiagnostics',
     'reviewGeneratedExports',
+    'updateClaimType',
+    'updateCaseSynopsis',
     'reviewUiArtifacts',
     'optimizeUiArtifacts',
     'runBrowserAudit',
@@ -857,8 +869,11 @@ function toolingContractPayload(userId = 'did:key:playwright-demo') {
   const coreFlowSteps = [
     ['intake', 'submit_intake_answers', 'answer', 'complaint.submit_intake', 'submitIntake'],
     ['evidence_capture', 'save_evidence', 'add-evidence', 'complaint.save_evidence', 'saveEvidence'],
+    ['gmail_import', 'import_gmail_evidence', 'import-gmail-evidence', 'complaint.import_gmail_evidence', 'importGmailEvidence'],
     ['support_review', 'review_case', 'review', 'complaint.review_case', 'reviewCase'],
     ['mediator_handoff', 'build_mediator_prompt', 'mediator-prompt', 'complaint.build_mediator_prompt', 'buildMediatorPrompt'],
+    ['claim_type_alignment', 'update_claim_type', 'set-claim-type', 'complaint.update_claim_type', 'updateClaimType'],
+    ['case_synopsis_sync', 'update_case_synopsis', 'update-synopsis', 'complaint.update_case_synopsis', 'updateCaseSynopsis'],
     ['draft_generation', 'generate_complaint', 'generate', 'complaint.generate_complaint', 'generateComplaint'],
     ['complaint_export_markdown', 'export_complaint_markdown', 'export-markdown', 'complaint.export_complaint_markdown', 'exportComplaintMarkdown'],
     ['complaint_export_pdf', 'export_complaint_pdf', 'export-pdf', 'complaint.export_complaint_pdf', 'exportComplaintPdf'],
@@ -1379,13 +1394,92 @@ function buildStubUiReviewResult(args = {}, userId = 'did:key:playwright-demo') 
       iterations: Number(args.iterations || 0),
       screenshot_dir: args.screenshot_dir || 'artifacts/ui-audit/screenshots',
       output_dir: args.output_path || 'artifacts/ui-audit/reviews',
+      backend: {
+        strategy: 'multimodal_router',
+        provider: args.provider || 'llm_router',
+        model: args.model || 'multimodal_router',
+      },
       latest_review: `# Top Risks\n- ${routerLabel} should keep complaint-output guidance visible while reviewing screenshots.\n\n# High-Impact UX Fixes\n- ${String(suggestion.title || 'Promote complaint-output blockers')} so unsupported claim elements stay visible before export.\n- ${String(suggestion.recommendation || 'Use complaint-output suggestions to tighten review and draft guidance.')}\n\n# Stage Findings\n## Intake\nFirst-time complainants need clearer reassurance that incomplete dates and imperfect wording can still be saved.\n\n## Evidence\nEvidence capture guidance is still too easy to miss for first-time complainants.\n\n## Review\nComplaint-output suggestion carried into router review: ${String(suggestion.title || 'Promote complaint-output blockers')}.\n\n## Draft\nDraft generation should feel like the direct continuation of the case theory, not a separate document tool.\n\n## Integration Discovery\n${routerLabel} should stay visible from the shared dashboard shortcuts and tool panels.`,
+      review: {
+        summary: `Workspace mock review completed with ${routerLabel}. Complaint-output suggestion: ${String(suggestion.title || 'Promote complaint-output blockers')}.`,
+        issues: [
+          {
+            severity: 'medium',
+            surface: '/workspace',
+            problem: 'Export controls can still visually outrank the release gate and support summary.',
+            user_impact: 'A complainant could download a complaint before noticing the formal-filing warnings and readiness cues.',
+            recommended_fix: 'Keep the release gate, filing-shape score, and next-step guidance pinned beside the download controls.',
+          },
+        ],
+        broken_controls: [
+          {
+            surface: '/workspace',
+            control: 'Download Markdown',
+            failure_mode: 'Export looks like a primary CTA before the complainant reviews filing readiness.',
+            repair: 'Keep the release-gate summary visibly adjacent to the export controls.',
+          },
+        ],
+        complaint_journey: {
+          tested_stages: ['chat', 'intake', 'evidence', 'review', 'draft', 'integrations', 'optimizer'],
+          journey_gaps: ['Keep export blockers and release-gate messaging visible beside the download controls.'],
+          sdk_tool_invocations: [
+            'complaint.start_session',
+            'complaint.submit_intake',
+            'complaint.save_evidence',
+            'complaint.import_gmail_evidence',
+            'complaint.review_case',
+            'complaint.generate_complaint',
+            'complaint.export_complaint_packet',
+            'complaint.review_generated_exports',
+            'complaint.review_ui',
+            'complaint.optimize_ui',
+          ],
+          release_blockers: [],
+        },
+        actor_plan: {
+          primary_objective: 'Keep the complainant on a linear path from intake through export without hiding release-gate warnings.',
+          repair_sequence: [
+            'Keep filing-shape and support warnings visible beside exports',
+            'Use the Gmail import affordance to strengthen documentary support earlier in the flow',
+            'Preserve the MCP tool contract in the integrations panel',
+          ],
+        },
+        critic_review: {
+          verdict: 'warning',
+          blocking_findings: ['Export controls still need stronger readiness framing before download.'],
+          acceptance_checks: [
+            'The release gate must remain visible after complaint generation and before download.',
+            'The optimizer must keep the MCP tool contract discoverable from the integrations panel.',
+            'The Gmail import route must remain browser-accessible through the JavaScript SDK.',
+          ],
+        },
+        actor_summary: 'The actor can now reach a formal complaint, upload evidence, review support, and hand off to the mediator, but export still needs stronger guardrails.',
+        critic_summary: 'The critic accepts the overall complaint journey, while requiring clearer release-gate emphasis near the download controls.',
+        actor_path_breaks: [
+          'Export still feels slightly too easy relative to the visible readiness messaging.',
+        ],
+        critic_test_obligations: [
+          'Verify the release gate remains visible after export analysis and before download.',
+          'Verify Gmail import remains browser-visible through the shared MCP contract.',
+        ],
+        playwright_followups: [
+          'Capture the draft panel after export analysis so the release gate and complaint-output guidance remain visible.',
+          'Capture the evidence panel near the Gmail import affordance so evidence-ingestion guidance stays legible.',
+        ],
+        stage_findings: {
+          Intake: 'First-time complainants need clearer reassurance that incomplete dates and imperfect wording can still be saved.',
+          Evidence: 'The Gmail import affordance keeps evidence ingestion inside the browser workspace and the shared MCP SDK path.',
+          Review: `Complaint-output suggestion carried into router review: ${String(suggestion.title || 'Promote complaint-output blockers')}.`,
+          Draft: 'Draft generation should feel like the direct continuation of the case theory, not a separate document tool.',
+          'Integration Discovery': `${routerLabel} should stay visible from the shared dashboard shortcuts and tool panels.`,
+        },
+      },
       stage_findings: {
         Intake: 'First-time complainants need clearer reassurance that incomplete dates and imperfect wording can still be saved.',
-        Evidence: 'The evidence step should explain which documents help prove causation before users are asked to upload or summarize proof.',
+        Evidence: 'The Gmail import affordance keeps evidence ingestion inside the browser workspace and the shared MCP SDK path.',
         Review: `Complaint-output suggestion carried into router review: ${String(suggestion.title || 'Promote complaint-output blockers')}.`,
         Draft: 'Draft generation should feel like the direct continuation of the case theory, not a separate document tool.',
-        'Integration Discovery': `${routerLabel} should stay visible so operators do not miss the shared complaint-generator tooling.`,
+        'Integration Discovery': `${routerLabel} should stay visible from the shared dashboard shortcuts and tool panels.`,
       },
       actor_summary: 'The actor can stay on one DID-backed complaint path, but still needs clearer guidance for synopsis, evidence upload, review, and draft transitions.',
       critic_summary: 'The critic expects hard end-to-end assertions around testimony, evidence attachment, support review, and final complaint generation.',
@@ -1947,6 +2041,7 @@ const server = http.createServer(async (request, response) => {
         { name: 'complaint.start_session', description: 'Load or initialize a complaint workspace session.', inputSchema: { type: 'object' } },
         { name: 'complaint.submit_intake', description: 'Save complaint intake answers.', inputSchema: { type: 'object' } },
         { name: 'complaint.save_evidence', description: 'Save testimony or document evidence to the workspace.', inputSchema: { type: 'object' } },
+        { name: 'complaint.import_gmail_evidence', description: 'Import matching Gmail messages and attachments into the complaint evidence workspace.', inputSchema: { type: 'object' } },
         { name: 'complaint.review_case', description: 'Return the support matrix and evidence review.', inputSchema: { type: 'object' } },
         { name: 'complaint.build_mediator_prompt', description: 'Build a testimony-ready chat mediator prompt from the shared case synopsis and support gaps.', inputSchema: { type: 'object' } },
         { name: 'complaint.get_complaint_readiness', description: 'Estimate whether the current complaint record is ready for drafting, still building, or already in draft refinement.', inputSchema: { type: 'object' } },
@@ -1994,6 +2089,7 @@ const server = http.createServer(async (request, response) => {
             { name: 'complaint.start_session', description: 'Load or initialize a complaint workspace session.', inputSchema: { type: 'object' } },
             { name: 'complaint.submit_intake', description: 'Save complaint intake answers.', inputSchema: { type: 'object' } },
             { name: 'complaint.save_evidence', description: 'Save testimony or document evidence to the workspace.', inputSchema: { type: 'object' } },
+            { name: 'complaint.import_gmail_evidence', description: 'Import matching Gmail messages and attachments into the complaint evidence workspace.', inputSchema: { type: 'object' } },
             { name: 'complaint.review_case', description: 'Return the support matrix and evidence review.', inputSchema: { type: 'object' } },
             { name: 'complaint.build_mediator_prompt', description: 'Build a testimony-ready chat mediator prompt from the shared case synopsis and support gaps.', inputSchema: { type: 'object' } },
             { name: 'complaint.get_complaint_readiness', description: 'Estimate whether the current complaint record is ready for drafting, still building, or already in draft refinement.', inputSchema: { type: 'object' } },
@@ -2055,6 +2151,29 @@ const server = http.createServer(async (request, response) => {
           attachment_names: Array.isArray(args.attachment_names) ? args.attachment_names : [],
         });
         structuredContent = workspaceSessionPayload(userId);
+      } else if (toolName === 'complaint.import_gmail_evidence') {
+        const addresses = Array.isArray(args.addresses) ? args.addresses.filter(Boolean) : [];
+        const importedRecords = addresses.map((address, index) => {
+          const record = {
+            id: `document-${workspaceState.evidence.documents.length + 1}`,
+            kind: 'document',
+            claim_element_id: args.claim_element_id || 'causation',
+            title: `Imported Gmail message ${index + 1}`,
+            content: `Imported evidence matched from ${String(address)}.`,
+            source: `gmail:${String(address)}`,
+            attachment_names: [`message-${index + 1}.eml`],
+          };
+          workspaceState.evidence.documents.push(record);
+          return record;
+        });
+        structuredContent = {
+          user_id: userId,
+          imported_count: importedRecords.length,
+          imported_records: importedRecords,
+          review: workspaceReview(workspaceState),
+          session: JSON.parse(JSON.stringify(workspaceState)),
+          case_synopsis: String(workspaceState.case_synopsis || '').trim(),
+        };
       } else if (toolName === 'complaint.review_case' || toolName === 'complaint.start_session') {
         structuredContent = workspaceSessionPayload(userId);
       } else if (toolName === 'complaint.build_mediator_prompt') {
@@ -2321,6 +2440,30 @@ const server = http.createServer(async (request, response) => {
         attachment_names: Array.isArray(args.attachment_names) ? args.attachment_names : [],
       });
       return sendJson(response, workspaceSessionPayload(userId));
+    }
+    if (toolName === 'complaint.import_gmail_evidence') {
+      const addresses = Array.isArray(args.addresses) ? args.addresses.filter(Boolean) : [];
+      const importedRecords = addresses.map((address, index) => {
+        const record = {
+          id: `document-${workspaceState.evidence.documents.length + 1}`,
+          kind: 'document',
+          claim_element_id: args.claim_element_id || 'causation',
+          title: `Imported Gmail message ${index + 1}`,
+          content: `Imported evidence matched from ${String(address)}.`,
+          source: `gmail:${String(address)}`,
+          attachment_names: [`message-${index + 1}.eml`],
+        };
+        workspaceState.evidence.documents.push(record);
+        return record;
+      });
+      return sendJson(response, {
+        user_id: userId,
+        imported_count: importedRecords.length,
+        imported_records: importedRecords,
+        review: workspaceReview(workspaceState),
+        session: JSON.parse(JSON.stringify(workspaceState)),
+        case_synopsis: String(workspaceState.case_synopsis || '').trim(),
+      });
     }
     if (toolName === 'complaint.review_case' || toolName === 'complaint.start_session') {
       return sendJson(response, workspaceSessionPayload(userId));

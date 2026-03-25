@@ -149,14 +149,98 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     cli_payload = _invoke_cli(runner, "tooling-contract", "--user-id", "contract-user")
     assert cli_payload["all_core_flow_steps_exposed"] is True
     assert "generate" in cli_payload["cli_commands"]
+    assert "import-gmail-evidence" in cli_payload["cli_commands"]
+    assert "tooling-contract" in cli_payload["cli_commands"]
+    assert "set-claim-type" in cli_payload["cli_commands"]
+    assert "update-synopsis" in cli_payload["cli_commands"]
 
     mcp_payload = _call_mcp_tool(service, 92, "complaint.get_tooling_contract", {"user_id": "contract-user"})
     assert mcp_payload["all_core_flow_steps_exposed"] is True
     assert any(step["id"] == "draft_generation" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "gmail_evidence_import" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "tooling_contract" for step in mcp_payload["core_flow_steps"])
 
     package_payload = get_tooling_contract("contract-user", service=service)
     assert package_payload["all_core_flow_steps_exposed"] is True
     assert "complaint.generate_complaint" in package_payload["mcp_tools"]
+    assert "import_gmail_evidence" in package_payload["package_exports"]
+    assert "update_claim_type" in package_payload["package_exports"]
+    assert "update_case_synopsis" in package_payload["package_exports"]
+    assert "importGmailEvidence" in package_payload["browser_sdk_methods"]
+    assert "updateClaimType" in package_payload["browser_sdk_methods"]
+    assert "updateCaseSynopsis" in package_payload["browser_sdk_methods"]
+    assert "getToolingContract" in package_payload["browser_sdk_methods"]
+
+
+def test_generate_api_route_forwards_llm_router_options(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "generate-api-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    captured = {}
+
+    def fake_generate_complaint(
+        user_id,
+        *,
+        requested_relief=None,
+        title_override=None,
+        use_llm=False,
+        provider=None,
+        model=None,
+        config_path=None,
+        backend_id=None,
+    ):
+        captured.update(
+            {
+                "user_id": user_id,
+                "requested_relief": list(requested_relief or []),
+                "title_override": title_override,
+                "use_llm": use_llm,
+                "provider": provider,
+                "model": model,
+                "config_path": config_path,
+                "backend_id": backend_id,
+            }
+        )
+        return {
+            "draft": {
+                "title": title_override or "LLM complaint",
+                "body": "IN THE UNITED STATES DISTRICT COURT\nCOMPLAINT FOR RETALIATION",
+                "draft_strategy": "llm_router" if use_llm else "template",
+            }
+        }
+
+    monkeypatch.setattr(service, "generate_complaint", fake_generate_complaint)
+
+    response = client.post(
+        "/api/complaint-workspace/generate",
+        json={
+            "user_id": "api-llm-user",
+            "requested_relief": ["Back pay", "Injunctive relief"],
+            "title_override": "API LLM Complaint",
+            "use_llm": True,
+            "provider": "codex_cli",
+            "model": "gpt-5.3-codex",
+            "config_path": "config.llm_router.json",
+            "backend_id": "formal_complaint_reviewer",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert captured == {
+        "user_id": "api-llm-user",
+        "requested_relief": ["Back pay", "Injunctive relief"],
+        "title_override": "API LLM Complaint",
+        "use_llm": True,
+        "provider": "codex_cli",
+        "model": "gpt-5.3-codex",
+        "config_path": "config.llm_router.json",
+        "backend_id": "formal_complaint_reviewer",
+    }
 
 
 def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
@@ -802,7 +886,7 @@ def test_provider_diagnostics_are_exposed_across_package_cli_and_mcp(monkeypatch
         assert "effective_default_provider" in payload
         codex_entry = next(item for item in payload["providers"] if item["name"] == "codex_cli")
         copilot_entry = next(item for item in payload["providers"] if item["name"] == "copilot_cli")
-        assert codex_entry["draft_timeout_seconds"] == 60
+        assert codex_entry["draft_timeout_seconds"] == 90
         assert copilot_entry["draft_timeout_seconds"] == 45
 
 
@@ -1176,6 +1260,98 @@ def test_cli_and_mcp_can_request_llm_backed_complaint_generation(monkeypatch, tm
     assert observed_calls[0]["model"] == "stub-model"
     assert observed_calls[1]["provider"] == "stub-provider-2"
     assert observed_calls[1]["model"] == "stub-model-2"
+
+
+def test_generate_complaint_defaults_llm_backend_to_verified_codex_profile(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "default-llm-profile-sessions")
+    service.submit_intake_answers(
+        "default-llm-user",
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10.",
+            "harm": "Lost wages and emotional distress.",
+        },
+    )
+
+    observed_kwargs = {}
+
+    def fake_refine(self, state, base_draft, **kwargs):
+        observed_kwargs.update(kwargs)
+        return {
+            **base_draft,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "complaint-draft",
+                "provider": kwargs.get("provider"),
+                "model": kwargs.get("model"),
+                "requested_provider": None,
+                "requested_model": None,
+            },
+        }
+
+    monkeypatch.setattr(ComplaintWorkspaceService, "_refine_draft_with_llm_router", fake_refine)
+
+    payload = service.generate_complaint(
+        "default-llm-user",
+        requested_relief=["Back pay"],
+        use_llm=True,
+    )
+
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert observed_kwargs["provider"] == "codex_cli"
+    assert observed_kwargs["model"] == "gpt-5.3-codex"
+    assert observed_kwargs["requested_provider"] is None
+    assert observed_kwargs["requested_model"] is None
+    assert payload["draft"]["draft_backend"]["provider"] == "codex_cli"
+    assert payload["draft"]["draft_backend"]["model"] == "gpt-5.3-codex"
+
+
+def test_generate_complaint_uses_env_override_for_default_llm_backend(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "env-default-llm-profile-sessions")
+    service.submit_intake_answers(
+        "env-default-llm-user",
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10.",
+            "harm": "Lost wages and emotional distress.",
+        },
+    )
+
+    observed_kwargs = {}
+
+    def fake_refine(self, state, base_draft, **kwargs):
+        observed_kwargs.update(kwargs)
+        return {
+            **base_draft,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "complaint-draft",
+                "provider": kwargs.get("provider"),
+                "model": kwargs.get("model"),
+            },
+        }
+
+    monkeypatch.setattr(ComplaintWorkspaceService, "_refine_draft_with_llm_router", fake_refine)
+    monkeypatch.setenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "copilot_cli")
+    monkeypatch.setenv("COMPLAINT_GENERATOR_LLM_DRAFT_MODEL_COPILOT_CLI", "gpt-5-mini")
+
+    payload = service.generate_complaint(
+        "env-default-llm-user",
+        requested_relief=["Back pay"],
+        use_llm=True,
+    )
+
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert observed_kwargs["provider"] == "copilot_cli"
+    assert observed_kwargs["model"] == "gpt-5-mini"
+    assert observed_kwargs["requested_provider"] is None
+    assert observed_kwargs["requested_model"] is None
 
 
 def test_llm_draft_timeout_falls_back_to_template_with_reason(monkeypatch, tmp_path):

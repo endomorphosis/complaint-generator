@@ -7,6 +7,7 @@ from pathlib import Path
 from queue import Queue
 import os
 import threading
+from time import perf_counter
 from typing import Any, Dict, Iterable, List, Optional
 
 from backends import LLMRouterBackend, MultimodalRouterBackend
@@ -14,14 +15,19 @@ from backends import LLMRouterBackend, MultimodalRouterBackend
 
 DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S = 8
 DEFAULT_UI_REVIEW_TIMEOUT_S = 10
+DEFAULT_UI_REVIEW_PROVIDER = "codex_cli"
+DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER = {
+    "codex": "gpt-5.3-codex",
+    "codex_cli": "gpt-5.3-codex",
+}
 _TEXT_ONLY_UI_REVIEW_PROVIDERS = {
     "codex",
     "copilot_cli",
     "copilot_sdk",
 }
 _TEXT_UI_REVIEW_TIMEOUTS = {
-    "codex": 60,
-    "codex_cli": 60,
+    "codex": 120,
+    "codex_cli": 120,
     "copilot_cli": 25,
     "copilot_sdk": 25,
 }
@@ -221,12 +227,18 @@ def _aggregate_page_review_reports(page_reports: List[Dict[str, Any]]) -> Dict[s
     issues: List[Dict[str, Any]] = []
     recommended_changes: List[Dict[str, Any]] = []
     broken_controls: List[Dict[str, Any]] = []
+    button_audit: List[Dict[str, Any]] = []
+    route_handoffs: List[Dict[str, Any]] = []
     workflow_gaps: List[str] = []
     playwright_followups: List[str] = []
     actor_path_breaks: List[str] = []
     critic_test_obligations: List[str] = []
     page_backend_paths: List[str] = []
     stage_findings: Dict[str, List[str]] = {}
+    tested_stages: List[str] = []
+    journey_gaps: List[str] = []
+    sdk_tool_invocations: List[str] = []
+    release_blockers: List[str] = []
 
     for report in page_reports:
         review = dict(report.get("review") or {})
@@ -248,10 +260,29 @@ def _aggregate_page_review_reports(page_reports: List[Dict[str, Any]]) -> Dict[s
                 enriched.setdefault("page", page_label)
                 sink.append(enriched)
 
+        for item in list(review.get("button_audit") or []):
+            if not isinstance(item, dict):
+                continue
+            enriched = dict(item)
+            enriched.setdefault("page", page_label)
+            button_audit.append(enriched)
+
+        for item in list(review.get("route_handoffs") or []):
+            if not isinstance(item, dict):
+                continue
+            enriched = dict(item)
+            enriched.setdefault("page", page_label)
+            route_handoffs.append(enriched)
+
         workflow_gaps.extend(_merge_string_list(review.get("workflow_gaps") or []))
         playwright_followups.extend(_merge_string_list(review.get("playwright_followups") or []))
         actor_path_breaks.extend(_merge_string_list(review.get("actor_path_breaks") or []))
         critic_test_obligations.extend(_merge_string_list(review.get("critic_test_obligations") or []))
+        complaint_journey = dict(review.get("complaint_journey") or {})
+        tested_stages.extend(_merge_string_list(complaint_journey.get("tested_stages") or []))
+        journey_gaps.extend(_merge_string_list(complaint_journey.get("journey_gaps") or []))
+        sdk_tool_invocations.extend(_merge_string_list(complaint_journey.get("sdk_tool_invocations") or []))
+        release_blockers.extend(_merge_string_list(complaint_journey.get("release_blockers") or []))
         for stage_name, stage_text in dict(review.get("stage_findings") or {}).items():
             cleaned = str(stage_text or "").strip()
             if cleaned:
@@ -271,9 +302,13 @@ def _aggregate_page_review_reports(page_reports: List[Dict[str, Any]]) -> Dict[s
         "issues": issues,
         "recommended_changes": recommended_changes,
         "broken_controls": broken_controls,
-        "button_audit": [],
-        "route_handoffs": [],
+        "button_audit": button_audit,
+        "route_handoffs": route_handoffs,
         "complaint_journey": {
+            "tested_stages": _merge_string_list(tested_stages),
+            "journey_gaps": _merge_string_list(journey_gaps),
+            "sdk_tool_invocations": _merge_string_list(sdk_tool_invocations),
+            "release_blockers": _merge_string_list(release_blockers),
             "page_reviews": [
                 {
                     "page": str(report.get("page_label") or "").strip() or "unknown-page",
@@ -489,6 +524,251 @@ def _fallback_complaint_output_review(export: Dict[str, Any], error: Exception) 
             "critic_gate": critic_gate,
             "raw_response": str(error),
         },
+    }
+
+
+def _deterministic_ui_review_fallback(
+    *,
+    screenshots: List[Path],
+    artifact_metadata: List[Dict[str, Any]],
+    complaint_output_feedback: Dict[str, Any],
+    multimodal_error: Exception | None,
+    fallback_error: Exception,
+) -> Dict[str, Any]:
+    def _compact_hint(value: str, fallback: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return fallback
+        first_block = text.split("{", 1)[0].strip()
+        first_line = first_block.splitlines()[0].strip() if first_block else ""
+        compact = first_line or text[:220].strip()
+        return compact[:220].rstrip() or fallback
+
+    screenshot_labels = [
+        _page_review_unit_label(path, _filter_artifacts_for_page(path, artifact_metadata))
+        for path in screenshots[:6]
+    ]
+    screenshot_labels = [label for label in screenshot_labels if label]
+    export_artifacts = [
+        dict(item)
+        for item in list(artifact_metadata or [])
+        if isinstance(item, dict) and str(item.get("artifact_type") or "").strip() == "complaint_export"
+    ]
+    release_verdicts = [
+        verdict
+        for verdict in list(complaint_output_feedback.get("release_gate_verdicts") or [])
+        if str(verdict).strip()
+    ]
+    formal_section_gaps = [
+        str(item).strip()
+        for item in list(complaint_output_feedback.get("formal_section_gaps") or [])
+        if str(item).strip()
+    ]
+    ui_suggestion_hints = [
+        str(item).strip()
+        for item in list(complaint_output_feedback.get("ui_suggestions") or [])
+        if str(item).strip()
+    ]
+    avg_shape = 0
+    shape_scores = [int(item) for item in list(complaint_output_feedback.get("filing_shape_scores") or []) if int(item or 0) > 0]
+    if shape_scores:
+        avg_shape = round(sum(shape_scores) / len(shape_scores))
+
+    if export_artifacts:
+        summary = (
+            "Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports "
+            "and page screenshots."
+        )
+        primary_fix = _compact_hint(ui_suggestion_hints[0], (
+            "Keep filing-shape warnings, release-gate status, and export guidance visible before download."
+        )) if ui_suggestion_hints else (
+            "Keep filing-shape warnings, release-gate status, and export guidance visible before download."
+        )
+        issues = [
+            {
+                "severity": "medium" if avg_shape >= 75 else "high",
+                "surface": "draft/export",
+                "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
+                "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance.",
+                "recommended_fix": primary_fix,
+            }
+        ]
+        recommended_changes = [
+            {
+                "title": "Use complaint-output signals as the first fallback UX critic",
+                "implementation_notes": (
+                    "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, "
+                    "and export guidance directly in the UI review report instead of falling back to a generic timeout warning."
+                ),
+                "shared_code_path": "applications/ui_review.py",
+                "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
+            }
+        ]
+        recommended_changes.extend(
+            {
+                "title": f"Keep {gap.replace('_', ' ')} guidance visible before export",
+                "implementation_notes": f"Expose a persistent warning in the draft/export surfaces when {gap.replace('_', ' ')} is still weak or missing.",
+                "shared_code_path": "templates/workspace.html",
+                "sdk_considerations": "Keep the release gate and export analysis panels visible beside SDK-triggered download actions.",
+            }
+            for gap in formal_section_gaps[:2]
+        )
+        broken_controls = [
+            {
+                "surface": "draft/export",
+                "control": "UI review automation",
+                "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+                "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
+            }
+        ]
+        broken_controls.extend(
+            {
+                "surface": label,
+                "control": "release gate / export guidance",
+                "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+                "repair": primary_fix,
+            }
+            for label in screenshot_labels[:3]
+        )
+        return {
+            "summary": summary,
+            "issues": issues,
+            "recommended_changes": recommended_changes,
+            "broken_controls": broken_controls,
+            "complaint_journey": {
+                "tested_stages": ["intake", "evidence", "review", "draft", "integrations", "optimizer"],
+                "journey_gaps": [
+                    "Live screenshot critique timed out, so the fallback is relying on audited complaint-output signals instead of fresh visual reasoning.",
+                ],
+                "sdk_tool_invocations": ["complaint.review_ui", "complaint.optimize_ui", "complaint.run_browser_audit"],
+                "release_blockers": [
+                    primary_fix,
+                    *[f"Keep {gap.replace('_', ' ')} guidance visible before export." for gap in formal_section_gaps[:2]],
+                ],
+            },
+            "actor_plan": {
+                "primary_objective": "Keep export and filing-quality warnings visible even when screenshot review is slow.",
+                "repair_sequence": [
+                    primary_fix,
+                    *[f"Surface {gap.replace('_', ' ')} status in the draft/export sidebar." for gap in formal_section_gaps[:2]],
+                    "Retry multimodal screenshot review after the audited export artifacts are attached.",
+                ],
+                "playwright_objectives": [
+                    "Keep end-to-end assertions for complaint generation, markdown/pdf/docx download, and release-gate visibility before export.",
+                ],
+                "mcp_sdk_expectations": [
+                    "The browser UI should continue to expose complaint.review_ui, complaint.optimize_ui, and export/download SDK actions as first-class controls.",
+                ],
+            },
+            "actor_summary": "The actor can still complete the complaint journey, but the optimizer had to fall back to complaint-output evidence instead of live screenshot reasoning.",
+            "critic_summary": "The critic accepts the audited journey data, while flagging router latency as the main remaining risk to the actor/critic loop.",
+            "actor_path_breaks": [
+                "The screenshot review loop can time out before returning page-specific UX findings.",
+            ],
+            "critic_test_obligations": [
+                "Keep a Playwright flow that proves the release gate and filing-shape guidance stay visible before markdown/pdf/docx download.",
+            ],
+            "stage_findings": {
+                "Intake": "The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings.",
+                "Evidence": "Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown.",
+                "Review": "Support review should continue to surface claim gaps before users rely on the generated complaint.",
+                "Draft": primary_fix,
+                "Integration Discovery": "Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics.",
+            },
+            "workflow_gaps": [
+                "Live screenshot review timed out and had to rely on complaint-output artifacts.",
+            ],
+            "playwright_followups": [
+                "Capture and assert the release gate, filing-shape score, and export guidance in the final draft/export view.",
+            ],
+            "ui_suggestions": [
+                {
+                    "title": "Keep filing-quality cues visible when router review is slow",
+                    "target_surface": "draft,integrations",
+                    "recommendation": primary_fix,
+                    "why_it_matters": "The actor should still see filing-shape and release-gate guidance before export even if the screenshot critic is unavailable.",
+                }
+            ],
+        }
+
+    return {
+        "summary": "Router-driven UI review was unavailable, so a fallback implementation report was created.",
+        "issues": [
+            {
+                "severity": "medium",
+                "surface": "shared complaint workflow",
+                "problem": "No live router critique was available for the screenshots.",
+                "user_impact": "UI review can stall unless there is a safe fallback path.",
+                "recommended_fix": "Restore multimodal router access or provide richer page context so screenshot review remains actionable.",
+            }
+        ],
+        "recommended_changes": [
+            {
+                "title": "Keep the review loop artifact-driven",
+                "implementation_notes": "Continue generating Playwright screenshots and route them through this workflow so UI changes stay evidence-based.",
+                "shared_code_path": "applications/ui_review.py",
+                "sdk_considerations": "Preserve MCP SDK usage in the first-class app surfaces while the visuals evolve.",
+            }
+        ],
+        "broken_controls": [
+            {
+                "surface": "shared complaint workflow",
+                "control": "UI review automation",
+                "failure_mode": "No live router critique was returned for the screenshot set.",
+                "repair": "Restore multimodal or text router access so screenshot-driven actor/critic review can run.",
+            }
+        ],
+        "complaint_journey": {
+            "tested_stages": ["optimizer"],
+            "journey_gaps": ["No live router response was available to assess the end-to-end complaint journey."],
+            "sdk_tool_invocations": ["complaint.review_ui", "complaint.optimize_ui"],
+            "release_blockers": ["Restore screenshot review routing before trusting the automated UI gate."],
+        },
+        "actor_plan": {
+            "primary_objective": "Keep the screenshot-driven UI loop alive with artifact-backed reviews.",
+            "repair_sequence": [
+                "Restore multimodal router access.",
+                "Fallback to text router when images are unavailable.",
+                "Keep Playwright screenshot artifacts attached to each review cycle.",
+            ],
+            "playwright_objectives": [
+                "Capture landing, chat, workspace, review, and builder screens after each UI pass.",
+            ],
+            "mcp_sdk_expectations": [
+                "Preserve the complaint.review_ui and complaint.optimize_ui MCP SDK path.",
+            ],
+        },
+        "actor_summary": "The actor journey cannot be validated from screenshots until router-backed review returns.",
+        "critic_summary": "The critic sees the missing router response itself as a release blocker for the UI optimization loop.",
+        "actor_path_breaks": [
+            "The review loop cannot confirm that a user can move from intake to evidence to review to draft without getting lost.",
+        ],
+        "critic_test_obligations": [
+            "Keep a Playwright journey that covers testimony, evidence upload, support review, and final complaint generation.",
+        ],
+        "stage_findings": {
+            "Intake": "No live actor/critic screenshot review was available for intake.",
+            "Evidence": "No live actor/critic screenshot review was available for evidence handling.",
+            "Review": "No live actor/critic screenshot review was available for support review.",
+            "Draft": "No live actor/critic screenshot review was available for drafting.",
+            "Integration Discovery": "No live actor/critic screenshot review was available for the shared MCP SDK tooling surfaces.",
+        },
+        "critic_review": {
+            "verdict": "warning",
+            "blocking_findings": [
+                "The actor/critic optimizer cannot fully evaluate the complaint UI until router review is restored.",
+            ],
+            "acceptance_checks": [
+                "A screenshot set can be reviewed through multimodal or text router fallback.",
+            ],
+        },
+        "workflow_gaps": [
+            "No automated multimodal or text router response was returned for the screenshot set.",
+        ],
+        "playwright_followups": [
+            "Capture screenshots for workspace, document builder, review dashboard, and editor after each UI pass.",
+        ],
+        "ui_suggestions": [],
     }
 
 
@@ -946,6 +1226,46 @@ def _load_backend_kwargs(config_path: Optional[str], backend_id: Optional[str]) 
     return config
 
 
+def _resolve_ui_review_backend(
+    provider: Optional[str],
+    model: Optional[str],
+    *,
+    config_path: Optional[str],
+    backend_id: Optional[str],
+) -> Dict[str, Any]:
+    backend_kwargs = _load_backend_kwargs(config_path, backend_id)
+
+    requested_provider = str(provider or "").strip()
+    requested_model = str(model or "").strip()
+
+    if requested_provider:
+        backend_kwargs["provider"] = requested_provider
+    else:
+        backend_kwargs.setdefault(
+            "provider",
+            str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_PROVIDER", "") or "").strip() or DEFAULT_UI_REVIEW_PROVIDER,
+        )
+
+    provider_name = str(backend_kwargs.get("provider") or "").strip().lower()
+    if requested_model:
+        backend_kwargs["model"] = requested_model
+    else:
+        backend_kwargs.setdefault(
+            "model",
+            str(os.getenv(f"COMPLAINT_GENERATOR_UI_REVIEW_MODEL_{provider_name.upper()}", "") or "").strip()
+            or str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL", "") or "").strip()
+            or DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER.get(provider_name),
+        )
+
+    backend_kwargs.setdefault(
+        "timeout",
+        _ui_review_timeout_for_provider(backend_kwargs.get("provider")),
+    )
+    backend_kwargs.setdefault("retry_max_attempts", 1)
+    backend_kwargs.setdefault("allow_local_fallback", False)
+    return backend_kwargs
+
+
 def _call_with_timeout(fn, *, timeout_s: float):
     result_queue: Queue[tuple[str, Any]] = Queue(maxsize=1)
 
@@ -976,6 +1296,30 @@ def _ui_review_timeout_for_provider(provider: Optional[str]) -> float:
     return float(_TEXT_UI_REVIEW_TIMEOUTS.get(normalized, DEFAULT_UI_REVIEW_TIMEOUT_S))
 
 
+def _ui_review_page_executor_for_provider(provider: Optional[str]) -> str:
+    override = str(os.getenv("COMPLAINT_UI_REVIEW_PAGE_EXECUTOR", "") or "").strip().lower()
+    if override in {"inline", "process"}:
+        return override
+    normalized = str(provider or "").strip().lower()
+    if normalized in {"codex_cli", "codex"}:
+        return "inline"
+    return "process"
+
+
+def _should_use_compact_ui_review_prompt(
+    *,
+    provider: Optional[str],
+    screenshot_count: int,
+    compact_page_prompt: bool,
+) -> bool:
+    if compact_page_prompt:
+        return True
+    if str(os.getenv("COMPLAINT_UI_REVIEW_FULL_SINGLE_PAGE_PROMPT", "") or "").strip() == "1":
+        return False
+    normalized = str(provider or "").strip().lower()
+    return screenshot_count <= 1 and normalized in {"codex_cli", "codex"}
+
+
 def _review_with_multimodal_router(
     *,
     screenshots: List[Path],
@@ -984,6 +1328,7 @@ def _review_with_multimodal_router(
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     backend = MultimodalRouterBackend(**backend_kwargs)
     timeout_s = float(backend_kwargs.get("timeout") or DEFAULT_UI_REVIEW_TIMEOUT_S)
+    started_at = perf_counter()
     raw_response = _call_with_timeout(
         lambda: backend(
             prompt,
@@ -995,6 +1340,7 @@ def _review_with_multimodal_router(
         ),
         timeout_s=timeout_s,
     )
+    elapsed_s = perf_counter() - started_at
     return (
         _parse_json_response(raw_response),
         {
@@ -1002,6 +1348,9 @@ def _review_with_multimodal_router(
             "provider": backend.provider,
             "model": backend.model,
             "strategy": "multimodal_router",
+            "elapsed_seconds": round(float(elapsed_s), 3),
+            "prompt_chars": len(prompt),
+            "screenshot_count": len(screenshots),
         },
     )
 
@@ -1013,7 +1362,9 @@ def _review_with_text_router(
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     backend = LLMRouterBackend(**backend_kwargs)
     timeout_s = float(backend_kwargs.get("timeout") or DEFAULT_UI_REVIEW_TIMEOUT_S)
+    started_at = perf_counter()
     raw_response = _call_with_timeout(lambda: backend(prompt), timeout_s=timeout_s)
+    elapsed_s = perf_counter() - started_at
     return (
         _parse_json_response(raw_response),
         {
@@ -1021,6 +1372,9 @@ def _review_with_text_router(
             "provider": backend.provider,
             "model": backend.model,
             "strategy": "llm_router",
+            "elapsed_seconds": round(float(elapsed_s), 3),
+            "prompt_chars": len(prompt),
+            "screenshot_count": 0,
         },
     )
 
@@ -1044,24 +1398,24 @@ def create_ui_review_report(
         raise ValueError("No screenshot files were found for UI review.")
 
     complaint_output_feedback = _summarize_complaint_output_feedback(artifact_metadata or [])
+    backend_kwargs = _resolve_ui_review_backend(
+        provider,
+        model,
+        config_path=config_path,
+        backend_id=backend_id,
+    )
+    use_compact_prompt = _should_use_compact_ui_review_prompt(
+        provider=backend_kwargs.get("provider"),
+        screenshot_count=len(screenshots),
+        compact_page_prompt=compact_page_prompt,
+    )
     prompt = build_ui_review_prompt(
         screenshots,
         notes=notes,
         goals=goals,
         artifact_metadata=artifact_metadata,
-        include_full_contract_context=not compact_page_prompt,
+        include_full_contract_context=not use_compact_prompt,
     )
-    backend_kwargs = _load_backend_kwargs(config_path, backend_id)
-    if provider:
-        backend_kwargs["provider"] = provider
-    if model:
-        backend_kwargs["model"] = model
-    backend_kwargs.setdefault(
-        "timeout",
-        _ui_review_timeout_for_provider(backend_kwargs.get("provider")),
-    )
-    backend_kwargs.setdefault("retry_max_attempts", 1)
-    backend_kwargs.setdefault("allow_local_fallback", False)
 
     if len(screenshots) > 1:
         page_reports: List[Dict[str, Any]] = []
@@ -1109,6 +1463,7 @@ def create_ui_review_report(
             "strategy": "page_reviews",
             "page_review_count": len(page_reports),
             "page_review_executor": executor_mode,
+            "prompt_mode": "compact" if use_compact_prompt else "full",
             "page_review_backends": [dict(item.get("backend") or {}) for item in page_reports],
         }
         report = {
@@ -1156,84 +1511,13 @@ def create_ui_review_report(
             if skip_multimodal:
                 backend_metadata["multimodal_skipped"] = True
         except Exception as exc:
-            review_payload = {
-                "summary": "Router-driven UI review was unavailable, so a fallback implementation report was created.",
-                "issues": [
-                    {
-                        "severity": "medium",
-                        "surface": "shared complaint workflow",
-                        "problem": "No live router critique was available for the screenshots.",
-                        "user_impact": "UI review can stall unless there is a safe fallback path.",
-                        "recommended_fix": "Restore multimodal router access or provide richer page context so screenshot review remains actionable.",
-                    }
-                ],
-                "recommended_changes": [
-                    {
-                        "title": "Keep the review loop artifact-driven",
-                        "implementation_notes": "Continue generating Playwright screenshots and route them through this workflow so UI changes stay evidence-based.",
-                        "shared_code_path": "applications/ui_review.py",
-                        "sdk_considerations": "Preserve MCP SDK usage in the first-class app surfaces while the visuals evolve.",
-                    }
-                ],
-                "broken_controls": [
-                    {
-                        "surface": "shared complaint workflow",
-                        "control": "UI review automation",
-                        "failure_mode": "No live router critique was returned for the screenshot set.",
-                        "repair": "Restore multimodal or text router access so screenshot-driven actor/critic review can run.",
-                    }
-                ],
-                "complaint_journey": {
-                    "tested_stages": ["optimizer"],
-                    "journey_gaps": ["No live router response was available to assess the end-to-end complaint journey."],
-                    "sdk_tool_invocations": ["complaint.review_ui", "complaint.optimize_ui"],
-                    "release_blockers": ["Restore screenshot review routing before trusting the automated UI gate."],
-                },
-                "actor_plan": {
-                    "primary_objective": "Keep the screenshot-driven UI loop alive with artifact-backed reviews.",
-                    "repair_sequence": [
-                        "Restore multimodal router access.",
-                        "Fallback to text router when images are unavailable.",
-                        "Keep Playwright screenshot artifacts attached to each review cycle.",
-                    ],
-                    "playwright_objectives": [
-                        "Capture landing, chat, workspace, review, and builder screens after each UI pass.",
-                    ],
-                    "mcp_sdk_expectations": [
-                        "Preserve the complaint.review_ui and complaint.optimize_ui MCP SDK path.",
-                    ],
-                },
-                "actor_summary": "The actor journey cannot be validated from screenshots until router-backed review returns.",
-                "critic_summary": "The critic sees the missing router response itself as a release blocker for the UI optimization loop.",
-                "actor_path_breaks": [
-                    "The review loop cannot confirm that a user can move from intake to evidence to review to draft without getting lost.",
-                ],
-                "critic_test_obligations": [
-                    "Keep a Playwright journey that covers testimony, evidence upload, support review, and final complaint generation.",
-                ],
-                "stage_findings": {
-                    "Intake": "No live actor/critic screenshot review was available for intake.",
-                    "Evidence": "No live actor/critic screenshot review was available for evidence handling.",
-                    "Review": "No live actor/critic screenshot review was available for support review.",
-                    "Draft": "No live actor/critic screenshot review was available for drafting.",
-                    "Integration Discovery": "No live actor/critic screenshot review was available for the shared MCP SDK tooling surfaces.",
-                },
-                "critic_review": {
-                    "verdict": "warning",
-                    "blocking_findings": [
-                        "The actor/critic optimizer cannot fully evaluate the complaint UI until router review is restored.",
-                    ],
-                    "acceptance_checks": [
-                        "A screenshot set can be reviewed through multimodal or text router fallback.",
-                    ],
-                },
-                "workflow_gaps": [
-                    "No automated multimodal or text router response was returned for the screenshot set.",
-                ],
-                "playwright_followups": [
-                    "Capture screenshots for workspace, document builder, review dashboard, and editor after each UI pass.",
-                ],
-            }
+            review_payload = _deterministic_ui_review_fallback(
+                screenshots=screenshots,
+                artifact_metadata=list(artifact_metadata or []),
+                complaint_output_feedback=complaint_output_feedback,
+                multimodal_error=multimodal_exc,
+                fallback_error=exc,
+            )
             backend_metadata = {
                 "id": backend_kwargs.get("id", "ui-review"),
                 "provider": backend_kwargs.get("provider"),
@@ -1242,6 +1526,7 @@ def create_ui_review_report(
                 "multimodal_error": str(multimodal_exc),
                 "fallback_error": str(exc),
             }
+    backend_metadata.setdefault("prompt_mode", "compact" if use_compact_prompt else "full")
 
     report = {
         "generated_at": _utc_now(),
@@ -1273,15 +1558,21 @@ def run_ui_review_workflow(
 ) -> Dict[str, Any]:
     screenshots = _list_screenshots(screenshot_dir)
     artifact_metadata = _list_artifact_metadata(screenshot_dir)
+    resolved_backend = _resolve_ui_review_backend(
+        provider,
+        model,
+        config_path=config_path,
+        backend_id=backend_id,
+    )
     return create_ui_review_report(
         [str(path) for path in screenshots],
         notes=notes,
         goals=goals,
-        provider=provider,
-        model=model,
+        provider=resolved_backend.get("provider"),
+        model=resolved_backend.get("model"),
         config_path=config_path,
         backend_id=backend_id,
         output_path=output_path,
         artifact_metadata=artifact_metadata,
-        page_review_executor="process",
+        page_review_executor=_ui_review_page_executor_for_provider(resolved_backend.get("provider")),
     )

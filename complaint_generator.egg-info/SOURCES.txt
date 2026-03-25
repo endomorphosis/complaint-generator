@@ -262,6 +262,7 @@ tests/test_llm_fallback_integration.py
 tests/test_llm_router_backend.py
 tests/test_llm_router_circuit_breaker.py
 tests/test_llm_router_codex_quota_detection.py
+tests/test_llm_router_provider_priority.py
 tests/test_llm_router_shim_claude_code.py
 tests/test_llm_router_shim_codex_cli.py
 tests/test_llm_router_shim_copilot_sdk.py
@@ -321,6 +322,7 @@ tests/test_synonym_handling_resolution.py
 tests/test_synthesize_hacc_complaint.py
 tests/test_temporal_reasoning_extraction.py
 tests/test_ui_review_multimodal.py
+tests/test_ui_review_router_fallback_regression.py
 tests/test_ui_ux_optimizer_bundle.py
 tests/test_ui_ux_workflow.py
 tests/test_validate_intake_follow_up_worksheet.py

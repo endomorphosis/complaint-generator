@@ -28,6 +28,7 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "python3 -m complaint_generator.cli import-gmail-evidence" in content
     assert "complaint.import_gmail_evidence" in content
     assert '"tool": "complaint.import_gmail_evidence"' in content
+    assert "await client.importGmailEvidence({" in content
     assert '"addresses": ["hr@example.com", "manager@example.com"]' in content
     assert "copyTextToClipboard(" in content
     assert "CLI Gmail import command copied." in content
@@ -81,6 +82,7 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "provider-diagnostics-preview" in content
     assert "workspaceProviderDiagnostics = null;" in content
     assert "client.getProviderDiagnostics(workspaceUserId)" in content
+    assert "client.getToolingContract(workspaceUserId)" in content
     assert "refreshProviderDiagnosticsPanel()" in content
     assert "Provider diagnostics refreshed." in content
     assert "Router provider diagnostics" in content

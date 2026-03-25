@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import threading
 import uuid
 import zipfile
@@ -17,13 +18,29 @@ from typing import Any, Dict, List, Optional
 from xml.sax.saxutils import escape
 
 
+def _ensure_local_ipfs_datasets_path() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    candidate = repo_root / "ipfs_datasets_py"
+    candidate_text = str(candidate)
+    if candidate.is_dir() and candidate_text not in sys.path:
+        sys.path.insert(0, candidate_text)
+
+
+_ensure_local_ipfs_datasets_path()
+
+
 DEFAULT_USER_ID = "did:key:anonymous"
 DEFAULT_UI_UX_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
+DEFAULT_LLM_DRAFT_PROVIDER = "codex_cli"
+DEFAULT_LLM_DRAFT_MODELS_BY_PROVIDER: Dict[str, str] = {
+    "codex": "gpt-5.3-codex",
+    "codex_cli": "gpt-5.3-codex",
+}
 DEFAULT_LLM_DRAFT_TIMEOUT_SECONDS = 20
 DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER: Dict[str, int] = {
-    "codex": 60,
-    "codex_cli": 60,
+    "codex": 90,
+    "codex_cli": 90,
     "copilot_cli": 45,
     "copilot_sdk": 45,
     "openai": 30,
@@ -107,12 +124,14 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "start_session",
     "submit_intake_answers",
     "save_evidence",
+    "import_gmail_evidence",
     "review_case",
     "build_mediator_prompt",
     "get_complaint_readiness",
     "get_ui_readiness",
     "get_client_release_gate",
     "get_workflow_capabilities",
+    "get_tooling_contract",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -123,6 +142,8 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "get_filing_provenance",
     "get_provider_diagnostics",
     "review_generated_exports",
+    "update_claim_type",
+    "update_case_synopsis",
     "review_ui",
     "optimize_ui",
     "run_browser_audit",
@@ -132,12 +153,14 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "session",
     "answer",
     "add-evidence",
+    "import-gmail-evidence",
     "review",
     "mediator-prompt",
     "complaint-readiness",
     "ui-readiness",
     "client-release-gate",
     "capabilities",
+    "tooling-contract",
     "generate",
     "export-packet",
     "export-markdown",
@@ -148,6 +171,8 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "filing-provenance",
     "provider-diagnostics",
     "review-exports",
+    "set-claim-type",
+    "update-synopsis",
     "review-ui",
     "optimize-ui",
     "browser-audit",
@@ -158,12 +183,14 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "getSession",
     "submitIntake",
     "saveEvidence",
+    "importGmailEvidence",
     "reviewCase",
     "buildMediatorPrompt",
     "getComplaintReadiness",
     "getUiReadiness",
     "getClientReleaseGate",
     "getWorkflowCapabilities",
+    "getToolingContract",
     "generateComplaint",
     "exportComplaintPacket",
     "exportComplaintMarkdown",
@@ -174,6 +201,8 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "getFilingProvenance",
     "getProviderDiagnostics",
     "reviewGeneratedExports",
+    "updateClaimType",
+    "updateCaseSynopsis",
     "reviewUiArtifacts",
     "optimizeUiArtifacts",
     "runBrowserAudit",
@@ -191,6 +220,12 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "mcp_tool": "complaint.save_evidence",
         "browser_sdk_method": "saveEvidence",
     },
+    "gmail_evidence_import": {
+        "package_export": "import_gmail_evidence",
+        "cli_command": "import-gmail-evidence",
+        "mcp_tool": "complaint.import_gmail_evidence",
+        "browser_sdk_method": "importGmailEvidence",
+    },
     "support_review": {
         "package_export": "review_case",
         "cli_command": "review",
@@ -202,6 +237,18 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "mediator-prompt",
         "mcp_tool": "complaint.build_mediator_prompt",
         "browser_sdk_method": "buildMediatorPrompt",
+    },
+    "claim_type_alignment": {
+        "package_export": "update_claim_type",
+        "cli_command": "set-claim-type",
+        "mcp_tool": "complaint.update_claim_type",
+        "browser_sdk_method": "updateClaimType",
+    },
+    "case_synopsis_sync": {
+        "package_export": "update_case_synopsis",
+        "cli_command": "update-synopsis",
+        "mcp_tool": "complaint.update_case_synopsis",
+        "browser_sdk_method": "updateCaseSynopsis",
     },
     "draft_generation": {
         "package_export": "generate_complaint",
@@ -250,6 +297,12 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "provider-diagnostics",
         "mcp_tool": "complaint.get_provider_diagnostics",
         "browser_sdk_method": "getProviderDiagnostics",
+    },
+    "tooling_contract": {
+        "package_export": "get_tooling_contract",
+        "cli_command": "tooling-contract",
+        "mcp_tool": "complaint.get_tooling_contract",
+        "browser_sdk_method": "getToolingContract",
     },
     "export_critic": {
         "package_export": "review_generated_exports",
@@ -426,6 +479,37 @@ def _llm_draft_timeout_for_provider(provider: Optional[str]) -> int:
     return int(DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER.get(provider_key, DEFAULT_LLM_DRAFT_TIMEOUT_SECONDS))
 
 
+def _resolve_llm_draft_backend(
+    provider: Optional[str],
+    model: Optional[str],
+) -> Dict[str, Optional[str]]:
+    requested_provider = str(provider or "").strip()
+    requested_model = str(model or "").strip()
+
+    env_default_provider = str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "") or "").strip()
+    effective_provider = requested_provider or env_default_provider or DEFAULT_LLM_DRAFT_PROVIDER
+    provider_key = effective_provider.lower()
+
+    env_provider_model = str(
+        os.getenv(f"COMPLAINT_GENERATOR_LLM_DRAFT_MODEL_{provider_key.upper()}", "") or ""
+    ).strip()
+    env_default_model = str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_MODEL", "") or "").strip()
+    effective_model = (
+        requested_model
+        or env_provider_model
+        or env_default_model
+        or DEFAULT_LLM_DRAFT_MODELS_BY_PROVIDER.get(provider_key)
+        or None
+    )
+
+    return {
+        "provider": effective_provider,
+        "model": effective_model,
+        "requested_provider": requested_provider or None,
+        "requested_model": requested_model or None,
+    }
+
+
 def _pleading_timeline_sentence(value: Optional[str], fallback: str) -> str:
     text = _normalize_fragment(value, fallback)
     if not text:
@@ -507,6 +591,12 @@ def _formal_evidence_summary_item(item: Dict[str, Any], *, kind: str) -> str:
     if kind == "testimony":
         return f"testimony presently identified as '{title}' on the {element_label} element"
     return f"documentary exhibit presently identified as '{title}' on the {element_label} element"
+
+
+def _compact_evidence_reference_item(item: Dict[str, Any]) -> str:
+    title = str(item.get("title") or "Untitled evidence").strip()
+    element_label = _claim_element_label(item.get("claim_element_id")).strip() or "Claim element"
+    return f"{title} ({element_label})"
 
 
 def _claim_type_filing_guidance(value: Optional[str]) -> str:
@@ -1223,17 +1313,23 @@ class ComplaintWorkspaceService:
             for item in testimony_items[:3]
         ])
         document_reference_lines = _unique_preserve_order([
-            f"Plaintiff expects to offer documentary exhibit '{item.get('title') or 'Untitled document'}' in support of the {_claim_element_label(item.get('claim_element_id')).lower()} element."
+            (
+                f"Plaintiff identifies documentary exhibit '{item.get('title') or 'Untitled document'}' as presently supporting the "
+                f"{_claim_element_label(item.get('claim_element_id')).lower()} element. "
+                f"Plaintiff expects to offer documentary exhibit '{item.get('title') or 'Untitled document'}' in support of the "
+                f"{_claim_element_label(item.get('claim_element_id')).lower()} element."
+            )
             for item in document_items[:3]
         ])
         testimony_summary = "; ".join(_unique_preserve_order([
             _formal_evidence_summary_item(item, kind="testimony")
             for item in testimony_items[:3]
         ])) or "No witness or complainant testimony is presently identified"
-        document_summary = "; ".join(_unique_preserve_order([
-            _formal_evidence_summary_item(item, kind="document")
+        document_summary_items = _unique_preserve_order([
+            f"{_compact_evidence_reference_item(item)}; {_formal_evidence_summary_item(item, kind='document')}"
             for item in document_items[:3]
-        ])) or "No documentary exhibits are presently identified"
+        ])
+        document_summary = "; ".join(document_summary_items) or "No documentary exhibits are presently identified"
         complaint_heading = f"COMPLAINT FOR {claim_label.upper()}"
         nature_of_action = {
             "retaliation": (
@@ -1549,11 +1645,14 @@ class ComplaintWorkspaceService:
         }
         if use_llm:
             self._last_draft_refinement_error = None
+            resolved_backend = _resolve_llm_draft_backend(provider, model)
             refined_draft = self._refine_draft_with_llm_router(
                 state,
                 draft,
-                provider=provider,
-                model=model,
+                provider=resolved_backend["provider"],
+                model=resolved_backend["model"],
+                requested_provider=resolved_backend["requested_provider"],
+                requested_model=resolved_backend["requested_model"],
                 config_path=config_path,
                 backend_id=backend_id,
             )
@@ -1673,6 +1772,8 @@ class ComplaintWorkspaceService:
         *,
         provider: Optional[str] = None,
         model: Optional[str] = None,
+        requested_provider: Optional[str] = None,
+        requested_model: Optional[str] = None,
         config_path: Optional[str] = None,
         backend_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
@@ -1739,8 +1840,8 @@ class ComplaintWorkspaceService:
                 "id": getattr(backend, "id", backend_id or "complaint-draft"),
                 "provider": effective_provider,
                 "model": effective_model,
-                "requested_provider": str(provider or "").strip() or None,
-                "requested_model": str(model or "").strip() or None,
+                "requested_provider": str(requested_provider or "").strip() or None,
+                "requested_model": str(requested_model or "").strip() or None,
             },
             "draft_normalizations": normalization_notes,
         }

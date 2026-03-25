@@ -4315,24 +4315,15 @@ ${cliAddressLines}
                 return;
             }
             setBusyStatus('Importing Gmail evidence and attachments into the workspace…');
-            const response = await fetch('/api/complaint-workspace/import-gmail-evidence', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_id: workspaceUserId,
-                    addresses,
-                    claim_element_id: document.getElementById('gmail-import-claim-element').value,
-                    gmail_user: gmailUser,
-                    gmail_app_password: gmailAppPassword,
-                    date_after: document.getElementById('gmail-import-date-after').value || null,
-                    date_before: document.getElementById('gmail-import-date-before').value || null,
-                }),
+            const payload = await client.importGmailEvidence({
+                user_id: workspaceUserId,
+                addresses,
+                claim_element_id: document.getElementById('gmail-import-claim-element').value,
+                gmail_user: gmailUser,
+                gmail_app_password: gmailAppPassword,
+                date_after: document.getElementById('gmail-import-date-after').value || null,
+                date_before: document.getElementById('gmail-import-date-before').value || null,
             });
-            if (!response.ok) {
-                const message = await response.text();
-                throw new Error(message || 'Failed to import Gmail evidence.');
-            }
-            const payload = await response.json();
             workspaceSession = await client.startSession(workspaceUserId);
             await loadSharedCapabilities();
             renderWorkspace(workspaceSession);

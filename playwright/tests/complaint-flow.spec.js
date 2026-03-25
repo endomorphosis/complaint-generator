@@ -315,7 +315,7 @@ test.describe('complaint generation workflow', () => {
     await page.getByLabel('Requested Relief').fill('Front pay\nInjunctive relief');
     await page.getByRole('button', { name: 'Generate Formal Complaint' }).click();
 
-    expect(recorder.documentRequests).toHaveLength(2);
+    await expect.poll(() => (recorder.documentRequests || []).length).toBe(2);
     expect(recorder.documentRequests[1].requested_relief).toEqual(['Front pay', 'Injunctive relief']);
 
     await expect(page.locator('#previewRoot')).toContainText(/Front pay/i);
@@ -414,8 +414,12 @@ test.describe('complaint generation workflow', () => {
     await page.locator('#refresh-tooling-contract-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Tooling contract refreshed\./i);
     await expect(page.locator('#tooling-contract-preview')).toContainText(/"all_core_flow_steps_exposed":\s*true/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/import_gmail_evidence/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/importGmailEvidence/i);
     await expect(page.locator('#tooling-contract-preview')).toContainText(/complaint\.generate_complaint/i);
     await expect(page.locator('#tooling-contract-preview')).toContainText(/getToolingContract/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/updateClaimType/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/updateCaseSynopsis/i);
     await expect(page.locator('#tooling-contract-preview')).toContainText(/complaint\.get_formal_diagnostics/i);
     await expect(page.locator('#tooling-contract-preview')).toContainText(/getFormalDiagnostics/i);
     await expect(page.locator('#tooling-contract-preview')).toContainText(/complaint\.get_filing_provenance/i);
@@ -547,9 +551,15 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#ux-review-summary')).toContainText(/llm_router/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/multimodal_router/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/Tighten review-to-draft gatekeeping/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/7\/7 tools|7\/7 stages|7 stages/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/complaint\.import_gmail_evidence/i);
     await expect(page.locator('#ux-review-actor-critic')).toContainText(/actor/i);
     await expect(page.locator('#ux-review-actor-critic')).toContainText(/critic/i);
+    await expect(page.locator('#ux-review-actor-critic')).toContainText(/complaint\.import_gmail_evidence/i);
+    await expect(page.locator('#ux-review-issues')).toContainText(/Export controls can still visually outrank the release gate/i);
     await expect(page.locator('#ux-review-stage-findings')).toContainText(/Complaint-output suggestion carried into router review/i);
+    await expect(page.locator('#ux-review-stage-findings')).toContainText(/Gmail import affordance/i);
+    await expect(page.locator('#ux-review-followups')).toContainText(/Gmail import/i);
 
     await page.locator('#run-ux-closed-loop-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Closed-loop UI\/UX optimization completed\./i);
@@ -654,6 +664,10 @@ test.describe('complaint generation workflow', () => {
     await page.locator('#save-evidence-button').click();
     await expect(page.locator('#evidence-list')).toContainText(/Termination timeline email/i);
     await expect(page.locator('#evidence-list')).toContainText(/termination-email\.txt/i);
+    await expect(page.locator('#gmail-import-cli-command')).toContainText(/import-gmail-evidence/i);
+    await expect(page.locator('#gmail-import-mcp-command')).toContainText(/complaint\.import_gmail_evidence/i);
+    await expect(page.locator('#import-gmail-evidence-button')).toBeVisible();
+    await expect(page.locator('#gmail-import-cli-help')).toContainText(/keyring-backed Gmail app password reuse/i);
     await writeUiScreenshotArtifact(page, { name: 'workspace-evidence', title: 'Workspace Evidence' });
 
     await page.getByRole('button', { name: 'Review', exact: true }).click();

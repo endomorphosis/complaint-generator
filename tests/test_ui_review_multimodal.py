@@ -31,13 +31,17 @@ def test_create_ui_review_report_prefers_multimodal_router(monkeypatch, tmp_path
             self.id = kwargs.get("id", "ui-review")
             self.provider = kwargs.get("provider")
             self.model = kwargs.get("model")
-            assert kwargs["timeout"] == ui_review_module.DEFAULT_UI_REVIEW_TIMEOUT_S
+            assert kwargs["provider"] == ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            assert kwargs["model"] == ui_review_module.DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER["codex_cli"]
+            assert kwargs["timeout"] == ui_review_module._ui_review_timeout_for_provider(
+                ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            )
             assert kwargs["retry_max_attempts"] == 1
             assert kwargs["allow_local_fallback"] is False
 
         def __call__(self, prompt, *, image_paths=None, system_prompt=None):
-            assert "ComplaintMcpClient" in prompt
-            assert "Complaint export artifacts" in prompt
+            assert "Look at this complaint-generator page screenshot" in prompt
+            assert "Complaint-output hints" in prompt
             assert "Add a clearer export warning when support gaps remain." in prompt
             assert image_paths == [screenshot]
             assert system_prompt
@@ -56,6 +60,10 @@ def test_create_ui_review_report_prefers_multimodal_router(monkeypatch, tmp_path
     report = ui_review_module.create_ui_review_report([str(screenshot)], artifact_metadata=artifact_metadata)
 
     assert report["backend"]["strategy"] == "multimodal_router"
+    assert report["backend"]["prompt_mode"] == "compact"
+    assert report["backend"]["prompt_chars"] > 0
+    assert report["backend"]["screenshot_count"] == 1
+    assert report["backend"]["elapsed_seconds"] >= 0
     assert report["review"]["summary"] == "Use calmer next-step guidance."
     assert report["complaint_output_feedback"]["export_artifact_count"] == 1
     assert report["complaint_output_feedback"]["claim_types"] == ["retaliation"]
@@ -73,7 +81,11 @@ def test_create_ui_review_report_falls_back_to_text_router(monkeypatch, tmp_path
             self.id = kwargs.get("id", "ui-review")
             self.provider = kwargs.get("provider")
             self.model = kwargs.get("model")
-            assert kwargs["timeout"] == ui_review_module.DEFAULT_UI_REVIEW_TIMEOUT_S
+            assert kwargs["provider"] == ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            assert kwargs["model"] == ui_review_module.DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER["codex_cli"]
+            assert kwargs["timeout"] == ui_review_module._ui_review_timeout_for_provider(
+                ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            )
             assert kwargs["retry_max_attempts"] == 1
             assert kwargs["allow_local_fallback"] is False
 
@@ -85,12 +97,16 @@ def test_create_ui_review_report_falls_back_to_text_router(monkeypatch, tmp_path
             self.id = kwargs.get("id", "ui-review")
             self.provider = kwargs.get("provider")
             self.model = kwargs.get("model")
-            assert kwargs["timeout"] == ui_review_module.DEFAULT_UI_REVIEW_TIMEOUT_S
+            assert kwargs["provider"] == ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            assert kwargs["model"] == ui_review_module.DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER["codex_cli"]
+            assert kwargs["timeout"] == ui_review_module._ui_review_timeout_for_provider(
+                ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            )
             assert kwargs["retry_max_attempts"] == 1
             assert kwargs["allow_local_fallback"] is False
 
         def __call__(self, prompt):
-            assert "Screenshot artifacts" in prompt
+            assert "Look at this complaint-generator page screenshot" in prompt
             return '{"summary":"Fallback review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
 
     monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FailingMultimodalBackend)
@@ -100,6 +116,10 @@ def test_create_ui_review_report_falls_back_to_text_router(monkeypatch, tmp_path
 
     assert report["backend"]["strategy"] == "llm_router"
     assert report["backend"]["fallback_from"] == "multimodal_router"
+    assert report["backend"]["prompt_mode"] == "compact"
+    assert report["backend"]["prompt_chars"] > 0
+    assert report["backend"]["screenshot_count"] == 0
+    assert report["backend"]["elapsed_seconds"] >= 0
     assert report["review"]["summary"] == "Fallback review."
 
 
@@ -125,12 +145,16 @@ def test_run_ui_review_workflow_loads_complaint_export_artifacts_from_screenshot
             self.id = kwargs.get("id", "ui-review")
             self.provider = kwargs.get("provider")
             self.model = kwargs.get("model")
-            assert kwargs["timeout"] == ui_review_module.DEFAULT_UI_REVIEW_TIMEOUT_S
+            assert kwargs["provider"] == ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            assert kwargs["model"] == ui_review_module.DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER["codex_cli"]
+            assert kwargs["timeout"] == ui_review_module._ui_review_timeout_for_provider(
+                ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            )
             assert kwargs["retry_max_attempts"] == 1
             assert kwargs["allow_local_fallback"] is False
 
         def __call__(self, prompt, *, image_paths=None, system_prompt=None):
-            assert "Complaint export artifacts" in prompt
+            assert "Complaint-output hints" in prompt
             assert "Add clearer draft-readiness warnings before download." in prompt
             return '{"summary":"Workflow review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
 
@@ -139,6 +163,7 @@ def test_run_ui_review_workflow_loads_complaint_export_artifacts_from_screenshot
     report = ui_review_module.run_ui_review_workflow(str(tmp_path))
 
     assert report["backend"]["strategy"] == "multimodal_router"
+    assert report["backend"]["prompt_mode"] == "compact"
     assert report["complaint_output_feedback"]["export_artifact_count"] == 1
     assert report["complaint_output_feedback"]["claim_types"] == ["retaliation"]
     assert report["complaint_output_feedback"]["draft_strategies"] == ["template"]
@@ -152,7 +177,7 @@ def test_run_ui_review_workflow_loads_complaint_export_artifacts_from_screenshot
 def test_create_ui_review_report_times_out_multimodal_and_falls_back_to_text(monkeypatch, tmp_path: Path):
     screenshot = tmp_path / "workspace.png"
     screenshot.write_bytes(b"fake-png")
-    monkeypatch.setattr(ui_review_module, "DEFAULT_UI_REVIEW_TIMEOUT_S", 0.01)
+    monkeypatch.setattr(ui_review_module, "_ui_review_timeout_for_provider", lambda provider: 0.01)
 
     class HangingMultimodalBackend:
         def __init__(self, **kwargs):
@@ -163,6 +188,97 @@ def test_create_ui_review_report_times_out_multimodal_and_falls_back_to_text(mon
         def __call__(self, prompt, *, image_paths=None, system_prompt=None):
             time.sleep(0.05)
             return '{"summary":"too late","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    class FakeTextBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt):
+            assert "Look at this complaint-generator page screenshot" in prompt
+            return '{"summary":"Timed out multimodal, text fallback succeeded.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", HangingMultimodalBackend)
+    monkeypatch.setattr(ui_review_module, "LLMRouterBackend", FakeTextBackend)
+
+    report = ui_review_module.create_ui_review_report([str(screenshot)])
+
+    assert report["backend"]["strategy"] == "llm_router"
+    assert report["backend"]["fallback_from"] == "multimodal_router"
+    assert "timed out" in report["backend"]["fallback_error"].lower()
+    assert report["review"]["summary"] == "Timed out multimodal, text fallback succeeded."
+
+
+def test_create_ui_review_report_defaults_to_verified_codex_profile(monkeypatch, tmp_path: Path):
+    screenshot = tmp_path / "workspace.png"
+    screenshot.write_bytes(b"fake-png")
+
+    class FakeMultimodalBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+            assert self.provider == "codex_cli"
+            assert self.model == "gpt-5.3-codex"
+            assert kwargs["timeout"] == ui_review_module._ui_review_timeout_for_provider("codex_cli")
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            return '{"summary":"Default profile review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FakeMultimodalBackend)
+
+    report = ui_review_module.create_ui_review_report([str(screenshot)])
+
+    assert report["backend"]["strategy"] == "multimodal_router"
+    assert report["backend"]["provider"] == "codex_cli"
+    assert report["backend"]["model"] == "gpt-5.3-codex"
+    assert report["backend"]["prompt_mode"] == "compact"
+
+
+def test_create_ui_review_report_can_force_full_single_page_prompt(monkeypatch, tmp_path: Path):
+    screenshot = tmp_path / "workspace.png"
+    screenshot.write_bytes(b"fake-png")
+    monkeypatch.setenv("COMPLAINT_UI_REVIEW_FULL_SINGLE_PAGE_PROMPT", "1")
+
+    class FakeMultimodalBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            assert "ComplaintMcpClient" in prompt
+            assert "Screenshot artifacts" in prompt
+            return '{"summary":"Full prompt review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FakeMultimodalBackend)
+
+    report = ui_review_module.create_ui_review_report([str(screenshot)])
+
+    assert report["backend"]["prompt_mode"] == "full"
+    assert report["review"]["summary"] == "Full prompt review."
+
+
+def test_run_ui_review_workflow_defaults_to_inline_page_reviews_for_codex_cli(monkeypatch, tmp_path: Path):
+    screenshot = tmp_path / "workspace.png"
+    screenshot.write_bytes(b"fake-png")
+    captured = {}
+
+    def fake_create_ui_review_report(screenshot_paths, **kwargs):
+        captured["screenshot_paths"] = list(screenshot_paths)
+        captured["kwargs"] = dict(kwargs)
+        return {"backend": {"strategy": "page_reviews"}, "review": {"summary": "ok"}}
+
+    monkeypatch.setattr(ui_review_module, "create_ui_review_report", fake_create_ui_review_report)
+
+    ui_review_module.run_ui_review_workflow(str(tmp_path))
+
+    assert captured["screenshot_paths"] == [str(screenshot.resolve())]
+    assert captured["kwargs"]["provider"] == "codex_cli"
+    assert captured["kwargs"]["model"] == "gpt-5.3-codex"
+    assert captured["kwargs"]["page_review_executor"] == "inline"
+
 
 def test_run_ui_review_workflow_falls_back_to_text_router_when_only_export_artifacts_exist(monkeypatch, tmp_path: Path):
     (tmp_path / "workspace-export-artifacts.json").write_text(
@@ -179,6 +295,15 @@ def test_run_ui_review_workflow_falls_back_to_text_router_when_only_export_artif
         )
     )
 
+    class FailingMultimodalBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            raise RuntimeError("no screenshots available for multimodal review")
+
     class FakeTextBackend:
         def __init__(self, **kwargs):
             self.id = kwargs.get("id", "ui-review")
@@ -186,17 +311,67 @@ def test_run_ui_review_workflow_falls_back_to_text_router_when_only_export_artif
             self.model = kwargs.get("model")
 
         def __call__(self, prompt):
-            return '{"summary":"Timed out multimodal, text fallback succeeded.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+            assert "Complaint-output hints" in prompt
+            assert "Keep formal pleading warnings visible before download." in prompt
+            return '{"summary":"Artifact-only review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
 
-    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", HangingMultimodalBackend)
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FailingMultimodalBackend)
     monkeypatch.setattr(ui_review_module, "LLMRouterBackend", FakeTextBackend)
 
-    report = ui_review_module.create_ui_review_report([str(screenshot)])
+    report = ui_review_module.run_ui_review_workflow(str(tmp_path))
 
     assert report["backend"]["strategy"] == "llm_router"
     assert report["backend"]["fallback_from"] == "multimodal_router"
-    assert "timed out" in report["backend"]["fallback_error"].lower()
-    assert report["review"]["summary"] == "Timed out multimodal, text fallback succeeded."
+    assert report["review"]["summary"] == "Artifact-only review."
+    assert report["complaint_output_feedback"]["export_artifact_count"] == 1
+
+
+def test_create_ui_review_report_uses_artifact_driven_fallback_when_both_router_paths_fail(monkeypatch, tmp_path: Path):
+    screenshot = tmp_path / "workspace-export-artifacts.png"
+    screenshot.write_bytes(b"fake-png")
+    artifact_metadata = [
+        {
+            "artifact_type": "complaint_export",
+            "claim_type": "retaliation",
+            "draft_strategy": "llm_router",
+            "filing_shape_score": 71,
+            "release_gate": {"verdict": "warning", "blocking_reason": "Signature posture is still weak."},
+            "formal_section_gaps": ["signature_block"],
+            "ui_suggestions_excerpt": "Keep filing-shape warnings visible before export.",
+        }
+    ]
+
+    class FailingMultimodalBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            raise TimeoutError("UI review timed out after 60s")
+
+    class FailingTextBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt):
+            raise TimeoutError("UI review timed out after 60s")
+
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FailingMultimodalBackend)
+    monkeypatch.setattr(ui_review_module, "LLMRouterBackend", FailingTextBackend)
+
+    report = ui_review_module.create_ui_review_report(
+        [str(screenshot)],
+        artifact_metadata=artifact_metadata,
+    )
+
+    assert report["backend"]["strategy"] == "fallback"
+    assert report["review"]["summary"].startswith("Router-driven UI review timed out")
+    assert report["review"]["ui_suggestions"][0]["recommendation"] == "Keep filing-shape warnings visible before export."
+    assert report["review"]["issues"][0]["recommended_fix"] == "Keep filing-shape warnings visible before export."
+    assert report["review"]["broken_controls"][0]["control"] == "UI review automation"
 
 
 def test_create_ui_review_report_uses_native_multimodal_for_codex_cli(monkeypatch, tmp_path: Path):
@@ -211,7 +386,7 @@ def test_create_ui_review_report_uses_native_multimodal_for_codex_cli(monkeypatc
             assert kwargs["provider"] == "codex_cli"
 
         def __call__(self, prompt, *, image_paths=None, system_prompt=None):
-            assert "Screenshot artifacts" in prompt
+            assert "Look at this complaint-generator page screenshot" in prompt
             assert image_paths == [screenshot]
             assert system_prompt
             return '{"summary":"Codex multimodal review succeeded.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
@@ -254,6 +429,29 @@ def test_aggregate_page_review_reports_merges_page_level_feedback():
                         "sdk_considerations": "Keep ComplaintMcpClient visible.",
                     }
                 ],
+                "button_audit": [
+                    {
+                        "control": "Save Intake",
+                        "expected_outcome": "Persist intake answers and move the actor toward evidence capture.",
+                        "status": "warning",
+                        "notes": "The CTA needs stronger next-step language.",
+                    }
+                ],
+                "route_handoffs": [
+                    {
+                        "from_surface": "workspace-intake",
+                        "to_surface": "chat",
+                        "trigger": "handoff-chat-button",
+                        "state_requirements": ["shared DID", "case synopsis"],
+                        "status": "pass",
+                    }
+                ],
+                "complaint_journey": {
+                    "tested_stages": ["intake", "chat"],
+                    "journey_gaps": ["Mediator handoff could be clearer from intake."],
+                    "sdk_tool_invocations": ["complaint.submit_intake", "complaint.build_mediator_prompt"],
+                    "release_blockers": ["Intake CTA hierarchy is still confusing."],
+                },
                 "workflow_gaps": ["workspace-intake gap"],
                 "playwright_followups": ["Capture workspace-intake again after fixes"],
                 "stage_findings": {"Evidence": "workspace-intake evidence finding"},
@@ -281,6 +479,29 @@ def test_aggregate_page_review_reports_merges_page_level_feedback():
                         "sdk_considerations": "Keep ComplaintMcpClient visible.",
                     }
                 ],
+                "button_audit": [
+                    {
+                        "control": "Save Evidence",
+                        "expected_outcome": "Persist evidence and refresh the support matrix.",
+                        "status": "pass",
+                        "notes": "The button is visible, but the panel still needs clearer upload guidance.",
+                    }
+                ],
+                "route_handoffs": [
+                    {
+                        "from_surface": "workspace-evidence",
+                        "to_surface": "workspace-review",
+                        "trigger": "Review tab",
+                        "state_requirements": ["saved evidence"],
+                        "status": "pass",
+                    }
+                ],
+                "complaint_journey": {
+                    "tested_stages": ["evidence", "review", "draft"],
+                    "journey_gaps": ["Evidence upload guidance is still too thin."],
+                    "sdk_tool_invocations": ["complaint.save_evidence", "complaint.review_case", "complaint.generate_complaint"],
+                    "release_blockers": ["Evidence copy still undersells why uploads matter to the complaint."],
+                },
                 "workflow_gaps": ["workspace-evidence gap"],
                 "playwright_followups": ["Capture workspace-evidence again after fixes"],
                 "stage_findings": {"Evidence": "workspace-evidence evidence finding"},
@@ -293,21 +514,24 @@ def test_aggregate_page_review_reports_merges_page_level_feedback():
     assert "Aggregated 2 page-level screenshot reviews." in aggregated["summary"]
     assert len(aggregated["issues"]) == 2
     assert len(aggregated["recommended_changes"]) == 2
+    assert len(aggregated["button_audit"]) == 2
+    assert len(aggregated["route_handoffs"]) == 2
     assert len(aggregated["page_reviews"]) == 2
     assert aggregated["critic_review"]["verdict"] == "warning"
+    assert aggregated["complaint_journey"]["tested_stages"] == ["intake", "chat", "evidence", "review", "draft"]
+    assert aggregated["complaint_journey"]["sdk_tool_invocations"] == [
+        "complaint.submit_intake",
+        "complaint.build_mediator_prompt",
+        "complaint.save_evidence",
+        "complaint.review_case",
+        "complaint.generate_complaint",
+    ]
+    assert aggregated["complaint_journey"]["release_blockers"] == [
+        "Intake CTA hierarchy is still confusing.",
+        "Evidence copy still undersells why uploads matter to the complaint.",
+    ]
     assert "workspace-intake: workspace-intake evidence finding" in aggregated["stage_findings"]["Evidence"]
     assert "workspace-evidence: workspace-evidence evidence finding" in aggregated["stage_findings"]["Evidence"]
-            assert "Keep formal pleading warnings visible before download." in prompt
-            return '{"summary":"Artifact-only review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
-
-    monkeypatch.setattr(ui_review_module, "LLMRouterBackend", FakeTextBackend)
-
-    report = ui_review_module.run_ui_review_workflow(str(tmp_path))
-
-    assert report["backend"]["strategy"] == "llm_router"
-    assert report["backend"]["fallback_from"] == "multimodal_router"
-    assert report["review"]["summary"] == "Artifact-only review."
-    assert report["complaint_output_feedback"]["export_artifact_count"] == 1
 
 
 def test_build_complaint_output_review_prompt_includes_claim_type_context():

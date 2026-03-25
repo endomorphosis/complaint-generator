@@ -641,7 +641,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#ux-review-actor-critic')).toContainText(/Critic obligations/i);
     await expect(page.locator('#ux-review-runs')).toContainText(/Iteration 1/i);
     await expect(page.locator('#ux-review-stage-findings')).toContainText(/First-time complainants need clearer reassurance that incomplete dates and imperfect wording can still be saved/i);
-    await expect(page.locator('#ux-review-stage-findings')).toContainText(/The evidence step should explain which documents help prove causation before users are asked to upload or summarize proof/i);
+    await expect(page.locator('#ux-review-stage-findings')).toContainText(/The Gmail import affordance keeps evidence ingestion inside the browser workspace and the shared MCP SDK path|The evidence step should explain which documents help prove causation before users are asked to upload or summarize proof/i);
     await expect(page.locator('#ux-review-stage-findings')).not.toContainText(/Markdown fallback should not replace the structured intake guidance/i);
     await expect(page.locator('#ux-review-stage-findings')).not.toContainText(/Markdown fallback should not replace the structured evidence guidance/i);
 

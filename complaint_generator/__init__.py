@@ -21,6 +21,7 @@ from .workspace import (
     generate_decentralized_id,
     generate_complaint,
     get_workflow_capabilities,
+    import_gmail_evidence,
     list_claim_elements,
     list_intake_questions,
     list_mcp_tools,
@@ -119,7 +120,6 @@ _LAZY_EXPORTS = {
     "complaint_workspace_cli_main": (".cli", "main"),
     "complaint_mcp_server_main": (".mcp_server", "main"),
     "complaint_generator_main": (".entrypoints", "main"),
-    "import_gmail_evidence": (".email_import", "import_gmail_evidence"),
     "run_main": (".entrypoints", "run_main"),
 }
 

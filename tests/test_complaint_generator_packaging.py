@@ -78,8 +78,10 @@ def test_package_exports_expose_workspace_review_and_entrypoint_helpers():
         "getClientReleaseGate",
         "getFilingProvenance",
         "getFormalDiagnostics",
+        "importGmailEvidence",
         "getProviderDiagnostics",
         "getToolingContract",
+        "updateClaimType",
     ):
         assert method_name in commonjs_sdk
         assert method_name in esm_sdk

@@ -167,6 +167,10 @@
             }, payload || {}));
         }
 
+        importGmailEvidence(payload) {
+            return this.callTool('complaint.import_gmail_evidence', payload || {});
+        }
+
         reviewCase(userId) {
             return this.callTool('complaint.review_case', {
                 user_id: userId,

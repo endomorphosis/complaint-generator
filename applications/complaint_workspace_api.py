@@ -42,6 +42,11 @@ class GenerateRequest(BaseModel):
     user_id: Optional[str] = None
     requested_relief: List[str] = Field(default_factory=list)
     title_override: Optional[str] = None
+    use_llm: bool = False
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    config_path: Optional[str] = None
+    backend_id: Optional[str] = None
 
 
 class DraftUpdateRequest(BaseModel):
@@ -120,6 +125,11 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             request.user_id,
             requested_relief=request.requested_relief or None,
             title_override=request.title_override,
+            use_llm=request.use_llm,
+            provider=request.provider,
+            model=request.model,
+            config_path=request.config_path,
+            backend_id=request.backend_id,
         )
 
     @router.post("/api/complaint-workspace/update-draft")

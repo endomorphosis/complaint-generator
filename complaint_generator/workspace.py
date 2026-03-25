@@ -99,6 +99,35 @@ def save_evidence(
     )
 
 
+def import_gmail_evidence(
+    user_id: Optional[str],
+    *,
+    addresses: list[str],
+    claim_element_id: str = "causation",
+    folder: str = "INBOX",
+    limit: Optional[int] = None,
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
+    evidence_root: Optional[str | Path] = None,
+    gmail_user: Optional[str] = None,
+    gmail_app_password: Optional[str] = None,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).import_gmail_evidence(
+        user_id,
+        addresses=list(addresses or []),
+        claim_element_id=claim_element_id,
+        folder=folder,
+        limit=limit,
+        date_after=date_after,
+        date_before=date_before,
+        evidence_root=str(evidence_root) if evidence_root is not None else None,
+        gmail_user=gmail_user,
+        gmail_app_password=gmail_app_password,
+    )
+
+
 def review_case(
     user_id: Optional[str],
     *,
@@ -469,6 +498,7 @@ __all__ = [
     "generate_decentralized_id",
     "generate_complaint",
     "get_workflow_capabilities",
+    "import_gmail_evidence",
     "list_claim_elements",
     "list_intake_questions",
     "list_mcp_tools",

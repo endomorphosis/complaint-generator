@@ -1,6 +1,8 @@
 import json
 import os
 import runpy
+import shutil
+import site
 import subprocess
 import sys
 from pathlib import Path
@@ -64,16 +66,30 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _script_path(script_name: str) -> Path:
-    scripts_dir = Path(sys.executable).parent
     suffix = ".exe" if sys.platform.startswith("win") else ""
-    return scripts_dir / f"{script_name}{suffix}"
+    script_filename = f"{script_name}{suffix}"
+    candidates = [
+        Path(sys.executable).parent / script_filename,
+        Path(site.USER_BASE) / ("Scripts" if sys.platform.startswith("win") else "bin") / script_filename,
+        Path.home() / (".local/Scripts" if sys.platform.startswith("win") else ".local/bin") / script_filename,
+    ]
+    located = shutil.which(script_name)
+    if located:
+        candidates.insert(0, Path(located))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 def _ensure_editable_console_scripts() -> None:
+    install_env = dict(os.environ)
+    install_env["PIP_BREAK_SYSTEM_PACKAGES"] = "1"
     subprocess.run(
         [sys.executable, "-m", "pip", "install", "-e", ".", "--no-deps"],
         cwd=REPO_ROOT,
         check=True,
+        env=install_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -519,6 +535,53 @@ def test_package_workspace_generate_complaint_can_optionally_use_llm_router(tmp_
         and "llm_router-backed formal complaint generation" in item["detail"]
         for item in capabilities_payload["capabilities"]
     )
+
+
+def test_package_generate_complaint_defaults_to_verified_llm_profile(tmp_path, monkeypatch):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "package-default-llm-profile-sessions")
+    submit_intake_answers(
+        "package-default-llm-user",
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10.",
+            "harm": "Lost wages and emotional distress.",
+        },
+        service=service,
+    )
+
+    observed_kwargs = {}
+
+    def fake_refine(self, state, base_draft, **kwargs):
+        observed_kwargs.update(kwargs)
+        return {
+            **base_draft,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "package-default-backend",
+                "provider": kwargs.get("provider"),
+                "model": kwargs.get("model"),
+            },
+        }
+
+    monkeypatch.setattr(ComplaintWorkspaceService, "_refine_draft_with_llm_router", fake_refine)
+
+    payload = generate_complaint(
+        "package-default-llm-user",
+        requested_relief=["Back pay"],
+        use_llm=True,
+        service=service,
+    )
+
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert observed_kwargs["provider"] == "codex_cli"
+    assert observed_kwargs["model"] == "gpt-5.3-codex"
+    assert observed_kwargs["requested_provider"] is None
+    assert observed_kwargs["requested_model"] is None
+    assert payload["draft"]["draft_backend"]["provider"] == "codex_cli"
+    assert payload["draft"]["draft_backend"]["model"] == "gpt-5.3-codex"
 
 
 def test_complaint_generator_cli_wrapper_exposes_workspace_commands(tmp_path, monkeypatch):

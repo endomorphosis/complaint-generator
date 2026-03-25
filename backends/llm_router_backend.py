@@ -15,10 +15,10 @@ from integrations.ipfs_datasets.llm import (
 logger = logging.getLogger(__name__)
 
 _PROVIDER_ALIASES = {
-    'local': 'hf',
-    'local_hf': 'hf',
-    'huggingface': 'hf',
-    'hf': 'hf',
+    'local': 'local_hf',
+    'local_hf': 'local_hf',
+    'hf': 'local_hf',
+    'huggingface': 'hf_inference_api',
 }
 
 _PROVIDER_ENV_KEYS = (

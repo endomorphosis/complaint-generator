@@ -157,6 +157,10 @@ class ComplaintMcpClient {
         }, payload || {}));
     }
 
+    importGmailEvidence(payload) {
+        return this.callTool('complaint.import_gmail_evidence', payload || {});
+    }
+
     reviewCase(userId) {
         return this.callTool('complaint.review_case', {
             user_id: userId,
@@ -255,6 +259,13 @@ class ComplaintMcpClient {
 
     reviewGeneratedExports(payload) {
         return this.callTool('complaint.review_generated_exports', payload || {});
+    }
+
+    updateClaimType(userId, claimType) {
+        return this.callTool('complaint.update_claim_type', {
+            user_id: userId,
+            claim_type: claimType,
+        });
     }
 
     downloadComplaintPacketUrl(userId, outputFormat) {
