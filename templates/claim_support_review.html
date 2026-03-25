@@ -5816,6 +5816,8 @@
                         <div class="chip-row">
                             ${record.claim_element_text ? `<span class="chip">${record.claim_element_text}</span>` : ''}
                             ${record.evidence_type ? `<span class="chip">type: ${record.evidence_type}</span>` : ''}
+                            ${record.filename ? `<span class="chip">file: ${record.filename}</span>` : ''}
+                            ${record.source_url ? `<span class="chip">source: ${record.source_url}</span>` : ''}
                             ${parseMetadata.quality_tier ? `<span class="chip">quality: ${parseMetadata.quality_tier}</span>` : ''}
                             ${record.graph_status ? `<span class="chip">graph: ${record.graph_status}</span>` : ''}
                             ${record.fact_count !== null && record.fact_count !== undefined ? `<span class="chip">facts: ${record.fact_count}</span>` : ''}

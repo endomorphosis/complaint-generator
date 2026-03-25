@@ -2092,6 +2092,57 @@ async function installCommonMocks(page, recorder = {}, options = {}) {
     });
   });
 
+  await page.route('**/api/claim-support/upload-document', async (route) => {
+    const postDataBuffer = route.request().postDataBuffer();
+    const bodyText = postDataBuffer ? postDataBuffer.toString('utf8') : '';
+    const uploadedFilenameMatch = bodyText.match(/filename=\"([^\"]+)\"/);
+    const uploadedFilename = uploadedFilenameMatch ? uploadedFilenameMatch[1] : 'uploaded-evidence.txt';
+    recorder.saveUploadedDocumentRequest = {
+      contentType: route.request().headers()['content-type'] || '',
+      bodyText,
+      filename: uploadedFilename,
+    };
+    const payload = clone(reviewPayload);
+    payload.document_artifacts.retaliation = [
+      {
+        claim_element_id: 'retaliation:2',
+        claim_element_text: 'Adverse action',
+        description: 'Uploaded termination notice',
+        filename: uploadedFilename,
+        evidence_type: 'document_upload',
+        parse_status: 'parsed',
+        chunk_count: 1,
+        fact_count: 1,
+        graph_status: 'ready',
+        parsed_text_preview: 'Uploaded evidence parsed successfully for the adverse action element.',
+        created_at: '2026-03-22T12:35:00Z',
+      },
+    ];
+    payload.document_summary.retaliation = {
+      record_count: 1,
+      linked_element_count: 1,
+      total_chunk_count: 1,
+      total_fact_count: 1,
+      low_quality_record_count: 0,
+      graph_ready_record_count: 1,
+      parse_status_counts: {
+        parsed: 1,
+      },
+    };
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        recorded: true,
+        document_result: {
+          filename: uploadedFilename,
+          parse_status: 'parsed',
+        },
+        post_save_review: payload,
+      }),
+    });
+  });
+
   await page.route('**/api/claim-support/save-testimony', async (route) => {
     recorder.saveTestimonyRequest = route.request().postDataJSON();
     const payload = clone(reviewPayload);

@@ -1144,15 +1144,6 @@ def create_ui_review_report(
             prompt=prompt,
             backend_kwargs=backend_kwargs,
         )
-    except Exception as multimodal_exc:
-        if screenshots:
-            review_payload, backend_metadata = _review_with_multimodal_router(
-                screenshots=screenshots,
-                prompt=prompt,
-                backend_kwargs=backend_kwargs,
-            )
-        else:
-            raise RuntimeError("No screenshot files were available for multimodal review.")
     except Exception as exc:
         multimodal_exc = exc
         try:

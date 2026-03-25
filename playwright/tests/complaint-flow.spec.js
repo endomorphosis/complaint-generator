@@ -181,6 +181,38 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('body')).toContainText(/Formal Complaint Builder/i);
   });
 
+  test('review dashboard can upload a document file and keep the attachment visible in the evidence flow', async ({ page }) => {
+    const recorder = {};
+    await installCommonMocks(page, recorder);
+
+    await page.goto('/claim-support-review?claim_type=retaliation&user_id=demo-user&section=claims_for_relief');
+    await page.getByRole('button', { name: 'Load Review' }).click();
+    await expect(page.locator('#status-line')).toContainText(/Review payload loaded/i);
+
+    await page.locator('#document-element-id').fill('retaliation:2');
+    await page.locator('#document-element-text').fill('Adverse action');
+    await page.locator('#document-label').fill('Uploaded termination notice');
+    await page.locator('#document-filename').fill('review-upload-evidence.txt');
+    await page.locator('#document-mime-type').fill('text/plain');
+    await page.locator('#document-file-input').setInputFiles({
+      name: 'review-upload-evidence.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('Termination notice uploaded through the review dashboard.'),
+    });
+    await page.getByRole('button', { name: 'Save Document' }).click();
+
+    await expect(page.locator('#document-list')).toContainText(/Uploaded termination notice/i);
+    await expect(page.locator('#document-list')).toContainText(/review-upload-evidence\.txt/i);
+    await expect(page.locator('#document-list')).toContainText(/parse parsed/i);
+    await expect(page.locator('#document-list')).toContainText(/graph:\s*ready/i);
+    await expect(page.locator('#raw-output')).toContainText(/"recorded": true/i);
+
+    expect(recorder.saveUploadedDocumentRequest.contentType).toMatch(/multipart\/form-data/i);
+    expect(recorder.saveUploadedDocumentRequest.filename).toBe('review-upload-evidence.txt');
+    expect(recorder.saveUploadedDocumentRequest.bodyText).toContain('retaliation:2');
+    expect(recorder.saveUploadedDocumentRequest.bodyText).toContain('Uploaded termination notice');
+  });
+
   test('user can go through intake questions and see them across chat, profile, and results surfaces', async ({ page }) => {
     await page.addInitScript(() => {
       window.alert = () => {};
