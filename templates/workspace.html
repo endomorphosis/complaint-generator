@@ -1512,6 +1512,48 @@
                                 <button class="secondary" id="import-gmail-evidence-button" type="button">Import Gmail Evidence</button>
                             </div>
                         </div>
+                        <div class="evidence-form-shell" style="margin-top: 18px;">
+                            <div class="section-intro">
+                                <strong>Import local evidence artifacts</strong>
+                                <span>Bring local PDFs, screenshots, text exports, mailbox files, or whole directories into the complaint evidence workspace by path.</span>
+                            </div>
+                            <div class="field-grid">
+                                <div class="field-row">
+                                    <div>
+                                        <label for="local-evidence-paths">Files Or Directories</label>
+                                        <textarea id="local-evidence-paths" placeholder="/home/me/case/termination-email.pdf&#10;/home/me/case/screenshots"></textarea>
+                                        <div class="helper-text">One local path per line. Directories are scanned recursively for files.</div>
+                                    </div>
+                                    <div>
+                                        <label for="local-evidence-claim-element">Claim Element</label>
+                                        <select id="local-evidence-claim-element">
+                                            <option value="protected_activity">Protected activity</option>
+                                            <option value="employer_knowledge">Employer knowledge</option>
+                                            <option value="adverse_action">Adverse action</option>
+                                            <option value="causation" selected>Causal link</option>
+                                            <option value="harm">Damages</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="field-row">
+                                    <div>
+                                        <label for="local-evidence-kind">Evidence Kind</label>
+                                        <select id="local-evidence-kind">
+                                            <option value="document" selected>Document</option>
+                                            <option value="testimony">Testimony</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="local-evidence-note">Collection Note</label>
+                                        <input id="local-evidence-note" type="text" placeholder="Optional note about this import batch">
+                                        <div class="helper-text">Use this to remind yourself why this local import batch matters to the case.</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="button-row" style="margin-top: 16px;">
+                                <button class="secondary" id="import-local-evidence-button" type="button">Import Local Evidence</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="button-row">
                         <button class="primary" id="save-evidence-button" type="button">Save Evidence Item</button>
@@ -4461,6 +4503,30 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             setStatus(`Imported ${payload.imported_count || 0} Gmail message(s) into the evidence workspace.`);
         }
 
+        async function importLocalEvidence() {
+            const paths = document.getElementById('local-evidence-paths').value
+                .split('\n')
+                .map((item) => item.trim())
+                .filter(Boolean);
+            if (!paths.length) {
+                activateTab('evidence');
+                setStatus('Add at least one local file or directory path before importing local evidence.');
+                return;
+            }
+            setBusyStatus('Importing local evidence artifacts into the workspace…');
+            const payload = await client.importLocalEvidence({
+                user_id: workspaceUserId,
+                paths,
+                claim_element_id: document.getElementById('local-evidence-claim-element').value,
+                kind: document.getElementById('local-evidence-kind').value,
+            });
+            workspaceSession = await client.startSession(workspaceUserId);
+            await loadSharedCapabilities();
+            renderWorkspace(workspaceSession);
+            document.getElementById('local-evidence-note').value = '';
+            setStatus(`Imported ${payload.imported_count || 0} local evidence artifact(s) into the evidence workspace.`);
+        }
+
         async function generateDraft() {
             const requiredQuestions = ['party_name', 'opposing_party', 'protected_activity', 'adverse_action', 'timeline', 'harm'];
             const savedAnswers = ((workspaceSession || {}).session || {}).intake_answers || {};
@@ -4766,6 +4832,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
         document.getElementById('refresh-session-button').addEventListener('click', refreshWorkspace);
         document.getElementById('save-evidence-button').addEventListener('click', addEvidence);
         document.getElementById('import-gmail-evidence-button').addEventListener('click', importGmailEvidence);
+        document.getElementById('import-local-evidence-button').addEventListener('click', importLocalEvidence);
         document.getElementById('copy-gmail-import-cli-command').addEventListener('click', () => {
             copyTextToClipboard(
                 document.getElementById('gmail-import-cli-command').innerText,

@@ -42,6 +42,7 @@ from complaint_generator import (
     generate_complaint,
     get_workflow_capabilities,
     handle_jsonrpc_message,
+    import_local_evidence,
     list_claim_elements,
     list_intake_questions,
     list_mcp_tools,
@@ -212,6 +213,16 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
         service=service,
     )
     assert evidence_payload["saved"]["title"] == "Termination email"
+
+    local_artifact = tmp_path / "timeline.txt"
+    local_artifact.write_text("Timeline notes for the retaliation case.", encoding="utf-8")
+    local_import_payload = import_local_evidence(
+        "package-wrapper-user",
+        paths=[str(local_artifact)],
+        claim_element_id="causation",
+        service=service,
+    )
+    assert local_import_payload["imported_count"] == 1
 
     synopsis_payload = update_case_synopsis(
         "package-wrapper-user",

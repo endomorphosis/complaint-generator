@@ -2179,6 +2179,11 @@ class ComplaintWorkspaceService:
         actor_path_breaks = list(review.get("actor_path_breaks") or (result or {}).get("actor_path_breaks") or [])
         broken_controls = list(review.get("broken_controls") or (result or {}).get("broken_controls") or [])
         issues = list(review.get("issues") or (result or {}).get("issues") or [])
+        recommended_changes = list(review.get("recommended_changes") or (result or {}).get("recommended_changes") or [])
+        playwright_followups = list(review.get("playwright_followups") or (result or {}).get("playwright_followups") or [])
+        screenshot_findings = list(review.get("screenshot_findings") or (result or {}).get("screenshot_findings") or [])
+        optimization_targets = list(review.get("optimization_targets") or (result or {}).get("optimization_targets") or [])
+        stage_findings = dict(review.get("stage_findings") or (result or {}).get("stage_findings") or {})
         release_blockers = list(complaint_journey.get("release_blockers") or [])
         acceptance_checks = list(critic_review.get("acceptance_checks") or [])
         tested_stages = list(complaint_journey.get("tested_stages") or [])
@@ -2233,10 +2238,19 @@ class ComplaintWorkspaceService:
             "sdk_invocations": sdk_invocations,
             "actor_path_breaks": actor_path_breaks,
             "broken_controls": broken_controls,
+            "issues": issues,
+            "recommended_changes": recommended_changes,
+            "playwright_followups": playwright_followups,
+            "stage_findings": stage_findings,
+            "screenshot_findings": screenshot_findings,
+            "optimization_targets": optimization_targets,
             "issue_counts": severity_counts,
             "summary": summary_text,
             "workflow_type": str((result or {}).get("workflow_type") or (result or {}).get("backend", {}).get("strategy") or "review"),
             "review_backend": deepcopy((result or {}).get("backend") or {}),
+            "latest_review_markdown_path": (result or {}).get("latest_review_markdown_path"),
+            "latest_review_json_path": (result or {}).get("latest_review_json_path"),
+            "runs": deepcopy((result or {}).get("runs") or []),
             "updated_at": _utc_now(),
         }
 
@@ -2266,9 +2280,18 @@ class ComplaintWorkspaceService:
             "sdk_invocations": [],
             "actor_path_breaks": [],
             "broken_controls": [],
+            "issues": [],
+            "recommended_changes": [],
+            "playwright_followups": [],
+            "stage_findings": {},
+            "screenshot_findings": [],
+            "optimization_targets": [],
             "issue_counts": {"high": 0, "medium": 0, "low": 0},
             "workflow_type": None,
             "review_backend": {},
+            "latest_review_markdown_path": None,
+            "latest_review_json_path": None,
+            "runs": [],
             "updated_at": None,
         }
 

@@ -737,6 +737,7 @@ def test_review_surface_app_registers_dashboard_and_api_routes():
         ("/api/complaint-workspace/intake", "POST"),
         ("/api/complaint-workspace/evidence", "POST"),
         ("/api/complaint-workspace/import-gmail-evidence", "POST"),
+        ("/api/complaint-workspace/import-local-evidence", "POST"),
         ("/api/complaint-workspace/review", "POST"),
         ("/api/complaint-workspace/generate", "POST"),
         ("/api/complaint-workspace/update-draft", "POST"),

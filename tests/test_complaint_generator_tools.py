@@ -62,6 +62,7 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.submit_intake",
         "complaint.save_evidence",
         "complaint.import_gmail_evidence",
+        "complaint.import_local_evidence",
         "complaint.review_case",
         "complaint.build_mediator_prompt",
         "complaint.get_complaint_readiness",
@@ -150,6 +151,7 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert cli_payload["all_core_flow_steps_exposed"] is True
     assert "generate" in cli_payload["cli_commands"]
     assert "import-gmail-evidence" in cli_payload["cli_commands"]
+    assert "import-local-evidence" in cli_payload["cli_commands"]
     assert "tooling-contract" in cli_payload["cli_commands"]
     assert "set-claim-type" in cli_payload["cli_commands"]
     assert "update-synopsis" in cli_payload["cli_commands"]
@@ -158,15 +160,18 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert mcp_payload["all_core_flow_steps_exposed"] is True
     assert any(step["id"] == "draft_generation" for step in mcp_payload["core_flow_steps"])
     assert any(step["id"] == "gmail_evidence_import" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "local_evidence_import" for step in mcp_payload["core_flow_steps"])
     assert any(step["id"] == "tooling_contract" for step in mcp_payload["core_flow_steps"])
 
     package_payload = get_tooling_contract("contract-user", service=service)
     assert package_payload["all_core_flow_steps_exposed"] is True
     assert "complaint.generate_complaint" in package_payload["mcp_tools"]
     assert "import_gmail_evidence" in package_payload["package_exports"]
+    assert "import_local_evidence" in package_payload["package_exports"]
     assert "update_claim_type" in package_payload["package_exports"]
     assert "update_case_synopsis" in package_payload["package_exports"]
     assert "importGmailEvidence" in package_payload["browser_sdk_methods"]
+    assert "importLocalEvidence" in package_payload["browser_sdk_methods"]
     assert "updateClaimType" in package_payload["browser_sdk_methods"]
     assert "updateCaseSynopsis" in package_payload["browser_sdk_methods"]
     assert "getToolingContract" in package_payload["browser_sdk_methods"]
@@ -494,6 +499,86 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
     assert len(documents) == 1
     assert documents[0]["title"] == "Email import: Termination email"
     assert documents[0]["attachment_names"] == ["message.eml", "termination.pdf", "message.json"]
+
+
+def test_import_local_evidence_cli_command(monkeypatch, tmp_path):
+    runner = CliRunner()
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "local-import-cli-sessions")
+    monkeypatch.setattr(complaint_cli_impl, "service", service)
+
+    evidence_file = tmp_path / "timeline.txt"
+    evidence_file.write_text("Timeline notes for the retaliation case.", encoding="utf-8")
+
+    payload = _invoke_cli(
+        runner,
+        "import-local-evidence",
+        "--user-id",
+        "cli-user",
+        "--path",
+        str(evidence_file),
+        "--claim-element-id",
+        "causation",
+    )
+
+    assert payload["status"] == "success"
+    assert payload["imported_count"] == 1
+    session = service.get_session("cli-user")["session"]
+    documents = session["evidence"]["documents"]
+    assert len(documents) == 1
+    assert documents[0]["title"] == "Local import: timeline.txt"
+
+
+def test_import_local_evidence_mcp_tool(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "local-import-mcp-sessions")
+    evidence_file = tmp_path / "timeline.txt"
+    evidence_file.write_text("Timeline notes for the retaliation case.", encoding="utf-8")
+
+    payload = _call_mcp_tool(
+        service,
+        22_1,
+        "complaint.import_local_evidence",
+        {
+            "user_id": "mcp-user",
+            "paths": [str(evidence_file)],
+            "claim_element_id": "causation",
+        },
+    )
+
+    assert payload["status"] == "success"
+    assert payload["imported_count"] == 1
+    session = service.get_session("mcp-user")["session"]
+    documents = session["evidence"]["documents"]
+    assert len(documents) == 1
+    assert documents[0]["title"] == "Local import: timeline.txt"
+
+
+def test_import_local_evidence_api_route(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "local-import-api-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    evidence_file = tmp_path / "timeline.txt"
+    evidence_file.write_text("Timeline notes for the retaliation case.", encoding="utf-8")
+
+    response = client.post(
+        "/api/complaint-workspace/import-local-evidence",
+        json={
+            "user_id": "api-user",
+            "paths": [str(evidence_file)],
+            "claim_element_id": "causation",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["imported_count"] == 1
+    session = service.get_session("api-user")["session"]
+    documents = session["evidence"]["documents"]
+    assert len(documents) == 1
+    assert documents[0]["title"] == "Local import: timeline.txt"
 
 
 def test_all_cli_commands_are_exercised_end_to_end(monkeypatch, tmp_path):
@@ -2471,6 +2556,49 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
             "iterations": 2,
             "screenshot_dir": str(tmp_path),
             "output_dir": str(tmp_path / "reviews"),
+            "review": {
+                "summary": "Audit found broken stage transitions around draft handoff.",
+                "critic_review": {"verdict": "warning", "acceptance_checks": ["Keep every export action reachable from the draft review stage."]},
+                "complaint_journey": {
+                    "tested_stages": ["intake", "evidence", "review", "draft", "export"],
+                    "sdk_tool_invocations": ["generateComplaint", "exportComplaintPdf"],
+                },
+            },
+            "issues": [
+                {
+                    "severity": "high",
+                    "stage": "draft",
+                    "summary": "Primary export button becomes inert after review refresh.",
+                }
+            ],
+            "recommended_changes": [
+                "Keep the primary export action anchored beside the complaint draft preview."
+            ],
+            "playwright_followups": [
+                "Assert the export control stays enabled after evidence edits."
+            ],
+            "stage_findings": {
+                "draft": ["Export path looks disconnected from the complaint preview after a refresh."]
+            },
+            "screenshot_findings": [
+                {
+                    "artifact_path": str(tmp_path / "workspace-draft.png"),
+                    "stage": "draft",
+                    "surface": "workspace-draft",
+                    "summary": "The draft page hides the export affordance below the fold.",
+                    "criticisms": [
+                        "The actor loses the next step after generating the complaint.",
+                    ],
+                }
+            ],
+            "optimization_targets": [
+                {
+                    "stage": "draft",
+                    "target": "Keep export buttons visible next to the generated complaint.",
+                }
+            ],
+            "latest_review_markdown_path": str(tmp_path / "reviews" / "iteration-01-review.md"),
+            "latest_review_json_path": str(tmp_path / "reviews" / "iteration-01-review.json"),
             "runs": [
                 {
                     "iteration": 1,
@@ -2499,6 +2627,65 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
     assert mcp_payload["runs"][0]["iteration"] == 1
     cached_payload = _call_mcp_tool(service, 13, "complaint.get_ui_readiness", {"user_id": "iter-user"})
     assert cached_payload["status"] == "cached"
+    assert cached_payload["screenshot_findings"][0]["surface"] == "workspace-draft"
+    assert cached_payload["optimization_targets"][0]["stage"] == "draft"
+    assert cached_payload["playwright_followups"] == ["Assert the export control stays enabled after evidence edits."]
+    assert cached_payload["latest_review_json_path"] == str(tmp_path / "reviews" / "iteration-01-review.json")
+    assert cached_payload["runs"][0]["iteration"] == 1
+
+
+def test_ui_readiness_summary_preserves_screenshot_driven_optimizer_feedback(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "ui-readiness-summary")
+
+    summarized = service._summarize_ui_readiness_result(
+        {
+            "workflow_type": "iterative_actor_critic_review",
+            "backend": {"strategy": "multimodal_router", "provider": "codex_cli", "model": "gpt-5.3-codex"},
+            "latest_review": "The draft stage needs a clearer export handoff.",
+            "review": {
+                "summary": "The draft stage needs a clearer export handoff.",
+                "critic_review": {"verdict": "warning", "acceptance_checks": ["Keep export actions visible."]},
+                "complaint_journey": {
+                    "tested_stages": ["intake", "evidence", "review", "draft", "export"],
+                    "sdk_tool_invocations": ["generateComplaint", "exportComplaintPdf"],
+                },
+            },
+            "issues": [{"severity": "high", "summary": "Export CTA disappears after review."}],
+            "recommended_changes": ["Pin export actions in the draft sidebar."],
+            "playwright_followups": ["Verify PDF and markdown downloads remain reachable after testimony edits."],
+            "stage_findings": {"draft": ["Draft stage loses the export CTA after a refresh."]},
+            "screenshot_findings": [
+                {
+                    "artifact_path": str(tmp_path / "workspace-draft.png"),
+                    "stage": "draft",
+                    "surface": "workspace-draft",
+                    "summary": "Export controls are visually buried beneath dense metadata.",
+                    "criticisms": ["Actor cannot confidently continue from the draft stage."],
+                }
+            ],
+            "optimization_targets": [
+                {
+                    "stage": "draft",
+                    "target": "Move export controls adjacent to the complaint preview and mediator handoff panel.",
+                }
+            ],
+            "latest_review_markdown_path": str(tmp_path / "iteration-01-review.md"),
+            "latest_review_json_path": str(tmp_path / "iteration-01-review.json"),
+            "runs": [{"iteration": 1, "optimization_target_count": 1}],
+        }
+    )
+
+    assert summarized["workflow_type"] == "iterative_actor_critic_review"
+    assert summarized["review_backend"]["provider"] == "codex_cli"
+    assert summarized["issues"][0]["summary"] == "Export CTA disappears after review."
+    assert summarized["recommended_changes"] == ["Pin export actions in the draft sidebar."]
+    assert summarized["playwright_followups"] == ["Verify PDF and markdown downloads remain reachable after testimony edits."]
+    assert summarized["stage_findings"]["draft"] == ["Draft stage loses the export CTA after a refresh."]
+    assert summarized["screenshot_findings"][0]["artifact_path"] == str(tmp_path / "workspace-draft.png")
+    assert summarized["optimization_targets"][0]["stage"] == "draft"
+    assert summarized["latest_review_markdown_path"] == str(tmp_path / "iteration-01-review.md")
+    assert summarized["latest_review_json_path"] == str(tmp_path / "iteration-01-review.json")
+    assert summarized["runs"][0]["optimization_target_count"] == 1
 
 
 def test_optimize_ui_tool_supports_closed_loop_workflow_through_cli_and_mcp(monkeypatch, tmp_path):

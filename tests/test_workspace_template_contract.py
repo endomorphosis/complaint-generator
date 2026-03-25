@@ -29,6 +29,14 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "broaden collection beyond a single inbox pass" in content
     assert "Describe the dispute in plain language" in content
     assert "Optional keyword phrases, one per line" in content
+    assert "local-evidence-paths" in content
+    assert "local-evidence-claim-element" in content
+    assert "local-evidence-kind" in content
+    assert "local-evidence-note" in content
+    assert "import-local-evidence-button" in content
+    assert "Import local evidence artifacts" in content
+    assert "Bring local PDFs, screenshots, text exports, mailbox files, or whole directories" in content
+    assert "One local path per line. Directories are scanned recursively for files." in content
     assert "Pull likely correspondents from intake answers and saved evidence" in content
     assert "The Gmail app password is never stored here and is cleared after each import." in content
     assert "prefer the CLI or MCP import path with keyring support" in content
@@ -93,6 +101,11 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "const gmailAddressChip = event.target.closest('[data-gmail-address-chip]');" in content
     assert "document.getElementById('gmail-import-claim-element').addEventListener('change', renderGmailImportCommandExamples);" in content
     assert "document.getElementById('gmail-import-user').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "async function importLocalEvidence()" in content
+    assert "await client.importLocalEvidence({" in content
+    assert "Add at least one local file or directory path before importing local evidence." in content
+    assert "Imported ${payload.imported_count || 0} local evidence artifact(s) into the evidence workspace." in content
+    assert "document.getElementById('import-local-evidence-button').addEventListener('click', importLocalEvidence);" in content
     assert "gmailImportUserStorageKey()" in content
     assert "window.sessionStorage.getItem(gmailImportUserStorageKey())" in content
     assert "window.sessionStorage.setItem(gmailImportUserStorageKey(), nextValue)" in content
