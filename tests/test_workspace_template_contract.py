@@ -7,6 +7,10 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "gmail-import-user" in content
     assert "gmail-import-password" in content
     assert "gmail-import-remember-user" in content
+    assert "gmail-import-folders" in content
+    assert "gmail-import-complaint-query" in content
+    assert "gmail-import-complaint-keywords" in content
+    assert "gmail-import-min-relevance-score" in content
     assert "Remember Gmail address for this browser session" in content
     assert "gmail-import-security-note" in content
     assert "suggest-gmail-import-addresses" in content
@@ -18,6 +22,13 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Suggest Addresses From Case" in content
     assert "Detected from case" in content
     assert "Selected for import" in content
+    assert "Folders To Scan" in content
+    assert "Minimum Relevance Score" in content
+    assert "Complaint Query" in content
+    assert "Complaint Keywords" in content
+    assert "broaden collection beyond a single inbox pass" in content
+    assert "Describe the dispute in plain language" in content
+    assert "Optional keyword phrases, one per line" in content
     assert "Pull likely correspondents from intake answers and saved evidence" in content
     assert "The Gmail app password is never stored here and is cleared after each import." in content
     assert "prefer the CLI or MCP import path with keyring support" in content
@@ -34,6 +45,8 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "CLI Gmail import command copied." in content
     assert "MCP Gmail import example copied." in content
     assert "currentGmailImportAddresses()" in content
+    assert "currentGmailImportFolders()" in content
+    assert "currentGmailImportComplaintKeywords()" in content
     assert "setGmailImportAddresses(addresses)" in content
     assert "extractEmailAddresses(value)" in content
     assert "recordSuggestedGmailImportAddress(metadataByAddress, address, sourceLabel)" in content
@@ -62,8 +75,20 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Removed ${addressToRemove} from the Gmail import list." in content
     assert "Suggested ${suggested.length} email address" in content
     assert "JSON.stringify(mcpPayload, null, 2)" in content
+    assert "--scan-folder" in content
+    assert "--complaint-query" in content
+    assert "--complaint-keyword" in content
+    assert "--min-relevance-score" in content
+    assert "folders: folders.length ? folders : ['INBOX']" in content
+    assert "complaint_query: complaintQuery || undefined" in content
+    assert "complaint_keywords: complaintKeywords" in content
+    assert "min_relevance_score: Number(minRelevanceScore || '0')" in content
     assert "document.getElementById('suggest-gmail-import-addresses').addEventListener('click', suggestGmailImportAddresses);" in content
     assert "document.getElementById('gmail-import-addresses').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-folders').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-complaint-query').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-complaint-keywords').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-min-relevance-score').addEventListener('input', renderGmailImportCommandExamples);" in content
     assert "const gmailDetectedAddressChip = event.target.closest('[data-gmail-detected-address-chip]');" in content
     assert "const gmailAddressChip = event.target.closest('[data-gmail-address-chip]');" in content
     assert "document.getElementById('gmail-import-claim-element').addEventListener('change', renderGmailImportCommandExamples);" in content
@@ -81,6 +106,7 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "refresh-provider-diagnostics-button" in content
     assert "provider-diagnostics-preview" in content
     assert "workspaceProviderDiagnostics = null;" in content
+    assert "latestUiReviewResult = null;" in content
     assert "client.getProviderDiagnostics(workspaceUserId)" in content
     assert "client.getToolingContract(workspaceUserId)" in content
     assert "refreshProviderDiagnosticsPanel()" in content
@@ -88,4 +114,9 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Router provider diagnostics" in content
     assert "Effective default:" in content
     assert "Preference order:" in content
+    assert "Screenshot-driven optimization target" in content
+    assert "Screenshot-linked critic lanes" in content
+    assert "screenshot findings:" in content
+    assert "optimization targets:" in content
+    assert "item.criticisms" in content
     assert "document.getElementById('refresh-provider-diagnostics-button').addEventListener('click', refreshProviderDiagnosticsPanel);" in content

@@ -548,11 +548,56 @@ def site_app(monkeypatch: pytest.MonkeyPatch):
                     "Integration Discovery": "The MCP tool contract remains visible from the workspace integrations panel.",
                 },
                 "playwright_followups": ["Capture the draft panel after the release gate updates and before export."],
+                "screenshot_findings": [
+                    {
+                        "name": "workspace-draft",
+                        "stage": "Draft",
+                        "surface": "/workspace?tab=draft",
+                        "stage_finding": "The screenshot shows export controls overshadowing readiness guidance.",
+                        "criticisms": [
+                            {
+                                "problem": "The export controls still compete with draft-editing controls.",
+                                "recommended_fix": "Keep export warnings and next-step guidance pinned near the download buttons.",
+                            }
+                        ],
+                    }
+                ],
+                "optimization_targets": [
+                    {
+                        "title": "Pin release-gate messaging beside exports",
+                        "target_surface": "templates/workspace.html",
+                        "reason": "The screenshot review shows the actor can download too early unless readiness stays visually dominant.",
+                    }
+                ],
             },
+            "screenshot_findings": [
+                {
+                    "name": "workspace-draft",
+                    "stage": "Draft",
+                    "surface": "/workspace?tab=draft",
+                    "stage_finding": "The screenshot shows export controls overshadowing readiness guidance.",
+                    "criticisms": [
+                        {
+                            "problem": "The export controls still compete with draft-editing controls.",
+                            "recommended_fix": "Keep export warnings and next-step guidance pinned near the download buttons.",
+                        }
+                    ],
+                }
+            ],
+            "optimization_targets": [
+                {
+                    "title": "Pin release-gate messaging beside exports",
+                    "target_surface": "templates/workspace.html",
+                    "reason": "The screenshot review shows the actor can download too early unless readiness stays visually dominant.",
+                }
+            ],
             "runs": [
                 {
                     "iteration": 1,
                     "review_excerpt": "Multimodal actor/critic review complete. Complaint-output suggestion carried into router review.",
+                    "issues_count": 1,
+                    "broken_controls_count": 1,
+                    "optimization_target_count": 1,
                 }
             ],
         }
@@ -934,6 +979,15 @@ def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_op
             )
             page.wait_for_function(
                 "() => document.getElementById('ux-review-stage-findings').textContent.includes('Complaint-output suggestion carried into router review')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-artifacts').textContent.includes('Screenshot critic: workspace-draft')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Screenshot-driven optimization target')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-metadata').textContent.includes('optimization targets: 1')"
             )
 
             page.locator('#run-browser-audit-button').click()

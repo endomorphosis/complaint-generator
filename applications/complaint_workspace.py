@@ -3515,12 +3515,16 @@ class ComplaintWorkspaceService:
         addresses: List[str],
         claim_element_id: str = "causation",
         folder: str = "INBOX",
+        folders: Optional[List[str]] = None,
         limit: Optional[int] = None,
         date_after: Optional[str] = None,
         date_before: Optional[str] = None,
         evidence_root: Optional[str] = None,
         gmail_user: Optional[str] = None,
         gmail_app_password: Optional[str] = None,
+        complaint_query: Optional[str] = None,
+        complaint_keywords: Optional[List[str]] = None,
+        min_relevance_score: float = 0.0,
     ) -> Dict[str, Any]:
         async def _run_import() -> Dict[str, Any]:
             from complaint_generator.email_import import import_gmail_evidence
@@ -3532,11 +3536,15 @@ class ComplaintWorkspaceService:
                 workspace_root=self._session_dir,
                 evidence_root=Path(evidence_root) if evidence_root else None,
                 folder=folder,
+                folders=folders or [],
                 limit=limit,
                 date_after=date_after,
                 date_before=date_before,
                 gmail_user=gmail_user,
                 gmail_app_password=gmail_app_password,
+                complaint_query=complaint_query,
+                complaint_keywords=complaint_keywords or [],
+                min_relevance_score=min_relevance_score,
                 service=self,
             )
 
@@ -3684,12 +3692,16 @@ class ComplaintWorkspaceService:
                 addresses=[str(item).strip() for item in list(args.get("addresses") or []) if str(item).strip()],
                 claim_element_id=str(args.get("claim_element_id") or "causation"),
                 folder=str(args.get("folder") or "INBOX"),
+                folders=[str(item).strip() for item in list(args.get("folders") or []) if str(item).strip()],
                 limit=int(args["limit"]) if args.get("limit") is not None else None,
                 date_after=str(args.get("date_after") or "") or None,
                 date_before=str(args.get("date_before") or "") or None,
                 evidence_root=str(args.get("evidence_root") or "") or None,
                 gmail_user=str(args.get("gmail_user") or "") or None,
                 gmail_app_password=str(args.get("gmail_app_password") or "") or None,
+                complaint_query=str(args.get("complaint_query") or "") or None,
+                complaint_keywords=[str(item).strip() for item in list(args.get("complaint_keywords") or []) if str(item).strip()],
+                min_relevance_score=float(args.get("min_relevance_score") or 0.0),
             )
         if tool_name == "complaint.review_case":
             session = self.get_session(args.get("user_id"))

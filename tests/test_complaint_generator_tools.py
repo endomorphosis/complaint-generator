@@ -247,8 +247,10 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
     runner = CliRunner()
     service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-import-cli-sessions")
     monkeypatch.setattr(complaint_cli_impl, "service", service)
+    captured = {}
 
     async def fake_import_gmail_evidence(**kwargs):
+        captured.update(kwargs)
         service.save_evidence(
             kwargs["user_id"],
             kind="document",
@@ -287,6 +289,16 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
         "manager@example.com",
         "--claim-element-id",
         "causation",
+        "--scan-folder",
+        "[Gmail]/Sent Mail",
+        "--complaint-query",
+        "termination retaliation hr complaint",
+        "--complaint-keyword",
+        "termination",
+        "--complaint-keyword",
+        "retaliation",
+        "--min-relevance-score",
+        "1.5",
         "--gmail-user",
         "user@gmail.com",
         "--gmail-app-password",
@@ -296,6 +308,10 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
     assert payload["status"] == "success"
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
     assert payload["imported_count"] == 1
+    assert captured["folders"] == ["[Gmail]/Sent Mail"]
+    assert captured["complaint_query"] == "termination retaliation hr complaint"
+    assert captured["complaint_keywords"] == ["termination", "retaliation"]
+    assert captured["min_relevance_score"] == 1.5
 
     session = service.get_session("cli-user")["session"]
     documents = session["evidence"]["documents"]
@@ -306,6 +322,7 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
 
 def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-import-mcp-sessions")
+    captured = {}
 
     def fake_import_gmail_evidence(
         user_id,
@@ -313,13 +330,25 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
         addresses,
         claim_element_id="causation",
         folder="INBOX",
+        folders=None,
         limit=None,
         date_after=None,
         date_before=None,
         evidence_root=None,
         gmail_user=None,
         gmail_app_password=None,
+        complaint_query=None,
+        complaint_keywords=None,
+        min_relevance_score=0.0,
     ):
+        captured.update(
+            {
+                "folders": folders,
+                "complaint_query": complaint_query,
+                "complaint_keywords": complaint_keywords,
+                "min_relevance_score": min_relevance_score,
+            }
+        )
         service.save_evidence(
             user_id,
             kind="document",
@@ -355,6 +384,10 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
             "user_id": "mcp-user",
             "addresses": ["hr@example.com", "manager@example.com"],
             "claim_element_id": "causation",
+            "folders": ["[Gmail]/Sent Mail", "[Gmail]/All Mail"],
+            "complaint_query": "termination retaliation hr complaint",
+            "complaint_keywords": ["termination", "retaliation"],
+            "min_relevance_score": 2.0,
             "gmail_user": "user@gmail.com",
             "gmail_app_password": "app-password",
         },
@@ -363,6 +396,10 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
     assert payload["status"] == "success"
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
     assert payload["imported_count"] == 1
+    assert captured["folders"] == ["[Gmail]/Sent Mail", "[Gmail]/All Mail"]
+    assert captured["complaint_query"] == "termination retaliation hr complaint"
+    assert captured["complaint_keywords"] == ["termination", "retaliation"]
+    assert captured["min_relevance_score"] == 2.0
 
     session = service.get_session("mcp-user")["session"]
     documents = session["evidence"]["documents"]
@@ -379,19 +416,33 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
 
     client = TestClient(app)
 
+    captured = {}
+
     def fake_import_gmail_evidence(
         user_id,
         *,
         addresses,
         claim_element_id="causation",
         folder="INBOX",
+        folders=None,
         limit=None,
         date_after=None,
         date_before=None,
         evidence_root=None,
         gmail_user=None,
         gmail_app_password=None,
+        complaint_query=None,
+        complaint_keywords=None,
+        min_relevance_score=0.0,
     ):
+        captured.update(
+            {
+                "folders": folders,
+                "complaint_query": complaint_query,
+                "complaint_keywords": complaint_keywords,
+                "min_relevance_score": min_relevance_score,
+            }
+        )
         service.save_evidence(
             user_id,
             kind="document",
@@ -419,6 +470,10 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
             "user_id": "api-user",
             "addresses": ["hr@example.com", "manager@example.com"],
             "claim_element_id": "causation",
+            "folders": ["[Gmail]/Sent Mail"],
+            "complaint_query": "termination retaliation hr complaint",
+            "complaint_keywords": ["termination", "retaliation"],
+            "min_relevance_score": 1.25,
             "gmail_user": "user@gmail.com",
             "gmail_app_password": "app-password",
         },
@@ -428,6 +483,10 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
     payload = response.json()
     assert payload["status"] == "success"
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
+    assert captured["folders"] == ["[Gmail]/Sent Mail"]
+    assert captured["complaint_query"] == "termination retaliation hr complaint"
+    assert captured["complaint_keywords"] == ["termination", "retaliation"]
+    assert captured["min_relevance_score"] == 1.25
     assert payload["imported_count"] == 1
 
     session = service.get_session("api-user")["session"]

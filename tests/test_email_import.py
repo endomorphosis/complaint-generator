@@ -27,26 +27,33 @@ def _build_email_bytes(*, subject: str, sender: str, recipient: str, body: str, 
 
 
 class _FakeConnection:
-    def __init__(self, messages: list[bytes]) -> None:
-        self._messages = messages
+    def __init__(self, messages: list[bytes] | dict[str, list[bytes]]) -> None:
+        if isinstance(messages, dict):
+            self._messages_by_folder = messages
+        else:
+            self._messages_by_folder = {"INBOX": messages}
+        self._selected_folder = "INBOX"
 
     def select(self, folder: str, readonly: bool = True):
+        self._selected_folder = folder
         return "OK", [b""]
 
     def search(self, charset, *criteria):
-        message_ids = b" ".join(str(index + 1).encode("ascii") for index in range(len(self._messages)))
+        messages = self._messages_by_folder.get(self._selected_folder, [])
+        message_ids = b" ".join(str(index + 1).encode("ascii") for index in range(len(messages)))
         return "OK", [message_ids]
 
     def fetch(self, message_id: bytes, query: str):
         index = int(message_id.decode("ascii")) - 1
-        return "OK", [(b"RFC822", self._messages[index])]
+        messages = self._messages_by_folder.get(self._selected_folder, [])
+        return "OK", [(b"RFC822", messages[index])]
 
     def logout(self):
         return "BYE", [b""]
 
 
 class _FakeProcessor:
-    def __init__(self, messages: list[bytes]) -> None:
+    def __init__(self, messages: list[bytes] | dict[str, list[bytes]]) -> None:
         self.connection = _FakeConnection(messages)
         self.connected = False
 
@@ -169,3 +176,54 @@ def test_import_gmail_evidence_filters_by_complaint_relevance(tmp_path, monkeypa
     assert payload["relevance_filtered_count"] == 1
     assert payload["imported"][0]["subject"] == "Termination hearing request"
     assert payload["imported"][0]["relevance_score"] >= 2.0
+
+
+def test_import_gmail_evidence_scans_multiple_folders_without_duplicate_message_ids(tmp_path, monkeypatch):
+    shared_message = _build_email_bytes(
+        subject="Termination email",
+        sender="hr@example.com",
+        recipient="employee@example.com",
+        body="Termination details attached.",
+    )
+    sent_only_message = _build_email_bytes(
+        subject="Follow-up to counsel",
+        sender="employee@example.com",
+        recipient="lawyer@example.com",
+        body="Forwarding the termination timeline.",
+    )
+
+    monkeypatch.setattr(
+        "complaint_generator.email_import.create_email_processor",
+        lambda **kwargs: _FakeProcessor(
+            {
+                "INBOX": [shared_message],
+                "[Gmail]/All Mail": [shared_message, sent_only_message],
+            }
+        ),
+    )
+
+    workspace_root = tmp_path / "sessions"
+    evidence_root = tmp_path / "evidence"
+    service = ComplaintWorkspaceService(root_dir=workspace_root)
+
+    async def _run_import():
+        return await import_gmail_evidence(
+            addresses=["hr@example.com", "employee@example.com", "lawyer@example.com"],
+            user_id="case-user",
+            claim_element_id="causation",
+            workspace_root=workspace_root,
+            evidence_root=evidence_root,
+            folder="INBOX",
+            folders=["INBOX", "[Gmail]/All Mail"],
+            gmail_user="user@gmail.com",
+            gmail_app_password="app-password",
+            service=service,
+        )
+
+    payload = anyio.run(_run_import)
+
+    assert payload["folders"] == ["INBOX", "[Gmail]/All Mail"]
+    assert payload["searched_message_count"] == 3
+    assert payload["imported_count"] == 2
+    assert sorted(item["subject"] for item in payload["imported"]) == ["Follow-up to counsel", "Termination email"]
+    assert {item["folder"] for item in payload["imported"]} == {"INBOX", "[Gmail]/All Mail"}

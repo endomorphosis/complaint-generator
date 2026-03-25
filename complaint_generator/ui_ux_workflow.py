@@ -120,6 +120,15 @@ def _first_nonempty_line(section_text: str) -> str:
     return ""
 
 
+def _extract_named_markdown_section(markdown_text: str, heading: str) -> str:
+    escaped = re.escape(str(heading or "").strip())
+    pattern = re.compile(
+        rf"(?ms)^\#{1,6}\s+{escaped}\s*$\n?(.*?)(?=^\#{1,6}\s+.+?$|\Z)"
+    )
+    match = pattern.search(str(markdown_text or ""))
+    return str(match.group(1) or "").strip() if match else ""
+
+
 def _stage_from_artifact(artifact: dict[str, Any]) -> str:
     haystack = " ".join(
         [
@@ -247,6 +256,16 @@ def structure_ui_ux_review(
         for stage in ("Intake", "Evidence", "Review", "Draft", "Integration Discovery")
         if _first_nonempty_line(stage_subsections.get(stage, ""))
     }
+    for stage in ("Intake", "Evidence", "Review", "Draft", "Integration Discovery"):
+        if stage not in stage_findings:
+            direct_stage_body = str(sections.get(stage) or "").strip()
+            if direct_stage_body:
+                stage_findings[stage] = _first_nonempty_line(direct_stage_body)
+    if not stage_findings:
+        for stage in ("Intake", "Evidence", "Review", "Draft", "Integration Discovery"):
+            stage_body = _extract_named_markdown_section(stage_section, stage)
+            if stage_body:
+                stage_findings[stage] = _first_nonempty_line(stage_body)
 
     issues: list[dict[str, Any]] = []
     stage_order = list(stage_findings.keys()) or ["Workspace"]

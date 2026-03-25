@@ -30,12 +30,16 @@ class GmailEvidenceImportRequest(BaseModel):
     addresses: List[str] = Field(default_factory=list)
     claim_element_id: str = "causation"
     folder: str = "INBOX"
+    folders: List[str] = Field(default_factory=list)
     limit: Optional[int] = None
     date_after: Optional[str] = None
     date_before: Optional[str] = None
     evidence_root: Optional[str] = None
     gmail_user: Optional[str] = None
     gmail_app_password: Optional[str] = None
+    complaint_query: Optional[str] = None
+    complaint_keywords: List[str] = Field(default_factory=list)
+    min_relevance_score: float = 0.0
 
 
 class GenerateRequest(BaseModel):
@@ -107,12 +111,16 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             addresses=list(request.addresses or []),
             claim_element_id=request.claim_element_id,
             folder=request.folder,
+            folders=list(request.folders or []),
             limit=request.limit,
             date_after=request.date_after,
             date_before=request.date_before,
             evidence_root=request.evidence_root,
             gmail_user=request.gmail_user,
             gmail_app_password=request.gmail_app_password,
+            complaint_query=request.complaint_query,
+            complaint_keywords=list(request.complaint_keywords or []),
+            min_relevance_score=request.min_relevance_score,
         )
 
     @router.post("/api/complaint-workspace/review")

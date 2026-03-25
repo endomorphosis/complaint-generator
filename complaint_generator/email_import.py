@@ -37,6 +37,19 @@ def _normalize_addresses(addresses: Iterable[str]) -> list[str]:
     return normalized
 
 
+def _normalize_items(values: Iterable[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        value = str(item or "").strip()
+        lookup = value.lower()
+        if not value or lookup in seen:
+            continue
+        seen.add(lookup)
+        normalized.append(value)
+    return normalized
+
+
 def _extract_header_addresses(message: email.message.EmailMessage) -> set[str]:
     header_values = [
         str(message.get("From", "") or ""),
@@ -191,6 +204,7 @@ async def import_gmail_evidence(
     workspace_root: str | Path = ".complaint_workspace/sessions",
     evidence_root: str | Path | None = None,
     folder: str = "INBOX",
+    folders: Sequence[str] = (),
     limit: Optional[int] = None,
     date_after: Optional[str] = None,
     date_before: Optional[str] = None,
@@ -213,6 +227,9 @@ async def import_gmail_evidence(
 
     workspace_root_path = Path(workspace_root)
     evidence_root_path = Path(evidence_root) if evidence_root is not None else _default_evidence_root(workspace_root_path)
+    normalized_folders = _normalize_items(folders) if folders else []
+    if not normalized_folders:
+        normalized_folders = [str(folder or "INBOX").strip() or "INBOX"]
     if service is None:
         from applications.complaint_workspace import ComplaintWorkspaceService
 
@@ -231,142 +248,158 @@ async def import_gmail_evidence(
 
     await processor.connect()
     try:
-        try:
-            message_ids = await _search_message_ids(
-                processor.connection,
-                folder=folder,
-                date_after=date_after,
-                date_before=date_before,
-            )
-            if limit is not None and limit > 0:
-                message_ids = message_ids[-int(limit) :]
-        except imaplib.IMAP4.error as exc:
-            if not (limit is not None and limit > 0 and "got more than 1000000 bytes" in str(exc)):
-                raise
-            message_ids = await _fetch_recent_message_ids(processor.connection, folder=folder, limit=int(limit))
-
         imported: list[dict[str, Any]] = []
         skipped_count = 0
         relevance_filtered_count = 0
-        for index, message_id in enumerate(reversed(message_ids), start=1):
-            raw_message = await _fetch_raw_message(processor.connection, message_id)
-            parsed_message = email.message_from_bytes(raw_message, policy=email.policy.default)
-            header_addresses = _extract_header_addresses(parsed_message) | _extract_header_addresses_from_raw(raw_message)
-            if normalized_addresses and not any(address in header_addresses for address in normalized_addresses):
-                skipped_count += 1
-                continue
-
-            subject = str(parsed_message.get("Subject") or "").strip() or "Untitled email"
-            sender = str(parsed_message.get("From") or "").strip()
-            recipient = str(parsed_message.get("To") or "").strip()
-            email_date = str(parsed_message.get("Date") or "").strip()
-            body_text = _extract_body_text(parsed_message)
-            attachments = _extract_attachment_payloads(parsed_message)
-            relevance = score_email_relevance(
-                complaint_terms=complaint_terms,
-                subject=subject,
-                sender=sender,
-                recipient=recipient,
-                cc=str(parsed_message.get("Cc") or "").strip(),
-                reply_to=str(parsed_message.get("Reply-To") or "").strip(),
-                body_text=body_text,
-                attachment_names=[str(item.get("filename") or "") for item in attachments],
-            )
-            if complaint_terms and float(relevance["score"]) < float(min_relevance_score):
-                relevance_filtered_count += 1
-                continue
-
-            date_fragment = "undated"
+        searched_message_count = 0
+        seen_message_headers: set[str] = set()
+        global_index = 0
+        for folder_name in normalized_folders:
             try:
-                if email_date:
-                    date_fragment = parsedate_to_datetime(email_date).strftime("%Y%m%d")
-            except Exception:
-                pass
-            message_dir = artifact_root / f"{index:04d}_{date_fragment}_{_slugify_fragment(subject, fallback='email')}"
-            message_dir.mkdir(parents=True, exist_ok=True)
-
-            eml_path = message_dir / "message.eml"
-            eml_path.write_bytes(raw_message)
-
-            saved_attachments: list[dict[str, Any]] = []
-            attachment_names: list[str] = [eml_path.name]
-            attachments_dir = message_dir / "attachments"
-            for attachment in attachments:
-                attachments_dir.mkdir(parents=True, exist_ok=True)
-                attachment_path = attachments_dir / attachment["filename"]
-                attachment_path.write_bytes(bytes(attachment["data"]))
-                saved_attachments.append(
-                    {
-                        "filename": attachment["filename"],
-                        "path": str(attachment_path),
-                        "content_type": attachment["content_type"],
-                        "size": int(attachment["size"] or 0),
-                    }
+                message_ids = await _search_message_ids(
+                    processor.connection,
+                    folder=folder_name,
+                    date_after=date_after,
+                    date_before=date_before,
                 )
-                attachment_names.append(attachment["filename"])
+                if limit is not None and limit > 0:
+                    message_ids = message_ids[-int(limit) :]
+            except imaplib.IMAP4.error as exc:
+                if not (limit is not None and limit > 0 and "got more than 1000000 bytes" in str(exc)):
+                    raise
+                message_ids = await _fetch_recent_message_ids(processor.connection, folder=folder_name, limit=int(limit))
 
-            metadata_payload = {
-                "subject": subject,
-                "from": sender,
-                "to": recipient,
-                "cc": str(parsed_message.get("Cc") or "").strip(),
-                "date": email_date,
-                "message_id_header": str(parsed_message.get("Message-ID") or "").strip(),
-                "matched_addresses": normalized_addresses,
-                "relevance_score": float(relevance["score"]),
-                "matched_terms": list(relevance["matched_terms"]),
-                "matched_fields": list(relevance["matched_fields"]),
-                "attachment_count": len(saved_attachments),
-                "attachments": saved_attachments,
-                "artifact_dir": str(message_dir),
-                "eml_path": str(eml_path),
-            }
-            metadata_path = message_dir / "message.json"
-            metadata_path.write_text(json.dumps(metadata_payload, indent=2, sort_keys=True))
-            attachment_names.append(metadata_path.name)
+            searched_message_count += len(message_ids)
+            for message_id in reversed(message_ids):
+                raw_message = await _fetch_raw_message(processor.connection, message_id)
+                parsed_message = email.message_from_bytes(raw_message, policy=email.policy.default)
+                message_header_id = str(parsed_message.get("Message-ID") or "").strip().lower()
+                if message_header_id and message_header_id in seen_message_headers:
+                    continue
+                if message_header_id:
+                    seen_message_headers.add(message_header_id)
+                header_addresses = _extract_header_addresses(parsed_message) | _extract_header_addresses_from_raw(raw_message)
+                if normalized_addresses and not any(address in header_addresses for address in normalized_addresses):
+                    skipped_count += 1
+                    continue
 
-            summary_lines = [
-                f"Subject: {subject}",
-                f"From: {sender}",
-                f"To: {recipient}",
-                f"Date: {email_date}",
-                f"Matched addresses: {', '.join(normalized_addresses)}",
-                f"Artifact directory: {message_dir}",
-            ]
-            if body_text:
-                summary_lines.extend(["", body_text[:4000]])
+                subject = str(parsed_message.get("Subject") or "").strip() or "Untitled email"
+                sender = str(parsed_message.get("From") or "").strip()
+                recipient = str(parsed_message.get("To") or "").strip()
+                email_date = str(parsed_message.get("Date") or "").strip()
+                body_text = _extract_body_text(parsed_message)
+                attachments = _extract_attachment_payloads(parsed_message)
+                relevance = score_email_relevance(
+                    complaint_terms=complaint_terms,
+                    subject=subject,
+                    sender=sender,
+                    recipient=recipient,
+                    cc=str(parsed_message.get("Cc") or "").strip(),
+                    reply_to=str(parsed_message.get("Reply-To") or "").strip(),
+                    body_text=body_text,
+                    attachment_names=[str(item.get("filename") or "") for item in attachments],
+                )
+                if complaint_terms and float(relevance["score"]) < float(min_relevance_score):
+                    relevance_filtered_count += 1
+                    continue
 
-            workspace_record = service.save_evidence(
-                user_id,
-                kind="document",
-                claim_element_id=claim_element_id,
-                title=f"Email import: {subject}",
-                content="\n".join(summary_lines).strip(),
-                source="gmail_imap_import",
-                attachment_names=attachment_names,
-            )
+                global_index += 1
+                date_fragment = "undated"
+                try:
+                    if email_date:
+                        date_fragment = parsedate_to_datetime(email_date).strftime("%Y%m%d")
+                except Exception:
+                    pass
+                message_dir = artifact_root / f"{global_index:04d}_{date_fragment}_{_slugify_fragment(subject, fallback='email')}"
+                message_dir.mkdir(parents=True, exist_ok=True)
 
-            imported.append(
-                {
-                    "message_id": message_id.decode("utf-8", errors="ignore"),
+                eml_path = message_dir / "message.eml"
+                eml_path.write_bytes(raw_message)
+
+                saved_attachments: list[dict[str, Any]] = []
+                attachment_names: list[str] = [eml_path.name]
+                attachments_dir = message_dir / "attachments"
+                for attachment in attachments:
+                    attachments_dir.mkdir(parents=True, exist_ok=True)
+                    attachment_path = attachments_dir / attachment["filename"]
+                    attachment_path.write_bytes(bytes(attachment["data"]))
+                    saved_attachments.append(
+                        {
+                            "filename": attachment["filename"],
+                            "path": str(attachment_path),
+                            "content_type": attachment["content_type"],
+                            "size": int(attachment["size"] or 0),
+                        }
+                    )
+                    attachment_names.append(attachment["filename"])
+
+                metadata_payload = {
                     "subject": subject,
                     "from": sender,
                     "to": recipient,
+                    "cc": str(parsed_message.get("Cc") or "").strip(),
                     "date": email_date,
+                    "folder": folder_name,
+                    "message_id_header": str(parsed_message.get("Message-ID") or "").strip(),
+                    "matched_addresses": normalized_addresses,
                     "relevance_score": float(relevance["score"]),
                     "matched_terms": list(relevance["matched_terms"]),
                     "matched_fields": list(relevance["matched_fields"]),
+                    "attachment_count": len(saved_attachments),
+                    "attachments": saved_attachments,
                     "artifact_dir": str(message_dir),
                     "eml_path": str(eml_path),
-                    "attachment_paths": [item["path"] for item in saved_attachments],
-                    "workspace_evidence_id": ((workspace_record.get("saved") or {}).get("id")),
                 }
-            )
+                metadata_path = message_dir / "message.json"
+                metadata_path.write_text(json.dumps(metadata_payload, indent=2, sort_keys=True))
+                attachment_names.append(metadata_path.name)
+
+                summary_lines = [
+                    f"Subject: {subject}",
+                    f"Folder: {folder_name}",
+                    f"From: {sender}",
+                    f"To: {recipient}",
+                    f"Date: {email_date}",
+                    f"Matched addresses: {', '.join(normalized_addresses)}",
+                    f"Artifact directory: {message_dir}",
+                ]
+                if body_text:
+                    summary_lines.extend(["", body_text[:4000]])
+
+                workspace_record = service.save_evidence(
+                    user_id,
+                    kind="document",
+                    claim_element_id=claim_element_id,
+                    title=f"Email import: {subject}",
+                    content="\n".join(summary_lines).strip(),
+                    source=f"gmail_imap_import:{folder_name}",
+                    attachment_names=attachment_names,
+                )
+
+                imported.append(
+                    {
+                        "message_id": message_id.decode("utf-8", errors="ignore"),
+                        "message_id_header": str(parsed_message.get("Message-ID") or "").strip(),
+                        "folder": folder_name,
+                        "subject": subject,
+                        "from": sender,
+                        "to": recipient,
+                        "date": email_date,
+                        "relevance_score": float(relevance["score"]),
+                        "matched_terms": list(relevance["matched_terms"]),
+                        "matched_fields": list(relevance["matched_fields"]),
+                        "artifact_dir": str(message_dir),
+                        "eml_path": str(eml_path),
+                        "attachment_paths": [item["path"] for item in saved_attachments],
+                        "workspace_evidence_id": ((workspace_record.get("saved") or {}).get("id")),
+                    }
+                )
 
         return {
             "status": "success",
             "gmail_user": gmail_user or "",
             "folder": folder,
+            "folders": normalized_folders,
             "claim_element_id": claim_element_id,
             "user_id": user_id,
             "workspace_root": str(workspace_root_path),
@@ -374,7 +407,7 @@ async def import_gmail_evidence(
             "matched_addresses": normalized_addresses,
             "complaint_terms": complaint_terms,
             "min_relevance_score": float(min_relevance_score),
-            "searched_message_count": len(message_ids),
+            "searched_message_count": searched_message_count,
             "imported_count": len(imported),
             "skipped_count": skipped_count,
             "relevance_filtered_count": relevance_filtered_count,

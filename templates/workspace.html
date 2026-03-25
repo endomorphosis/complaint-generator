@@ -1485,6 +1485,28 @@
                                         <input id="gmail-import-date-before" type="date">
                                     </div>
                                 </div>
+                                <div class="field-row">
+                                    <div>
+                                        <label for="gmail-import-folders">Folders To Scan</label>
+                                        <textarea id="gmail-import-folders" placeholder="INBOX&#10;[Gmail]/Sent Mail&#10;[Gmail]/All Mail">INBOX</textarea>
+                                        <div class="helper-text">One folder per line. Use this to broaden collection beyond a single inbox pass.</div>
+                                    </div>
+                                    <div>
+                                        <label for="gmail-import-min-relevance-score">Minimum Relevance Score</label>
+                                        <input id="gmail-import-min-relevance-score" type="number" min="0" step="0.1" value="0">
+                                        <div class="helper-text">Raise this above zero when you want complaint-term filtering to suppress unrelated mail.</div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label for="gmail-import-complaint-query">Complaint Query</label>
+                                    <textarea id="gmail-import-complaint-query" placeholder="termination retaliation HR complaint timeline"></textarea>
+                                    <div class="helper-text">Describe the dispute in plain language so the importer can rank broader Gmail results by likely complaint relevance.</div>
+                                </div>
+                                <div>
+                                    <label for="gmail-import-complaint-keywords">Complaint Keywords</label>
+                                    <textarea id="gmail-import-complaint-keywords" placeholder="termination&#10;retaliation&#10;hr complaint"></textarea>
+                                    <div class="helper-text">Optional keyword phrases, one per line, to broaden collection while still filtering toward the complaint theory.</div>
+                                </div>
                             </div>
                             <div class="button-row" style="margin-top: 16px;">
                                 <button class="secondary" id="import-gmail-evidence-button" type="button">Import Gmail Evidence</button>
@@ -1888,6 +1910,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let workspaceProviderDiagnostics = null;
         let latestPacketExport = null;
         let latestComplaintOutputAnalysis = null;
+        let latestUiReviewResult = null;
         let sdkPrimitiveSnapshot = null;
         let gmailImportDetectedAddresses = [];
         const readinessStorageKey = 'complaintGenerator.uiReadiness';
@@ -1990,6 +2013,20 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
 
         function currentGmailImportAddresses() {
             return document.getElementById('gmail-import-addresses').value
+                .split('\n')
+                .map((item) => item.trim())
+                .filter(Boolean);
+        }
+
+        function currentGmailImportFolders() {
+            return document.getElementById('gmail-import-folders').value
+                .split('\n')
+                .map((item) => item.trim())
+                .filter(Boolean);
+        }
+
+        function currentGmailImportComplaintKeywords() {
+            return document.getElementById('gmail-import-complaint-keywords').value
                 .split('\n')
                 .map((item) => item.trim())
                 .filter(Boolean);
@@ -2116,13 +2153,19 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             const claimElementId = currentGmailImportClaimElement();
             const gmailUser = document.getElementById('gmail-import-user').value.trim() || 'you@gmail.com';
             const addresses = currentGmailImportAddresses();
+            const folders = currentGmailImportFolders();
+            const complaintQuery = document.getElementById('gmail-import-complaint-query').value.trim();
+            const complaintKeywords = currentGmailImportComplaintKeywords();
+            const minRelevanceScore = String(document.getElementById('gmail-import-min-relevance-score').value || '0').trim() || '0';
             const commandAddresses = addresses.length ? addresses : ['hr@example.com', 'manager@example.com'];
             const cliAddressLines = commandAddresses.map((address) => `  --address ${address} \\`).join('\n');
+            const cliFolderLines = folders.filter((item) => item !== 'INBOX').map((item) => `  --scan-folder ${item} \\`).join('\n');
+            const cliKeywordLines = complaintKeywords.map((item) => `  --complaint-keyword ${item} \\`).join('\n');
             cliNode.textContent = `python3 -m complaint_generator.cli import-gmail-evidence \\
   --user-id ${userId} \\
 ${cliAddressLines}
-  --claim-element-id ${claimElementId} \\
-  --gmail-user ${gmailUser} \\
+${cliFolderLines ? `${cliFolderLines}\n` : ''}  --claim-element-id ${claimElementId} \\
+${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywordLines ? `${cliKeywordLines}\n` : ''}${minRelevanceScore !== '0' ? `  --min-relevance-score ${minRelevanceScore} \\\n` : ''}  --gmail-user ${gmailUser} \\
   --use-keyring`;
 
             const mcpPayload = {
@@ -2131,6 +2174,10 @@ ${cliAddressLines}
                     user_id: userId,
                     addresses: commandAddresses,
                     claim_element_id: claimElementId,
+                    folders: folders.length ? folders : ['INBOX'],
+                    complaint_query: complaintQuery || undefined,
+                    complaint_keywords: complaintKeywords,
+                    min_relevance_score: Number(minRelevanceScore || '0'),
                     gmail_user: gmailUser,
                 },
             };
@@ -3245,10 +3292,21 @@ ${cliAddressLines}
             if (!container) {
                 return;
             }
+            const latestReview = latestUiReviewResult || {};
+            const reviewOptimizationTargets = Array.isArray(latestReview.optimization_targets)
+                ? latestReview.optimization_targets
+                : Array.isArray(latestReview.review && latestReview.review.optimization_targets)
+                    ? latestReview.review.optimization_targets
+                    : [];
+            const screenshotFindings = Array.isArray(latestReview.screenshot_findings)
+                ? latestReview.screenshot_findings
+                : Array.isArray(latestReview.review && latestReview.review.screenshot_findings)
+                    ? latestReview.review.screenshot_findings
+                    : [];
             const exportCritic = (latestComplaintOutputAnalysis || {}).export_critic || null;
             const aggregate = exportCritic && exportCritic.aggregate ? exportCritic.aggregate : {};
             const brief = aggregate && aggregate.optimizer_repair_brief ? aggregate.optimizer_repair_brief : null;
-            if (!brief) {
+            if (!brief && !reviewOptimizationTargets.length) {
                 container.innerHTML = '<div class="item"><strong>No complaint-output repair brief yet.</strong><div class="muted">Run Export Critic after generating a complaint to see the top filing defects and the UI surfaces the optimizer should repair first.</div></div>';
                 return;
             }
@@ -3299,7 +3357,30 @@ ${cliAddressLines}
                 }
                 return null;
             }).filter(Boolean);
-            container.innerHTML = `
+            const reviewBriefCards = reviewOptimizationTargets.length
+                ? reviewOptimizationTargets.map((target, index) => `
+                    <div class="item">
+                        <strong>Screenshot-driven optimization target ${escapeHtml(String(index + 1))}</strong>
+                        <div class="chip-row">
+                            ${target.title ? `<span class="chip good">${escapeHtml(String(target.title))}</span>` : ''}
+                            ${target.target_surface ? `<span class="chip">${escapeHtml(String(target.target_surface))}</span>` : ''}
+                        </div>
+                        <div class="muted">${escapeHtml(String(target.reason || 'No optimization reason returned.'))}</div>
+                    </div>
+                `).join('')
+                : '';
+            const screenshotCriticismCard = screenshotFindings.length
+                ? `
+                    <div class="item">
+                        <strong>Screenshot-linked critic lanes</strong>
+                        <div class="chip-row">
+                            <span class="chip">${escapeHtml(String(screenshotFindings.length))} screenshots mapped</span>
+                        </div>
+                        <div class="muted">${escapeHtml(String((screenshotFindings[0] || {}).stage_finding || 'The latest review did not return a stage-specific screenshot criticism.'))}</div>
+                    </div>
+                `
+                : '';
+            const exportCriticCard = brief ? `
                 <div class="item">
                     <strong>Complaint-output optimizer repair brief</strong>
                     <div class="chip-row">
@@ -3322,7 +3403,8 @@ ${cliAddressLines}
                         >${escapeHtml(action.label)}</button>
                     `).join('')}</div>` : ''}
                 </div>
-            `;
+            ` : '';
+            container.innerHTML = `${reviewBriefCards}${screenshotCriticismCard}${exportCriticCard}`;
             container.querySelectorAll('.repair-brief-action').forEach((button) => {
                 button.addEventListener('click', () => {
                     jumpToStage(
@@ -4079,11 +4161,22 @@ ${cliAddressLines}
             const runs = document.getElementById('ux-review-runs');
             const artifacts = document.getElementById('ux-review-artifacts');
             const followups = document.getElementById('ux-review-followups');
+            latestUiReviewResult = result || null;
             const cycles = Array.isArray(result && result.cycles) ? result.cycles : [];
             const issueList = Array.isArray(result && result.review && result.review.issues)
                 ? result.review.issues
                 : Array.isArray(result && result.issues)
                     ? result.issues
+                    : [];
+            const screenshotFindings = Array.isArray(result && result.review && result.review.screenshot_findings)
+                ? result.review.screenshot_findings
+                : Array.isArray(result && result.screenshot_findings)
+                    ? result.screenshot_findings
+                    : [];
+            const optimizationTargets = Array.isArray(result && result.review && result.review.optimization_targets)
+                ? result.review.optimization_targets
+                : Array.isArray(result && result.optimization_targets)
+                    ? result.optimization_targets
                     : [];
             const runList = Array.isArray(result && result.runs) ? result.runs : [];
             const playwrightFollowups = Array.isArray(result && result.review && result.review.playwright_followups)
@@ -4100,6 +4193,8 @@ ${cliAddressLines}
                 result && result.stop_reason ? `<span class="chip warn">stop: ${escapeHtml(String(result.stop_reason))}</span>` : '',
                 result && result.screenshot_dir ? `<span class="chip">screenshots: ${escapeHtml(String(result.screenshot_dir))}</span>` : '',
                 result && result.output_dir ? `<span class="chip">output: ${escapeHtml(String(result.output_dir))}</span>` : '',
+                screenshotFindings.length ? `<span class="chip">screenshot findings: ${escapeHtml(String(screenshotFindings.length))}</span>` : '',
+                optimizationTargets.length ? `<span class="chip">optimization targets: ${escapeHtml(String(optimizationTargets.length))}</span>` : '',
                 result && result.latest_review_markdown_path ? `<span class="chip">latest markdown: ${escapeHtml(String(result.latest_review_markdown_path))}</span>` : '',
             ].filter(Boolean).join('');
 
@@ -4107,6 +4202,7 @@ ${cliAddressLines}
             renderUiReviewScorecard(result);
             renderActorCriticResult(result);
             renderStageFindings(result);
+            renderOptimizerRepairBrief();
 
             issues.innerHTML = issueList.length
                 ? issueList.map((item) => `
@@ -4157,6 +4253,34 @@ ${cliAddressLines}
                         </div>
                     `;
                 }).join('')
+                : screenshotFindings.length || optimizationTargets.length
+                    ? `
+                        ${screenshotFindings.map((item) => `
+                            <div class="item">
+                                <strong>Screenshot critic: ${escapeHtml(String(item.name || item.stage || 'artifact'))}</strong>
+                                <div class="chip-row">
+                                    ${item.stage ? `<span class="chip">${escapeHtml(String(item.stage))}</span>` : ''}
+                                    ${item.surface ? `<span class="chip">${escapeHtml(String(item.surface))}</span>` : ''}
+                                </div>
+                                <div class="muted">${escapeHtml(String(item.stage_finding || item.visible_text_excerpt || 'No screenshot finding returned.'))}</div>
+                                <div class="chip-row">
+                                    ${(Array.isArray(item.criticisms) ? item.criticisms : []).map((criticism) => `
+                                        <span class="chip warn">${escapeHtml(String((criticism || {}).problem || (criticism || {}).recommended_fix || 'Criticism'))}</span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `).join('')}
+                        ${optimizationTargets.map((item) => `
+                            <div class="item">
+                                <strong>Optimization target</strong>
+                                <div class="chip-row">
+                                    ${item.title ? `<span class="chip good">${escapeHtml(String(item.title))}</span>` : ''}
+                                    ${item.target_surface ? `<span class="chip">${escapeHtml(String(item.target_surface))}</span>` : ''}
+                                </div>
+                                <div class="muted">${escapeHtml(String(item.reason || 'No optimization rationale returned.'))}</div>
+                            </div>
+                        `).join('')}
+                    `
                 : '<div class="item"><strong>No optimizer artifacts yet.</strong><div class="muted">Run closed-loop optimization to capture patch paths, CIDs, and changed files.</div></div>';
 
             followups.innerHTML = playwrightFollowups.length
@@ -4319,10 +4443,15 @@ ${cliAddressLines}
                 user_id: workspaceUserId,
                 addresses,
                 claim_element_id: document.getElementById('gmail-import-claim-element').value,
+                folder: currentGmailImportFolders()[0] || 'INBOX',
+                folders: currentGmailImportFolders(),
                 gmail_user: gmailUser,
                 gmail_app_password: gmailAppPassword,
                 date_after: document.getElementById('gmail-import-date-after').value || null,
                 date_before: document.getElementById('gmail-import-date-before').value || null,
+                complaint_query: document.getElementById('gmail-import-complaint-query').value.trim() || null,
+                complaint_keywords: currentGmailImportComplaintKeywords(),
+                min_relevance_score: Number(document.getElementById('gmail-import-min-relevance-score').value || '0'),
             });
             workspaceSession = await client.startSession(workspaceUserId);
             await loadSharedCapabilities();
@@ -4767,6 +4896,10 @@ ${cliAddressLines}
         document.getElementById('gmail-import-remember-user').addEventListener('change', persistGmailImportUserPreference);
         document.getElementById('suggest-gmail-import-addresses').addEventListener('click', suggestGmailImportAddresses);
         document.getElementById('gmail-import-addresses').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-folders').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-complaint-query').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-complaint-keywords').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-min-relevance-score').addEventListener('input', renderGmailImportCommandExamples);
         document.getElementById('gmail-import-claim-element').addEventListener('change', renderGmailImportCommandExamples);
         document.getElementById('run-ux-review-button').addEventListener('click', () => runUiReview(true));
         document.getElementById('run-ux-snapshot-button').addEventListener('click', () => runUiReview(false));

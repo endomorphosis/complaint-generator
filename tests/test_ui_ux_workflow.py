@@ -10,6 +10,7 @@ from complaint_generator import (
     run_end_to_end_complaint_browser_audit,
     run_iterative_ui_ux_workflow,
     run_playwright_screenshot_audit,
+    structure_ui_ux_review,
 )
 from complaint_generator import ui_ux_workflow as workflow_module
 
@@ -227,6 +228,8 @@ def test_review_and_iterative_workflow_return_llm_router_output(monkeypatch, tmp
 
     review = review_screenshot_audit_with_llm_router(screenshot_dir=screenshot_dir, iteration=1)
     assert "Top Risks" in review["review"]
+    assert review["issues"][0]["problem"] == "Intake flow needs calmer language."
+    assert review["screenshot_findings"][0]["criticisms"]
 
     def fake_audit(**kwargs):
         _write_artifact(screenshot_dir, "workspace")
@@ -251,6 +254,53 @@ def test_review_and_iterative_workflow_return_llm_router_output(monkeypatch, tmp
     assert result["iterations"] == 2
     assert (output_dir / "iteration-01-review.md").exists()
     assert (output_dir / "iteration-02-review.json").exists()
+    assert result["review"]["issues"][0]["problem"] == "Intake flow needs calmer language."
+    assert result["runs"][0]["issues_count"] >= 1
+
+
+def test_structure_ui_ux_review_builds_screenshot_driven_structured_feedback(tmp_path):
+    _write_artifact(tmp_path, "workspace-intake", url="http://example.test/workspace?tab=intake")
+    _write_artifact(tmp_path, "workspace-evidence", url="http://example.test/workspace?tab=evidence")
+    artifacts = workflow_module.collect_screenshot_artifacts(tmp_path)
+
+    review_text = """# Top Risks
+- The intake call to action is easy to miss on the homepage.
+- Evidence upload looks secondary even though it is required before filing.
+
+# High-Impact UX Fixes
+- Promote a single primary intake action above competing shortcuts.
+- Move evidence upload into the main progression rail and label it as required.
+
+# Stage Findings
+## Intake
+The actor can miss the first required step because the primary intake action is visually buried.
+## Evidence
+Evidence capture looks optional, which weakens the complaint record before generation.
+
+# Actor Journey Findings
+- The actor can start intake, but the first step is too easy to miss.
+
+# Critic Test Obligations
+- Click the primary intake CTA and confirm the intake panel becomes the dominant focus.
+
+# Playwright Assertions To Add
+- Assert the evidence upload control is visible and marked required before complaint generation.
+
+# Actor Plan
+- Clarify the first action and keep the actor on a linear path through evidence.
+
+# Critic Verdict
+Warning: the flow is usable, but the screenshots still show misleading hierarchy.
+"""
+    structured = structure_ui_ux_review(review_text=review_text, artifacts=artifacts, iteration=1)
+
+    assert structured["issues"][0]["problem"] == "The intake call to action is easy to miss on the homepage."
+    assert structured["recommended_changes"][0]["implementation_notes"].startswith("Promote a single primary intake action")
+    assert structured["stage_findings"]["Intake"].startswith("The actor can miss")
+    assert structured["critic_review"]["verdict"] == "warning"
+    assert len(structured["screenshot_findings"]) == 2
+    assert structured["screenshot_findings"][0]["criticisms"]
+    assert structured["optimization_targets"][0]["target_surface"]
 
 
 def test_review_workflow_routes_complaint_output_analysis_into_multimodal_prompt(monkeypatch, tmp_path):

@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--address", action="append", dest="addresses", required=True, help="Target address to match in From/To/Cc headers. Repeat for multiple addresses.")
     parser.add_argument("--claim-element-id", default="causation", help="Claim element to attach imported emails to.")
     parser.add_argument("--folder", default="INBOX", help="Gmail IMAP folder to scan.")
+    parser.add_argument("--scan-folder", action="append", default=[], help="Additional Gmail IMAP folder to scan. Repeat to broaden collection across INBOX, Sent, or All Mail.")
     parser.add_argument("--limit", type=int, default=None, help="Maximum number of recent messages to consider after IMAP search.")
     parser.add_argument("--date-after", default=None, help="Only search messages on/after this date (YYYY-MM-DD).")
     parser.add_argument("--date-before", default=None, help="Only search messages before this date (YYYY-MM-DD).")
@@ -57,6 +58,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         workspace_root=Path(args.workspace_root),
         evidence_root=Path(args.evidence_root) if args.evidence_root else None,
         folder=args.folder,
+        folders=args.scan_folder,
         limit=args.limit,
         date_after=args.date_after,
         date_before=args.date_before,
