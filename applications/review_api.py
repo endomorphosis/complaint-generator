@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, FastAPI, File, Form, Response, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from claim_support_review import (
     ClaimSupportDocumentSaveRequest,
     ClaimSupportFollowUpExecuteRequest,
@@ -17,6 +17,13 @@ from claim_support_review import (
     build_claim_support_uploaded_document_payload,
 )
 from .document_api import attach_document_routes
+
+try:
+    import multipart  # type: ignore  # noqa: F401
+
+    _MULTIPART_AVAILABLE = True
+except Exception:
+    _MULTIPART_AVAILABLE = False
 
 
 REVIEW_EXECUTION_COMPATIBILITY_NOTICE = {
@@ -100,43 +107,56 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
     ) -> Dict[str, Any]:
         return build_claim_support_document_payload(mediator, request)
 
-    @router.post("/api/claim-support/upload-document")
-    async def claim_support_upload_document(
-        file: UploadFile = File(...),
-        user_id: Optional[str] = Form(default=None),
-        claim_type: Optional[str] = Form(default=None),
-        claim_element_id: Optional[str] = Form(default=None),
-        claim_element: Optional[str] = Form(default=None),
-        document_label: Optional[str] = Form(default=None),
-        source_url: Optional[str] = Form(default=None),
-        mime_type: Optional[str] = Form(default=None),
-        evidence_type: str = Form(default="document"),
-        required_support_kinds: Optional[str] = Form(default=None),
-        include_post_save_review: bool = Form(default=True),
-        include_support_summary: bool = Form(default=True),
-        include_overview: bool = Form(default=True),
-        include_follow_up_plan: bool = Form(default=True),
-    ) -> Dict[str, Any]:
-        file_bytes = await file.read()
-        return build_claim_support_uploaded_document_payload(
-            mediator,
-            user_id=user_id,
-            claim_type=claim_type,
-            claim_element_id=claim_element_id,
-            claim_element=claim_element,
-            file_bytes=file_bytes,
-            filename=file.filename,
-            document_label=document_label,
-            source_url=source_url,
-            mime_type=mime_type or file.content_type,
-            evidence_type=evidence_type,
-            document_metadata={},
-            required_support_kinds=_normalize_required_support_kinds_form(required_support_kinds),
-            include_post_save_review=include_post_save_review,
-            include_support_summary=include_support_summary,
-            include_overview=include_overview,
-            include_follow_up_plan=include_follow_up_plan,
-        )
+    if _MULTIPART_AVAILABLE:
+
+        @router.post("/api/claim-support/upload-document")
+        async def claim_support_upload_document(
+            file: UploadFile = File(...),
+            user_id: Optional[str] = Form(default=None),
+            claim_type: Optional[str] = Form(default=None),
+            claim_element_id: Optional[str] = Form(default=None),
+            claim_element: Optional[str] = Form(default=None),
+            document_label: Optional[str] = Form(default=None),
+            source_url: Optional[str] = Form(default=None),
+            mime_type: Optional[str] = Form(default=None),
+            evidence_type: str = Form(default="document"),
+            required_support_kinds: Optional[str] = Form(default=None),
+            include_post_save_review: bool = Form(default=True),
+            include_support_summary: bool = Form(default=True),
+            include_overview: bool = Form(default=True),
+            include_follow_up_plan: bool = Form(default=True),
+        ) -> Dict[str, Any]:
+            file_bytes = await file.read()
+            return build_claim_support_uploaded_document_payload(
+                mediator,
+                user_id=user_id,
+                claim_type=claim_type,
+                claim_element_id=claim_element_id,
+                claim_element=claim_element,
+                file_bytes=file_bytes,
+                filename=file.filename,
+                document_label=document_label,
+                source_url=source_url,
+                mime_type=mime_type or file.content_type,
+                evidence_type=evidence_type,
+                document_metadata={},
+                required_support_kinds=_normalize_required_support_kinds_form(required_support_kinds),
+                include_post_save_review=include_post_save_review,
+                include_support_summary=include_support_summary,
+                include_overview=include_overview,
+                include_follow_up_plan=include_follow_up_plan,
+            )
+    else:
+
+        @router.post("/api/claim-support/upload-document")
+        async def claim_support_upload_document_unavailable(_: Request) -> Dict[str, Any]:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Document upload requires the optional dependency 'python-multipart'. "
+                    "Install it to enable multipart evidence uploads."
+                ),
+            )
 
     return router
 

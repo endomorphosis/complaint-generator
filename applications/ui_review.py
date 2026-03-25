@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
+import os
 import threading
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -325,6 +327,28 @@ def _aggregate_page_review_reports(page_reports: List[Dict[str, Any]]) -> Dict[s
             for report in page_reports
         ],
     }
+
+
+def _run_page_review_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    screenshot = str(task.get("screenshot") or "").strip()
+    if not screenshot:
+        raise ValueError("Page review task is missing screenshot")
+    page_report = create_ui_review_report(
+        [screenshot],
+        notes=task.get("notes"),
+        goals=list(task.get("goals") or []),
+        provider=task.get("provider"),
+        model=task.get("model"),
+        config_path=task.get("config_path"),
+        backend_id=task.get("backend_id"),
+        output_path=None,
+        artifact_metadata=list(task.get("artifact_metadata") or []),
+        compact_page_prompt=bool(task.get("compact_page_prompt", True)),
+        page_review_executor="inline",
+    )
+    payload = dict(page_report or {})
+    payload["page_label"] = str(task.get("page_label") or "").strip() or Path(screenshot).stem
+    return payload
 
 
 def _summarize_complaint_output_feedback(artifact_metadata: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
@@ -731,17 +755,15 @@ def build_ui_review_prompt(
     ]
     complaint_feedback = _summarize_complaint_output_feedback(artifact_metadata or [])
     if not include_full_contract_context:
+        screenshot_names = ", ".join(item.get("name", "") for item in screenshot_list if item.get("name")) or "single-page-screenshot"
+        feedback_excerpt = ", ".join(_merge_string_list(complaint_feedback.get("ui_suggestions") or [])[:3])
         return (
-            "Review this single complaint-generator page screenshot as an adversarial UI critic.\n"
-            "Focus only on visible problems in this page.\n"
-            "Keep the response compact and concrete.\n"
+            "Look at this complaint-generator page screenshot and return strict JSON.\n"
+            "Focus only on visible UI/UX problems in this single page.\n"
             "Preserve the shared ComplaintMcpClient / MCP workflow when suggesting repairs.\n\n"
-            f"Goals:\n- " + "\n- ".join(goal_lines[:3]) + "\n\n"
-            f"Additional notes:\n{notes or 'No additional notes were provided.'}\n\n"
-            "Screenshot artifacts:\n"
-            f"{json.dumps(screenshot_list, indent=2, sort_keys=True)}\n\n"
-            "Complaint export artifacts relevant to this page:\n"
-            f"{json.dumps(complaint_feedback, indent=2, sort_keys=True)}\n\n"
+            f"Screenshot file(s): {screenshot_names}\n"
+            f"Additional notes: {notes or 'None.'}\n"
+            f"Complaint-output hints: {feedback_excerpt or 'None.'}\n\n"
             "Return strict JSON with this shape:\n"
             "{\n"
             '  "summary": "short paragraph",\n'
@@ -1015,6 +1037,7 @@ def create_ui_review_report(
     output_path: Optional[str] = None,
     artifact_metadata: Optional[List[Dict[str, Any]]] = None,
     compact_page_prompt: bool = False,
+    page_review_executor: str = "inline",
 ) -> Dict[str, Any]:
     screenshots = _normalize_paths(screenshot_paths)
     if not screenshots and not list(artifact_metadata or []):
@@ -1042,23 +1065,40 @@ def create_ui_review_report(
 
     if len(screenshots) > 1:
         page_reports: List[Dict[str, Any]] = []
+        task_payloads: List[Dict[str, Any]] = []
         for screenshot in screenshots:
             page_artifacts = _filter_artifacts_for_page(screenshot, artifact_metadata or [])
-            page_report = create_ui_review_report(
-                [str(screenshot)],
-                notes=notes,
-                goals=goals,
-                provider=provider,
-                model=model,
-                config_path=config_path,
-                backend_id=backend_id,
-                output_path=None,
-                artifact_metadata=page_artifacts,
-                compact_page_prompt=True,
+            task_payloads.append(
+                {
+                    "screenshot": str(screenshot),
+                    "page_label": _page_review_unit_label(screenshot, page_artifacts),
+                    "notes": notes,
+                    "goals": list(goals or []),
+                    "provider": provider,
+                    "model": model,
+                    "config_path": config_path,
+                    "backend_id": backend_id,
+                    "artifact_metadata": page_artifacts,
+                    "compact_page_prompt": True,
+                }
             )
-            page_report = dict(page_report or {})
-            page_report["page_label"] = _page_review_unit_label(screenshot, page_artifacts)
-            page_reports.append(page_report)
+
+        executor_mode = str(page_review_executor or "inline").strip().lower()
+        if executor_mode == "process":
+            max_workers = max(
+                1,
+                min(
+                    len(task_payloads),
+                    int(os.getenv("COMPLAINT_UI_REVIEW_PAGE_WORKERS", "4") or "4"),
+                ),
+            )
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(_run_page_review_task, payload) for payload in task_payloads]
+                for future in as_completed(futures):
+                    page_reports.append(dict(future.result() or {}))
+        else:
+            for payload in task_payloads:
+                page_reports.append(_run_page_review_task(payload))
 
         page_reports.sort(key=lambda item: str(item.get("page_label") or "").strip())
         review_payload = _aggregate_page_review_reports(page_reports)
@@ -1068,6 +1108,7 @@ def create_ui_review_report(
             "model": backend_kwargs.get("model"),
             "strategy": "page_reviews",
             "page_review_count": len(page_reports),
+            "page_review_executor": executor_mode,
             "page_review_backends": [dict(item.get("backend") or {}) for item in page_reports],
         }
         report = {
@@ -1251,4 +1292,5 @@ def run_ui_review_workflow(
         backend_id=backend_id,
         output_path=output_path,
         artifact_metadata=artifact_metadata,
+        page_review_executor="process",
     )
