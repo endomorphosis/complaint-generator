@@ -2517,7 +2517,7 @@
                     <div class="draft-action-rail">
                         <div class="draft-action-card">
                             <strong>Run the filing workflow in order</strong>
-                            <span>Keep one dominant next move visible. Generate or save the draft first, run packet review second, and only download when the release gate and support posture make that safe.</span>
+                            <span>Keep one dominant next move visible, with generation, packet review, and next-step safety guidance on the same rail. Generate or save the draft first, run packet review second, and only download when the release gate and support posture make that safe.</span>
                             <div class="soft-note" id="draft-primary-action-note">Primary action guidance will appear here once filing readiness is evaluated.</div>
                             <div class="draft-action-groups">
                                 <div class="draft-action-group">
@@ -2549,7 +2549,7 @@
                         <div class="draft-action-stack">
                             <div class="draft-action-card release-gate-callout" id="draft-release-gate-card">
                                 <strong>Export decision gate</strong>
-                                <span>Keep this summary visible while deciding whether to export, review, or gather more proof. Download should never outrank the release gate.</span>
+                                <span>Keep this summary and next safest move visible while deciding whether to export, review, or gather more proof. Download should never outrank the release gate.</span>
                                 <div class="chip-row" id="draft-release-gate-chip-row">
                                     <span class="chip warn" id="draft-release-gate-chip">release gate: waiting</span>
                                     <span class="chip" id="draft-release-shape-chip">filing shape: waiting</span>
@@ -5072,9 +5072,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             if (screenshotFindings.length || unresolvedText.includes('release gate') || unresolvedText.includes('export')) {
                 inferredAssertions.push("await expect(page.locator('#draft-release-gate-summary')).toContainText('Primary action:');");
                 inferredAssertions.push("await expect(page.locator('#draft-export-safety-preview')).toContainText('Primary action right now:');");
+                inferredAssertions.push("await expect(page.locator('#draft-primary-action-note')).toContainText('Primary action now:');");
             }
             if (unresolvedText.includes('next step') || unresolvedText.includes('guidance') || unresolvedText.includes('primary action')) {
                 inferredAssertions.push("await expect(page.locator('#draft-release-gate-next-step')).toContainText('Next safest move:');");
+            }
+            if (unresolvedText.includes('download') || unresolvedText.includes('blocked') || unresolvedText.includes('unsafe')) {
+                inferredAssertions.push("await expect(page.locator('#draft-release-gate-chip')).toBeVisible();");
+                inferredAssertions.push("await expect(page.locator('#download-packet-markdown-button')).toBeDisabled();");
+                inferredAssertions.push("await expect(page.locator('#download-packet-docx-button')).toBeDisabled();");
+                inferredAssertions.push("await expect(page.locator('#download-packet-pdf-button')).toBeDisabled();");
             }
             const merged = followups.concat(inferredAssertions);
             return merged.filter((item, index) => item && merged.indexOf(item) === index);

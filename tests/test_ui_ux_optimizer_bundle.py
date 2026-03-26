@@ -288,3 +288,31 @@ def test_fallback_local_optimizer_can_apply_bounded_codex_edits(monkeypatch, tmp
     assert result.metadata["changed_files"] == ["templates/workspace.html"]
     assert Path(result.patch_path).is_file()
     assert "Start intake" in target_file.read_text(encoding="utf-8")
+
+
+def test_fallback_local_optimizer_plan_only_does_not_claim_changed_files(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    optimizer = Optimizer()
+    components = optimizer._fallback_agentic_optimizer_components()
+    fallback_cls = components["optimizer_classes"]["actor_critic"]
+    output_dir = tmp_path / "reviews"
+    output_dir.mkdir()
+    target_file = tmp_path / "templates" / "workspace.html"
+    target_file.parent.mkdir(parents=True)
+    target_file.write_text("<button>Start</button>\n", encoding="utf-8")
+
+    monkeypatch.setattr("adversarial_harness.optimizer.shutil.which", lambda name: None)
+
+    task = SimpleNamespace(
+        task_id="ui-task",
+        target_files=[Path("templates/workspace.html")],
+        constraints={"output_dir": str(output_dir)},
+        metadata={},
+    )
+
+    result = fallback_cls(agent_id="fallback-ui", llm_router=None).optimize(task)
+
+    assert result.status == "fallback_recommendations_generated"
+    assert result.metadata["changed_files"] == []
+    assert result.metadata["target_files"] == ["templates/workspace.html"]
+    assert Path(result.patch_path).is_file()

@@ -691,7 +691,8 @@ class Optimizer:
                     status="fallback_recommendations_generated",
                     patch_path=str(patch_path),
                     metadata={
-                        "changed_files": changed_files,
+                        "changed_files": [],
+                        "target_files": changed_files,
                         "recommendations": recommendations,
                         "optimizer_backend": "local_fallback_optimizer",
                     },

@@ -308,6 +308,12 @@ class ComplaintMcpClient {
         });
     }
 
+    exportComplaintDocx(userId) {
+        return this.callTool('complaint.export_complaint_docx', {
+            user_id: userId,
+        });
+    }
+
     exportComplaintPdf(userId) {
         return this.callTool('complaint.export_complaint_pdf', {
             user_id: userId,

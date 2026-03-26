@@ -255,6 +255,11 @@
     background: #f8fafc;
 }
 
+.cg-app-shell__workflow-rail.is-warn {
+    border-color: #fdba74;
+    background: #fff7ed;
+}
+
 .cg-app-shell__meta {
     margin-top: 14px;
     color: #64748b;

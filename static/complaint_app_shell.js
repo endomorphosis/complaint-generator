@@ -267,11 +267,36 @@
         const primaryActionKey = !workflowState.reviewReady
             ? 'workspace'
             : (!workflowState.builderReady ? 'review' : 'builder');
+        const primaryActionHref = primaryActionKey === 'workspace'
+            ? buildShellSurfaceUrl('/workspace', context)
+            : primaryActionKey === 'review'
+                ? buildShellSurfaceUrl('/claim-support-review', context)
+                : buildShellSurfaceUrl('/document', context);
+        const primaryActionLabel = primaryActionKey === 'workspace'
+            ? 'Primary: Continue Intake'
+            : primaryActionKey === 'review'
+                ? 'Primary: Close Support Gaps'
+                : 'Primary: Draft Complaint';
         const workflowNextStep = primaryActionKey === 'workspace'
             ? 'Primary action: continue intake in Workspace, then reopen Review once enough factual detail is saved.'
             : primaryActionKey === 'review'
                 ? 'Primary action: resolve support gaps in Review before moving into formal drafting.'
                 : 'Primary action: generate or refine the complaint draft in Builder, then use Workspace export + release-gate checks before download.';
+        const actionLinks = [
+            buildGatedLink('cg-app-shell__action', 'Open Workspace', buildShellSurfaceUrl('/workspace', context), true, ''),
+            buildGatedLink('cg-app-shell__action', 'Open Review', buildShellSurfaceUrl('/claim-support-review', context), workflowState.reviewReady, workflowState.reviewGateReason),
+            buildGatedLink('cg-app-shell__action', 'Open Builder', buildShellSurfaceUrl('/document', context), workflowState.builderReady, workflowState.builderGateReason),
+            '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/mlwysiwyg', context) + '">Edit Draft</a>',
+        ];
+        const secondaryActionLinks = actionLinks.filter((link) => {
+            if (primaryActionKey === 'workspace') {
+                return link.indexOf('Open Workspace') === -1;
+            }
+            if (primaryActionKey === 'review') {
+                return link.indexOf('Open Review') === -1;
+            }
+            return link.indexOf('Open Builder') === -1;
+        });
 
         shell.innerHTML = [
             '<div class="cg-app-shell__inner">',
@@ -324,12 +349,10 @@
             '</div>',
             '<div class="cg-app-shell__section-title">Next Actions</div>',
             '<div class="cg-app-shell__actions">',
-            '<a class="cg-app-shell__action' + (primaryActionKey === 'workspace' ? ' is-primary' : '') + '" href="' + buildShellSurfaceUrl('/workspace', context) + '">Open Workspace</a>',
-            buildGatedLink('cg-app-shell__action' + (primaryActionKey === 'builder' ? ' is-primary' : ''), 'Open Builder', buildShellSurfaceUrl('/document', context), workflowState.builderReady, workflowState.builderGateReason),
-            buildGatedLink('cg-app-shell__action' + (primaryActionKey === 'review' ? ' is-primary' : ''), 'Open Review', buildShellSurfaceUrl('/claim-support-review', context), workflowState.reviewReady, workflowState.reviewGateReason),
-            '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/mlwysiwyg', context) + '">Edit Draft</a>',
+            buildGatedLink('cg-app-shell__action is-primary', primaryActionLabel, primaryActionHref, primaryActionKey === 'workspace' ? true : (primaryActionKey === 'review' ? workflowState.reviewReady : workflowState.builderReady), primaryActionKey === 'review' ? workflowState.reviewGateReason : (primaryActionKey === 'builder' ? workflowState.builderGateReason : '')),
+            secondaryActionLinks.join(''),
             '</div>',
-            '<div class="cg-app-shell__workflow-rail">',
+            '<div class="cg-app-shell__workflow-rail' + (workflowState.builderReady ? '' : ' is-warn') + '">',
             '<div class="cg-app-shell__phase-note">' + safeText(workflowNextStep, '') + '</div>',
             '<div class="cg-app-shell__phase-note">Keep draft generation, packet export, and release-gate next-step guidance visible together before downloading complaint files.</div>',
             '</div>',
