@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
 import os
+import tempfile
 import threading
 from time import perf_counter
 from typing import Any, Dict, Iterable, List, Optional
@@ -37,6 +38,14 @@ _MULTIMODAL_RATE_LIMIT_FALLBACKS = {
     "codex": ("copilot_cli", "hf_inference_api"),
     "codex_cli": ("copilot_cli", "hf_inference_api"),
     "copilot_cli": ("hf_inference_api",),
+}
+_UI_REVIEW_TEXT_ITEM_LIMIT = 280
+_UI_REVIEW_SUGGESTION_COUNT_LIMIT = 4
+_UI_REVIEW_METADATA_LIST_LIMIT = 4
+_UI_REVIEW_PROVIDER_IMAGE_LIMITS = {
+    "hf_inference_api": {"max_bytes": 900_000, "max_dimension": 1280, "jpeg_quality": 72},
+    "codex": {"max_bytes": 1_800_000, "max_dimension": 1600, "jpeg_quality": 78},
+    "codex_cli": {"max_bytes": 1_800_000, "max_dimension": 1600, "jpeg_quality": 78},
 }
 
 
@@ -76,6 +85,13 @@ def _strip_code_fences(text: str) -> str:
             parts = parts[:-1]
         stripped = "\n".join(parts).strip()
     return stripped
+
+
+def _truncate_text(value: Any, *, limit: int = _UI_REVIEW_TEXT_ITEM_LIMIT) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 16)].rstrip() + "...[truncated]"
 
 
 def _parse_json_response(text: str) -> Dict[str, Any]:
@@ -223,6 +239,124 @@ def _merge_string_list(items: Iterable[Any]) -> List[str]:
         if text and text not in merged:
             merged.append(text)
     return merged
+
+
+def _compact_complaint_output_feedback(
+    complaint_output_feedback: Dict[str, Any],
+    *,
+    suggestion_limit: int = _UI_REVIEW_SUGGESTION_COUNT_LIMIT,
+    metadata_limit: int = _UI_REVIEW_METADATA_LIST_LIMIT,
+) -> Dict[str, Any]:
+    feedback = dict(complaint_output_feedback or {})
+    return {
+        "export_artifact_count": int(feedback.get("export_artifact_count") or 0),
+        "claim_types": [str(item).strip() for item in list(feedback.get("claim_types") or [])[:metadata_limit] if str(item).strip()],
+        "draft_strategies": [str(item).strip() for item in list(feedback.get("draft_strategies") or [])[:metadata_limit] if str(item).strip()],
+        "filing_shape_scores": [int(item) for item in list(feedback.get("filing_shape_scores") or [])[:metadata_limit]],
+        "markdown_filenames": [str(item).strip() for item in list(feedback.get("markdown_filenames") or [])[:metadata_limit] if str(item).strip()],
+        "pdf_filenames": [str(item).strip() for item in list(feedback.get("pdf_filenames") or [])[:metadata_limit] if str(item).strip()],
+        "release_gate_verdicts": [str(item).strip() for item in list(feedback.get("release_gate_verdicts") or [])[:metadata_limit] if str(item).strip()],
+        "formal_section_gaps": [_truncate_text(item, limit=120) for item in list(feedback.get("formal_section_gaps") or [])[:metadata_limit] if str(item).strip()],
+        "ui_suggestions": [_truncate_text(item) for item in list(feedback.get("ui_suggestions") or [])[:suggestion_limit] if str(item).strip()],
+        "router_backends": [
+            {
+                "provider": str((item or {}).get("provider") or "").strip(),
+                "model": str((item or {}).get("model") or "").strip(),
+                "strategy": str((item or {}).get("strategy") or "").strip(),
+            }
+            for item in list(feedback.get("router_backends") or [])[:metadata_limit]
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _provider_image_limits(provider: Optional[str]) -> Dict[str, int]:
+    normalized = str(provider or "").strip().lower()
+    return dict(_UI_REVIEW_PROVIDER_IMAGE_LIMITS.get(normalized, {}))
+
+
+def _prepare_review_image_copy(
+    image_path: Path,
+    *,
+    output_dir: Path,
+    provider: Optional[str],
+) -> Path:
+    limits = _provider_image_limits(provider)
+    if not limits:
+        return image_path
+    try:
+        from PIL import Image
+    except Exception:
+        return image_path
+
+    max_bytes = int(limits.get("max_bytes") or 0)
+    max_dimension = int(limits.get("max_dimension") or 0)
+    jpeg_quality = int(limits.get("jpeg_quality") or 75)
+
+    stat = image_path.stat()
+    try:
+        with Image.open(image_path) as image:
+            width, height = image.size
+            if (
+                (not max_bytes or stat.st_size <= max_bytes)
+                and (not max_dimension or (width <= max_dimension and height <= max_dimension))
+            ):
+                return image_path
+
+            candidate = image.copy()
+            if max_dimension:
+                candidate.thumbnail((max_dimension, max_dimension))
+            if candidate.mode not in {"RGB", "L"}:
+                flattened = Image.new("RGB", candidate.size, (255, 255, 255))
+                flattened.paste(candidate, mask=candidate.split()[-1] if "A" in candidate.getbands() else None)
+                candidate = flattened
+            elif candidate.mode == "L":
+                candidate = candidate.convert("RGB")
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+            prepared_path = output_dir / f"{image_path.stem}.review.jpg"
+            for quality in (jpeg_quality, max(jpeg_quality - 10, 45), 40):
+                candidate.save(prepared_path, format="JPEG", optimize=True, quality=quality)
+                if not max_bytes or prepared_path.stat().st_size <= max_bytes:
+                    return prepared_path
+            if prepared_path.exists() and prepared_path.stat().st_size < stat.st_size:
+                return prepared_path
+    except Exception:
+        return image_path
+    return image_path
+
+
+def _prepare_multimodal_image_paths(
+    screenshots: List[Path],
+    *,
+    provider: Optional[str],
+    diagnostics_dir: Optional[str],
+) -> tuple[List[Path], Dict[str, Any]]:
+    prepared_paths: List[Path] = []
+    changed_paths: List[str] = []
+    limits = _provider_image_limits(provider)
+    if not limits:
+        return list(screenshots), {"prepared_image_count": 0, "original_screenshot_count": len(screenshots)}
+
+    if diagnostics_dir:
+        output_dir = Path(diagnostics_dir).expanduser().resolve() / "prepared-images"
+    else:
+        output_dir = Path(tempfile.mkdtemp(prefix="complaint-ui-review-images-"))
+
+    for screenshot in list(screenshots or []):
+        prepared = _prepare_review_image_copy(
+            screenshot,
+            output_dir=output_dir,
+            provider=provider,
+        )
+        prepared_paths.append(prepared)
+        if prepared != screenshot:
+            changed_paths.append(str(prepared))
+    return prepared_paths, {
+        "prepared_image_count": len(changed_paths),
+        "prepared_image_paths": changed_paths,
+        "original_screenshot_count": len(screenshots),
+    }
 
 
 def _aggregate_page_review_reports(page_reports: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -1041,7 +1175,9 @@ def build_ui_review_prompt(
         "Use the JavaScript MCP SDK rather than page-specific ad hoc fetch logic whenever possible.",
         "Make the intake, evidence, support review, and draft editing journey feel linear and trustworthy.",
     ]
-    complaint_feedback = _summarize_complaint_output_feedback(artifact_metadata or [])
+    complaint_feedback = _compact_complaint_output_feedback(
+        _summarize_complaint_output_feedback(artifact_metadata or [])
+    )
     if not include_full_contract_context:
         screenshot_names = ", ".join(item.get("name", "") for item in screenshot_list if item.get("name")) or "single-page-screenshot"
         feedback_excerpt = ", ".join(_merge_string_list(complaint_feedback.get("ui_suggestions") or [])[:3])
@@ -1421,14 +1557,20 @@ def _review_with_multimodal_router(
     screenshots: List[Path],
     prompt: str,
     backend_kwargs: Dict[str, Any],
+    diagnostics_dir: Optional[str],
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    prepared_screenshots, preparation_metadata = _prepare_multimodal_image_paths(
+        screenshots,
+        provider=backend_kwargs.get("provider"),
+        diagnostics_dir=diagnostics_dir,
+    )
     backend = MultimodalRouterBackend(**backend_kwargs)
     timeout_s = float(backend_kwargs.get("timeout") or DEFAULT_UI_REVIEW_TIMEOUT_S)
     started_at = perf_counter()
     raw_response = _call_with_timeout(
         lambda: backend(
             prompt,
-            image_paths=screenshots,
+            image_paths=prepared_screenshots,
             system_prompt=(
                 "Review complaint UI screenshots and produce strict JSON. "
                 "Prioritize actionable fixes that preserve the shared MCP JavaScript SDK workflow."
@@ -1446,7 +1588,8 @@ def _review_with_multimodal_router(
             "strategy": "multimodal_router",
             "elapsed_seconds": round(float(elapsed_s), 3),
             "prompt_chars": len(prompt),
-            "screenshot_count": len(screenshots),
+            "screenshot_count": len(prepared_screenshots),
+            **preparation_metadata,
         },
     )
 
@@ -1612,6 +1755,7 @@ def create_ui_review_report(
             screenshots=screenshots,
             prompt=prompt,
             backend_kwargs=backend_kwargs,
+            diagnostics_dir=resolved_diagnostics_dir,
         )
     except Exception as exc:
         multimodal_exc = exc
@@ -1630,6 +1774,7 @@ def create_ui_review_report(
                         screenshots=screenshots,
                         prompt=prompt,
                         backend_kwargs=candidate_kwargs,
+                        diagnostics_dir=resolved_diagnostics_dir,
                     )
                     backend_metadata["fallback_from"] = "multimodal_router"
                     backend_metadata["provider_fallback_from"] = provider_name or None

@@ -713,7 +713,304 @@
   },
   "intake_answers": {},
   "intake_history": [],
-  "ui_readiness": null,
-  "updated_at": "2026-03-24T07:48:28.572292+00:00",
+  "latest_export_critic": null,
+  "latest_packet_export": null,
+  "ui_readiness": {
+    "acceptance_checks": [
+      "Keep a Playwright flow that proves the release gate and filing-shape guidance stay visible before markdown/pdf/docx download."
+    ],
+    "actor_path_breaks": [
+      "The screenshot review loop can time out before returning page-specific UX findings."
+    ],
+    "broken_controls": [
+      {
+        "control": "UI review automation",
+        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "page": "workspace-draft",
+        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
+        "surface": "draft/export"
+      },
+      {
+        "control": "release gate / export guidance",
+        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "page": "workspace-draft",
+        "repair": "Release gate: PASS",
+        "surface": "workspace-draft"
+      },
+      {
+        "control": "UI review automation",
+        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "page": "workspace-evidence",
+        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
+        "surface": "draft/export"
+      },
+      {
+        "control": "release gate / export guidance",
+        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "page": "workspace-evidence",
+        "repair": "Release gate: PASS",
+        "surface": "workspace-evidence"
+      },
+      {
+        "control": "UI review automation",
+        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "page": "workspace-homepage",
+        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
+        "surface": "draft/export"
+      },
+      {
+        "control": "release gate / export guidance",
+        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "page": "workspace-homepage",
+        "repair": "Release gate: PASS",
+        "surface": "workspace-homepage"
+      },
+      {
+        "control": "UI review automation",
+        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "page": "workspace-intake",
+        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
+        "surface": "draft/export"
+      },
+      {
+        "control": "release gate / export guidance",
+        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "page": "workspace-intake",
+        "repair": "Release gate: PASS",
+        "surface": "workspace-intake"
+      },
+      {
+        "control": "UI review automation",
+        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "page": "workspace-integrations",
+        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
+        "surface": "draft/export"
+      },
+      {
+        "control": "release gate / export guidance",
+        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "page": "workspace-integrations",
+        "repair": "Release gate: PASS",
+        "surface": "workspace-integrations"
+      },
+      {
+        "control": "UI review automation",
+        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "page": "workspace-review",
+        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
+        "surface": "draft/export"
+      },
+      {
+        "control": "release gate / export guidance",
+        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "page": "workspace-review",
+        "repair": "Release gate: PASS",
+        "surface": "workspace-review"
+      }
+    ],
+    "carry_forward_assessment": {},
+    "critic_verdict": "warning",
+    "issue_counts": {
+      "high": 0,
+      "low": 0,
+      "medium": 6
+    },
+    "issues": [
+      {
+        "page": "workspace-draft",
+        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
+        "recommended_fix": "Release gate: PASS",
+        "severity": "medium",
+        "surface": "draft/export",
+        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
+        "recommended_fix": "Release gate: PASS",
+        "severity": "medium",
+        "surface": "draft/export",
+        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+      },
+      {
+        "page": "workspace-homepage",
+        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
+        "recommended_fix": "Release gate: PASS",
+        "severity": "medium",
+        "surface": "draft/export",
+        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
+        "recommended_fix": "Release gate: PASS",
+        "severity": "medium",
+        "surface": "draft/export",
+        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+      },
+      {
+        "page": "workspace-integrations",
+        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
+        "recommended_fix": "Release gate: PASS",
+        "severity": "medium",
+        "surface": "draft/export",
+        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+      },
+      {
+        "page": "workspace-review",
+        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
+        "recommended_fix": "Release gate: PASS",
+        "severity": "medium",
+        "surface": "draft/export",
+        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+      }
+    ],
+    "latest_review_json_path": null,
+    "latest_review_markdown_path": null,
+    "optimization_targets": [],
+    "playwright_followups": [
+      "Capture and assert the release gate, filing-shape score, and export guidance in the final draft/export view."
+    ],
+    "recommended_changes": [
+      {
+        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "page": "workspace-draft",
+        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
+        "shared_code_path": "applications/ui_review.py",
+        "title": "Use complaint-output signals as the first fallback UX critic"
+      },
+      {
+        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "page": "workspace-evidence",
+        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
+        "shared_code_path": "applications/ui_review.py",
+        "title": "Use complaint-output signals as the first fallback UX critic"
+      },
+      {
+        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "page": "workspace-homepage",
+        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
+        "shared_code_path": "applications/ui_review.py",
+        "title": "Use complaint-output signals as the first fallback UX critic"
+      },
+      {
+        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "page": "workspace-intake",
+        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
+        "shared_code_path": "applications/ui_review.py",
+        "title": "Use complaint-output signals as the first fallback UX critic"
+      },
+      {
+        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "page": "workspace-integrations",
+        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
+        "shared_code_path": "applications/ui_review.py",
+        "title": "Use complaint-output signals as the first fallback UX critic"
+      },
+      {
+        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "page": "workspace-review",
+        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
+        "shared_code_path": "applications/ui_review.py",
+        "title": "Use complaint-output signals as the first fallback UX critic"
+      }
+    ],
+    "release_blockers": [
+      "Release gate: PASS"
+    ],
+    "review_backend": {
+      "id": "llm-router",
+      "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+      "page_review_backends": [
+        {
+          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "id": "llm-router",
+          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49744-4cbb09817b04d3ec6a9cd99d;135b7dc9-f0d1-4649-9c04-71e0b054bf1c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "prompt_mode": "compact",
+          "provider": "hf_inference_api",
+          "strategy": "fallback"
+        },
+        {
+          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "id": "llm-router",
+          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49744-3e1e1d5f524d4a5a555367a6;6066d45e-1925-4f37-817b-a9513d3105e2)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "prompt_mode": "compact",
+          "provider": "hf_inference_api",
+          "strategy": "fallback"
+        },
+        {
+          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "id": "llm-router",
+          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49744-2cb007d95736eefb02ad1dc3;77d73f38-2706-4518-9aa0-80be137e39e8)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "prompt_mode": "compact",
+          "provider": "hf_inference_api",
+          "strategy": "fallback"
+        },
+        {
+          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "id": "llm-router",
+          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49744-3d2fe5a82d0a92fd152bba51;b80cc96f-7c65-45ad-8f49-38bb88f5d91a)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "prompt_mode": "compact",
+          "provider": "hf_inference_api",
+          "strategy": "fallback"
+        },
+        {
+          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "id": "llm-router",
+          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49745-747e417f4c1eb5db46e65f4d;acd70440-2928-4473-86ac-e286cad7131c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "prompt_mode": "compact",
+          "provider": "hf_inference_api",
+          "strategy": "fallback"
+        },
+        {
+          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "id": "llm-router",
+          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49745-7d31e8d36ed02116450efe7e;6b85e3fa-199a-496e-94b4-1449fb53646b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "prompt_mode": "compact",
+          "provider": "hf_inference_api",
+          "strategy": "fallback"
+        }
+      ],
+      "page_review_count": 6,
+      "page_review_executor": "process",
+      "prompt_mode": "full",
+      "provider": "hf_inference_api",
+      "strategy": "page_reviews"
+    },
+    "runs": [],
+    "score": 0,
+    "screenshot_findings": [],
+    "sdk_invocations": [
+      "complaint.review_ui",
+      "complaint.optimize_ui",
+      "complaint.run_browser_audit"
+    ],
+    "stage_findings": {
+      "Draft": "workspace-draft: Release gate: PASS | workspace-evidence: Release gate: PASS | workspace-homepage: Release gate: PASS | workspace-intake: Release gate: PASS | workspace-integrations: Release gate: PASS | workspace-review: Release gate: PASS",
+      "Evidence": "workspace-draft: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-evidence: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-homepage: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-intake: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-integrations: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-review: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown.",
+      "Intake": "workspace-draft: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-evidence: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-homepage: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-intake: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-integrations: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-review: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings.",
+      "Integration Discovery": "workspace-draft: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-evidence: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-homepage: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-intake: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-integrations: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-review: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics.",
+      "Review": "workspace-draft: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-evidence: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-homepage: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-intake: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-integrations: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-review: Support review should continue to surface claim gaps before users rely on the generated complaint."
+    },
+    "summary": "Aggregated 6 page-level screenshot reviews. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots.",
+    "tested_stages": [
+      "intake",
+      "evidence",
+      "review",
+      "draft",
+      "integrations",
+      "optimizer"
+    ],
+    "updated_at": "2026-03-26T02:17:41.829023+00:00",
+    "verdict": "Do not send to clients yet",
+    "workflow_type": "page_reviews"
+  },
+  "updated_at": "2026-03-26T02:17:41.829045+00:00",
   "user_id": "demo-user"
 }

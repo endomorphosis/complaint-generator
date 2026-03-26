@@ -71,6 +71,10 @@
     margin-top: 16px;
 }
 
+.cg-app-shell__nav--secondary {
+    margin-top: 10px;
+}
+
 .cg-app-shell__stats {
     margin-top: 16px;
     grid-template-columns: 1fr;
@@ -78,6 +82,19 @@
 
 .cg-app-shell__section-title {
     margin: 18px 0 10px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.cg-app-shell__drawer {
+    margin-top: 12px;
+}
+
+.cg-app-shell__drawer-summary {
+    cursor: pointer;
     color: #64748b;
     font-size: 12px;
     font-weight: 700;

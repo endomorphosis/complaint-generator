@@ -11,6 +11,7 @@ async function waitForWorkspaceReady(page, { requireIntakeVisible = true } = {})
     try {
       await expect(page.locator('#sdk-server-info')).toContainText(/complaint-workspace-mcp/i, { timeout: 20000 });
       await expect(page.locator('#workspace-status')).toContainText(/synchronized|workspace ready|opened workspace|returned from|draft generated|intake answers saved|complaint readiness refreshed/i, { timeout: 20000 });
+      await expect(page.locator('body')).toHaveAttribute('data-workspace-hydrated', /ready|partial/, { timeout: 20000 });
       if (requireIntakeVisible) {
         await page.locator('[data-tab-target="intake"]').click();
         await expect(page.locator('#intake-party_name')).toBeVisible({ timeout: 10000 });
@@ -400,6 +401,9 @@ test.describe('complaint generation workflow', () => {
     }, did);
     await page.goto('/workspace');
     await waitForWorkspaceReady(page);
+    await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Secure Intake/i);
+    await expect(page.locator('[data-surface-nav="primary"]')).not.toContainText(/Profile|Trace|Dashboards/i);
+    await expect(page.locator('#workspace-advanced-nav')).toContainText(/Developer tools and linked surfaces/i);
     await expect(page.locator('#tool-list')).toContainText(/complaint\.generate_complaint/i);
     await expect(page.locator('#tool-list')).toContainText(/complaint\.get_complaint_readiness/i);
     await expect(page.locator('#tool-list')).toContainText(/complaint\.update_claim_type/i);
@@ -443,6 +447,8 @@ test.describe('complaint generation workflow', () => {
     await page.locator('#save-intake-button').click();
 
     await expect(page.locator('#next-question-label')).toContainText(/Intake complete/i);
+    await expect(page.locator('#case-confidence-chip')).toContainText(/record:/i);
+    await expect(page.locator('#progress-percent-chip')).toContainText(/workflow mapped/i);
     await page.locator('#case-synopsis').fill('Jane Doe alleges retaliation after reporting discrimination to HR, and the next priority is proving the timing and motive with corroborating evidence.');
     await page.locator('#save-synopsis-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Shared case synopsis saved/i);
@@ -471,6 +477,13 @@ test.describe('complaint generation workflow', () => {
     await waitForWorkspaceReady(page, { requireIntakeVisible: false });
     await expect(page.locator('#workspace-status')).toContainText(/Opened Workspace from the results surface\./i);
     await expect(page.locator('#case-synopsis')).toHaveValue(/Jane Doe alleges retaliation/i);
+    await expect(page.locator('#blocker-list .evidence-shortcut-action')).toContainText([/Add testimony for/i, /Upload document for/i]);
+    await page.locator('#blocker-list .evidence-shortcut-action[data-evidence-kind="document"]').first().click();
+    await expect(page.locator('[data-tab-panel="evidence"]')).toHaveClass(/is-active/);
+    await expect(page.locator('#evidence-kind')).toHaveValue('document');
+    await expect(page.locator('#evidence-claim-element')).toHaveValue(/.+/);
+    await expect(page.locator('#evidence-add-testimony-button')).toContainText(/Add testimony for/i);
+    await expect(page.locator('#evidence-add-document-button')).toContainText(/Attach document for/i);
 
     await page.getByRole('button', { name: 'Evidence', exact: true }).click();
 
@@ -517,6 +530,10 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-contract-preview')).toContainText(/Expected count heading: COUNT I - RETALIATION/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Record support: |Release gate verdict:/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Evidence items: 1/i);
+    await expect(page.locator('#draft-export-integrity-preview')).toContainText(/Claim type selected: Retaliation/i);
+    await expect(page.locator('#draft-export-integrity-preview')).toContainText(/Draft strategy selected: llm_router/i);
+    await expect(page.locator('#draft-export-integrity-preview')).toContainText(/\[ok\] Prayer for relief/i);
+    await expect(page.locator('#draft-export-integrity-preview')).toContainText(/Civil Action No\. is still a placeholder\./i);
 
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
     const packageCard = page.locator('.tool-card').filter({ has: page.getByRole('heading', { name: 'Python package imports' }) }).first();

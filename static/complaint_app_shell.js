@@ -1,15 +1,17 @@
 (function () {
     const readinessStorageKey = 'complaintGenerator.uiReadiness';
     const lastToolCallStorageKey = 'complaintGenerator.sdkLastToolCall';
-    const navItems = [
+    const primaryNavItems = [
         ['Landing', '/'],
-        ['Account', '/home'],
-        ['Chat', '/chat'],
-        ['Profile', '/profile'],
-        ['Results', '/results'],
+        ['Secure Intake', '/home'],
         ['Workspace', '/workspace'],
         ['Review', '/claim-support-review'],
         ['Builder', '/document'],
+        ['Chat', '/chat'],
+    ];
+    const advancedNavItems = [
+        ['Profile', '/profile'],
+        ['Results', '/results'],
         ['Editor', '/mlwysiwyg'],
         ['Trace', '/document/optimization-trace'],
         ['SDK', '/ipfs-datasets/sdk-playground'],
@@ -229,7 +231,7 @@
 
         const context = readShellContext(state);
 
-        const navHtml = navItems.map(([label, href]) => {
+        const renderNavLink = ([label, href]) => {
             const targetUrl = buildShellSurfaceUrl(href, context);
             const active = window.location.pathname === href ? ' is-active' : '';
             const gatedReview = href === '/claim-support-review';
@@ -237,7 +239,9 @@
             const enabled = gatedReview ? workflowState.reviewReady : (gatedBuilder ? workflowState.builderReady : true);
             const reason = gatedReview ? workflowState.reviewGateReason : (gatedBuilder ? workflowState.builderGateReason : '');
             return '<a class="cg-app-shell__nav-link' + active + (enabled ? '' : ' is-disabled') + '" href="' + targetUrl + '" aria-disabled="' + (enabled ? 'false' : 'true') + '" data-disabled-reason="' + safeText(reason, '') + '">' + label + '</a>';
-        }).join('');
+        };
+        const navHtml = primaryNavItems.map(renderNavLink).join('');
+        const advancedNavHtml = advancedNavItems.map(renderNavLink).join('');
         const readiness = state.uiReadiness || loadCachedReadiness();
         const lastToolCall = loadCachedLastToolCall();
         const readinessVerdict = readiness && readiness.verdict ? readiness.verdict : 'No UI verdict cached';
@@ -274,6 +278,7 @@
             '</div>',
             '<div class="cg-app-shell__section-title">Navigate</div>',
             '<div class="cg-app-shell__nav">' + navHtml + '</div>',
+            '<details class="cg-app-shell__drawer" id="cg-app-shell-advanced-nav"><summary class="cg-app-shell__drawer-summary">Developer tools and linked surfaces</summary><div class="cg-app-shell__nav cg-app-shell__nav--secondary">' + advancedNavHtml + '</div></details>',
             '<div class="cg-app-shell__section-title">Session</div>',
             '<div class="cg-app-shell__stats">',
             '<div class="cg-app-shell__stat"><span class="cg-app-shell__stat-label">Intake</span><span class="cg-app-shell__stat-value" id="cg-app-shell-intake-count">' + summary.answeredQuestions + '</span><span class="cg-app-shell__stat-detail">' + safeText(summary.nextQuestion, 'Intake complete.') + '</span></div>',

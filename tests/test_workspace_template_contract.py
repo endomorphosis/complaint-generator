@@ -233,10 +233,36 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "deriveWorkflowState" in content
     assert "workspace-nav-builder" in content
     assert "workspace-nav-review" in content
+    assert "workspace-advanced-nav" in content
+    assert "Developer tools and linked surfaces" in content
+    assert "What is complete" in content
+    assert "Exactly what to do next" in content
+    assert "What still needs support" in content
+    assert "record: materially supported" in content
+    assert "record: thin corroboration" in content
+    assert "record: developing" in content
+    assert "record: early intake" in content
+    assert "% of workflow mapped" in content
+    assert "draft-export-integrity-preview" in content
+    assert "complaintSectionChecks" in content
+    assert "complaintPlaceholderWarnings" in content
+    assert "renderDraftExportIntegrity" in content
+    assert "Required section checks:" in content
+    assert "Civil Action No. is still a placeholder." in content
+    assert "formatGapActionLabel" in content
+    assert "Add testimony for ${escapeHtml(item.label)}" in content
+    assert "Upload document for ${escapeHtml(item.label)}" in content
+    assert "formatGapActionLabel('Attach document', weakestGap)" in content
     assert "surface-link.is-disabled" in content
     assert "Screenshot-linked critic lanes" in content
     assert "evidence-add-testimony-button" in content
     assert "evidence-add-document-button" in content
+    assert "evidence-shortcut-action" in content
+    assert "openEvidenceForGap" in content
+    assert "resolveSupportGap" in content
+    assert 'data-evidence-kind="${escapeHtml(action.kind || \'testimony\')}"' in content
+    assert 'data-evidence-kind="testimony"' in content
+    assert 'data-evidence-kind="document"' in content
     assert "draft-export-safety-preview" in content
     assert "activateEvidenceComposer" in content
     assert "screenshot findings:" in content

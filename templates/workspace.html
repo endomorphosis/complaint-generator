@@ -197,6 +197,28 @@
             margin-top: 18px;
         }
 
+        .surface-nav-group {
+            display: grid;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .surface-nav-drawer {
+            margin: 0;
+        }
+
+        .surface-nav-summary {
+            list-style: none;
+            cursor: pointer;
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .surface-nav-summary::-webkit-details-marker {
+            display: none;
+        }
+
         .surface-link,
         .tab-button,
         button {
@@ -988,7 +1010,7 @@
         }
     </style>
 </head>
-<body>
+<body data-workspace-hydrated="booting">
     <div class="shell">
         <section class="topbar" aria-label="Workspace identity">
             <div class="brand-lockup">
@@ -1009,19 +1031,26 @@
                 <div class="hero-panel">
                     <h2>Start with the next calm, useful step</h2>
                     <p class="muted">Capture identity and timeline first, then protected activity, the adverse action, and the harm. Review and Builder stay gated until the case record is coherent enough to use them safely.</p>
-                    <div class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation">
-                        <a class="surface-link" href="/">Landing</a>
-                        <a class="surface-link" href="/home">Account</a>
-                        <a class="surface-link" id="workspace-nav-chat" href="/chat">Chat</a>
-                        <a class="surface-link" id="workspace-nav-profile" href="/profile">Profile</a>
-                        <a class="surface-link" id="workspace-nav-results" href="/results">Results</a>
-                        <a class="surface-link" id="workspace-nav-workspace" href="/workspace">Workspace</a>
-                        <a class="surface-link" id="workspace-nav-review" href="/claim-support-review">Review</a>
-                        <a class="surface-link" id="workspace-nav-builder" href="/document">Builder</a>
-                        <a class="surface-link" href="/mlwysiwyg">Editor</a>
-                        <a class="surface-link" id="workspace-nav-trace" href="/document/optimization-trace">Trace</a>
-                        <a class="surface-link" href="/ipfs-datasets/sdk-playground">SDK</a>
-                        <a class="surface-link" href="/dashboards">Dashboards</a>
+                    <div class="surface-nav-group">
+                        <div class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation">
+                            <a class="surface-link" href="/">Landing</a>
+                            <a class="surface-link" href="/home">Secure Intake</a>
+                            <a class="surface-link" id="workspace-nav-workspace" href="/workspace">Workspace</a>
+                            <a class="surface-link" id="workspace-nav-review" href="/claim-support-review">Review</a>
+                            <a class="surface-link" id="workspace-nav-builder" href="/document">Builder</a>
+                            <a class="surface-link" id="workspace-nav-chat" href="/chat">Chat</a>
+                        </div>
+                        <details class="surface-nav-drawer" id="workspace-advanced-nav">
+                            <summary class="surface-nav-summary">Developer tools and linked surfaces</summary>
+                            <div class="surface-links" aria-label="Developer tools and linked surfaces">
+                                <a class="surface-link" id="workspace-nav-profile" href="/profile">Profile</a>
+                                <a class="surface-link" id="workspace-nav-results" href="/results">Results</a>
+                                <a class="surface-link" href="/mlwysiwyg">Editor</a>
+                                <a class="surface-link" id="workspace-nav-trace" href="/document/optimization-trace">Trace</a>
+                                <a class="surface-link" href="/ipfs-datasets/sdk-playground">SDK</a>
+                                <a class="surface-link" href="/dashboards">Dashboards</a>
+                            </div>
+                        </details>
                     </div>
                 </div>
                 <div class="hero-panel">
@@ -1107,15 +1136,15 @@
 
                 <div class="stage-grid" aria-label="Complaint workflow summary">
                     <div class="stage-card">
-                        <strong id="workflow-stage-chip">Loading stage…</strong>
+                        <strong id="workflow-stage-chip">What is complete</strong>
                         <span id="workflow-stage-summary">We are checking what information is already present and what still needs to be gathered.</span>
                     </div>
                     <div class="stage-card">
-                        <strong>Immediate next move</strong>
+                        <strong>Exactly what to do next</strong>
                         <span id="workflow-next-action">Load the shared complaint session and identify the next unanswered question.</span>
                     </div>
                     <div class="stage-card">
-                        <strong>Draft readiness</strong>
+                        <strong>What still needs support</strong>
                         <span id="workflow-draft-guidance">A draft will become more reliable as each supported element has intake or evidence behind it.</span>
                     </div>
                 </div>
@@ -1127,7 +1156,7 @@
                             <div class="muted" id="progress-detail">The workspace will estimate how far the complaint has moved from intake toward a usable draft.</div>
                         </div>
                         <div class="chip-row">
-                            <span class="chip good" id="progress-percent-chip">0% ready</span>
+                            <span class="chip good" id="progress-percent-chip">0% of workflow mapped</span>
                             <span class="chip" id="progress-phase-chip">phase: loading</span>
                         </div>
                     </div>
@@ -1715,6 +1744,7 @@
                         <h3>Draft and export safety rail</h3>
                         <p class="muted" id="draft-export-guidance">Keep the next step visible: if support or release-gate warnings are still open, strengthen the record before treating download as the main action.</p>
                         <div class="status draft-preview-shell"><pre id="draft-export-safety-preview">Export safety guidance will appear here once the record and release gate are available.</pre></div>
+                        <div class="status draft-preview-shell"><pre id="draft-export-integrity-preview">Export integrity checks will appear here once a complaint draft or packet export is available.</pre></div>
                         <div class="button-row">
                             <button class="secondary" id="draft-review-before-export-button" type="button">Review Before Export</button>
                             <button class="secondary" id="draft-evidence-before-export-button" type="button">Add Support Before Export</button>
@@ -2110,6 +2140,10 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let gmailImportDetectedAddresses = [];
         const readinessStorageKey = 'complaintGenerator.uiReadiness';
         const lastToolCallStorageKey = 'complaintGenerator.sdkLastToolCall';
+
+        function setWorkspaceHydrationState(state) {
+            document.body.dataset.workspaceHydrated = state;
+        }
 
         function setStatus(message) {
             const statusNode = document.getElementById('workspace-status');
@@ -2656,25 +2690,48 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             return goals;
         }
 
-        function presetEvidenceForGap(sessionPayload, preferredGap) {
+        function resolveSupportGap(sessionPayload, preferredGap) {
             const review = sessionPayload.review || {};
             const supportMatrix = review.support_matrix || [];
-            const weakest = preferredGap
+            return preferredGap
                 || supportMatrix.find((item) => !item.supported)
                 || supportMatrix.find((item) => item.label);
+        }
+
+        function formatGapActionLabel(baseLabel, gap) {
+            const label = String((gap && gap.label) || '').trim();
+            return label ? `${baseLabel} for ${label}` : baseLabel;
+        }
+
+        function presetEvidenceForGap(sessionPayload, preferredGap, preferredKind) {
+            const weakest = resolveSupportGap(sessionPayload, preferredGap);
             if (weakest && weakest.id) {
                 const select = document.getElementById('evidence-claim-element');
                 if (select) {
                     select.value = weakest.id;
                 }
+                const kindField = document.getElementById('evidence-kind');
+                if (kindField && preferredKind) {
+                    kindField.value = preferredKind;
+                }
                 const title = document.getElementById('evidence-title');
                 if (title && !title.value.trim()) {
-                    title.value = `${weakest.label} support`;
+                    title.value = preferredKind === 'document'
+                        ? `${weakest.label} supporting record`
+                        : `${weakest.label} support`;
                 }
                 const content = document.getElementById('evidence-content');
                 if (content && !content.value.trim()) {
                     content.value = `Add support that helps prove ${weakest.label.toLowerCase()} more directly.`;
                 }
+            }
+        }
+
+        function openEvidenceForGap(sessionPayload, preferredGap, preferredKind, statusMessage) {
+            presetEvidenceForGap(sessionPayload, preferredGap, preferredKind);
+            activateEvidenceComposer(preferredKind || 'testimony');
+            if (statusMessage) {
+                setStatus(statusMessage);
             }
         }
 
@@ -2983,11 +3040,14 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const documents = review.documents || [];
             const overview = review.overview || {};
             const items = testimony.concat(documents);
+            const weakestGap = resolveSupportGap(reviewPayload);
             document.getElementById('workbench-testimony-count').textContent = `${testimony.length} saved items`;
             document.getElementById('workbench-document-count').textContent = `${documents.length} saved items`;
             document.getElementById('workbench-gap-count').textContent = `${overview.missing_elements || 0} elements need support`;
+            document.getElementById('evidence-add-testimony-button').textContent = formatGapActionLabel('Add testimony', weakestGap);
+            document.getElementById('evidence-add-document-button').textContent = formatGapActionLabel('Attach document', weakestGap);
             document.getElementById('evidence-primary-guidance').textContent = (overview.missing_elements || 0) > 0
-                ? `There are ${overview.missing_elements || 0} open support gaps. Add the next testimony or document that closes the weakest element before returning to Draft.`
+                ? `There are ${overview.missing_elements || 0} open support gaps. Start with ${String((weakestGap && weakestGap.label) || 'the weakest element').toLowerCase()} so the next testimony or document clearly closes a named gap before returning to Draft.`
                 : items.length
                     ? 'The core support record is taking shape. Add the next best corroborating item, then return to Review to check whether the theory still has weak spots.'
                     : 'Start with one focused testimony or document item that explains what it proves and why it matters.';
@@ -3051,6 +3111,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                                 data-gap-id="${escapeHtml(item.id)}"
                                 data-gap-label="${escapeHtml(item.label)}"
                             >Add support for ${escapeHtml(item.label)}</button>
+                            <button
+                                class="secondary evidence-shortcut-action"
+                                type="button"
+                                data-evidence-kind="testimony"
+                                data-gap-id="${escapeHtml(item.id)}"
+                                data-gap-label="${escapeHtml(item.label)}"
+                            >Add testimony for ${escapeHtml(item.label)}</button>
+                            <button
+                                class="secondary evidence-shortcut-action"
+                                type="button"
+                                data-evidence-kind="document"
+                                data-gap-id="${escapeHtml(item.id)}"
+                                data-gap-label="${escapeHtml(item.label)}"
+                            >Upload document for ${escapeHtml(item.label)}</button>
                         </div>
                     </div>
                 `).join('')
@@ -3121,6 +3195,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     ? 'A complaint draft exists for this session, but the current tab is still hydrating the latest draft body and generation metadata.'
                     : 'Draft generation strategy details will appear here once a complaint is generated.');
             renderDraftReadiness(sessionPayload);
+            renderDraftExportIntegrity(sessionPayload);
             syncSynopsisMirrors(document.getElementById('case-synopsis').value);
         }
 
@@ -3200,6 +3275,64 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
 
         function draftCountHeading(rawClaimType) {
             return `COUNT I - ${String(rawClaimType || 'retaliation').replace(/_/g, ' ').toUpperCase()}`;
+        }
+
+        function complaintSectionChecks(rawBody) {
+            const body = String(rawBody || '');
+            return [
+                ['Caption + civil action number', /Civil Action No\.\s*_+/i.test(body)],
+                ['Nature of the action', /NATURE OF THE ACTION/i.test(body)],
+                ['Jurisdiction and venue', /JURISDICTION AND VENUE/i.test(body)],
+                ['Factual allegations', /FACTUAL ALLEGATIONS/i.test(body)],
+                ['Claim for relief', /CLAIM FOR RELIEF/i.test(body)],
+                ['Prayer for relief', /PRAYER FOR RELIEF/i.test(body)],
+                ['Signature block', /SIGNATURE BLOCK/i.test(body)],
+            ];
+        }
+
+        function complaintPlaceholderWarnings(rawBody) {
+            const body = String(rawBody || '');
+            const warnings = [];
+            if (/Civil Action No\.\s*_+/i.test(body)) {
+                warnings.push('Civil Action No. is still a placeholder.');
+            }
+            if (/SIGNATURE BLOCK/i.test(body) && !/@|Phone:|Tel:|\(\d{3}\)/i.test(body)) {
+                warnings.push('Signature block still looks sparse and may be missing contact details.');
+            }
+            return warnings;
+        }
+
+        function renderDraftExportIntegrity(sessionPayload) {
+            const integrityNode = document.getElementById('draft-export-integrity-preview');
+            if (!integrityNode) {
+                return;
+            }
+            const resolvedDraft = resolveDraftState(sessionPayload || {});
+            const draft = resolvedDraft.draft || {};
+            const packetDraft = (((latestPacketExport || {}).packet || {}).draft) || {};
+            const effectiveDraft = (packetDraft && typeof packetDraft === 'object' && Object.keys(packetDraft).length)
+                ? packetDraft
+                : draft;
+            const draftBody = String(effectiveDraft.body || effectiveDraft.draft_text || '');
+            if (!draftBody.trim()) {
+                integrityNode.textContent = 'Export integrity checks will appear here once a complaint draft or packet export is available.';
+                return;
+            }
+            const claimType = String((document.getElementById('draft-claim-type') || {}).value || effectiveDraft.claim_type || ((sessionPayload || {}).session || {}).claim_type || 'retaliation');
+            const draftMode = String((document.getElementById('draft-mode') || {}).value || effectiveDraft.draft_strategy || 'llm_router');
+            const sectionChecks = complaintSectionChecks(draftBody);
+            const placeholderWarnings = complaintPlaceholderWarnings(draftBody);
+            const lines = [
+                `Claim type selected: ${draftClaimTypeLabel(claimType)}`,
+                `Draft strategy selected: ${draftMode}`,
+                '',
+                'Required section checks:',
+                ...sectionChecks.map(([label, present]) => `${present ? '[ok]' : '[missing]'} ${label}`),
+                '',
+                placeholderWarnings.length ? 'Placeholder warnings:' : 'Placeholder warnings: none detected in the current draft text.',
+                ...placeholderWarnings.map((warning) => `- ${warning}`),
+            ];
+            integrityNode.textContent = lines.join('\n');
         }
 
         function activateEvidenceComposer(kind) {
@@ -3290,6 +3423,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('draft-export-guidance').textContent = currentReleaseGate && String(currentReleaseGate.verdict || '').toLowerCase() === 'pass'
                 ? 'The complaint export path is available, but the safest flow still keeps release-gate context and next-step guidance beside the download buttons.'
                 : 'Review and evidence should stay easier to choose than download whenever support gaps or release-gate blockers remain.';
+            renderDraftExportIntegrity(sessionPayload);
         }
 
         function renderSidebar(sessionPayload) {
@@ -3360,11 +3494,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const timeline = answers.timeline || 'a still-developing timeline';
             const theorySummary = `${partyName} is building a ${claimType} complaint against ${opposingParty}.`;
             const theoryDetail = `${partyName} reports ${protectedActivity}, followed by ${adverseAction}, with harm described as ${harm}. Timeline posture: ${timeline}.`;
-            const confidenceLabel = readinessPercent >= 85
-                ? 'confidence: high'
-                : readinessPercent >= 55
-                    ? 'confidence: developing'
-                    : 'confidence: early stage';
+            const confidenceLabel = state.builderReady && evidenceCount > 2
+                ? 'record: materially supported'
+                : state.builderReady
+                    ? 'record: thin corroboration'
+                    : readinessPercent >= 55
+                        ? 'record: developing'
+                        : 'record: early intake';
             const blockers = [];
             if (nextQuestion) {
                 blockers.push({
@@ -3373,15 +3509,38 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 });
             }
             if (missingItems.length) {
+                const weakestGap = missingItems[0];
                 blockers.push({
-                    title: `Support ${missingItems[0].label}`,
+                    title: `Support ${weakestGap.label}`,
                     detail: `${missingItems.length} claim element${missingItems.length === 1 ? '' : 's'} still need support. Add testimony or documents tied to the weakest element first.`,
+                    gap: weakestGap,
+                    actions: [
+                        {
+                            label: formatGapActionLabel('Add testimony', weakestGap),
+                            kind: 'testimony',
+                        },
+                        {
+                            label: formatGapActionLabel('Upload document', weakestGap),
+                            kind: 'document',
+                        },
+                    ],
                 });
             }
             if (!evidenceCount) {
                 blockers.push({
                     title: 'Add corroborating evidence',
                     detail: 'No testimony or documents have been saved yet. Even one targeted record can make the complaint easier to trust.',
+                    gap: resolveSupportGap(sessionPayload),
+                    actions: [
+                        {
+                            label: formatGapActionLabel('Add testimony', resolveSupportGap(sessionPayload)),
+                            kind: 'testimony',
+                        },
+                        {
+                            label: formatGapActionLabel('Upload document', resolveSupportGap(sessionPayload)),
+                            kind: 'document',
+                        },
+                    ],
                 });
             }
             if (!state.builderReady && !nextQuestion && !missingItems.length) {
@@ -3417,10 +3576,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('workflow-user-id').textContent = `Complainant ID: ${workspaceUserId || session.user_id || 'unknown'}`;
             document.getElementById('workflow-priority-text').textContent = nextActionText;
             document.getElementById('workflow-stage-detail').textContent = `Answered intake questions: ${answeredCount}. Supported elements: ${overview.supported_elements || 0}. Missing elements: ${overview.missing_elements || 0}.`;
-            document.getElementById('workflow-stage-chip').textContent = stageLabel;
-            document.getElementById('workflow-stage-summary').textContent = `${answeredCount} intake answers saved, ${evidenceCount} evidence items collected, ${overview.supported_elements || 0} supported elements.`;
+            document.getElementById('workflow-stage-chip').textContent = 'What is complete';
+            document.getElementById('workflow-stage-summary').textContent = `${answeredCount} intake answers saved, ${evidenceCount} evidence items collected, ${overview.supported_elements || 0} supported elements currently have some support behind them.`;
             document.getElementById('workflow-next-action').textContent = nextActionText;
-            document.getElementById('workflow-draft-guidance').textContent = draftState.guidance;
+            document.getElementById('workflow-draft-guidance').textContent = nextQuestion
+                ? 'Finish the remaining intake answers before treating any draft language as reliable.'
+                : missingItems.length
+                    ? `${missingItems.length} claim element${missingItems.length === 1 ? '' : 's'} still need stronger support before the filing feels dependable.`
+                    : evidenceCount <= 2
+                        ? 'The theory is mapped, but the record is still lightly corroborated. Add stronger support before treating export as final.'
+                        : draftState.guidance;
             document.getElementById('progress-title').textContent = state.builderReady
                 ? 'The complaint is in drafting and refinement mode'
                 : nextQuestion
@@ -3428,7 +3593,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : 'The complaint is ready for a first draft pass';
             document.getElementById('progress-detail').textContent = `Intake answered: ${answeredCount}/${totalQuestions}. Evidence items: ${evidenceCount}. Supported elements: ${overview.supported_elements || 0}.`;
             document.getElementById('progress-meter').style.width = `${readinessPercent}%`;
-            document.getElementById('progress-percent-chip').textContent = `${readinessPercent}% ready`;
+            document.getElementById('progress-percent-chip').textContent = `${readinessPercent}% of workflow mapped`;
             document.getElementById('progress-phase-chip').textContent = `phase: ${stageLabel.toLowerCase()}`;
             document.getElementById('progress-step-intake').textContent = nextQuestion
                 ? `Still collecting ${nextQuestion.label || 'intake details'}.`
@@ -3485,6 +3650,19 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 <div class="diagnostic-item">
                     <strong>${escapeHtml(blocker.title)}</strong>
                     <span>${escapeHtml(blocker.detail)}</span>
+                    ${Array.isArray(blocker.actions) && blocker.actions.length ? `
+                        <div class="button-row">
+                            ${blocker.actions.map((action) => `
+                                <button
+                                    class="${action.kind === 'testimony' ? 'primary' : 'secondary'} evidence-shortcut-action"
+                                    type="button"
+                                    data-evidence-kind="${escapeHtml(action.kind || 'testimony')}"
+                                    data-gap-id="${escapeHtml(String(((blocker.gap || {}).id) || ''))}"
+                                    data-gap-label="${escapeHtml(String(((blocker.gap || {}).label) || 'claim element'))}"
+                                >${escapeHtml(action.label)}</button>
+                            `).join('')}
+                        </div>
+                    ` : ''}
                 </div>
             `).join('');
         }
@@ -5245,11 +5423,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         }
 
         async function refreshWorkspace() {
+            setWorkspaceHydrationState('loading');
             setBusyStatus('Refreshing shared complaint session…');
             const sessionPayload = await client.startSession(workspaceUserId);
             workspaceSession = sessionPayload;
             await loadSharedCapabilities();
             renderWorkspace(sessionPayload);
+            setWorkspaceHydrationState('ready');
             setStatus(`Workspace synchronized for ${workspaceUserId}.`);
         }
 
@@ -5469,8 +5649,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         async function analyzeComplaintOutputPanel() {
             setBusyStatus('Analyzing the exported complaint output for UI/UX improvement suggestions…');
             latestComplaintOutputAnalysis = await client.analyzeComplaintOutput(workspaceUserId);
-            renderWorkflowOperations();
             setStatus('Complaint output analysis refreshed.');
+            renderWorkflowOperations();
         }
 
         async function reviewGeneratedExportsPanel() {
@@ -5813,6 +5993,23 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             const button = event.target.closest('.quick-action-button');
             if (!button) {
+                const evidenceShortcutButton = event.target.closest('.evidence-shortcut-action');
+                if (evidenceShortcutButton) {
+                    const gap = {
+                        id: evidenceShortcutButton.dataset.gapId || '',
+                        label: evidenceShortcutButton.dataset.gapLabel || 'claim element',
+                    };
+                    const evidenceKind = evidenceShortcutButton.dataset.evidenceKind || 'testimony';
+                    openEvidenceForGap(
+                        workspaceSession || {},
+                        gap.id ? gap : undefined,
+                        evidenceKind,
+                        evidenceKind === 'document'
+                            ? `Opened Evidence to upload a document for ${gap.label}.`
+                            : `Opened Evidence to add testimony for ${gap.label}.`,
+                    );
+                    return;
+                }
                 const gapButton = event.target.closest('.review-gap-action');
                 if (!gapButton) {
                     return;
@@ -5872,6 +6069,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         document.getElementById('run-browser-audit-button').addEventListener('click', runBrowserAudit);
 
         client.bootstrapWorkspace(workspaceUserId).then(async (bootstrap) => {
+            setWorkspaceHydrationState('loading');
             workspaceUserId = bootstrap.did;
             workspaceSession = bootstrap.session;
             workspaceSessionTools = bootstrap.tools || [];
@@ -5902,9 +6100,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const failedLoad = followOnLoads.find((result) => result.status === 'rejected');
             if (failedLoad && failedLoad.reason) {
                 console.warn('Workspace follow-on load failed', failedLoad.reason);
+                setWorkspaceHydrationState('partial');
                 setStatus(`${bootstrapStatus} Some capability details may still be loading.`);
+                return;
             }
+            setWorkspaceHydrationState('ready');
         }).catch((error) => {
+            setWorkspaceHydrationState('error');
             setStatus(`Workspace failed to load: ${error.message}`);
         });
     </script>

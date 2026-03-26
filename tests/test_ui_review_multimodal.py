@@ -72,6 +72,33 @@ def test_create_ui_review_report_prefers_multimodal_router(monkeypatch, tmp_path
     assert report["complaint_output_feedback"]["ui_suggestions"] == ["Add a clearer export warning when support gaps remain."]
 
 
+def test_build_ui_review_prompt_compacts_large_export_feedback(tmp_path: Path):
+    screenshot = tmp_path / "workspace.png"
+    screenshot.write_bytes(b"fake-png")
+    giant_hint = "Export warning " + ("very long detail " * 200)
+
+    prompt = ui_review_module.build_ui_review_prompt(
+        [screenshot],
+        artifact_metadata=[
+            {
+                "artifact_type": "complaint_export",
+                "claim_type": "retaliation",
+                "draft_strategy": "llm_router",
+                "filing_shape_score": 88,
+                "markdown_filename": "complaint.md",
+                "pdf_filename": "complaint.pdf",
+                "ui_suggestions_excerpt": giant_hint,
+            }
+        ],
+        include_full_contract_context=False,
+    )
+
+    assert "Complaint-output hints" in prompt
+    assert giant_hint not in prompt
+    assert "...[truncated]" in prompt
+    assert len(prompt) < 4000
+
+
 def test_create_ui_review_report_falls_back_to_text_router(monkeypatch, tmp_path: Path):
     screenshot = tmp_path / "workspace.png"
     screenshot.write_bytes(b"fake-png")
@@ -252,6 +279,43 @@ def test_create_ui_review_report_rate_limit_falls_back_provider_chain(monkeypatc
         }
     ]
     assert report["review"]["summary"] == "HF fallback review."
+
+
+def test_create_ui_review_report_prepares_provider_friendly_images(monkeypatch, tmp_path: Path):
+    screenshot = tmp_path / "workspace.png"
+    screenshot.write_bytes(b"fake-png")
+    prepared = tmp_path / "workspace.review.jpg"
+    prepared.write_bytes(b"fake-jpg")
+
+    def fake_prepare_multimodal_image_paths(screenshots, *, provider, diagnostics_dir):
+        assert screenshots == [screenshot]
+        assert provider == "hf_inference_api"
+        return [prepared], {
+            "prepared_image_count": 1,
+            "prepared_image_paths": [str(prepared)],
+            "original_screenshot_count": 1,
+        }
+
+    class FakeMultimodalBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            assert image_paths == [prepared]
+            return '{"summary":"Prepared image review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    monkeypatch.setattr(ui_review_module, "_prepare_multimodal_image_paths", fake_prepare_multimodal_image_paths)
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FakeMultimodalBackend)
+
+    report = ui_review_module.create_ui_review_report([str(screenshot)], provider="hf_inference_api")
+
+    assert report["backend"]["strategy"] == "multimodal_router"
+    assert report["backend"]["prepared_image_count"] == 1
+    assert report["backend"]["prepared_image_paths"] == [str(prepared)]
+    assert report["backend"]["original_screenshot_count"] == 1
+    assert report["review"]["summary"] == "Prepared image review."
 
 
 def test_create_ui_review_report_non_rate_limit_error_does_not_use_provider_chain(monkeypatch, tmp_path: Path):
