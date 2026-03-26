@@ -43,6 +43,21 @@ def test_build_ui_ux_optimization_bundle_wraps_iterative_review_workflow(monkeyp
         "_read_ui_ux_review_json",
         lambda path: {
             "review": "# Top Risks\n- Improve evidence affordances.",
+            "issues": [
+                {
+                    "problem": "Release gate messaging contradicts export posture.",
+                    "recommended_fix": "Add a canonical filing readiness banner.",
+                    "severity": "high",
+                    "surface": "/workspace",
+                }
+            ],
+            "recommended_changes": [
+                {
+                    "title": "Canonical filing banner",
+                    "implementation_notes": "Add a single filing readiness banner that owns the verdict and blockers.",
+                    "shared_code_path": "templates/workspace.html",
+                }
+            ],
             "complaint_output_feedback": {
                 "export_artifact_count": 2,
                 "claim_types": ["retaliation"],
@@ -71,8 +86,12 @@ def test_build_ui_ux_optimization_bundle_wraps_iterative_review_workflow(monkeyp
     assert payload["review_runs"]
     assert payload["complaint_output_feedback"]["export_artifact_count"] == 2
     assert payload["complaint_output_feedback"]["release_gate"]["verdict"] == "pass"
+    assert payload["patch_briefs"]
+    assert payload["patch_briefs"][0]["title"]
     assert payload["task"]["target_files"]
     assert "templates/workspace.html" in payload["target_files"]
+    assert payload["task"]["metadata"]["report_summary"]["prioritized_patch_briefs"]
+    assert payload["task"]["metadata"]["report_summary"]["active_target_files"] == ["templates/workspace.html"]
 
 
 def test_run_agentic_ui_ux_autopatch_executes_optimizer_against_ui_task(monkeypatch, tmp_path):
@@ -107,6 +126,7 @@ def test_run_agentic_ui_ux_autopatch_executes_optimizer_against_ui_task(monkeypa
                 "ui_suggestions": ["Keep export warnings visible."],
                 "release_gate": {"verdict": "blocked"},
             },
+            patch_briefs=[],
             task={},
         ),
     )
@@ -166,6 +186,13 @@ def test_run_agentic_ui_ux_feedback_loop_revalidates_and_stops_when_reviews_stab
             review_text = f"# Top Risks\n- Review pass {round_index}."
         review_by_path[str(review_json_path)] = {
             "review": review_text,
+            "recommended_changes": [
+                {
+                    "title": "Keep filing readiness visible",
+                    "implementation_notes": "Make the release gate and next safest action impossible to miss in the draft rail.",
+                    "shared_code_path": "templates/workspace.html",
+                }
+            ],
             "complaint_output_feedback": {
                 "export_artifact_count": 1,
                 "claim_types": ["housing_discrimination"],
@@ -233,7 +260,13 @@ def test_run_agentic_ui_ux_feedback_loop_revalidates_and_stops_when_reviews_stab
     assert patch_briefs_path.endswith("patch-briefs.json")
     assert round_summary_path.endswith("round-summary.json")
     assert "patch_briefs" in patch_briefs_payload
+    assert patch_briefs_payload["selected_patch_brief"]["title"]
+    assert patch_briefs_payload["selected_target_files"] == ["templates/workspace.html"]
     assert round_summary_payload["patch_briefs_path"] == patch_briefs_path
+    assert round_summary_payload["selected_patch_brief"]["title"]
+    assert round_summary_payload["selected_target_files"] == ["templates/workspace.html"]
+    assert result["cycles"][0]["selected_patch_brief"]["title"]
+    assert result["cycles"][0]["selected_target_files"] == ["templates/workspace.html"]
     assert result["complaint_output_feedback"]["export_artifact_count"] == 1
     assert result["complaint_output_release_gate"]["verdict"] == "pass"
     assert "actor_critic_summary" in result
@@ -316,3 +349,55 @@ def test_fallback_local_optimizer_plan_only_does_not_claim_changed_files(monkeyp
     assert result.metadata["changed_files"] == []
     assert result.metadata["target_files"] == ["templates/workspace.html"]
     assert Path(result.patch_path).is_file()
+
+
+def test_fallback_local_optimizer_rolls_back_suspicious_empty_file_outputs(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    optimizer = Optimizer()
+    components = optimizer._fallback_agentic_optimizer_components()
+    fallback_cls = components["optimizer_classes"]["actor_critic"]
+    output_dir = tmp_path / "reviews"
+    output_dir.mkdir()
+    target_file = tmp_path / "templates" / "workspace.html"
+    target_file.parent.mkdir(parents=True)
+    original_text = "<main>" + ("x" * 2000) + "</main>\n"
+    target_file.write_text(original_text, encoding="utf-8")
+
+    monkeypatch.setattr("adversarial_harness.optimizer.shutil.which", lambda name: "/usr/bin/codex")
+
+    def fake_run(command, cwd, capture_output, text, timeout, check):
+        target_file.write_text("", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="patched", stderr="")
+
+    monkeypatch.setattr("adversarial_harness.optimizer.subprocess.run", fake_run)
+
+    task = SimpleNamespace(
+        task_id="ui-task",
+        target_files=[Path("templates/workspace.html")],
+        constraints={"output_dir": str(output_dir)},
+        metadata={
+            "actor_critic_review": {"top_risks": ["Keep the draft rail visible."]},
+            "report_summary": {
+                "prioritized_patch_briefs": [
+                    {
+                        "title": "Keep draft rail visible",
+                        "surface": "draft",
+                        "problem": "The primary action disappears.",
+                        "recommended_action": "Keep the draft rail visible.",
+                    }
+                ]
+            },
+        },
+    )
+
+    worker = fallback_cls(agent_id="fallback-ui", llm_router=None)
+    result = worker.optimize(task)
+
+    assert result.status == "fallback_recommendations_generated"
+    assert result.metadata["changed_files"] == []
+    assert target_file.read_text(encoding="utf-8") == original_text
+    assert any(
+        item.get("status") == "rolled_back_suspicious_output"
+        for item in list(getattr(worker, "_last_generation_diagnostics", []) or [])
+        if isinstance(item, dict)
+    )

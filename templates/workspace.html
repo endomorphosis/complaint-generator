@@ -885,17 +885,17 @@
             gap: 14px;
         }
 
-        .release-gate-callout {
+        .canonical-release-gate {
             border-color: rgba(154, 52, 18, 0.2);
             background: linear-gradient(180deg, rgba(255, 249, 243, 0.98), rgba(252, 240, 228, 0.92));
             box-shadow: 0 16px 34px rgba(154, 52, 18, 0.08);
         }
 
-        .release-gate-callout .chip-row {
+        .canonical-release-gate .chip-row {
             margin-top: 12px;
         }
 
-        .release-gate-callout .status {
+        .canonical-release-gate .status {
             margin-top: 14px;
             background: rgba(255, 255, 255, 0.82);
         }
@@ -2548,16 +2548,18 @@
                         </div>
                         <div class="draft-action-stack">
                             <div class="draft-action-card release-gate-callout" id="draft-release-gate-card">
-                                <strong>Export decision gate</strong>
-                                <span>Keep this summary and next safest move visible while deciding whether to export, review, or gather more proof. Download should never outrank the release gate.</span>
+                                <strong>Canonical verdict rail</strong>
+                                <span>Use one verdict before every export decision: PASS means export and download are currently safe enough to proceed; BLOCKED means fix the listed blockers first.</span>
                                 <div class="chip-row" id="draft-release-gate-chip-row">
-                                    <span class="chip warn" id="draft-release-gate-chip">release gate: waiting</span>
+                                    <span class="chip warn" id="draft-release-gate-chip">verdict: BLOCKED</span>
                                     <span class="chip" id="draft-release-shape-chip">filing shape: waiting</span>
                                     <span class="chip" id="draft-release-support-chip">support: waiting</span>
                                 </div>
-                                <div class="status draft-preview-shell"><pre id="draft-release-gate-summary">Release-gate summary will stay here once the draft and export posture are available.</pre></div>
-                                <div class="soft-note" id="draft-release-gate-next-step">The next safest move will appear here after the workspace reviews the current draft and record.</div>
+                                <div class="status draft-preview-shell"><pre id="draft-release-gate-summary">Verdict: BLOCKED
+Blocker reasons: waiting for readiness signals.</pre></div>
+                                <div class="soft-note" id="draft-release-gate-next-step">Primary CTA guidance will appear here after the workspace reviews the current draft and record.</div>
                                 <div class="button-row">
+                                    <button class="primary" id="draft-release-primary-cta" type="button" data-action="open_review">Open Review</button>
                                     <button class="secondary" id="draft-release-open-review-button" type="button">Open Review</button>
                                     <button class="secondary" id="draft-release-open-evidence-button" type="button">Add Support</button>
                                     <button class="secondary" id="draft-release-open-integrations-button" type="button">Open CLI + MCP</button>

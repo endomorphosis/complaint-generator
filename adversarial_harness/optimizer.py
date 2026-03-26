@@ -209,6 +209,7 @@ class UIUXOptimizationBundle:
     target_files: List[str]
     review_runs: List[Dict[str, Any]]
     complaint_output_feedback: Dict[str, Any]
+    patch_briefs: List[Dict[str, Any]]
     latest_review_markdown_path: Optional[str] = None
     latest_review_json_path: Optional[str] = None
     task: Optional[Dict[str, Any]] = None
@@ -223,6 +224,7 @@ class UIUXOptimizationBundle:
             "target_files": list(self.target_files or []),
             "review_runs": list(self.review_runs or []),
             "complaint_output_feedback": dict(self.complaint_output_feedback or {}),
+            "patch_briefs": list(self.patch_briefs or []),
             "latest_review_markdown_path": self.latest_review_markdown_path,
             "latest_review_json_path": self.latest_review_json_path,
             "task": dict(self.task or {}),
@@ -493,6 +495,37 @@ class Optimizer:
                         )
                     return "".join(chunks)
 
+                def _restore_suspicious_file_outputs(command_status: str) -> List[Dict[str, Any]]:
+                    rollback_diagnostics: List[Dict[str, Any]] = []
+                    for rel_path, absolute_path in tracked_files.items():
+                        before_text = original_text_by_file.get(rel_path, "")
+                        after_text = absolute_path.read_text(encoding="utf-8")
+                        if before_text == after_text:
+                            continue
+                        suspicious_empty = bool(before_text.strip()) and not bool(after_text.strip())
+                        suspicious_truncation = (
+                            len(before_text.strip()) >= 1000
+                            and len(after_text.strip()) > 0
+                            and len(after_text.strip()) < max(200, int(len(before_text.strip()) * 0.1))
+                        )
+                        if not suspicious_empty and not suspicious_truncation:
+                            continue
+                        absolute_path.write_text(before_text, encoding="utf-8")
+                        rollback_diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "rolled_back_suspicious_output",
+                                "reason": (
+                                    "Codex fallback edit left a tracked file empty."
+                                    if suspicious_empty
+                                    else "Codex fallback edit truncated a tracked file implausibly."
+                                ),
+                                "command_status": command_status,
+                                "file": rel_path,
+                            }
+                        )
+                    return rollback_diagnostics
+
                 def _attempt_codex_autopatch() -> tuple[List[str], str | None, List[Dict[str, Any]]]:
                     diagnostics: List[Dict[str, Any]] = []
                     if not tracked_files:
@@ -581,6 +614,7 @@ class Optimizer:
                             check=False,
                         )
                     except subprocess.TimeoutExpired as exc:
+                        diagnostics.extend(_restore_suspicious_file_outputs("timed_out"))
                         diagnostics.append(
                             {
                                 "backend": "codex_cli_fallback_optimizer",
@@ -593,6 +627,7 @@ class Optimizer:
                         )
                         return [], None, diagnostics
                     except Exception as exc:
+                        diagnostics.extend(_restore_suspicious_file_outputs("failed"))
                         diagnostics.append(
                             {
                                 "backend": "codex_cli_fallback_optimizer",
@@ -612,6 +647,9 @@ class Optimizer:
                             "last_message_path": str(last_message_path),
                         }
                     )
+                    diagnostics.extend(_restore_suspicious_file_outputs(
+                        "ok" if completed.returncode == 0 else "nonzero_exit"
+                    ))
 
                     updated_files = [
                         rel_path
@@ -833,9 +871,10 @@ class Optimizer:
     @staticmethod
     def _ui_target_files_from_review(review_report: Dict[str, Any] | None) -> List[Path]:
         report = review_report if isinstance(review_report, dict) else {}
-        review = dict(report.get("review") or {})
-        recommended_changes = list(review.get("recommended_changes") or [])
-        issues = list(review.get("issues") or [])
+        review_payload = report.get("review")
+        review = dict(review_payload) if isinstance(review_payload, dict) else {}
+        recommended_changes = list((review.get("recommended_changes") if review else report.get("recommended_changes")) or [])
+        issues = list((review.get("issues") if review else report.get("issues")) or [])
 
         targets: List[Path] = []
 
@@ -2980,6 +3019,12 @@ class Optimizer:
         latest_markdown_path = str(latest_run.get("review_markdown_path") or "")
         latest_json_path = str(latest_run.get("review_json_path") or "")
         latest_review_payload = self._read_ui_ux_review_json(Path(latest_json_path)) if latest_json_path else {}
+        ui_review_bundle = self.build_ui_optimization_bundle(ui_review_report=latest_review_payload)
+        patch_briefs = list(ui_review_bundle.patch_briefs or [])
+        prioritized_patch_briefs = self._prioritize_ui_patch_briefs(patch_briefs)
+        top_patch_brief = dict(prioritized_patch_briefs[0]) if prioritized_patch_briefs else {}
+        if top_patch_brief.get("target_files"):
+            resolved_target_files = [Path(path) for path in list(top_patch_brief.get("target_files") or []) if str(path).strip()]
         latest_review_excerpt = str(
             latest_review_payload.get("review")
             or latest_review_payload.get("summary")
@@ -3031,6 +3076,23 @@ class Optimizer:
                 "complaint_output_release_gate": self._build_complaint_output_release_gate(
                     self._extract_complaint_output_feedback(latest_review_payload)
                 ),
+                "report_summary": {
+                    "summary": str(ui_review_bundle.summary or latest_review_excerpt).strip(),
+                    "recommendations": [
+                        str((item or {}).get("implementation_notes") or "").strip()
+                        for item in list(ui_review_bundle.recommended_changes or [])
+                        if isinstance(item, dict) and str((item or {}).get("implementation_notes") or "").strip()
+                    ][:6],
+                    "issues": [
+                        str((item or {}).get("problem") or "").strip()
+                        for item in list(ui_review_bundle.issues or [])
+                        if isinstance(item, dict) and str((item or {}).get("problem") or "").strip()
+                    ][:6],
+                    "patch_briefs": patch_briefs,
+                    "prioritized_patch_briefs": prioritized_patch_briefs,
+                    "top_patch_brief": top_patch_brief,
+                    "active_target_files": [str(path) for path in list(resolved_target_files or [])],
+                },
                 **dict(metadata or {}),
             },
         )
@@ -3176,6 +3238,7 @@ class Optimizer:
         review_runs = list(workflow_result.get("runs") or [])
         latest_review_json_path = str((review_runs[-1] or {}).get("review_json_path") or "") if review_runs else ""
         latest_review_payload = self._read_ui_ux_review_json(Path(latest_review_json_path)) if latest_review_json_path else {}
+        ui_review_bundle = self.build_ui_optimization_bundle(ui_review_report=latest_review_payload)
         task = self.build_ui_ux_optimization_task(
             screenshot_dir=screenshot_dir,
             output_dir=output_dir,
@@ -3197,12 +3260,13 @@ class Optimizer:
             output_dir=str(output_dir),
             iterations=int(workflow_result.get("iterations") or iterations),
             pytest_target=str(pytest_target),
-            target_files=[str(path) for path in self._default_ui_ux_target_files()],
+            target_files=[str(path) for path in list(getattr(task, "target_files", []) or [])],
             review_runs=review_runs,
             complaint_output_feedback={
                 **complaint_output_feedback,
                 "release_gate": self._build_complaint_output_release_gate(complaint_output_feedback),
             },
+            patch_briefs=list(ui_review_bundle.patch_briefs or []),
             latest_review_markdown_path=str((review_runs[-1] or {}).get("review_markdown_path") or "") or None,
             latest_review_json_path=latest_review_json_path or None,
             task={
@@ -3449,11 +3513,20 @@ class Optimizer:
                 validation_review,
             )
             serialized_result = _serialize_optimizer_result(optimize_result)
+            report_summary = dict((getattr(task, "metadata", {}) or {}).get("report_summary") or {})
+            selected_patch_brief = dict(report_summary.get("top_patch_brief") or {})
+            selected_target_files = [
+                str(path).strip()
+                for path in list(report_summary.get("active_target_files") or getattr(task, "target_files", []) or [])
+                if str(path).strip()
+            ]
             patch_briefs_payload = {
                 "round": round_index,
                 "generated_at": datetime.now(UTC).isoformat(),
                 "patch_briefs": list(getattr(bundle, "patch_briefs", []) or []),
                 "target_files": list(bundle.target_files or []),
+                "selected_patch_brief": selected_patch_brief,
+                "selected_target_files": selected_target_files,
                 "task_id": str(getattr(task, "task_id", "")),
                 "pytest_target": str(pytest_target),
             }
@@ -3474,6 +3547,8 @@ class Optimizer:
                     "generated_at": datetime.now(UTC).isoformat(),
                     "task_id": str(getattr(task, "task_id", "")),
                     "patch_briefs_path": patch_briefs_path,
+                    "selected_patch_brief": selected_patch_brief,
+                    "selected_target_files": selected_target_files,
                     "pre_review_json_path": str(pre_workflow.get("latest_review_json_path") or ""),
                     "validation_review_json_path": str(validation_workflow.get("latest_review_json_path") or ""),
                     "complaint_output_validation_review": complaint_output_validation_review,
@@ -3486,6 +3561,8 @@ class Optimizer:
                     "bundle": bundle.to_dict(),
                     "patch_briefs_path": patch_briefs_path,
                     "round_summary_path": round_summary_path,
+                    "selected_patch_brief": selected_patch_brief,
+                    "selected_target_files": selected_target_files,
                     "task": {
                         "task_id": str(getattr(task, "task_id", "")),
                         "description": str(getattr(task, "description", "")),
@@ -3948,12 +4025,16 @@ class Optimizer:
         ui_review_report: Dict[str, Any],
     ) -> UIOptimizationBundle:
         report = dict(ui_review_report or {})
-        review = dict(report.get("review") or {})
+        review_payload = report.get("review")
+        review = dict(review_payload) if isinstance(review_payload, dict) else {}
+        review_markdown = str(review_payload or "") if not isinstance(review_payload, dict) else ""
         complaint_output_feedback = dict(report.get("complaint_output_feedback") or review.get("complaint_output_feedback") or {})
         formal_diagnostics = dict(complaint_output_feedback.get("formal_diagnostics") or {})
         target_files = [str(path) for path in self._ui_target_files_from_review(report)]
         recommended_changes = [
-            dict(item) for item in list(review.get("recommended_changes") or []) if isinstance(item, dict)
+            dict(item)
+            for item in list((review.get("recommended_changes") if review else report.get("recommended_changes")) or [])
+            if isinstance(item, dict)
         ]
         for suggestion in [str(item).strip() for item in list(complaint_output_feedback.get("ui_suggestions") or []) if str(item).strip()]:
             recommended_changes.append(
@@ -4024,8 +4105,14 @@ class Optimizer:
                     "sdk_considerations": "Keep MCP SDK export and analysis controls visible while highlighting the top complaint defects before download.",
                 }
             )
-        alignment_score = int(complaint_output_feedback.get("claim_type_alignment_score") or 0)
-        if 0 <= alignment_score < 80:
+        alignment_score_raw = complaint_output_feedback.get("claim_type_alignment_score")
+        alignment_score = None
+        if alignment_score_raw is not None and str(alignment_score_raw).strip():
+            try:
+                alignment_score = int(alignment_score_raw)
+            except Exception:
+                alignment_score = None
+        if alignment_score is not None and 0 <= alignment_score < 80:
             recommended_changes.append(
                 {
                     "title": "Claim type alignment warning",
@@ -4051,16 +4138,26 @@ class Optimizer:
                 if isinstance(item, dict) and str((item or {}).get("path") or "").strip()
             ],
             artifact_count=int(len(list(report.get("screenshots") or []))),
-            summary=str(review.get("summary") or ""),
-            issues=[dict(item) for item in list(review.get("issues") or []) if isinstance(item, dict)],
+            summary=str(review.get("summary") or report.get("summary") or review_markdown).strip(),
+            issues=[
+                dict(item)
+                for item in list((review.get("issues") if review else report.get("issues")) or [])
+                if isinstance(item, dict)
+            ],
             recommended_changes=recommended_changes,
             broken_controls=[
-                dict(item) for item in list(review.get("broken_controls") or []) if isinstance(item, dict)
+                dict(item)
+                for item in list((review.get("broken_controls") if review else report.get("broken_controls")) or [])
+                if isinstance(item, dict)
             ],
             complaint_journey=dict(review.get("complaint_journey") or {}),
             actor_plan=dict(review.get("actor_plan") or {}),
             critic_review=dict(review.get("critic_review") or {}),
-            playwright_followups=[str(item) for item in list(review.get("playwright_followups") or []) if str(item)],
+            playwright_followups=[
+                str(item)
+                for item in list((review.get("playwright_followups") if review else report.get("playwright_followups")) or [])
+                if str(item)
+            ],
             complaint_output_feedback=complaint_output_feedback,
             target_files=target_files,
             patch_briefs=patch_briefs,
@@ -4169,8 +4266,14 @@ class Optimizer:
                 related_controls=["Generate Draft", "Export Markdown", "Export PDF", "Analyze Output"],
             )
 
-        alignment_score = int(complaint_output_feedback.get("claim_type_alignment_score") or 0)
-        if 0 <= alignment_score < 80:
+        alignment_score_raw = complaint_output_feedback.get("claim_type_alignment_score")
+        alignment_score = None
+        if alignment_score_raw is not None and str(alignment_score_raw).strip():
+            try:
+                alignment_score = int(alignment_score_raw)
+            except Exception:
+                alignment_score = None
+        if alignment_score is not None and 0 <= alignment_score < 80:
             add_brief(
                 brief_id="claim-type-alignment",
                 title="Prevent claim-type drift before export",
