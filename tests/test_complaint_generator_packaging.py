@@ -80,6 +80,9 @@ def test_package_exports_expose_workspace_review_and_entrypoint_helpers():
     commonjs_sdk = (REPO_ROOT / "static" / "complaint_mcp_sdk.js").read_text(encoding="utf-8")
     esm_sdk = (REPO_ROOT / "static" / "complaint_mcp_sdk.mjs").read_text(encoding="utf-8")
 
+    assert "ComplaintMcpSdk =" in commonjs_sdk
+    assert "module.exports = ComplaintMcpSdk" in commonjs_sdk
+
     for method_name in (
         "getClientReleaseGate",
         "getFilingProvenance",

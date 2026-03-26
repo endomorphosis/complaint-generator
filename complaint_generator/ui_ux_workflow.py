@@ -5,6 +5,7 @@ import json
 import os
 from queue import Queue
 import re
+import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -702,12 +703,46 @@ def run_playwright_screenshot_audit(
     for stale in list(target_dir.glob("*.png")) + list(target_dir.glob("*.json")):
         stale.unlink()
 
+    def _prune_playwright_temp_dirs(root: Path, *, max_age_seconds: int = 6 * 60 * 60) -> None:
+        if not root.exists():
+            return
+        now = time()
+        prefixes = (
+            "playwright-artifacts-",
+            "playwright_chromiumdev_profile-",
+            "playwright-firefox-",
+            "playwright-webkit-",
+            "playwright-downloads-",
+            "playwright-upload-",
+            "playwright-transform-cache-",
+        )
+        for candidate in root.iterdir():
+            if not candidate.is_dir():
+                continue
+            if not any(candidate.name.startswith(prefix) for prefix in prefixes):
+                continue
+            try:
+                age_seconds = max(0, int(now - candidate.stat().st_mtime))
+            except Exception:
+                continue
+            if age_seconds < max_age_seconds:
+                continue
+            shutil.rmtree(candidate, ignore_errors=True)
+
+    tmp_root = target_dir / ".playwright-tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    _prune_playwright_temp_dirs(Path("/tmp"))
+    _prune_playwright_temp_dirs(tmp_root, max_age_seconds=60 * 60)
+
     env = dict(os.environ)
     env["COMPLAINT_UI_SCREENSHOT_DIR"] = str(target_dir)
     env.setdefault("RUN_LLM_TESTS", "1")
     env.setdefault("RUN_NETWORK_TESTS", "1")
     env.setdefault("RUN_HEAVY_TESTS", "1")
     env["PLAYWRIGHT_TEST_PORT"] = str(19000 + (int(time() * 1000) % 1000))
+    env["TMPDIR"] = str(tmp_root)
+    env["TMP"] = str(tmp_root)
+    env["TEMP"] = str(tmp_root)
     target_text = str(pytest_target or "").strip()
     if target_text.endswith(".js") or "playwright/tests/" in target_text:
         playwright_command = ["npm", "run", "test:e2e", "--", "--workers=1", target_text]

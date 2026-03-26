@@ -3022,9 +3022,30 @@ class Optimizer:
         ui_review_bundle = self.build_ui_optimization_bundle(ui_review_report=latest_review_payload)
         patch_briefs = list(ui_review_bundle.patch_briefs or [])
         prioritized_patch_briefs = self._prioritize_ui_patch_briefs(patch_briefs)
-        top_patch_brief = dict(prioritized_patch_briefs[0]) if prioritized_patch_briefs else {}
-        if top_patch_brief.get("target_files"):
-            resolved_target_files = [Path(path) for path in list(top_patch_brief.get("target_files") or []) if str(path).strip()]
+        selected_patch_briefs = [dict(item) for item in prioritized_patch_briefs[:3]]
+        top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
+        selected_target_paths: List[Path] = []
+        for brief in selected_patch_briefs:
+            for raw_path in list(brief.get("target_files") or []):
+                text = str(raw_path).strip()
+                if not text:
+                    continue
+                candidate = Path(text)
+                if candidate not in selected_target_paths:
+                    selected_target_paths.append(candidate)
+        if selected_target_paths:
+            resolved_target_files = selected_target_paths
+        recommendation_coverage = {
+            "total_patch_briefs": len(patch_briefs),
+            "selected_patch_briefs_count": len(selected_patch_briefs),
+            "uncovered_patch_briefs_count": max(0, len(patch_briefs) - len(selected_patch_briefs)),
+            "selected_patch_brief_titles": [
+                str((item or {}).get("title") or "").strip()
+                for item in selected_patch_briefs
+                if str((item or {}).get("title") or "").strip()
+            ],
+            "selected_target_files": [str(path) for path in selected_target_paths] if selected_target_paths else [],
+        }
         latest_review_excerpt = str(
             latest_review_payload.get("review")
             or latest_review_payload.get("summary")
@@ -3090,7 +3111,9 @@ class Optimizer:
                     ][:6],
                     "patch_briefs": patch_briefs,
                     "prioritized_patch_briefs": prioritized_patch_briefs,
+                    "selected_patch_briefs": selected_patch_briefs,
                     "top_patch_brief": top_patch_brief,
+                    "recommendation_coverage": recommendation_coverage,
                     "active_target_files": [str(path) for path in list(resolved_target_files or [])],
                 },
                 **dict(metadata or {}),
@@ -3514,7 +3537,13 @@ class Optimizer:
             )
             serialized_result = _serialize_optimizer_result(optimize_result)
             report_summary = dict((getattr(task, "metadata", {}) or {}).get("report_summary") or {})
+            selected_patch_briefs = [
+                dict(item)
+                for item in list(report_summary.get("selected_patch_briefs") or [])
+                if isinstance(item, dict)
+            ]
             selected_patch_brief = dict(report_summary.get("top_patch_brief") or {})
+            recommendation_coverage = dict(report_summary.get("recommendation_coverage") or {})
             selected_target_files = [
                 str(path).strip()
                 for path in list(report_summary.get("active_target_files") or getattr(task, "target_files", []) or [])
@@ -3525,7 +3554,9 @@ class Optimizer:
                 "generated_at": datetime.now(UTC).isoformat(),
                 "patch_briefs": list(getattr(bundle, "patch_briefs", []) or []),
                 "target_files": list(bundle.target_files or []),
+                "selected_patch_briefs": selected_patch_briefs,
                 "selected_patch_brief": selected_patch_brief,
+                "recommendation_coverage": recommendation_coverage,
                 "selected_target_files": selected_target_files,
                 "task_id": str(getattr(task, "task_id", "")),
                 "pytest_target": str(pytest_target),
@@ -3547,7 +3578,9 @@ class Optimizer:
                     "generated_at": datetime.now(UTC).isoformat(),
                     "task_id": str(getattr(task, "task_id", "")),
                     "patch_briefs_path": patch_briefs_path,
+                    "selected_patch_briefs": selected_patch_briefs,
                     "selected_patch_brief": selected_patch_brief,
+                    "recommendation_coverage": recommendation_coverage,
                     "selected_target_files": selected_target_files,
                     "pre_review_json_path": str(pre_workflow.get("latest_review_json_path") or ""),
                     "validation_review_json_path": str(validation_workflow.get("latest_review_json_path") or ""),
@@ -3561,7 +3594,9 @@ class Optimizer:
                     "bundle": bundle.to_dict(),
                     "patch_briefs_path": patch_briefs_path,
                     "round_summary_path": round_summary_path,
+                    "selected_patch_briefs": selected_patch_briefs,
                     "selected_patch_brief": selected_patch_brief,
+                    "recommendation_coverage": recommendation_coverage,
                     "selected_target_files": selected_target_files,
                     "task": {
                         "task_id": str(getattr(task, "task_id", "")),

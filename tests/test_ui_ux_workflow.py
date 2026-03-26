@@ -225,6 +225,9 @@ def test_run_playwright_screenshot_audit_uses_configured_artifact_directory(monk
         assert env["RUN_LLM_TESTS"] == "1"
         assert env["RUN_NETWORK_TESTS"] == "1"
         assert env["RUN_HEAVY_TESTS"] == "1"
+        assert env["TMPDIR"] == str(screenshot_dir / ".playwright-tmp")
+        assert env["TMP"] == str(screenshot_dir / ".playwright-tmp")
+        assert env["TEMP"] == str(screenshot_dir / ".playwright-tmp")
         _write_artifact(screenshot_dir, "workspace")
 
         class Result:

@@ -91,6 +91,8 @@ def test_build_ui_ux_optimization_bundle_wraps_iterative_review_workflow(monkeyp
     assert payload["task"]["target_files"]
     assert "templates/workspace.html" in payload["target_files"]
     assert payload["task"]["metadata"]["report_summary"]["prioritized_patch_briefs"]
+    assert payload["task"]["metadata"]["report_summary"]["selected_patch_briefs"]
+    assert payload["task"]["metadata"]["report_summary"]["recommendation_coverage"]["total_patch_briefs"] >= 1
     assert payload["task"]["metadata"]["report_summary"]["active_target_files"] == ["templates/workspace.html"]
 
 
@@ -260,12 +262,18 @@ def test_run_agentic_ui_ux_feedback_loop_revalidates_and_stops_when_reviews_stab
     assert patch_briefs_path.endswith("patch-briefs.json")
     assert round_summary_path.endswith("round-summary.json")
     assert "patch_briefs" in patch_briefs_payload
+    assert patch_briefs_payload["selected_patch_briefs"]
     assert patch_briefs_payload["selected_patch_brief"]["title"]
+    assert patch_briefs_payload["recommendation_coverage"]["selected_patch_briefs_count"] >= 1
     assert patch_briefs_payload["selected_target_files"] == ["templates/workspace.html"]
     assert round_summary_payload["patch_briefs_path"] == patch_briefs_path
+    assert round_summary_payload["selected_patch_briefs"]
     assert round_summary_payload["selected_patch_brief"]["title"]
+    assert round_summary_payload["recommendation_coverage"]["selected_patch_briefs_count"] >= 1
     assert round_summary_payload["selected_target_files"] == ["templates/workspace.html"]
+    assert result["cycles"][0]["selected_patch_briefs"]
     assert result["cycles"][0]["selected_patch_brief"]["title"]
+    assert result["cycles"][0]["recommendation_coverage"]["selected_patch_briefs_count"] >= 1
     assert result["cycles"][0]["selected_target_files"] == ["templates/workspace.html"]
     assert result["complaint_output_feedback"]["export_artifact_count"] == 1
     assert result["complaint_output_release_gate"]["verdict"] == "pass"
