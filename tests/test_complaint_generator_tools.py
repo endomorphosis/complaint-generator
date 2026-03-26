@@ -3513,3 +3513,19 @@ def test_get_session_recovers_from_malformed_workspace_state(tmp_path):
     assert restored_payload["user_id"] == user_id
     assert restored_payload["claim_type"] == "retaliation"
     assert restored_export["ui_feedback"]["release_gate"] == export_payload["ui_feedback"]["release_gate"]
+
+
+def test_workspace_save_state_uses_stable_tmp_path(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "stable-save-sessions")
+    user_id = "stable-save-user"
+
+    state = service._load_state(user_id)
+    saved = service._save_state(state)
+    saved_again = service._save_state(saved)
+
+    session_path = service._session_path(user_id)
+    tmp_path_candidate = session_path.with_name(f"{session_path.name}.tmp")
+
+    assert session_path.is_file()
+    assert not tmp_path_candidate.exists()
+    assert saved_again["user_id"] == user_id

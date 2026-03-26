@@ -209,6 +209,19 @@ def _cycle_dir(artifact_root: Path, cycle_number: int) -> Path:
     return artifact_root / "cycles" / f"cycle-{cycle_number:03d}-{timestamp}"
 
 
+def _prune_old_cycle_artifacts(artifact_root: Path, *, keep_latest: int = 6) -> None:
+    cycles_root = artifact_root / "cycles"
+    if not cycles_root.exists():
+        return
+    cycle_dirs = sorted(
+        [path for path in cycles_root.iterdir() if path.is_dir()],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for stale in cycle_dirs[max(0, int(keep_latest)):]:
+        subprocess.run(["rm", "-rf", str(stale)], check=False)
+
+
 def _build_status_payload(
     *,
     args: argparse.Namespace,
@@ -472,6 +485,7 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
 
     try:
         while not _STOP_REQUESTED:
+            _prune_old_cycle_artifacts(artifact_root)
             cycle_count += 1
             state["cycle_count"] = cycle_count
             state["phase"] = "running_cycle"

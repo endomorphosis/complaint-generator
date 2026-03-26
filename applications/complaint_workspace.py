@@ -1228,7 +1228,7 @@ class ComplaintWorkspaceService:
     def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         state["updated_at"] = _utc_now()
         path = self._session_path(str(state.get("user_id") or DEFAULT_USER_ID))
-        temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+        temp_path = path.with_name(f"{path.name}.tmp")
         try:
             temp_path.write_text(json.dumps(state, indent=2, sort_keys=True))
             os.replace(temp_path, path)
