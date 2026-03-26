@@ -1,4 +1,5 @@
 import json
+import imaplib
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
@@ -28,12 +29,13 @@ def _build_email_bytes(*, subject: str, sender: str, recipient: str, body: str, 
 
 
 class _FakeConnection:
-    def __init__(self, messages: list[bytes] | dict[str, list[bytes]]) -> None:
+    def __init__(self, messages: list[bytes] | dict[str, list[bytes]], *, fail_large_uid_search_span: int | None = None) -> None:
         if isinstance(messages, dict):
             self._messages_by_folder = messages
         else:
             self._messages_by_folder = {"INBOX": messages}
         self._selected_folder = "INBOX"
+        self._fail_large_uid_search_span = fail_large_uid_search_span
         self._uids_by_folder = {
             folder_name: [str(101 + index).encode("ascii") for index in range(len(folder_messages))]
             for folder_name, folder_messages in self._messages_by_folder.items()
@@ -48,6 +50,12 @@ class _FakeConnection:
         messages = self._messages_by_folder.get(self._selected_folder, [])
         message_ids = b" ".join(str(index + 1).encode("ascii") for index in range(len(messages)))
         return "OK", [message_ids]
+
+    def status(self, folder: str, query: str):
+        selected_folder = str(folder or "").strip('"')
+        uids = self._uids_by_folder.get(selected_folder, [])
+        uidnext = (max((int(uid.decode("ascii")) for uid in uids), default=100) + 1)
+        return "OK", [f'{selected_folder} (UIDNEXT {uidnext})'.encode("utf-8")]
 
     def fetch(self, message_id: bytes, query: str):
         index = int(message_id.decode("ascii")) - 1
@@ -64,12 +72,20 @@ class _FakeConnection:
                 uid_index = criteria.index("UID")
                 if uid_index + 1 < len(criteria):
                     range_text = str(criteria[uid_index + 1] or "")
-                    start_text = range_text.split(":", 1)[0]
+                    start_text, end_text = (range_text.split(":", 1) + ["*"])[:2]
                     start_uid = int(start_text or "1")
+                    end_uid = None if end_text == "*" else int(end_text or "0")
+                    if (
+                        self._fail_large_uid_search_span is not None
+                        and end_uid is not None
+                        and (end_uid - start_uid + 1) > int(self._fail_large_uid_search_span)
+                    ):
+                        raise imaplib.IMAP4.error("command SEARCH illegal in state SELECTED: got more than 1000000 bytes")
                     filtered_pairs = [
                         (uid, message)
                         for uid, message in zip(uids, messages)
                         if int(uid.decode("ascii")) >= start_uid
+                        and (end_uid is None or int(uid.decode("ascii")) <= end_uid)
                     ]
                     uids = [item[0] for item in filtered_pairs]
             return "OK", [b" ".join(uids)]
@@ -86,8 +102,8 @@ class _FakeConnection:
 
 
 class _FakeProcessor:
-    def __init__(self, messages: list[bytes] | dict[str, list[bytes]]) -> None:
-        self.connection = _FakeConnection(messages)
+    def __init__(self, messages: list[bytes] | dict[str, list[bytes]], *, fail_large_uid_search_span: int | None = None) -> None:
+        self.connection = _FakeConnection(messages, fail_large_uid_search_span=fail_large_uid_search_span)
         self.connected = False
 
     async def connect(self):
@@ -175,6 +191,52 @@ def test_import_gmail_evidence_saves_matching_emails_and_attachments(tmp_path, m
     assert "message.eml" in documents[0]["attachment_names"]
     assert "termination.pdf" in documents[0]["attachment_names"]
     assert "message.json" in documents[0]["attachment_names"]
+
+
+def test_import_gmail_evidence_can_collect_all_messages_without_address_filter(tmp_path, monkeypatch):
+    first_message = _build_email_bytes(
+        subject="Mailbox-wide email 1",
+        sender="alerts@example.com",
+        recipient="other@example.com",
+        body="This should still be imported in collect-all mode.",
+    )
+    second_message = _build_email_bytes(
+        subject="Mailbox-wide email 2",
+        sender="hr@example.com",
+        recipient="employee@example.com",
+        body="This should also be imported.",
+    )
+
+    monkeypatch.setattr(
+        "complaint_generator.email_import.create_email_processor",
+        lambda **kwargs: _FakeProcessor([first_message, second_message]),
+    )
+
+    workspace_root = tmp_path / "sessions"
+    evidence_root = tmp_path / "evidence"
+    service = ComplaintWorkspaceService(root_dir=workspace_root)
+
+    async def _run_import():
+        return await import_gmail_evidence(
+            addresses=[],
+            collect_all_messages=True,
+            user_id="case-user",
+            claim_element_id="causation",
+            workspace_root=workspace_root,
+            evidence_root=evidence_root,
+            folder="INBOX",
+            gmail_user="user@gmail.com",
+            gmail_app_password="app-password",
+            service=service,
+        )
+
+    payload = anyio.run(_run_import)
+
+    assert payload["collect_all_messages"] is True
+    assert payload["matched_addresses"] == []
+    assert payload["imported_count"] == 2
+    assert payload["skipped_count"] == 0
+    assert sorted(item["subject"] for item in payload["imported"]) == ["Mailbox-wide email 1", "Mailbox-wide email 2"]
 
 
 def test_import_gmail_evidence_filters_by_complaint_relevance(tmp_path, monkeypatch):
@@ -325,13 +387,65 @@ def test_import_gmail_evidence_can_resume_by_uid_checkpoint(tmp_path, monkeypatc
     second_payload = anyio.run(_run_import)
 
     assert first_payload["imported_count"] == 1
-    assert first_payload["imported"][0]["subject"] == "Termination email 1"
-    assert first_payload["checkpoint"]["folders"]["INBOX"]["last_processed_uid"] == 101
+    assert first_payload["imported"][0]["subject"] == "Termination email 2"
+    assert first_payload["checkpoint"]["folders"]["INBOX"]["last_processed_uid"] == 102
+    assert first_payload["checkpoint"]["folders"]["INBOX"]["next_uid_upper_bound"] == 101
     assert Path(first_payload["checkpoint_path"]).exists()
 
     assert second_payload["imported_count"] == 1
-    assert second_payload["imported"][0]["subject"] == "Termination email 2"
+    assert second_payload["imported"][0]["subject"] == "Termination email 1"
     assert second_payload["checkpoint"]["folders"]["INBOX"]["last_processed_uid"] == 102
+
+
+def test_import_gmail_evidence_uid_backfill_adapts_when_search_range_is_too_large(tmp_path, monkeypatch):
+    matching_messages = [
+        _build_email_bytes(
+            subject=f"Termination email {index + 1}",
+            sender="hr@example.com",
+            recipient="employee@example.com",
+            body=f"Mailbox message {index + 1}.",
+        )
+        for index in range(4)
+    ]
+
+    monkeypatch.setattr(
+        "complaint_generator.email_import.create_email_processor",
+        lambda **kwargs: _FakeProcessor(matching_messages, fail_large_uid_search_span=2),
+    )
+
+    workspace_root = tmp_path / "sessions"
+    evidence_root = tmp_path / "evidence"
+    service = ComplaintWorkspaceService(root_dir=workspace_root)
+
+    async def _run_import():
+        return await import_gmail_evidence(
+            addresses=["hr@example.com", "employee@example.com"],
+            user_id="case-user",
+            claim_element_id="causation",
+            workspace_root=workspace_root,
+            evidence_root=evidence_root,
+            folder="INBOX",
+            gmail_user="user@gmail.com",
+            gmail_app_password="app-password",
+            use_uid_checkpoint=True,
+            checkpoint_name="gmail-range-split",
+            uid_window_size=2,
+            uid_range_span=10,
+            service=service,
+        )
+
+    payload = anyio.run(_run_import)
+
+    assert payload["imported_count"] == 2
+    assert [item["subject"] for item in payload["imported"]] == [
+        "Termination email 4",
+        "Termination email 3",
+    ]
+    folder_state = payload["checkpoint"]["folders"]["INBOX"]
+    assert folder_state["checkpoint_strategy"] == "historical_uid_range_backfill"
+    assert folder_state["uid_range_span"] == 10
+    assert folder_state["next_uid_upper_bound"] == 102
+    assert folder_state["historical_backfill_complete"] is False
 
 
 def test_import_gmail_evidence_resolves_years_back_into_date_after(tmp_path, monkeypatch):

@@ -219,6 +219,8 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "refreshProviderDiagnosticsPanel()" in content
     assert "Provider diagnostics refreshed." in content
     assert "Router provider diagnostics" in content
+    assert "Complaint draft default:" in content
+    assert "Complaint draft fallback chain:" in content
     assert "Effective default:" in content
     assert "Preference order:" in content
     assert "UI review default:" in content

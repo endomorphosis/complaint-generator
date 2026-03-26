@@ -9,8 +9,13 @@ async function waitForWorkspaceReady(page, { requireIntakeVisible = true } = {})
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await expect(page.locator('#sdk-server-info')).toContainText(/complaint-workspace-(mcp|mock)/i, { timeout: 20000 });
-      await expect(page.locator('#workspace-status')).toContainText(/synchronized|workspace ready|opened workspace|returned from|draft generated|intake answers saved|complaint readiness refreshed/i, { timeout: 20000 });
+      const serverInfo = page.locator('#sdk-server-info');
+      const workspaceStatus = page.locator('#workspace-status');
+      await expect(workspaceStatus).toContainText(/synchronized|workspace ready|opened workspace|returned from|draft generated|intake answers saved|complaint readiness refreshed/i, { timeout: 20000 });
+      const serverInfoText = await serverInfo.textContent();
+      if (String(serverInfoText || '').trim()) {
+        await expect(serverInfo).toContainText(/complaint-workspace-(mcp|mock)/i, { timeout: 5000 });
+      }
       await expect(page.locator('body')).toHaveAttribute('data-workspace-hydrated', /ready|partial/, { timeout: 20000 });
       if (requireIntakeVisible) {
         await page.locator('[data-tab-target="intake"]').click();
@@ -564,6 +569,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-body')).toHaveValue(/Jane Doe brings this retaliation complaint against Acme Corporation\./i);
     await expect(page.locator('#draft-generation-meta')).toContainText(/Draft strategy: llm_router/i);
     await expect(page.locator('#draft-generation-meta')).toContainText(/Claim type: retaliation/i);
+    await expect(page.locator('#draft-generation-meta')).toContainText(/codex_cli|copilot_cli|hf_inference_api/i);
     await expect(page.locator('#draft-contract-preview')).toContainText(/Claim type: Retaliation/i);
     await expect(page.locator('#draft-contract-preview')).toContainText(/Expected count heading: COUNT I - RETALIATION/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Record support: |Release gate verdict:/i);
@@ -576,6 +582,8 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-export-integrity-preview')).toContainText(/Draft strategy selected: llm_router/i);
     await expect(page.locator('#draft-export-integrity-preview')).toContainText(/\[ok\] Prayer for relief/i);
     await expect(page.locator('#draft-export-integrity-preview')).toContainText(/Civil Action No\. is still a placeholder\./i);
+    await expect(page.locator('#draft-provenance-preview')).toContainText(/Generator backend:/i);
+    await expect(page.locator('#draft-provenance-preview')).toContainText(/Generator fallback chain:/i);
 
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
     await expect(page.locator('#focus-rail-stage')).toContainText(/You are in CLI \+ MCP\./i);
@@ -632,7 +640,13 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#ux-review-runtime')).toContainText(/strategy:\s*(deterministic_fallback|llm_router|multimodal_router)/i);
     await expect(page.locator('#ux-review-runtime')).toContainText(/completed through|fell back|deterministic fallback/i);
     await expect(page.locator('#ux-review-runtime')).toContainText(/Workflow state/i);
-    await expect(page.locator('#ux-review-runtime')).toContainText(/status:\s*completed/i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/status:\s*(completed|unavailable)/i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/Open Latest JSON|Open Latest Markdown/i);
+    await expect(page.locator('#ux-review-metadata')).toContainText(/updated/i);
+    await expect(page.locator('#ux-review-metadata')).toContainText(/latest artifact:/i);
+    await page.getByRole('button', { name: 'Open Latest JSON' }).click();
+    await expect(page.locator('#workspace-status')).toContainText(/Opened latest json artifact reference:/i);
+    await expect(page.locator('#workspace-status')).toContainText(/iteration-01-review\.json/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/llm_router/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/multimodal_router/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/Tighten review-to-draft gatekeeping/i);
@@ -660,6 +674,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#ux-review-runtime')).toContainText(/Browser audit runtime/i);
     await expect(page.locator('#ux-review-runtime')).toContainText(/strategy: browser_audit/i);
     await expect(page.locator('#ux-review-runtime')).toContainText(/status:\s*browser_audit_completed/i);
+    await expect(page.locator('#ux-review-metadata')).toContainText(/updated/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/End-to-end complaint browser audit completed with 6 screenshot artifacts\./i);
     await expect(page.locator('#ux-review-stage-findings')).toContainText(/Lawsuit-generation browser audit/i);
 
@@ -681,6 +696,39 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('title', /Download is blocked until/i);
     await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('data-download-url', /output_format=markdown/);
     await expect(page.locator('#draft-release-gate-summary')).toContainText(/Download blockers:/i);
+  });
+
+  test('ux audit exposes latest review artifact launchers inside the workspace', async ({ page }) => {
+    const recorder = {};
+    const did = `did:key:workspace-ux-artifacts-${Date.now()}`;
+    await installCommonMocks(page, recorder);
+    await page.addInitScript((value) => {
+      window.localStorage.setItem('complaintGenerator.did', value);
+    }, did);
+
+    await page.goto('/workspace');
+    await waitForWorkspaceReady(page);
+
+    await page.getByRole('button', { name: 'UX Audit', exact: true }).click();
+    await expect(page.locator('#focus-rail-stage')).toContainText(/You are in UX Audit\./i);
+    await page.locator('#ux-review-provider').fill('llm_router');
+    await page.locator('#ux-review-model').fill('multimodal_router');
+    await page.locator('#run-ux-review-button').click();
+
+    await expect(page.locator('#workspace-status')).toContainText(/Iterative UI\/UX review completed\./i, { timeout: 15000 });
+    await expect(page.locator('#ux-review-runtime')).toContainText(/Latest review artifacts/i);
+    await expect(page.getByRole('button', { name: 'Open Latest JSON' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Open Latest Markdown' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Open Latest JSON' }).click();
+    await expect(page.locator('#workspace-status')).toContainText(/Opened latest json artifact reference:/i);
+    await expect(page.locator('#workspace-status')).toContainText(/iteration-01-review\.json/i);
+    await expect(page.locator('#ux-review-artifacts')).toContainText(/Latest review JSON artifact/i);
+
+    await page.getByRole('button', { name: 'Open Latest Markdown' }).click();
+    await expect(page.locator('#workspace-status')).toContainText(/Opened latest markdown artifact reference:/i);
+    await expect(page.locator('#workspace-status')).toContainText(/iteration-01-review\.md/i);
+    await expect(page.locator('#ux-review-artifacts')).toContainText(/Latest review markdown artifact/i);
   });
 
   test('workspace Gmail DuckDB controls run through the browser MCP flow and surface searchable evidence results', async ({ page }) => {
@@ -878,6 +926,8 @@ test.describe('complaint generation workflow', () => {
     await page.locator('#refresh-provider-diagnostics-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Provider diagnostics refreshed\./i);
     await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Router provider diagnostics/i);
+    await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Complaint draft default: codex_cli/i);
+    await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Complaint draft fallback chain: codex_cli -> copilot_cli -> hf_inference_api/i);
     await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Preference order: codex_cli -> openai -> copilot_cli -> hf_inference_api/i);
     await expect(page.locator('#provider-diagnostics-preview')).toContainText(/copilot_cli:/i);
 

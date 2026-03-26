@@ -93,7 +93,8 @@ def add_evidence(
 @app.command("import-gmail-evidence")
 def import_gmail_evidence_command(
     user_id: str = "demo-user",
-    address: list[str] = typer.Option(..., "--address", help="Target address to match in From/To/Cc headers. Repeat for multiple addresses."),
+    address: list[str] = typer.Option([], "--address", help="Target address to match in From/To/Cc headers. Repeat for multiple addresses."),
+    collect_all_messages: bool = typer.Option(False, "--collect-all-messages", help="Import the whole mailbox slice instead of requiring address matches."),
     claim_element_id: str = "causation",
     folder: str = "INBOX",
     folders: list[str] = typer.Option([], "--scan-folder", help="Additional Gmail IMAP folder to scan. Repeat to broaden collection across INBOX, Sent, or All Mail."),
@@ -128,6 +129,8 @@ def import_gmail_evidence_command(
     from complaint_generator.email_credentials import resolve_gmail_credentials
 
     parser = argparse.ArgumentParser(prog="complaint-workspace import-gmail-evidence")
+    if not collect_all_messages and not list(address or []):
+        parser.error("Provide at least one --address or use --collect-all-messages.")
     if use_gmail_oauth:
         resolved_gmail_user = str(gmail_user or "").strip()
         resolved_gmail_app_password = None
@@ -150,6 +153,7 @@ def import_gmail_evidence_command(
     async def _run_import() -> dict[str, object]:
         return await import_gmail_evidence(
             addresses=address,
+            collect_all_messages=collect_all_messages,
             user_id=user_id,
             claim_element_id=claim_element_id,
             workspace_root=service._session_dir,
@@ -213,7 +217,8 @@ def import_local_evidence_command(
 @app.command("run-gmail-duckdb-pipeline")
 def run_gmail_duckdb_pipeline_command(
     user_id: str = "demo-user",
-    address: list[str] = typer.Option(..., "--address", help="Target address to match in From/To/Cc headers. Repeat for multiple addresses."),
+    address: list[str] = typer.Option([], "--address", help="Target address to match in From/To/Cc headers. Repeat for multiple addresses."),
+    collect_all_messages: bool = typer.Option(False, "--collect-all-messages", help="Import the whole mailbox slice instead of requiring address matches."),
     claim_element_id: str = "causation",
     folder: str = "INBOX",
     folders: list[str] = typer.Option([], "--scan-folder", help="Additional Gmail IMAP folder to scan."),
@@ -225,6 +230,7 @@ def run_gmail_duckdb_pipeline_command(
     min_relevance_score: float = 0.0,
     checkpoint_name: str = "gmail-duckdb-pipeline",
     uid_window_size: int = 500,
+    duckdb_build_every_batches: int = 10,
     max_batches: int = 20,
     duckdb_output_dir: Optional[str] = None,
     append_to_existing_corpus: bool = False,
@@ -246,6 +252,8 @@ def run_gmail_duckdb_pipeline_command(
     from complaint_generator.email_credentials import resolve_gmail_credentials
 
     parser = argparse.ArgumentParser(prog="complaint-workspace run-gmail-duckdb-pipeline")
+    if not collect_all_messages and not list(address or []):
+        parser.error("Provide at least one --address or use --collect-all-messages.")
     if use_gmail_oauth:
         resolved_gmail_user = str(gmail_user or "").strip()
         resolved_gmail_app_password = None
@@ -269,6 +277,7 @@ def run_gmail_duckdb_pipeline_command(
         return await run_gmail_duckdb_pipeline(
             user_id=user_id,
             addresses=address,
+            collect_all_messages=collect_all_messages,
             claim_element_id=claim_element_id,
             folder=folder,
             folders=folders,
@@ -288,6 +297,7 @@ def run_gmail_duckdb_pipeline_command(
             gmail_oauth_open_browser=gmail_oauth_open_browser,
             checkpoint_name=checkpoint_name,
             uid_window_size=uid_window_size,
+            duckdb_build_every_batches=duckdb_build_every_batches,
             max_batches=max_batches,
             duckdb_output_dir=duckdb_output_dir,
             append_to_existing_corpus=append_to_existing_corpus,
@@ -578,6 +588,117 @@ def browser_audit(
             pytest_target=pytest_target,
         )
     )
+
+
+@app.command("ui-optimizer-start")
+def ui_optimizer_start(
+    user_id: str = "demo-user",
+    workspace_root: Optional[str] = None,
+    artifact_root: Optional[str] = None,
+    pytest_target: str = DEFAULT_UI_UX_SCREENSHOT_TARGET,
+    max_rounds: int = 2,
+    iterations: int = 1,
+    notes: Optional[str] = None,
+    goals: Optional[str] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    config_path: str = "config.llm_router.json",
+    backend_id: Optional[str] = None,
+    method: str = DEFAULT_UI_UX_OPTIMIZER_METHOD,
+    priority: int = DEFAULT_UI_UX_OPTIMIZER_PRIORITY,
+    use_llm_draft: bool = True,
+    poll_seconds: float = 1800.0,
+    retry_seconds: float = 300.0,
+    max_consecutive_errors: int = 0,
+    max_cycles: int = 0,
+    pid_file: Optional[str] = None,
+    status_file: Optional[str] = None,
+    log_file: Optional[str] = None,
+) -> None:
+    from complaint_generator.ui_optimizer_daemon import _start_daemon
+
+    goal_items = _split_multiline_values(goals)
+    payload = _start_daemon(
+        argparse.Namespace(
+            command="start",
+            user_id=user_id,
+            workspace_root=workspace_root,
+            artifact_root=artifact_root,
+            pytest_target=pytest_target,
+            max_rounds=max_rounds,
+            iterations=iterations,
+            notes=notes,
+            goals=goal_items,
+            provider=provider,
+            model=model,
+            config_path=config_path,
+            backend_id=backend_id,
+            method=method,
+            priority=priority,
+            use_llm_draft=use_llm_draft,
+            poll_seconds=poll_seconds,
+            retry_seconds=retry_seconds,
+            max_consecutive_errors=max_consecutive_errors,
+            max_cycles=max_cycles,
+            pid_file=pid_file,
+            status_file=status_file,
+            log_file=log_file,
+            json=True,
+        )
+    )
+    _print(payload)
+
+
+@app.command("ui-optimizer-status")
+def ui_optimizer_status(
+    user_id: str = "demo-user",
+    workspace_root: Optional[str] = None,
+    artifact_root: Optional[str] = None,
+    pid_file: Optional[str] = None,
+    status_file: Optional[str] = None,
+    log_file: Optional[str] = None,
+) -> None:
+    from complaint_generator.ui_optimizer_daemon import _status_payload
+
+    payload = _status_payload(
+        argparse.Namespace(
+            command="status",
+            user_id=user_id,
+            workspace_root=workspace_root,
+            artifact_root=artifact_root,
+            pid_file=pid_file,
+            status_file=status_file,
+            log_file=log_file,
+            json=True,
+        )
+    )
+    _print(payload)
+
+
+@app.command("ui-optimizer-stop")
+def ui_optimizer_stop(
+    user_id: str = "demo-user",
+    workspace_root: Optional[str] = None,
+    artifact_root: Optional[str] = None,
+    pid_file: Optional[str] = None,
+    status_file: Optional[str] = None,
+    log_file: Optional[str] = None,
+) -> None:
+    from complaint_generator.ui_optimizer_daemon import _stop_daemon
+
+    payload = _stop_daemon(
+        argparse.Namespace(
+            command="stop",
+            user_id=user_id,
+            workspace_root=workspace_root,
+            artifact_root=artifact_root,
+            pid_file=pid_file,
+            status_file=status_file,
+            log_file=log_file,
+            json=True,
+        )
+    )
+    _print(payload)
 
 
 def main() -> None:

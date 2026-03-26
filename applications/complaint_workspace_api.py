@@ -28,6 +28,7 @@ class EvidenceRequest(BaseModel):
 class GmailEvidenceImportRequest(BaseModel):
     user_id: Optional[str] = None
     addresses: List[str] = Field(default_factory=list)
+    collect_all_messages: bool = False
     claim_element_id: str = "causation"
     folder: str = "INBOX"
     folders: List[str] = Field(default_factory=list)
@@ -53,6 +54,7 @@ class GmailEvidenceImportRequest(BaseModel):
 class GmailDuckdbPipelineRequest(BaseModel):
     user_id: Optional[str] = None
     addresses: List[str] = Field(default_factory=list)
+    collect_all_messages: bool = False
     claim_element_id: str = "causation"
     folder: str = "INBOX"
     folders: List[str] = Field(default_factory=list)
@@ -71,6 +73,7 @@ class GmailDuckdbPipelineRequest(BaseModel):
     gmail_oauth_open_browser: bool = True
     checkpoint_name: str = "gmail-duckdb-pipeline"
     uid_window_size: int = 500
+    duckdb_build_every_batches: int = 10
     max_batches: int = 20
     duckdb_output_dir: Optional[str] = None
     append_to_existing_corpus: bool = False
@@ -162,6 +165,7 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
         return workspace.import_gmail_evidence(
             request.user_id,
             addresses=list(request.addresses or []),
+            collect_all_messages=bool(request.collect_all_messages),
             claim_element_id=request.claim_element_id,
             folder=request.folder,
             folders=list(request.folders or []),
@@ -199,6 +203,7 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
         return workspace.run_gmail_duckdb_pipeline(
             request.user_id,
             addresses=list(request.addresses or []),
+            collect_all_messages=bool(request.collect_all_messages),
             claim_element_id=request.claim_element_id,
             folder=request.folder,
             folders=list(request.folders or []),
@@ -217,6 +222,7 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             gmail_oauth_open_browser=request.gmail_oauth_open_browser,
             checkpoint_name=request.checkpoint_name,
             uid_window_size=request.uid_window_size,
+            duckdb_build_every_batches=request.duckdb_build_every_batches,
             max_batches=request.max_batches,
             duckdb_output_dir=request.duckdb_output_dir,
             append_to_existing_corpus=request.append_to_existing_corpus,

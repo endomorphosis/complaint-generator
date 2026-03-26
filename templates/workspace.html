@@ -4432,10 +4432,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const backend = draft.draft_backend || {};
             const strategyLabel = draft.draft_strategy || 'none';
             const backendParts = [backend.provider, backend.model].filter(Boolean).join(' / ');
+            const draftFallbackChain = Array.isArray(draft.draft_backend_fallback_chain) ? draft.draft_backend_fallback_chain.filter(Boolean) : [];
             const fallbackReason = String(draft.draft_fallback_reason || '').trim();
             const normalizationNotes = Array.isArray(draft.draft_normalizations) ? draft.draft_normalizations : [];
             document.getElementById('draft-generation-meta').textContent = draft.body
-                ? `Draft strategy: ${strategyLabel}${backendParts ? ` (${backendParts})` : ''}. Claim type: ${claimType.replace(/_/g, ' ')}.${normalizationNotes.length ? ` LLM cleanup: ${normalizationNotes.join(', ')}.` : ''}${fallbackReason ? ` Fallback reason: ${fallbackReason}.` : ''}`
+                ? `Draft strategy: ${strategyLabel}${backendParts ? ` (${backendParts})` : ''}. Claim type: ${claimType.replace(/_/g, ' ')}.${draftFallbackChain.length ? ` Complaint draft fallback chain: ${draftFallbackChain.join(' -> ')}.` : ''}${normalizationNotes.length ? ` LLM cleanup: ${normalizationNotes.join(', ')}.` : ''}${fallbackReason ? ` Fallback reason: ${fallbackReason}.` : ''}`
                 : (resolvedDraft.hasDraft
                     ? 'A complaint draft exists for this session, but the current tab is still hydrating the latest draft body and generation metadata.'
                     : 'Draft generation strategy details will appear here once a complaint is generated.');
@@ -4843,6 +4844,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const defendantName = currentIntakeValue('opposing_party') || 'Defendant';
             const placeholderPartyNames = /^(plaintiff|the complainant)$/i.test(plaintiffName) || /^(defendant|the opposing party)$/i.test(defendantName);
             const currentStrategyLabel = String((draft.draft_strategy || selectedDraftMode || 'none')).trim().toLowerCase();
+            const draftFallbackChain = Array.isArray(draft.draft_backend_fallback_chain) ? draft.draft_backend_fallback_chain.filter(Boolean) : [];
             const exportHardBlockers = [];
             if (missingElements > 0) {
                 exportHardBlockers.push(`${missingElements} claim element${missingElements === 1 ? '' : 's'} still need support`);
@@ -4884,6 +4886,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const provenanceLines = [
                 `Draft strategy used: ${draft.draft_strategy || selectedDraftMode || 'unknown'}`,
                 `Generator backend: ${draft.draft_backend && (draft.draft_backend.provider || draft.draft_backend.model) ? [draft.draft_backend.provider, draft.draft_backend.model].filter(Boolean).join(' / ') : 'not reported'}`,
+                `Generator fallback chain: ${draftFallbackChain.length ? draftFallbackChain.join(' -> ') : 'not used'}`,
                 `Claim type in editor: ${draftClaimTypeLabel(selectedClaimType)}`,
                 `Release-gate verdict: ${String((currentReleaseGate && currentReleaseGate.verdict) || 'unknown').toUpperCase()}`,
                 `Claim-type alignment score: ${claimAlignmentScore}`,
@@ -5663,6 +5666,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     'Router provider diagnostics',
                     `Forced provider: ${String(workspaceProviderDiagnostics.forced_provider || 'auto')}`,
                     `Effective default: ${String(workspaceProviderDiagnostics.effective_default_provider || 'none')}`,
+                    `Complaint draft default: ${String(workspaceProviderDiagnostics.effective_complaint_draft_provider || 'none')}`,
+                    `Complaint draft fallback chain: ${Array.isArray(workspaceProviderDiagnostics.complaint_draft_default_order) ? workspaceProviderDiagnostics.complaint_draft_default_order.join(' -> ') : 'unknown'}`,
                     `Preference order: ${Array.isArray(workspaceProviderDiagnostics.default_order) ? workspaceProviderDiagnostics.default_order.join(' -> ') : 'unknown'}`,
                     `UI review default: ${[workspaceProviderDiagnostics.ui_review_default_provider, workspaceProviderDiagnostics.ui_review_default_model].map((item) => String(item || '').trim()).filter(Boolean).join(' / ') || 'unknown'}`,
                     `UI review rate-limit fallback chain: ${Array.isArray((workspaceProviderDiagnostics.ui_review_multimodal_rate_limit_fallbacks || {}).codex_cli) ? workspaceProviderDiagnostics.ui_review_multimodal_rate_limit_fallbacks.codex_cli.join(' -> ') : 'unknown'}`,
@@ -6554,6 +6559,51 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             return 'Review completed, but no summary text was returned.';
         }
 
+        function formatRelativeTimestamp(value) {
+            const raw = String(value || '').trim();
+            if (!raw) {
+                return '';
+            }
+            const timestamp = Date.parse(raw);
+            if (!Number.isFinite(timestamp)) {
+                return raw;
+            }
+            const diffMs = Date.now() - timestamp;
+            const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+            if (diffMinutes < 1) {
+                return 'updated just now';
+            }
+            if (diffMinutes === 1) {
+                return 'updated 1 minute ago';
+            }
+            if (diffMinutes < 60) {
+                return `updated ${diffMinutes} minutes ago`;
+            }
+            const diffHours = Math.round(diffMinutes / 60);
+            if (diffHours === 1) {
+                return 'updated 1 hour ago';
+            }
+            if (diffHours < 48) {
+                return `updated ${diffHours} hours ago`;
+            }
+            const diffDays = Math.round(diffHours / 24);
+            return diffDays === 1 ? 'updated 1 day ago' : `updated ${diffDays} days ago`;
+        }
+
+        function revealLatestReviewArtifact(kind, path) {
+            const normalizedKind = String(kind || 'artifact').trim() || 'artifact';
+            const normalizedPath = String(path || '').trim();
+            if (!normalizedPath) {
+                setStatus(`No saved ${normalizedKind} artifact path is available yet.`);
+                return;
+            }
+            const artifactsNode = document.getElementById('ux-review-artifacts');
+            if (artifactsNode && typeof artifactsNode.scrollIntoView === 'function') {
+                artifactsNode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+            setStatus(`Opened latest ${normalizedKind} artifact reference: ${normalizedPath}`);
+        }
+
         function normalizeUiReadinessResultForDisplay(result) {
             if (!result || typeof result !== 'object') {
                 return result;
@@ -7003,9 +7053,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 timeoutSeconds > 0 ? `Timeout: ${timeoutSeconds}s` : '',
                 fallbackError ? `Fallback reason: ${fallbackError}` : '',
             ].filter(Boolean);
-            const progressStatus = String(latestProgress.status || '').trim();
+            const progressStatus = String(latestProgress.status || (result ? 'completed' : '')).trim();
             const progressIteration = Number(latestProgress.iteration || latestProgress.iterations_completed || 0);
             const progressArtifactCount = Number(latestProgress.artifact_count || 0);
+            const latestJsonPath = String(
+                result && result.latest_review_json_path
+                || latestProgress.latest_review_json_path
+                || latestProgress.review_json_path
+                || ''
+            ).trim();
+            const latestMarkdownPath = String(
+                result && result.latest_review_markdown_path
+                || latestProgress.latest_review_markdown_path
+                || ''
+            ).trim();
             const progressSummary = isBrowserAudit
                 ? 'Workflow state: browser audit completed.'
                 : progressStatus
@@ -7041,7 +7102,26 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     <div class="muted">${escapeHtml(progressSummary)}</div>
                     ${progressLines.length ? `<div class="status"><pre id="ux-review-progress-details">${escapeHtml(progressLines.join('\n'))}</pre></div>` : ''}
                 </div>
+                ${(latestJsonPath || latestMarkdownPath) ? `
+                    <div class="item">
+                        <strong>Latest review artifacts</strong>
+                        <div class="chip-row">
+                            ${latestJsonPath ? `<span class="chip">json: ${escapeHtml(latestJsonPath)}</span>` : ''}
+                            ${latestMarkdownPath ? `<span class="chip">markdown: ${escapeHtml(latestMarkdownPath)}</span>` : ''}
+                        </div>
+                        <div class="muted">Jump to the artifact section and keep the saved review path visible while comparing the latest actor/critic output.</div>
+                        <div class="button-row">
+                            ${latestJsonPath ? `<button class="secondary ux-review-artifact-action" type="button" data-artifact-kind="json" data-artifact-path="${escapeHtml(latestJsonPath)}">Open Latest JSON</button>` : ''}
+                            ${latestMarkdownPath ? `<button class="secondary ux-review-artifact-action" type="button" data-artifact-kind="markdown" data-artifact-path="${escapeHtml(latestMarkdownPath)}">Open Latest Markdown</button>` : ''}
+                        </div>
+                    </div>
+                ` : ''}
             `;
+            container.querySelectorAll('.ux-review-artifact-action').forEach((button) => {
+                button.addEventListener('click', () => {
+                    revealLatestReviewArtifact(button.dataset.artifactKind || 'artifact', button.dataset.artifactPath || '');
+                });
+            });
         }
 
         function renderUiReviewResult(result) {
@@ -7082,6 +7162,34 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : {};
             const complaintOutputSignals = extractComplaintOutputSignals(result);
             const backendStrategy = result && result.backend && result.backend.strategy ? result.backend.strategy : '';
+            const latestProgress = result && result.latest_progress && typeof result.latest_progress === 'object'
+                ? result.latest_progress
+                : {};
+            const freshnessValue = String(
+                latestProgress.updated_at
+                || result.updated_at
+                || result.review_updated_at
+                || ''
+            ).trim();
+            const freshnessLabel = formatRelativeTimestamp(freshnessValue) || 'updated time unavailable';
+            const latestArtifactPath = String(
+                result && result.latest_review_json_path
+                || result && result.latest_review_markdown_path
+                || latestProgress.latest_review_json_path
+                || latestProgress.review_json_path
+                || ''
+            ).trim();
+            const latestJsonArtifactPath = String(
+                result && result.latest_review_json_path
+                || latestProgress.latest_review_json_path
+                || latestProgress.review_json_path
+                || ''
+            ).trim();
+            const latestMarkdownArtifactPath = String(
+                result && result.latest_review_markdown_path
+                || latestProgress.latest_review_markdown_path
+                || ''
+            ).trim();
 
             metadata.innerHTML = [
                 result && result.iterations ? `<span class="chip good">iterations: ${escapeHtml(String(result.iterations))}</span>` : '',
@@ -7096,6 +7204,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 Number(complaintOutputSignals.average_claim_type_alignment_score || 0) ? `<span class="chip">alignment: ${escapeHtml(String(complaintOutputSignals.average_claim_type_alignment_score))}</span>` : '',
                 Array.isArray(complaintOutputSignals.release_gate_verdicts) && complaintOutputSignals.release_gate_verdicts.length ? `<span class="chip warn">release gate: ${escapeHtml(String(complaintOutputSignals.release_gate_verdicts[0]))}</span>` : '',
                 Array.isArray(carryForward.unresolved_findings) && carryForward.unresolved_findings.length ? `<span class="chip warn">unresolved prior findings: ${escapeHtml(String(carryForward.unresolved_findings.length))}</span>` : '',
+                `<span class="chip">${escapeHtml(freshnessLabel)}</span>`,
+                latestArtifactPath ? `<span class="chip">latest artifact: ${escapeHtml(String(latestArtifactPath))}</span>` : '',
                 result && result.latest_review_markdown_path ? `<span class="chip">latest markdown: ${escapeHtml(String(result.latest_review_markdown_path))}</span>` : '',
             ].filter(Boolean).join('');
 
@@ -7157,6 +7267,21 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         </div>
                     `;
                 }).join('')
+                : (latestJsonArtifactPath || latestMarkdownArtifactPath)
+                    ? `
+                        ${latestJsonArtifactPath ? `
+                            <div class="item">
+                                <strong>Latest review JSON artifact</strong>
+                                <div class="muted">${escapeHtml(String(latestJsonArtifactPath))}</div>
+                            </div>
+                        ` : ''}
+                        ${latestMarkdownArtifactPath ? `
+                            <div class="item">
+                                <strong>Latest review markdown artifact</strong>
+                                <div class="muted">${escapeHtml(String(latestMarkdownArtifactPath))}</div>
+                            </div>
+                        ` : ''}
+                    `
                 : screenshotFindings.length || optimizationTargets.length
                     ? `
                         ${screenshotFindings.map((item) => `
@@ -7294,6 +7419,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 result && result.returncode === 0 ? '<span class="chip good">status: passed</span>' : '<span class="chip warn">status: failed</span>',
                 artifactCount ? `<span class="chip">artifacts: ${escapeHtml(String(artifactCount))}</span>` : '',
                 result && result.screenshot_dir ? `<span class="chip">screenshots: ${escapeHtml(String(result.screenshot_dir))}</span>` : '',
+                '<span class="chip">updated time unavailable</span>',
             ].filter(Boolean).join('');
 
             summary.textContent = artifactCount
@@ -7304,7 +7430,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     workflow_type: 'browser_audit',
                     latest_progress: {
                         status: 'browser_audit_completed',
-                        artifact_count,
+                        artifact_count: artifactCount,
                     },
                     backend: {
                         strategy: 'browser_audit',

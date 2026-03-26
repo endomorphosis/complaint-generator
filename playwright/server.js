@@ -1489,6 +1489,7 @@ function buildStubUiReviewResult(args = {}, userId = 'did:key:playwright-demo') 
       critic_test_obligations: [
         'Verify the full workspace journey from intake through mediator synopsis, evidence upload, review, and final complaint draft.',
       ],
+      latest_review_json_path: 'artifacts/ui-audit/reviews/iteration-01-review.json',
       latest_review_markdown_path: 'artifacts/ui-audit/reviews/iteration-01-review.md',
       runs: [
         {
@@ -1797,8 +1798,8 @@ function generateWorkspaceDraft(workspaceState, requestedRelief, options = {}) {
     'Email: ____________________',
   ].join('\n\n');
   const useLlm = Boolean(options.use_llm);
-  const provider = String(options.provider || '').trim() || 'playwright-stub';
-  const model = String(options.model || '').trim() || 'stub-formal-complaint';
+  const provider = String(options.provider || '').trim() || 'codex_cli';
+  const model = String(options.model || '').trim() || 'gpt-5.3-codex';
   workspaceState.draft = {
     title: `${answers.party_name || 'Plaintiff'} v. ${answers.opposing_party || 'Defendant'} ${claimTypeTitle} Complaint`,
     requested_relief: relief,

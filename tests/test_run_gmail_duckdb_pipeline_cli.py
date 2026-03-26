@@ -24,7 +24,9 @@ def test_build_parser_exposes_pipeline_and_bm25_flags():
 
     assert "--years-back" in help_text
     assert "--uid-window-size" in help_text
+    assert "--uid-range-span" in help_text
     assert "--max-batches" in help_text
+    assert "--duckdb-build-every-batches" in help_text
     assert "--duckdb-output-dir" in help_text
     assert "--append-to-existing-corpus" in help_text
     assert "--bm25-search-query" in help_text
@@ -78,7 +80,9 @@ def test_run_pipeline_batches_imports_and_appends_duckdb(tmp_path, monkeypatch):
         save_to_ipfs_secrets_vault=False,
         checkpoint_name="gmail-duckdb-pipeline",
         uid_window_size=500,
+        uid_range_span=50000,
         max_batches=5,
+        duckdb_build_every_batches=10,
         duckdb_output_dir=str(tmp_path / "duckdb"),
         append_to_existing_corpus=False,
         bm25_search_query="termination grievance",
@@ -95,5 +99,7 @@ def test_run_pipeline_batches_imports_and_appends_duckdb(tmp_path, monkeypatch):
     assert payload["total_searched_message_count"] == 625
     assert payload["received"]["years_back"] == 2
     assert payload["received"]["uid_window_size"] == 500
+    assert payload["received"]["uid_range_span"] == 50000
+    assert payload["received"]["duckdb_build_every_batches"] == 10
     assert payload["received"]["bm25_search_query"] == "termination grievance"
     assert Path(payload["summary_path"]).exists()

@@ -1,0 +1,23 @@
+[Unit]
+Description=Complaint UI Optimizer Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=complaint-app
+Group=complaint-app
+WorkingDirectory=/home/complaint-app/complaint-generator
+Environment="PATH=/home/complaint-app/complaint-generator/.venv/bin:/usr/local/bin:/usr/bin"
+EnvironmentFile=/home/complaint-app/.env
+ExecStart=/home/complaint-app/complaint-generator/.venv/bin/python -m complaint_generator.ui_optimizer_daemon run --user-id demo-user --daemon-root /home/complaint-app/complaint-generator/artifacts/ui-optimizer-daemon/demo-user --max-rounds 2 --poll-seconds 1800 --goal "keep export and testimony actions obvious" --goal "make the generated complaint read like a formal pleading" --use-llm-draft --json
+Restart=always
+RestartSec=30
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/home/complaint-app/complaint-generator/.complaint_workspace /home/complaint-app/complaint-generator/artifacts
+
+[Install]
+WantedBy=multi-user.target

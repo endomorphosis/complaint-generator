@@ -66,6 +66,64 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
+    evidence_root = Path(args.evidence_root).expanduser().resolve()
+    artifact_root = evidence_root / str(args.user_id or "gmail-daemon") / "gmail-import"
+    manifest_path = artifact_root / "email_import_manifest.json"
+    checkpoint_path = artifact_root / "_state" / f"{str(args.checkpoint_name or 'default').strip() or 'default'}_checkpoint.json"
+
+    summary: dict[str, Any] = {
+        "artifact_root": str(artifact_root),
+        "manifest_path": str(manifest_path),
+        "checkpoint_path": str(checkpoint_path),
+        "manifest_exists": manifest_path.exists(),
+        "checkpoint_exists": checkpoint_path.exists(),
+        "imported_count": 0,
+        "searched_message_count": 0,
+        "raw_email_total_bytes": 0,
+        "last_processed_uid": 0,
+        "next_uid_upper_bound": 0,
+        "folder_last_run_searched_message_count": 0,
+        "checkpoint_strategy": "",
+        "historical_backfill_complete": False,
+        "artifact_directory_count": 0,
+    }
+
+    if artifact_root.exists():
+        try:
+            summary["artifact_directory_count"] = sum(1 for item in artifact_root.iterdir() if item.is_dir() and item.name != "_state")
+        except Exception:
+            summary["artifact_directory_count"] = 0
+
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            summary["imported_count"] = int(manifest.get("imported_count") or 0)
+            summary["searched_message_count"] = int(manifest.get("searched_message_count") or 0)
+            summary["raw_email_total_bytes"] = int(manifest.get("raw_email_total_bytes") or 0)
+            summary["manifest_updated_at"] = datetime.fromtimestamp(manifest_path.stat().st_mtime, tz=UTC).isoformat()
+        except Exception as exc:
+            summary["manifest_error"] = str(exc)
+
+    if checkpoint_path.exists():
+        try:
+            checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            folder_state = (
+                (checkpoint.get("folders") or {}).get(str(args.folder or ""))
+                or {}
+            )
+            summary["last_processed_uid"] = int(folder_state.get("last_processed_uid") or 0)
+            summary["next_uid_upper_bound"] = int(folder_state.get("next_uid_upper_bound") or 0)
+            summary["folder_last_run_searched_message_count"] = int(folder_state.get("last_run_searched_message_count") or 0)
+            summary["checkpoint_strategy"] = str(folder_state.get("checkpoint_strategy") or "")
+            summary["historical_backfill_complete"] = bool(folder_state.get("historical_backfill_complete"))
+            summary["checkpoint_updated_at"] = str(folder_state.get("updated_at") or "")
+        except Exception as exc:
+            summary["checkpoint_error"] = str(exc)
+
+    return summary
+
+
 def _write_status(
     *,
     status_file: Path,
@@ -77,6 +135,7 @@ def _write_status(
     error: str | None = None,
     cycle_count: int = 0,
     phase: str | None = None,
+    consecutive_errors: int = 0,
 ) -> dict[str, Any]:
     pid = None
     if pid_file.exists():
@@ -89,15 +148,20 @@ def _write_status(
         "user_id": args.user_id,
         "gmail_user": str(args.gmail_user or ""),
         "addresses": list(args.addresses or []),
+        "collect_all_messages": bool(getattr(args, "collect_all_messages", False)),
         "folder": args.folder,
         "scan_folders": list(args.scan_folder or []),
         "years_back": args.years_back,
         "checkpoint_name": args.checkpoint_name,
         "uid_window_size": args.uid_window_size,
+        "uid_range_span": getattr(args, "uid_range_span", None),
         "max_batches": args.max_batches,
+        "duckdb_build_every_batches": getattr(args, "duckdb_build_every_batches", None),
         "poll_seconds": args.poll_seconds,
+        "retry_seconds": getattr(args, "retry_seconds", None),
         "cycle_count": int(cycle_count),
         "phase": str(phase or state),
+        "consecutive_errors": int(consecutive_errors or 0),
         "pid": pid,
         "pid_file": str(pid_file),
         "log_file": str(log_file),
@@ -106,6 +170,7 @@ def _write_status(
         "last_updated_at": datetime.now(UTC).isoformat(),
         "last_result": last_result,
         "error": error,
+        "progress_summary": _build_progress_summary(args),
     }
     _write_json(status_file, payload)
     return payload
@@ -139,7 +204,8 @@ def _resolve_runtime_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
 
 def _add_shared_pipeline_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--user-id", required=True, help="Complaint workspace user id.")
-    parser.add_argument("--address", action="append", dest="addresses", required=True, help="Target address to match in From/To/Cc headers. Repeat for multiple addresses.")
+    parser.add_argument("--address", action="append", dest="addresses", default=[], help="Target address to match in From/To/Cc headers. Repeat for multiple addresses.")
+    parser.add_argument("--collect-all-messages", action="store_true", help="Import the whole mailbox slice instead of requiring address matches.")
     parser.add_argument("--claim-element-id", default="causation", help="Claim element to attach imported emails to.")
     parser.add_argument("--folder", default='[Gmail]/All Mail', help="Primary Gmail IMAP folder to scan.")
     parser.add_argument("--scan-folder", action="append", default=[], help="Additional Gmail IMAP folder to scan.")
@@ -165,11 +231,15 @@ def _add_shared_pipeline_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--save-to-ipfs-secrets-vault", action="store_true", help="Save the resolved Gmail app password to the ipfs_datasets_py DID-derived secrets vault.")
     parser.add_argument("--checkpoint-name", default="gmail-duckdb-daemon", help="Checkpoint name for resumable mailbox collection.")
     parser.add_argument("--uid-window-size", type=int, default=500, help="Maximum number of newly discovered UID messages to import per batch.")
+    parser.add_argument("--uid-range-span", type=int, default=50000, help="UID range span to search per IMAP backfill chunk so very large mailboxes do not require one giant UID SEARCH result.")
     parser.add_argument("--max-batches", type=int, default=10, help="Maximum number of checkpointed Gmail batches to ingest per daemon cycle.")
+    parser.add_argument("--duckdb-build-every-batches", type=int, default=10, help="How many Gmail import batches to accumulate before refreshing DuckDB/parquet artifacts. Higher values reduce index-write pressure on huge crawls.")
     parser.add_argument("--append-to-existing-corpus", action="store_true", help="Append the first batch into an existing DuckDB corpus instead of rebuilding it.")
     parser.add_argument("--bm25-search-query", default=None, help="Optional keyword query to run against the final DuckDB BM25 email index.")
     parser.add_argument("--bm25-search-limit", type=int, default=20, help="Maximum number of BM25 hits to return.")
     parser.add_argument("--poll-seconds", type=float, default=900.0, help="Delay between daemon cycles.")
+    parser.add_argument("--retry-seconds", type=float, default=60.0, help="Delay before retrying after a failed cycle.")
+    parser.add_argument("--max-consecutive-errors", type=int, default=0, help="Maximum consecutive cycle errors before exit. 0 means retry indefinitely.")
     parser.add_argument("--max-cycles", type=int, default=0, help="Maximum daemon cycles before exit. 0 means run until stopped.")
     parser.add_argument("--pid-file", default=None, help="Optional PID file path.")
     parser.add_argument("--status-file", default=None, help="Optional daemon status JSON path.")
@@ -228,6 +298,7 @@ async def _run_cycle(args: argparse.Namespace) -> dict[str, Any]:
     return await run_gmail_duckdb_pipeline(
         user_id=args.user_id,
         addresses=args.addresses,
+        collect_all_messages=bool(args.collect_all_messages),
         claim_element_id=args.claim_element_id,
         folder=args.folder,
         folders=args.scan_folder,
@@ -247,7 +318,9 @@ async def _run_cycle(args: argparse.Namespace) -> dict[str, Any]:
         gmail_oauth_open_browser=not bool(args.no_gmail_oauth_browser),
         checkpoint_name=args.checkpoint_name,
         uid_window_size=args.uid_window_size,
+        uid_range_span=args.uid_range_span,
         max_batches=args.max_batches,
+        duckdb_build_every_batches=args.duckdb_build_every_batches,
         duckdb_output_dir=args.duckdb_output_dir,
         append_to_existing_corpus=bool(args.append_to_existing_corpus),
         bm25_search_query=args.bm25_search_query,
@@ -266,12 +339,14 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
     pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
 
     cycle_count = 0
+    consecutive_errors = 0
     last_result: dict[str, Any] | None = None
     status_state: dict[str, Any] = {
         "phase": "starting",
         "cycle_count": cycle_count,
         "last_result": None,
         "error": None,
+        "consecutive_errors": consecutive_errors,
     }
 
     def _heartbeat() -> None:
@@ -286,6 +361,7 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                 error=status_state.get("error"),
                 cycle_count=int(status_state.get("cycle_count") or 0),
                 phase=str(status_state.get("phase") or "running"),
+                consecutive_errors=int(status_state.get("consecutive_errors") or 0),
             )
             time.sleep(15.0)
 
@@ -298,6 +374,7 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
         args=args,
         cycle_count=cycle_count,
         phase="starting",
+        consecutive_errors=consecutive_errors,
     )
     heartbeat.start()
     try:
@@ -307,7 +384,10 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
             status_state["phase"] = "running_cycle"
             try:
                 last_result = anyio.run(_run_cycle, args)
+                consecutive_errors = 0
                 status_state["last_result"] = last_result
+                status_state["error"] = None
+                status_state["consecutive_errors"] = consecutive_errors
                 status_state["phase"] = "sleeping"
                 _write_status(
                     status_file=status_file,
@@ -318,9 +398,12 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                     last_result=last_result,
                     cycle_count=cycle_count,
                     phase="sleeping",
+                    consecutive_errors=consecutive_errors,
                 )
             except Exception as exc:
+                consecutive_errors += 1
                 status_state["error"] = str(exc)
+                status_state["consecutive_errors"] = consecutive_errors
                 status_state["phase"] = "error"
                 _write_status(
                     status_file=status_file,
@@ -332,8 +415,28 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                     error=str(exc),
                     cycle_count=cycle_count,
                     phase="error",
+                    consecutive_errors=consecutive_errors,
                 )
-                raise
+                if _STOP_REQUESTED:
+                    break
+                max_consecutive_errors = int(args.max_consecutive_errors or 0)
+                if max_consecutive_errors > 0 and consecutive_errors >= max_consecutive_errors:
+                    raise
+                status_state["phase"] = "retrying_after_error"
+                _write_status(
+                    status_file=status_file,
+                    pid_file=pid_file,
+                    log_file=log_file,
+                    state="running",
+                    args=args,
+                    last_result=last_result,
+                    error=str(exc),
+                    cycle_count=cycle_count,
+                    phase="retrying_after_error",
+                    consecutive_errors=consecutive_errors,
+                )
+                time.sleep(max(float(args.retry_seconds or 0.0), 0.0))
+                continue
             if _STOP_REQUESTED:
                 break
             if int(args.max_cycles or 0) > 0 and cycle_count >= int(args.max_cycles):
@@ -351,6 +454,7 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
             last_result=last_result,
             cycle_count=cycle_count,
             phase=final_state,
+            consecutive_errors=consecutive_errors,
         )
         _cleanup_pid_file(pid_file)
     return {
@@ -374,6 +478,8 @@ def _build_run_command(args: argparse.Namespace, *, pid_file: Path, status_file:
     ]
     for address in list(args.addresses or []):
         cmd.extend(["--address", address])
+    if args.collect_all_messages:
+        cmd.append("--collect-all-messages")
     cmd.extend(["--claim-element-id", args.claim_element_id])
     cmd.extend(["--folder", args.folder])
     for folder_name in list(args.scan_folder or []):
@@ -411,7 +517,9 @@ def _build_run_command(args: argparse.Namespace, *, pid_file: Path, status_file:
         cmd.append("--save-to-ipfs-secrets-vault")
     cmd.extend(["--checkpoint-name", str(args.checkpoint_name)])
     cmd.extend(["--uid-window-size", str(args.uid_window_size)])
+    cmd.extend(["--uid-range-span", str(args.uid_range_span)])
     cmd.extend(["--max-batches", str(args.max_batches)])
+    cmd.extend(["--duckdb-build-every-batches", str(args.duckdb_build_every_batches)])
     cmd.extend(["--duckdb-output-dir", str(args.duckdb_output_dir)])
     if args.append_to_existing_corpus:
         cmd.append("--append-to-existing-corpus")
@@ -523,6 +631,8 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command in {"run", "start"}:
+        if not getattr(args, "collect_all_messages", False) and not list(getattr(args, "addresses", []) or []):
+            parser.error("Provide at least one --address or use --collect-all-messages.")
         args.gmail_user, args.gmail_app_password = _resolve_credentials(args, parser)
         _resolve_runtime_paths(args)
 

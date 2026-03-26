@@ -202,6 +202,32 @@ def _coerce_message_uid(value: bytes | str | int | None) -> int:
         return 0
 
 
+def _uid_range_search_criteria(
+    *,
+    low_uid: int,
+    high_uid: int,
+    date_after: Optional[str],
+    date_before: Optional[str],
+) -> list[str]:
+    criteria: list[str] = ["UID", f"{int(low_uid)}:{int(high_uid)}"]
+    if date_after:
+        after_value = datetime.fromisoformat(str(date_after)).strftime("%d-%b-%Y")
+        criteria.extend(["SINCE", after_value])
+    if date_before:
+        before_value = datetime.fromisoformat(str(date_before)).strftime("%d-%b-%Y")
+        criteria.extend(["BEFORE", before_value])
+    return criteria
+
+
+def _is_imap_search_result_too_large(exc: BaseException) -> bool:
+    message = str(exc or "").lower()
+    return (
+        "got more than 1000000 bytes" in message
+        or "result too large" in message
+        or "command size limit" in message
+    )
+
+
 def _build_email_import_manifest(
     *,
     artifact_root: Path,
@@ -213,6 +239,7 @@ def _build_email_import_manifest(
     workspace_root: Path,
     evidence_root: Path,
     matched_addresses: Sequence[str],
+    collect_all_messages: bool,
     complaint_terms: Sequence[str],
     min_relevance_score: float,
     searched_message_count: int,
@@ -239,6 +266,7 @@ def _build_email_import_manifest(
         "evidence_root": str(evidence_root),
         "output_dir": str(artifact_root),
         "matched_addresses": list(matched_addresses),
+        "collect_all_messages": bool(collect_all_messages),
         "complaint_terms": list(complaint_terms),
         "min_relevance_score": float(min_relevance_score),
         "limit": int(limit) if limit is not None else None,
@@ -371,6 +399,94 @@ async def _search_message_uids(
     return await anyio.to_thread.run_sync(_run)
 
 
+async def _get_uidnext(connection: Any, *, folder: str) -> int:
+    def _run() -> int:
+        mailbox = _imap_mailbox_name(folder)
+        status, data = connection.status(mailbox, "(UIDNEXT)")
+        if status != "OK":
+            raise RuntimeError(f"failed to read UIDNEXT for IMAP folder {folder!r}: {status}")
+        raw_text = b" ".join(data or []).decode("utf-8", errors="ignore")
+        match = re.search(r"UIDNEXT\s+(\d+)", raw_text)
+        if not match:
+            raise RuntimeError(f"missing UIDNEXT in IMAP STATUS response for {folder!r}: {raw_text!r}")
+        return int(match.group(1))
+
+    return await anyio.to_thread.run_sync(_run)
+
+
+async def _search_message_uids_descending_window(
+    connection: Any,
+    *,
+    folder: str,
+    date_after: Optional[str],
+    date_before: Optional[str],
+    target_count: int,
+    upper_bound: Optional[int] = None,
+    uid_range_span: int = 50000,
+) -> tuple[list[bytes], int, bool]:
+    def _run() -> tuple[list[bytes], int, bool]:
+        mailbox = _imap_mailbox_name(folder)
+        status, _ = connection.select(mailbox, readonly=True)
+        if status != "OK":
+            raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
+
+        search_upper = int(upper_bound or 0)
+        if search_upper <= 0:
+            status, data = connection.status(mailbox, "(UIDNEXT)")
+            if status != "OK":
+                raise RuntimeError(f"failed to read UIDNEXT for IMAP folder {folder!r}: {status}")
+            raw_text = b" ".join(data or []).decode("utf-8", errors="ignore")
+            match = re.search(r"UIDNEXT\s+(\d+)", raw_text)
+            if not match:
+                raise RuntimeError(f"missing UIDNEXT in IMAP STATUS response for {folder!r}: {raw_text!r}")
+            search_upper = max(0, int(match.group(1)) - 1)
+
+        found: list[bytes] = []
+        span = max(1, int(uid_range_span or 1))
+        target = max(1, int(target_count or 1))
+        exhausted = False
+
+        while search_upper > 0 and len(found) < target:
+            current_span = min(span, search_upper)
+            while True:
+                low_uid = max(1, search_upper - current_span + 1)
+                criteria = _uid_range_search_criteria(
+                    low_uid=low_uid,
+                    high_uid=search_upper,
+                    date_after=date_after,
+                    date_before=date_before,
+                )
+                try:
+                    status, data = connection.uid("search", None, *criteria)
+                except imaplib.IMAP4.error as exc:
+                    if not _is_imap_search_result_too_large(exc) or current_span <= 1:
+                        raise
+                    current_span = max(1, current_span // 2)
+                    continue
+                if status != "OK":
+                    raise RuntimeError(f"failed to UID search IMAP folder {folder!r}: {status}")
+                break
+            raw_ids = data[0] if data else b""
+            ids = [item for item in raw_ids.split() if item]
+            if ids:
+                descending_ids = list(reversed(ids))
+                remaining = target - len(found)
+                selected_ids = descending_ids[:remaining]
+                found.extend(selected_ids)
+                if len(descending_ids) > remaining and selected_ids:
+                    search_upper = max(0, _coerce_message_uid(selected_ids[-1]) - 1)
+                else:
+                    search_upper = low_uid - 1
+            else:
+                search_upper = low_uid - 1
+            if search_upper <= 0:
+                exhausted = True
+
+        return found, max(0, search_upper), exhausted
+
+    return await anyio.to_thread.run_sync(_run)
+
+
 async def _fetch_raw_message(connection: Any, message_id: bytes) -> bytes:
     def _run() -> bytes:
         status, data = connection.fetch(message_id, "(RFC822)")
@@ -430,6 +546,7 @@ async def import_gmail_evidence(
     date_after: Optional[str] = None,
     date_before: Optional[str] = None,
     years_back: Optional[int] = None,
+    collect_all_messages: bool = False,
     gmail_user: Optional[str] = None,
     gmail_app_password: Optional[str] = None,
     use_gmail_oauth: bool = False,
@@ -443,10 +560,11 @@ async def import_gmail_evidence(
     use_uid_checkpoint: bool = False,
     checkpoint_name: Optional[str] = None,
     uid_window_size: Optional[int] = None,
+    uid_range_span: int = 50000,
     service: "ComplaintWorkspaceService" | None = None,
 ) -> dict[str, Any]:
     normalized_addresses = _normalize_addresses(addresses)
-    if not normalized_addresses:
+    if not normalized_addresses and not collect_all_messages:
         raise ValueError("At least one target email address is required")
     complaint_terms = build_complaint_terms(
         complaint_query=complaint_query,
@@ -506,16 +624,34 @@ async def import_gmail_evidence(
                 if use_uid_checkpoint:
                     folder_state = (checkpoint_payload or {}).setdefault("folders", {}).setdefault(folder_name, {})
                     folder_last_processed_uid = int(folder_state.get("last_processed_uid") or 0)
-                    message_ids = await _search_message_uids(
-                        processor.connection,
-                        folder=folder_name,
-                        date_after=resolved_date_after,
-                        date_before=date_before,
-                        after_uid=folder_last_processed_uid,
-                    )
                     cap = uid_window_size if uid_window_size is not None else limit
-                    if cap is not None and int(cap) > 0:
-                        message_ids = message_ids[: int(cap)]
+                    target_count = max(1, int(cap or 500))
+                    backfill_complete = bool(folder_state.get("historical_backfill_complete"))
+                    if not backfill_complete:
+                        message_ids, next_upper_bound, backfill_exhausted = await _search_message_uids_descending_window(
+                            processor.connection,
+                            folder=folder_name,
+                            date_after=resolved_date_after,
+                            date_before=date_before,
+                            target_count=target_count,
+                            upper_bound=int(folder_state.get("next_uid_upper_bound") or 0),
+                            uid_range_span=uid_range_span,
+                        )
+                        folder_state["checkpoint_strategy"] = "historical_uid_range_backfill"
+                        folder_state["next_uid_upper_bound"] = int(next_upper_bound)
+                        folder_state["historical_backfill_complete"] = bool(backfill_exhausted)
+                        if folder_state["historical_backfill_complete"]:
+                            folder_state["historical_backfill_completed_at"] = datetime.now(UTC).isoformat()
+                    else:
+                        message_ids = await _search_message_uids(
+                            processor.connection,
+                            folder=folder_name,
+                            date_after=resolved_date_after,
+                            date_before=date_before,
+                            after_uid=folder_last_processed_uid,
+                        )
+                        if target_count > 0:
+                            message_ids = message_ids[:target_count]
                 else:
                     message_ids = await _search_message_ids(
                         processor.connection,
@@ -527,7 +663,7 @@ async def import_gmail_evidence(
                     if limit is not None and limit > 0 and (resolved_date_after or date_before):
                         message_ids = message_ids[-int(limit) :]
             except imaplib.IMAP4.error as exc:
-                if not (limit is not None and limit > 0 and "got more than 1000000 bytes" in str(exc)):
+                if not (limit is not None and limit > 0 and _is_imap_search_result_too_large(exc)):
                     raise
                 message_ids = await _fetch_recent_message_ids(processor.connection, folder=folder_name, limit=int(limit))
 
@@ -546,7 +682,7 @@ async def import_gmail_evidence(
                 if message_header_id:
                     seen_message_headers.add(message_header_id)
                 header_addresses = _extract_header_addresses(parsed_message) | _extract_header_addresses_from_raw(raw_message)
-                if normalized_addresses and not any(address in header_addresses for address in normalized_addresses):
+                if normalized_addresses and not collect_all_messages and not any(address in header_addresses for address in normalized_addresses):
                     skipped_count += 1
                     continue
 
@@ -610,6 +746,7 @@ async def import_gmail_evidence(
                     "folder": folder_name,
                     "message_id_header": str(parsed_message.get("Message-ID") or "").strip(),
                     "matched_addresses": normalized_addresses,
+                    "collect_all_messages": bool(collect_all_messages),
                     "relevance_score": float(relevance["score"]),
                     "matched_terms": list(relevance["matched_terms"]),
                     "matched_fields": list(relevance["matched_fields"]),
@@ -634,7 +771,11 @@ async def import_gmail_evidence(
                     f"From: {sender}",
                     f"To: {recipient}",
                     f"Date: {email_date}",
-                    f"Matched addresses: {', '.join(normalized_addresses)}",
+                    (
+                        "Matched addresses: all mailbox messages"
+                        if collect_all_messages
+                        else f"Matched addresses: {', '.join(normalized_addresses)}"
+                    ),
                     f"Artifact directory: {message_dir}",
                 ]
                 if body_text:
@@ -680,6 +821,7 @@ async def import_gmail_evidence(
                 folder_state = checkpoint_payload.setdefault("folders", {}).setdefault(folder_name, {})
                 folder_state["last_processed_uid"] = int(folder_last_processed_uid or 0)
                 folder_state["last_run_searched_message_count"] = len(message_ids)
+                folder_state["uid_range_span"] = int(uid_range_span or 0)
                 folder_state["updated_at"] = datetime.now(UTC).isoformat()
 
         if use_uid_checkpoint and checkpoint_payload is not None:
@@ -695,6 +837,7 @@ async def import_gmail_evidence(
             workspace_root=workspace_root_path,
             evidence_root=evidence_root_path,
             matched_addresses=normalized_addresses,
+            collect_all_messages=bool(collect_all_messages),
             complaint_terms=complaint_terms,
             min_relevance_score=float(min_relevance_score),
             searched_message_count=searched_message_count,
@@ -730,6 +873,7 @@ async def import_gmail_evidence(
             "workspace_root": str(workspace_root_path),
             "evidence_root": str(evidence_root_path),
             "matched_addresses": normalized_addresses,
+            "collect_all_messages": bool(collect_all_messages),
             "complaint_terms": complaint_terms,
             "min_relevance_score": float(min_relevance_score),
             "years_back": int(years_back) if years_back is not None else None,
@@ -738,6 +882,7 @@ async def import_gmail_evidence(
             "auth_mode": "gmail_oauth" if use_gmail_oauth else "gmail_app_password",
             "use_uid_checkpoint": bool(use_uid_checkpoint),
             "uid_window_size": int(uid_window_size) if uid_window_size is not None else None,
+            "uid_range_span": int(uid_range_span or 0),
             "searched_message_count": searched_message_count,
             "imported_count": len(imported),
             "skipped_count": skipped_count,

@@ -780,8 +780,8 @@ function buildWorkspaceDraft(state, requestedRelief, options = {}) {
   const documentReferenceLines = (evidence.documents || []).slice(0, 3)
     .map((item) => `Plaintiff expects to offer documentary exhibit '${item.title || 'Untitled document'}' in support of the ${claimElementLabel(item.claim_element_id).toLowerCase()} element.`);
   const useLlm = Boolean(options.use_llm);
-  const provider = String(options.provider || '').trim() || 'playwright-stub';
-  const model = String(options.model || '').trim() || 'stub-formal-complaint';
+  const provider = String(options.provider || '').trim() || 'codex_cli';
+  const model = String(options.model || '').trim() || 'gpt-5.3-codex';
   return {
     title: `${answers.party_name || 'Plaintiff'} v. ${answers.opposing_party || 'Defendant'} ${claimTypeTitle} Complaint`,
     requested_relief: relief,
@@ -1465,7 +1465,10 @@ function buildWorkspaceUiReviewResult(state, toolArgs = {}) {
       iterations_completed: 1,
       artifact_count: 6,
       latest_review_json_path: 'artifacts/ui-optimizer-run/iteration-01-review.json',
+      updated_at: '2026-03-22T12:35:00Z',
     },
+    updated_at: '2026-03-22T12:35:00Z',
+    latest_review_markdown_path: 'artifacts/ui-optimizer-run/iteration-01-review.md',
     review: {
       summary: `Workspace mock review completed with ${routerLabel}. Complaint-output suggestion: ${String(suggestion.title || 'Promote complaint-output blockers')}.`,
       issues: [
@@ -1582,7 +1585,9 @@ function buildWorkspaceUiOptimizationResult(state, toolArgs = {}) {
       status: 'completed',
       stop_reason: 'max_rounds_reached',
       artifact_count: 6,
+      updated_at: '2026-03-22T12:40:00Z',
     },
+    updated_at: '2026-03-22T12:40:00Z',
     latest_validation_review: `The optimizer path itself should stay discoverable from the shared dashboard shortcuts and tool panels. Complaint-output suggestion carried into optimization: ${String(suggestion.title || 'Promote complaint-output blockers')} via ${routerLabel}.`,
     changed_files: ['templates/workspace.html'],
   };

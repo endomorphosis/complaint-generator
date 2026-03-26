@@ -237,6 +237,52 @@ sudo systemctl start complaint-generator-review
 sudo systemctl status complaint-generator-review
 ```
 
+#### 5b. Overnight UI Optimizer Daemon
+
+If you want the actor/critic UI optimizer to keep pressure-testing the complaint workflow overnight, use the included systemd example at [docs/systemd/complaint-ui-optimizer-daemon.service.example](/home/barberb/complaint-generator/docs/systemd/complaint-ui-optimizer-daemon.service.example) as a starting point.
+
+Create `/etc/systemd/system/complaint-ui-optimizer-daemon.service`:
+
+```ini
+[Unit]
+Description=Complaint UI Optimizer Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=complaint-app
+Group=complaint-app
+WorkingDirectory=/home/complaint-app/complaint-generator
+Environment="PATH=/home/complaint-app/complaint-generator/.venv/bin:/usr/local/bin:/usr/bin"
+EnvironmentFile=/home/complaint-app/.env
+ExecStart=/home/complaint-app/complaint-generator/.venv/bin/python -m complaint_generator.ui_optimizer_daemon run --user-id demo-user --daemon-root /home/complaint-app/complaint-generator/artifacts/ui-optimizer-daemon/demo-user --max-rounds 2 --poll-seconds 1800 --goal "keep export and testimony actions obvious" --goal "make the generated complaint read like a formal pleading" --use-llm-draft --json
+Restart=always
+RestartSec=30
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/home/complaint-app/complaint-generator/.complaint_workspace /home/complaint-app/complaint-generator/artifacts
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and inspect it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable complaint-ui-optimizer-daemon
+sudo systemctl start complaint-ui-optimizer-daemon
+sudo systemctl status complaint-ui-optimizer-daemon
+
+journalctl -u complaint-ui-optimizer-daemon -f
+python3 -m complaint_generator.ui_optimizer_daemon status --user-id demo-user --daemon-root artifacts/ui-optimizer-daemon/demo-user --json
+```
+
+Each cycle writes status, logs, screenshots, optimizer reviews, and export-review artifacts under `artifacts/ui-optimizer-daemon/<user-id>`, so the morning handoff is a concrete trail of what changed and what the critic still wants fixed.
+
 #### 6. Configure Nginx Reverse Proxy
 
 Create `/etc/nginx/sites-available/complaint-generator`:

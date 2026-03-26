@@ -57,6 +57,7 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
                 "type": "array",
                 "items": {"type": "string"},
             },
+            "collect_all_messages": {"type": "boolean"},
             "claim_element_id": {"type": "string"},
             "folder": {"type": "string"},
             "folders": {
@@ -84,13 +85,13 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "checkpoint_name": {"type": "string"},
             "uid_window_size": {"type": "integer"},
         },
-        "required": ["addresses"],
     },
     "complaint.run_gmail_duckdb_pipeline": {
         "type": "object",
         "properties": {
             "user_id": {"type": "string"},
             "addresses": {"type": "array", "items": {"type": "string"}},
+            "collect_all_messages": {"type": "boolean"},
             "claim_element_id": {"type": "string"},
             "folder": {"type": "string"},
             "folders": {"type": "array", "items": {"type": "string"}},
@@ -109,13 +110,13 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "gmail_oauth_open_browser": {"type": "boolean"},
             "checkpoint_name": {"type": "string"},
             "uid_window_size": {"type": "integer"},
+            "duckdb_build_every_batches": {"type": "integer"},
             "max_batches": {"type": "integer"},
             "duckdb_output_dir": {"type": "string"},
             "append_to_existing_corpus": {"type": "boolean"},
             "bm25_search_query": {"type": "string"},
             "bm25_search_limit": {"type": "integer"},
         },
-        "required": ["addresses"],
     },
     "complaint.import_local_evidence": {
         "type": "object",

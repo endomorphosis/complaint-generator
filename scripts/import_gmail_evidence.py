@@ -19,7 +19,8 @@ from complaint_generator.email_import import import_gmail_evidence
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Import Gmail messages and attachments into the complaint evidence folder.")
     parser.add_argument("--user-id", required=True, help="Complaint workspace user id.")
-    parser.add_argument("--address", action="append", dest="addresses", required=True, help="Target address to match in From/To/Cc headers. Repeat for multiple addresses.")
+    parser.add_argument("--address", action="append", dest="addresses", default=[], help="Target address to match in From/To/Cc headers. Repeat for multiple addresses.")
+    parser.add_argument("--collect-all-messages", action="store_true", help="Import the whole mailbox slice instead of requiring address matches.")
     parser.add_argument("--claim-element-id", default="causation", help="Claim element to attach imported emails to.")
     parser.add_argument("--folder", default="INBOX", help="Gmail IMAP folder to scan.")
     parser.add_argument("--scan-folder", action="append", default=[], help="Additional Gmail IMAP folder to scan. Repeat to broaden collection across INBOX, Sent, or All Mail.")
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
 async def _run(args: argparse.Namespace) -> dict[str, object]:
     payload = await import_gmail_evidence(
         addresses=args.addresses,
+        collect_all_messages=bool(args.collect_all_messages),
         user_id=args.user_id,
         claim_element_id=args.claim_element_id,
         workspace_root=Path(args.workspace_root),
@@ -131,6 +133,8 @@ def _resolve_credentials(args: argparse.Namespace, parser: argparse.ArgumentPars
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if not args.collect_all_messages and not list(args.addresses or []):
+        parser.error("Provide at least one --address or use --collect-all-messages.")
     args.gmail_user, args.gmail_app_password = _resolve_credentials(args, parser)
 
     payload = anyio.run(_run, args)
@@ -139,7 +143,10 @@ def main() -> int:
     else:
         print(f"Imported {payload['imported_count']} matching email(s) into {payload['evidence_root']}")
         print(f"Searched messages: {payload['searched_message_count']}")
-        print(f"Matched addresses: {', '.join(payload['matched_addresses'])}")
+        if payload.get("collect_all_messages"):
+            print("Matched addresses: all mailbox messages")
+        else:
+            print(f"Matched addresses: {', '.join(payload['matched_addresses'])}")
         if payload.get("date_after") or payload.get("date_before"):
             print(f"Date window: {payload.get('date_after') or '*'} -> {payload.get('date_before') or '*'}")
         if payload.get("complaint_terms"):

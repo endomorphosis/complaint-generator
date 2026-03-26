@@ -1260,6 +1260,8 @@ def test_all_mcp_server_tools_are_exercised_via_jsonrpc(tmp_path):
     assert formal_diagnostics_payload["formal_diagnostics"]["release_gate_verdict"] in {"pass", "warning", "blocked"}
     provider_diagnostics_payload = _call_mcp_tool(service, 34, "complaint.get_provider_diagnostics", {"user_id": "mcp-user"})
     assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["effective_complaint_draft_provider"] == "codex_cli"
     assert provider_diagnostics_payload["ui_review_multimodal_rate_limit_fallbacks"]["codex_cli"] == ["copilot_cli", "hf_inference_api"]
     assert isinstance(provider_diagnostics_payload["providers"], list)
 
@@ -1275,6 +1277,8 @@ def test_provider_diagnostics_are_exposed_across_package_cli_and_mcp(monkeypatch
 
     for payload in (package_payload, cli_payload, mcp_payload):
         assert payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+        assert payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
+        assert payload["effective_complaint_draft_provider"] == "codex_cli"
         assert payload["ui_review_default_provider"] == "codex_cli"
         assert payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
         assert isinstance(payload["providers"], list)
@@ -1747,6 +1751,51 @@ def test_generate_complaint_uses_env_override_for_default_llm_backend(monkeypatc
     assert observed_kwargs["model"] == "gpt-5-mini"
     assert observed_kwargs["requested_provider"] is None
     assert observed_kwargs["requested_model"] is None
+
+
+def test_generate_complaint_falls_back_through_verified_provider_chain(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "fallback-chain-sessions")
+    service.submit_intake_answers(
+        "fallback-chain-user",
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10.",
+            "harm": "Lost wages and emotional distress.",
+        },
+    )
+
+    attempted = []
+
+    def fake_refine(self, state, base_draft, **kwargs):
+        attempted.append(str(kwargs.get("provider") or ""))
+        if kwargs.get("provider") in {"codex_cli", "copilot_cli"}:
+            self._last_draft_refinement_error = f"provider failed: {kwargs.get('provider')}"
+            return None
+        return {
+            **base_draft,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "complaint-draft",
+                "provider": kwargs.get("provider"),
+                "model": kwargs.get("model"),
+            },
+        }
+
+    monkeypatch.setattr(ComplaintWorkspaceService, "_refine_draft_with_llm_router", fake_refine)
+
+    payload = service.generate_complaint(
+        "fallback-chain-user",
+        requested_relief=["Back pay"],
+        use_llm=True,
+    )
+
+    assert attempted == ["codex_cli", "copilot_cli", "hf_inference_api"]
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert payload["draft"]["draft_backend"]["provider"] == "hf_inference_api"
+    assert payload["draft"]["draft_backend_fallback_chain"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
 
 
 def test_llm_draft_timeout_falls_back_to_template_with_reason(monkeypatch, tmp_path):
@@ -3220,6 +3269,66 @@ def test_browser_audit_is_exposed_through_cli_and_mcp(monkeypatch, tmp_path):
     assert mcp_payload["returncode"] == 0
     assert mcp_payload["artifact_count"] == 3
     assert captured["pytest_target"] == "playwright/tests/complaint-flow.spec.js"
+
+
+def test_ui_optimizer_daemon_cli_commands_delegate_to_daemon_module(monkeypatch, tmp_path):
+    runner = CliRunner()
+    captured = {}
+
+    def fake_start(args):
+        captured["start"] = args
+        return {"status": "started", "user_id": args.user_id, "artifact_root": args.artifact_root}
+
+    def fake_status(args):
+        captured["status"] = args
+        return {"status": "ok", "running": True, "artifact_root": args.artifact_root}
+
+    def fake_stop(args):
+        captured["stop"] = args
+        return {"status": "stopping", "user_id": args.user_id, "artifact_root": args.artifact_root}
+
+    monkeypatch.setattr("complaint_generator.ui_optimizer_daemon._start_daemon", fake_start)
+    monkeypatch.setattr("complaint_generator.ui_optimizer_daemon._status_payload", fake_status)
+    monkeypatch.setattr("complaint_generator.ui_optimizer_daemon._stop_daemon", fake_stop)
+
+    start_payload = _invoke_cli(
+        runner,
+        "ui-optimizer-start",
+        "--user-id",
+        "daemon-user",
+        "--artifact-root",
+        str(tmp_path / "daemon"),
+        "--goals",
+        "seed goal one\nseed goal two",
+        "--provider",
+        "codex_cli",
+        "--use-llm-draft",
+    )
+    status_payload = _invoke_cli(
+        runner,
+        "ui-optimizer-status",
+        "--user-id",
+        "daemon-user",
+        "--artifact-root",
+        str(tmp_path / "daemon"),
+    )
+    stop_payload = _invoke_cli(
+        runner,
+        "ui-optimizer-stop",
+        "--user-id",
+        "daemon-user",
+        "--artifact-root",
+        str(tmp_path / "daemon"),
+    )
+
+    assert start_payload["status"] == "started"
+    assert status_payload["running"] is True
+    assert stop_payload["status"] == "stopping"
+    assert captured["start"].goals == ["seed goal one", "seed goal two"]
+    assert captured["start"].provider == "codex_cli"
+    assert captured["start"].use_llm_draft is True
+    assert captured["status"].artifact_root == str(tmp_path / "daemon")
+    assert captured["stop"].artifact_root == str(tmp_path / "daemon")
 
 
 def test_package_wrappers_delegate_to_matching_ui_review_and_browser_tools(monkeypatch, tmp_path):

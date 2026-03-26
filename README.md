@@ -266,9 +266,20 @@ npm run test:e2e:navigation
 
 complaint-workspace browser-audit --screenshot-dir artifacts/ui-audit/screenshots
 complaint-workspace optimize-ui --screenshot-dir artifacts/ui-audit/screenshots
+python3 -m complaint_generator.ui_optimizer_daemon start \
+  --user-id demo-user \
+  --daemon-root artifacts/ui-optimizer-daemon/demo-user \
+  --poll-seconds 1800 \
+  --max-rounds 2 \
+  --goal "keep export and testimony actions obvious" \
+  --goal "make the generated complaint read like a formal pleading" \
+  --use-llm-draft \
+  --json
 ```
 
 That browser journey explicitly drives intake, evidence capture, claim review, draft generation, export downloads, complaint-output analysis, actor/critic review, and browser-audit handoffs. The Playwright spec at `playwright/tests/complaint-flow.spec.js` now asserts that the generated markdown and PDF still read like a formal pleading rather than a generic summary.
+
+The overnight daemon wraps that same complaint journey into a long-running loop, leaving status JSON, logs, screenshots, export reviews, and closed-loop optimizer artifacts under `artifacts/ui-optimizer-daemon/<user-id>`. Use `python3 -m complaint_generator.ui_optimizer_daemon status --user-id demo-user --daemon-root artifacts/ui-optimizer-daemon/demo-user --json` to check whether it is still running, and `python3 -m complaint_generator.ui_optimizer_daemon stop --user-id demo-user --daemon-root artifacts/ui-optimizer-daemon/demo-user --json` to stop it cleanly.
 
 **Claim Support Regression:**
 

@@ -25,6 +25,8 @@ def test_build_parser_exposes_daemon_commands_and_flags():
     assert "run" in help_text
     assert "status" in help_text
     assert "stop" in help_text
+    assert "--uid-range-span" in help_text
+    assert "--duckdb-build-every-batches" in help_text
 
     start_help = parser.parse_args(
         ["start", "--user-id", "case-user", "--address", "hr@example.com", "--use-ipfs-secrets-vault"]
@@ -80,11 +82,15 @@ def test_run_daemon_writes_status_and_pid_files(tmp_path, monkeypatch):
         save_to_ipfs_secrets_vault=False,
         checkpoint_name="gmail-duckdb-daemon",
         uid_window_size=500,
+        uid_range_span=50000,
         max_batches=1,
+        duckdb_build_every_batches=10,
         append_to_existing_corpus=False,
         bm25_search_query=None,
         bm25_search_limit=20,
         poll_seconds=0.0,
+        retry_seconds=0.0,
+        max_consecutive_errors=0,
         max_cycles=1,
         pid_file=str(pid_file),
         status_file=str(status_file),
@@ -101,6 +107,9 @@ def test_run_daemon_writes_status_and_pid_files(tmp_path, monkeypatch):
     assert status_payload["status"] == "completed"
     assert status_payload["cycle_count"] == 1
     assert status_payload["phase"] == "completed"
+    assert status_payload["consecutive_errors"] == 0
+    assert "progress_summary" in status_payload
+    assert status_payload["progress_summary"]["manifest_path"].endswith("email_import_manifest.json")
     assert status_payload["last_result"]["total_imported_count"] == 10
     assert not pid_file.exists()
 
@@ -165,11 +174,15 @@ def test_start_status_and_stop_daemon_commands(tmp_path, monkeypatch):
         save_to_ipfs_secrets_vault=False,
         checkpoint_name="gmail-duckdb-daemon",
         uid_window_size=500,
+        uid_range_span=50000,
         max_batches=5,
+        duckdb_build_every_batches=10,
         append_to_existing_corpus=True,
         bm25_search_query="termination grievance",
         bm25_search_limit=10,
         poll_seconds=60.0,
+        retry_seconds=30.0,
+        max_consecutive_errors=0,
         max_cycles=0,
         pid_file=str(pid_file),
         status_file=str(status_file),
@@ -181,6 +194,8 @@ def test_start_status_and_stop_daemon_commands(tmp_path, monkeypatch):
     assert start_payload["status"] == "started"
     assert "run" in captured["cmd"]
     assert "--use-ipfs-secrets-vault" in captured["cmd"]
+    assert "--uid-range-span" in captured["cmd"]
+    assert "--duckdb-build-every-batches" in captured["cmd"]
     assert captured["env"]["GMAIL_APP_PASSWORD"] == "app-password"
 
     pid_file.write_text("424242\n", encoding="utf-8")

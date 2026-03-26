@@ -25,6 +25,11 @@ from complaint_generator import (
     run_closed_loop_ui_ux_improvement,
     run_end_to_end_complaint_browser_audit,
     run_browser_audit,
+    ui_optimizer_daemon_build_parser,
+    ui_optimizer_daemon_main,
+    ui_optimizer_daemon_start,
+    ui_optimizer_daemon_status,
+    ui_optimizer_daemon_stop,
     create_review_dashboard_app,
     create_ui_review_report,
     create_review_surface_app,
@@ -144,6 +149,11 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(run_end_to_end_complaint_browser_audit)
     assert callable(run_iterative_ui_ux_workflow)
     assert callable(run_playwright_screenshot_audit)
+    assert callable(ui_optimizer_daemon_build_parser)
+    assert callable(ui_optimizer_daemon_main)
+    assert callable(ui_optimizer_daemon_start)
+    assert callable(ui_optimizer_daemon_status)
+    assert callable(ui_optimizer_daemon_stop)
     assert callable(create_identity)
     assert callable(start_session)
     assert callable(list_intake_questions)
@@ -254,6 +264,8 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
     assert filing_provenance_payload["draft_strategy"] == "template"
     assert "draft_backend" in filing_provenance_payload
     assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["effective_complaint_draft_provider"] == "codex_cli"
     assert provider_diagnostics_payload["ui_review_default_provider"] == "codex_cli"
     assert provider_diagnostics_payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
     assert provider_diagnostics_payload["ui_review_multimodal_rate_limit_fallbacks"]["codex_cli"] == ["copilot_cli", "hf_inference_api"]

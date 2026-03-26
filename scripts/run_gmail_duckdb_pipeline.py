@@ -18,7 +18,8 @@ from complaint_generator.email_pipeline import run_gmail_duckdb_pipeline
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a checkpointed Gmail-to-DuckDB ingestion pipeline across many mailbox windows.")
     parser.add_argument("--user-id", required=True, help="Complaint workspace user id.")
-    parser.add_argument("--address", action="append", dest="addresses", required=True, help="Target address to match in From/To/Cc headers. Repeat for multiple addresses.")
+    parser.add_argument("--address", action="append", dest="addresses", default=[], help="Target address to match in From/To/Cc headers. Repeat for multiple addresses.")
+    parser.add_argument("--collect-all-messages", action="store_true", help="Import the whole mailbox slice instead of requiring address matches.")
     parser.add_argument("--claim-element-id", default="causation", help="Claim element to attach imported emails to.")
     parser.add_argument("--folder", default="INBOX", help="Primary Gmail IMAP folder to scan.")
     parser.add_argument("--scan-folder", action="append", default=[], help="Additional Gmail IMAP folder to scan. Repeat to broaden collection across INBOX, Sent, or All Mail.")
@@ -43,7 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-to-ipfs-secrets-vault", action="store_true", help="Save the resolved Gmail app password to the ipfs_datasets_py DID-derived secrets vault.")
     parser.add_argument("--checkpoint-name", default="gmail-duckdb-pipeline", help="Checkpoint name for resumable mailbox collection.")
     parser.add_argument("--uid-window-size", type=int, default=500, help="Maximum number of newly discovered UID messages to import per batch.")
+    parser.add_argument("--uid-range-span", type=int, default=50000, help="UID range span to search per IMAP backfill chunk so very large mailboxes do not require one giant UID SEARCH result.")
     parser.add_argument("--max-batches", type=int, default=20, help="Maximum number of checkpointed Gmail batches to ingest in one pipeline run.")
+    parser.add_argument("--duckdb-build-every-batches", type=int, default=10, help="How many Gmail import batches to accumulate before refreshing DuckDB/parquet artifacts. Higher values reduce index-write pressure on very large crawls.")
     parser.add_argument("--duckdb-output-dir", default=None, help="Directory for DuckDB/parquet email index artifacts.")
     parser.add_argument("--append-to-existing-corpus", action="store_true", help="Append the first batch into an existing DuckDB corpus instead of rebuilding it.")
     parser.add_argument("--bm25-search-query", default=None, help="Optional keyword query to run against the final DuckDB BM25 email index.")
@@ -74,6 +77,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
     return await run_gmail_duckdb_pipeline(
         user_id=args.user_id,
         addresses=args.addresses,
+        collect_all_messages=bool(args.collect_all_messages),
         claim_element_id=args.claim_element_id,
         folder=args.folder,
         folders=args.scan_folder,
@@ -93,7 +97,9 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         gmail_oauth_open_browser=not bool(args.no_gmail_oauth_browser),
         checkpoint_name=args.checkpoint_name,
         uid_window_size=args.uid_window_size,
+        uid_range_span=args.uid_range_span,
         max_batches=args.max_batches,
+        duckdb_build_every_batches=args.duckdb_build_every_batches,
         duckdb_output_dir=args.duckdb_output_dir,
         append_to_existing_corpus=bool(args.append_to_existing_corpus),
         bm25_search_query=args.bm25_search_query,
@@ -104,6 +110,8 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if not args.collect_all_messages and not list(args.addresses or []):
+        parser.error("Provide at least one --address or use --collect-all-messages.")
     args.gmail_user, args.gmail_app_password = _resolve_credentials(args, parser)
 
     payload = anyio.run(_run, args)

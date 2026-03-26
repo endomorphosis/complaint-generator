@@ -33,9 +33,15 @@ DEFAULT_USER_ID = "did:key:anonymous"
 DEFAULT_UI_UX_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 DEFAULT_LLM_DRAFT_PROVIDER = "codex_cli"
+DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN: List[str] = [
+    "codex_cli",
+    "copilot_cli",
+    "hf_inference_api",
+]
 DEFAULT_LLM_DRAFT_MODELS_BY_PROVIDER: Dict[str, str] = {
     "codex": "gpt-5.3-codex",
     "codex_cli": "gpt-5.3-codex",
+    "copilot_cli": "gpt-5-mini",
 }
 DEFAULT_LLM_DRAFT_TIMEOUT_SECONDS = 20
 DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER: Dict[str, int] = {
@@ -535,6 +541,33 @@ def _resolve_llm_draft_backend(
         "requested_provider": requested_provider or None,
         "requested_model": requested_model or None,
     }
+
+
+def _resolve_llm_draft_backend_candidates(
+    provider: Optional[str],
+    model: Optional[str],
+) -> List[Dict[str, Optional[str]]]:
+    requested_provider = str(provider or "").strip()
+    requested_model = str(model or "").strip()
+    env_default_provider = str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "") or "").strip()
+
+    if requested_provider or env_default_provider:
+        return [_resolve_llm_draft_backend(provider, model)]
+
+    candidates: List[Dict[str, Optional[str]]] = []
+    seen: set[str] = set()
+    for fallback_provider in DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN:
+        provider_key = str(fallback_provider or "").strip().lower()
+        if not provider_key or provider_key in seen:
+            continue
+        seen.add(provider_key)
+        candidates.append(
+            _resolve_llm_draft_backend(
+                fallback_provider,
+                requested_model or None,
+            )
+        )
+    return candidates or [_resolve_llm_draft_backend(provider, model)]
 
 
 def _pleading_timeline_sentence(value: Optional[str], fallback: str) -> str:
@@ -1681,20 +1714,29 @@ class ComplaintWorkspaceService:
         }
         if use_llm:
             self._last_draft_refinement_error = None
-            resolved_backend = _resolve_llm_draft_backend(provider, model)
-            refined_draft = self._refine_draft_with_llm_router(
-                state,
-                draft,
-                provider=resolved_backend["provider"],
-                model=resolved_backend["model"],
-                requested_provider=resolved_backend["requested_provider"],
-                requested_model=resolved_backend["requested_model"],
-                config_path=config_path,
-                backend_id=backend_id,
-            )
-            if refined_draft:
-                return refined_draft
+            resolved_backends = _resolve_llm_draft_backend_candidates(provider, model)
+            attempted_providers: List[str] = []
+            for resolved_backend in resolved_backends:
+                provider_name = str(resolved_backend["provider"] or "").strip()
+                if provider_name:
+                    attempted_providers.append(provider_name)
+                refined_draft = self._refine_draft_with_llm_router(
+                    state,
+                    draft,
+                    provider=resolved_backend["provider"],
+                    model=resolved_backend["model"],
+                    requested_provider=resolved_backend["requested_provider"],
+                    requested_model=resolved_backend["requested_model"],
+                    config_path=config_path,
+                    backend_id=backend_id,
+                )
+                if refined_draft:
+                    if len(attempted_providers) > 1:
+                        refined_draft["draft_backend_fallback_chain"] = attempted_providers
+                    return refined_draft
             if self._last_draft_refinement_error:
+                if attempted_providers:
+                    draft["draft_backend_fallback_chain"] = attempted_providers
                 draft["draft_fallback_reason"] = self._last_draft_refinement_error
         return draft
 
@@ -3318,6 +3360,11 @@ class ComplaintWorkspaceService:
             "forced_provider": forced_provider or None,
             "default_order": default_order,
             "effective_default_provider": forced_provider or effective_default,
+            "complaint_draft_default_order": list(DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN),
+            "effective_complaint_draft_provider": (
+                str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "") or "").strip()
+                or DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN[0]
+            ),
             "ui_review_default_provider": ui_review_module.DEFAULT_UI_REVIEW_PROVIDER,
             "ui_review_default_model": ui_review_module._ui_review_model_for_provider(
                 ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
@@ -3675,6 +3722,7 @@ class ComplaintWorkspaceService:
         user_id: Optional[str],
         *,
         addresses: List[str],
+        collect_all_messages: bool = False,
         claim_element_id: str = "causation",
         folder: str = "INBOX",
         folders: Optional[List[str]] = None,
@@ -3701,6 +3749,7 @@ class ComplaintWorkspaceService:
 
             return await import_gmail_evidence(
                 addresses=addresses,
+                collect_all_messages=collect_all_messages,
                 user_id=str(user_id or DEFAULT_USER_ID),
                 claim_element_id=claim_element_id,
                 workspace_root=self._session_dir,
@@ -3733,6 +3782,7 @@ class ComplaintWorkspaceService:
         user_id: Optional[str],
         *,
         addresses: List[str],
+        collect_all_messages: bool = False,
         claim_element_id: str = "causation",
         folder: str = "INBOX",
         folders: Optional[List[str]] = None,
@@ -3751,6 +3801,7 @@ class ComplaintWorkspaceService:
         gmail_oauth_open_browser: bool = True,
         checkpoint_name: str = "gmail-duckdb-pipeline",
         uid_window_size: int = 500,
+        duckdb_build_every_batches: int = 10,
         max_batches: int = 20,
         duckdb_output_dir: Optional[str] = None,
         append_to_existing_corpus: bool = False,
@@ -3763,6 +3814,7 @@ class ComplaintWorkspaceService:
             return await run_gmail_duckdb_pipeline(
                 user_id=str(user_id or DEFAULT_USER_ID),
                 addresses=addresses,
+                collect_all_messages=collect_all_messages,
                 claim_element_id=claim_element_id,
                 folder=folder,
                 folders=folders or [],
@@ -3782,6 +3834,7 @@ class ComplaintWorkspaceService:
                 gmail_oauth_open_browser=gmail_oauth_open_browser,
                 checkpoint_name=checkpoint_name,
                 uid_window_size=uid_window_size,
+                duckdb_build_every_batches=duckdb_build_every_batches,
                 max_batches=max_batches,
                 duckdb_output_dir=duckdb_output_dir,
                 append_to_existing_corpus=append_to_existing_corpus,
