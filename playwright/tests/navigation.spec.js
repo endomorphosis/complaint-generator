@@ -523,7 +523,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#draft-title')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('#reset-session-button')).toBeVisible({ timeout: 10000 });
     await page.locator('#reset-session-button').click();
-    await expect(page.locator('#workspace-status')).toContainText(/reset to a clean state/i);
+    await expect(page.locator('#workspace-status')).toContainText(/resetting the workspace|reset to a clean state/i);
     await page.locator('[data-tab-target="intake"]').click();
     await expect(page.locator('#sdk-server-info')).toContainText(/complaint-workspace-mcp/i);
     await expect(page.locator('#tool-list')).toContainText(/complaint.generate_complaint/i);
@@ -540,7 +540,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#feature-walkthrough-list')).toContainText(/5\. Coach testimony with the mediator/i);
     await expect(page.locator('#feature-walkthrough-list')).toContainText(/7\. Improve the UI with the optimizer/i);
     await expect(page.locator('#quick-action-grid')).toContainText(/Finish intake/i);
-    await expect(page.locator('#quick-action-grid')).toContainText(/Update the mediator brief/i);
+    await expect(page.locator('#quick-action-grid')).toContainText(/Update the mediator brief|Inspect shared tool access/i);
     await expect(page.locator('#quick-action-grid')).toContainText(/Run the actor\/critic optimizer/i);
     await page.locator('#shortcut-optimizer-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Opened UX Audit/i);
@@ -671,6 +671,35 @@ test.describe('website surface navigation', () => {
     await page.goto('/');
     await expect(page.locator('#homepage-ui-readiness-summary')).toContainText(/Do not send to clients yet|Needs repair|Client-safe/i);
     await expect(page.locator('#homepage-ui-readiness-summary')).toContainText(/100|release blocker|No release blocker/i);
+  });
+
+  test('workspace integrations stay usable on a narrow viewport', async ({ page }, testInfo) => {
+    test.slow();
+    await page.addInitScript(() => {
+      window.localStorage.setItem('complaintGenerator.did', 'did:key:nav-workspace-mobile');
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/workspace');
+    await waitForWorkspaceReady(page, { requireIntakeVisible: false });
+
+    await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
+    await expect(page.locator('#integrations-start-readiness-button')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#integrations-start-export-button')).toBeVisible();
+    await expect(page.locator('#feature-coverage-list')).toContainText(/Actor\/Critic UI optimizer/i);
+    await expect(page.locator('#tool-list')).toContainText(/complaint\.optimize_ui/i);
+
+    const panelMetrics = await page.locator('[data-tab-panel="integrations"]').evaluate((node) => ({
+      clientWidth: node.clientWidth,
+      scrollWidth: node.scrollWidth,
+    }));
+    expect(panelMetrics.scrollWidth).toBeLessThanOrEqual(panelMetrics.clientWidth + 2);
+
+    const screenshotPath = testInfo.outputPath('workspace-integrations-mobile.png');
+    await page.locator('[data-tab-panel="integrations"]').screenshot({ path: screenshotPath });
+    await testInfo.attach('workspace-integrations-mobile', {
+      path: screenshotPath,
+      contentType: 'image/png',
+    });
   });
 
   test('first-class pages share the same DID-backed application sidebar and session summary', async ({ page, request }) => {

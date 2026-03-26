@@ -195,6 +195,7 @@ def test_run_playwright_screenshot_audit_uses_configured_artifact_directory(monk
     screenshot_dir = tmp_path / "screens"
 
     def fake_run(cmd, cwd, env, stdout, stderr, text, check):
+        assert cmd == ["npm", "run", "test:e2e", "--", "--workers=1", "playwright/tests/complaint-flow.spec.js"]
         assert env["COMPLAINT_UI_SCREENSHOT_DIR"] == str(screenshot_dir)
         assert env["RUN_LLM_TESTS"] == "1"
         assert env["RUN_NETWORK_TESTS"] == "1"

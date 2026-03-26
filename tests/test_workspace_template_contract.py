@@ -263,6 +263,11 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "formatGapActionLabel" in content
     assert "activeWorkspaceTab" in content
     assert "focusRailStateForTab" in content
+    assert "activeStageLabelForTab" in content
+    assert "humanizeCasePhaseLabel" in content
+    assert "supportStrengthAssessment" in content
+    assert "pleadingFormAssessment" in content
+    assert "buildCanonicalFilingReadiness" in content
     assert "buildCanonicalActionQueue" in content
     assert "Canonical action queue loading" in content
     assert "Canonical Next Move" in content
@@ -282,6 +287,10 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "sdk: complaint.generate_complaint" in content
     assert "sdk: complaint.get_tooling_contract" in content
     assert "sdk: complaint.review_ui" in content
+    assert "case phase:" in content
+    assert "Current stage: ${activeStageLabel.toLowerCase()}" in content
+    assert "active stage: ${activeStageLabel.toLowerCase()}" in content
+    assert "Case phase: ${casePhaseLabel}." in content
     assert "You are in Intake." in content
     assert "You are in Evidence." in content
     assert "You are in Review." in content
@@ -308,6 +317,10 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert 'data-evidence-kind="testimony"' in content
     assert 'data-evidence-kind="document"' in content
     assert "draft-export-safety-preview" in content
+    assert "Canonical filing readiness" in content
+    assert "Pleading form quality:" in content
+    assert "Evidence support strength:" in content
+    assert "Download complaint files:" in content
     assert "activateEvidenceComposer" in content
     assert "screenshot findings:" in content
     assert "optimization targets:" in content

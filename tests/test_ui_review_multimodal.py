@@ -318,6 +318,28 @@ def test_create_ui_review_report_prepares_provider_friendly_images(monkeypatch, 
     assert report["review"]["summary"] == "Prepared image review."
 
 
+def test_prepare_review_image_copy_preserves_readable_width_for_tall_screenshots(tmp_path: Path):
+    Image = pytest.importorskip("PIL.Image")
+
+    screenshot = tmp_path / "workspace-integrations.png"
+    output_dir = tmp_path / "prepared"
+    image = Image.new("RGB", (1280, 45626), (245, 245, 248))
+    image.save(screenshot, format="PNG")
+
+    prepared = ui_review_module._prepare_review_image_copy(
+        screenshot,
+        output_dir=output_dir,
+        provider="codex_cli",
+    )
+
+    assert prepared != screenshot
+    with Image.open(prepared) as prepared_image:
+        width, height = prepared_image.size
+    assert width >= 1200
+    assert height <= 1600
+    assert prepared.suffix == ".jpg"
+
+
 def test_create_ui_review_report_non_rate_limit_error_does_not_use_provider_chain(monkeypatch, tmp_path: Path):
     screenshot = tmp_path / "workspace.png"
     screenshot.write_bytes(b"fake-png")

@@ -492,8 +492,9 @@ def run_playwright_screenshot_audit(
     env.setdefault("RUN_HEAVY_TESTS", "1")
     target_text = str(pytest_target or "").strip()
     if target_text.endswith(".js") or "playwright/tests/" in target_text:
+        playwright_command = ["npm", "run", "test:e2e", "--", "--workers=1", target_text]
         completed = subprocess.run(
-            ["npm", "run", "test:e2e", "--", target_text],
+            playwright_command,
             cwd=str(workdir or REPO_ROOT),
             env=env,
             stdout=subprocess.PIPE,
@@ -501,7 +502,7 @@ def run_playwright_screenshot_audit(
             text=True,
             check=False,
         )
-        command = ["npm", "run", "test:e2e", "--", target_text]
+        command = playwright_command
     else:
         pytest_cmd = str(pytest_executable or (REPO_ROOT / ".venv" / "bin" / "pytest"))
         completed = subprocess.run(

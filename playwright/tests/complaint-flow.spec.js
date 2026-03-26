@@ -498,6 +498,10 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#focus-rail-stage')).toContainText(/You are in Evidence\./i);
     await expect(page.locator('#focus-rail-title')).toContainText(/Evidence stage:/i);
     await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.save_evidence/i);
+    await expect(page.locator('#workflow-stage-chip')).toContainText(/Current stage: evidence/i);
+    await expect(page.locator('#progress-title')).toContainText(/Evidence is the active workspace stage/i);
+    await expect(page.locator('#progress-phase-chip')).toContainText(/case phase:/i);
+    await expect(page.locator('#workflow-stage-chip')).not.toContainText(/draft in progress/i);
 
     await page.locator('#evidence-kind').selectOption('testimony');
     await page.locator('#evidence-claim-element').selectOption('causation');
@@ -517,6 +521,10 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#focus-rail-stage')).toContainText(/You are in Review\./i);
     await expect(page.locator('#focus-rail-title')).toContainText(/Review stage:/i);
     await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.review_case/i);
+    await expect(page.locator('#workflow-stage-chip')).toContainText(/Current stage: review/i);
+    await expect(page.locator('#progress-title')).toContainText(/Review is the active workspace stage/i);
+    await expect(page.locator('#progress-phase-chip')).toContainText(/case phase:/i);
+    await expect(page.locator('#workflow-stage-chip')).not.toContainText(/draft in progress/i);
     await expect(page.locator('#support-strength-map')).toContainText(/Per-element proof map/i);
     await expect(page.locator('#support-strength-map')).toContainText(/thin|unsupported|grounded/i);
     await expect(page.locator('#support-grid')).toContainText(/Protected activity/i);
@@ -550,6 +558,10 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-contract-preview')).toContainText(/Expected count heading: COUNT I - RETALIATION/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Record support: |Release gate verdict:/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Evidence items: 1/i);
+    await expect(page.locator('#draft-readiness-preview')).toContainText(/Canonical filing readiness/i);
+    await expect(page.locator('#draft-readiness-preview')).toContainText(/Pleading form quality:/i);
+    await expect(page.locator('#draft-readiness-preview')).toContainText(/Evidence support strength:/i);
+    await expect(page.locator('#draft-readiness-preview')).toContainText(/Download complaint files:/i);
     await expect(page.locator('#draft-export-integrity-preview')).toContainText(/Claim type selected: Retaliation/i);
     await expect(page.locator('#draft-export-integrity-preview')).toContainText(/Draft strategy selected: llm_router/i);
     await expect(page.locator('#draft-export-integrity-preview')).toContainText(/\[ok\] Prayer for relief/i);
@@ -590,6 +602,7 @@ test.describe('complaint generation workflow', () => {
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Release gate verdict:/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Top defect:/i);
+    await expect(page.locator('#draft-export-safety-preview')).toContainText(/Canonical filing readiness/i);
 
     await page.getByRole('button', { name: 'UX Audit', exact: true }).click();
     await expect(page.locator('#focus-rail-stage')).toContainText(/You are in UX Audit\./i);

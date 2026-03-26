@@ -370,6 +370,80 @@ def _provider_image_limits(provider: Optional[str]) -> Dict[str, int]:
     return dict(_UI_REVIEW_PROVIDER_IMAGE_LIMITS.get(normalized, {}))
 
 
+def _build_tall_image_review_board(
+    image,
+    *,
+    max_dimension: int,
+):
+    try:
+        from PIL import Image
+    except Exception:
+        return image
+
+    width, height = image.size
+    if max_dimension <= 0 or width <= 0 or height <= 0:
+        return image
+
+    ratio = height / float(width)
+    if ratio < 2.5 or height <= max_dimension:
+        return image
+
+    board_columns = 2
+    board_rows = 2
+    gutter = 16
+    cell_width = max(280, (max_dimension - gutter * (board_columns + 1)) // board_columns)
+    segment_height = max(int(width * 0.78), 720)
+    max_top = max(0, height - segment_height)
+    anchors = [0, max_top // 3, (max_top * 2) // 3, max_top]
+
+    segments = []
+    seen = set()
+    for anchor in anchors:
+        top = min(max(0, int(anchor)), max_top)
+        if top in seen:
+            continue
+        seen.add(top)
+        bottom = min(height, top + segment_height)
+        crop = image.crop((0, top, width, bottom))
+        if crop.mode not in {"RGB", "L"}:
+            flattened = Image.new("RGB", crop.size, (255, 255, 255))
+            flattened.paste(crop, mask=crop.split()[-1] if "A" in crop.getbands() else None)
+            crop = flattened
+        elif crop.mode == "L":
+            crop = crop.convert("RGB")
+        scaled_height = max(1, int(round(crop.height * (cell_width / float(crop.width)))))
+        crop = crop.resize((cell_width, scaled_height))
+        segments.append(crop)
+        if len(segments) >= board_columns * board_rows:
+            break
+
+    if len(segments) < 2:
+        return image
+
+    row_heights = []
+    for row in range(board_rows):
+        row_items = segments[row * board_columns : (row + 1) * board_columns]
+        if not row_items:
+            break
+        row_heights.append(max(item.height for item in row_items))
+
+    board_height = gutter
+    for row_height in row_heights:
+        board_height += row_height + gutter
+    board_width = gutter + (cell_width * board_columns) + (gutter * (board_columns - 1)) + gutter
+    board = Image.new("RGB", (board_width, board_height), (250, 250, 252))
+
+    y = gutter
+    for row, row_height in enumerate(row_heights):
+        x = gutter
+        row_items = segments[row * board_columns : (row + 1) * board_columns]
+        for item in row_items:
+            board.paste(item, (x, y))
+            x += cell_width + gutter
+        y += row_height + gutter
+    return board
+
+
 def _prepare_review_image_copy(
     image_path: Path,
     *,
@@ -400,6 +474,7 @@ def _prepare_review_image_copy(
 
             candidate = image.copy()
             if max_dimension:
+                candidate = _build_tall_image_review_board(candidate, max_dimension=max_dimension)
                 candidate.thumbnail((max_dimension, max_dimension))
             if candidate.mode not in {"RGB", "L"}:
                 flattened = Image.new("RGB", candidate.size, (255, 255, 255))

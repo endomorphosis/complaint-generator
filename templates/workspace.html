@@ -298,6 +298,7 @@
             color: var(--accent);
             font: inherit;
             font-weight: 700;
+            overflow-wrap: anywhere;
             cursor: pointer;
             transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
         }
@@ -717,6 +718,26 @@
             line-height: 1.55;
         }
 
+        .integration-grid {
+            grid-template-columns: minmax(0, 1.04fr) minmax(340px, 0.96fr);
+            align-items: start;
+            margin-top: 16px;
+        }
+
+        .integration-grid > .tool-card:last-child {
+            grid-column: 1 / -1;
+        }
+
+        .integrations-stack-label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--accent-strong);
+        }
+
         .panel-split {
             grid-template-columns: minmax(0, 0.92fr) minmax(320px, 1.08fr);
             align-items: start;
@@ -801,12 +822,37 @@
         }
 
         .draft-layout {
-            grid-template-columns: minmax(300px, 0.72fr) minmax(0, 1.28fr);
+            grid-template-columns: minmax(340px, 0.58fr) minmax(0, 1.42fr);
             align-items: start;
         }
 
         .draft-preview-shell {
             margin-top: 14px;
+        }
+
+        .draft-status-scan {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-top: 14px;
+        }
+
+        .draft-status-card {
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+        }
+
+        .draft-status-card strong,
+        .draft-status-card span {
+            display: block;
+        }
+
+        .draft-status-card span {
+            margin-top: 4px;
+            color: var(--muted);
+            line-height: 1.45;
         }
 
         .guidance-grid {
@@ -815,11 +861,8 @@
         }
 
         .tab-row {
-            position: sticky;
-            top: 12px;
-            z-index: 2;
             padding: 12px;
-            margin-bottom: 20px;
+            margin: 0;
             border-radius: 22px;
             background: rgba(250, 243, 235, 0.94);
             border: 1px solid var(--line);
@@ -829,6 +872,32 @@
 
         .tab-button {
             background: rgba(255, 255, 255, 0.72);
+        }
+
+        .stage-index-shell {
+            position: sticky;
+            top: 12px;
+            z-index: 2;
+            display: grid;
+            gap: 12px;
+            margin-bottom: 20px;
+            padding: 14px;
+            border-radius: 24px;
+            border: 1px solid var(--line);
+            background: rgba(250, 243, 235, 0.96);
+            box-shadow: 0 14px 28px rgba(24, 34, 41, 0.07);
+            backdrop-filter: blur(10px);
+        }
+
+        .stage-index-summary strong,
+        .stage-index-summary span {
+            display: block;
+        }
+
+        .stage-index-summary span {
+            margin-top: 4px;
+            color: var(--muted);
+            line-height: 1.5;
         }
 
         .action-card {
@@ -959,6 +1028,12 @@
             resize: vertical;
         }
 
+        #draft-body {
+            min-height: 980px;
+            font-size: 1rem;
+            line-height: 1.75;
+        }
+
         .tool-card {
             padding: 18px;
             background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(251, 244, 236, 0.86));
@@ -1009,6 +1084,7 @@
         .item strong {
             display: block;
             margin-bottom: 6px;
+            overflow-wrap: anywhere;
         }
 
         .chip {
@@ -1022,6 +1098,7 @@
             color: var(--accent);
             font-size: 0.86rem;
             font-weight: 700;
+            overflow-wrap: anywhere;
         }
 
         .chip.good {
@@ -1178,15 +1255,28 @@
             white-space: pre-wrap;
             overflow-wrap: anywhere;
             line-height: 1.7;
+            font-size: 0.96rem;
             font-family: "Iosevka", "SFMono-Regular", monospace;
         }
 
         @media (max-width: 1040px) {
+            .shell {
+                padding: 18px 14px 48px;
+            }
+
+            .hero,
+            .tab-panel,
+            .stage-index-shell {
+                padding: 18px;
+            }
+
             .hero-grid,
             .layout,
             .focus-rail,
             .field-row,
             .support-grid,
+            .integration-grid,
+            .stage-banner,
             .stage-grid,
             .action-grid,
             .guidance-grid,
@@ -1198,7 +1288,8 @@
             .draft-layout,
             .workbench-metrics,
             .shortcut-grid,
-            .quick-action-grid {
+            .quick-action-grid,
+            .feature-grid {
                 grid-template-columns: 1fr;
             }
 
@@ -1212,6 +1303,10 @@
 
             .focus-rail-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .button-row button {
+                width: 100%;
             }
         }
     </style>
@@ -1260,7 +1355,7 @@
                     </div>
                 </div>
                 <div class="hero-panel">
-                    <h2>Today’s handling priorities</h2>
+                    <h2>What to pay attention to now</h2>
                     <div class="priority-list">
                         <div class="priority-item">
                             <strong id="workflow-user-id">Complainant ID loading…</strong>
@@ -1281,8 +1376,8 @@
 
         <section class="layout">
             <aside class="panel sidebar">
-                <h2>Case Pulse</h2>
-                <p class="muted">This sidebar stays anchored while you move through intake, evidence collection, support validation, and draft editing.</p>
+                <h2>Case Snapshot</h2>
+                <p class="muted">This sidebar keeps the current question, support picture, and draft posture in view while you move through the workspace.</p>
                 <div class="summary-stack">
                     <div class="summary-card">
                         <span class="summary-label">Next intake question</span>
@@ -1309,21 +1404,21 @@
                 <div class="summary-stack">
                     <section class="diagnostic-card" aria-label="Case framing">
                         <div class="diagnostic-header">
-                            <strong id="case-theory-title">Case framing is loading…</strong>
+                            <strong id="case-theory-title">Case summary is loading…</strong>
                             <span class="chip" id="case-confidence-chip">confidence: pending</span>
                         </div>
-                        <span id="case-theory-summary">The workspace will summarize the complaint theory once intake answers are available.</span>
-                        <div class="soft-note" id="case-theory-detail">This summary is meant to help the operator orient quickly. It does not replace the underlying intake record.</div>
+                        <span id="case-theory-summary">The workspace will summarize the case once intake answers are available.</span>
+                        <div class="soft-note" id="case-theory-detail">This summary is here to help you reorient quickly. It does not replace the underlying intake record.</div>
                         <label for="case-synopsis">Working case synopsis</label>
-                        <textarea id="case-synopsis" placeholder="Summarize the complaint theory, the strongest facts, and the biggest remaining uncertainty."></textarea>
+                        <textarea id="case-synopsis" placeholder="Summarize what happened, the strongest facts so far, and what still needs to be clarified."></textarea>
                         <div class="button-row">
                             <button class="primary" id="save-synopsis-button" type="button">Save Shared Synopsis</button>
                             <button class="secondary" id="refresh-synopsis-button" type="button">Refresh from Case Facts</button>
                         </div>
                     </section>
                     <section class="diagnostic-card" aria-label="Case blockers">
-                        <strong>Blockers and recommendations</strong>
-                        <span>Use this list to spot what would most improve the complaint before relying on the current draft.</span>
+                        <strong>Next improvements</strong>
+                        <span>Use this list to see what would most help before leaning on the current draft.</span>
                         <div class="diagnostic-list" id="blocker-list">
                             <div class="diagnostic-item">
                                 <strong>Loading case blockers…</strong>
@@ -1342,7 +1437,7 @@
 
                 <section class="focus-rail" aria-label="Current workflow focus">
                     <div class="focus-rail-summary">
-                        <span class="eyebrow">Current Workflow Focus</span>
+                        <span class="eyebrow">Current Focus</span>
                         <strong class="focus-rail-title" id="focus-rail-title">The workspace is preparing the safest next step.</strong>
                         <span class="focus-rail-detail" id="focus-rail-detail">This rail keeps the current stage, next required action, and export-safety posture visible while you scroll through the workspace.</span>
                         <div class="button-row">
@@ -1356,11 +1451,11 @@
                             <span id="focus-rail-stage">Loading current stage…</span>
                         </div>
                         <div class="focus-rail-card">
-                            <strong>Readiness posture</strong>
+                            <strong>Where things stand</strong>
                             <span id="focus-rail-readiness">The workspace is checking whether the record is still in intake, support-building, or drafting posture.</span>
                         </div>
                         <div class="focus-rail-card">
-                            <strong>Export safety</strong>
+                            <strong>Download safety</strong>
                             <span id="focus-rail-export-safety">Export guidance will appear here once the release gate and draft posture are available.</span>
                         </div>
                     </div>
@@ -1377,7 +1472,7 @@
                     </div>
                     <div class="stage-card">
                         <strong>What still needs support</strong>
-                        <span id="workflow-draft-guidance">A draft will become more reliable as each supported element has intake or evidence behind it.</span>
+                        <span id="workflow-draft-guidance">A draft becomes easier to trust as each key point has intake detail or evidence behind it.</span>
                     </div>
                 </div>
 
@@ -1385,7 +1480,7 @@
                     <div class="progress-header">
                         <div>
                             <strong id="progress-title">Case progress is loading</strong>
-                            <div class="muted" id="progress-detail">The workspace will estimate how far the complaint has moved from intake toward a usable draft.</div>
+                            <div class="muted" id="progress-detail">The workspace will estimate how far the case has moved from intake toward a usable draft.</div>
                         </div>
                         <div class="chip-row">
                             <span class="chip good" id="progress-percent-chip">0% of workflow mapped</span>
@@ -1410,7 +1505,7 @@
                         </div>
                         <div class="progress-step">
                             <strong>4. Draft</strong>
-                            <span id="progress-step-draft">Generate a draft when the theory feels coherent.</span>
+                            <span id="progress-step-draft">Generate a draft when the story and support are steady enough.</span>
                         </div>
                     </div>
                 </section>
@@ -1430,7 +1525,7 @@
                     </div>
                     <div class="journey-card">
                         <strong>Shape the filing</strong>
-                        <span>Use Draft when the complaint theory is coherent enough to turn into a usable filing document.</span>
+                        <span>Use Draft when the story is steady enough to turn into a usable filing document.</span>
                     </div>
                 </section>
 
@@ -1539,6 +1634,11 @@
                                 <span class="chip" id="session-tool-activity-status-chip">status: idle</span>
                             </div>
                             <div class="helper-text" id="session-tool-activity-note">When the workspace calls the SDK, the latest tool name and completion status will appear here.</div>
+                            <div class="button-row">
+                                <button class="primary" id="session-tool-open-surface-button" type="button">Open related surface</button>
+                                <button class="secondary" id="session-tool-recheck-button" type="button">Refresh readiness</button>
+                                <button class="secondary" id="session-tool-optimizer-button" type="button">Open UX Audit</button>
+                            </div>
                             <div class="diagnostic-list" id="session-tool-activity-ledger">
                                 <div class="diagnostic-item">
                                     <strong>Invocation ledger is waiting for SDK activity.</strong>
@@ -1562,6 +1662,7 @@
                             <span class="chip" id="action-stage-chip">stage: loading</span>
                             <span class="chip" id="action-support-chip">support: loading</span>
                             <span class="chip" id="action-sdk-chip">sdk: shared MCP client</span>
+                            <span class="chip" id="action-sync-chip">sync: waiting</span>
                         </div>
                     </section>
 
@@ -1581,13 +1682,24 @@
                     </section>
                 </div>
 
-                <div class="tab-row" role="tablist" aria-label="Workspace stages">
-                    <button class="tab-button is-active" data-tab-target="intake" type="button">Intake</button>
-                    <button class="tab-button" data-tab-target="evidence" type="button">Evidence</button>
-                    <button class="tab-button" data-tab-target="review" type="button">Review</button>
-                    <button class="tab-button" data-tab-target="draft" type="button">Draft</button>
-                    <button class="tab-button" data-tab-target="integrations" type="button">CLI + MCP</button>
-                    <button class="tab-button" data-tab-target="ux-review" type="button">UX Audit</button>
+                <div class="stage-index-shell" aria-label="Workspace stage index">
+                    <div class="stage-index-summary">
+                        <strong id="stage-index-title">Stage index is loading…</strong>
+                        <span id="stage-index-detail">This navigator keeps the current stage, posture, and next route visible while you move through the workspace.</span>
+                        <div class="chip-row">
+                            <span class="chip good" id="stage-index-stage-chip">stage: loading</span>
+                            <span class="chip" id="stage-index-posture-chip">posture: loading</span>
+                            <span class="chip" id="stage-index-sync-chip">sync: waiting</span>
+                        </div>
+                    </div>
+                    <div class="tab-row" role="tablist" aria-label="Workspace stages">
+                        <button class="tab-button is-active" data-tab-target="intake" type="button">Intake</button>
+                        <button class="tab-button" data-tab-target="evidence" type="button">Evidence</button>
+                        <button class="tab-button" data-tab-target="review" type="button">Review</button>
+                        <button class="tab-button" data-tab-target="draft" type="button">Draft</button>
+                        <button class="tab-button" data-tab-target="integrations" type="button">CLI + MCP</button>
+                        <button class="tab-button" data-tab-target="ux-review" type="button">UX Audit</button>
+                    </div>
                 </div>
 
                 <section class="tab-panel is-active" data-tab-panel="intake">
@@ -2064,6 +2176,20 @@
                             <span>Before treating the draft as usable, make sure it names the parties clearly, ties the adverse action to the protected activity, describes the harm, and asks for relief that matches the record.</span>
                             <div class="soft-note" id="draft-synopsis-preview">The case synopsis will appear here as a drafting reference.</div>
                             <div class="soft-note" id="draft-generation-meta">Draft generation strategy details will appear here once a complaint is generated.</div>
+                            <div class="draft-status-scan" id="draft-status-scan">
+                                <div class="draft-status-card">
+                                    <strong>Route</strong>
+                                    <span id="draft-status-route">Waiting for draft route details.</span>
+                                </div>
+                                <div class="draft-status-card">
+                                    <strong>Release gate</strong>
+                                    <span id="draft-status-gate">Waiting for release-gate details.</span>
+                                </div>
+                                <div class="draft-status-card">
+                                    <strong>Sync</strong>
+                                    <span id="draft-status-sync">Waiting for the latest shared tool activity.</span>
+                                </div>
+                            </div>
                             <div class="status draft-preview-shell"><pre id="draft-provenance-preview">Draft provenance will appear here once the complaint generator has run.</pre></div>
                             <div class="status draft-preview-shell"><pre id="draft-caption-preview">Caption preview will appear here once the party names and court caption are available.</pre></div>
                             <div class="status draft-preview-shell"><pre id="draft-contract-preview">Draft contract details will appear here once the complaint type and drafting path are selected.</pre></div>
@@ -2138,6 +2264,16 @@
                 <section class="tab-panel" data-tab-panel="integrations">
                     <h2>CLI and MCP Tools</h2>
                     <p class="muted">The website is using the JavaScript MCP SDK below. The same service is also available through a Python CLI and a lightweight stdio MCP tool server.</p>
+                    <div class="stage-banner">
+                        <div class="stage-banner-copy">
+                            <strong>Integration Discovery</strong>
+                            <span>Keep package imports, CLI commands, MCP tools, and browser SDK actions aligned so the same complaint workflow can be run from any surface without guesswork.</span>
+                        </div>
+                        <div class="stage-banner-status">
+                            <strong>Ready to leave this stage</strong>
+                            <span>Readiness, mediator handoff, export review, and UX audit should all be visible and runnable from this tab without digging through long reference blocks.</span>
+                        </div>
+                    </div>
                     <div class="tool-card" style="margin-bottom: 16px;">
                         <h3>Start with a live tool workflow</h3>
                         <p class="muted">Use these first when you want to confirm the shared tool contract, prepare the mediator handoff, export the complaint packet, or continue the actor/critic UI review without scanning the whole tools page.</p>
@@ -2150,6 +2286,7 @@
                     </div>
                     <div class="integration-grid">
                         <div class="tool-card">
+                            <span class="integrations-stack-label">Package</span>
                             <h3>Python package imports</h3>
                             <pre>from complaint_generator import ComplaintWorkspaceService, create_review_surface_app, export_complaint_docx
 from complaint_generator.mcp import handle_jsonrpc_message
@@ -2159,6 +2296,7 @@ session = service.get_session("did:key:example")
 docx_artifact = export_complaint_docx("did:key:example", service=service)</pre>
                         </div>
                         <div class="tool-card">
+                            <span class="integrations-stack-label">CLI</span>
                             <h3>Python CLI</h3>
                             <pre>complaint-workspace session --user-id did:key:example
 complaint-generator-workspace session --user-id did:key:example
@@ -2170,6 +2308,7 @@ complaint-workspace export-pdf --user-id did:key:example
 complaint-workspace browser-audit artifacts/ui-audit/browser-audit</pre>
                         </div>
                         <div class="tool-card">
+                            <span class="integrations-stack-label">MCP</span>
                             <h3>MCP stdio server</h3>
                             <pre>complaint-generator-mcp
 complaint-mcp-server
@@ -2177,6 +2316,7 @@ tool: complaint.export_complaint_docx
 tool: complaint.run_browser_audit</pre>
                         </div>
                         <div class="tool-card">
+                            <span class="integrations-stack-label">Browser SDK</span>
                             <h3>JavaScript MCP SDK</h3>
                             <pre>const client = new window.ComplaintMcpSdk.ComplaintMcpClient();
 const bootstrap = await client.bootstrapWorkspace();
@@ -2188,17 +2328,20 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                             <div class="chip-row" id="sdk-server-info"></div>
                         </div>
                         <div class="tool-card">
+                            <span class="integrations-stack-label">Readiness Signals</span>
                             <h3>Available MCP Tools</h3>
                             <p class="muted" id="tool-list-summary">The browser will group the visible MCP tools by workflow stage once the shared session is loaded.</p>
                             <div class="chip-row" id="tool-list-phase-chips"></div>
                             <div class="list" id="tool-list"></div>
                         </div>
                         <div class="tool-card">
+                            <span class="integrations-stack-label">Coverage</span>
                             <h3>Feature Coverage</h3>
                             <p class="muted">This panel shows whether the current workspace session can actually use the full complaint-generator flow, including the actor/critic optimizer path and cross-surface handoffs.</p>
                             <div class="feature-grid" id="feature-coverage-list"></div>
                         </div>
                         <div class="tool-card">
+                            <span class="integrations-stack-label">Operational Lane</span>
                             <h3>Workflow Operations</h3>
                             <p class="muted">Use the same JavaScript MCP SDK path to inspect capabilities, prepare the mediator brief, and export the current lawsuit packet without leaving the workspace.</p>
                             <div class="tool-card" id="integrations-operations-lane" style="margin-bottom: 16px;">
@@ -2297,6 +2440,7 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                             </div>
                         </div>
                         <div class="tool-card">
+                            <span class="integrations-stack-label">Diagnostics</span>
                             <h3>SDK Diagnostics</h3>
                             <p class="muted">Inspect the underlying complaint identity, intake question bank, and claim-element definitions that power the workspace.</p>
                             <div class="button-row">
@@ -2683,6 +2827,29 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 },
             };
             return focusByTab[tab] || focusByTab.intake;
+        }
+
+        function activeStageLabelForTab(tabName) {
+            const labels = {
+                intake: 'Intake',
+                evidence: 'Evidence',
+                review: 'Review',
+                draft: 'Draft',
+                integrations: 'CLI + MCP',
+                'ux-review': 'UX Audit',
+            };
+            return labels[String(tabName || 'intake').trim()] || 'Intake';
+        }
+
+        function humanizeCasePhaseLabel(phaseLabel) {
+            const normalized = String(phaseLabel || '').trim();
+            if (!normalized) {
+                return 'Loading';
+            }
+            if (normalized === 'draft refinement') {
+                return 'Draft refinement';
+            }
+            return normalized.replace(/\b\w/g, (match) => match.toUpperCase());
         }
 
         function buildCanonicalActionQueue(statePayload) {
@@ -3418,7 +3585,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('handoff-builder-gating-note').textContent = state.builderGateReason;
             document.getElementById('continuity-gating-summary').textContent = `This workspace and every handoff are tied to ${workspaceUserId || session.user_id || 'the current DID-backed session'}, so phase gating follows the same shared complaint record everywhere.`;
             document.getElementById('continuity-session-chip').textContent = `session: ${workspaceUserId || session.user_id || 'unknown'}`;
-            document.getElementById('continuity-phase-chip').textContent = `phase: ${state.phaseLabel}`;
+            document.getElementById('continuity-phase-chip').textContent = `case phase: ${state.phaseLabel}`;
             document.getElementById('continuity-phase-note').textContent = state.builderReady
                 ? 'The case record is coherent enough to let review and builder handoffs stay open across surfaces.'
                 : `The review and builder handoffs stay intentionally gated while the complaint is still in ${state.phaseLabel}.`;
@@ -4109,6 +4276,113 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : 'Opened Evidence to add focused testimony tied to a claim element.');
         }
 
+        function supportStrengthAssessment(missingElements, evidenceItemCount, supportedElements) {
+            if (Number(missingElements || 0) > 0 || Number(supportedElements || 0) === 0) {
+                return {
+                    label: 'unsupported',
+                    detail: 'Core claim elements still lack support, so the filing record is not stable enough to treat as ready.',
+                };
+            }
+            if (Number(evidenceItemCount || 0) <= 2) {
+                return {
+                    label: 'thin',
+                    detail: 'The claim elements are covered, but only lightly corroborated. Treat the record as provisional until more support is attached.',
+                };
+            }
+            return {
+                label: 'grounded',
+                detail: 'The current claim elements are covered with enough saved support to compare drafting choices against the record more confidently.',
+            };
+        }
+
+        function pleadingFormAssessment(filingShapeScore, claimAlignmentScore, hasDraftBody) {
+            if (!hasDraftBody) {
+                return {
+                    label: 'blocked',
+                    detail: 'No complaint draft is loaded yet, so the formal filing structure cannot be reviewed.',
+                };
+            }
+            if (Number(filingShapeScore || 0) >= 90 && Number(claimAlignmentScore || 0) >= 90) {
+                return {
+                    label: 'pass',
+                    detail: 'The complaint structure and selected claim type are aligned strongly enough for formal review.',
+                };
+            }
+            if (Number(filingShapeScore || 0) >= 70 && Number(claimAlignmentScore || 0) >= 70) {
+                return {
+                    label: 'warning',
+                    detail: 'The complaint shape is usable, but the form still needs another careful check before it should be trusted.',
+                };
+            }
+            return {
+                label: 'blocked',
+                detail: 'The current draft does not yet look structurally reliable enough for filing or export.',
+            };
+        }
+
+        function buildCanonicalFilingReadiness(readinessPayload) {
+            const releaseGateVerdict = String(readinessPayload.releaseGateVerdict || 'unknown').trim().toLowerCase();
+            const supportAssessment = supportStrengthAssessment(
+                readinessPayload.missingElements,
+                readinessPayload.evidenceItemCount,
+                readinessPayload.supportedElements,
+            );
+            const formAssessment = pleadingFormAssessment(
+                readinessPayload.filingShapeScore,
+                readinessPayload.claimAlignmentScore,
+                readinessPayload.hasDraftBody,
+            );
+            const exportAllowed = Boolean(readinessPayload.exportAllowed);
+            const downloadAllowed = Boolean(readinessPayload.downloadAllowed);
+            const exportBlockers = Array.isArray(readinessPayload.exportHardBlockers) ? readinessPayload.exportHardBlockers : [];
+            const downloadBlockers = Array.isArray(readinessPayload.downloadBlockers) ? readinessPayload.downloadBlockers : [];
+            const issueItems = Array.isArray(readinessPayload.issueItems) ? readinessPayload.issueItems : [];
+            const releaseReason = String(readinessPayload.releaseGateReason || '').trim();
+            let primaryAction = 'Keep the draft, support record, and release checks aligned before exporting.';
+
+            if (!exportAllowed) {
+                primaryAction = 'Strengthen the record before treating export as the next step.';
+            } else if (!downloadAllowed) {
+                primaryAction = 'Refresh export review if needed, but keep downloads blocked until the filing-readiness blockers are cleared.';
+            } else if (supportAssessment.label !== 'grounded') {
+                primaryAction = 'Downloads are available, but the support record is still light enough that the filing should be reviewed cautiously before it is relied on.';
+            } else {
+                primaryAction = 'Export is available, but keep the filing-readiness summary visible while downloading and reviewing the packet.';
+            }
+            const downloadPosture = !downloadAllowed
+                ? 'blocked'
+                : supportAssessment.label === 'grounded'
+                    ? 'available'
+                    : 'available with caution';
+
+            const summaryLines = [
+                'Canonical filing readiness',
+                `Pleading form quality: ${formAssessment.label.toUpperCase()}`,
+                `Evidence support strength: ${supportAssessment.label.toUpperCase()}`,
+                `Release gate verdict: ${releaseGateVerdict ? releaseGateVerdict.toUpperCase() : 'UNKNOWN'}`,
+                `Export packet: ${exportAllowed ? 'available' : 'blocked'}`,
+                `Download complaint files: ${downloadPosture}`,
+                `Primary action: ${primaryAction}`,
+                `Form detail: ${formAssessment.detail}`,
+                `Support detail: ${supportAssessment.detail}`,
+                releaseReason ? `Release-gate reason: ${releaseReason}` : 'Release-gate reason: No release-gate reason is cached yet.',
+                `Record support: ${Number(readinessPayload.supportedElements || 0)} supported / ${Number(readinessPayload.missingElements || 0)} missing elements`,
+                `Evidence items: ${Number(readinessPayload.evidenceItemCount || 0)}`,
+                `Filing shape score: ${Number(readinessPayload.filingShapeScore || 0)}`,
+                `Claim-type alignment score: ${Number(readinessPayload.claimAlignmentScore || 0)}`,
+                exportBlockers.length ? `Export blockers: ${exportBlockers.join('; ')}` : 'Export blockers: none',
+                downloadBlockers.length ? `Download blockers: ${downloadBlockers.join('; ')}` : 'Download blockers: none',
+                issueItems.length ? `Top defect: ${String((issueItems[0] || {}).finding || '').trim()}` : 'Top defect: No complaint-output defect captured.',
+            ];
+
+            return {
+                supportAssessment,
+                formAssessment,
+                primaryAction,
+                summaryLines,
+            };
+        }
+
         function renderDraftReadiness(sessionPayload) {
             const session = (sessionPayload || {}).session || {};
             const resolvedDraft = resolveDraftState(sessionPayload);
@@ -4158,6 +4432,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             if (currentStrategyLabel === 'template' && !releasePass) {
                 downloadBlockers.push('the draft is still on the template fallback path');
             }
+            const supportAssessment = supportStrengthAssessment(missingElements, evidenceItemCount, supportedElements);
             const exportAllowed = exportHardBlockers.length === 0;
             const downloadAllowed = exportAllowed && downloadBlockers.length === 0;
             const packetExportAllowed = Boolean(latestPacketExport || currentDraftBody.trim() || resolvedDraft.hasDraft);
@@ -4182,61 +4457,40 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 downloadBlockers.length ? `Download blockers: ${downloadBlockers.join('; ')}` : 'Download blockers: none. The packet is eligible for download.',
             ];
             document.getElementById('draft-provenance-preview').textContent = provenanceLines.join('\n');
-
-            const readinessLines = currentReleaseGate
-                ? [
-                    `Record support: ${supportedElements} supported / ${missingElements} missing elements`,
-                    `Release gate verdict: ${String(currentReleaseGate.verdict || 'unknown').toUpperCase()}`,
-                    currentReleaseGate.reason ? `Reason: ${currentReleaseGate.reason}` : 'Reason: No release-gate reason provided yet.',
-                    `Filing shape score: ${Number(currentReleaseGate.filing_shape_score || 0)}`,
-                    `Claim-type alignment score: ${Number(currentReleaseGate.claim_type_alignment_score || 0)}`,
-                    `Evidence items: ${Number(currentReleaseGate.evidence_item_count || evidenceItemCount)}`,
-                    `Missing elements: ${Number(currentReleaseGate.missing_elements || missingElements)}`,
-                    issueItems.length ? `Top defect: ${String((issueItems[0] || {}).finding || '').trim()}` : 'Top defect: No complaint-output defect captured.',
-                ]
-                : [
-                    `Record support: ${supportedElements} supported / ${missingElements} missing elements`,
-                    `Evidence items: ${evidenceItemCount}`,
-                    resolvedDraft.hasDraft
-                        ? 'Draft status: A complaint draft exists. Keep the selected claim theory and formal sections intact while editing.'
-                        : 'Draft status: No complaint draft exists yet.',
-                    missingElements > 0
-                        ? 'Next best move: close the missing support gaps before treating the complaint as filing-ready.'
-                        : 'Next best move: keep the complaint aligned to the selected theory and requested relief while refining the filing language.',
-                ];
-            readinessLines.push(exportAllowed
-                ? (downloadAllowed
-                    ? 'Export posture: the packet can be exported and downloaded, but keep provenance and release-gate context visible while downloading.'
-                    : `Export posture: you can run export to refresh the packet review, but downloads stay blocked until ${downloadBlockers.join('; ')}.`)
-                : `Export posture: blocked until ${exportHardBlockers.join('; ')}.`);
-            document.getElementById('draft-readiness-preview').textContent = readinessLines.join('\n');
-            const exportSafetyLines = currentReleaseGate
-                ? [
-                    `Primary action right now: ${exportAllowed ? (downloadAllowed ? 'export is available, but keep the release gate visible while downloading.' : 'run export to refresh the packet review, then wait for downloads to unlock.') : 'strengthen the record before treating export as the next step.'}`,
-                    `Release gate verdict: ${String(currentReleaseGate.verdict || 'unknown').toUpperCase()}`,
-                    currentReleaseGate.reason ? `Why this matters: ${currentReleaseGate.reason}` : 'Why this matters: the release gate has not yet explained the current blocker.',
-                    missingElements > 0 ? `Open support gaps: ${missingElements}` : 'Open support gaps: none detected in the current review snapshot.',
-                    `Evidence items in record: ${evidenceItemCount}`,
-                    exportAllowed
-                        ? (downloadAllowed ? 'Export and download controls are enabled for this record.' : `Export is enabled, but downloads are disabled because ${downloadBlockers.join('; ')}.`)
-                        : `Export controls are disabled because ${exportHardBlockers.join('; ')}.`,
-                ]
-                : [
-                    `Primary action right now: ${exportAllowed ? 'run export to produce a fresh release-gate review before treating download as the main next step.' : 'review support and draft posture before treating export as the main next step.'}`,
-                    missingElements > 0
-                        ? `There are still ${missingElements} support gaps in the current record.`
-                        : 'No release-gate payload is cached yet, so export should be treated as provisional.',
-                    `Evidence items in record: ${evidenceItemCount}`,
-                    exportAllowed
-                        ? (downloadAllowed ? 'Export and download controls are enabled for this record.' : `Export is enabled, but downloads are disabled because ${downloadBlockers.join('; ')}.`)
-                        : `Export controls are disabled because ${exportHardBlockers.join('; ')}.`,
-                ];
-            document.getElementById('draft-export-safety-preview').textContent = exportSafetyLines.join('\n');
+            document.getElementById('draft-status-route').textContent = `${draft.draft_strategy || selectedDraftMode || 'unknown'}${draft.draft_backend && (draft.draft_backend.provider || draft.draft_backend.model) ? ` via ${[draft.draft_backend.provider, draft.draft_backend.model].filter(Boolean).join(' / ')}` : ''}`;
+            const canonicalReadiness = buildCanonicalFilingReadiness({
+                releaseGateVerdict: currentReleaseGate && currentReleaseGate.verdict,
+                releaseGateReason: currentReleaseGate && currentReleaseGate.reason,
+                supportedElements,
+                missingElements,
+                evidenceItemCount: Number((currentReleaseGate && currentReleaseGate.evidence_item_count) || evidenceItemCount),
+                filingShapeScore,
+                claimAlignmentScore,
+                hasDraftBody: Boolean(currentDraftBody.trim()),
+                exportAllowed,
+                downloadAllowed,
+                exportHardBlockers,
+                downloadBlockers,
+                issueItems,
+            });
+            document.getElementById('draft-status-gate').textContent = `${canonicalReadiness.formAssessment.label.toUpperCase()} form • ${canonicalReadiness.supportAssessment.label.toUpperCase()} support • ${downloadAllowed ? 'downloads available' : 'downloads blocked'}`;
+            document.getElementById('draft-readiness-preview').textContent = canonicalReadiness.summaryLines.join('\n');
+            document.getElementById('draft-export-safety-preview').textContent = [
+                canonicalReadiness.summaryLines[0],
+                `Primary action right now: ${canonicalReadiness.primaryAction}`,
+                `Why this matters: ${canonicalReadiness.supportAssessment.detail}`,
+                `Form quality detail: ${canonicalReadiness.formAssessment.detail}`,
+                exportAllowed
+                    ? (downloadAllowed
+                        ? 'Export and download controls are enabled for this record.'
+                        : `Export is enabled, but downloads are disabled because ${downloadBlockers.join('; ')}.`)
+                    : `Export controls are disabled because ${exportHardBlockers.join('; ')}.`,
+            ].join('\n');
             document.getElementById('draft-export-guidance').textContent = downloadAllowed
-                ? 'The complaint export path is available, but the safest flow still keeps release-gate context and next-step guidance beside the download buttons.'
+                ? 'The complaint export path is available, and the canonical filing-readiness summary should stay beside the download buttons while you review the packet.'
                 : exportAllowed
-                    ? 'Use export to refresh the packet review, but keep downloads secondary until the release gate and provenance are safe.'
-                : 'Review and evidence should stay easier to choose than download whenever support gaps or release-gate blockers remain.';
+                    ? 'Export can refresh the packet review, but the canonical filing-readiness summary still shows why downloads stay blocked.'
+                    : 'Review and evidence should stay easier to choose than download whenever the canonical filing-readiness summary still shows blockers.';
             const exportButtons = [
                 document.getElementById('export-packet-button'),
                 document.getElementById('export-packet-tool-button'),
@@ -4283,9 +4537,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const totalQuestions = (sessionPayload.questions || []).length || 0;
             const evidenceCount = (overview.testimony_items || 0) + (overview.document_items || 0);
             const missingItems = supportMatrix.filter((item) => !item.supported);
-            const stageLabel = state.phaseLabel === 'draft refinement'
-                ? 'Draft in progress'
-                : (nextQuestion ? 'Collecting complaint facts' : 'Ready for document drafting');
+            const activeStageLabel = activeStageLabelForTab(activeWorkspaceTab);
+            const casePhaseLabel = humanizeCasePhaseLabel(state.phaseLabel);
             const nextActionText = nextQuestion
                 ? `Ask and save: ${nextQuestion.label || nextQuestion.prompt}`
                 : (state.builderReady ? 'Review, refine, and export the complaint draft.' : 'Generate a complaint draft from the current record.');
@@ -4293,6 +4546,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const focusRailActionButton = document.getElementById('focus-rail-action-button');
             const queue = document.getElementById('queue-list');
             const blockerList = document.getElementById('blocker-list');
+            const stageIndexTitle = document.getElementById('stage-index-title');
+            const stageIndexDetail = document.getElementById('stage-index-detail');
+            const stageIndexStageChip = document.getElementById('stage-index-stage-chip');
+            const stageIndexPostureChip = document.getElementById('stage-index-posture-chip');
             const currentReleaseGate = workspaceClientReleaseGate || {};
             const currentTabFocus = focusRailStateForTab(activeWorkspaceTab, sessionPayload);
             let readinessPercent = 8;
@@ -4339,8 +4596,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const adverseAction = answers.adverse_action || 'an adverse action';
             const harm = answers.harm || 'described harm';
             const timeline = answers.timeline || 'a still-developing timeline';
-            const theorySummary = `${partyName} is building a ${claimType} complaint against ${opposingParty}.`;
-            const theoryDetail = `${partyName} reports ${protectedActivity}, followed by ${adverseAction}, with harm described as ${harm}. Timeline posture: ${timeline}.`;
+            const theorySummary = `${partyName} is preparing a ${claimType} complaint against ${opposingParty}.`;
+            const theoryDetail = `${partyName} describes ${protectedActivity}, followed by ${adverseAction}, with harm described as ${harm}. Timeline so far: ${timeline}.`;
             const confidenceLabel = state.builderReady && evidenceCount > 2
                 ? 'record: materially supported'
                 : state.builderReady
@@ -4432,22 +4689,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             refreshSynopsisEditor(sessionPayload);
             document.getElementById('workflow-user-id').textContent = `Complainant ID: ${workspaceUserId || session.user_id || 'unknown'}`;
             document.getElementById('workflow-priority-text').textContent = nextActionText;
-            document.getElementById('workflow-stage-detail').textContent = `Answered intake questions: ${answeredCount}. Supported elements: ${overview.supported_elements || 0}. Missing elements: ${overview.missing_elements || 0}.`;
-            document.getElementById('workflow-stage-chip').textContent = `Current stage: ${stageLabel.toLowerCase()}`;
+            document.getElementById('workflow-stage-detail').textContent = `Case phase: ${casePhaseLabel}. Answered intake questions: ${answeredCount}. Supported elements: ${overview.supported_elements || 0}. Missing elements: ${overview.missing_elements || 0}.`;
+            document.getElementById('workflow-stage-chip').textContent = `Current stage: ${activeStageLabel.toLowerCase()}`;
             document.getElementById('workflow-stage-summary').textContent = canonicalQueue[0].detail;
             document.getElementById('workflow-next-action').textContent = canonicalQueue[1].detail;
             document.getElementById('workflow-draft-guidance').textContent = canonicalQueue[2].detail;
-            document.getElementById('progress-title').textContent = state.builderReady
-                ? 'The complaint is in drafting and refinement mode'
-                : nextQuestion
-                    ? 'The complaint is still in information-gathering mode'
-                    : 'The complaint is ready for a first draft pass';
-            document.getElementById('progress-detail').textContent = `Intake answered: ${answeredCount}/${totalQuestions}. Evidence items: ${evidenceCount}. Supported elements: ${overview.supported_elements || 0}.`;
+            document.getElementById('progress-title').textContent = `${activeStageLabel} is the active workspace stage`;
+            document.getElementById('progress-detail').textContent = `Case phase: ${casePhaseLabel}. Intake answered: ${answeredCount}/${totalQuestions}. Evidence items: ${evidenceCount}. Supported elements: ${overview.supported_elements || 0}.`;
             document.getElementById('progress-meter').style.width = `${readinessPercent}%`;
             document.getElementById('progress-percent-chip').textContent = state.builderReady && evidenceCount <= 2
-                ? `${readinessPercent}% mapped, but record still thin`
+                ? `${readinessPercent}% mapped, with lighter support so far`
                 : `${readinessPercent}% of workflow mapped`;
-            document.getElementById('progress-phase-chip').textContent = `phase: ${stageLabel.toLowerCase()}`;
+            document.getElementById('progress-phase-chip').textContent = `case phase: ${state.phaseLabel}`;
             document.getElementById('progress-step-intake').textContent = nextQuestion
                 ? `Still collecting ${nextQuestion.label || 'intake details'}.`
                 : 'The intake questionnaire has been answered.';
@@ -4459,18 +4712,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('reassurance-title').textContent = nextQuestion
                 ? 'You can move forward without having every detail yet.'
                 : state.builderReady
-                    ? 'The complaint is far enough along to refine carefully.'
-                    : 'The story is in place, and the next step is to turn it into a filing draft.';
+                    ? 'The complaint is far enough along for a careful review.'
+                    : 'The story is in place, and the next step is to shape a first filing draft.';
             document.getElementById('reassurance-detail').textContent = nextQuestion
                 ? 'Save the best available version of the story now, then come back with evidence or corrections once the complainant has more records.'
                 : (overview.missing_elements || 0) > 0
-                    ? 'The complaint is understandable, but some parts still need stronger support before the filing feels fully grounded.'
+                    ? 'The complaint is understandable, but a few parts would benefit from stronger support before the filing feels settled.'
                     : state.builderReady
-                        ? 'Use Review and Draft together to make sure the final document matches the supported facts and the requested relief.'
-                        : 'The intake record is coherent enough to generate a first draft, even if you still plan to strengthen corroboration afterward.';
+                        ? 'Use Review and Draft together to make sure the final document still matches the saved facts and requested relief.'
+                        : 'The intake record is steady enough for a first draft, even if you still plan to strengthen support afterward.';
             document.getElementById('action-title').textContent = actionTitle.trim();
             document.getElementById('action-detail').textContent = actionDetail;
-            document.getElementById('action-stage-chip').textContent = `stage: ${stageLabel.toLowerCase()}`;
+            document.getElementById('action-stage-chip').textContent = `active stage: ${activeStageLabel.toLowerCase()}`;
             document.getElementById('action-support-chip').textContent = `support: ${overview.supported_elements || 0} supported / ${overview.missing_elements || 0} missing`;
             document.getElementById('action-sdk-chip').textContent = currentTabFocus.sdkChip;
             actionButton.dataset.targetTab = actionTab;
@@ -4495,6 +4748,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('focus-rail-export-safety').textContent = currentTabFocus.exportSafety;
             focusRailActionButton.dataset.targetTab = currentTabFocus.targetTab || actionTab;
             focusRailActionButton.textContent = currentTabFocus.actionLabel || focusRailActionButton.textContent;
+            if (stageIndexTitle) {
+                stageIndexTitle.textContent = currentTabFocus.title;
+            }
+            if (stageIndexDetail) {
+                stageIndexDetail.textContent = currentTabFocus.detail;
+            }
+            if (stageIndexStageChip) {
+                stageIndexStageChip.textContent = `stage: ${activeWorkspaceTab || 'intake'}`;
+            }
+            if (stageIndexPostureChip) {
+                stageIndexPostureChip.textContent = state.builderReady && evidenceCount <= 2
+                    ? 'posture: draft open, support still light'
+                    : currentTabFocus.readiness;
+            }
             document.getElementById('intake-soft-note').textContent = nextQuestion
                 ? 'Saving here only updates the shared workspace. You can keep improving answers as the record becomes clearer.'
                 : 'The intake is complete enough for the next step. You can still return later if details need correction.';
@@ -5273,16 +5540,22 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const draftChip = document.getElementById('session-sync-draft-chip');
             const summary = document.getElementById('session-sync-summary');
             const note = document.getElementById('session-sync-note');
+            const actionSyncChip = document.getElementById('action-sync-chip');
+            const stageIndexSyncChip = document.getElementById('stage-index-sync-chip');
+            const draftStatusSync = document.getElementById('draft-status-sync');
             const activitySummary = document.getElementById('session-tool-activity-summary');
             const activityToolChip = document.getElementById('session-tool-activity-tool-chip');
             const activityStatusChip = document.getElementById('session-tool-activity-status-chip');
             const activityNote = document.getElementById('session-tool-activity-note');
             const activityLedger = document.getElementById('session-tool-activity-ledger');
+            const activitySurfaceButton = document.getElementById('session-tool-open-surface-button');
+            const activityRecheckButton = document.getElementById('session-tool-recheck-button');
+            const activityOptimizerButton = document.getElementById('session-tool-optimizer-button');
             const lastActivity = latestSdkToolActivity || loadLastSdkToolActivity();
             const ledgerEntries = loadSdkToolActivityLedger();
 
             didChip.textContent = `did: ${workspaceUserId || session.user_id || 'unknown'}`;
-            phaseChip.textContent = `phase: ${state.phaseLabel}`;
+            phaseChip.textContent = `case phase: ${state.phaseLabel}`;
             draftChip.textContent = `draft: ${resolvedDraft.hasDraft ? 'present' : 'not generated'}`;
             summary.textContent = resolvedDraft.hasDraft
                 ? 'Workspace, review, builder, and SDK surfaces are operating on a complaint session that already has a draft in progress or being hydrated from shared export state.'
@@ -5298,15 +5571,72 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 activityNote.textContent = lastActivity.finished_at
                     ? `Updated at ${lastActivity.finished_at}.`
                     : 'Updated after the last shared SDK action.';
+                if (actionSyncChip) {
+                    actionSyncChip.textContent = `sync: ${lastActivity.status || 'updated'}`;
+                }
+                if (stageIndexSyncChip) {
+                    stageIndexSyncChip.textContent = `sync: ${lastActivity.status || 'updated'}`;
+                }
+                if (draftStatusSync) {
+                    draftStatusSync.textContent = lastActivity.finished_at
+                        ? `${lastActivity.status || 'updated'} at ${lastActivity.finished_at}`
+                        : `Latest shared tool: ${lastActivity.tool_name}`;
+                }
             } else {
                 activitySummary.textContent = 'No shared MCP tool activity has been recorded for this browser session yet.';
                 activityToolChip.textContent = 'tool: pending';
                 activityStatusChip.textContent = 'status: idle';
                 activityNote.textContent = 'When the workspace calls the SDK, the latest tool name and completion status will appear here.';
+                if (actionSyncChip) {
+                    actionSyncChip.textContent = 'sync: waiting';
+                }
+                if (stageIndexSyncChip) {
+                    stageIndexSyncChip.textContent = 'sync: waiting';
+                }
+                if (draftStatusSync) {
+                    draftStatusSync.textContent = 'Waiting for the latest shared tool activity.';
+                }
             }
 
+            const lastToolName = String((lastActivity && lastActivity.tool_name) || '').trim();
+            let suggestedTab = 'integrations';
+            let suggestedFocusSelector = '#tool-list';
+            let suggestedStatusMessage = 'Opened CLI + MCP so the latest shared tool activity can be inspected.';
+            let suggestedButtonLabel = 'Open CLI + MCP';
+            if (lastToolName.includes('review_ui') || lastToolName.includes('optimize_ui') || lastToolName.includes('browser_audit')) {
+                suggestedTab = 'ux-review';
+                suggestedFocusSelector = '#ux-review-notes';
+                suggestedStatusMessage = 'Opened UX Audit to continue the latest optimizer workflow.';
+                suggestedButtonLabel = 'Open UX Audit';
+            } else if (lastToolName.includes('export') || lastToolName.includes('generate_complaint') || lastToolName.includes('draft')) {
+                suggestedTab = 'draft';
+                suggestedFocusSelector = '#draft-provenance-preview';
+                suggestedStatusMessage = 'Opened Draft so the latest generation or export activity can be checked.';
+                suggestedButtonLabel = 'Open Draft provenance';
+            } else if (lastToolName.includes('review_case') || lastToolName.includes('evidence') || lastToolName.includes('mediator')) {
+                suggestedTab = 'review';
+                suggestedFocusSelector = '#support-grid';
+                suggestedStatusMessage = 'Opened Review so the latest support-related tool activity can be checked.';
+                suggestedButtonLabel = 'Open Review';
+            } else if (lastToolName.includes('intake') || lastToolName.includes('case_synopsis') || lastToolName.includes('claim_type') || lastToolName.includes('start_session')) {
+                suggestedTab = 'intake';
+                suggestedFocusSelector = '#case-synopsis';
+                suggestedStatusMessage = 'Opened Intake so the latest complaint-framing activity can be checked.';
+                suggestedButtonLabel = 'Open Intake';
+            }
+            activitySurfaceButton.dataset.targetTab = suggestedTab;
+            activitySurfaceButton.dataset.focusSelector = suggestedFocusSelector;
+            activitySurfaceButton.dataset.statusMessage = suggestedStatusMessage;
+            activitySurfaceButton.textContent = suggestedButtonLabel;
+            activityRecheckButton.dataset.targetTab = 'integrations';
+            activityRecheckButton.dataset.focusSelector = '#client-release-gate-preview';
+            activityRecheckButton.dataset.statusMessage = 'Opened CLI + MCP so complaint readiness and release-gate posture can be refreshed.';
+            activityOptimizerButton.dataset.targetTab = 'ux-review';
+            activityOptimizerButton.dataset.focusSelector = '#ux-review-notes';
+            activityOptimizerButton.dataset.statusMessage = 'Opened UX Audit from the session activity rail.';
+
             activityLedger.innerHTML = ledgerEntries.length
-                ? ledgerEntries.map((entry) => `
+                ? ledgerEntries.slice(0, 3).map((entry) => `
                     <div class="diagnostic-item">
                         <strong>${escapeHtml(String(entry.tool_name || 'unknown tool'))}</strong>
                         <span>${escapeHtml(`status: ${entry.status || 'unknown'} | started: ${entry.started_at || 'unknown'}${entry.finished_at ? ` | finished: ${entry.finished_at}` : ''}`)}</span>
@@ -5421,7 +5751,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const hasExportPath = toolNames.has('complaint.export_packet') || toolNames.has('complaint.export_complaint_markdown');
             const hasUiAuditPath = toolNames.has('complaint.review_ui') || toolNames.has('complaint.optimize_ui');
 
-            phaseChip.textContent = `phase: ${state.phaseLabel}`;
+            phaseChip.textContent = `case phase: ${state.phaseLabel}`;
             toolChip.textContent = `tools: ${availableToolCount} shared MCP tools`;
             guidance.textContent = state.builderReady
                 ? 'The case is far enough along to treat export, release-gate review, and UX audit as operational actions from this panel.'
@@ -5510,6 +5840,15 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const missingCount = overview.missing_elements || 0;
             const evidenceCount = (overview.testimony_items || 0) + (overview.document_items || 0);
             const caseSynopsis = String(sessionPayload.case_synopsis || session.case_synopsis || '').trim();
+            const primaryTargetTab = answeredCount < totalQuestions
+                ? 'intake'
+                : (missingCount > 0 || evidenceCount === 0)
+                    ? 'evidence'
+                    : resolvedDraft.hasDraft
+                        ? 'review'
+                        : (answeredCount >= totalQuestions && missingCount === 0 && evidenceCount > 0)
+                            ? 'draft'
+                            : 'integrations';
 
             const actions = [];
             if (answeredCount < totalQuestions) {
@@ -5598,7 +5937,14 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 });
             }
 
-            container.innerHTML = actions.slice(0, 6).map((action, index) => `
+            const filteredActions = actions.filter((action, index) => {
+                if (index === 0) {
+                    return true;
+                }
+                return action.targetTab !== primaryTargetTab;
+            }).filter((action, index, values) => values.findIndex((candidate) => candidate.targetTab === action.targetTab && candidate.buttonLabel === action.buttonLabel) === index);
+
+            container.innerHTML = filteredActions.slice(0, 4).map((action, index) => `
                 <div class="quick-action-card">
                     <strong>${escapeHtml(action.label)}</strong>
                     <span>${escapeHtml(action.detail)}</span>
@@ -6868,6 +7214,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             );
         });
         document.getElementById('focus-rail-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the workflow focus rail so support and release-gate posture can be checked.'));
+        document.getElementById('session-tool-open-surface-button').addEventListener('click', () => {
+            const button = document.getElementById('session-tool-open-surface-button');
+            jumpToStage(button.dataset.targetTab || 'integrations', button.dataset.focusSelector || '', button.dataset.statusMessage || 'Opened the surface related to the latest MCP activity.');
+        });
+        document.getElementById('session-tool-recheck-button').addEventListener('click', async () => {
+            jumpToStage('integrations', '#client-release-gate-preview', 'Opened CLI + MCP so complaint readiness and release-gate posture can be refreshed.');
+            await refreshComplaintReadinessPanel();
+            await refreshClientReleaseGatePanel();
+        });
+        document.getElementById('session-tool-optimizer-button').addEventListener('click', () => jumpToStage('ux-review', '#ux-review-notes', 'Opened UX Audit from the session activity rail.'));
         document.getElementById('action-refresh-button').addEventListener('click', refreshWorkspace);
         document.getElementById('shortcut-intake-button').addEventListener('click', () => jumpToStage('intake', '#intake-party_name', 'Opened Intake so the complaint story can be captured.'));
         document.getElementById('shortcut-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so support can be attached to the case theory.'));
