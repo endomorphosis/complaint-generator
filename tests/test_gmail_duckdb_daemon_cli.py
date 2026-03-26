@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
+import io
 from pathlib import Path
 
 
@@ -224,3 +226,113 @@ def test_start_status_and_stop_daemon_commands(tmp_path, monkeypatch):
     stop_payload = module._stop_daemon(stop_args)
     assert stop_payload["status"] == "stopping"
     assert captured["killed"][0] == 424242
+
+
+def test_build_progress_summary_reports_estimated_completion(tmp_path):
+    module = _load_script_module()
+    evidence_root = tmp_path / "evidence"
+    artifact_root = evidence_root / "case-user" / "gmail-import"
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    for index in range(2):
+        message_dir = artifact_root / f"0000000-0000999" / f"uid_{index:010d}"
+        message_dir.mkdir(parents=True, exist_ok=True)
+        (message_dir / "message.eml").write_bytes(b"raw-email")
+
+    state_dir = artifact_root / "_state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = state_dir / "gmail-daemon_checkpoint.json"
+    checkpoint_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "folders": {
+                    "[Gmail]/All Mail": {
+                        "estimated_total_messages": 5,
+                        "estimated_total_messages_exact": True,
+                        "last_processed_uid": 999,
+                        "next_uid_upper_bound": 777,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    progress_path = state_dir / "gmail-daemon_progress.json"
+    progress_path.write_text(
+        json.dumps(
+            {
+                "status": "running",
+                "imported_count": 2,
+                "searched_message_count": 2,
+                "raw_email_total_bytes": 123,
+                "estimated_total_messages": 5,
+                "estimated_total_messages_exact": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(
+        user_id="case-user",
+        evidence_root=str(evidence_root),
+        checkpoint_name="gmail-daemon",
+        folder="[Gmail]/All Mail",
+    )
+
+    summary = module._build_progress_summary(args)
+    assert summary["eml_file_count"] == 2
+    assert summary["estimated_total_messages"] == 5
+    assert summary["estimated_total_messages_exact"] is True
+    assert summary["estimated_remaining_messages"] == 3
+    assert summary["estimated_completion_percent"] == 40.0
+
+
+def test_main_status_prints_human_readable_progress_summary(tmp_path, monkeypatch):
+    module = _load_script_module()
+    duckdb_dir = tmp_path / "duckdb"
+    duckdb_dir.mkdir(parents=True, exist_ok=True)
+    pid_file = duckdb_dir / "gmail_duckdb_daemon.pid"
+    status_file = duckdb_dir / "gmail_duckdb_daemon_status.json"
+    pid_file.write_text("424242\n", encoding="utf-8")
+    status_file.write_text(
+        json.dumps(
+            {
+                "status": "running",
+                "phase": "running_cycle",
+                "progress_summary": {
+                    "eml_file_count": 5629,
+                    "estimated_total_messages": 140012,
+                    "estimated_completion_percent": 4.02,
+                    "estimated_remaining_messages": 134383,
+                    "raw_email_total_bytes": 19777974,
+                    "last_processed_uid": 749419,
+                    "next_uid_upper_bound": 742633,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "_pid_is_running", lambda pid: pid == 424242)
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        [
+            "gmail_duckdb_daemon.py",
+            "status",
+            "--user-id",
+            "case-user",
+            "--duckdb-output-dir",
+            str(duckdb_dir),
+        ],
+    )
+
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+        exit_code = module.main()
+
+    text = stdout.getvalue()
+    assert exit_code == 0
+    assert "Daemon status: running" in text
+    assert "Phase: running_cycle" in text
+    assert "Progress: 5629 / 140012 (4.02%)" in text
+    assert "Estimated remaining: 134383" in text

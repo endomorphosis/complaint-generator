@@ -90,6 +90,12 @@ def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
         "checkpoint_strategy": "",
         "historical_backfill_complete": False,
         "artifact_directory_count": 0,
+        "eml_file_count": 0,
+        "estimated_total_messages": None,
+        "estimated_total_messages_exact": False,
+        "estimated_remaining_messages": None,
+        "estimated_completion_ratio": None,
+        "estimated_completion_percent": None,
     }
 
     if artifact_root.exists():
@@ -97,6 +103,10 @@ def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
             summary["artifact_directory_count"] = sum(1 for item in artifact_root.rglob("*") if item.is_dir() and item.name != "_state" and item.parent != artifact_root / "_state")
         except Exception:
             summary["artifact_directory_count"] = 0
+        try:
+            summary["eml_file_count"] = sum(1 for item in artifact_root.rglob("message.eml") if item.is_file())
+        except Exception:
+            summary["eml_file_count"] = 0
 
     if progress_path.exists():
         try:
@@ -104,6 +114,9 @@ def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
             summary["imported_count"] = int(progress.get("imported_count") or 0)
             summary["searched_message_count"] = int(progress.get("searched_message_count") or 0)
             summary["raw_email_total_bytes"] = int(progress.get("raw_email_total_bytes") or 0)
+            if progress.get("estimated_total_messages") is not None:
+                summary["estimated_total_messages"] = int(progress.get("estimated_total_messages") or 0)
+                summary["estimated_total_messages_exact"] = bool(progress.get("estimated_total_messages_exact"))
             summary["progress_status"] = str(progress.get("status") or "")
             summary["progress_updated_at"] = str(progress.get("updated_at") or "")
             summary["progress_skipped_count"] = int(progress.get("skipped_count") or 0)
@@ -134,9 +147,21 @@ def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
             summary["folder_last_run_searched_message_count"] = int(folder_state.get("last_run_searched_message_count") or 0)
             summary["checkpoint_strategy"] = str(folder_state.get("checkpoint_strategy") or "")
             summary["historical_backfill_complete"] = bool(folder_state.get("historical_backfill_complete"))
+            if folder_state.get("estimated_total_messages") is not None:
+                summary["estimated_total_messages"] = int(folder_state.get("estimated_total_messages") or 0)
+                summary["estimated_total_messages_exact"] = bool(folder_state.get("estimated_total_messages_exact"))
             summary["checkpoint_updated_at"] = str(folder_state.get("updated_at") or "")
         except Exception as exc:
             summary["checkpoint_error"] = str(exc)
+
+    estimated_total = summary.get("estimated_total_messages")
+    if isinstance(estimated_total, int) and estimated_total > 0:
+        downloaded_count = int(summary.get("eml_file_count") or 0)
+        remaining = max(0, estimated_total - downloaded_count)
+        ratio = min(1.0, max(0.0, downloaded_count / float(estimated_total)))
+        summary["estimated_remaining_messages"] = remaining
+        summary["estimated_completion_ratio"] = ratio
+        summary["estimated_completion_percent"] = round(ratio * 100.0, 2)
 
     return summary
 
@@ -643,6 +668,36 @@ def _stop_daemon(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _format_status_payload_text(payload: dict[str, Any]) -> str:
+    status_payload = payload.get("status_payload") or {}
+    progress = status_payload.get("progress_summary") or {}
+    lines = [
+        f"Daemon status: {status_payload.get('status') or payload.get('status') or 'unknown'}",
+        f"Running: {'yes' if payload.get('running') else 'no'}",
+        f"Phase: {status_payload.get('phase') or 'unknown'}",
+    ]
+    completion_percent = progress.get("estimated_completion_percent")
+    downloaded = progress.get("eml_file_count")
+    estimated_total = progress.get("estimated_total_messages")
+    if completion_percent is not None and estimated_total:
+        lines.append(
+            f"Progress: {int(downloaded or 0)} / {int(estimated_total)} ({float(completion_percent):.2f}%)"
+        )
+    elif downloaded is not None:
+        lines.append(f"Downloaded emails: {int(downloaded)}")
+    remaining = progress.get("estimated_remaining_messages")
+    if remaining is not None:
+        lines.append(f"Estimated remaining: {int(remaining)}")
+    if progress.get("raw_email_total_bytes") is not None:
+        lines.append(f"Raw email bytes: {int(progress.get('raw_email_total_bytes') or 0)}")
+    if progress.get("last_processed_uid") is not None:
+        lines.append(f"Last processed UID: {int(progress.get('last_processed_uid') or 0)}")
+    if progress.get("next_uid_upper_bound") is not None:
+        lines.append(f"Next UID upper bound: {int(progress.get('next_uid_upper_bound') or 0)}")
+    lines.append(f"Status file: {payload.get('status_file')}")
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -668,7 +723,10 @@ def main() -> int:
     if getattr(args, "json", False):
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
-        print(json.dumps(payload, indent=2, sort_keys=True))
+        if args.command == "status":
+            print(_format_status_payload_text(payload))
+        else:
+            print(json.dumps(payload, indent=2, sort_keys=True))
     return 0
 
 

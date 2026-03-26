@@ -68,6 +68,10 @@ class _FakeConnection:
             messages = self._messages_by_folder.get(self._selected_folder, [])
             uids = list(self._uids_by_folder.get(self._selected_folder, []))
             criteria = [str(item.decode("ascii") if isinstance(item, bytes) else item) for item in args[1:]]
+            return_count_only = False
+            if criteria[:2] == ["RETURN", "(COUNT)"]:
+                return_count_only = True
+                criteria = criteria[2:]
             if "UID" in criteria:
                 uid_index = criteria.index("UID")
                 if uid_index + 1 < len(criteria):
@@ -88,6 +92,8 @@ class _FakeConnection:
                         and (end_uid is None or int(uid.decode("ascii")) <= end_uid)
                     ]
                     uids = [item[0] for item in filtered_pairs]
+            if return_count_only:
+                return "OK", [f"COUNT {len(uids)}".encode("ascii")]
             return "OK", [b" ".join(uids)]
         if command_name == "fetch":
             uid = args[0]
@@ -250,6 +256,52 @@ def test_import_gmail_evidence_can_collect_all_messages_without_address_filter(t
     assert payload["imported_count"] == 2
     assert payload["skipped_count"] == 0
     assert sorted(item["subject"] for item in payload["imported"]) == ["Mailbox-wide email 1", "Mailbox-wide email 2"]
+
+
+def test_import_gmail_evidence_records_estimated_total_messages_for_collect_all_checkpoint(tmp_path, monkeypatch):
+    messages = [
+        _build_email_bytes(
+            subject=f"Mailbox-wide email {index}",
+            sender="alerts@example.com",
+            recipient="other@example.com",
+            body="This message should be counted toward the mailbox estimate.",
+        )
+        for index in range(1, 4)
+    ]
+
+    monkeypatch.setattr(
+        "complaint_generator.email_import.create_email_processor",
+        lambda **kwargs: _FakeProcessor(messages),
+    )
+
+    async def _run_import():
+        return await import_gmail_evidence(
+            addresses=[],
+            collect_all_messages=True,
+            user_id="case-user",
+            claim_element_id="causation",
+            workspace_root=tmp_path / "sessions",
+            evidence_root=tmp_path / "evidence",
+            folder="INBOX",
+            gmail_user="user@gmail.com",
+            gmail_app_password="app-password",
+            use_uid_checkpoint=True,
+            checkpoint_name="gmail-estimate",
+            uid_window_size=2,
+        )
+
+    payload = anyio.run(_run_import)
+
+    assert payload["estimated_total_messages"] == 3
+    assert payload["estimated_total_messages_exact"] is True
+    folder_state = payload["checkpoint"]["folders"]["INBOX"]
+    assert folder_state["estimated_total_messages"] == 3
+    assert folder_state["estimated_total_messages_exact"] is True
+
+    progress_path = Path(payload["checkpoint_path"]).parent / "gmail-estimate_progress.json"
+    progress_payload = json.loads(progress_path.read_text(encoding="utf-8"))
+    assert progress_payload["estimated_total_messages"] == 3
+    assert progress_payload["estimated_total_messages_exact"] is True
 
 
 def test_import_gmail_evidence_can_skip_workspace_persistence_for_bulk_collection(tmp_path, monkeypatch):

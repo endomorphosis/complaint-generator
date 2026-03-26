@@ -262,6 +262,34 @@ def _uid_range_search_criteria(
     return criteria
 
 
+def _date_search_criteria(
+    *,
+    date_after: Optional[str],
+    date_before: Optional[str],
+) -> list[str]:
+    criteria: list[str] = []
+    if date_after:
+        after_value = datetime.fromisoformat(str(date_after)).strftime("%d-%b-%Y")
+        criteria.extend(["SINCE", after_value])
+    if date_before:
+        before_value = datetime.fromisoformat(str(date_before)).strftime("%d-%b-%Y")
+        criteria.extend(["BEFORE", before_value])
+    if not criteria:
+        criteria = ["ALL"]
+    return criteria
+
+
+def _extract_search_count(data: Sequence[Any]) -> Optional[int]:
+    raw_text = b" ".join(
+        item if isinstance(item, bytes) else str(item or "").encode("utf-8", errors="ignore")
+        for item in (data or [])
+    ).decode("utf-8", errors="ignore")
+    match = re.search(r"COUNT\s+(\d+)", raw_text, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def _is_imap_search_result_too_large(exc: BaseException) -> bool:
     message = str(exc or "").lower()
     return (
@@ -380,15 +408,7 @@ async def _search_message_ids(
             total_messages = int((count_data or [b"0"])[0] or b"0")
             start = max(1, total_messages - int(limit) + 1)
             return [str(index).encode("ascii") for index in range(start, total_messages + 1)]
-        criteria: list[str] = []
-        if date_after:
-            after_value = datetime.fromisoformat(str(date_after)).strftime("%d-%b-%Y")
-            criteria.extend(["SINCE", after_value])
-        if date_before:
-            before_value = datetime.fromisoformat(str(date_before)).strftime("%d-%b-%Y")
-            criteria.extend(["BEFORE", before_value])
-        if not criteria:
-            criteria = ["ALL"]
+        criteria = _date_search_criteria(date_after=date_after, date_before=date_before)
         status, data = connection.search(None, *criteria)
         if status != "OK":
             raise RuntimeError(f"failed to search IMAP folder {folder!r}: {status}")
@@ -425,14 +445,7 @@ async def _search_message_uids(
         criteria: list[str] = []
         if after_uid and int(after_uid) > 0:
             criteria.extend(["UID", f"{int(after_uid) + 1}:*"])
-        if date_after:
-            after_value = datetime.fromisoformat(str(date_after)).strftime("%d-%b-%Y")
-            criteria.extend(["SINCE", after_value])
-        if date_before:
-            before_value = datetime.fromisoformat(str(date_before)).strftime("%d-%b-%Y")
-            criteria.extend(["BEFORE", before_value])
-        if not criteria:
-            criteria = ["ALL"]
+        criteria.extend(_date_search_criteria(date_after=date_after, date_before=date_before))
         status, data = connection.uid("search", None, *criteria)
         if status != "OK":
             raise RuntimeError(f"failed to UID search IMAP folder {folder!r}: {status}")
@@ -453,6 +466,36 @@ async def _get_uidnext(connection: Any, *, folder: str) -> int:
         if not match:
             raise RuntimeError(f"missing UIDNEXT in IMAP STATUS response for {folder!r}: {raw_text!r}")
         return int(match.group(1))
+
+    return await anyio.to_thread.run_sync(_run)
+
+
+async def _estimate_folder_message_count(
+    connection: Any,
+    *,
+    folder: str,
+    date_after: Optional[str],
+    date_before: Optional[str],
+) -> int:
+    def _run() -> int:
+        mailbox = _imap_mailbox_name(folder)
+        status, _ = connection.select(mailbox, readonly=True)
+        if status != "OK":
+            raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
+        criteria = _date_search_criteria(date_after=date_after, date_before=date_before)
+        try:
+            status, data = connection.uid("search", "RETURN", "(COUNT)", *criteria)
+            if status == "OK":
+                count = _extract_search_count(data or [])
+                if count is not None:
+                    return int(count)
+        except Exception:
+            pass
+        status, data = connection.uid("search", None, *criteria)
+        if status != "OK":
+            raise RuntimeError(f"failed to count UID search IMAP folder {folder!r}: {status}")
+        raw_ids = data[0] if data else b""
+        return len([item for item in raw_ids.split() if item])
 
     return await anyio.to_thread.run_sync(_run)
 
@@ -668,12 +711,17 @@ async def import_gmail_evidence(
         def _flush_incremental_progress(*, folder_name: str, folder_last_processed_uid: int) -> None:
             nonlocal checkpoint_file_path
             raw_email_total_bytes = sum(int(item.get("raw_size_bytes") or 0) for item in imported)
+            estimated_total_messages = None
+            estimated_total_messages_exact = False
             if use_uid_checkpoint and checkpoint_payload is not None:
                 folder_state = checkpoint_payload.setdefault("folders", {}).setdefault(folder_name, {})
                 folder_state["last_processed_uid"] = int(folder_last_processed_uid or 0)
                 folder_state["last_run_searched_message_count"] = len(message_ids)
                 folder_state["uid_range_span"] = int(uid_range_span or 0)
                 folder_state["updated_at"] = datetime.now(UTC).isoformat()
+                if folder_state.get("estimated_total_messages") is not None:
+                    estimated_total_messages = int(folder_state.get("estimated_total_messages") or 0)
+                    estimated_total_messages_exact = bool(folder_state.get("estimated_total_messages_exact"))
                 checkpoint_file_path = _save_checkpoint(artifact_root, checkpoint_name, checkpoint_payload)
             _save_progress(
                 artifact_root,
@@ -691,6 +739,8 @@ async def import_gmail_evidence(
                     "skipped_count": int(skipped_count),
                     "relevance_filtered_count": int(relevance_filtered_count),
                     "raw_email_total_bytes": int(raw_email_total_bytes),
+                    "estimated_total_messages": estimated_total_messages,
+                    "estimated_total_messages_exact": bool(estimated_total_messages_exact),
                     "checkpoint_path": str(checkpoint_file_path) if checkpoint_file_path is not None else None,
                     "updated_at": datetime.now(UTC).isoformat(),
                 },
@@ -702,6 +752,20 @@ async def import_gmail_evidence(
             try:
                 if use_uid_checkpoint:
                     folder_state = (checkpoint_payload or {}).setdefault("folders", {}).setdefault(folder_name, {})
+                    if (
+                        collect_all_messages
+                        and folder_state.get("estimated_total_messages") is None
+                    ):
+                        folder_state["estimated_total_messages"] = int(
+                            await _estimate_folder_message_count(
+                                processor.connection,
+                                folder=folder_name,
+                                date_after=resolved_date_after,
+                                date_before=date_before,
+                            )
+                        )
+                        folder_state["estimated_total_messages_exact"] = True
+                        folder_state["estimated_total_messages_updated_at"] = datetime.now(UTC).isoformat()
                     folder_last_processed_uid = int(folder_state.get("last_processed_uid") or 0)
                     cap = uid_window_size if uid_window_size is not None else limit
                     target_count = max(1, int(cap or 500))
@@ -932,6 +996,8 @@ async def import_gmail_evidence(
         if use_uid_checkpoint and checkpoint_payload is not None:
             checkpoint_file_path = _save_checkpoint(artifact_root, checkpoint_name, checkpoint_payload)
 
+        primary_folder_state = (((checkpoint_payload or {}).get("folders") or {}).get(str(folder or ""), {}) or {})
+
         manifest_path = _build_email_import_manifest(
             artifact_root=artifact_root,
             gmail_user=gmail_user,
@@ -975,6 +1041,10 @@ async def import_gmail_evidence(
                 "skipped_count": int(skipped_count),
                 "relevance_filtered_count": int(relevance_filtered_count),
                 "raw_email_total_bytes": int(sum(int(item.get("raw_size_bytes") or 0) for item in imported)),
+                "estimated_total_messages": (
+                    int(primary_folder_state.get("estimated_total_messages") or 0) or None
+                ),
+                "estimated_total_messages_exact": bool(primary_folder_state.get("estimated_total_messages_exact")),
                 "checkpoint_path": str(checkpoint_file_path) if checkpoint_file_path is not None else None,
                 "manifest_path": str(manifest_path),
                 "updated_at": datetime.now(UTC).isoformat(),
@@ -1015,6 +1085,8 @@ async def import_gmail_evidence(
             "skipped_count": skipped_count,
             "relevance_filtered_count": relevance_filtered_count,
             "raw_email_total_bytes": sum(int(item.get("raw_size_bytes") or 0) for item in imported),
+            "estimated_total_messages": (int(primary_folder_state.get("estimated_total_messages") or 0) or None),
+            "estimated_total_messages_exact": bool(primary_folder_state.get("estimated_total_messages_exact")),
             "manifest_path": str(manifest_path),
             "checkpoint_path": str(checkpoint_file_path) if checkpoint_file_path is not None else None,
             "checkpoint": checkpoint_payload,
