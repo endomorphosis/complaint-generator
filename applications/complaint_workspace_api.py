@@ -37,6 +37,10 @@ class GmailEvidenceImportRequest(BaseModel):
     evidence_root: Optional[str] = None
     gmail_user: Optional[str] = None
     gmail_app_password: Optional[str] = None
+    use_gmail_oauth: bool = False
+    gmail_oauth_client_secrets: Optional[str] = None
+    gmail_oauth_token_cache: Optional[str] = None
+    gmail_oauth_open_browser: bool = True
     complaint_query: Optional[str] = None
     complaint_keywords: List[str] = Field(default_factory=list)
     min_relevance_score: float = 0.0
@@ -129,6 +133,10 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             evidence_root=request.evidence_root,
             gmail_user=request.gmail_user,
             gmail_app_password=request.gmail_app_password,
+            use_gmail_oauth=request.use_gmail_oauth,
+            gmail_oauth_client_secrets=request.gmail_oauth_client_secrets,
+            gmail_oauth_token_cache=request.gmail_oauth_token_cache,
+            gmail_oauth_open_browser=request.gmail_oauth_open_browser,
             complaint_query=request.complaint_query,
             complaint_keywords=list(request.complaint_keywords or []),
             min_relevance_score=request.min_relevance_score,

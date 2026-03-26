@@ -377,6 +377,7 @@ def _run_page_review_task(task: Dict[str, Any]) -> Dict[str, Any]:
         config_path=task.get("config_path"),
         backend_id=task.get("backend_id"),
         output_path=None,
+        diagnostics_dir=task.get("diagnostics_dir"),
         artifact_metadata=list(task.get("artifact_metadata") or []),
         compact_page_prompt=bool(task.get("compact_page_prompt", True)),
         page_review_executor="inline",
@@ -1226,6 +1227,46 @@ def _load_backend_kwargs(config_path: Optional[str], backend_id: Optional[str]) 
     return config
 
 
+def _slugify_path_label(value: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or "").strip())
+    normalized = "-".join(part for part in cleaned.split("-") if part)
+    return normalized or "ui-review"
+
+
+def _default_ui_review_diagnostics_dir(output_path: Optional[str]) -> Optional[Path]:
+    if not output_path:
+        return None
+    destination = Path(output_path).expanduser().resolve()
+    stem = destination.stem or "ui-review"
+    return destination.parent / f"{stem}-codex-diagnostics"
+
+
+def _ui_review_codex_trace_kwargs(
+    *,
+    provider: Optional[str],
+    screenshots: Iterable[Path],
+    diagnostics_dir: Optional[str],
+) -> Dict[str, Any]:
+    provider_name = str(provider or "").strip().lower()
+    if provider_name not in {"codex_cli", "codex"}:
+        return {}
+    if not diagnostics_dir:
+        return {}
+
+    root = Path(diagnostics_dir).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    screenshot_names = [_slugify_path_label(path.stem) for path in list(screenshots or []) if isinstance(path, Path)]
+    label = screenshot_names[0] if len(screenshot_names) == 1 else "multi-page-review"
+    trace_jsonl_path = root / f"{label}.codex.jsonl"
+    return {
+        "trace": True,
+        "trace_dir": str(root),
+        "trace_jsonl_path": str(trace_jsonl_path),
+        "trace_stderr_path": str(trace_jsonl_path).replace(".jsonl", ".stderr.log"),
+        "trace_metadata_path": str(trace_jsonl_path).replace(".jsonl", ".metadata.json"),
+    }
+
+
 def _resolve_ui_review_backend(
     provider: Optional[str],
     model: Optional[str],
@@ -1389,6 +1430,7 @@ def create_ui_review_report(
     config_path: Optional[str] = None,
     backend_id: Optional[str] = None,
     output_path: Optional[str] = None,
+    diagnostics_dir: Optional[str] = None,
     artifact_metadata: Optional[List[Dict[str, Any]]] = None,
     compact_page_prompt: bool = False,
     page_review_executor: str = "inline",
@@ -1403,6 +1445,17 @@ def create_ui_review_report(
         model,
         config_path=config_path,
         backend_id=backend_id,
+    )
+    resolved_diagnostics_dir = diagnostics_dir
+    if resolved_diagnostics_dir is None:
+        default_diagnostics_dir = _default_ui_review_diagnostics_dir(output_path)
+        resolved_diagnostics_dir = str(default_diagnostics_dir) if default_diagnostics_dir else None
+    backend_kwargs.update(
+        _ui_review_codex_trace_kwargs(
+            provider=backend_kwargs.get("provider"),
+            screenshots=screenshots,
+            diagnostics_dir=resolved_diagnostics_dir,
+        )
     )
     use_compact_prompt = _should_use_compact_ui_review_prompt(
         provider=backend_kwargs.get("provider"),
@@ -1434,6 +1487,11 @@ def create_ui_review_report(
                     "backend_id": backend_id,
                     "artifact_metadata": page_artifacts,
                     "compact_page_prompt": True,
+                    "diagnostics_dir": (
+                        str(Path(resolved_diagnostics_dir).expanduser().resolve() / "pages")
+                        if resolved_diagnostics_dir
+                        else None
+                    ),
                 }
             )
 

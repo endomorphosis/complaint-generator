@@ -325,3 +325,60 @@ def test_import_gmail_evidence_can_resume_by_uid_checkpoint(tmp_path, monkeypatc
     assert second_payload["imported_count"] == 1
     assert second_payload["imported"][0]["subject"] == "Termination email 2"
     assert second_payload["checkpoint"]["folders"]["INBOX"]["last_processed_uid"] == 102
+
+
+def test_import_gmail_evidence_can_use_gmail_oauth(tmp_path, monkeypatch):
+    matching_message = _build_email_bytes(
+        subject="Termination email",
+        sender="hr@example.com",
+        recipient="employee@example.com",
+        body="Your employment is terminated effective immediately.",
+    )
+    fake_processor = _FakeProcessor([matching_message])
+    oauth_calls = {}
+
+    monkeypatch.setattr(
+        "complaint_generator.email_import.create_email_processor",
+        lambda **kwargs: fake_processor,
+    )
+    monkeypatch.setattr(
+        "complaint_generator.email_import.resolve_gmail_oauth_access_token",
+        lambda **kwargs: ("oauth-access-token", {"expires_at": 1234567890, "refresh_token": "refresh-token"}),
+    )
+
+    async def fake_connect_processor_with_xoauth2(processor, *, gmail_user, access_token):
+        oauth_calls.update({"processor": processor, "gmail_user": gmail_user, "access_token": access_token})
+        processor.connected = True
+        return {"status": "success", "auth_mode": "gmail_oauth"}
+
+    monkeypatch.setattr("complaint_generator.email_import._connect_processor_with_xoauth2", fake_connect_processor_with_xoauth2)
+
+    workspace_root = tmp_path / "sessions"
+    evidence_root = tmp_path / "evidence"
+    service = ComplaintWorkspaceService(root_dir=workspace_root)
+    client_secrets = tmp_path / "client-secrets.json"
+    client_secrets.write_text('{"installed":{"client_id":"abc","client_secret":"def","redirect_uris":["http://127.0.0.1"]}}', encoding="utf-8")
+    token_cache = tmp_path / "gmail-token.json"
+
+    async def _run_import():
+        return await import_gmail_evidence(
+            addresses=["hr@example.com", "employee@example.com"],
+            user_id="case-user",
+            claim_element_id="causation",
+            workspace_root=workspace_root,
+            evidence_root=evidence_root,
+            folder="INBOX",
+            gmail_user="user@gmail.com",
+            use_gmail_oauth=True,
+            gmail_oauth_client_secrets=str(client_secrets),
+            gmail_oauth_token_cache=str(token_cache),
+            gmail_oauth_open_browser=False,
+            service=service,
+        )
+
+    payload = anyio.run(_run_import)
+
+    assert payload["auth_mode"] == "gmail_oauth"
+    assert oauth_calls["gmail_user"] == "user@gmail.com"
+    assert oauth_calls["access_token"] == "oauth-access-token"
+    assert payload["gmail_oauth"]["has_refresh_token"] is True

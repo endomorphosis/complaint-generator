@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Iterable, Optional, Sequence
 
 from ipfs_datasets_py.processors.multimedia.email_processor import create_email_processor
 from .evidence_relevance import build_complaint_terms, score_email_relevance
+from .email_oauth import build_xoauth2_bytes, resolve_gmail_oauth_access_token
 
 if TYPE_CHECKING:
     from applications.complaint_workspace import ComplaintWorkspaceService
@@ -373,6 +374,26 @@ async def _fetch_raw_message_by_uid(connection: Any, uid: bytes) -> bytes:
     return await anyio.to_thread.run_sync(_run)
 
 
+async def _connect_processor_with_xoauth2(processor: Any, *, gmail_user: str, access_token: str) -> dict[str, Any]:
+    def _run() -> dict[str, Any]:
+        connection = imaplib.IMAP4_SSL(processor.server, processor.port, timeout=processor.timeout)
+        xoauth2 = build_xoauth2_bytes(gmail_user, access_token)
+        connection.authenticate("XOAUTH2", lambda _challenge: xoauth2)
+        processor.connection = connection
+        processor.connected = True
+        return {
+            "status": "success",
+            "protocol": "imap",
+            "server": processor.server,
+            "port": processor.port,
+            "username": gmail_user,
+            "connected": True,
+            "auth_mode": "gmail_oauth",
+        }
+
+    return await anyio.to_thread.run_sync(_run)
+
+
 async def import_gmail_evidence(
     *,
     addresses: Sequence[str],
@@ -387,6 +408,10 @@ async def import_gmail_evidence(
     date_before: Optional[str] = None,
     gmail_user: Optional[str] = None,
     gmail_app_password: Optional[str] = None,
+    use_gmail_oauth: bool = False,
+    gmail_oauth_client_secrets: Optional[str] = None,
+    gmail_oauth_token_cache: Optional[str] = None,
+    gmail_oauth_open_browser: bool = True,
     complaint_query: Optional[str] = None,
     complaint_keywords: Sequence[str] = (),
     complaint_keyword_files: Sequence[str] = (),
@@ -428,7 +453,21 @@ async def import_gmail_evidence(
     checkpoint_payload = _load_checkpoint(artifact_root, checkpoint_name) if use_uid_checkpoint else None
     checkpoint_file_path = _checkpoint_path(artifact_root, checkpoint_name) if use_uid_checkpoint else None
 
-    await processor.connect()
+    oauth_token_payload: dict[str, Any] | None = None
+    if use_gmail_oauth:
+        if not gmail_user:
+            raise ValueError("gmail_user is required when use_gmail_oauth=True")
+        if not gmail_oauth_client_secrets:
+            raise ValueError("gmail_oauth_client_secrets is required when use_gmail_oauth=True")
+        access_token, oauth_token_payload = resolve_gmail_oauth_access_token(
+            gmail_user=gmail_user,
+            client_secrets_path=gmail_oauth_client_secrets,
+            token_cache_path=gmail_oauth_token_cache,
+            open_browser=gmail_oauth_open_browser,
+        )
+        await _connect_processor_with_xoauth2(processor, gmail_user=gmail_user, access_token=access_token)
+    else:
+        await processor.connect()
     try:
         imported: list[dict[str, Any]] = []
         skipped_count = 0
@@ -645,6 +684,16 @@ async def import_gmail_evidence(
             checkpoint_path=checkpoint_file_path,
             checkpoint_payload=checkpoint_payload,
         )
+        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if use_gmail_oauth:
+            manifest_payload["gmail_oauth"] = {
+                "client_secrets_path": str(Path(gmail_oauth_client_secrets).expanduser().resolve()) if gmail_oauth_client_secrets else "",
+                "token_cache_path": str(Path(gmail_oauth_token_cache).expanduser().resolve()) if gmail_oauth_token_cache else "",
+                "open_browser": bool(gmail_oauth_open_browser),
+                "expires_at": (oauth_token_payload or {}).get("expires_at"),
+                "has_refresh_token": bool((oauth_token_payload or {}).get("refresh_token")),
+            }
+            manifest_path.write_text(json.dumps(manifest_payload, indent=2, ensure_ascii=False), encoding="utf-8")
         return {
             "status": "success",
             "gmail_user": gmail_user or "",
@@ -657,6 +706,7 @@ async def import_gmail_evidence(
             "matched_addresses": normalized_addresses,
             "complaint_terms": complaint_terms,
             "min_relevance_score": float(min_relevance_score),
+            "auth_mode": "gmail_oauth" if use_gmail_oauth else "gmail_app_password",
             "use_uid_checkpoint": bool(use_uid_checkpoint),
             "uid_window_size": int(uid_window_size) if uid_window_size is not None else None,
             "searched_message_count": searched_message_count,
@@ -667,6 +717,17 @@ async def import_gmail_evidence(
             "manifest_path": str(manifest_path),
             "checkpoint_path": str(checkpoint_file_path) if checkpoint_file_path is not None else None,
             "checkpoint": checkpoint_payload,
+            "gmail_oauth": (
+                {
+                    "client_secrets_path": str(Path(gmail_oauth_client_secrets).expanduser().resolve()) if gmail_oauth_client_secrets else "",
+                    "token_cache_path": str(Path(gmail_oauth_token_cache).expanduser().resolve()) if gmail_oauth_token_cache else "",
+                    "open_browser": bool(gmail_oauth_open_browser),
+                    "expires_at": (oauth_token_payload or {}).get("expires_at"),
+                    "has_refresh_token": bool((oauth_token_payload or {}).get("refresh_token")),
+                }
+                if use_gmail_oauth
+                else None
+            ),
             "imported": imported,
         }
     finally:

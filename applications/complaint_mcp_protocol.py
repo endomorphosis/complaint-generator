@@ -69,6 +69,10 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "evidence_root": {"type": "string"},
             "gmail_user": {"type": "string"},
             "gmail_app_password": {"type": "string"},
+            "use_gmail_oauth": {"type": "boolean"},
+            "gmail_oauth_client_secrets": {"type": "string"},
+            "gmail_oauth_token_cache": {"type": "string"},
+            "gmail_oauth_open_browser": {"type": "boolean"},
             "complaint_query": {"type": "string"},
             "complaint_keywords": {
                 "type": "array",

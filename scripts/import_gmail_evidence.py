@@ -36,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--evidence-root", default=None, help="Directory to write imported email artifacts to.")
     parser.add_argument("--gmail-user", default=os.environ.get("GMAIL_USER") or os.environ.get("EMAIL_USER"), help="Gmail address. Defaults to GMAIL_USER or EMAIL_USER.")
     parser.add_argument("--gmail-app-password", default=os.environ.get("GMAIL_APP_PASSWORD") or os.environ.get("EMAIL_PASS"), help="Gmail app password. Defaults to GMAIL_APP_PASSWORD or EMAIL_PASS.")
+    parser.add_argument("--use-gmail-oauth", action="store_true", help="Authenticate to Gmail IMAP with OAuth/XOAUTH2 instead of an app password.")
+    parser.add_argument("--gmail-oauth-client-secrets", default=os.environ.get("GMAIL_OAUTH_CLIENT_SECRETS"), help="Google OAuth client-secrets JSON path.")
+    parser.add_argument("--gmail-oauth-token-cache", default=os.environ.get("GMAIL_OAUTH_TOKEN_CACHE"), help="Optional Gmail OAuth token-cache path.")
+    parser.add_argument("--no-gmail-oauth-browser", action="store_true", help="Do not automatically open the browser during the Gmail OAuth loopback flow.")
     parser.add_argument("--prompt-for-credentials", action="store_true", help="Prompt interactively for Gmail credentials. Password input is hidden.")
     parser.add_argument("--use-keyring", action="store_true", help="Load the Gmail app password from the OS keyring when available.")
     parser.add_argument("--save-to-keyring", action="store_true", help="Save the resolved Gmail app password to the OS keyring when available.")
@@ -69,6 +73,10 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         complaint_keywords=args.complaint_keyword,
         complaint_keyword_files=args.complaint_keyword_file,
         min_relevance_score=args.min_relevance_score,
+        use_gmail_oauth=args.use_gmail_oauth,
+        gmail_oauth_client_secrets=args.gmail_oauth_client_secrets,
+        gmail_oauth_token_cache=args.gmail_oauth_token_cache,
+        gmail_oauth_open_browser=not bool(args.no_gmail_oauth_browser),
         use_uid_checkpoint=args.use_uid_checkpoint,
         checkpoint_name=args.checkpoint_name,
         uid_window_size=args.uid_window_size,
@@ -78,6 +86,13 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _resolve_credentials(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[str, str]:
+    if getattr(args, "use_gmail_oauth", False):
+        gmail_user = str(args.gmail_user or "").strip()
+        if not gmail_user:
+            parser.error("--gmail-user is required when --use-gmail-oauth is enabled.")
+        if not getattr(args, "gmail_oauth_client_secrets", None):
+            parser.error("--gmail-oauth-client-secrets is required when --use-gmail-oauth is enabled.")
+        return gmail_user, ""
     return resolve_gmail_credentials(
         gmail_user=str(args.gmail_user or ""),
         gmail_app_password=str(args.gmail_app_password or ""),

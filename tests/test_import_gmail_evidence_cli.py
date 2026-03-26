@@ -134,6 +134,27 @@ def test_resolve_credentials_can_load_password_from_ipfs_secrets_vault(monkeypat
     assert gmail_password == "stored-vault-password"
 
 
+def test_resolve_credentials_supports_gmail_oauth_without_app_password():
+    module = _load_script_module()
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        gmail_user="user@gmail.com",
+        gmail_app_password="",
+        use_gmail_oauth=True,
+        gmail_oauth_client_secrets="/tmp/client-secrets.json",
+        prompt_for_credentials=False,
+        use_keyring=False,
+        save_to_keyring=False,
+        use_ipfs_secrets_vault=False,
+        save_to_ipfs_secrets_vault=False,
+    )
+
+    gmail_user, gmail_password = module._resolve_credentials(args, parser)
+
+    assert gmail_user == "user@gmail.com"
+    assert gmail_password == ""
+
+
 def test_resolve_credentials_can_save_password_to_ipfs_secrets_vault(monkeypatch):
     module = _load_script_module()
     credentials_module = importlib.import_module("complaint_generator.email_credentials")

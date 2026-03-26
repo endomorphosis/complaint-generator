@@ -260,6 +260,33 @@ def test_create_ui_review_report_can_force_full_single_page_prompt(monkeypatch, 
     assert report["review"]["summary"] == "Full prompt review."
 
 
+def test_create_ui_review_report_enables_codex_trace_artifacts(monkeypatch, tmp_path: Path):
+    screenshot = tmp_path / "workspace.png"
+    screenshot.write_bytes(b"fake-png")
+    output_path = tmp_path / "review.json"
+
+    class FakeMultimodalBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+            assert kwargs["trace"] is True
+            assert kwargs["trace_dir"].endswith("review-codex-diagnostics")
+            assert kwargs["trace_jsonl_path"].endswith("workspace.codex.jsonl")
+            assert kwargs["trace_stderr_path"].endswith("workspace.codex.stderr.log")
+            assert kwargs["trace_metadata_path"].endswith("workspace.codex.metadata.json")
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            return '{"summary":"Trace-enabled review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FakeMultimodalBackend)
+
+    report = ui_review_module.create_ui_review_report([str(screenshot)], output_path=str(output_path))
+
+    assert report["backend"]["strategy"] == "multimodal_router"
+    assert report["review"]["summary"] == "Trace-enabled review."
+
+
 def test_run_ui_review_workflow_defaults_to_inline_page_reviews_for_codex_cli(monkeypatch, tmp_path: Path):
     screenshot = tmp_path / "workspace.png"
     screenshot.write_bytes(b"fake-png")

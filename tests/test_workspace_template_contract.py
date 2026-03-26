@@ -6,6 +6,15 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
 
     assert "gmail-import-user" in content
     assert "gmail-import-password" in content
+    assert "gmail-import-use-oauth" in content
+    assert "gmail-import-oauth-client-secrets" in content
+    assert "gmail-import-oauth-token-cache" in content
+    assert "gmail-import-oauth-open-browser" in content
+    assert "gmail-import-checkpoint-name" in content
+    assert "gmail-import-uid-window-size" in content
+    assert "gmail-import-summary-card" in content
+    assert "gmail-import-summary-chips" in content
+    assert "gmail-import-summary-preview" in content
     assert "gmail-import-remember-user" in content
     assert "gmail-import-folders" in content
     assert "gmail-import-complaint-query" in content
@@ -24,9 +33,18 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Selected for import" in content
     assert "Folders To Scan" in content
     assert "Minimum Relevance Score" in content
+    assert "Use Gmail OAuth for large mailbox collection" in content
+    assert "OAuth Client Secrets JSON" in content
+    assert "OAuth Token Cache" in content
+    assert "Open browser automatically for Gmail OAuth" in content
+    assert "UID Checkpoint Name" in content
+    assert "UID Window Size" in content
+    assert "Latest Gmail import" in content
     assert "Complaint Query" in content
     assert "Complaint Keywords" in content
     assert "broaden collection beyond a single inbox pass" in content
+    assert "resumable mailbox collection" in content
+    assert "UID checkpoints" in content
     assert "Describe the dispute in plain language" in content
     assert "Optional keyword phrases, one per line" in content
     assert "local-evidence-paths" in content
@@ -50,12 +68,18 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert '"tool": "complaint.import_gmail_evidence"' in content
     assert "await client.importGmailEvidence({" in content
     assert '"addresses": ["hr@example.com", "manager@example.com"]' in content
+    assert '"use_uid_checkpoint": true' in content
     assert "copyTextToClipboard(" in content
     assert "CLI Gmail import command copied." in content
     assert "MCP Gmail import example copied." in content
     assert "currentGmailImportAddresses()" in content
     assert "currentGmailImportFolders()" in content
     assert "currentGmailImportComplaintKeywords()" in content
+    assert "const useGmailOAuth = Boolean(document.getElementById('gmail-import-use-oauth').checked);" in content
+    assert "const gmailOauthClientSecrets = document.getElementById('gmail-import-oauth-client-secrets').value.trim()" in content
+    assert "const checkpointName = document.getElementById('gmail-import-checkpoint-name').value.trim();" in content
+    assert "const uidWindowSize = String(document.getElementById('gmail-import-uid-window-size').value || '').trim();" in content
+    assert "let latestGmailImportResult = null;" in content
     assert "setGmailImportAddresses(addresses)" in content
     assert "extractEmailAddresses(value)" in content
     assert "recordSuggestedGmailImportAddress(metadataByAddress, address, sourceLabel)" in content
@@ -85,10 +109,22 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Suggested ${suggested.length} email address" in content
     assert "JSON.stringify(mcpPayload, null, 2)" in content
     assert "--scan-folder" in content
+    assert "--use-gmail-oauth" in content
+    assert "--gmail-oauth-client-secrets" in content
+    assert "--gmail-oauth-token-cache" in content
+    assert "--no-gmail-oauth-browser" in content
+    assert "--use-uid-checkpoint" in content
+    assert "--checkpoint-name" in content
+    assert "--uid-window-size" in content
     assert "--complaint-query" in content
     assert "--complaint-keyword" in content
     assert "--min-relevance-score" in content
     assert "folders: folders.length ? folders : ['INBOX']" in content
+    assert "use_gmail_oauth: useGmailOAuth || undefined" in content
+    assert "gmail_oauth_client_secrets: useGmailOAuth ? gmailOauthClientSecrets : undefined" in content
+    assert "use_uid_checkpoint: true" in content
+    assert "checkpoint_name: checkpointName || undefined" in content
+    assert "uid_window_size: uidWindowSize ? Number(uidWindowSize) : undefined" in content
     assert "complaint_query: complaintQuery || undefined" in content
     assert "complaint_keywords: complaintKeywords" in content
     assert "min_relevance_score: Number(minRelevanceScore || '0')" in content
@@ -102,6 +138,25 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "const gmailAddressChip = event.target.closest('[data-gmail-address-chip]');" in content
     assert "document.getElementById('gmail-import-claim-element').addEventListener('change', renderGmailImportCommandExamples);" in content
     assert "document.getElementById('gmail-import-user').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-use-oauth').addEventListener('change', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-oauth-client-secrets').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-oauth-token-cache').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-oauth-open-browser').addEventListener('change', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-checkpoint-name').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "document.getElementById('gmail-import-uid-window-size').addEventListener('input', renderGmailImportCommandExamples);" in content
+    assert "Enter your Gmail app password before importing Gmail evidence, or enable Gmail OAuth." in content
+    assert "Add a Gmail OAuth client-secrets JSON path before using Gmail OAuth collection." in content
+    assert "UID checkpoint saved at ${payload.checkpoint_path}." in content
+    assert "function renderGmailImportSummary()" in content
+    assert "No Gmail import has been run in this browser session yet." in content
+    assert "Imported count: ${payload.imported_count || 0}" in content
+    assert "Manifest path:" in content
+    assert "Checkpoint path:" in content
+    assert "Checkpoint state:" in content
+    assert "Imported subjects:" in content
+    assert "latestGmailImportResult = payload || null;" in content
+    assert "latestGmailImportResult = null;" in content
+    assert "renderGmailImportSummary();" in content
     assert "async function importLocalEvidence()" in content
     assert "await client.importLocalEvidence({" in content
     assert "Add at least one local file or directory path before importing local evidence." in content
@@ -159,6 +214,9 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "latestSdkToolActivity" in content
     assert "loadLastSdkToolActivity" in content
     assert "complaint-mcp-sdk-call" in content
+    assert "tooling-parity-preview" in content
+    assert "sdkToMcpParityMap" in content
+    assert "Browser SDK parity summary" in content
     assert "renderOperationalToolLane" in content
     assert "runOperationalToolReadiness" in content
     assert "runOperationalMediatorHandoff" in content

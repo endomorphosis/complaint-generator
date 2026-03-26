@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,13 @@ def _read_text(path: Path, limit: int = 12000) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + "\n...[truncated]..."
+
+
+def _write_progress_artifact(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = dict(payload or {})
+    normalized["updated_at"] = datetime.now(UTC).isoformat()
+    path.write_text(json.dumps(normalized, indent=2, sort_keys=True))
 
 
 def collect_screenshot_artifacts(screenshot_dir: str | Path) -> list[dict[str, Any]]:
@@ -798,27 +806,71 @@ def run_iterative_ui_ux_workflow(
     resolved_notes = _resolve_review_notes(notes)
     target_output_dir = Path(output_dir or (Path(screenshot_dir) / "reviews"))
     target_output_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = target_output_dir / "workflow-progress.json"
+    _write_progress_artifact(
+        progress_path,
+        {
+            "status": "initialized",
+            "iterations_requested": max(1, iterations),
+            "screenshot_dir": str(screenshot_dir),
+            "pytest_target": str(pytest_target),
+            "provider": str(provider or ""),
+            "model": str(model or ""),
+        },
+    )
 
     previous_review: str | None = initial_previous_review
     run_reports: list[dict[str, Any]] = []
     latest_structured_review: dict[str, Any] = {}
 
     for iteration in range(1, max(1, iterations) + 1):
+        _write_progress_artifact(
+            progress_path,
+            {
+                "status": "running_playwright_audit",
+                "iteration": iteration,
+                "output_dir": str(target_output_dir),
+            },
+        )
         audit = run_playwright_screenshot_audit(
             screenshot_dir=screenshot_dir,
             pytest_target=pytest_target,
         )
         if audit["returncode"] != 0:
+            _write_progress_artifact(
+                progress_path,
+                {
+                    "status": "playwright_audit_failed",
+                    "iteration": iteration,
+                    "returncode": int(audit.get("returncode") or 1),
+                },
+            )
             raise RuntimeError(
                 "Playwright screenshot audit failed.\n"
                 f"stdout:\n{audit['stdout']}\n\nstderr:\n{audit['stderr']}"
             )
         if int(audit.get("artifact_count") or 0) <= 0:
+            _write_progress_artifact(
+                progress_path,
+                {
+                    "status": "playwright_audit_empty",
+                    "iteration": iteration,
+                    "returncode": int(audit.get("returncode") or 0),
+                },
+            )
             raise RuntimeError(
                 "Playwright screenshot audit completed without screenshot artifacts.\n"
                 f"stdout:\n{audit['stdout']}\n\nstderr:\n{audit['stderr']}"
             )
 
+        _write_progress_artifact(
+            progress_path,
+            {
+                "status": "running_router_review",
+                "iteration": iteration,
+                "artifact_count": int(audit.get("artifact_count") or 0),
+            },
+        )
         review = review_screenshot_audit_with_llm_router(
             screenshot_dir=screenshot_dir,
             iteration=iteration,
@@ -833,6 +885,16 @@ def run_iterative_ui_ux_workflow(
         json_path = target_output_dir / f"iteration-{iteration:02d}-review.json"
         markdown_path.write_text(review["review"])
         json_path.write_text(json.dumps(review, indent=2, sort_keys=True))
+        _write_progress_artifact(
+            progress_path,
+            {
+                "status": "review_written",
+                "iteration": iteration,
+                "review_markdown_path": str(markdown_path),
+                "review_json_path": str(json_path),
+                "artifact_count": int(review.get("artifact_count") or 0),
+            },
+        )
         previous_review = review["review"]
         latest_structured_review = dict(review.get("structured_review") or {})
         run_reports.append(
@@ -850,6 +912,14 @@ def run_iterative_ui_ux_workflow(
             }
         )
 
+    _write_progress_artifact(
+        progress_path,
+        {
+            "status": "completed",
+            "iterations_completed": len(run_reports),
+            "latest_review_json_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.json") if run_reports else "",
+        },
+    )
     return {
         "iterations": len(run_reports),
         "screenshot_dir": str(screenshot_dir),

@@ -77,7 +77,11 @@ async function writeUiScreenshotArtifact(page, { name, title }) {
   await fs.mkdir(targetDir, { recursive: true });
   const screenshotPath = path.join(targetDir, `${name}.png`);
   const metadataPath = path.join(targetDir, `${name}.json`);
-  await page.screenshot({ path: screenshotPath, fullPage: true });
+  try {
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+  } catch (error) {
+    await page.screenshot({ path: screenshotPath });
+  }
   const viewport = page.viewportSize() || { width: 1440, height: 1200 };
   const textExcerpt = String(await page.locator('body').innerText()).slice(0, 4000);
   const payload = {

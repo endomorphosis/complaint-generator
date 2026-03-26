@@ -1461,7 +1461,7 @@
                         <div class="evidence-form-shell" style="margin-top: 18px;">
                             <div class="section-intro">
                                 <strong>Import Gmail evidence</strong>
-                                <span>Pull matching emails and their attachments straight into the evidence workspace. Use a Gmail app password, not your normal account password.</span>
+                                <span>Pull matching emails and their attachments straight into the evidence workspace. Use a Gmail app password for quick imports, or switch to Gmail OAuth plus UID checkpoints for broader, resumable mailbox collection.</span>
                             </div>
                             <div class="field-grid">
                                 <div class="field-row">
@@ -1485,12 +1485,35 @@
                                     <div>
                                         <label for="gmail-import-user">Gmail Address</label>
                                         <input id="gmail-import-user" type="email" placeholder="you@gmail.com" autocomplete="username">
-                                        <div class="helper-text">You can remember this address for the current browser session. The app password is never stored here.</div>
+                                        <div class="helper-text">You can remember this address for the current browser session. The app password is never stored here. OAuth token reuse happens in the local token cache, not in the browser page.</div>
                                     </div>
                                     <div>
                                         <label for="gmail-import-password">Gmail App Password</label>
                                         <input id="gmail-import-password" type="password" placeholder="Google app password" autocomplete="current-password">
                                     </div>
+                                </div>
+                                <div>
+                                    <label style="display: flex; align-items: center; gap: 10px;">
+                                        <input id="gmail-import-use-oauth" type="checkbox">
+                                        <span>Use Gmail OAuth for large mailbox collection</span>
+                                    </label>
+                                    <div class="helper-text">Enable OAuth/XOAUTH2 when you want resumable collection across very large Gmail folders without relying only on app-password IMAP sessions.</div>
+                                </div>
+                                <div class="field-row">
+                                    <div>
+                                        <label for="gmail-import-oauth-client-secrets">OAuth Client Secrets JSON</label>
+                                        <input id="gmail-import-oauth-client-secrets" type="text" placeholder="/path/to/client_secrets.json">
+                                    </div>
+                                    <div>
+                                        <label for="gmail-import-oauth-token-cache">OAuth Token Cache</label>
+                                        <input id="gmail-import-oauth-token-cache" type="text" placeholder="/path/to/gmail_token_cache.json">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label style="display: flex; align-items: center; gap: 10px;">
+                                        <input id="gmail-import-oauth-open-browser" type="checkbox" checked>
+                                        <span>Open browser automatically for Gmail OAuth</span>
+                                    </label>
                                 </div>
                                 <div>
                                     <label style="display: flex; align-items: center; gap: 10px;">
@@ -1517,6 +1540,8 @@
                                         <span class="chip">CLI</span>
                                         <span class="chip">MCP</span>
                                         <span class="chip">Keyring-ready</span>
+                                        <span class="chip">OAuth-ready</span>
+                                        <span class="chip">UID checkpoint</span>
                                     </div>
                                     <pre id="gmail-import-cli-command">python3 -m complaint_generator.cli import-gmail-evidence \
   --user-id &lt;workspace-user-id&gt; \
@@ -1524,18 +1549,20 @@
   --address manager@example.com \
   --claim-element-id causation \
   --gmail-user you@gmail.com \
-  --use-keyring</pre>
+  --use-keyring \
+  --use-uid-checkpoint</pre>
                                     <div class="button-row" style="margin-top: 12px;">
                                         <button class="secondary" id="copy-gmail-import-cli-command" type="button">Copy CLI Command</button>
                                     </div>
-                                    <div class="helper-text" id="gmail-import-mcp-note">MCP tool: <code>complaint.import_gmail_evidence</code> with <code>addresses</code>, <code>claim_element_id</code>, <code>gmail_user</code>, and <code>gmail_app_password</code> or a keyring-backed credential path.</div>
+                                    <div class="helper-text" id="gmail-import-mcp-note">MCP tool: <code>complaint.import_gmail_evidence</code> with <code>addresses</code>, <code>claim_element_id</code>, <code>gmail_user</code>, plus either <code>gmail_app_password</code> or the Gmail OAuth fields. UID checkpoints can be combined with either auth mode.</div>
                                     <pre id="gmail-import-mcp-command" style="margin-top: 12px;">{
   "tool": "complaint.import_gmail_evidence",
   "arguments": {
     "user_id": "&lt;workspace-user-id&gt;",
     "addresses": ["hr@example.com", "manager@example.com"],
     "claim_element_id": "causation",
-    "gmail_user": "you@gmail.com"
+    "gmail_user": "you@gmail.com",
+    "use_uid_checkpoint": true
   }
 }</pre>
                                     <div class="button-row" style="margin-top: 12px;">
@@ -1564,6 +1591,17 @@
                                         <div class="helper-text">Raise this above zero when you want complaint-term filtering to suppress unrelated mail.</div>
                                     </div>
                                 </div>
+                                <div class="field-row">
+                                    <div>
+                                        <label for="gmail-import-checkpoint-name">UID Checkpoint Name</label>
+                                        <input id="gmail-import-checkpoint-name" type="text" placeholder="gmail-main">
+                                    </div>
+                                    <div>
+                                        <label for="gmail-import-uid-window-size">UID Window Size</label>
+                                        <input id="gmail-import-uid-window-size" type="number" min="1" step="1" placeholder="500">
+                                    </div>
+                                </div>
+                                <div class="helper-text">Use UID checkpoints when you want repeated runs to resume through very large Gmail folders instead of rescanning the same raw messages.</div>
                                 <div>
                                     <label for="gmail-import-complaint-query">Complaint Query</label>
                                     <textarea id="gmail-import-complaint-query" placeholder="termination retaliation HR complaint timeline"></textarea>
@@ -1577,6 +1615,11 @@
                             </div>
                             <div class="button-row" style="margin-top: 16px;">
                                 <button class="secondary" id="import-gmail-evidence-button" type="button">Import Gmail Evidence</button>
+                            </div>
+                            <div class="tool-card" id="gmail-import-summary-card" style="margin-top: 16px;">
+                                <h3>Latest Gmail import</h3>
+                                <div class="chip-row" id="gmail-import-summary-chips"></div>
+                                <div class="status draft-preview-shell"><pre id="gmail-import-summary-preview">No Gmail import has been run in this browser session yet.</pre></div>
                             </div>
                         </div>
                         <div class="evidence-form-shell" style="margin-top: 18px;">
@@ -1856,6 +1899,10 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 </div>
                             </div>
                             <div>
+                                <label>SDK / MCP Parity</label>
+                                <div class="list" id="tooling-parity-preview"></div>
+                            </div>
+                            <div>
                                 <label>Complaint Readiness</label>
                                 <div class="status draft-preview-shell"><pre id="complaint-readiness-preview">No complaint-readiness payload loaded yet.</pre></div>
                             </div>
@@ -2047,6 +2094,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let latestPacketExport = null;
         let latestComplaintOutputAnalysis = null;
         let latestUiReviewResult = null;
+        let latestGmailImportResult = null;
         let sdkPrimitiveSnapshot = null;
         let latestSdkToolActivity = null;
         let gmailImportDetectedAddresses = [];
@@ -2304,6 +2352,12 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             const gmailUser = document.getElementById('gmail-import-user').value.trim() || 'you@gmail.com';
             const addresses = currentGmailImportAddresses();
             const folders = currentGmailImportFolders();
+            const useGmailOAuth = Boolean(document.getElementById('gmail-import-use-oauth').checked);
+            const gmailOauthClientSecrets = document.getElementById('gmail-import-oauth-client-secrets').value.trim() || '/path/to/client_secrets.json';
+            const gmailOauthTokenCache = document.getElementById('gmail-import-oauth-token-cache').value.trim();
+            const gmailOauthOpenBrowser = Boolean(document.getElementById('gmail-import-oauth-open-browser').checked);
+            const checkpointName = document.getElementById('gmail-import-checkpoint-name').value.trim();
+            const uidWindowSize = String(document.getElementById('gmail-import-uid-window-size').value || '').trim();
             const complaintQuery = document.getElementById('gmail-import-complaint-query').value.trim();
             const complaintKeywords = currentGmailImportComplaintKeywords();
             const minRelevanceScore = String(document.getElementById('gmail-import-min-relevance-score').value || '0').trim() || '0';
@@ -2311,12 +2365,16 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             const cliAddressLines = commandAddresses.map((address) => `  --address ${address} \\`).join('\n');
             const cliFolderLines = folders.filter((item) => item !== 'INBOX').map((item) => `  --scan-folder ${item} \\`).join('\n');
             const cliKeywordLines = complaintKeywords.map((item) => `  --complaint-keyword ${item} \\`).join('\n');
+            const cliOAuthLines = useGmailOAuth
+                ? `  --use-gmail-oauth \\\n  --gmail-oauth-client-secrets ${gmailOauthClientSecrets} \\\n${gmailOauthTokenCache ? `  --gmail-oauth-token-cache ${gmailOauthTokenCache} \\\n` : ''}${gmailOauthOpenBrowser ? '' : '  --no-gmail-oauth-browser \\\n'}`
+                : '  --use-keyring \\\n';
+            const cliCheckpointLines = `  --use-uid-checkpoint \\\n${checkpointName ? `  --checkpoint-name ${checkpointName} \\\n` : ''}${uidWindowSize ? `  --uid-window-size ${uidWindowSize} \\\n` : ''}`;
             cliNode.textContent = `python3 -m complaint_generator.cli import-gmail-evidence \\
   --user-id ${userId} \\
 ${cliAddressLines}
 ${cliFolderLines ? `${cliFolderLines}\n` : ''}  --claim-element-id ${claimElementId} \\
 ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywordLines ? `${cliKeywordLines}\n` : ''}${minRelevanceScore !== '0' ? `  --min-relevance-score ${minRelevanceScore} \\\n` : ''}  --gmail-user ${gmailUser} \\
-  --use-keyring`;
+${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
 
             const mcpPayload = {
                 tool: 'complaint.import_gmail_evidence',
@@ -2325,6 +2383,13 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                     addresses: commandAddresses,
                     claim_element_id: claimElementId,
                     folders: folders.length ? folders : ['INBOX'],
+                    use_gmail_oauth: useGmailOAuth || undefined,
+                    gmail_oauth_client_secrets: useGmailOAuth ? gmailOauthClientSecrets : undefined,
+                    gmail_oauth_token_cache: useGmailOAuth && gmailOauthTokenCache ? gmailOauthTokenCache : undefined,
+                    gmail_oauth_open_browser: useGmailOAuth ? gmailOauthOpenBrowser : undefined,
+                    use_uid_checkpoint: true,
+                    checkpoint_name: checkpointName || undefined,
+                    uid_window_size: uidWindowSize ? Number(uidWindowSize) : undefined,
                     complaint_query: complaintQuery || undefined,
                     complaint_keywords: complaintKeywords,
                     min_relevance_score: Number(minRelevanceScore || '0'),
@@ -2953,6 +3018,74 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             syncSynopsisMirrors(document.getElementById('case-synopsis').value);
         }
 
+        function renderGmailImportSummary() {
+            const previewNode = document.getElementById('gmail-import-summary-preview');
+            const chipsNode = document.getElementById('gmail-import-summary-chips');
+            if (!previewNode || !chipsNode) {
+                return;
+            }
+            const payload = latestGmailImportResult || null;
+            if (!payload || typeof payload !== 'object') {
+                chipsNode.innerHTML = '';
+                previewNode.textContent = 'No Gmail import has been run in this browser session yet.';
+                return;
+            }
+
+            const chips = [];
+            chips.push(`<span class="chip">imported ${escapeHtml(String(payload.imported_count || 0))}</span>`);
+            chips.push(`<span class="chip">searched ${escapeHtml(String(payload.searched_message_count || 0))}</span>`);
+            if (payload.auth_mode) {
+                chips.push(`<span class="chip">${escapeHtml(String(payload.auth_mode || ''))}</span>`);
+            }
+            if (payload.use_uid_checkpoint) {
+                chips.push('<span class="chip">uid checkpoint</span>');
+            }
+            const checkpoint = payload.checkpoint || {};
+            const folderStates = checkpoint && checkpoint.folders && typeof checkpoint.folders === 'object'
+                ? checkpoint.folders
+                : {};
+            const folderNames = Object.keys(folderStates);
+            if (folderNames.length) {
+                const firstFolderName = folderNames[0];
+                const firstFolderState = folderStates[firstFolderName] || {};
+                if (firstFolderState.last_processed_uid) {
+                    chips.push(`<span class="chip">last uid ${escapeHtml(String(firstFolderState.last_processed_uid))}</span>`);
+                }
+            }
+            chipsNode.innerHTML = chips.join('');
+
+            const summaryLines = [
+                `Imported count: ${payload.imported_count || 0}`,
+                `Searched messages: ${payload.searched_message_count || 0}`,
+                `Skipped non-matches: ${payload.skipped_count || 0}`,
+                `Relevance filtered: ${payload.relevance_filtered_count || 0}`,
+                `Raw email bytes: ${payload.raw_email_total_bytes || 0}`,
+                `Folders: ${((payload.folders || [])).join(', ') || 'INBOX'}`,
+                `Manifest path: ${payload.manifest_path || 'n/a'}`,
+                `Checkpoint path: ${payload.checkpoint_path || 'n/a'}`,
+            ];
+            if (payload.gmail_oauth && payload.gmail_oauth.token_cache_path) {
+                summaryLines.push(`OAuth token cache: ${payload.gmail_oauth.token_cache_path}`);
+            }
+            if (folderNames.length) {
+                summaryLines.push('');
+                summaryLines.push('Checkpoint state:');
+                folderNames.forEach((folderName) => {
+                    const folderState = folderStates[folderName] || {};
+                    summaryLines.push(
+                        `${folderName}: last_processed_uid=${folderState.last_processed_uid || 0}, last_run_searched_message_count=${folderState.last_run_searched_message_count || 0}`
+                    );
+                });
+            }
+            const importedSubjects = Array.isArray(payload.imported) ? payload.imported.slice(0, 5).map((item) => String(item.subject || 'Untitled email')) : [];
+            if (importedSubjects.length) {
+                summaryLines.push('');
+                summaryLines.push('Imported subjects:');
+                importedSubjects.forEach((subject) => summaryLines.push(`- ${subject}`));
+            }
+            previewNode.textContent = summaryLines.join('\n');
+        }
+
         function draftClaimTypeLabel(rawClaimType) {
             return String(rawClaimType || 'retaliation')
                 .replace(/_/g, ' ')
@@ -3381,6 +3514,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             const mediatorNode = document.getElementById('mediator-prompt-preview');
             const capabilitiesNode = document.getElementById('workflow-capabilities-preview');
             const toolingContractNode = document.getElementById('tooling-contract-preview');
+            const toolingParityNode = document.getElementById('tooling-parity-preview');
             const complaintReadinessNode = document.getElementById('complaint-readiness-preview');
             const uiReadinessNode = document.getElementById('ui-readiness-preview');
             const clientReleaseGateNode = document.getElementById('client-release-gate-preview');
@@ -3420,6 +3554,41 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                     </div>
                 `
                 : '';
+            const sdkToMcpParityMap = {
+                startSession: 'complaint.start_session',
+                listIntakeQuestions: 'complaint.list_intake_questions',
+                listClaimElements: 'complaint.list_claim_elements',
+                submitIntake: 'complaint.submit_intake',
+                saveEvidence: 'complaint.save_evidence',
+                importGmailEvidence: 'complaint.import_gmail_evidence',
+                importLocalEvidence: 'complaint.import_local_evidence',
+                reviewCase: 'complaint.review_case',
+                buildMediatorPrompt: 'complaint.build_mediator_prompt',
+                getComplaintReadiness: 'complaint.get_complaint_readiness',
+                getUiReadiness: 'complaint.get_ui_readiness',
+                getClientReleaseGate: 'complaint.get_client_release_gate',
+                getWorkflowCapabilities: 'complaint.get_workflow_capabilities',
+                getToolingContract: 'complaint.get_tooling_contract',
+                generateComplaint: 'complaint.generate_complaint',
+                updateDraft: 'complaint.update_draft',
+                exportComplaintPacket: 'complaint.export_complaint_packet',
+                exportComplaintMarkdown: 'complaint.export_complaint_markdown',
+                exportComplaintDocx: 'complaint.export_complaint_docx',
+                exportComplaintPdf: 'complaint.export_complaint_pdf',
+                analyzeComplaintOutput: 'complaint.analyze_complaint_output',
+                getFormalDiagnostics: 'complaint.get_formal_diagnostics',
+                getFilingProvenance: 'complaint.get_filing_provenance',
+                getProviderDiagnostics: 'complaint.get_provider_diagnostics',
+                reviewGeneratedExports: 'complaint.review_generated_exports',
+                updateClaimType: 'complaint.update_claim_type',
+                updateCaseSynopsis: 'complaint.update_case_synopsis',
+                resetSession: 'complaint.reset_session',
+                reviewUiArtifacts: 'complaint.review_ui',
+                optimizeUiArtifacts: 'complaint.optimize_ui',
+                runUiUxWorkflow: 'complaint.review_ui',
+                runClosedLoopUiUxWorkflow: 'complaint.optimize_ui',
+                runBrowserAudit: 'complaint.run_browser_audit',
+            };
             capabilitiesNode.innerHTML = capabilities.length
                 ? capabilities.map((item) => `
                     <div class="item">
@@ -3431,8 +3600,40 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
 
             if (toolingContract) {
                 toolingContractNode.textContent = JSON.stringify(toolingContract, null, 2);
+                const sdkMethods = Array.isArray(toolingContract.browser_sdk_methods) ? toolingContract.browser_sdk_methods : [];
+                const mcpTools = new Set(Array.isArray(toolingContract.mcp_tools) ? toolingContract.mcp_tools : []);
+                const parityFindings = sdkMethods.map((method) => {
+                    const expectedTool = sdkToMcpParityMap[method] || '';
+                    return {
+                        method,
+                        expectedTool,
+                        matched: expectedTool ? mcpTools.has(expectedTool) : false,
+                    };
+                });
+                const missingParity = parityFindings.filter((item) => item.expectedTool && !item.matched);
+                toolingParityNode.innerHTML = `
+                    <div class="item">
+                        <strong>Browser SDK parity summary</strong>
+                        <div class="chip-row">
+                            <span class="chip good">sdk methods: ${escapeHtml(String(sdkMethods.length))}</span>
+                            <span class="chip good">mcp tools: ${escapeHtml(String(mcpTools.size))}</span>
+                            <span class="chip ${missingParity.length ? 'warn' : 'good'}">missing parity: ${escapeHtml(String(missingParity.length))}</span>
+                        </div>
+                        <div class="muted">${missingParity.length ? escapeHtml(`SDK methods without a visible MCP twin: ${missingParity.map((item) => item.method).join(', ')}.`) : 'Every browser SDK method with a declared parity rule has a visible MCP twin in this workspace.'}</div>
+                    </div>
+                    ${parityFindings.slice(0, 10).map((item) => `
+                        <div class="item">
+                            <strong>${escapeHtml(item.method)}</strong>
+                            <div class="chip-row">
+                                <span class="chip ${item.matched ? 'good' : 'warn'}">${item.matched ? 'parity verified' : 'missing mcp twin'}</span>
+                            </div>
+                            <div class="muted">${escapeHtml(item.expectedTool || 'No parity rule declared for this SDK method yet.')}</div>
+                        </div>
+                    `).join('')}
+                `;
             } else {
                 toolingContractNode.textContent = 'No tooling-contract payload loaded yet.';
+                toolingParityNode.innerHTML = '<div class="item"><strong>No parity payload loaded yet.</strong><div class="muted">Refresh the tooling contract to compare browser SDK methods against visible MCP tools.</div></div>';
             }
 
             if (workspaceComplaintReadiness) {
@@ -4230,6 +4431,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
             renderSessionSyncStatus(sessionPayload);
             renderWorkflowOperations();
             renderSdkDiagnostics();
+            renderGmailImportSummary();
             renderGmailImportCommandExamples();
             if (workspaceUiReadiness && typeof workspaceUiReadiness === 'object') {
                 renderUiReviewResult(normalizeUiReadinessResultForDisplay(workspaceUiReadiness));
@@ -4968,14 +5170,30 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 .filter(Boolean);
             const gmailUser = document.getElementById('gmail-import-user').value.trim();
             const gmailAppPassword = document.getElementById('gmail-import-password').value;
+            const useGmailOAuth = Boolean(document.getElementById('gmail-import-use-oauth').checked);
+            const gmailOauthClientSecrets = document.getElementById('gmail-import-oauth-client-secrets').value.trim();
+            const gmailOauthTokenCache = document.getElementById('gmail-import-oauth-token-cache').value.trim();
+            const gmailOauthOpenBrowser = Boolean(document.getElementById('gmail-import-oauth-open-browser').checked);
+            const checkpointName = document.getElementById('gmail-import-checkpoint-name').value.trim();
+            const uidWindowSize = document.getElementById('gmail-import-uid-window-size').value.trim();
             if (!addresses.length) {
                 activateTab('evidence');
                 setStatus('Add at least one email address to match before importing Gmail evidence.');
                 return;
             }
-            if (!gmailUser || !gmailAppPassword) {
+            if (!gmailUser) {
                 activateTab('evidence');
-                setStatus('Enter your Gmail address and app password before importing Gmail evidence.');
+                setStatus('Enter your Gmail address before importing Gmail evidence.');
+                return;
+            }
+            if (useGmailOAuth && !gmailOauthClientSecrets) {
+                activateTab('evidence');
+                setStatus('Add a Gmail OAuth client-secrets JSON path before using Gmail OAuth collection.');
+                return;
+            }
+            if (!useGmailOAuth && !gmailAppPassword) {
+                activateTab('evidence');
+                setStatus('Enter your Gmail app password before importing Gmail evidence, or enable Gmail OAuth.');
                 return;
             }
             setBusyStatus('Importing Gmail evidence and attachments into the workspace…');
@@ -4986,19 +5204,31 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
                 folder: currentGmailImportFolders()[0] || 'INBOX',
                 folders: currentGmailImportFolders(),
                 gmail_user: gmailUser,
-                gmail_app_password: gmailAppPassword,
+                gmail_app_password: useGmailOAuth ? null : gmailAppPassword,
+                use_gmail_oauth: useGmailOAuth,
+                gmail_oauth_client_secrets: useGmailOAuth ? gmailOauthClientSecrets : null,
+                gmail_oauth_token_cache: useGmailOAuth && gmailOauthTokenCache ? gmailOauthTokenCache : null,
+                gmail_oauth_open_browser: useGmailOAuth ? gmailOauthOpenBrowser : null,
+                use_uid_checkpoint: true,
+                checkpoint_name: checkpointName || null,
+                uid_window_size: uidWindowSize ? Number(uidWindowSize) : null,
                 date_after: document.getElementById('gmail-import-date-after').value || null,
                 date_before: document.getElementById('gmail-import-date-before').value || null,
                 complaint_query: document.getElementById('gmail-import-complaint-query').value.trim() || null,
                 complaint_keywords: currentGmailImportComplaintKeywords(),
                 min_relevance_score: Number(document.getElementById('gmail-import-min-relevance-score').value || '0'),
             });
+            latestGmailImportResult = payload || null;
             workspaceSession = await client.startSession(workspaceUserId);
             await loadSharedCapabilities();
             renderWorkspace(workspaceSession);
             persistGmailImportUserPreference();
             document.getElementById('gmail-import-password').value = '';
-            setStatus(`Imported ${payload.imported_count || 0} Gmail message(s) into the evidence workspace.`);
+            if (payload.checkpoint_path) {
+                setStatus(`Imported ${payload.imported_count || 0} Gmail message(s) into the evidence workspace. UID checkpoint saved at ${payload.checkpoint_path}.`);
+            } else {
+                setStatus(`Imported ${payload.imported_count || 0} Gmail message(s) into the evidence workspace.`);
+            }
         }
 
         async function importLocalEvidence() {
@@ -5212,6 +5442,7 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
 
         async function resetSession() {
             setBusyStatus('Resetting the workspace to a clean complaint session…');
+            latestGmailImportResult = null;
             workspaceSession = await client.resetSession(workspaceUserId);
             window.localStorage.removeItem(synopsisStorageKey());
             await refreshWorkspace();
@@ -5483,10 +5714,16 @@ ${complaintQuery ? `  --complaint-query ${complaintQuery} \\\n` : ''}${cliKeywor
         });
         document.getElementById('gmail-import-user').addEventListener('input', persistGmailImportUserPreference);
         document.getElementById('gmail-import-user').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-use-oauth').addEventListener('change', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-oauth-client-secrets').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-oauth-token-cache').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-oauth-open-browser').addEventListener('change', renderGmailImportCommandExamples);
         document.getElementById('gmail-import-remember-user').addEventListener('change', persistGmailImportUserPreference);
         document.getElementById('suggest-gmail-import-addresses').addEventListener('click', suggestGmailImportAddresses);
         document.getElementById('gmail-import-addresses').addEventListener('input', renderGmailImportCommandExamples);
         document.getElementById('gmail-import-folders').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-checkpoint-name').addEventListener('input', renderGmailImportCommandExamples);
+        document.getElementById('gmail-import-uid-window-size').addEventListener('input', renderGmailImportCommandExamples);
         document.getElementById('gmail-import-complaint-query').addEventListener('input', renderGmailImportCommandExamples);
         document.getElementById('gmail-import-complaint-keywords').addEventListener('input', renderGmailImportCommandExamples);
         document.getElementById('gmail-import-min-relevance-score').addEventListener('input', renderGmailImportCommandExamples);

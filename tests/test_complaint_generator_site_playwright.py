@@ -1014,6 +1014,12 @@ def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_op
                 "() => document.getElementById('tool-list-phase-chips').textContent.includes('Draft + export')"
             )
             page.wait_for_function(
+                "() => document.getElementById('tooling-parity-preview').textContent.includes('Browser SDK parity summary')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('tooling-parity-preview').textContent.includes('parity verified')"
+            )
+            page.wait_for_function(
                 "() => document.getElementById('operations-tool-readiness-button').getAttribute('aria-disabled') === 'false'"
             )
             page.wait_for_function(

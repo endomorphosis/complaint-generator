@@ -107,6 +107,10 @@ def import_gmail_evidence_command(
     evidence_root: Optional[str] = None,
     gmail_user: Optional[str] = typer.Option(os.environ.get("GMAIL_USER") or os.environ.get("EMAIL_USER"), "--gmail-user"),
     gmail_app_password: Optional[str] = typer.Option(os.environ.get("GMAIL_APP_PASSWORD") or os.environ.get("EMAIL_PASS"), "--gmail-app-password"),
+    use_gmail_oauth: bool = typer.Option(False, "--use-gmail-oauth"),
+    gmail_oauth_client_secrets: Optional[str] = typer.Option(os.environ.get("GMAIL_OAUTH_CLIENT_SECRETS"), "--gmail-oauth-client-secrets"),
+    gmail_oauth_token_cache: Optional[str] = typer.Option(os.environ.get("GMAIL_OAUTH_TOKEN_CACHE"), "--gmail-oauth-token-cache"),
+    gmail_oauth_open_browser: bool = typer.Option(True, "--gmail-oauth-open-browser/--no-gmail-oauth-browser"),
     prompt_for_credentials: bool = typer.Option(False, "--prompt-for-credentials"),
     use_keyring: bool = typer.Option(False, "--use-keyring"),
     save_to_keyring: bool = typer.Option(False, "--save-to-keyring"),
@@ -116,16 +120,24 @@ def import_gmail_evidence_command(
     from complaint_generator.email_credentials import resolve_gmail_credentials
 
     parser = argparse.ArgumentParser(prog="complaint-workspace import-gmail-evidence")
-    resolved_gmail_user, resolved_gmail_app_password = resolve_gmail_credentials(
-        gmail_user=str(gmail_user or ""),
-        gmail_app_password=str(gmail_app_password or ""),
-        prompt_for_credentials=prompt_for_credentials,
-        use_keyring=use_keyring,
-        save_to_keyring_flag=save_to_keyring,
-        use_ipfs_secrets_vault=use_ipfs_secrets_vault,
-        save_to_ipfs_secrets_vault_flag=save_to_ipfs_secrets_vault,
-        parser=parser,
-    )
+    if use_gmail_oauth:
+        resolved_gmail_user = str(gmail_user or "").strip()
+        resolved_gmail_app_password = None
+        if not resolved_gmail_user:
+            parser.error("--gmail-user is required when --use-gmail-oauth is enabled.")
+        if not gmail_oauth_client_secrets:
+            parser.error("--gmail-oauth-client-secrets is required when --use-gmail-oauth is enabled.")
+    else:
+        resolved_gmail_user, resolved_gmail_app_password = resolve_gmail_credentials(
+            gmail_user=str(gmail_user or ""),
+            gmail_app_password=str(gmail_app_password or ""),
+            prompt_for_credentials=prompt_for_credentials,
+            use_keyring=use_keyring,
+            save_to_keyring_flag=save_to_keyring,
+            use_ipfs_secrets_vault=use_ipfs_secrets_vault,
+            save_to_ipfs_secrets_vault_flag=save_to_ipfs_secrets_vault,
+            parser=parser,
+        )
 
     async def _run_import() -> dict[str, object]:
         return await import_gmail_evidence(
@@ -142,6 +154,10 @@ def import_gmail_evidence_command(
             complaint_query=complaint_query,
             complaint_keywords=complaint_keyword,
             min_relevance_score=min_relevance_score,
+            use_gmail_oauth=use_gmail_oauth,
+            gmail_oauth_client_secrets=gmail_oauth_client_secrets,
+            gmail_oauth_token_cache=gmail_oauth_token_cache,
+            gmail_oauth_open_browser=gmail_oauth_open_browser,
             use_uid_checkpoint=use_uid_checkpoint,
             checkpoint_name=checkpoint_name,
             uid_window_size=uid_window_size,
