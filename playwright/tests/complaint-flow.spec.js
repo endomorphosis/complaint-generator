@@ -404,6 +404,8 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Secure Intake/i);
     await expect(page.locator('[data-surface-nav="primary"]')).not.toContainText(/Profile|Trace|Dashboards/i);
     await expect(page.locator('#workspace-advanced-nav')).toContainText(/Developer tools and linked surfaces/i);
+    await expect(page.locator('#intake-question-grid')).toContainText(/What name should we use for the person harmed\?/i);
+    await expect(page.locator('#intake-question-grid')).toContainText(/You can save and return anytime\. Share only what you can right now\./i);
     await expect(page.locator('#tool-list')).toContainText(/complaint\.generate_complaint/i);
     await expect(page.locator('#tool-list')).toContainText(/complaint\.get_complaint_readiness/i);
     await expect(page.locator('#tool-list')).toContainText(/complaint\.update_claim_type/i);
@@ -548,6 +550,10 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#workspace-status')).toContainText(/Complaint readiness refreshed/i);
     await expect(page.locator('#complaint-readiness-preview')).toContainText(/"verdict":\s*"Draft in progress"/i);
     await expect(page.locator('#complaint-readiness-preview')).toContainText(/"has_draft":\s*true/i);
+    await expect(page.locator('#tooling-parity-preview')).toContainText(/Session-bound tooling handoff/i);
+    await expect(page.locator('#tooling-parity-preview')).toContainText(/Inspect this session/i);
+    await expect(page.locator('#tooling-parity-preview')).toContainText(/complaint-workspace session --user-id did:key:workspace-flow-/i);
+    await expect(page.locator('#tooling-parity-preview')).toContainText(/complaint\.export_complaint_packet/i);
 
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
 

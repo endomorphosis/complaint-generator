@@ -224,6 +224,13 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "tooling-parity-preview" in content
     assert "sdkToMcpParityMap" in content
     assert "Browser SDK parity summary" in content
+    assert "buildSessionBoundParityExamples" in content
+    assert "Session-bound tooling handoff" in content
+    assert "Run the same live session through package, CLI, MCP, or SDK without rewriting the user id by hand." in content
+    assert "Inspect this session" in content
+    assert "Review current support posture" in content
+    assert "Export this complaint packet" in content
+    assert "complaint.export_complaint_packet" in content
     assert "renderOperationalToolLane" in content
     assert "runOperationalToolReadiness" in content
     assert "runOperationalMediatorHandoff" in content
@@ -250,6 +257,12 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Required section checks:" in content
     assert "Civil Action No. is still a placeholder." in content
     assert "formatGapActionLabel" in content
+    assert "What name should we use for the person harmed?" in content
+    assert "What did they report, oppose, or ask for help about?" in content
+    assert "What happened after that?" in content
+    assert "How did this affect them?" in content
+    assert "You can save and return anytime. Share only what you can right now." in content
+    assert "The workspace will guide one calm step at a time." in content
     assert "Add testimony for ${escapeHtml(item.label)}" in content
     assert "Upload document for ${escapeHtml(item.label)}" in content
     assert "formatGapActionLabel('Attach document', weakestGap)" in content

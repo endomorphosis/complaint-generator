@@ -50,6 +50,43 @@ class GmailEvidenceImportRequest(BaseModel):
     uid_window_size: Optional[int] = None
 
 
+class GmailDuckdbPipelineRequest(BaseModel):
+    user_id: Optional[str] = None
+    addresses: List[str] = Field(default_factory=list)
+    claim_element_id: str = "causation"
+    folder: str = "INBOX"
+    folders: List[str] = Field(default_factory=list)
+    years_back: Optional[int] = 2
+    date_after: Optional[str] = None
+    date_before: Optional[str] = None
+    complaint_query: Optional[str] = None
+    complaint_keywords: List[str] = Field(default_factory=list)
+    min_relevance_score: float = 0.0
+    evidence_root: Optional[str] = None
+    gmail_user: Optional[str] = None
+    gmail_app_password: Optional[str] = None
+    use_gmail_oauth: bool = False
+    gmail_oauth_client_secrets: Optional[str] = None
+    gmail_oauth_token_cache: Optional[str] = None
+    gmail_oauth_open_browser: bool = True
+    checkpoint_name: str = "gmail-duckdb-pipeline"
+    uid_window_size: int = 500
+    max_batches: int = 20
+    duckdb_output_dir: Optional[str] = None
+    append_to_existing_corpus: bool = False
+    bm25_search_query: Optional[str] = None
+    bm25_search_limit: int = 20
+
+
+class EmailDuckdbSearchRequest(BaseModel):
+    index_path: str
+    query: str
+    limit: int = 20
+    ranking: str = "bm25"
+    bm25_k1: float = 1.2
+    bm25_b: float = 0.75
+
+
 class LocalEvidenceImportRequest(BaseModel):
     user_id: Optional[str] = None
     paths: List[str] = Field(default_factory=list)
@@ -155,6 +192,47 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             claim_element_id=request.claim_element_id,
             kind=request.kind,
             evidence_root=request.evidence_root,
+        )
+
+    @router.post("/api/complaint-workspace/run-gmail-duckdb-pipeline")
+    async def run_gmail_duckdb_pipeline_route(request: GmailDuckdbPipelineRequest) -> Dict[str, Any]:
+        return workspace.run_gmail_duckdb_pipeline(
+            request.user_id,
+            addresses=list(request.addresses or []),
+            claim_element_id=request.claim_element_id,
+            folder=request.folder,
+            folders=list(request.folders or []),
+            years_back=request.years_back,
+            date_after=request.date_after,
+            date_before=request.date_before,
+            complaint_query=request.complaint_query,
+            complaint_keywords=list(request.complaint_keywords or []),
+            min_relevance_score=request.min_relevance_score,
+            evidence_root=request.evidence_root,
+            gmail_user=request.gmail_user,
+            gmail_app_password=request.gmail_app_password,
+            use_gmail_oauth=request.use_gmail_oauth,
+            gmail_oauth_client_secrets=request.gmail_oauth_client_secrets,
+            gmail_oauth_token_cache=request.gmail_oauth_token_cache,
+            gmail_oauth_open_browser=request.gmail_oauth_open_browser,
+            checkpoint_name=request.checkpoint_name,
+            uid_window_size=request.uid_window_size,
+            max_batches=request.max_batches,
+            duckdb_output_dir=request.duckdb_output_dir,
+            append_to_existing_corpus=request.append_to_existing_corpus,
+            bm25_search_query=request.bm25_search_query,
+            bm25_search_limit=request.bm25_search_limit,
+        )
+
+    @router.post("/api/complaint-workspace/search-email-duckdb")
+    async def search_email_duckdb_route(request: EmailDuckdbSearchRequest) -> Dict[str, Any]:
+        return workspace.search_email_duckdb_corpus(
+            index_path=request.index_path,
+            query=request.query,
+            limit=request.limit,
+            ranking=request.ranking,
+            bm25_k1=request.bm25_k1,
+            bm25_b=request.bm25_b,
         )
 
     @router.post("/api/complaint-workspace/review")

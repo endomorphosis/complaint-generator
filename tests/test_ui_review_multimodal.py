@@ -452,6 +452,81 @@ def test_run_ui_review_workflow_defaults_to_inline_page_reviews_for_codex_cli(mo
     assert captured["kwargs"]["page_review_executor"] == "inline"
 
 
+def test_create_ui_review_report_limits_codex_page_reviews_to_high_signal_screenshots(monkeypatch, tmp_path: Path):
+    screenshot_names = [
+        "workspace-intake.png",
+        "workspace-evidence.png",
+        "workspace-review.png",
+        "workspace-draft.png",
+        "workspace-integrations.png",
+        "workspace-homepage.png",
+    ]
+    screenshots = []
+    artifact_metadata = []
+    for name in screenshot_names:
+        path = tmp_path / name
+        path.write_bytes(b"fake-png")
+        screenshots.append(path)
+        artifact_metadata.append(
+            {
+                "artifact_type": "workspace_surface",
+                "name": path.stem,
+                "title": path.stem.replace("-", " ").title(),
+                "screenshot_path": str(path),
+                "text_excerpt": path.stem,
+            }
+        )
+
+    def fake_run_page_review_task(task):
+        return {
+            "page_label": task["page_label"],
+            "backend": {"strategy": "fallback"},
+            "review": {
+                "summary": f"reviewed {task['page_label']}",
+                "issues": [],
+                "recommended_changes": [],
+                "broken_controls": [],
+                "button_audit": [],
+                "route_handoffs": [],
+                "workflow_gaps": [],
+                "playwright_followups": [],
+                "complaint_journey": {},
+                "actor_plan": {},
+                "critic_review": {},
+                "actor_summary": "",
+                "critic_summary": "",
+                "actor_path_breaks": [],
+                "critic_test_obligations": [],
+                "stage_findings": {},
+            },
+        }
+
+    monkeypatch.setattr(ui_review_module, "_run_page_review_task", fake_run_page_review_task)
+
+    report = ui_review_module.create_ui_review_report(
+        [str(path) for path in screenshots],
+        provider="codex_cli",
+        artifact_metadata=artifact_metadata,
+        page_review_executor="inline",
+    )
+
+    assert report["backend"]["strategy"] == "page_reviews"
+    assert report["backend"]["selected_screenshot_count"] == 4
+    assert report["backend"]["skipped_screenshot_count"] == 2
+    assert report["backend"]["selected_screenshots"] == [
+        "workspace-draft.png",
+        "workspace-evidence.png",
+        "workspace-intake.png",
+        "workspace-review.png",
+    ]
+    assert report["backend"]["skipped_screenshots"] == [
+        "workspace-integrations.png",
+        "workspace-homepage.png",
+    ]
+    assert [item["name"] for item in report["screenshots"]] == report["backend"]["selected_screenshots"]
+    assert len(report["page_reviews"]) == 4
+
+
 def test_run_ui_review_workflow_falls_back_to_text_router_when_only_export_artifacts_exist(monkeypatch, tmp_path: Path):
     (tmp_path / "workspace-export-artifacts.json").write_text(
         (

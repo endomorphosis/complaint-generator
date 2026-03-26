@@ -140,6 +140,73 @@
             font-size: 1.04rem;
         }
 
+        .focus-rail {
+            position: sticky;
+            top: 14px;
+            z-index: 4;
+            display: grid;
+            gap: 14px;
+            grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+            margin: 18px 0;
+            padding: 18px 20px;
+            border-radius: 24px;
+            border: 1px solid rgba(141, 61, 23, 0.18);
+            background: rgba(255, 248, 241, 0.96);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+            pointer-events: none;
+        }
+
+        .focus-rail strong,
+        .focus-rail span {
+            display: block;
+        }
+
+        .focus-rail-summary {
+            display: grid;
+            gap: 10px;
+        }
+
+        .focus-rail-title {
+            font-size: 1.15rem;
+            line-height: 1.2;
+        }
+
+        .focus-rail-detail {
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .focus-rail-grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .focus-rail-card {
+            padding: 12px 14px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.8);
+        }
+
+        .focus-rail-card strong {
+            font-size: 0.84rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: var(--accent-strong);
+        }
+
+        .focus-rail-card span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .focus-rail button {
+            pointer-events: auto;
+        }
+
         .eyebrow {
             display: inline-block;
             margin-bottom: 8px;
@@ -987,6 +1054,7 @@
         @media (max-width: 1040px) {
             .hero-grid,
             .layout,
+            .focus-rail,
             .field-row,
             .support-grid,
             .stage-grid,
@@ -1006,6 +1074,14 @@
 
             .sidebar {
                 position: static;
+            }
+
+            .focus-rail {
+                position: static;
+            }
+
+            .focus-rail-grid {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -1030,7 +1106,7 @@
             <div class="hero-grid">
                 <div class="hero-panel">
                     <h2>Start with the next calm, useful step</h2>
-                    <p class="muted">Capture identity and timeline first, then protected activity, the adverse action, and the harm. Review and Builder stay gated until the case record is coherent enough to use them safely.</p>
+                    <p class="muted">Start with names and timing, then what was reported, what happened after, and how the situation affected the complainant. Review and Builder stay gated until the case record is coherent enough to use them safely.</p>
                     <div class="surface-nav-group">
                         <div class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation">
                             <a class="surface-link" href="/">Landing</a>
@@ -1130,8 +1206,34 @@
 
             <main class="panel">
                 <section class="reassurance-banner" aria-label="Workflow reassurance">
-                    <strong id="reassurance-title">The workspace will guide one step at a time.</strong>
-                    <span id="reassurance-detail">You do not need every fact immediately. Start with the clearest version of the story, then use evidence and review to strengthen it.</span>
+                    <strong id="reassurance-title">The workspace will guide one calm step at a time.</strong>
+                    <span id="reassurance-detail">You do not need every fact right now. Save the clearest version you have, then come back with evidence or corrections when you are ready.</span>
+                </section>
+
+                <section class="focus-rail" aria-label="Current workflow focus">
+                    <div class="focus-rail-summary">
+                        <span class="eyebrow">Current Workflow Focus</span>
+                        <strong class="focus-rail-title" id="focus-rail-title">The workspace is preparing the safest next step.</strong>
+                        <span class="focus-rail-detail" id="focus-rail-detail">This rail keeps the current stage, next required action, and export-safety posture visible while you scroll through the workspace.</span>
+                        <div class="button-row">
+                            <button class="primary" id="focus-rail-action-button" type="button" data-target-tab="intake">Continue current step</button>
+                            <button class="secondary" id="focus-rail-review-button" type="button">Check review gate</button>
+                        </div>
+                    </div>
+                    <div class="focus-rail-grid">
+                        <div class="focus-rail-card">
+                            <strong>Current stage</strong>
+                            <span id="focus-rail-stage">Loading current stage…</span>
+                        </div>
+                        <div class="focus-rail-card">
+                            <strong>Readiness posture</strong>
+                            <span id="focus-rail-readiness">The workspace is checking whether the record is still in intake, support-building, or drafting posture.</span>
+                        </div>
+                        <div class="focus-rail-card">
+                            <strong>Export safety</strong>
+                            <span id="focus-rail-export-safety">Export guidance will appear here once the release gate and draft posture are available.</span>
+                        </div>
+                    </div>
                 </section>
 
                 <div class="stage-grid" aria-label="Complaint workflow summary">
@@ -1357,26 +1459,26 @@
                     <p class="muted">Capture the facts once, then reuse them everywhere else in the workflow. The optional court-caption field helps the complaint open with a more realistic court header when you know the right district.</p>
                     <div class="section-intro">
                         <strong>What to do here</strong>
-                        <span>Focus on who was involved, what happened, when it happened, and what harm followed. If the exact date or wording is uncertain, save the best current version and improve it later.</span>
+                        <span>Focus on who was involved, what happened, when it happened, and how it affected the complainant. If the exact date or wording is uncertain, save the best current version and improve it later.</span>
                     </div>
                     <div class="panel-split">
                         <div>
                             <div class="callout">
                                 <h3>Start with the story the complainant can tell clearly today</h3>
-                                <p class="muted">Use plain language. If dates or exact wording are uncertain, capture the best current version and come back with corroboration in the Evidence stage.</p>
+                                <p class="muted">Use plain language. Best estimate is okay. If dates or exact wording are uncertain, capture the best current version now and come back with corroboration in the Evidence stage.</p>
                             </div>
                             <div class="guidance-grid" aria-label="Intake guidance">
                                 <div class="guidance-card">
                                     <strong>Ask for sequence</strong>
-                                    <span>What happened first, what happened next, and how soon after the protected activity did the harm occur?</span>
+                                    <span>What happened first, what happened next, and how soon after the report or complaint did the harm occur?</span>
                                 </div>
                                 <div class="guidance-card">
                                     <strong>Name the actors</strong>
-                                    <span>Capture who made the decision, who knew about the complaint, and who communicated the adverse action.</span>
+                                    <span>Capture who made the decision, who knew about the report or complaint, and who communicated what happened next.</span>
                                 </div>
                                 <div class="guidance-card">
                                     <strong>Leave room for uncertainty</strong>
-                                    <span>Approximate dates and incomplete recall are acceptable at intake if they are marked for later corroboration.</span>
+                                    <span>Approximate dates and incomplete recall are acceptable at intake if they are marked for later corroboration. You can skip and return.</span>
                                 </div>
                             </div>
                         </div>
@@ -2956,15 +3058,45 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         }
 
         function renderIntake(sessionPayload) {
+            const intakeDisplayCopy = {
+                party_name: {
+                    label: 'What name should we use for the person harmed?',
+                    prompt: 'Share the name you want used in this complaint workspace.',
+                    placeholder: 'Name of the harmed person',
+                },
+                protected_activity: {
+                    label: 'What did they report, oppose, or ask for help about?',
+                    prompt: 'Describe the report, complaint, request, or protected step that came before things changed.',
+                    placeholder: 'Reported discrimination to HR',
+                },
+                adverse_action: {
+                    label: 'What happened after that?',
+                    prompt: 'Describe what the employer, housing provider, agency, or other party did next.',
+                    placeholder: 'Was terminated two days later',
+                },
+                harm: {
+                    label: 'How did this affect them?',
+                    prompt: 'Describe the practical harm, loss, stress, or instability that followed.',
+                    placeholder: 'Lost wages, benefits, or housing stability',
+                },
+                timeline: {
+                    label: 'When did the key events happen?',
+                    prompt: 'Use the best timeline you have right now. Best estimate is okay.',
+                    placeholder: 'Report on March 8, termination on March 10',
+                },
+            };
             const grid = document.getElementById('intake-question-grid');
             grid.innerHTML = (sessionPayload.questions || []).map((question) => `
                 <div class="interview-card">
-                    <strong>${escapeHtml(question.label)}</strong>
-                    <span>${escapeHtml(question.prompt)}</span>
+                    <strong>${escapeHtml(((intakeDisplayCopy[question.id] || {}).label) || question.label)}</strong>
+                    <span>${escapeHtml(((intakeDisplayCopy[question.id] || {}).prompt) || question.prompt)}</span>
                     ${question.id === 'court_header'
                         ? '<div class="helper-text">Optional. If you know the correct district, enter it here so the complaint caption uses that court header instead of the generic fallback.</div>'
                         : ''}
-                    <textarea id="intake-${escapeHtml(question.id)}" data-question-id="${escapeHtml(question.id)}" placeholder="${escapeHtml(question.placeholder || '')}">${escapeHtml(question.answer || '')}</textarea>
+                    ${question.id !== 'court_header'
+                        ? '<div class="helper-text">You can save and return anytime. Share only what you can right now.</div>'
+                        : ''}
+                    <textarea id="intake-${escapeHtml(question.id)}" data-question-id="${escapeHtml(question.id)}" placeholder="${escapeHtml(((intakeDisplayCopy[question.id] || {}).placeholder) || question.placeholder || '')}">${escapeHtml(question.answer || '')}</textarea>
                 </div>
             `).join('');
             renderCaptionPreview();
@@ -3335,6 +3467,33 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             integrityNode.textContent = lines.join('\n');
         }
 
+        function buildSessionBoundParityExamples(userId) {
+            const did = String(userId || workspaceUserId || '').trim() || 'did:key:current-session';
+            return [
+                {
+                    title: 'Inspect this session',
+                    packageExample: `from complaint_generator import ComplaintWorkspaceService\n\nservice = ComplaintWorkspaceService()\npayload = service.get_session("${did}")`,
+                    cliExample: `complaint-workspace session --user-id ${did}`,
+                    mcpExample: `tool: complaint.get_session\n{"user_id":"${did}"}`,
+                    sdkExample: `await client.callTool('complaint.get_session', { user_id: '${did}' });`,
+                },
+                {
+                    title: 'Review current support posture',
+                    packageExample: `from complaint_generator import ComplaintWorkspaceService\n\nservice = ComplaintWorkspaceService()\nreview = service.review_case("${did}")`,
+                    cliExample: `complaint-workspace review --user-id ${did}`,
+                    mcpExample: `tool: complaint.review_case\n{"user_id":"${did}"}`,
+                    sdkExample: `await client.callTool('complaint.review_case', { user_id: '${did}' });`,
+                },
+                {
+                    title: 'Export this complaint packet',
+                    packageExample: `from complaint_generator import ComplaintWorkspaceService\n\nservice = ComplaintWorkspaceService()\npacket = service.export_complaint_packet("${did}")`,
+                    cliExample: `complaint-workspace export-markdown --user-id ${did}`,
+                    mcpExample: `tool: complaint.export_complaint_packet\n{"user_id":"${did}"}`,
+                    sdkExample: `await client.callTool('complaint.export_complaint_packet', { user_id: '${did}' });`,
+                },
+            ];
+        }
+
         function activateEvidenceComposer(kind) {
             const kindField = document.getElementById('evidence-kind');
             if (kindField) {
@@ -3446,8 +3605,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 ? `Ask and save: ${nextQuestion.label || nextQuestion.prompt}`
                 : (state.builderReady ? 'Review, refine, and export the complaint draft.' : 'Generate a complaint draft from the current record.');
             const actionButton = document.getElementById('action-button');
+            const focusRailActionButton = document.getElementById('focus-rail-action-button');
             const queue = document.getElementById('queue-list');
             const blockerList = document.getElementById('blocker-list');
+            const currentReleaseGate = workspaceClientReleaseGate || {};
             let readinessPercent = 8;
             let actionTab = 'intake';
             let actionTitle = 'Complete intake before moving on';
@@ -3576,7 +3737,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('workflow-user-id').textContent = `Complainant ID: ${workspaceUserId || session.user_id || 'unknown'}`;
             document.getElementById('workflow-priority-text').textContent = nextActionText;
             document.getElementById('workflow-stage-detail').textContent = `Answered intake questions: ${answeredCount}. Supported elements: ${overview.supported_elements || 0}. Missing elements: ${overview.missing_elements || 0}.`;
-            document.getElementById('workflow-stage-chip').textContent = 'What is complete';
+            document.getElementById('workflow-stage-chip').textContent = `Current stage: ${stageLabel.toLowerCase()}`;
             document.getElementById('workflow-stage-summary').textContent = `${answeredCount} intake answers saved, ${evidenceCount} evidence items collected, ${overview.supported_elements || 0} supported elements currently have some support behind them.`;
             document.getElementById('workflow-next-action').textContent = nextActionText;
             document.getElementById('workflow-draft-guidance').textContent = nextQuestion
@@ -3593,7 +3754,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : 'The complaint is ready for a first draft pass';
             document.getElementById('progress-detail').textContent = `Intake answered: ${answeredCount}/${totalQuestions}. Evidence items: ${evidenceCount}. Supported elements: ${overview.supported_elements || 0}.`;
             document.getElementById('progress-meter').style.width = `${readinessPercent}%`;
-            document.getElementById('progress-percent-chip').textContent = `${readinessPercent}% of workflow mapped`;
+            document.getElementById('progress-percent-chip').textContent = state.builderReady && evidenceCount <= 2
+                ? `${readinessPercent}% mapped, but record still thin`
+                : `${readinessPercent}% of workflow mapped`;
             document.getElementById('progress-phase-chip').textContent = `phase: ${stageLabel.toLowerCase()}`;
             document.getElementById('progress-step-intake').textContent = nextQuestion
                 ? `Still collecting ${nextQuestion.label || 'intake details'}.`
@@ -3620,6 +3783,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('action-stage-chip').textContent = `stage: ${stageLabel.toLowerCase()}`;
             document.getElementById('action-support-chip').textContent = `support: ${overview.supported_elements || 0} supported / ${overview.missing_elements || 0} missing`;
             actionButton.dataset.targetTab = actionTab;
+            focusRailActionButton.dataset.targetTab = actionTab;
             actionButton.textContent = actionTab === 'draft'
                 ? 'Go to draft'
                 : actionTab === 'evidence'
@@ -3627,6 +3791,34 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : actionTab === 'review'
                         ? 'Go to review'
                         : 'Go to intake';
+            focusRailActionButton.textContent = actionTab === 'draft'
+                ? 'Continue in draft'
+                : actionTab === 'evidence'
+                    ? 'Continue in evidence'
+                    : actionTab === 'review'
+                        ? 'Continue in review'
+                        : 'Continue in intake';
+            document.getElementById('focus-rail-title').textContent = actionTitle.trim();
+            document.getElementById('focus-rail-detail').textContent = nextQuestion
+                ? 'Stay in one calm lane: finish the next intake answer, then reassess what proof or drafting step actually comes next.'
+                : missingItems.length
+                    ? `The main risk right now is unsupported claim elements. Use evidence actions that directly close the ${missingItems.length} weakest gap${missingItems.length === 1 ? '' : 's'}.`
+                    : state.builderReady
+                        ? 'The theory is far enough along to refine carefully, but export should stay secondary to release-gate and proof review.'
+                        : 'The core story is in place. Generate the first complaint draft only after checking whether the current support still feels too thin.';
+            document.getElementById('focus-rail-stage').textContent = `${stageLabel}. Next route: ${actionTab}.`;
+            document.getElementById('focus-rail-readiness').textContent = nextQuestion
+                ? `${answeredCount}/${Math.max(totalQuestions, 1)} intake answers saved. Keep building the factual record before trusting draft posture.`
+                : missingItems.length
+                    ? `${overview.supported_elements || 0} elements have support, but ${missingItems.length} still need stronger corroboration.`
+                    : evidenceCount <= 2
+                        ? `Draft path is open, but only ${evidenceCount} evidence item${evidenceCount === 1 ? '' : 's'} are attached. Treat readiness as provisional.`
+                        : `Record is materially supported enough to refine the complaint draft without losing track of the strongest next action.`;
+            document.getElementById('focus-rail-export-safety').textContent = currentReleaseGate && Object.keys(currentReleaseGate).length
+                ? `${String(currentReleaseGate.verdict || 'unknown').toUpperCase()}: ${currentReleaseGate.reason || 'Keep the release gate visible beside export controls.'}`
+                : missingItems.length || evidenceCount <= 2
+                    ? 'Hold export behind review and support-building until the release gate has a specific verdict and the record is less thin.'
+                    : 'No cached release-gate review yet. Export should stay secondary until packet analysis runs.';
             document.getElementById('intake-soft-note').textContent = nextQuestion
                 ? 'Saving here only updates the shared workspace. You can keep improving answers as the record becomes clearer.'
                 : 'The intake is complete enough for the next step. You can still return later if details need correction.';
@@ -3897,6 +4089,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     };
                 });
                 const missingParity = parityFindings.filter((item) => item.expectedTool && !item.matched);
+                const parityExamples = buildSessionBoundParityExamples(workspaceUserId || (workspaceSession || {}).user_id || ((workspaceSession || {}).session || {}).user_id);
                 toolingParityNode.innerHTML = `
                     <div class="item">
                         <strong>Browser SDK parity summary</strong>
@@ -3907,6 +4100,27 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         </div>
                         <div class="muted">${missingParity.length ? escapeHtml(`SDK methods without a visible MCP twin: ${missingParity.map((item) => item.method).join(', ')}.`) : 'Every browser SDK method with a declared parity rule has a visible MCP twin in this workspace.'}</div>
                     </div>
+                    <div class="item">
+                        <strong>Session-bound tooling handoff</strong>
+                        <div class="chip-row">
+                            <span class="chip good">did: ${escapeHtml(String(workspaceUserId || (workspaceSession || {}).user_id || ((workspaceSession || {}).session || {}).user_id || 'unknown'))}</span>
+                            <span class="chip">${escapeHtml(latestSdkToolActivity && latestSdkToolActivity.tool_name ? `last tool: ${latestSdkToolActivity.tool_name}` : 'last tool: none yet')}</span>
+                        </div>
+                        <div class="muted">Run the same live session through package, CLI, MCP, or SDK without rewriting the user id by hand.</div>
+                    </div>
+                    ${parityExamples.map((example) => `
+                        <div class="item">
+                            <strong>${escapeHtml(example.title)}</strong>
+                            <div class="muted">Package</div>
+                            <pre>${escapeHtml(example.packageExample)}</pre>
+                            <div class="muted">CLI</div>
+                            <pre>${escapeHtml(example.cliExample)}</pre>
+                            <div class="muted">MCP</div>
+                            <pre>${escapeHtml(example.mcpExample)}</pre>
+                            <div class="muted">SDK</div>
+                            <pre>${escapeHtml(example.sdkExample)}</pre>
+                        </div>
+                    `).join('')}
                     ${parityFindings.slice(0, 10).map((item) => `
                         <div class="item">
                             <strong>${escapeHtml(item.method)}</strong>
@@ -5949,6 +6163,15 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 defaultStatusMessageForTab(targetTab),
             );
         });
+        document.getElementById('focus-rail-action-button').addEventListener('click', () => {
+            const targetTab = document.getElementById('focus-rail-action-button').dataset.targetTab || 'intake';
+            jumpToStage(
+                targetTab,
+                defaultFocusSelectorForTab(targetTab),
+                `Opened ${targetTab.charAt(0).toUpperCase()}${targetTab.slice(1)} from the workflow focus rail.`,
+            );
+        });
+        document.getElementById('focus-rail-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the workflow focus rail so support and release-gate posture can be checked.'));
         document.getElementById('action-refresh-button').addEventListener('click', refreshWorkspace);
         document.getElementById('shortcut-intake-button').addEventListener('click', () => jumpToStage('intake', '#intake-party_name', 'Opened Intake so the complaint story can be captured.'));
         document.getElementById('shortcut-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so support can be attached to the case theory.'));

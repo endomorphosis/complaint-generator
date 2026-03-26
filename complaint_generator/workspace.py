@@ -171,6 +171,86 @@ def import_local_evidence(
     )
 
 
+def run_gmail_duckdb_pipeline(
+    user_id: Optional[str],
+    *,
+    addresses: list[str],
+    claim_element_id: str = "causation",
+    folder: str = "INBOX",
+    folders: Optional[list[str]] = None,
+    years_back: Optional[int] = 2,
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
+    complaint_query: Optional[str] = None,
+    complaint_keywords: Optional[list[str]] = None,
+    min_relevance_score: float = 0.0,
+    evidence_root: Optional[str | Path] = None,
+    gmail_user: Optional[str] = None,
+    gmail_app_password: Optional[str] = None,
+    use_gmail_oauth: bool = False,
+    gmail_oauth_client_secrets: Optional[str] = None,
+    gmail_oauth_token_cache: Optional[str] = None,
+    gmail_oauth_open_browser: bool = True,
+    checkpoint_name: str = "gmail-duckdb-pipeline",
+    uid_window_size: int = 500,
+    max_batches: int = 20,
+    duckdb_output_dir: Optional[str | Path] = None,
+    append_to_existing_corpus: bool = False,
+    bm25_search_query: Optional[str] = None,
+    bm25_search_limit: int = 20,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).run_gmail_duckdb_pipeline(
+        user_id,
+        addresses=list(addresses or []),
+        claim_element_id=claim_element_id,
+        folder=folder,
+        folders=folders or [],
+        years_back=years_back,
+        date_after=date_after,
+        date_before=date_before,
+        complaint_query=complaint_query,
+        complaint_keywords=complaint_keywords or [],
+        min_relevance_score=min_relevance_score,
+        evidence_root=str(evidence_root) if evidence_root is not None else None,
+        gmail_user=gmail_user,
+        gmail_app_password=gmail_app_password,
+        use_gmail_oauth=use_gmail_oauth,
+        gmail_oauth_client_secrets=gmail_oauth_client_secrets,
+        gmail_oauth_token_cache=gmail_oauth_token_cache,
+        gmail_oauth_open_browser=gmail_oauth_open_browser,
+        checkpoint_name=checkpoint_name,
+        uid_window_size=uid_window_size,
+        max_batches=max_batches,
+        duckdb_output_dir=str(duckdb_output_dir) if duckdb_output_dir is not None else None,
+        append_to_existing_corpus=append_to_existing_corpus,
+        bm25_search_query=bm25_search_query,
+        bm25_search_limit=bm25_search_limit,
+    )
+
+
+def search_email_duckdb_corpus(
+    *,
+    index_path: str | Path,
+    query: str,
+    limit: int = 20,
+    ranking: str = "bm25",
+    bm25_k1: float = 1.2,
+    bm25_b: float = 0.75,
+) -> dict[str, Any]:
+    from .email_pipeline import search_email_duckdb_corpus as _search_email_duckdb_corpus
+
+    return _search_email_duckdb_corpus(
+        index_path=index_path,
+        query=query,
+        limit=limit,
+        ranking=ranking,
+        bm25_k1=bm25_k1,
+        bm25_b=bm25_b,
+    )
+
+
 def review_case(
     user_id: Optional[str],
     *,
@@ -553,11 +633,13 @@ __all__ = [
     "reset_session",
     "review_ui",
     "review_case",
+    "run_gmail_duckdb_pipeline",
     "run_browser_audit",
     "run_closed_loop_ui_ux_improvement",
     "run_end_to_end_complaint_browser_audit",
     "run_iterative_ui_ux_workflow",
     "save_evidence",
+    "search_email_duckdb_corpus",
     "start_session",
     "submit_intake_answers",
     "update_case_synopsis",

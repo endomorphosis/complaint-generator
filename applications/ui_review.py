@@ -232,6 +232,101 @@ def _page_review_unit_label(screenshot: Path, artifact_metadata: Iterable[Dict[s
     return screenshot.stem
 
 
+def _artifact_priority_score(screenshot: Path, artifact_metadata: Iterable[Dict[str, Any]]) -> int:
+    page_artifacts = _filter_artifacts_for_page(screenshot, artifact_metadata)
+    score = 0
+    artifact_context = " ".join(
+        [
+            str(((page_artifacts[0] if page_artifacts else {}).get("name") or screenshot.stem)),
+            str(((page_artifacts[0] if page_artifacts else {}).get("title") or screenshot.stem)),
+            str(((page_artifacts[0] if page_artifacts else {}).get("url") or "")),
+            str(((page_artifacts[0] if page_artifacts else {}).get("text_excerpt") or "")),
+        ]
+    ).lower()
+    if "intake" in artifact_context or "chat" in artifact_context:
+        stage = "Intake"
+    elif "evidence" in artifact_context or "document" in artifact_context:
+        stage = "Evidence"
+    elif "review" in artifact_context or "support" in artifact_context:
+        stage = "Review"
+    elif "draft" in artifact_context or "builder" in artifact_context:
+        stage = "Draft"
+    elif "integration" in artifact_context or "sdk" in artifact_context or "tool" in artifact_context:
+        stage = "Integration Discovery"
+    else:
+        stage = "Workspace"
+    stage_bonus = {
+        "Intake": 60,
+        "Evidence": 55,
+        "Review": 50,
+        "Draft": 65,
+        "Integration Discovery": 45,
+        "Workspace": 35,
+    }
+    score += stage_bonus.get(stage, 20)
+    for item in page_artifacts:
+        artifact_type = str(item.get("artifact_type") or "").strip()
+        if artifact_type == "complaint_export":
+            score += 40
+        if str(item.get("name") or "").strip().lower().startswith("workspace-"):
+            score += 8
+        text_excerpt = str(item.get("text_excerpt") or "")
+        if "release gate" in text_excerpt.lower():
+            score += 20
+        if "draft" in text_excerpt.lower():
+            score += 12
+        if "evidence" in text_excerpt.lower():
+            score += 10
+        if "review" in text_excerpt.lower():
+            score += 8
+    return score
+
+
+def _max_page_reviews_for_provider(provider: Optional[str]) -> int:
+    override = str(os.getenv("COMPLAINT_UI_REVIEW_MAX_PAGES", "") or "").strip()
+    if override:
+        try:
+            return max(1, int(override))
+        except Exception:
+            pass
+    normalized = str(provider or "").strip().lower()
+    if normalized in {"codex_cli", "codex"}:
+        return 4
+    return 12
+
+
+def _select_screenshots_for_review(
+    screenshots: List[Path],
+    *,
+    artifact_metadata: Iterable[Dict[str, Any]],
+    provider: Optional[str],
+) -> tuple[List[Path], Dict[str, Any]]:
+    if len(screenshots) <= 1:
+        return list(screenshots), {
+            "selected_screenshot_count": len(screenshots),
+            "skipped_screenshot_count": 0,
+            "selected_screenshots": [path.name for path in screenshots],
+            "skipped_screenshots": [],
+        }
+
+    max_pages = _max_page_reviews_for_provider(provider)
+    ranked = sorted(
+        screenshots,
+        key=lambda path: (
+            -_artifact_priority_score(path, artifact_metadata),
+            path.name,
+        ),
+    )
+    selected = ranked[:max_pages]
+    skipped = ranked[max_pages:]
+    return selected, {
+        "selected_screenshot_count": len(selected),
+        "skipped_screenshot_count": len(skipped),
+        "selected_screenshots": [path.name for path in selected],
+        "skipped_screenshots": [path.name for path in skipped],
+    }
+
+
 def _merge_string_list(items: Iterable[Any]) -> List[str]:
     merged: List[str] = []
     for item in items:
@@ -1669,9 +1764,14 @@ def create_ui_review_report(
     )
 
     if len(screenshots) > 1:
+        selected_screenshots, selection_metadata = _select_screenshots_for_review(
+            screenshots,
+            artifact_metadata=artifact_metadata or [],
+            provider=backend_kwargs.get("provider"),
+        )
         page_reports: List[Dict[str, Any]] = []
         task_payloads: List[Dict[str, Any]] = []
-        for screenshot in screenshots:
+        for screenshot in selected_screenshots:
             page_artifacts = _filter_artifacts_for_page(screenshot, artifact_metadata or [])
             task_payloads.append(
                 {
@@ -1721,11 +1821,12 @@ def create_ui_review_report(
             "page_review_executor": executor_mode,
             "prompt_mode": "compact" if use_compact_prompt else "full",
             "page_review_backends": [dict(item.get("backend") or {}) for item in page_reports],
+            **selection_metadata,
         }
         report = {
             "generated_at": _utc_now(),
             "backend": backend_metadata,
-            "screenshots": _screenshot_payload(screenshots),
+            "screenshots": _screenshot_payload(selected_screenshots),
             "artifact_metadata": list(artifact_metadata or []),
             "complaint_output_feedback": complaint_output_feedback,
             "notes": notes or "",

@@ -717,300 +717,489 @@
   "latest_packet_export": null,
   "ui_readiness": {
     "acceptance_checks": [
-      "Keep a Playwright flow that proves the release gate and filing-shape guidance stay visible before markdown/pdf/docx download."
+      "Add viewport tests (mobile/tablet/desktop) asserting draft pane min readable width and non-overlapping controls.",
+      "Assert exactly one primary CTA is visible per stage and remains visible after scrolling.",
+      "Capture screenshots for each stage with diagnostics collapsed vs expanded to verify hierarchy.",
+      "Add accessibility checks for minimum font size, color contrast, and button hit target size in draft/review surfaces.",
+      "Add full-page visual regression asserting no floating/off-canvas control boxes outside the main container.",
+      "Assert minimum computed font-size/line-height for review labels and body text.",
+      "Capture screenshots at mobile and desktop widths to verify sticky stage nav and action bar behavior.",
+      "Assert single primary CTA is visible and enabled/disabled strictly by MCP operation state."
     ],
-    "actor_path_breaks": [
-      "The screenshot review loop can time out before returning page-specific UX findings."
-    ],
+    "actor_path_breaks": [],
     "broken_controls": [
       {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "control": "Primary submit/advance button",
+        "failure_mode": "Looks insufficiently distinct from surrounding controls due to crowded visual context.",
         "page": "workspace-draft",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "repair": "Use one high-contrast primary style per stage and consistent placement in sticky header/footer.",
+        "surface": "Stage actions"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "control": "Expand/collapse affordances",
+        "failure_mode": "Section boundaries and toggles are hard to parse in dense stacked cards.",
         "page": "workspace-draft",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-draft"
+        "repair": "Add explicit chevron toggles, larger hit areas, and clearer collapsed summaries.",
+        "surface": "Diagnostics/metadata sections"
       },
       {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "control": "Floating mini-panel controls (unlabeled in screenshot)",
+        "failure_mode": "Controls appear visually detached/clipped from the main page, implying broken placement or stale overlays.",
         "page": "workspace-evidence",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "repair": "Fix positioning context and z-index; hide or dock helper controls within the page container at all breakpoints.",
+        "surface": "Left gutter near lower/mid page"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "control": "Primary export/next-step action",
+        "failure_mode": "Action emphasis appears weak versus surrounding blocks, making next step ambiguous.",
         "page": "workspace-evidence",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-evidence"
+        "repair": "Promote one persistent primary CTA with clear label and state feedback.",
+        "surface": "End-of-flow action region"
       },
       {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "control": "Connect",
+        "failure_mode": "Looks detached from immediate feedback context; users cannot tell what changes after click from visible UI alone.",
         "page": "workspace-homepage",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "repair": "Show inline post-click state (spinner, connected badge, last sync timestamp) in the same row and disable conflicting actions until status resolves.",
+        "surface": "Continue existing complaint panel"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "control": "Review support truth",
+        "failure_mode": "Label is domain-specific and less immediately understandable than adjacent actions.",
         "page": "workspace-homepage",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-homepage"
+        "repair": "Rename to a clearer verb-object label (e.g., \"Review evidence support\") and add one-line condition for when it should be used.",
+        "surface": "Primary hero action group"
       },
       {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "control": "Open builder",
+        "failure_mode": "Appears visually de-emphasized/disabled-looking compared with nearby actions, potentially signaling unavailable state without explanation.",
+        "page": "workspace-homepage",
+        "repair": "Use explicit enabled/disabled styling with reason text when disabled; if enabled, match other active CTA contrast and weight.",
+        "surface": "Bottom route cards"
+      },
+      {
+        "control": "Primary orange action button(s)",
+        "failure_mode": "Appears visually ambiguous among nearby controls; primary intent is not consistently obvious.",
         "page": "workspace-intake",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "repair": "Standardize one primary action style and location per stage, with clear disabled/loading states tied to existing MCP request status.",
+        "surface": "Main stage cards"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "control": "Stage links",
+        "failure_mode": "Active step is not strongly distinguishable in the screenshot.",
         "page": "workspace-intake",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-intake"
-      },
-      {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
-        "page": "workspace-integrations",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
-      },
-      {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
-        "page": "workspace-integrations",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-integrations"
-      },
-      {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
-        "page": "workspace-review",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
-      },
-      {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
-        "page": "workspace-review",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-review"
+        "repair": "Add high-contrast active styling and scroll-sync to section headers.",
+        "surface": "Left sidebar navigation"
       }
     ],
     "carry_forward_assessment": {},
     "critic_verdict": "warning",
     "issue_counts": {
-      "high": 0,
-      "low": 0,
-      "medium": 6
+      "high": 8,
+      "low": 4,
+      "medium": 8
     },
     "issues": [
       {
         "page": "workspace-draft",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
+        "problem": "Primary content is rendered in very narrow columns with tiny text, causing severe readability loss.",
+        "recommended_fix": "Increase base font size and line height, widen the main draft panel, and enforce responsive min-widths with stacked layout on smaller viewports.",
+        "severity": "high",
+        "surface": "Draft workspace",
+        "user_impact": "Users cannot reliably review legal wording or catch errors before export."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Information density is excessive with many boxed sections and little visual separation between decision-critical and secondary metadata.",
+        "recommended_fix": "Group by workflow stage, collapse non-critical diagnostics by default, and promote key actions/status into a persistent top summary bar.",
+        "severity": "high",
+        "surface": "Whole page layout",
+        "user_impact": "Users spend more time searching for key actions and may miss high-risk content defects."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Primary action controls appear visually diluted among many similar panels/buttons.",
+        "recommended_fix": "Apply clear primary/secondary button hierarchy, keep one dominant CTA per stage, and place stage-completion action consistently.",
         "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "surface": "Action area",
+        "user_impact": "Users may trigger wrong actions or fail to complete the intended next step."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Field labels and values look tightly packed with limited whitespace and weak scan paths.",
+        "recommended_fix": "Use consistent spacing scale, stronger headings, and two-level typography hierarchy for labels vs values.",
+        "severity": "medium",
+        "surface": "Form and metadata blocks",
+        "user_impact": "Increases cognitive load and raises risk of misreading evidence, claim settings, or export options."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Important quality signals (release gate/shape/alignment) are present but not visually integrated with draft decision points.",
+        "recommended_fix": "Attach inline guidance next to each score and provide direct links/buttons to the affected stage section.",
+        "severity": "low",
+        "surface": "Status/score presentation",
+        "user_impact": "Users may not connect scores to corrective actions before filing."
       },
       {
         "page": "workspace-evidence",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
+        "problem": "Typography and controls appear too small relative to page density, making labels and values hard to read.",
+        "recommended_fix": "Increase base font size and line height, enlarge key controls, and enforce minimum readable sizes for form labels/summary chips in the review path.",
+        "severity": "high",
+        "surface": "Complaint generator main page",
+        "user_impact": "Actors can miss key facts or status signals during filing review, increasing risk of bad submissions."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Detached/floating mini-panels are visible outside the primary column, suggesting overlap, clipping, or broken sticky positioning.",
+        "recommended_fix": "Constrain floating elements to the content container, fix z-index/position rules, and hide non-active helper panels at narrow widths.",
+        "severity": "high",
+        "surface": "Left side of main content (lower/mid page)",
+        "user_impact": "Users may not trust which controls are active, and may click stale or hidden controls."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Very long single-column layout lacks strong stage separators and persistent progress context.",
+        "recommended_fix": "Add a persistent stage rail or sticky progress header with clear current-stage highlight and jump links.",
         "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "surface": "Full-page review flow",
+        "user_impact": "Users lose orientation between Intake/Evidence/Review/Draft, slowing verification and increasing omissions."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Visual hierarchy is flat (similar card styles, muted contrast, repeated micro-panels).",
+        "recommended_fix": "Promote key decision blocks (claim type, strategy, export readiness) with stronger contrast, spacing, and heading scale.",
+        "severity": "medium",
+        "surface": "Section cards and metadata blocks",
+        "user_impact": "Critical filing signals blend with secondary metadata, reducing decision speed."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Primary CTA is not consistently dominant across the long page; action priority is visually diluted.",
+        "recommended_fix": "Use a sticky action footer/header with one primary CTA and clearly grouped secondary actions.",
+        "severity": "low",
+        "surface": "Primary action area",
+        "user_impact": "Users may hesitate on next step or miss final export action."
       },
       {
         "page": "workspace-homepage",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
+        "problem": "Competing primary actions appear with similar visual weight (e.g., \"Start session fresh\", \"Open guided workspace\", \"Review support truth\").",
+        "recommended_fix": "Designate one primary CTA per role/state (new vs returning), demote others to secondary/tertiary styles, and add short helper text under each action clarifying when to use it.",
+        "severity": "high",
+        "surface": "Workspace home hero cards",
+        "user_impact": "Users may choose the wrong entry path and lose momentum at intake, increasing setup errors and rework."
+      },
+      {
+        "page": "workspace-homepage",
+        "problem": "Status blocks (identity, MCP tools, stage progress, case support) are dense and use low-contrast small text.",
+        "recommended_fix": "Increase font size/contrast, convert dense paragraphs to labeled key-value rows, and add clear success/warning badges for each status block.",
+        "severity": "high",
+        "surface": "Continue existing complaint panel",
+        "user_impact": "Operators cannot quickly confirm readiness or blockers, which delays transition from intake to drafting."
+      },
+      {
+        "page": "workspace-homepage",
+        "problem": "Tabs appear muted and potentially inactive-looking, with weak selected-state differentiation.",
+        "recommended_fix": "Strengthen active tab styling (contrast, weight, indicator), and ensure inactive tabs remain clearly actionable.",
         "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "surface": "Top navigation/tabs",
+        "user_impact": "Users may not understand where they are in the tool, causing navigation hesitation and stage confusion."
+      },
+      {
+        "page": "workspace-homepage",
+        "problem": "Cards are text-heavy with limited visual distinction between stages and actions.",
+        "recommended_fix": "Add stronger stage icons/colors, shorten copy to one-line outcomes, and keep one explicit action per card.",
+        "severity": "medium",
+        "surface": "Guided path and route cards",
+        "user_impact": "Users must read too much before acting, increasing cognitive load during time-sensitive complaint preparation."
+      },
+      {
+        "page": "workspace-homepage",
+        "problem": "Large vertical sections stack with similar background tones and soft borders, reducing section boundaries.",
+        "recommended_fix": "Increase section contrast and spacing rhythm, and add clearer headers/subheaders for each workflow block.",
+        "severity": "low",
+        "surface": "Global layout spacing",
+        "user_impact": "Scanning the page feels flat; users may miss critical progression cues."
       },
       {
         "page": "workspace-intake",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
-        "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "problem": "Single very long page with many stacked cards and no strong visual chunking between stages.",
+        "recommended_fix": "Introduce clear stage containers with stronger headings, separators, and collapsible sections by stage while keeping existing data flow and submit actions unchanged.",
+        "severity": "high",
+        "surface": "Unified Complaint Workspace main content",
+        "user_impact": "Users must scroll extensively and can lose context about where they are in the filing process."
       },
       {
-        "page": "workspace-integrations",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
-        "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "page": "workspace-intake",
+        "problem": "Navigation appears narrow and text-dense, with weak emphasis on current step.",
+        "recommended_fix": "Increase nav width/typography clarity, add a persistent active-step indicator, and support click-to-scroll anchors for each stage section.",
+        "severity": "high",
+        "surface": "Left navigation rail",
+        "user_impact": "Users may miss the active stage or jump to the wrong section, slowing completion."
       },
       {
-        "page": "workspace-review",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
+        "page": "workspace-intake",
+        "problem": "Secondary text and labels appear low-contrast and visually similar to non-interactive content.",
+        "recommended_fix": "Raise contrast for labels and statuses, standardize token usage for muted text, and reserve muted styles for truly optional metadata.",
         "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "surface": "Card bodies and metadata rows",
+        "user_impact": "Important status/validation details are harder to read, especially during final review."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Action hierarchy is unclear where multiple controls compete within the same viewport.",
+        "recommended_fix": "Use one consistent primary CTA per stage, demote secondary actions, and place stage-complete action at a predictable location.",
+        "severity": "medium",
+        "surface": "Primary/secondary actions",
+        "user_impact": "Users can hesitate or trigger lower-priority actions before completing required checks."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Inconsistent spacing/padding across cards and sections reduces scannability.",
+        "recommended_fix": "Apply consistent spacing scale and card layout primitives across all stage panels.",
+        "severity": "low",
+        "surface": "Overall page rhythm",
+        "user_impact": "The interface feels noisy and increases cognitive load when verifying filing readiness."
       }
     ],
     "latest_review_json_path": null,
     "latest_review_markdown_path": null,
     "optimization_targets": [],
     "playwright_followups": [
-      "Capture and assert the release gate, filing-shape score, and export guidance in the final draft/export view."
+      "Add viewport tests (mobile/tablet/desktop) asserting draft pane min readable width and non-overlapping controls.",
+      "Assert exactly one primary CTA is visible per stage and remains visible after scrolling.",
+      "Capture screenshots for each stage with diagnostics collapsed vs expanded to verify hierarchy.",
+      "Add accessibility checks for minimum font size, color contrast, and button hit target size in draft/review surfaces.",
+      "Add full-page visual regression asserting no floating/off-canvas control boxes outside the main container.",
+      "Assert minimum computed font-size/line-height for review labels and body text.",
+      "Capture screenshots at mobile and desktop widths to verify sticky stage nav and action bar behavior.",
+      "Assert single primary CTA is visible and enabled/disabled strictly by MCP operation state.",
+      "Add scroll-position test verifying stage highlight updates as sections enter viewport.",
+      "Assert only one primary CTA is rendered in the hero section for each mocked session state.",
+      "Capture screenshot snapshots for connected vs disconnected status panel states and verify badge/text changes.",
+      "Assert active tab has distinct visual class and aria-current semantics.",
+      "Assert disabled route actions include an explanatory tooltip or helper text.",
+      "Run visual regression on card density/contrast at desktop and mobile breakpoints.",
+      "Assert only one visible primary CTA per stage section at desktop width.",
+      "Capture screenshots at top/mid/bottom and verify sticky stage progress remains visible.",
+      "Assert sidebar active-stage state updates when scrolling to each stage anchor.",
+      "Run contrast checks on stage labels, statuses, and secondary metadata text.",
+      "Verify MCP-triggered loading/disabled states render on primary actions without changing request payloads."
     ],
     "recommended_changes": [
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "implementation_notes": "Create a responsive grid with a wide primary draft pane and secondary diagnostics rail; on narrow widths, stack rails beneath draft. Add max content width and typography tokens for legal-text readability.",
         "page": "workspace-draft",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "sdk_considerations": "Keep existing ComplaintMcpClient request/response contracts unchanged; this is a presentation-layer refactor only, with the same MCP stage payloads and event timing.",
+        "shared_code_path": "likely `src/pages/ComplaintGeneratorPage.tsx` and shared layout components under `src/components/workflow/`",
+        "title": "Refactor layout into stage-first responsive shell"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "implementation_notes": "Add a sticky header showing current stage, gate status, and one next action button; demote utility actions to secondary controls.",
+        "page": "workspace-draft",
+        "sdk_considerations": "Bind CTA actions to existing MCP workflow handlers (same method calls and state transitions), avoiding any client orchestration changes.",
+        "shared_code_path": "likely `src/components/workflow/StageHeader.tsx` and action toolbar component",
+        "title": "Introduce sticky stage header with single primary CTA"
+      },
+      {
+        "implementation_notes": "Collapse advanced metrics/log-like blocks by default, with explicit expand toggles and remembered panel state.",
+        "page": "workspace-draft",
+        "sdk_considerations": "Do not alter data fetch cadence from ComplaintMcpClient; only change visibility/state in UI so MCP traffic and shared SDK behavior remain identical.",
+        "shared_code_path": "likely diagnostics panel components in `src/components/review/` or `src/components/debug/`",
+        "title": "Progressive disclosure for diagnostics panels"
+      },
+      {
+        "implementation_notes": "Apply larger body text, improved line-height, paragraph spacing, and clearer heading scale specifically in draft/review text containers.",
+        "page": "workspace-draft",
+        "sdk_considerations": "No changes to draft generation calls; preserve Draft stage MCP prompt/router flow and render returned text verbatim.",
+        "shared_code_path": "likely global styles in `src/styles/` and draft viewer component in `src/components/draft/`",
+        "title": "Readable legal-draft typography preset"
+      },
+      {
+        "implementation_notes": "Audit sticky/absolute elements in the complaint page shell; enforce container bounds and responsive breakpoints to prevent detached side widgets.",
         "page": "workspace-evidence",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "sdk_considerations": "UI-only CSS/layout changes; do not alter ComplaintMcpClient request/response contracts or MCP tool invocation order.",
+        "shared_code_path": "src/ui/pages/complaint-generator/*",
+        "title": "Stabilize layout and floating control containment"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "implementation_notes": "Add a sticky stage navigator (Intake, Evidence, Review, Draft, Integration Discovery) with anchor links and current-section highlighting.",
+        "page": "workspace-evidence",
+        "sdk_considerations": "Bind nav state to existing workflow state already produced by MCP responses; avoid introducing alternate client-side truth that diverges from MCP stage data.",
+        "shared_code_path": "src/ui/components/workflow/StageNav.*",
+        "title": "Improve stage wayfinding for the long complaint flow"
+      },
+      {
+        "implementation_notes": "Increase typography scale, spacing, and contrast for labels/values; visually elevate filing-critical cards and de-emphasize secondary diagnostics.",
+        "page": "workspace-evidence",
+        "sdk_considerations": "Preserve existing mapped fields from ComplaintMcpClient payloads; no schema changes, only rendering treatment.",
+        "shared_code_path": "src/ui/components/complaint/ReviewPanel.*",
+        "title": "Raise readability and hierarchy in review cards"
+      },
+      {
+        "implementation_notes": "Provide a persistent action bar with clear primary action and disabled/loading states tied to in-flight MCP operations.",
+        "page": "workspace-evidence",
+        "sdk_considerations": "Keep current MCP mutation flow intact; ensure CTA state reflects existing MCP promise lifecycle and error handling.",
+        "shared_code_path": "src/ui/components/complaint/ActionBar.*",
+        "title": "Unify primary actions with sticky CTA region"
+      },
+      {
+        "implementation_notes": "Introduce a deterministic CTA priority map based on complaint/session state (new session, resumable session, ready-to-review). Render exactly one primary button and downgrade alternatives. Add concise sublabels like \"Use when no prior session exists.\"",
         "page": "workspace-homepage",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "sdk_considerations": "Do not change command handlers that call ComplaintMcpClient; only remap which existing MCP-backed action is promoted to primary in the UI.",
+        "shared_code_path": "src/pages/workspace-home.* (or equivalent home route component) and shared button style tokens",
+        "title": "State-driven CTA hierarchy"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "implementation_notes": "Refactor the right panel into compact status items: Connection, Session ID, Tool Availability, Progress, Support Completeness. Use badge states (ok/warn/error) and progressive disclosure for long details.",
+        "page": "workspace-homepage",
+        "sdk_considerations": "Keep existing MCP polling/subscription sources intact; improve only presentation and grouping of fields returned from shared MCP status endpoints.",
+        "shared_code_path": "src/components/workspace/StatusPanel.* and status card primitives",
+        "title": "Readable status rail for MCP/session health"
+      },
+      {
+        "implementation_notes": "Apply explicit active state in tabs, add stage breadcrumb or current-step chip, and mirror stage names across nav and cards to reduce terminology drift.",
+        "page": "workspace-homepage",
+        "sdk_considerations": "Reuse existing route/state machine and ComplaintMcpClient stage values; avoid introducing parallel client-side stage enums that could desync from MCP.",
+        "shared_code_path": "src/components/navigation/* and workflow stage constants module",
+        "title": "Navigation clarity and stage orientation"
+      },
+      {
+        "implementation_notes": "Shorten each card to outcome-first text, move long explanatory text behind \"Learn more\", and standardize one action button per card with consistent verb naming.",
+        "page": "workspace-homepage",
+        "sdk_considerations": "Retain current MCP action intents; only adjust labels and card composition so the same backend operations are triggered.",
+        "shared_code_path": "src/components/workspace/StageCards.*",
+        "title": "Card copy compression and action affordance cleanup"
+      },
+      {
+        "implementation_notes": "Split the page into explicit Intake, Evidence, Review, Draft, and Integration Discovery stage panels with collapsible bodies and sticky stage header navigation.",
         "page": "workspace-intake",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "sdk_considerations": "Do not alter `ComplaintMcpClient` request/response shapes; only reorganize rendering and local UI state for section expansion/navigation.",
+        "shared_code_path": "frontend/src/pages/ComplaintWorkspacePage.tsx",
+        "title": "Stage-first layout refactor without backend contract changes"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
-        "page": "workspace-integrations",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "implementation_notes": "Define one primary button style/placement per stage and move optional actions into tertiary links or overflow menus.",
+        "page": "workspace-intake",
+        "sdk_considerations": "Keep existing MCP action handlers and event sequencing; only change visual priority and placement of controls bound to those handlers.",
+        "shared_code_path": "frontend/src/components/complaint/StageActions.tsx",
+        "title": "Action hierarchy and CTA normalization"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
-        "page": "workspace-review",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "implementation_notes": "Increase font size for dense metadata rows, improve color contrast for labels/statuses, and enforce spacing tokens across cards.",
+        "page": "workspace-intake",
+        "sdk_considerations": "Pure presentation-layer change; no mutation to MCP payload construction, routing, or `ComplaintMcpClient` lifecycle.",
+        "shared_code_path": "frontend/src/styles/complaint-workspace.css",
+        "title": "Accessibility and readability pass"
+      },
+      {
+        "implementation_notes": "Add sticky progress summary showing current stage, completion state, and quick-jump anchors.",
+        "page": "workspace-intake",
+        "sdk_considerations": "Derive progress from existing stage state already populated via MCP responses; avoid introducing parallel client state that can drift from `ComplaintMcpClient` outputs.",
+        "shared_code_path": "frontend/src/components/complaint/WorkflowProgress.tsx",
+        "title": "Persistent workflow progress indicator"
       }
     ],
-    "release_blockers": [
-      "Release gate: PASS"
-    ],
+    "release_blockers": [],
     "review_backend": {
       "id": "llm-router",
-      "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+      "model": "gpt-5.3-codex",
       "page_review_backends": [
         {
-          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "elapsed_seconds": 43.016,
           "id": "llm-router",
-          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
-          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49744-4cbb09817b04d3ec6a9cd99d;135b7dc9-f0d1-4649-9c04-71e0b054bf1c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "model": "gpt-5.3-codex",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 1,
+          "prepared_image_paths": [
+            "/home/barberb/complaint-generator/artifacts/ui_review/rehydrated-review-codex-codex-diagnostics/pages/prepared-images/workspace-draft.review.jpg"
+          ],
+          "prompt_chars": 1609,
           "prompt_mode": "compact",
-          "provider": "hf_inference_api",
-          "strategy": "fallback"
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
         },
         {
-          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "elapsed_seconds": 52.171,
           "id": "llm-router",
-          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
-          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49744-3e1e1d5f524d4a5a555367a6;6066d45e-1925-4f37-817b-a9513d3105e2)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "model": "gpt-5.3-codex",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 1,
+          "prepared_image_paths": [
+            "/home/barberb/complaint-generator/artifacts/ui_review/rehydrated-review-codex-codex-diagnostics/pages/prepared-images/workspace-evidence.review.jpg"
+          ],
+          "prompt_chars": 1612,
           "prompt_mode": "compact",
-          "provider": "hf_inference_api",
-          "strategy": "fallback"
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
         },
         {
-          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "elapsed_seconds": 47.758,
           "id": "llm-router",
-          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
-          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49744-2cb007d95736eefb02ad1dc3;77d73f38-2706-4518-9aa0-80be137e39e8)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "model": "gpt-5.3-codex",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 1,
+          "prepared_image_paths": [
+            "/home/barberb/complaint-generator/artifacts/ui_review/rehydrated-review-codex-codex-diagnostics/pages/prepared-images/workspace-homepage.review.jpg"
+          ],
+          "prompt_chars": 1612,
           "prompt_mode": "compact",
-          "provider": "hf_inference_api",
-          "strategy": "fallback"
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
         },
         {
-          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
+          "elapsed_seconds": 39.599,
           "id": "llm-router",
-          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
-          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49744-3d2fe5a82d0a92fd152bba51;b80cc96f-7c65-45ad-8f49-38bb88f5d91a)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
+          "model": "gpt-5.3-codex",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 1,
+          "prepared_image_paths": [
+            "/home/barberb/complaint-generator/artifacts/ui_review/rehydrated-review-codex-codex-diagnostics/pages/prepared-images/workspace-intake.review.jpg"
+          ],
+          "prompt_chars": 1610,
           "prompt_mode": "compact",
-          "provider": "hf_inference_api",
-          "strategy": "fallback"
-        },
-        {
-          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
-          "id": "llm-router",
-          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
-          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49745-747e417f4c1eb5db46e65f4d;acd70440-2928-4473-86ac-e286cad7131c)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
-          "prompt_mode": "compact",
-          "provider": "hf_inference_api",
-          "strategy": "fallback"
-        },
-        {
-          "fallback_error": "llm_router_error: HF Inference API HTTP 402: {\"error\":\"You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.\"}",
-          "id": "llm-router",
-          "model": "Qwen/Qwen2.5-VL-7B-Instruct",
-          "multimodal_error": "HF Inference Providers chat request failed: Client error '402 Payment Required' for url 'https://router.huggingface.co/v1/chat/completions' (Request ID: Root=1-69c49745-7d31e8d36ed02116450efe7e;6b85e3fa-199a-496e-94b4-1449fb53646b)\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/402\n\nYou have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.",
-          "prompt_mode": "compact",
-          "provider": "hf_inference_api",
-          "strategy": "fallback"
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
         }
       ],
-      "page_review_count": 6,
-      "page_review_executor": "process",
+      "page_review_count": 4,
+      "page_review_executor": "inline",
       "prompt_mode": "full",
-      "provider": "hf_inference_api",
+      "provider": "codex_cli",
+      "selected_screenshot_count": 4,
+      "selected_screenshots": [
+        "workspace-draft.png",
+        "workspace-evidence.png",
+        "workspace-homepage.png",
+        "workspace-intake.png"
+      ],
+      "skipped_screenshot_count": 2,
+      "skipped_screenshots": [
+        "workspace-integrations.png",
+        "workspace-review.png"
+      ],
       "strategy": "page_reviews"
     },
     "runs": [],
     "score": 0,
     "screenshot_findings": [],
-    "sdk_invocations": [
-      "complaint.review_ui",
-      "complaint.optimize_ui",
-      "complaint.run_browser_audit"
-    ],
+    "sdk_invocations": [],
     "stage_findings": {
-      "Draft": "workspace-draft: Release gate: PASS | workspace-evidence: Release gate: PASS | workspace-homepage: Release gate: PASS | workspace-intake: Release gate: PASS | workspace-integrations: Release gate: PASS | workspace-review: Release gate: PASS",
-      "Evidence": "workspace-draft: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-evidence: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-homepage: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-intake: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-integrations: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-review: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown.",
-      "Intake": "workspace-draft: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-evidence: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-homepage: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-intake: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-integrations: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-review: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings.",
-      "Integration Discovery": "workspace-draft: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-evidence: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-homepage: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-intake: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-integrations: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-review: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics.",
-      "Review": "workspace-draft: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-evidence: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-homepage: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-intake: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-integrations: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-review: Support review should continue to surface claim gaps before users rely on the generated complaint."
+      "Draft": "workspace-draft: Draft text area appears too narrow/small for legal-grade editing and final validation. | workspace-evidence: Draft/export readiness signals appear present, but CTA prominence and final-step clarity are visually diluted. | workspace-homepage: Draft entry appears available but readiness criteria and preconditions are not clearly surfaced. | workspace-intake: Draft section is present but visually buried in the long scroll, reducing confidence in final pre-filing checks.",
+      "Evidence": "workspace-draft: Evidence-related metadata appears dense and hard to scan, increasing verification risk. | workspace-evidence: Evidence-related blocks are visible but blend into surrounding cards, reducing evidence traceability at a glance. | workspace-homepage: Support/status information is present but too dense to quickly validate evidence readiness. | workspace-intake: Evidence-related cards appear dense with small text, making source/status verification harder than necessary.",
+      "Intake": "workspace-draft: Inputs appear present but visually crowded; field readability and grouping need clearer hierarchy. | workspace-evidence: Intake content appears present but visually compressed; field readability likely below comfortable review threshold. | workspace-homepage: Entry actions are not clearly prioritized for first-time vs returning complaints. | workspace-intake: Intake content is visible but crowded; field groups and decision-critical values are not strongly separated.",
+      "Integration Discovery": "workspace-draft: Integration/status hints are visible but not clearly tied to user actions; keep MCP flow unchanged while improving UI mapping. | workspace-evidence: Integration/diagnostic metadata appears mixed into the same visual tier as core complaint content, which can distract from filing decisions. | workspace-homepage: MCP connectivity is visible, but health/sync feedback lacks immediate, actionable clarity for safe progression. | workspace-intake: Integration/diagnostic-style blocks are visible but not clearly distinguished from core task flow, which can distract from filing progression.",
+      "Review": "workspace-draft: Review surface is overloaded with adjacent diagnostics, reducing proofreading reliability. | workspace-evidence: Review stage appears dense and long with weak hierarchy, increasing cognitive load for final validation. | workspace-homepage: Review-related actions exist but wording and hierarchy make review intent less obvious. | workspace-intake: Review area looks information-heavy with weak hierarchy, increasing the chance of skipping key validation details."
     },
-    "summary": "Aggregated 6 page-level screenshot reviews. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots.",
-    "tested_stages": [
-      "intake",
-      "evidence",
-      "review",
-      "draft",
-      "integrations",
-      "optimizer"
-    ],
-    "updated_at": "2026-03-26T02:17:41.829023+00:00",
+    "summary": "Aggregated 4 page-level screenshot reviews. The page appears extremely dense, vertically overlong, and visually compressed, with small text, weak hierarchy, and crowded side-by-side panels that make review and drafting hard to scan. The core flow is present, but readability and affordance quality look below filing-grade UX standards for a high-stakes retaliation complaint workflow. The page appears information-dense and filing-focused, but the visible presentation is hard to scan: text is very small, section hierarchy is weak, and at least one set of floating side controls appears detached/clipped from the main layout. The overall flow looks long and linear without strong stage wayfinding, which increases review errors even when underlying complaint quality is high. The page communicates the complaint workflow, but key actions and status signals are visually weak or ambiguous. The main risks are low hierarchy, unclear primary CTA selection, and hard-to-scan progress/status cards that can slow operators and clients even when the underlying MCP-backed flow is functioning.",
+    "tested_stages": [],
+    "updated_at": "2026-03-26T02:35:29.033326+00:00",
     "verdict": "Do not send to clients yet",
     "workflow_type": "page_reviews"
   },
-  "updated_at": "2026-03-26T02:17:41.829045+00:00",
+  "updated_at": "2026-03-26T02:35:29.033340+00:00",
   "user_id": "demo-user"
 }
