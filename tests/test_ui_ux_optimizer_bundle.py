@@ -1,7 +1,9 @@
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 import json
+import subprocess
 
 from adversarial_harness import Optimizer, UIUXOptimizationBundle
 
@@ -235,3 +237,54 @@ def test_run_agentic_ui_ux_feedback_loop_revalidates_and_stops_when_reviews_stab
     assert result["complaint_output_feedback"]["export_artifact_count"] == 1
     assert result["complaint_output_release_gate"]["verdict"] == "pass"
     assert "actor_critic_summary" in result
+
+
+def test_fallback_local_optimizer_can_apply_bounded_codex_edits(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    optimizer = Optimizer()
+    components = optimizer._fallback_agentic_optimizer_components()
+    fallback_cls = components["optimizer_classes"]["actor_critic"]
+    output_dir = tmp_path / "reviews"
+    output_dir.mkdir()
+    target_file = tmp_path / "templates" / "workspace.html"
+    target_file.parent.mkdir(parents=True)
+    target_file.write_text("<button>Start</button>\n", encoding="utf-8")
+
+    monkeypatch.setattr("adversarial_harness.optimizer.shutil.which", lambda name: "/usr/bin/codex")
+
+    def fake_run(command, cwd, capture_output, text, timeout, check):
+        assert "codex" in command[0]
+        assert str(target_file.relative_to(tmp_path)) in " ".join(command)
+        target_file.write_text("<button>Start intake</button>\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="patched", stderr="")
+
+    monkeypatch.setattr("adversarial_harness.optimizer.subprocess.run", fake_run)
+
+    task = SimpleNamespace(
+        task_id="ui-task",
+        target_files=[Path("templates/workspace.html")],
+        constraints={"output_dir": str(output_dir)},
+        metadata={
+            "actor_critic_review": {
+                "top_risks": ["Clarify the intake CTA so first-time users know what the button does."],
+            },
+            "report_summary": {
+                "prioritized_patch_briefs": [
+                    {
+                        "title": "Clarify CTA",
+                        "surface": "intake",
+                        "problem": "The start button is vague.",
+                        "recommended_action": "Rename it to Start intake.",
+                    }
+                ]
+            },
+        },
+    )
+
+    result = fallback_cls(agent_id="fallback-ui", llm_router=None).optimize(task)
+
+    assert result.status == "applied"
+    assert result.metadata["optimizer_backend"] == "codex_cli_fallback_optimizer"
+    assert result.metadata["changed_files"] == ["templates/workspace.html"]
+    assert Path(result.patch_path).is_file()
+    assert "Start intake" in target_file.read_text(encoding="utf-8")

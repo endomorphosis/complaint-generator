@@ -4,9 +4,13 @@ Optimizer Module
 Analyzes critic feedback and provides optimization recommendations.
 """
 
+import difflib
 import json
 import logging
+import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -426,11 +430,13 @@ class Optimizer:
                 output_dir = Path(str(constraints.get("review_output_dir") or constraints.get("output_dir") or "."))
                 output_dir.mkdir(parents=True, exist_ok=True)
                 patch_path = output_dir / "fallback-optimizer-plan.md"
+                project_root = Path.cwd().resolve()
 
                 actor_critic_review = dict(metadata.get("actor_critic_review") or {})
                 complaint_output_feedback = dict(metadata.get("complaint_output_feedback") or {})
                 release_gate = dict(metadata.get("complaint_output_release_gate") or {})
-                changed_files = [str(path) for path in list(getattr(task, "target_files", []) or [])[:5]]
+                target_files = [Path(path) for path in list(getattr(task, "target_files", []) or [])[:5]]
+                changed_files = [str(path) for path in target_files]
 
                 recommendations = [
                     str(item).strip()
@@ -447,6 +453,173 @@ class Optimizer:
                         "Keep complaint generation, export, and next-step guidance visible together.",
                         "Add or strengthen Playwright assertions for the unresolved screenshot findings.",
                     ]
+
+                report_summary = dict(metadata.get("report_summary") or {})
+                prioritized_patch_briefs = list(report_summary.get("prioritized_patch_briefs") or [])
+                top_patch_brief = dict(prioritized_patch_briefs[0]) if prioritized_patch_briefs else {}
+
+                def _absolute_path(path: Path) -> Path:
+                    return path if path.is_absolute() else (project_root / path).resolve()
+
+                tracked_files = {
+                    str(path): _absolute_path(path)
+                    for path in target_files
+                    if _absolute_path(path).is_file()
+                }
+                original_text_by_file = {
+                    rel_path: absolute_path.read_text(encoding="utf-8")
+                    for rel_path, absolute_path in tracked_files.items()
+                }
+
+                def _build_patch_text(updated_files: List[str]) -> str:
+                    chunks: List[str] = []
+                    for rel_path in updated_files:
+                        absolute_path = tracked_files.get(rel_path)
+                        if absolute_path is None:
+                            continue
+                        before_text = original_text_by_file.get(rel_path, "")
+                        after_text = absolute_path.read_text(encoding="utf-8")
+                        if before_text == after_text:
+                            continue
+                        chunks.append(
+                            "".join(
+                                difflib.unified_diff(
+                                    before_text.splitlines(keepends=True),
+                                    after_text.splitlines(keepends=True),
+                                    fromfile=f"a/{rel_path}",
+                                    tofile=f"b/{rel_path}",
+                                )
+                            )
+                        )
+                    return "".join(chunks)
+
+                def _attempt_codex_autopatch() -> tuple[List[str], str | None, List[Dict[str, Any]]]:
+                    diagnostics: List[Dict[str, Any]] = []
+                    if not tracked_files:
+                        diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "skipped",
+                                "reason": "No existing target files were available for bounded Codex edits.",
+                            }
+                        )
+                        return [], None, diagnostics
+                    codex_bin = shutil.which("codex")
+                    if not codex_bin:
+                        diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "skipped",
+                                "reason": "codex CLI is not installed.",
+                            }
+                        )
+                        return [], None, diagnostics
+
+                    prompt_lines = [
+                        "You are repairing the complaint-generator UI/UX workflow.",
+                        "Make minimal, concrete edits in the listed target files only.",
+                        "Do not modify files outside this set.",
+                        "Prefer the smallest safe change that improves gating clarity, complaint formality, or end-to-end dashboard flow.",
+                        "",
+                        f"Task ID: {getattr(task, 'task_id', '')}",
+                        "Target files:",
+                        *[f"- {path}" for path in tracked_files.keys()],
+                        "",
+                        "Top recommendations:",
+                        *[f"- {item}" for item in recommendations[:6]],
+                    ]
+                    if top_patch_brief:
+                        prompt_lines.extend(
+                            [
+                                "",
+                                "Top patch brief:",
+                                f"- Title: {str(top_patch_brief.get('title') or '').strip()}",
+                                f"- Surface: {str(top_patch_brief.get('surface') or '').strip()}",
+                                f"- Problem: {str(top_patch_brief.get('problem') or '').strip()}",
+                                f"- Recommended action: {str(top_patch_brief.get('recommended_action') or '').strip()}",
+                            ]
+                        )
+                    prompt_lines.extend(
+                        [
+                            "",
+                            "Important constraints:",
+                            "- Preserve package, CLI, MCP, and browser SDK parity.",
+                            "- Keep release-gate and complaint-output warnings visible when drafting/export remains unsafe.",
+                            "- If you touch tests, keep them focused on the workflow you changed.",
+                            "- End by summarizing the concrete edits you made.",
+                        ]
+                    )
+                    prompt = "\n".join(prompt_lines)
+                    last_message_path = output_dir / "fallback-codex-last-message.txt"
+                    command = [
+                        codex_bin,
+                        "exec",
+                        "--dangerously-bypass-approvals-and-sandbox",
+                        "--skip-git-repo-check",
+                        "-C",
+                        str(project_root),
+                        "-m",
+                        "gpt-5.3-codex",
+                        "-o",
+                        str(last_message_path),
+                        prompt,
+                    ]
+                    try:
+                        completed = subprocess.run(
+                            command,
+                            cwd=str(project_root),
+                            capture_output=True,
+                            text=True,
+                            timeout=300,
+                            check=False,
+                        )
+                    except Exception as exc:
+                        diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "failed",
+                                "reason": str(exc),
+                            }
+                        )
+                        return [], None, diagnostics
+
+                    diagnostics.append(
+                        {
+                            "backend": "codex_cli_fallback_optimizer",
+                            "status": "ok" if completed.returncode == 0 else "nonzero_exit",
+                            "returncode": int(completed.returncode),
+                            "stdout_excerpt": str(completed.stdout or "").strip()[:500],
+                            "stderr_excerpt": str(completed.stderr or "").strip()[:500],
+                            "last_message_path": str(last_message_path),
+                        }
+                    )
+
+                    updated_files = [
+                        rel_path
+                        for rel_path, absolute_path in tracked_files.items()
+                        if absolute_path.read_text(encoding="utf-8") != original_text_by_file.get(rel_path, "")
+                    ]
+                    if not updated_files:
+                        return [], None, diagnostics
+
+                    codex_patch_path = output_dir / "fallback-codex-autopatch.patch"
+                    patch_text = _build_patch_text(updated_files)
+                    codex_patch_path.write_text(patch_text, encoding="utf-8")
+                    return updated_files, str(codex_patch_path), diagnostics
+
+                updated_files, codex_patch_path, codex_diagnostics = _attempt_codex_autopatch()
+                if updated_files:
+                    self._last_generation_diagnostics = codex_diagnostics
+                    return FallbackOptimizerResult(
+                        success=True,
+                        status="applied",
+                        patch_path=str(codex_patch_path or ""),
+                        metadata={
+                            "changed_files": updated_files,
+                            "recommendations": recommendations,
+                            "optimizer_backend": "codex_cli_fallback_optimizer",
+                        },
+                    )
 
                 lines = [
                     "# Fallback UI/UX Optimizer Plan",
@@ -487,7 +660,7 @@ class Optimizer:
                     )
 
                 patch_path.write_text("\n".join(lines).strip() + "\n")
-                self._last_generation_diagnostics = [
+                self._last_generation_diagnostics = codex_diagnostics + [
                     {
                         "backend": "local_fallback_optimizer",
                         "reason": "ipfs_datasets_py agentic optimizer classes were unavailable, so a deterministic optimizer plan was generated.",
