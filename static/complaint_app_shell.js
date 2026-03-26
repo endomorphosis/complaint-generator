@@ -264,6 +264,14 @@
             || String(complaintReadiness.verdict || '').toLowerCase() === 'draft in progress'
             ? ' is-good'
             : ' is-warn';
+        const primaryActionKey = !workflowState.reviewReady
+            ? 'workspace'
+            : (!workflowState.builderReady ? 'review' : 'builder');
+        const workflowNextStep = primaryActionKey === 'workspace'
+            ? 'Primary action: continue intake in Workspace, then reopen Review once enough factual detail is saved.'
+            : primaryActionKey === 'review'
+                ? 'Primary action: resolve support gaps in Review before moving into formal drafting.'
+                : 'Primary action: generate or refine the complaint draft in Builder, then use Workspace export + release-gate checks before download.';
 
         shell.innerHTML = [
             '<div class="cg-app-shell__inner">',
@@ -316,10 +324,14 @@
             '</div>',
             '<div class="cg-app-shell__section-title">Next Actions</div>',
             '<div class="cg-app-shell__actions">',
-            '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/workspace', context) + '">Open Workspace</a>',
-            buildGatedLink('cg-app-shell__action', 'Open Builder', buildShellSurfaceUrl('/document', context), workflowState.builderReady, workflowState.builderGateReason),
-            buildGatedLink('cg-app-shell__action', 'Open Review', buildShellSurfaceUrl('/claim-support-review', context), workflowState.reviewReady, workflowState.reviewGateReason),
+            '<a class="cg-app-shell__action' + (primaryActionKey === 'workspace' ? ' is-primary' : '') + '" href="' + buildShellSurfaceUrl('/workspace', context) + '">Open Workspace</a>',
+            buildGatedLink('cg-app-shell__action' + (primaryActionKey === 'builder' ? ' is-primary' : ''), 'Open Builder', buildShellSurfaceUrl('/document', context), workflowState.builderReady, workflowState.builderGateReason),
+            buildGatedLink('cg-app-shell__action' + (primaryActionKey === 'review' ? ' is-primary' : ''), 'Open Review', buildShellSurfaceUrl('/claim-support-review', context), workflowState.reviewReady, workflowState.reviewGateReason),
             '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/mlwysiwyg', context) + '">Edit Draft</a>',
+            '</div>',
+            '<div class="cg-app-shell__workflow-rail">',
+            '<div class="cg-app-shell__phase-note">' + safeText(workflowNextStep, '') + '</div>',
+            '<div class="cg-app-shell__phase-note">Keep draft generation, packet export, and release-gate next-step guidance visible together before downloading complaint files.</div>',
             '</div>',
             '<div class="cg-app-shell__meta">This sidebar is backed by the same cached DID and complaint workspace session used by the CLI, MCP tools, and browser SDK.</div>',
             '</div>',

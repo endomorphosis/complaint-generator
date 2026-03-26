@@ -241,6 +241,20 @@
     text-align: center;
 }
 
+.cg-app-shell__action.is-primary {
+    background: #0f172a;
+    border-color: #0f172a;
+    color: #f8fafc;
+}
+
+.cg-app-shell__workflow-rail {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
 .cg-app-shell__meta {
     margin-top: 14px;
     color: #64748b;

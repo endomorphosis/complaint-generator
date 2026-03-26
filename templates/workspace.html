@@ -2518,6 +2518,7 @@
                         <div class="draft-action-card">
                             <strong>Run the filing workflow in order</strong>
                             <span>Keep one dominant next move visible. Generate or save the draft first, run packet review second, and only download when the release gate and support posture make that safe.</span>
+                            <div class="soft-note" id="draft-primary-action-note">Primary action guidance will appear here once filing readiness is evaluated.</div>
                             <div class="draft-action-groups">
                                 <div class="draft-action-group">
                                     <strong>1. Generate or save</strong>
@@ -4869,6 +4870,15 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const exportAllowed = exportHardBlockers.length === 0;
             const downloadAllowed = exportAllowed && downloadBlockers.length === 0;
             const packetExportAllowed = Boolean(latestPacketExport || currentDraftBody.trim() || resolvedDraft.hasDraft);
+            const generateDraftButton = document.getElementById('generate-draft-button');
+            const saveDraftButton = document.getElementById('save-draft-button');
+            const exportPacketButton = document.getElementById('export-packet-button');
+            const primaryActionNoteNode = document.getElementById('draft-primary-action-note');
+            const downloadButtons = [
+                document.getElementById('download-packet-markdown-button'),
+                document.getElementById('download-packet-docx-button'),
+                document.getElementById('download-packet-pdf-button'),
+            ].filter(Boolean);
             const releaseGateChip = document.getElementById('draft-release-gate-chip');
             const releaseShapeChip = document.getElementById('draft-release-shape-chip');
             const releaseSupportChip = document.getElementById('draft-release-support-chip');
@@ -4930,6 +4940,55 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : exportAllowed
                     ? 'Export can refresh the packet review, but the canonical filing-readiness summary still shows why downloads stay blocked.'
                     : 'Review and evidence should stay easier to choose than download whenever the canonical filing-readiness summary still shows blockers.';
+            if (generateDraftButton) {
+                generateDraftButton.classList.remove('primary');
+                generateDraftButton.classList.add('secondary');
+            }
+            if (saveDraftButton) {
+                saveDraftButton.classList.remove('primary');
+                saveDraftButton.classList.add('secondary');
+            }
+            if (exportPacketButton) {
+                exportPacketButton.classList.remove('primary');
+                exportPacketButton.classList.add('secondary');
+            }
+            downloadButtons.forEach((button) => {
+                button.classList.remove('primary');
+                button.classList.add('secondary');
+            });
+            if (!currentDraftBody.trim()) {
+                if (generateDraftButton) {
+                    generateDraftButton.classList.remove('secondary');
+                    generateDraftButton.classList.add('primary');
+                }
+                if (primaryActionNoteNode) {
+                    primaryActionNoteNode.textContent = 'Primary action now: generate a formal complaint draft first. Keep the release-gate summary visible before moving to export.';
+                }
+            } else if (!latestPacketExport) {
+                if (exportPacketButton) {
+                    exportPacketButton.classList.remove('secondary');
+                    exportPacketButton.classList.add('primary');
+                }
+                if (primaryActionNoteNode) {
+                    primaryActionNoteNode.textContent = 'Primary action now: export and review the complaint packet so release-gate warnings and complaint-output defects stay visible before download.';
+                }
+            } else if (!downloadAllowed) {
+                if (exportPacketButton) {
+                    exportPacketButton.classList.remove('secondary');
+                    exportPacketButton.classList.add('primary');
+                }
+                if (primaryActionNoteNode) {
+                    primaryActionNoteNode.textContent = 'Primary action now: keep packet review fresh while downloads stay blocked. Use Review or Evidence next if blockers remain.';
+                }
+            } else {
+                if (downloadButtons[0]) {
+                    downloadButtons[0].classList.remove('secondary');
+                    downloadButtons[0].classList.add('primary');
+                }
+                if (primaryActionNoteNode) {
+                    primaryActionNoteNode.textContent = 'Primary action now: download only after confirming the visible release-gate summary and next-step guidance still match the record.';
+                }
+            }
             if (releaseGateChip) {
                 releaseGateChip.className = `chip ${downloadAllowed ? 'good' : 'warn'}`;
                 releaseGateChip.textContent = `release gate: ${releaseVerdict ? releaseVerdict.toUpperCase() : 'UNKNOWN'}`;
@@ -4998,6 +5057,27 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : `Download is blocked until ${downloadBlockers.join('; ')}.`;
             });
             renderDraftExportIntegrity(sessionPayload);
+        }
+
+        function buildPlaywrightAssertionFollowups(playwrightFollowups, screenshotFindings, carryForwardAssessment) {
+            const followups = Array.isArray(playwrightFollowups) ? playwrightFollowups.map((item) => String(item || '').trim()).filter(Boolean) : [];
+            const unresolved = carryForwardAssessment && Array.isArray(carryForwardAssessment.unresolved_findings)
+                ? carryForwardAssessment.unresolved_findings
+                : [];
+            const unresolvedText = unresolved.map((item) => String(item || '')).join(' ').toLowerCase();
+            const inferredAssertions = [];
+            if (screenshotFindings.length || unresolved.length) {
+                inferredAssertions.push("await expect(page.locator('#focus-rail-action-button')).toBeVisible();");
+            }
+            if (screenshotFindings.length || unresolvedText.includes('release gate') || unresolvedText.includes('export')) {
+                inferredAssertions.push("await expect(page.locator('#draft-release-gate-summary')).toContainText('Primary action:');");
+                inferredAssertions.push("await expect(page.locator('#draft-export-safety-preview')).toContainText('Primary action right now:');");
+            }
+            if (unresolvedText.includes('next step') || unresolvedText.includes('guidance') || unresolvedText.includes('primary action')) {
+                inferredAssertions.push("await expect(page.locator('#draft-release-gate-next-step')).toContainText('Next safest move:');");
+            }
+            const merged = followups.concat(inferredAssertions);
+            return merged.filter((item, index) => item && merged.indexOf(item) === index);
         }
 
         function renderSidebar(sessionPayload) {
@@ -7339,10 +7419,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     `
                 : '<div class="item"><strong>No optimizer artifacts yet.</strong><div class="muted">Run closed-loop optimization to capture patch paths, CIDs, and changed files.</div></div>';
 
-            followups.innerHTML = playwrightFollowups.length
-                ? playwrightFollowups.map((item) => `
+            const assertionFollowups = buildPlaywrightAssertionFollowups(playwrightFollowups, screenshotFindings, carryForward);
+            followups.innerHTML = assertionFollowups.length
+                ? assertionFollowups.map((item) => `
                     <div class="item">
-                        <strong>Playwright follow-up</strong>
+                        <strong>Playwright assertion follow-up</strong>
                         <div class="muted">${escapeHtml(String(item))}</div>
                     </div>
                 `).join('')

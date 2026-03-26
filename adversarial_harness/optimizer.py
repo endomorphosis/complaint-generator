@@ -564,15 +564,34 @@ class Optimizer:
                         str(last_message_path),
                         prompt,
                     ]
+                    timeout_seconds = 90
+                    timeout_override = str(os.getenv("COMPLAINT_GENERATOR_UI_UX_FALLBACK_CODEX_TIMEOUT_SECONDS", "") or "").strip()
+                    if timeout_override:
+                        try:
+                            timeout_seconds = max(15, int(float(timeout_override)))
+                        except Exception:
+                            timeout_seconds = 90
                     try:
                         completed = subprocess.run(
                             command,
                             cwd=str(project_root),
                             capture_output=True,
                             text=True,
-                            timeout=300,
+                            timeout=timeout_seconds,
                             check=False,
                         )
+                    except subprocess.TimeoutExpired as exc:
+                        diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "timed_out",
+                                "reason": f"codex exec timed out after {timeout_seconds}s",
+                                "timeout_seconds": timeout_seconds,
+                                "stdout_excerpt": str(exc.stdout or "").strip()[:500],
+                                "stderr_excerpt": str(exc.stderr or "").strip()[:500],
+                            }
+                        )
+                        return [], None, diagnostics
                     except Exception as exc:
                         diagnostics.append(
                             {
