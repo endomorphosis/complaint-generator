@@ -296,6 +296,8 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
         "causation",
         "--scan-folder",
         "[Gmail]/Sent Mail",
+        "--years-back",
+        "2",
         "--complaint-query",
         "termination retaliation hr complaint",
         "--complaint-keyword",
@@ -319,6 +321,7 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
     assert payload["imported_count"] == 1
     assert captured["folders"] == ["[Gmail]/Sent Mail"]
+    assert captured["years_back"] == 2
     assert captured["complaint_query"] == "termination retaliation hr complaint"
     assert captured["complaint_keywords"] == ["termination", "retaliation"]
     assert captured["min_relevance_score"] == 1.5
@@ -347,6 +350,7 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
         limit=None,
         date_after=None,
         date_before=None,
+        years_back=None,
         evidence_root=None,
         gmail_user=None,
         gmail_app_password=None,
@@ -360,6 +364,7 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
         captured.update(
             {
                 "folders": folders,
+                "years_back": years_back,
                 "complaint_query": complaint_query,
                 "complaint_keywords": complaint_keywords,
                 "min_relevance_score": min_relevance_score,
@@ -404,6 +409,7 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
             "addresses": ["hr@example.com", "manager@example.com"],
             "claim_element_id": "causation",
             "folders": ["[Gmail]/Sent Mail", "[Gmail]/All Mail"],
+            "years_back": 2,
             "complaint_query": "termination retaliation hr complaint",
             "complaint_keywords": ["termination", "retaliation"],
             "min_relevance_score": 2.0,
@@ -419,6 +425,7 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
     assert payload["imported_count"] == 1
     assert captured["folders"] == ["[Gmail]/Sent Mail", "[Gmail]/All Mail"]
+    assert captured["years_back"] == 2
     assert captured["complaint_query"] == "termination retaliation hr complaint"
     assert captured["complaint_keywords"] == ["termination", "retaliation"]
     assert captured["min_relevance_score"] == 2.0
@@ -453,6 +460,7 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
         limit=None,
         date_after=None,
         date_before=None,
+        years_back=None,
         evidence_root=None,
         gmail_user=None,
         gmail_app_password=None,
@@ -466,6 +474,7 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
         captured.update(
             {
                 "folders": folders,
+                "years_back": years_back,
                 "complaint_query": complaint_query,
                 "complaint_keywords": complaint_keywords,
                 "min_relevance_score": min_relevance_score,
@@ -502,6 +511,7 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
             "addresses": ["hr@example.com", "manager@example.com"],
             "claim_element_id": "causation",
             "folders": ["[Gmail]/Sent Mail"],
+            "years_back": 2,
             "complaint_query": "termination retaliation hr complaint",
             "complaint_keywords": ["termination", "retaliation"],
             "min_relevance_score": 1.25,
@@ -518,6 +528,7 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
     assert payload["status"] == "success"
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
     assert captured["folders"] == ["[Gmail]/Sent Mail"]
+    assert captured["years_back"] == 2
     assert captured["complaint_query"] == "termination retaliation hr complaint"
     assert captured["complaint_keywords"] == ["termination", "retaliation"]
     assert captured["min_relevance_score"] == 1.25
@@ -839,6 +850,8 @@ def test_all_cli_commands_are_exercised_end_to_end(monkeypatch, tmp_path):
     assert isinstance(formal_diagnostics_payload["release_gate"], dict)
     provider_diagnostics_payload = _invoke_cli(runner, "provider-diagnostics", "--user-id", "cli-user")
     assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["ui_review_default_provider"] == "codex_cli"
+    assert provider_diagnostics_payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
     assert isinstance(provider_diagnostics_payload["providers"], list)
 
     claim_type_payload = _invoke_cli(
@@ -1044,6 +1057,7 @@ def test_all_mcp_server_tools_are_exercised_via_jsonrpc(tmp_path):
     assert formal_diagnostics_payload["formal_diagnostics"]["release_gate_verdict"] in {"pass", "warning", "blocked"}
     provider_diagnostics_payload = _call_mcp_tool(service, 34, "complaint.get_provider_diagnostics", {"user_id": "mcp-user"})
     assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["ui_review_multimodal_rate_limit_fallbacks"]["codex_cli"] == ["copilot_cli", "hf_inference_api"]
     assert isinstance(provider_diagnostics_payload["providers"], list)
 
 
@@ -1058,6 +1072,8 @@ def test_provider_diagnostics_are_exposed_across_package_cli_and_mcp(monkeypatch
 
     for payload in (package_payload, cli_payload, mcp_payload):
         assert payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+        assert payload["ui_review_default_provider"] == "codex_cli"
+        assert payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
         assert isinstance(payload["providers"], list)
         assert "effective_default_provider" in payload
         codex_entry = next(item for item in payload["providers"] if item["name"] == "codex_cli")
@@ -3167,4 +3183,21 @@ def test_exported_packet_snapshot_is_restored_in_session_state(tmp_path):
     assert restored_export["packet"]["claim_type"] == export_payload["packet"]["claim_type"]
     assert restored_export["packet"]["draft"]["body"] == export_payload["packet"]["draft"]["body"]
     assert restored_export["packet_summary"]["artifact_formats"] == export_payload["packet_summary"]["artifact_formats"]
+
+
+def test_get_session_recovers_from_malformed_workspace_state(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "malformed-session-sessions")
+    user_id = "malformed-session-user"
+    session_path = service._session_path(user_id)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text("{")
+
+    payload = service.get_session(user_id)
+
+    assert payload["session"]["user_id"] == user_id
+    assert payload["session"]["claim_type"] == "retaliation"
+    assert payload["session"]["intake_answers"] == {}
+    restored_payload = json.loads(session_path.read_text())
+    assert restored_payload["user_id"] == user_id
+    assert restored_payload["claim_type"] == "retaliation"
     assert restored_export["ui_feedback"]["release_gate"] == export_payload["ui_feedback"]["release_gate"]

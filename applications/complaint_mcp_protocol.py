@@ -66,6 +66,7 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "limit": {"type": "integer"},
             "date_after": {"type": "string"},
             "date_before": {"type": "string"},
+            "years_back": {"type": "integer"},
             "evidence_root": {"type": "string"},
             "gmail_user": {"type": "string"},
             "gmail_app_password": {"type": "string"},
@@ -241,6 +242,7 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "output_path": {"type": "string"},
             "iterations": {"type": "integer"},
             "pytest_target": {"type": "string"},
+            "reuse_existing_screenshots": {"type": "boolean"},
         },
     },
     "complaint.optimize_ui": {
@@ -261,6 +263,7 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "method": {"type": "string"},
             "priority": {"type": "integer"},
             "pytest_target": {"type": "string"},
+            "reuse_existing_screenshots": {"type": "boolean"},
         },
         "required": ["screenshot_dir"],
     },

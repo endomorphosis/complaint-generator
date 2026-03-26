@@ -993,22 +993,22 @@
         <section class="topbar" aria-label="Workspace identity">
             <div class="brand-lockup">
                 <strong>Complaint Generator</strong>
-                <span>MCP complaint operations console for intake, evidence, review, and draft generation.</span>
+                <span>Guided intake, evidence, review, and complaint drafting in one shared workspace.</span>
             </div>
             <div class="chip-row">
                 <span class="chip good">shared package + CLI + MCP + SDK</span>
-                <span class="chip">operator workflow</span>
+                <span class="chip">guided complaint flow</span>
                 <span class="chip">playwright-audited UI</span>
             </div>
         </section>
         <section class="hero">
             <span class="eyebrow">Complaint Operations Workspace</span>
             <h1>Unified Complaint Workspace</h1>
-            <p>This is the complaint operator desk: gather the story with care, identify support gaps, preserve evidence, and move into a formal draft without losing continuity across the Python package, CLI, MCP tools, and browser SDK.</p>
+            <p>Start with the clearest version of the story, save the strongest support you already have, and move into a formal complaint only when the record is ready. The same session stays connected across the browser, package, CLI, MCP tools, and SDK.</p>
             <div class="hero-grid">
                 <div class="hero-panel">
-                    <h2>Keep the complainant oriented</h2>
-                    <p class="muted">Start with identity and timeline, then capture the protected activity, the adverse action, and the harm. The interface is organized so a real complaint can move from first disclosure to a draft without forcing the user to retell the story in disconnected tools.</p>
+                    <h2>Start with the next calm, useful step</h2>
+                    <p class="muted">Capture identity and timeline first, then protected activity, the adverse action, and the harm. Review and Builder stay gated until the case record is coherent enough to use them safely.</p>
                     <div class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation">
                         <a class="surface-link" href="/">Landing</a>
                         <a class="surface-link" href="/home">Account</a>
@@ -1799,6 +1799,16 @@
                 <section class="tab-panel" data-tab-panel="integrations">
                     <h2>CLI and MCP Tools</h2>
                     <p class="muted">The website is using the JavaScript MCP SDK below. The same service is also available through a Python CLI and a lightweight stdio MCP tool server.</p>
+                    <div class="tool-card" style="margin-bottom: 16px;">
+                        <h3>Start with a live tool workflow</h3>
+                        <p class="muted">Use these first when you want to confirm the shared tool contract, prepare the mediator handoff, export the complaint packet, or continue the actor/critic UI review without scanning the whole tools page.</p>
+                        <div class="button-row">
+                            <button class="primary" id="integrations-start-readiness-button" type="button">Check Tool Readiness</button>
+                            <button class="secondary" id="integrations-start-mediator-button" type="button">Prepare Mediator Handoff</button>
+                            <button class="secondary" id="integrations-start-export-button" type="button">Export and Review Packet</button>
+                            <button class="secondary" id="integrations-start-ux-audit-button" type="button">Open UX Audit Workflow</button>
+                        </div>
+                    </div>
                     <div class="integration-grid">
                         <div class="tool-card">
                             <h3>Python package imports</h3>
@@ -2123,6 +2133,89 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             } catch (error) {
                 return null;
             }
+        }
+
+        function latestPacketDraft() {
+            const packet = latestPacketExport && latestPacketExport.packet ? latestPacketExport.packet : null;
+            const draft = packet && packet.draft ? packet.draft : null;
+            return draft && typeof draft === 'object' ? draft : null;
+        }
+
+        function resolveDraftState(sessionPayload) {
+            const payload = sessionPayload && typeof sessionPayload === 'object' ? sessionPayload : {};
+            const session = payload.session && typeof payload.session === 'object' ? payload.session : {};
+            const directDraft = payload.draft && typeof payload.draft === 'object' ? payload.draft : null;
+            const sessionDraft = session.draft && typeof session.draft === 'object' ? session.draft : null;
+            const packetDraft = latestPacketDraft();
+            const readinessHasDraft = Boolean((workspaceComplaintReadiness || {}).has_draft);
+            const draft = directDraft || sessionDraft || packetDraft || null;
+            const hasHydratedContent = Boolean(draft && (
+                String(draft.body || '').trim()
+                || String(draft.title || '').trim()
+                || String(draft.updated_at || '').trim()
+                || String(draft.generated_at || '').trim()
+            ));
+            const source = directDraft
+                ? 'session_payload'
+                : sessionDraft
+                    ? 'session'
+                    : packetDraft
+                        ? 'packet_export'
+                        : readinessHasDraft
+                            ? 'complaint_readiness'
+                            : 'none';
+            return {
+                draft,
+                source,
+                hasDraft: Boolean(draft) || readinessHasDraft,
+                hasHydratedContent,
+                inferredOnly: Boolean(!hasHydratedContent && readinessHasDraft && !draft),
+            };
+        }
+
+        function hydrateResolvedDraftState(sessionPayload) {
+            const payload = sessionPayload && typeof sessionPayload === 'object' ? sessionPayload : null;
+            if (!payload) {
+                return;
+            }
+            const resolved = resolveDraftState(payload);
+            if (!resolved.hasDraft || !resolved.draft) {
+                return;
+            }
+            if (!payload.session || typeof payload.session !== 'object') {
+                payload.session = {};
+            }
+            if (!payload.draft) {
+                payload.draft = resolved.draft;
+            }
+            if (!payload.session.draft) {
+                payload.session.draft = resolved.draft;
+            }
+        }
+
+        function draftStatusCopy(sessionPayload) {
+            const resolved = resolveDraftState(sessionPayload);
+            if (!resolved.hasDraft) {
+                return {
+                    label: 'No draft generated yet.',
+                    guidance: 'No complaint draft yet. Use Review to close missing support before generation if possible.',
+                    summary: 'No complaint draft exists yet.',
+                };
+            }
+            if (resolved.hasHydratedContent) {
+                const draft = resolved.draft || {};
+                const updatedAt = String(draft.updated_at || draft.generated_at || '').trim();
+                return {
+                    label: updatedAt ? `Draft updated ${updatedAt}` : 'Draft in progress',
+                    guidance: 'A draft exists. Check support gaps and refine tone, relief, and factual precision before filing.',
+                    summary: 'A complaint draft exists and can be refined.',
+                };
+            }
+            return {
+                label: 'Draft in progress',
+                guidance: 'A shared complaint draft exists, but this tab is still hydrating the latest body and export artifacts.',
+                summary: 'A complaint draft exists, and the full body is still being loaded into this workspace view.',
+            };
         }
 
         async function copyTextToClipboard(text, successMessage) {
@@ -2642,7 +2735,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const session = (sessionPayload && sessionPayload.session) || {};
             const review = (sessionPayload && sessionPayload.review) || {};
             const overview = review.overview || {};
-            const draft = (sessionPayload && sessionPayload.draft) || session.draft || null;
+            const resolvedDraft = resolveDraftState(sessionPayload);
+            const draft = resolvedDraft.draft;
             const answers = session.intake_answers || {};
             const answeredCount = Object.values(answers).filter((value) => String(value || '').trim()).length;
             const totalQuestions = (sessionPayload && Array.isArray(sessionPayload.questions)) ? sessionPayload.questions.length : 0;
@@ -2650,10 +2744,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const missingCount = Number(overview.missing_elements || 0);
             const synopsis = resolveCurrentCaseSynopsis(sessionPayload || {});
             const intakeComplete = totalQuestions > 0 ? answeredCount >= totalQuestions : answeredCount > 0;
-            const reviewReady = intakeComplete || (answeredCount >= Math.max(2, Math.ceil(totalQuestions * 0.6))) || evidenceCount > 0;
-            const builderReady = Boolean(draft) || (intakeComplete && missingCount === 0 && evidenceCount > 0);
+            const reviewReady = intakeComplete || (
+                answeredCount >= Math.max(2, Math.ceil(totalQuestions * 0.6))
+                && evidenceCount > 0
+            );
+            const builderReady = resolvedDraft.hasDraft || (intakeComplete && missingCount === 0 && evidenceCount > 0);
             const mediatorReady = Boolean(synopsis) || answeredCount > 0;
-            const phaseLabel = draft
+            const phaseLabel = resolvedDraft.hasDraft
                 ? 'draft refinement'
                 : !reviewReady
                     ? 'intake first'
@@ -2662,7 +2759,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         : 'ready for drafting';
             const reviewGateReason = reviewReady
                 ? `The review dashboard can open with ${answeredCount} answered intake prompt${answeredCount === 1 ? '' : 's'} and ${evidenceCount} evidence item${evidenceCount === 1 ? '' : 's'} attached to this session.`
-                : 'Finish more intake first so the review dashboard opens with a coherent case theory instead of a sparse support matrix.';
+                : 'Finish more intake and save at least one targeted evidence item before opening Review so the support matrix starts from a coherent, trustworthy record.';
             const builderGateReason = builderReady
                 ? (draft
                     ? 'A complaint draft already exists, so the builder can open directly on the shared session.'
@@ -2975,7 +3072,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         }
 
         function renderDraft(sessionPayload) {
-            const draft = sessionPayload.draft || (sessionPayload.session || {}).draft || {};
+            const resolvedDraft = resolveDraftState(sessionPayload);
+            const draft = resolvedDraft.draft || {};
             const claimType = String((sessionPayload.session || {}).claim_type || sessionPayload.claim_type || 'retaliation');
             const packetDownloadButtons = [
                 document.getElementById('download-packet-markdown-button'),
@@ -2988,12 +3086,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('draft-title').value = draft.title || '';
             document.getElementById('requested-relief').value = (draft.requested_relief || []).join('\n');
             document.getElementById('draft-body').value = draft.body || '';
-            document.getElementById('draft-preview').textContent = draft.body || 'No complaint generated yet.';
+            document.getElementById('draft-preview').textContent = draft.body || (
+                resolvedDraft.hasDraft
+                    ? 'A complaint draft exists for this session, but the latest draft body is still hydrating into this workspace view.'
+                    : 'No complaint generated yet.'
+            );
             document.getElementById('packet-preview').textContent = latestPacketExport
                 ? buildPacketPreviewText(latestPacketExport)
                 : draft.body
                     ? [`Title: ${draft.title || 'Current complaint draft'}`, `Claim type: ${claimType}`, '', draft.body].join('\n')
-                : 'No complaint packet exported yet.';
+                : (resolvedDraft.hasDraft
+                    ? 'A complaint draft exists, but no complaint packet export is cached yet.'
+                    : 'No complaint packet exported yet.');
             if (!latestPacketExport && draft.body) {
                 packetDownloadButtons.forEach((button) => {
                     const outputFormat = (button.dataset.outputFormat || '').trim() || 'markdown';
@@ -3013,7 +3117,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const normalizationNotes = Array.isArray(draft.draft_normalizations) ? draft.draft_normalizations : [];
             document.getElementById('draft-generation-meta').textContent = draft.body
                 ? `Draft strategy: ${strategyLabel}${backendParts ? ` (${backendParts})` : ''}. Claim type: ${claimType.replace(/_/g, ' ')}.${normalizationNotes.length ? ` LLM cleanup: ${normalizationNotes.join(', ')}.` : ''}${fallbackReason ? ` Fallback reason: ${fallbackReason}.` : ''}`
-                : 'Draft generation strategy details will appear here once a complaint is generated.';
+                : (resolvedDraft.hasDraft
+                    ? 'A complaint draft exists for this session, but the current tab is still hydrating the latest draft body and generation metadata.'
+                    : 'Draft generation strategy details will appear here once a complaint is generated.');
             renderDraftReadiness(sessionPayload);
             syncSynopsisMirrors(document.getElementById('case-synopsis').value);
         }
@@ -3114,7 +3220,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
 
         function renderDraftReadiness(sessionPayload) {
             const session = (sessionPayload || {}).session || {};
-            const draft = (sessionPayload || {}).draft || session.draft || {};
+            const resolvedDraft = resolveDraftState(sessionPayload);
+            const draft = resolvedDraft.draft || {};
             const overview = ((sessionPayload || {}).review || {}).overview || {};
             const selectedClaimType = String((document.getElementById('draft-claim-type') || {}).value || session.claim_type || 'retaliation');
             const selectedDraftMode = String((document.getElementById('draft-mode') || {}).value || (draft.draft_strategy === 'template' ? 'template' : 'llm_router'));
@@ -3156,7 +3263,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : [
                     `Record support: ${supportedElements} supported / ${missingElements} missing elements`,
                     `Evidence items: ${evidenceItemCount}`,
-                    draft.body ? 'Draft status: A complaint draft exists. Keep the selected claim theory and formal sections intact while editing.' : 'Draft status: No complaint draft exists yet.',
+                    resolvedDraft.hasDraft
+                        ? 'Draft status: A complaint draft exists. Keep the selected claim theory and formal sections intact while editing.'
+                        : 'Draft status: No complaint draft exists yet.',
                     missingElements > 0
                         ? 'Next best move: close the missing support gaps before treating the complaint as filing-ready.'
                         : 'Next best move: keep the complaint aligned to the selected theory and requested relief while refining the filing language.',
@@ -3187,7 +3296,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const nextQuestion = sessionPayload.next_question || null;
             const review = sessionPayload.review || {};
             const overview = review.overview || {};
-            const draft = sessionPayload.draft || (sessionPayload.session || {}).draft || null;
+            const draftState = draftStatusCopy(sessionPayload);
             const session = sessionPayload.session || {};
             const state = deriveWorkflowState(sessionPayload);
             const answers = session.intake_answers || {};
@@ -3196,10 +3305,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const totalQuestions = (sessionPayload.questions || []).length || 0;
             const evidenceCount = (overview.testimony_items || 0) + (overview.document_items || 0);
             const missingItems = supportMatrix.filter((item) => !item.supported);
-            const stageLabel = draft ? 'Draft in progress' : (nextQuestion ? 'Collecting complaint facts' : 'Ready for document drafting');
+            const stageLabel = state.phaseLabel === 'draft refinement'
+                ? 'Draft in progress'
+                : (nextQuestion ? 'Collecting complaint facts' : 'Ready for document drafting');
             const nextActionText = nextQuestion
                 ? `Ask and save: ${nextQuestion.label || nextQuestion.prompt}`
-                : (draft ? 'Review, refine, and export the complaint draft.' : 'Generate a complaint draft from the current record.');
+                : (state.builderReady ? 'Review, refine, and export the complaint draft.' : 'Generate a complaint draft from the current record.');
             const actionButton = document.getElementById('action-button');
             const queue = document.getElementById('queue-list');
             const blockerList = document.getElementById('blocker-list');
@@ -3216,7 +3327,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 actionTab = 'evidence';
                 actionTitle = 'Add evidence for unsupported elements';
                 actionDetail = 'Use the Evidence tab to attach testimony or documents to the elements still marked as needing support.';
-            } else if (!draft) {
+            } else if (!state.builderReady) {
                 actionTab = 'draft';
                 actionTitle = 'Generate the complaint draft';
                 actionDetail = 'The intake and review record look coherent enough to generate a first formal draft.';
@@ -3235,7 +3346,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     35 + Math.round(((overview.supported_elements || 0) / Math.max((review.support_matrix || []).length || 1, 1)) * 35)
                 );
             }
-            if (draft) {
+            if (state.builderReady) {
                 readinessPercent = Math.max(readinessPercent, 88);
             }
             readinessPercent = Math.min(100, readinessPercent);
@@ -3273,13 +3384,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     detail: 'No testimony or documents have been saved yet. Even one targeted record can make the complaint easier to trust.',
                 });
             }
-            if (!draft && !nextQuestion && !missingItems.length) {
+            if (!state.builderReady && !nextQuestion && !missingItems.length) {
                 blockers.push({
                     title: 'Generate the first draft',
                     detail: 'The current record looks coherent enough for a first complaint draft. Use the draft stage to shape the filing language.',
                 });
             }
-            if (draft) {
+            if (state.builderReady) {
                 blockers.push({
                     title: 'Compare the draft to the record',
                     detail: 'Before treating the complaint as final, make sure the draft still matches the supported facts, requested relief, and any remaining proof gaps.',
@@ -3297,7 +3408,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('supported-count').textContent = String(overview.supported_elements || 0);
             document.getElementById('missing-count-label').textContent = `${overview.missing_elements || 0} need more support`;
             document.getElementById('evidence-count').textContent = String(evidenceCount);
-            document.getElementById('draft-status').textContent = draft ? `Draft updated ${draft.updated_at || draft.generated_at || ''}` : 'No draft generated yet.';
+            document.getElementById('draft-status').textContent = draftState.label;
             document.getElementById('case-theory-title').textContent = `${partyName} v. ${opposingParty}`;
             document.getElementById('case-confidence-chip').textContent = confidenceLabel;
             document.getElementById('case-theory-summary').textContent = theorySummary;
@@ -3309,10 +3420,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('workflow-stage-chip').textContent = stageLabel;
             document.getElementById('workflow-stage-summary').textContent = `${answeredCount} intake answers saved, ${evidenceCount} evidence items collected, ${overview.supported_elements || 0} supported elements.`;
             document.getElementById('workflow-next-action').textContent = nextActionText;
-            document.getElementById('workflow-draft-guidance').textContent = draft
-                ? 'A draft exists. Check support gaps and refine tone, relief, and factual precision before filing.'
-                : 'No complaint draft yet. Use Review to close missing support before generation if possible.';
-            document.getElementById('progress-title').textContent = draft
+            document.getElementById('workflow-draft-guidance').textContent = draftState.guidance;
+            document.getElementById('progress-title').textContent = state.builderReady
                 ? 'The complaint is in drafting and refinement mode'
                 : nextQuestion
                     ? 'The complaint is still in information-gathering mode'
@@ -3328,19 +3437,17 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 ? `${evidenceCount} evidence items already support the case record.`
                 : 'No supporting evidence has been attached yet.';
             document.getElementById('progress-step-review').textContent = `${overview.supported_elements || 0} elements supported, ${overview.missing_elements || 0} still need support.`;
-            document.getElementById('progress-step-draft').textContent = draft
-                ? 'A complaint draft exists and can be refined.'
-                : 'No complaint draft exists yet.';
+            document.getElementById('progress-step-draft').textContent = draftState.summary;
             document.getElementById('reassurance-title').textContent = nextQuestion
                 ? 'You can move forward without having every detail yet.'
-                : draft
+                : state.builderReady
                     ? 'The complaint is far enough along to refine carefully.'
                     : 'The story is in place, and the next step is to turn it into a filing draft.';
             document.getElementById('reassurance-detail').textContent = nextQuestion
                 ? 'Save the best available version of the story now, then come back with evidence or corrections once the complainant has more records.'
                 : (overview.missing_elements || 0) > 0
                     ? 'The complaint is understandable, but some parts still need stronger support before the filing feels fully grounded.'
-                    : draft
+                    : state.builderReady
                         ? 'Use Review and Draft together to make sure the final document matches the supported facts and the requested relief.'
                         : 'The intake record is coherent enough to generate a first draft, even if you still plan to strengthen corroboration afterward.';
             document.getElementById('action-title').textContent = actionTitle.trim();
@@ -3358,7 +3465,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('intake-soft-note').textContent = nextQuestion
                 ? 'Saving here only updates the shared workspace. You can keep improving answers as the record becomes clearer.'
                 : 'The intake is complete enough for the next step. You can still return later if details need correction.';
-            document.getElementById('draft-soft-note').textContent = draft
+            document.getElementById('draft-soft-note').textContent = state.builderReady
                 ? 'The draft is now editable. Tighten wording carefully without removing the facts that give the complaint its support.'
                 : 'Treat the first draft as a working document. Review is still the place to decide whether the record behind it feels strong enough.';
             setButtonGateState(document.getElementById('shortcut-review-button'), state.reviewReady, state.reviewGateReason);
@@ -3448,7 +3555,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const review = sessionPayload.review || {};
             const overview = review.overview || {};
             const session = sessionPayload.session || {};
-            const draft = sessionPayload.draft || session.draft || null;
+            const resolvedDraft = resolveDraftState(sessionPayload);
+            const draftState = draftStatusCopy(sessionPayload);
             const toolNames = new Set((tools || []).map((tool) => tool.name));
             const answeredCount = Object.values(session.intake_answers || {}).filter((value) => String(value || '').trim()).length;
             const totalQuestions = (sessionPayload.questions || []).length || 0;
@@ -3476,8 +3584,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 {
                     name: 'Draft editing',
                     enabled: toolNames.has('complaint.generate_complaint') && toolNames.has('complaint.update_draft'),
-                    detail: draft
-                        ? 'A complaint draft already exists and can be refined in-place.'
+                    detail: resolvedDraft.hasDraft
+                        ? draftState.summary
                         : 'Draft generation and editing tools are available once the theory is coherent enough.',
                 },
                 {
@@ -3726,6 +3834,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     `Forced provider: ${String(workspaceProviderDiagnostics.forced_provider || 'auto')}`,
                     `Effective default: ${String(workspaceProviderDiagnostics.effective_default_provider || 'none')}`,
                     `Preference order: ${Array.isArray(workspaceProviderDiagnostics.default_order) ? workspaceProviderDiagnostics.default_order.join(' -> ') : 'unknown'}`,
+                    `UI review default: ${[workspaceProviderDiagnostics.ui_review_default_provider, workspaceProviderDiagnostics.ui_review_default_model].map((item) => String(item || '').trim()).filter(Boolean).join(' / ') || 'unknown'}`,
+                    `UI review rate-limit fallback chain: ${Array.isArray((workspaceProviderDiagnostics.ui_review_multimodal_rate_limit_fallbacks || {}).codex_cli) ? workspaceProviderDiagnostics.ui_review_multimodal_rate_limit_fallbacks.codex_cli.join(' -> ') : 'unknown'}`,
+                    `UI review HF fallback model: ${String(workspaceProviderDiagnostics.ui_review_hf_fallback_model || 'unknown')}`,
                     '',
                 ];
                 (workspaceProviderDiagnostics.providers || []).forEach((item) => {
@@ -3733,6 +3844,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         `${String(item.name || 'provider')}: ${item.available ? 'available' : 'unavailable'}`
                         + (item.credential_source ? ` via ${String(item.credential_source)}` : '')
                     );
+                    if (Object.prototype.hasOwnProperty.call(item || {}, 'supports_multimodal_ui_review')) {
+                        providerLines.push(`  multimodal ui review: ${item.supports_multimodal_ui_review ? 'supported' : 'unsupported'}`);
+                    }
+                    if (item.ui_review_model) {
+                        providerLines.push(`  ui review model: ${String(item.ui_review_model)}`);
+                    }
                     if (item.reason) {
                         providerLines.push(`  ${String(item.reason)}`);
                     }
@@ -4085,7 +4202,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         function renderSessionSyncStatus(sessionPayload) {
             const state = deriveWorkflowState(sessionPayload || {});
             const session = (sessionPayload && sessionPayload.session) || {};
-            const draft = (sessionPayload && sessionPayload.draft) || session.draft || null;
+            const resolvedDraft = resolveDraftState(sessionPayload);
+            const draftState = draftStatusCopy(sessionPayload);
             const didChip = document.getElementById('session-sync-did-chip');
             const phaseChip = document.getElementById('session-sync-phase-chip');
             const draftChip = document.getElementById('session-sync-draft-chip');
@@ -4099,12 +4217,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
 
             didChip.textContent = `did: ${workspaceUserId || session.user_id || 'unknown'}`;
             phaseChip.textContent = `phase: ${state.phaseLabel}`;
-            draftChip.textContent = `draft: ${draft ? 'present' : 'not generated'}`;
-            summary.textContent = draft
-                ? 'Workspace, review, builder, and SDK surfaces are operating on a complaint session that already has a draft in progress.'
+            draftChip.textContent = `draft: ${resolvedDraft.hasDraft ? 'present' : 'not generated'}`;
+            summary.textContent = resolvedDraft.hasDraft
+                ? 'Workspace, review, builder, and SDK surfaces are operating on a complaint session that already has a draft in progress or being hydrated from shared export state.'
                 : `Workspace and connected surfaces are synchronized on the same DID-backed complaint session while the case remains in ${state.phaseLabel}.`;
             note.textContent = state.builderReady
-                ? 'The shared session is coherent enough for cross-surface drafting and export actions.'
+                ? draftState.guidance
                 : `The shared session is synchronized, but the workflow is still intentionally focused on ${state.phaseLabel}.`;
 
             if (lastActivity && lastActivity.tool_name) {
@@ -4127,7 +4245,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const review = sessionPayload.review || {};
             const overview = review.overview || {};
             const session = sessionPayload.session || {};
-            const draft = sessionPayload.draft || session.draft || null;
+            const resolvedDraft = resolveDraftState(sessionPayload);
             const toolNames = new Set((tools || []).map((tool) => tool.name));
             const answeredCount = Object.values(session.intake_answers || {}).filter((value) => String(value || '').trim()).length;
             const totalQuestions = (sessionPayload.questions || []).length || 0;
@@ -4170,9 +4288,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 },
                 {
                     title: '6. Generate and edit the complaint',
-                    done: Boolean(draft),
-                    detail: draft
-                        ? 'A complaint draft exists and can be revised directly in this workspace.'
+                    done: resolvedDraft.hasDraft,
+                    detail: resolvedDraft.hasDraft
+                        ? draftStatusCopy(sessionPayload).summary
                         : 'Once the theory is coherent enough, generate the complaint and refine the language in place.',
                 },
                 {
@@ -4203,10 +4321,22 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const toolChip = document.getElementById('integrations-operations-tool-chip');
             const guidance = document.getElementById('integrations-operations-guidance');
             const preview = document.getElementById('integrations-operations-preview');
-            const readinessButton = document.getElementById('operations-tool-readiness-button');
-            const mediatorButton = document.getElementById('operations-mediator-tool-button');
-            const exportButton = document.getElementById('operations-export-tool-button');
-            const auditButton = document.getElementById('operations-ui-audit-tool-button');
+            const readinessButtons = [
+                document.getElementById('operations-tool-readiness-button'),
+                document.getElementById('integrations-start-readiness-button'),
+            ].filter(Boolean);
+            const mediatorButtons = [
+                document.getElementById('operations-mediator-tool-button'),
+                document.getElementById('integrations-start-mediator-button'),
+            ].filter(Boolean);
+            const exportButtons = [
+                document.getElementById('operations-export-tool-button'),
+                document.getElementById('integrations-start-export-button'),
+            ].filter(Boolean);
+            const auditButtons = [
+                document.getElementById('operations-ui-audit-tool-button'),
+                document.getElementById('integrations-start-ux-audit-button'),
+            ].filter(Boolean);
             const hasMediatorPath = toolNames.has('complaint.build_mediator_prompt');
             const hasExportPath = toolNames.has('complaint.export_packet') || toolNames.has('complaint.export_complaint_markdown');
             const hasUiAuditPath = toolNames.has('complaint.review_ui') || toolNames.has('complaint.optimize_ui');
@@ -4224,18 +4354,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     ? 'Recommended tool workflow: check tool readiness, prepare the mediator brief, then use review and evidence to close the remaining support gaps.'
                     : 'Recommended tool workflow: inspect the shared tooling contract first, then build the mediator handoff once intake and synopsis are less sparse.';
 
-            setButtonGateState(readinessButton, true, availableToolCount > 0
+            readinessButtons.forEach((button) => setButtonGateState(button, true, availableToolCount > 0
                 ? 'The shared MCP tooling contract is available for inspection.'
-                : 'Use this action to diagnose why no MCP tools are currently visible to the browser workspace.');
-            setButtonGateState(mediatorButton, hasMediatorPath && state.mediatorReady, hasMediatorPath
+                : 'Use this action to diagnose why no MCP tools are currently visible to the browser workspace.'));
+            mediatorButtons.forEach((button) => setButtonGateState(button, hasMediatorPath && state.mediatorReady, hasMediatorPath
                 ? state.mediatorGateReason
-                : 'The mediator-brief tool is not visible in the current MCP tool list.');
-            setButtonGateState(exportButton, hasExportPath && state.builderReady, hasExportPath
+                : 'The mediator-brief tool is not visible in the current MCP tool list.'));
+            exportButtons.forEach((button) => setButtonGateState(button, hasExportPath && state.builderReady, hasExportPath
                 ? state.builderGateReason
-                : 'The export tools are not visible in the current MCP tool list.');
-            setButtonGateState(auditButton, hasUiAuditPath, hasUiAuditPath
+                : 'The export tools are not visible in the current MCP tool list.'));
+            auditButtons.forEach((button) => setButtonGateState(button, hasUiAuditPath, hasUiAuditPath
                 ? 'The actor/critic tool path is available through the shared MCP surface.'
-                : 'The UI review tools are not visible in the current MCP tool list.');
+                : 'The UI review tools are not visible in the current MCP tool list.'));
         }
 
         async function runOperationalToolReadiness() {
@@ -4291,7 +4421,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const review = sessionPayload.review || {};
             const overview = review.overview || {};
             const session = sessionPayload.session || {};
-            const draft = sessionPayload.draft || session.draft || null;
+            const state = deriveWorkflowState(sessionPayload);
+            const resolvedDraft = resolveDraftState(sessionPayload);
             const answers = session.intake_answers || {};
             const toolNames = new Set((tools || []).map((tool) => tool.name));
             const answeredCount = Object.values(answers).filter((value) => String(value || '').trim()).length;
@@ -4336,7 +4467,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     statusMessage: 'Focused the shared synopsis so the mediator handoff can be refined.',
                 });
             }
-            if (answeredCount >= totalQuestions || evidenceCount > 0 || missingCount > 0) {
+            if (state.reviewReady) {
                 actions.push({
                     label: 'Review support posture',
                     detail: `The review matrix currently shows ${overview.supported_elements || 0} supported elements and ${missingCount} remaining gaps.`,
@@ -4346,10 +4477,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     statusMessage: 'Opened Review to inspect support coverage and proof gaps.',
                 });
             }
-            if (draft) {
+            if (resolvedDraft.hasDraft) {
                 actions.push({
                     label: 'Refine the draft',
-                    detail: 'A complaint draft already exists. Review tone, facts, requested relief, and corroboration before filing.',
+                    detail: draftStatusCopy(sessionPayload).guidance,
                     buttonLabel: 'Edit Draft',
                     targetTab: 'draft',
                     focusSelector: '#draft-body',
@@ -4417,6 +4548,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
 
         function renderWorkspace(sessionPayload) {
             hydratePersistedWorkflowArtifacts(sessionPayload);
+            hydrateResolvedDraftState(sessionPayload);
             renderIntake(sessionPayload);
             renderEvidence(sessionPayload);
             renderReview(sessionPayload);
@@ -5472,6 +5604,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 pytest_target: pytestTarget,
                 iterations: iterative ? Number(document.getElementById('ux-review-iterations').value || '1') : 0,
                 goals,
+                reuse_existing_screenshots: true,
             };
             activateTab('ux-review');
             setBusyStatus(iterative ? 'Running iterative UI/UX review workflow via MCP…' : 'Running snapshot UI review via MCP…');
@@ -5510,6 +5643,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 method: document.getElementById('ux-review-method').value,
                 priority: Number(document.getElementById('ux-review-priority').value || '80'),
                 goals,
+                reuse_existing_screenshots: true,
             };
             activateTab('ux-review');
             setBusyStatus('Running closed-loop UI/UX optimization via MCP…');
@@ -5598,6 +5732,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         document.getElementById('operations-mediator-tool-button').addEventListener('click', runOperationalMediatorHandoff);
         document.getElementById('operations-export-tool-button').addEventListener('click', runOperationalExportReview);
         document.getElementById('operations-ui-audit-tool-button').addEventListener('click', () => jumpToStage('ux-review', '#ux-review-notes', 'Opened UX Audit from the operational tool lane so the actor/critic workflow can continue.'));
+        document.getElementById('integrations-start-readiness-button').addEventListener('click', runOperationalToolReadiness);
+        document.getElementById('integrations-start-mediator-button').addEventListener('click', runOperationalMediatorHandoff);
+        document.getElementById('integrations-start-export-button').addEventListener('click', runOperationalExportReview);
+        document.getElementById('integrations-start-ux-audit-button').addEventListener('click', () => jumpToStage('ux-review', '#ux-review-notes', 'Opened UX Audit from the integrations quick-start lane so the actor/critic workflow can continue.'));
         document.getElementById('export-packet-tool-button').addEventListener('click', exportPacket);
         document.getElementById('download-packet-tool-markdown-button').addEventListener('click', downloadPacket);
         document.getElementById('download-packet-tool-docx-button').addEventListener('click', downloadPacket);

@@ -39,15 +39,16 @@
         return answers ? Object.keys(answers).length : 0;
     }
 
-    function buildSummary(payload) {
+    function buildSummary(payload, complaintReadiness) {
         const review = payload && payload.review ? payload.review : {};
         const overview = review.overview || {};
         const session = payload && payload.session ? payload.session : {};
         const nextQuestion = payload && payload.next_question ? payload.next_question.prompt : 'Intake complete.';
-        const draft = session.draft || null;
+        const draftState = resolveShellDraftState(payload, complaintReadiness);
+        const draft = draftState.draft;
         const draftSummary = draft && draft.title
             ? draft.title
-            : (draft ? 'Draft available.' : 'No draft generated yet.');
+            : (draftState.hasDraft ? 'Draft in progress.' : 'No draft generated yet.');
         return {
             answeredQuestions: countAnsweredQuestions(payload),
             supportedElements: overview.supported_elements || 0,
@@ -58,12 +59,25 @@
         };
     }
 
-    function deriveWorkflowState(payload) {
+    function resolveShellDraftState(payload, complaintReadiness) {
+        const session = payload && payload.session ? payload.session : {};
+        const directDraft = payload && payload.draft ? payload.draft : null;
+        const sessionDraft = session.draft || null;
+        const draft = directDraft || sessionDraft || null;
+        const readinessHasDraft = Boolean(complaintReadiness && complaintReadiness.has_draft);
+        return {
+            draft: draft,
+            hasDraft: Boolean(draft) || readinessHasDraft,
+        };
+    }
+
+    function deriveWorkflowState(payload, complaintReadiness) {
         const review = payload && payload.review ? payload.review : {};
         const overview = review.overview || {};
         const session = payload && payload.session ? payload.session : {};
-        const summary = buildSummary(payload || {});
-        const draft = session.draft || null;
+        const summary = buildSummary(payload || {}, complaintReadiness || null);
+        const draftState = resolveShellDraftState(payload, complaintReadiness);
+        const draft = draftState.draft;
         const answeredQuestions = Number(summary.answeredQuestions || 0);
         const totalQuestions = Array.isArray(payload && payload.questions) ? payload.questions.length : 0;
         const evidenceCount = Number(summary.evidenceCount || 0);
@@ -71,9 +85,9 @@
         const caseSynopsis = String((payload && payload.case_synopsis) || session.case_synopsis || '').trim();
         const intakeComplete = totalQuestions > 0 ? answeredQuestions >= totalQuestions : answeredQuestions > 0;
         const reviewReady = intakeComplete || answeredQuestions >= Math.max(2, Math.ceil(totalQuestions * 0.6)) || evidenceCount > 0;
-        const builderReady = Boolean(draft) || (intakeComplete && missingElements === 0 && evidenceCount > 0);
+        const builderReady = draftState.hasDraft || (intakeComplete && missingElements === 0 && evidenceCount > 0);
         const mediatorReady = Boolean(caseSynopsis) || answeredQuestions > 0;
-        const phaseLabel = draft
+        const phaseLabel = draftState.hasDraft
             ? 'draft refinement'
             : !reviewReady
                 ? 'intake first'
@@ -206,8 +220,8 @@
             existing.remove();
         }
 
-        const summary = buildSummary(state.sessionPayload);
-        const workflowState = deriveWorkflowState(state.sessionPayload || {});
+        const summary = buildSummary(state.sessionPayload, state.complaintReadiness || null);
+        const workflowState = deriveWorkflowState(state.sessionPayload || {}, state.complaintReadiness || null);
         const shell = document.createElement('aside');
         shell.id = 'cg-app-shell';
         shell.className = 'cg-app-shell';

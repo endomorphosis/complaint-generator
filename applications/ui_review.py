@@ -19,6 +19,7 @@ DEFAULT_UI_REVIEW_PROVIDER = "codex_cli"
 DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER = {
     "codex": "gpt-5.3-codex",
     "codex_cli": "gpt-5.3-codex",
+    "hf_inference_api": "Qwen/Qwen2.5-VL-7B-Instruct",
 }
 _TEXT_ONLY_UI_REVIEW_PROVIDERS = {
     "codex",
@@ -30,6 +31,7 @@ _TEXT_UI_REVIEW_TIMEOUTS = {
     "codex_cli": 120,
     "copilot_cli": 25,
     "copilot_sdk": 25,
+    "hf_inference_api": 60,
 }
 _MULTIMODAL_RATE_LIMIT_FALLBACKS = {
     "codex": ("copilot_cli", "hf_inference_api"),

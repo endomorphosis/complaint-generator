@@ -181,3 +181,16 @@ def test_resolve_credentials_can_save_password_to_ipfs_secrets_vault(monkeypatch
     assert gmail_user == "user@gmail.com"
     assert gmail_password == "provided-app-password"
     assert captured == {"user": "user@gmail.com", "password": "provided-app-password"}
+
+
+def test_build_parser_exposes_years_back_and_duckdb_flags():
+    module = _load_script_module()
+
+    help_text = module.build_parser().format_help()
+
+    assert "--years-back" in help_text
+    assert "--build-duckdb-index" in help_text
+    assert "--duckdb-output-dir" in help_text
+    assert "--append-duckdb-index" in help_text
+    assert "--bm25-search-query" in help_text
+    assert "--bm25-search-limit" in help_text

@@ -1156,7 +1156,10 @@ class ComplaintWorkspaceService:
         path = self._session_path(user_id)
         if not path.exists():
             return _default_state(user_id)
-        payload = json.loads(path.read_text())
+        try:
+            payload = json.loads(path.read_text())
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            return _default_state(user_id)
         if not isinstance(payload, dict):
             return _default_state(user_id)
         payload.setdefault("user_id", user_id)
@@ -1174,7 +1177,13 @@ class ComplaintWorkspaceService:
     def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         state["updated_at"] = _utc_now()
         path = self._session_path(str(state.get("user_id") or DEFAULT_USER_ID))
-        path.write_text(json.dumps(state, indent=2, sort_keys=True))
+        temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            temp_path.write_text(json.dumps(state, indent=2, sort_keys=True))
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
         return state
 
     def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -3106,6 +3115,7 @@ class ComplaintWorkspaceService:
         }
 
     def get_provider_diagnostics(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        from applications import ui_review as ui_review_module
         from ipfs_datasets_py import llm_router
 
         def _vault_value(*names: str) -> str:
@@ -3227,6 +3237,10 @@ class ComplaintWorkspaceService:
         openai_key = _resolve_openai_key()
         hf_token = str(llm_router._resolve_hf_api_token() or "").strip()
         copilot_provider = llm_router._builtin_provider_by_name("copilot_cli")
+        copilot_command = os.getenv("IPFS_DATASETS_PY_COPILOT_CLI_CMD", "npx --yes @github/copilot -p {prompt}")
+        copilot_supports_image_inputs = bool(
+            getattr(llm_router, "_copilot_cli_supports_image_inputs", lambda _command: False)(copilot_command)
+        )
 
         providers = [
             {
@@ -3258,6 +3272,7 @@ class ComplaintWorkspaceService:
                 ),
                 "binary_path": copilot_path or None,
                 "supports_multimodal": bool(copilot_path),
+                "supports_multimodal_ui_review": copilot_supports_image_inputs,
                 "credential_source": (
                     "github_copilot_cli"
                     if copilot_provider is not None and copilot_path
@@ -3274,6 +3289,8 @@ class ComplaintWorkspaceService:
                 "credential_source": _source_for_hf(),
                 "base_url": str(os.getenv("IPFS_DATASETS_PY_HF_INFERENCE_BASE_URL", "https://router.huggingface.co/hf-inference/models")).rstrip("/"),
                 "draft_timeout_seconds": _llm_draft_timeout_for_provider("hf_inference_api"),
+                "ui_review_model": ui_review_module._ui_review_model_for_provider("hf_inference_api"),
+                "ui_review_timeout_seconds": ui_review_module._ui_review_timeout_for_provider("hf_inference_api"),
             },
         ]
 
@@ -3283,6 +3300,15 @@ class ComplaintWorkspaceService:
             "forced_provider": forced_provider or None,
             "default_order": default_order,
             "effective_default_provider": forced_provider or effective_default,
+            "ui_review_default_provider": ui_review_module.DEFAULT_UI_REVIEW_PROVIDER,
+            "ui_review_default_model": ui_review_module._ui_review_model_for_provider(
+                ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            ),
+            "ui_review_multimodal_rate_limit_fallbacks": {
+                "codex_cli": list(ui_review_module._multimodal_rate_limit_fallback_chain("codex_cli")),
+                "copilot_cli": list(ui_review_module._multimodal_rate_limit_fallback_chain("copilot_cli")),
+            },
+            "ui_review_hf_fallback_model": ui_review_module._ui_review_model_for_provider("hf_inference_api"),
             "providers": providers,
             "summary": {
                 "codex_available": bool(codex_path),
@@ -3637,6 +3663,7 @@ class ComplaintWorkspaceService:
         limit: Optional[int] = None,
         date_after: Optional[str] = None,
         date_before: Optional[str] = None,
+        years_back: Optional[int] = None,
         evidence_root: Optional[str] = None,
         gmail_user: Optional[str] = None,
         gmail_app_password: Optional[str] = None,
@@ -3665,6 +3692,7 @@ class ComplaintWorkspaceService:
                 limit=limit,
                 date_after=date_after,
                 date_before=date_before,
+                years_back=years_back,
                 gmail_user=gmail_user,
                 gmail_app_password=gmail_app_password,
                 use_gmail_oauth=use_gmail_oauth,
@@ -3850,6 +3878,7 @@ class ComplaintWorkspaceService:
                 limit=int(args["limit"]) if args.get("limit") is not None else None,
                 date_after=str(args.get("date_after") or "") or None,
                 date_before=str(args.get("date_before") or "") or None,
+                years_back=int(args["years_back"]) if args.get("years_back") is not None else None,
                 evidence_root=str(args.get("evidence_root") or "") or None,
                 gmail_user=str(args.get("gmail_user") or "") or None,
                 gmail_app_password=str(args.get("gmail_app_password") or "") or None,
@@ -3960,6 +3989,7 @@ class ComplaintWorkspaceService:
             screenshot_dir = args.get("screenshot_dir")
             iterations = int(args.get("iterations") or 0)
             pytest_target = args.get("pytest_target")
+            reuse_existing_screenshots = bool(args.get("reuse_existing_screenshots"))
             supplemental_artifacts = (
                 self._build_complaint_output_review_artifacts(args.get("user_id"))
                 + self._build_cached_ui_readiness_artifacts(args.get("user_id"))
@@ -3989,6 +4019,7 @@ class ComplaintWorkspaceService:
                         pytest_target=str(pytest_target)
                         if pytest_target
                         else DEFAULT_UI_UX_SCREENSHOT_TARGET,
+                        reuse_existing_screenshots=reuse_existing_screenshots,
                     )
                     self._persist_ui_readiness(args.get("user_id"), result)
                     return result
@@ -4028,6 +4059,7 @@ class ComplaintWorkspaceService:
                 notes=args.get("notes"),
                 goals=args.get("goals"),
                 supplemental_artifacts=supplemental_artifacts,
+                reuse_existing_screenshots=bool(args.get("reuse_existing_screenshots")),
             )
             self._persist_ui_readiness(args.get("user_id"), result)
             return result

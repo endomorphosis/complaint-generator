@@ -12,6 +12,7 @@ import anyio
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from complaint_generator.email_credentials import resolve_gmail_credentials
+from complaint_generator.email_graphrag import build_email_duckdb_artifacts, search_email_graphrag_duckdb
 from complaint_generator.email_import import import_gmail_evidence
 
 
@@ -25,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=None, help="Maximum number of recent messages to consider after IMAP search.")
     parser.add_argument("--date-after", default=None, help="Only search messages on/after this date (YYYY-MM-DD).")
     parser.add_argument("--date-before", default=None, help="Only search messages before this date (YYYY-MM-DD).")
+    parser.add_argument("--years-back", type=int, default=None, help="Convenience window for broad collection, e.g. --years-back 2 to scan the last two years when --date-after is omitted.")
     parser.add_argument("--complaint-query", default=None, help="Free-text complaint description used to rank/filter likely relevant emails.")
     parser.add_argument("--complaint-keyword", action="append", default=[], help="Repeatable complaint keyword or phrase.")
     parser.add_argument("--complaint-keyword-file", action="append", default=[], help="Path to newline-delimited complaint keywords or phrases.")
@@ -32,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--use-uid-checkpoint", action="store_true", help="Resume Gmail imports by IMAP UID checkpoint instead of rescanning from scratch.")
     parser.add_argument("--checkpoint-name", default=None, help="Optional checkpoint name when managing multiple Gmail import cursors.")
     parser.add_argument("--uid-window-size", type=int, default=None, help="Maximum number of newly discovered UID messages to import in this run.")
+    parser.add_argument("--build-duckdb-index", action="store_true", help="Build or update a DuckDB/parquet email corpus from the generated import manifest.")
+    parser.add_argument("--duckdb-output-dir", default=None, help="Directory for DuckDB/parquet email index artifacts. Defaults to a duckdb folder next to the manifest.")
+    parser.add_argument("--append-duckdb-index", action="store_true", help="Append the import manifest into an existing DuckDB corpus instead of rebuilding it from scratch.")
+    parser.add_argument("--bm25-search-query", default=None, help="Optional keyword query to run against the DuckDB BM25 email index after building it.")
+    parser.add_argument("--bm25-search-limit", type=int, default=20, help="Maximum number of BM25 search hits to return after building the index.")
     parser.add_argument("--workspace-root", default=".complaint_workspace/sessions", help="Workspace session root.")
     parser.add_argument("--evidence-root", default=None, help="Directory to write imported email artifacts to.")
     parser.add_argument("--gmail-user", default=os.environ.get("GMAIL_USER") or os.environ.get("EMAIL_USER"), help="Gmail address. Defaults to GMAIL_USER or EMAIL_USER.")
@@ -58,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 async def _run(args: argparse.Namespace) -> dict[str, object]:
-    return await import_gmail_evidence(
+    payload = await import_gmail_evidence(
         addresses=args.addresses,
         user_id=args.user_id,
         claim_element_id=args.claim_element_id,
@@ -69,6 +76,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         limit=args.limit,
         date_after=args.date_after,
         date_before=args.date_before,
+        years_back=args.years_back,
         complaint_query=args.complaint_query,
         complaint_keywords=args.complaint_keyword,
         complaint_keyword_files=args.complaint_keyword_file,
@@ -83,6 +91,21 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
         gmail_user=args.gmail_user,
         gmail_app_password=args.gmail_app_password,
     )
+    if args.build_duckdb_index and payload.get("manifest_path"):
+        duckdb_summary = build_email_duckdb_artifacts(
+            manifest_path=payload["manifest_path"],
+            output_dir=args.duckdb_output_dir,
+            append=bool(args.append_duckdb_index),
+        )
+        payload["duckdb_index"] = duckdb_summary
+        if args.bm25_search_query and duckdb_summary.get("duckdb_path"):
+            payload["bm25_search"] = search_email_graphrag_duckdb(
+                index_path=duckdb_summary["duckdb_path"],
+                query=args.bm25_search_query,
+                limit=int(args.bm25_search_limit or 20),
+                ranking="bm25",
+            )
+    return payload
 
 
 def _resolve_credentials(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[str, str]:
@@ -117,11 +140,21 @@ def main() -> int:
         print(f"Imported {payload['imported_count']} matching email(s) into {payload['evidence_root']}")
         print(f"Searched messages: {payload['searched_message_count']}")
         print(f"Matched addresses: {', '.join(payload['matched_addresses'])}")
+        if payload.get("date_after") or payload.get("date_before"):
+            print(f"Date window: {payload.get('date_after') or '*'} -> {payload.get('date_before') or '*'}")
         if payload.get("complaint_terms"):
             print(f"Complaint terms: {', '.join(payload['complaint_terms'])}")
             print(f"Relevance filtered: {payload.get('relevance_filtered_count', 0)}")
         if payload.get("checkpoint_path"):
             print(f"Checkpoint: {payload['checkpoint_path']}")
+        if payload.get("duckdb_index"):
+            duckdb_summary = payload["duckdb_index"]
+            print(f"DuckDB index: {duckdb_summary.get('duckdb_path') or duckdb_summary.get('status')}")
+            if duckdb_summary.get("bm25_terms_parquet_path"):
+                print(f"BM25 terms parquet: {duckdb_summary['bm25_terms_parquet_path']}")
+        if payload.get("bm25_search"):
+            bm25_payload = payload["bm25_search"]
+            print(f"BM25 hits: {bm25_payload.get('result_count', 0)} for query={bm25_payload.get('query')!r}")
         for item in payload.get("imported") or []:
             score = float(item.get("relevance_score", 0.0) or 0.0)
             matched_terms = ", ".join(item.get("matched_terms") or [])

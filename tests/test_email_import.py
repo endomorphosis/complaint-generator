@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from pathlib import Path
 
@@ -325,6 +326,58 @@ def test_import_gmail_evidence_can_resume_by_uid_checkpoint(tmp_path, monkeypatc
     assert second_payload["imported_count"] == 1
     assert second_payload["imported"][0]["subject"] == "Termination email 2"
     assert second_payload["checkpoint"]["folders"]["INBOX"]["last_processed_uid"] == 102
+
+
+def test_import_gmail_evidence_resolves_years_back_into_date_after(tmp_path, monkeypatch):
+    matching_message = _build_email_bytes(
+        subject="Timeline follow-up",
+        sender="hr@example.com",
+        recipient="employee@example.com",
+        body="Following up on the protected activity timeline.",
+    )
+
+    monkeypatch.setattr(
+        "complaint_generator.email_import.create_email_processor",
+        lambda **kwargs: _FakeProcessor([matching_message]),
+    )
+
+    class _FixedDatetime:
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 3, 26, 12, 0, 0, tzinfo=UTC)
+
+        @classmethod
+        def fromisoformat(cls, value: str):
+            return datetime.fromisoformat(value)
+
+    monkeypatch.setattr("complaint_generator.email_import.datetime", _FixedDatetime)
+
+    workspace_root = tmp_path / "sessions"
+    evidence_root = tmp_path / "evidence"
+    service = ComplaintWorkspaceService(root_dir=workspace_root)
+
+    async def _run_import():
+        return await import_gmail_evidence(
+            addresses=["hr@example.com", "employee@example.com"],
+            user_id="case-user",
+            claim_element_id="causation",
+            workspace_root=workspace_root,
+            evidence_root=evidence_root,
+            folder="INBOX",
+            years_back=2,
+            gmail_user="user@gmail.com",
+            gmail_app_password="app-password",
+            service=service,
+        )
+
+    payload = anyio.run(_run_import)
+
+    assert payload["status"] == "success"
+    assert payload["years_back"] == 2
+    assert payload["date_after"] == "2024-03-26"
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["years_back"] == 2
+    assert manifest["date_after"] == "2024-03-26"
 
 
 def test_import_gmail_evidence_can_use_gmail_oauth(tmp_path, monkeypatch):

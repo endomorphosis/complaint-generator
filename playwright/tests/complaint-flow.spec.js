@@ -602,6 +602,9 @@ test.describe('complaint generation workflow', () => {
 
     await expect(page.locator('#homepage-open-intake')).toBeVisible();
     await expect(page.locator('#homepage-open-workspace')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Start Secure Intake', exact: true })).toHaveCount(1);
+    await expect(page.locator('#homepage-nav-builder')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('#homepage-resume-builder')).toHaveAttribute('aria-disabled', 'true');
     await expect(page.locator('#homepage-complaint-readiness-summary')).toContainText(/Not ready to draft|Still building the record|Ready for first draft|Draft in progress/i);
     await expect(page.locator('#homepage-open-workspace')).toHaveAttribute('href', /\/workspace/);
     await writeUiScreenshotArtifact(page, { name: 'workspace-homepage', title: 'Homepage Entry' });
@@ -697,6 +700,18 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-contract-preview')).toContainText(/Drafting mode: llm_router formal complaint path/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Evidence items: 2/i);
     await writeUiScreenshotArtifact(page, { name: 'workspace-draft', title: 'Workspace Draft' });
+
+    await page.getByRole('button', { name: 'Evidence', exact: true }).click();
+    await expect(page.locator('#draft-status')).toContainText(/Draft in progress|Draft updated/i);
+    await expect(page.locator('#progress-step-draft')).toContainText(/complaint draft exists|draft exists/i);
+    await expect(page.locator('[data-tab-panel="evidence"]')).not.toContainText(/No draft generated yet\./i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-evidence', title: 'Workspace Evidence' });
+
+    await page.getByRole('button', { name: 'Review', exact: true }).click();
+    await expect(page.locator('#draft-status')).toContainText(/Draft in progress|Draft updated/i);
+    await expect(page.locator('#progress-step-draft')).toContainText(/complaint draft exists|draft exists/i);
+    await expect(page.locator('[data-tab-panel="review"]')).not.toContainText(/No draft generated yet\./i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-review', title: 'Workspace Review' });
 
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
     await page.locator('#refresh-complaint-readiness-button').click();

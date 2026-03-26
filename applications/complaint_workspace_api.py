@@ -34,6 +34,7 @@ class GmailEvidenceImportRequest(BaseModel):
     limit: Optional[int] = None
     date_after: Optional[str] = None
     date_before: Optional[str] = None
+    years_back: Optional[int] = None
     evidence_root: Optional[str] = None
     gmail_user: Optional[str] = None
     gmail_app_password: Optional[str] = None
@@ -130,6 +131,7 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             limit=request.limit,
             date_after=request.date_after,
             date_before=request.date_before,
+            years_back=request.years_back,
             evidence_root=request.evidence_root,
             gmail_user=request.gmail_user,
             gmail_app_password=request.gmail_app_password,

@@ -314,6 +314,40 @@ def test_review_and_iterative_workflow_return_llm_router_output(monkeypatch, tmp
     assert result["runs"][0]["issues_count"] >= 1
 
 
+def test_iterative_workflow_can_reuse_existing_screenshots_without_rerunning_playwright(monkeypatch, tmp_path):
+    screenshot_dir = tmp_path / "screens"
+    output_dir = tmp_path / "reviews"
+    _write_artifact(screenshot_dir, "workspace")
+
+    class FakeMultimodalBackend:
+        def __init__(self, id, provider=None, model=None):
+            self.id = id
+            self.provider = provider
+            self.model = model
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            assert image_paths
+            return "# Top Risks\n- Reused screenshots still show one weak evidence cue."
+
+    def fail_if_called(**kwargs):
+        raise AssertionError("Playwright audit should not run when reusing existing screenshots.")
+
+    monkeypatch.setattr(workflow_module, "MultimodalRouterBackend", FakeMultimodalBackend)
+    monkeypatch.setattr(workflow_module, "run_playwright_screenshot_audit", fail_if_called)
+
+    result = run_iterative_ui_ux_workflow(
+        screenshot_dir=screenshot_dir,
+        output_dir=output_dir,
+        iterations=1,
+        reuse_existing_screenshots=True,
+    )
+
+    assert result["iterations"] == 1
+    assert result["reuse_existing_screenshots"] is True
+    progress_payload = json.loads((output_dir / "workflow-progress.json").read_text())
+    assert progress_payload["status"] == "completed"
+
+
 def test_structure_ui_ux_review_builds_screenshot_driven_structured_feedback(tmp_path):
     _write_artifact(tmp_path, "workspace-intake", url="http://example.test/workspace?tab=intake")
     _write_artifact(tmp_path, "workspace-evidence", url="http://example.test/workspace?tab=evidence")
@@ -554,6 +588,7 @@ def test_closed_loop_ui_ux_improvement_delegates_to_optimizer(monkeypatch, tmp_p
     assert captured["method"] == "adversarial"
     assert captured["priority"] == 92
     assert captured["metadata"]["supplemental_artifacts"][0]["artifact_type"] == "complaint_export"
+    assert captured["reuse_existing_screenshots"] is False
 
 
 def test_closed_loop_ui_ux_improvement_uses_default_brief_when_none_is_supplied(monkeypatch, tmp_path):
@@ -574,3 +609,22 @@ def test_closed_loop_ui_ux_improvement_uses_default_brief_when_none_is_supplied(
     assert captured["priority"] == workflow_module.DEFAULT_OPTIMIZER_PRIORITY
     assert captured["goals"] == workflow_module.DEFAULT_UI_UX_REVIEW_GOALS
     assert captured["notes"] == workflow_module.DEFAULT_UI_UX_REVIEW_NOTES
+    assert captured["reuse_existing_screenshots"] is False
+
+
+def test_closed_loop_ui_ux_improvement_can_delegate_reuse_existing_screenshots(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_feedback_loop(self, **kwargs):
+        captured.update(kwargs)
+        return {"workflow_type": "ui_ux_closed_loop", "rounds_executed": 1}
+
+    monkeypatch.setattr("adversarial_harness.optimizer.Optimizer.run_agentic_ui_ux_feedback_loop", fake_feedback_loop)
+
+    run_closed_loop_ui_ux_improvement(
+        screenshot_dir=tmp_path / "screens",
+        output_dir=tmp_path / "reviews",
+        reuse_existing_screenshots=True,
+    )
+
+    assert captured["reuse_existing_screenshots"] is True

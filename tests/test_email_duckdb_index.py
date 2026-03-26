@@ -64,14 +64,18 @@ def test_build_and_search_email_duckdb_index(tmp_path: Path) -> None:
     assert Path(summary["duckdb_path"]).exists()
     assert Path(summary["messages_parquet_path"]).exists()
     assert Path(summary["terms_parquet_path"]).exists()
+    assert Path(summary["bm25_terms_parquet_path"]).exists()
+    assert summary["bm25_distinct_term_count"] >= 1
 
     search_payload = search_email_duckdb_index(
         index_path=summary["duckdb_path"],
         query="retaliation hearing hr@example.com",
         limit=5,
+        ranking="bm25",
     )
 
     assert search_payload["status"] == "success"
+    assert search_payload["ranking"] == "bm25"
     assert search_payload["result_count"] == 1
     assert search_payload["results"][0]["subject"] == "Termination meeting"
     assert "retaliation timeline" in search_payload["results"][0]["snippet"].lower()
@@ -153,6 +157,7 @@ def test_build_email_duckdb_index_can_append_manifests(tmp_path: Path) -> None:
         index_path=summary_two["duckdb_path"],
         query="notice",
         limit=10,
+        ranking="bm25",
     )
 
     assert summary_one["append_mode"] is False

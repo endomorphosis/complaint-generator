@@ -248,6 +248,9 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
     assert filing_provenance_payload["draft_strategy"] == "template"
     assert "draft_backend" in filing_provenance_payload
     assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["ui_review_default_provider"] == "codex_cli"
+    assert provider_diagnostics_payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
+    assert provider_diagnostics_payload["ui_review_multimodal_rate_limit_fallbacks"]["codex_cli"] == ["copilot_cli", "hf_inference_api"]
     assert any(item["name"] == "copilot_cli" for item in provider_diagnostics_payload["providers"])
 
     claim_type_payload = update_claim_type(

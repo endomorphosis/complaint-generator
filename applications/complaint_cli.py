@@ -9,6 +9,7 @@ from typing import Optional
 
 import typer
 
+from complaint_generator.email_graphrag import build_email_duckdb_artifacts, search_email_graphrag_duckdb
 from complaint_generator.email_import import import_gmail_evidence
 from applications.ui_review import run_ui_review_workflow
 
@@ -98,12 +99,18 @@ def import_gmail_evidence_command(
     limit: Optional[int] = None,
     date_after: Optional[str] = None,
     date_before: Optional[str] = None,
+    years_back: Optional[int] = typer.Option(None, "--years-back", help="Convenience window for broad collection, e.g. --years-back 2 to scan the last two years when --date-after is omitted."),
     complaint_query: Optional[str] = None,
     complaint_keyword: list[str] = typer.Option([], "--complaint-keyword", help="Complaint-specific keyword or phrase to improve relevance filtering. Repeat for multiple terms."),
     min_relevance_score: float = 0.0,
     use_uid_checkpoint: bool = typer.Option(False, "--use-uid-checkpoint", help="Resume large Gmail imports by IMAP UID checkpoint instead of rescanning the same mailbox slice."),
     checkpoint_name: Optional[str] = typer.Option(None, "--checkpoint-name", help="Optional checkpoint name when managing multiple Gmail import cursors."),
     uid_window_size: Optional[int] = typer.Option(None, "--uid-window-size", help="Maximum number of newly discovered UID messages to import in this run."),
+    build_duckdb_index: bool = typer.Option(False, "--build-duckdb-index", help="Build or update a DuckDB/parquet email corpus from the generated import manifest."),
+    duckdb_output_dir: Optional[str] = typer.Option(None, "--duckdb-output-dir", help="Directory for DuckDB/parquet email index artifacts."),
+    append_duckdb_index: bool = typer.Option(False, "--append-duckdb-index", help="Append the import manifest into an existing DuckDB corpus instead of rebuilding it."),
+    bm25_search_query: Optional[str] = typer.Option(None, "--bm25-search-query", help="Optional keyword query to run against the DuckDB BM25 index after building it."),
+    bm25_search_limit: int = typer.Option(20, "--bm25-search-limit", help="Maximum number of BM25 hits to return."),
     evidence_root: Optional[str] = None,
     gmail_user: Optional[str] = typer.Option(os.environ.get("GMAIL_USER") or os.environ.get("EMAIL_USER"), "--gmail-user"),
     gmail_app_password: Optional[str] = typer.Option(os.environ.get("GMAIL_APP_PASSWORD") or os.environ.get("EMAIL_PASS"), "--gmail-app-password"),
@@ -151,6 +158,7 @@ def import_gmail_evidence_command(
             limit=limit,
             date_after=date_after,
             date_before=date_before,
+            years_back=years_back,
             complaint_query=complaint_query,
             complaint_keywords=complaint_keyword,
             min_relevance_score=min_relevance_score,
@@ -167,6 +175,19 @@ def import_gmail_evidence_command(
         )
 
     payload = anyio.run(_run_import)
+    if build_duckdb_index and payload.get("manifest_path"):
+        payload["duckdb_index"] = build_email_duckdb_artifacts(
+            manifest_path=payload["manifest_path"],
+            output_dir=duckdb_output_dir,
+            append=bool(append_duckdb_index),
+        )
+        if bm25_search_query and payload["duckdb_index"].get("duckdb_path"):
+            payload["bm25_search"] = search_email_graphrag_duckdb(
+                index_path=payload["duckdb_index"]["duckdb_path"],
+                query=bm25_search_query,
+                limit=int(bm25_search_limit or 20),
+                ranking="bm25",
+            )
     _print(payload)
 
 
@@ -353,6 +374,7 @@ def review_ui(
     config_path: str = "config.llm_router.json",
     backend_id: Optional[str] = None,
     pytest_target: str = DEFAULT_UI_UX_SCREENSHOT_TARGET,
+    reuse_existing_screenshots: bool = False,
 ) -> None:
     goal_items = _split_multiline_values(goals)
     if iterations > 0:
@@ -372,6 +394,7 @@ def review_ui(
             notes=notes,
             goals=goal_items,
             supplemental_artifacts=supplemental_artifacts,
+            reuse_existing_screenshots=reuse_existing_screenshots,
         )
         service._persist_ui_readiness(user_id, result)
         _print(result)
@@ -404,6 +427,7 @@ def optimize_ui(
     method: str = DEFAULT_UI_UX_OPTIMIZER_METHOD,
     priority: int = DEFAULT_UI_UX_OPTIMIZER_PRIORITY,
     pytest_target: str = DEFAULT_UI_UX_SCREENSHOT_TARGET,
+    reuse_existing_screenshots: bool = False,
 ) -> None:
     from complaint_generator.ui_ux_workflow import run_closed_loop_ui_ux_improvement
 
@@ -425,6 +449,7 @@ def optimize_ui(
         notes=notes,
         goals=goal_items,
         supplemental_artifacts=supplemental_artifacts,
+        reuse_existing_screenshots=reuse_existing_screenshots,
     )
     service._persist_ui_readiness(user_id, result)
     _print(result)

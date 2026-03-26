@@ -972,6 +972,9 @@ def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_op
                 "() => { const text = document.getElementById('draft-preview').textContent || ''; return text.includes('COMPLAINT FOR RETALIATION') && text.includes('COUNT I - RETALIATION') && text.includes('SIGNATURE BLOCK'); }"
             )
             page.wait_for_function(
+                "() => !document.body.innerText.includes('No draft generated yet.')"
+            )
+            page.wait_for_function(
                 "() => document.getElementById('handoff-builder-button').getAttribute('aria-disabled') === 'false'"
             )
             page.wait_for_function(

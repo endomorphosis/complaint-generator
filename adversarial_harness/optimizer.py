@@ -3123,6 +3123,7 @@ class Optimizer:
         components: Optional[Dict[str, Any]] = None,
         stop_when_review_stable: bool = True,
         break_on_no_changes: bool = True,
+        reuse_existing_screenshots: bool = False,
     ) -> Dict[str, Any]:
         from complaint_generator.ui_ux_workflow import run_iterative_ui_ux_workflow
 
@@ -3187,6 +3188,7 @@ class Optimizer:
                 goals=goals,
                 initial_previous_review=previous_validation_review or None,
                 supplemental_artifacts=supplemental_artifacts,
+                reuse_existing_screenshots=reuse_existing_screenshots,
             )
             pre_review_payload = (
                 self._read_ui_ux_review_json(Path(str(pre_workflow.get("latest_review_json_path") or "")))
@@ -3241,6 +3243,7 @@ class Optimizer:
                 goals=goals,
                 initial_previous_review=_latest_review_text(pre_workflow) or previous_validation_review or None,
                 supplemental_artifacts=supplemental_artifacts,
+                reuse_existing_screenshots=reuse_existing_screenshots,
             )
             validation_review = _latest_review_text(validation_workflow)
             validation_review_payload = (

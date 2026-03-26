@@ -527,6 +527,21 @@ def run_playwright_screenshot_audit(
     }
 
 
+def _reuse_existing_screenshot_audit(screenshot_dir: str | Path) -> dict[str, Any]:
+    target_dir = Path(screenshot_dir)
+    artifacts = collect_screenshot_artifacts(target_dir)
+    return {
+        "command": ["reuse-existing-screenshots"],
+        "returncode": 0,
+        "stdout": "Reused existing screenshot artifacts.",
+        "stderr": "",
+        "artifact_count": len(artifacts),
+        "artifacts": artifacts,
+        "screenshot_dir": str(target_dir),
+        "reused_existing_screenshots": True,
+    }
+
+
 def run_end_to_end_complaint_browser_audit(
     *,
     screenshot_dir: str | Path,
@@ -801,6 +816,7 @@ def run_iterative_ui_ux_workflow(
     goals: list[str] | None = None,
     initial_previous_review: str | None = None,
     supplemental_artifacts: list[dict[str, Any]] | None = None,
+    reuse_existing_screenshots: bool = False,
 ) -> dict[str, Any]:
     resolved_goals = _resolve_review_goals(goals)
     resolved_notes = _resolve_review_notes(notes)
@@ -816,6 +832,7 @@ def run_iterative_ui_ux_workflow(
             "pytest_target": str(pytest_target),
             "provider": str(provider or ""),
             "model": str(model or ""),
+            "reuse_existing_screenshots": bool(reuse_existing_screenshots),
         },
     )
 
@@ -824,18 +841,31 @@ def run_iterative_ui_ux_workflow(
     latest_structured_review: dict[str, Any] = {}
 
     for iteration in range(1, max(1, iterations) + 1):
-        _write_progress_artifact(
-            progress_path,
-            {
-                "status": "running_playwright_audit",
-                "iteration": iteration,
-                "output_dir": str(target_output_dir),
-            },
-        )
-        audit = run_playwright_screenshot_audit(
-            screenshot_dir=screenshot_dir,
-            pytest_target=pytest_target,
-        )
+        existing_artifacts = collect_screenshot_artifacts(screenshot_dir)
+        if reuse_existing_screenshots and existing_artifacts:
+            _write_progress_artifact(
+                progress_path,
+                {
+                    "status": "reusing_existing_screenshots",
+                    "iteration": iteration,
+                    "output_dir": str(target_output_dir),
+                    "artifact_count": len(existing_artifacts),
+                },
+            )
+            audit = _reuse_existing_screenshot_audit(screenshot_dir)
+        else:
+            _write_progress_artifact(
+                progress_path,
+                {
+                    "status": "running_playwright_audit",
+                    "iteration": iteration,
+                    "output_dir": str(target_output_dir),
+                },
+            )
+            audit = run_playwright_screenshot_audit(
+                screenshot_dir=screenshot_dir,
+                pytest_target=pytest_target,
+            )
         if audit["returncode"] != 0:
             _write_progress_artifact(
                 progress_path,
@@ -936,6 +966,7 @@ def run_iterative_ui_ux_workflow(
         "carry_forward_assessment": dict(latest_structured_review.get("carry_forward_assessment") or {}),
         "latest_review_markdown_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.md") if run_reports else None,
         "latest_review_json_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.json") if run_reports else None,
+        "reuse_existing_screenshots": bool(reuse_existing_screenshots),
         "runs": run_reports,
     }
 
@@ -963,6 +994,7 @@ def run_closed_loop_ui_ux_improvement(
     components: dict[str, Any] | None = None,
     stop_when_review_stable: bool = True,
     break_on_no_changes: bool = True,
+    reuse_existing_screenshots: bool = False,
 ) -> dict[str, Any]:
     from adversarial_harness import Optimizer
 
@@ -992,6 +1024,7 @@ def run_closed_loop_ui_ux_improvement(
         components=components,
         stop_when_review_stable=stop_when_review_stable,
         break_on_no_changes=break_on_no_changes,
+        reuse_existing_screenshots=reuse_existing_screenshots,
     )
 
 
@@ -1010,6 +1043,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--method", default=DEFAULT_OPTIMIZER_METHOD)
     parser.add_argument("--priority", type=int, default=DEFAULT_OPTIMIZER_PRIORITY)
     parser.add_argument("--max-rounds", type=int, default=0)
+    parser.add_argument("--reuse-existing-screenshots", action="store_true")
     args = parser.parse_args(argv)
 
     if args.max_rounds > 0:
@@ -1025,6 +1059,7 @@ def main(argv: list[str] | None = None) -> int:
             goals=args.goals,
             method=args.method,
             priority=args.priority,
+            reuse_existing_screenshots=args.reuse_existing_screenshots,
         )
     else:
         result = run_iterative_ui_ux_workflow(
@@ -1036,6 +1071,7 @@ def main(argv: list[str] | None = None) -> int:
             pytest_target=args.pytest_target,
             notes=args.notes,
             goals=args.goals,
+            reuse_existing_screenshots=args.reuse_existing_screenshots,
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -1054,6 +1090,7 @@ __all__ = [
     "run_closed_loop_ui_ux_improvement",
     "run_iterative_ui_ux_workflow",
     "run_playwright_screenshot_audit",
+    "_reuse_existing_screenshot_audit",
     "structure_ui_ux_review",
     "main",
 ]

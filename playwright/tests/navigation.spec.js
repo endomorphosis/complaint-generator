@@ -69,6 +69,9 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#cg-app-shell')).toHaveCount(0);
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Secure Intake/i);
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Builder/i);
+    await expect(page.getByRole('link', { name: 'Start Secure Intake', exact: true })).toHaveCount(1);
+    await expect(page.locator('#homepage-nav-builder')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('#homepage-resume-builder')).toHaveAttribute('aria-disabled', 'true');
 
     const screenshotPath = testInfo.outputPath('homepage-overview.png');
     await page.locator('.hero').screenshot({ path: screenshotPath });

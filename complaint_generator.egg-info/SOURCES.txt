@@ -62,9 +62,11 @@ complaint_generator/cli.py
 complaint_generator/email_credentials.py
 complaint_generator/email_graphrag.py
 complaint_generator/email_import.py
+complaint_generator/email_oauth.py
 complaint_generator/email_seed_planner.py
 complaint_generator/entrypoints.py
 complaint_generator/evidence_relevance.py
+complaint_generator/local_evidence_import.py
 complaint_generator/mcp.py
 complaint_generator/mcp_server.py
 complaint_generator/review.py
@@ -226,8 +228,10 @@ tests/test_document_pipeline.py
 tests/test_document_pipeline_fallbacks.py
 tests/test_document_workflow_targeting_summary.py
 tests/test_domain_adaptation_learning.py
+tests/test_email_duckdb_index.py
 tests/test_email_graphrag.py
 tests/test_email_import.py
+tests/test_email_processor_window.py
 tests/test_email_seed_planner.py
 tests/test_enhanced_denoising.py
 tests/test_entity_linking_disambiguation.py
@@ -267,6 +271,7 @@ tests/test_llm_router_shim_claude_code.py
 tests/test_llm_router_shim_codex_cli.py
 tests/test_llm_router_shim_copilot_sdk.py
 tests/test_llm_router_shim_gemini_cli.py
+tests/test_local_evidence_import.py
 tests/test_log.py
 tests/test_logic_api_import_quiet.py
 tests/test_logic_common_feature_detection_import_quiet.py
@@ -296,6 +301,7 @@ tests/test_p2p_workflow_scheduler_tools.py
 tests/test_performance_profiling_suite.py
 tests/test_phase_manager_temporal_registry.py
 tests/test_pipeline_json_logger_types.py
+tests/test_primary_surface_button_contract.py
 tests/test_property_based_extraction_testing.py
 tests/test_refinement_feedback_loops.py
 tests/test_relationship_inference_accuracy.py

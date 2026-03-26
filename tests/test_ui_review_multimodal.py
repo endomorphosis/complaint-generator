@@ -286,6 +286,11 @@ def test_create_ui_review_report_non_rate_limit_error_does_not_use_provider_chai
     assert report["review"]["summary"] == "Text fallback after non-rate-limit error."
 
 
+def test_ui_review_model_for_provider_defaults_hf_multimodal_profile():
+    assert ui_review_module._ui_review_model_for_provider("hf_inference_api") == "Qwen/Qwen2.5-VL-7B-Instruct"
+    assert ui_review_module._ui_review_timeout_for_provider("hf_inference_api") == 60
+
+
 def test_create_ui_review_report_defaults_to_verified_codex_profile(monkeypatch, tmp_path: Path):
     screenshot = tmp_path / "workspace.png"
     screenshot.write_bytes(b"fake-png")

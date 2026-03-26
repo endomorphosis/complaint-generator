@@ -200,15 +200,49 @@ def build_email_graphrag_artifacts(
     return summary
 
 
+def build_email_duckdb_artifacts(
+    *,
+    manifest_path: str | Path,
+    output_dir: str | Path | None = None,
+    include_attachment_text: bool = False,
+    append: bool = False,
+) -> dict[str, Any]:
+    if _build_email_duckdb_index is None:
+        return {"status": "duckdb_index_unavailable", "manifest_path": str(Path(manifest_path).expanduser().resolve())}
+    try:
+        return _build_email_duckdb_index(
+            manifest_path=manifest_path,
+            output_dir=output_dir,
+            include_attachment_text=include_attachment_text,
+            append=append,
+        )
+    except ImportError as exc:
+        return {
+            "status": "duckdb_unavailable",
+            "manifest_path": str(Path(manifest_path).expanduser().resolve()),
+            "error": str(exc),
+        }
+
+
 def search_email_graphrag_duckdb(
     *,
     index_path: str | Path,
     query: str,
     limit: int = 20,
+    ranking: str = "bm25",
+    bm25_k1: float = 1.2,
+    bm25_b: float = 0.75,
 ) -> dict[str, Any]:
     if _search_email_duckdb_index is None:
         return {"status": "duckdb_index_unavailable", "query": query, "result_count": 0, "results": []}
-    return _search_email_duckdb_index(index_path=index_path, query=query, limit=limit)
+    return _search_email_duckdb_index(
+        index_path=index_path,
+        query=query,
+        limit=limit,
+        ranking=ranking,
+        bm25_k1=bm25_k1,
+        bm25_b=bm25_b,
+    )
 
 
-__all__ = ["build_email_graphrag_artifacts", "search_email_graphrag_duckdb"]
+__all__ = ["build_email_duckdb_artifacts", "build_email_graphrag_artifacts", "search_email_graphrag_duckdb"]

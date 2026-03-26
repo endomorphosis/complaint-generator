@@ -109,6 +109,7 @@ def import_gmail_evidence(
     limit: Optional[int] = None,
     date_after: Optional[str] = None,
     date_before: Optional[str] = None,
+    years_back: Optional[int] = None,
     evidence_root: Optional[str | Path] = None,
     gmail_user: Optional[str] = None,
     gmail_app_password: Optional[str] = None,
@@ -134,6 +135,7 @@ def import_gmail_evidence(
         limit=limit,
         date_after=date_after,
         date_before=date_before,
+        years_back=years_back,
         evidence_root=str(evidence_root) if evidence_root is not None else None,
         gmail_user=gmail_user,
         gmail_app_password=gmail_app_password,
@@ -422,6 +424,7 @@ def review_ui(
     output_path: Optional[str | Path] = None,
     iterations: int = 0,
     pytest_target: Optional[str] = None,
+    reuse_existing_screenshots: bool = False,
     service: Optional[ComplaintWorkspaceService] = None,
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
@@ -435,6 +438,7 @@ def review_ui(
         "backend_id": backend_id,
         "iterations": iterations,
         "pytest_target": pytest_target,
+        "reuse_existing_screenshots": reuse_existing_screenshots,
     }
     if screenshot_paths is not None:
         arguments["screenshot_paths"] = screenshot_paths
@@ -459,6 +463,7 @@ def optimize_ui(
     method: Optional[str] = None,
     priority: Optional[int] = None,
     pytest_target: Optional[str] = None,
+    reuse_existing_screenshots: bool = False,
     service: Optional[ComplaintWorkspaceService] = None,
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
@@ -474,6 +479,7 @@ def optimize_ui(
         "method": method,
         "priority": priority,
         "pytest_target": pytest_target,
+        "reuse_existing_screenshots": reuse_existing_screenshots,
     }
     if output_path is not None:
         arguments["output_path"] = str(output_path)

@@ -184,6 +184,10 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Router provider diagnostics" in content
     assert "Effective default:" in content
     assert "Preference order:" in content
+    assert "UI review default:" in content
+    assert "UI review rate-limit fallback chain:" in content
+    assert "UI review HF fallback model:" in content
+    assert "multimodal ui review:" in content
     assert "Screenshot-driven optimization target" in content
     assert "Carry-forward assessment" in content
     assert "unresolved prior findings:" in content
@@ -214,6 +218,9 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "latestSdkToolActivity" in content
     assert "loadLastSdkToolActivity" in content
     assert "complaint-mcp-sdk-call" in content
+    assert "resolveDraftState" in content
+    assert "draftStatusCopy" in content
+    assert "hydrateResolvedDraftState" in content
     assert "tooling-parity-preview" in content
     assert "sdkToMcpParityMap" in content
     assert "Browser SDK parity summary" in content

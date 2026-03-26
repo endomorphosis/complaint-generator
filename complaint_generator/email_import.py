@@ -143,6 +143,17 @@ def _default_evidence_root(workspace_root: Path) -> Path:
     return workspace_root / "evidence"
 
 
+def _resolve_date_after(*, date_after: Optional[str], years_back: Optional[int]) -> Optional[str]:
+    explicit = str(date_after or "").strip()
+    if explicit:
+        return explicit
+    if years_back is None:
+        return None
+    years_value = max(1, int(years_back))
+    anchor = datetime.now(UTC).date()
+    return anchor.fromordinal(anchor.toordinal() - (365 * years_value)).isoformat()
+
+
 def _checkpoint_path(artifact_root: Path, checkpoint_name: Optional[str]) -> Path:
     name = _slugify_fragment(str(checkpoint_name or "default"), fallback="default")
     return artifact_root / "_state" / f"{name}_checkpoint.json"
@@ -202,6 +213,7 @@ def _build_email_import_manifest(
     limit: Optional[int],
     date_after: Optional[str],
     date_before: Optional[str],
+    years_back: Optional[int] = None,
     use_uid_checkpoint: bool = False,
     uid_window_size: Optional[int] = None,
     checkpoint_path: Optional[Path] = None,
@@ -223,6 +235,7 @@ def _build_email_import_manifest(
         "limit": int(limit) if limit is not None else None,
         "date_after": date_after,
         "date_before": date_before,
+        "years_back": int(years_back) if years_back is not None else None,
         "use_uid_checkpoint": bool(use_uid_checkpoint),
         "uid_window_size": int(uid_window_size) if uid_window_size is not None else None,
         "searched_message_count": int(searched_message_count),
@@ -406,6 +419,7 @@ async def import_gmail_evidence(
     limit: Optional[int] = None,
     date_after: Optional[str] = None,
     date_before: Optional[str] = None,
+    years_back: Optional[int] = None,
     gmail_user: Optional[str] = None,
     gmail_app_password: Optional[str] = None,
     use_gmail_oauth: bool = False,
@@ -429,6 +443,7 @@ async def import_gmail_evidence(
         complaint_keywords=complaint_keywords,
         complaint_keyword_files=complaint_keyword_files,
     )
+    resolved_date_after = _resolve_date_after(date_after=date_after, years_back=years_back)
 
     workspace_root_path = Path(workspace_root)
     evidence_root_path = Path(evidence_root) if evidence_root is not None else _default_evidence_root(workspace_root_path)
@@ -484,7 +499,7 @@ async def import_gmail_evidence(
                     message_ids = await _search_message_uids(
                         processor.connection,
                         folder=folder_name,
-                        date_after=date_after,
+                        date_after=resolved_date_after,
                         date_before=date_before,
                         after_uid=folder_last_processed_uid,
                     )
@@ -495,11 +510,11 @@ async def import_gmail_evidence(
                     message_ids = await _search_message_ids(
                         processor.connection,
                         folder=folder_name,
-                        date_after=date_after,
+                        date_after=resolved_date_after,
                         date_before=date_before,
                         limit=limit,
                     )
-                    if limit is not None and limit > 0 and (date_after or date_before):
+                    if limit is not None and limit > 0 and (resolved_date_after or date_before):
                         message_ids = message_ids[-int(limit) :]
             except imaplib.IMAP4.error as exc:
                 if not (limit is not None and limit > 0 and "got more than 1000000 bytes" in str(exc)):
@@ -677,8 +692,9 @@ async def import_gmail_evidence(
             relevance_filtered_count=relevance_filtered_count,
             imported=imported,
             limit=limit,
-            date_after=date_after,
+            date_after=resolved_date_after,
             date_before=date_before,
+            years_back=years_back,
             use_uid_checkpoint=use_uid_checkpoint,
             uid_window_size=uid_window_size,
             checkpoint_path=checkpoint_file_path,
@@ -706,6 +722,9 @@ async def import_gmail_evidence(
             "matched_addresses": normalized_addresses,
             "complaint_terms": complaint_terms,
             "min_relevance_score": float(min_relevance_score),
+            "years_back": int(years_back) if years_back is not None else None,
+            "date_after": resolved_date_after,
+            "date_before": date_before,
             "auth_mode": "gmail_oauth" if use_gmail_oauth else "gmail_app_password",
             "use_uid_checkpoint": bool(use_uid_checkpoint),
             "uid_window_size": int(uid_window_size) if uid_window_size is not None else None,
