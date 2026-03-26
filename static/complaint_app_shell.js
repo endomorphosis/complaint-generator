@@ -278,7 +278,7 @@
             '</div>',
             '<div class="cg-app-shell__section-title">Navigate</div>',
             '<div class="cg-app-shell__nav">' + navHtml + '</div>',
-            '<details class="cg-app-shell__drawer" id="cg-app-shell-advanced-nav"><summary class="cg-app-shell__drawer-summary">Developer tools and linked surfaces</summary><div class="cg-app-shell__nav cg-app-shell__nav--secondary">' + advancedNavHtml + '</div></details>',
+            '<details class="cg-app-shell__drawer" id="cg-app-shell-advanced-nav" open><summary class="cg-app-shell__drawer-summary">Developer tools and linked surfaces</summary><div class="cg-app-shell__nav cg-app-shell__nav--secondary">' + advancedNavHtml + '</div></details>',
             '<div class="cg-app-shell__section-title">Session</div>',
             '<div class="cg-app-shell__stats">',
             '<div class="cg-app-shell__stat"><span class="cg-app-shell__stat-label">Intake</span><span class="cg-app-shell__stat-value" id="cg-app-shell-intake-count">' + summary.answeredQuestions + '</span><span class="cg-app-shell__stat-detail">' + safeText(summary.nextQuestion, 'Intake complete.') + '</span></div>',

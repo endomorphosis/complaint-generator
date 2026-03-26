@@ -855,6 +855,61 @@
             line-height: 1.45;
         }
 
+        .draft-action-rail {
+            display: grid;
+            gap: 14px;
+            margin: 18px 0 20px;
+            grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
+        }
+
+        .draft-action-card {
+            padding: 18px;
+            border-radius: 22px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(251, 244, 236, 0.84));
+        }
+
+        .draft-action-card strong,
+        .draft-action-card span {
+            display: block;
+        }
+
+        .draft-action-card span {
+            margin-top: 8px;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .draft-action-groups {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-top: 14px;
+        }
+
+        .draft-action-group {
+            padding: 14px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+        }
+
+        .draft-action-group strong,
+        .draft-action-group span {
+            display: block;
+        }
+
+        .draft-action-group span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.55;
+        }
+
+        .draft-action-group .button-row,
+        .draft-action-card .button-row {
+            margin-top: 12px;
+        }
+
         .guidance-grid {
             grid-template-columns: repeat(3, minmax(0, 1fr));
             margin-top: 16px;
@@ -1286,6 +1341,8 @@
             .intake-interview,
             .review-board,
             .draft-layout,
+            .draft-action-rail,
+            .draft-action-groups,
             .workbench-metrics,
             .shortcut-grid,
             .quick-action-grid,
@@ -1341,7 +1398,7 @@
                             <a class="surface-link" id="workspace-nav-builder" href="/document">Builder</a>
                             <a class="surface-link" id="workspace-nav-chat" href="/chat">Chat</a>
                         </div>
-                        <details class="surface-nav-drawer" id="workspace-advanced-nav">
+                        <details class="surface-nav-drawer" id="workspace-advanced-nav" open>
                             <summary class="surface-nav-summary">Developer tools and linked surfaces</summary>
                             <div class="surface-links" aria-label="Developer tools and linked surfaces">
                                 <a class="surface-link" id="workspace-nav-profile" href="/profile">Profile</a>
@@ -2247,14 +2304,44 @@
                             </div>
                         </div>
                     </div>
-                    <div class="button-row">
-                        <button class="primary" id="generate-draft-button" type="button">Generate First Draft</button>
-                        <button class="secondary" id="save-draft-button" type="button">Save Draft Changes</button>
-                        <button class="secondary" id="export-packet-button" type="button">Export Complaint Packet</button>
-                        <button class="secondary" id="download-packet-markdown-button" type="button" data-output-format="markdown" disabled>Download Markdown</button>
-                        <button class="secondary" id="download-packet-docx-button" type="button" data-output-format="docx" disabled>Download DOCX</button>
-                        <button class="secondary" id="download-packet-pdf-button" type="button" data-output-format="pdf" disabled>Download PDF</button>
-                        <button class="secondary" id="reset-session-button" type="button">Reset Workspace</button>
+                    <div class="draft-action-rail">
+                        <div class="draft-action-card">
+                            <strong>Run the filing workflow in order</strong>
+                            <span>Keep one dominant next move visible. Generate or save the draft first, run packet review second, and only download when the release gate and support posture make that safe.</span>
+                            <div class="draft-action-groups">
+                                <div class="draft-action-group">
+                                    <strong>1. Generate or save</strong>
+                                    <span>Work on the text while the claim type, route, and filing posture stay visible beside it.</span>
+                                    <div class="button-row">
+                                        <button class="primary" id="generate-draft-button" type="button">Generate First Draft</button>
+                                        <button class="secondary" id="save-draft-button" type="button">Save Draft Changes</button>
+                                    </div>
+                                </div>
+                                <div class="draft-action-group">
+                                    <strong>2. Review the packet</strong>
+                                    <span>Run the packet export and complaint-output review before treating file downloads as the endpoint of this stage.</span>
+                                    <div class="button-row">
+                                        <button class="secondary" id="export-packet-button" type="button">Export Complaint Packet</button>
+                                    </div>
+                                </div>
+                                <div class="draft-action-group">
+                                    <strong>3. Download when cleared</strong>
+                                    <span>Downloads stay available here, but they remain subordinate to the visible release-gate and record-strength checks above.</span>
+                                    <div class="button-row">
+                                        <button class="secondary" id="download-packet-markdown-button" type="button" data-output-format="markdown" disabled>Download Markdown</button>
+                                        <button class="secondary" id="download-packet-docx-button" type="button" data-output-format="docx" disabled>Download DOCX</button>
+                                        <button class="secondary" id="download-packet-pdf-button" type="button" data-output-format="pdf" disabled>Download PDF</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="draft-action-card">
+                            <strong>Operator controls</strong>
+                            <span>Use the safety rail above when the filing posture is getting ahead of the record. Reset the shared session here only when you truly need a clean complaint run.</span>
+                            <div class="button-row">
+                                <button class="secondary" id="reset-session-button" type="button">Reset Workspace</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="soft-note" id="draft-soft-note">Treat the first draft as a working document. Review is still the place to decide whether the record behind it feels strong enough.</div>
                     <div class="status draft-preview-shell"><pre id="draft-preview">No complaint generated yet.</pre></div>
