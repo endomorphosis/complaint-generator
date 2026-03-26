@@ -16,7 +16,9 @@ from complaint_generator import (
     handle_jsonrpc_message,
     import_gmail_evidence,
     import_local_evidence,
+    run_gmail_duckdb_pipeline,
     run_main,
+    search_email_duckdb_corpus,
     tool_list_payload,
 )
 from applications import complaint_cli as complaint_cli_impl
@@ -64,6 +66,8 @@ def test_package_exports_expose_workspace_review_and_entrypoint_helpers():
     assert handle_jsonrpc_message is not None
     assert import_gmail_evidence is not None
     assert import_local_evidence is not None
+    assert run_gmail_duckdb_pipeline is not None
+    assert search_email_duckdb_corpus is not None
     assert tool_list_payload is not None
     assert ComplaintWorkspaceService is complaint_workspace_module.ComplaintWorkspaceService
     assert handle_jsonrpc_message is complaint_mcp_module.handle_jsonrpc_message

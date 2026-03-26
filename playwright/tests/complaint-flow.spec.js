@@ -404,6 +404,9 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Secure Intake/i);
     await expect(page.locator('[data-surface-nav="primary"]')).not.toContainText(/Profile|Trace|Dashboards/i);
     await expect(page.locator('#workspace-advanced-nav')).toContainText(/Developer tools and linked surfaces/i);
+    await expect(page.locator('#queue-list')).toContainText(/Complete/i);
+    await expect(page.locator('#queue-list')).toContainText(/Do next/i);
+    await expect(page.locator('#queue-list')).toContainText(/Watch for/i);
     await expect(page.locator('#intake-question-grid')).toContainText(/What name should we use for the person harmed\?/i);
     await expect(page.locator('#intake-question-grid')).toContainText(/You can save and return anytime\. Share only what you can right now\./i);
     await expect(page.locator('#tool-list')).toContainText(/complaint\.generate_complaint/i);
@@ -434,10 +437,14 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#tooling-contract-preview')).toContainText(/getFormalDiagnostics/i);
     await expect(page.locator('#tooling-contract-preview')).toContainText(/complaint\.get_filing_provenance/i);
     await expect(page.locator('#tooling-contract-preview')).toContainText(/getFilingProvenance/i);
+    await expect(page.locator('#session-tool-activity-ledger')).toContainText(/complaint\.get_tooling_contract/i);
     await page.locator('#refresh-formal-diagnostics-button').click();
     await expect(page.locator('#formal-diagnostics-preview')).toContainText(/Formal complaint posture summary/i, { timeout: 15000 });
     await expect(page.locator('#formal-diagnostics-preview')).toContainText(/Release gate verdict:/i, { timeout: 15000 });
     await page.getByRole('button', { name: 'Intake', exact: true }).click();
+    await expect(page.locator('#focus-rail-stage')).toContainText(/You are in Intake\./i);
+    await expect(page.locator('#focus-rail-title')).toContainText(/Intake stage:/i);
+    await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.submit_intake/i);
 
     await page.locator('#intake-party_name').fill('Jane Doe');
     await page.locator('#intake-opposing_party').fill('Acme Corporation');
@@ -488,6 +495,9 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#evidence-add-document-button')).toContainText(/Attach document for/i);
 
     await page.getByRole('button', { name: 'Evidence', exact: true }).click();
+    await expect(page.locator('#focus-rail-stage')).toContainText(/You are in Evidence\./i);
+    await expect(page.locator('#focus-rail-title')).toContainText(/Evidence stage:/i);
+    await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.save_evidence/i);
 
     await page.locator('#evidence-kind').selectOption('testimony');
     await page.locator('#evidence-claim-element').selectOption('causation');
@@ -504,6 +514,11 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#evidence-list')).toContainText(/Witness statement/i);
     await expect(page.locator('#evidence-list')).toContainText(/termination-timeline\.txt/i);
     await page.getByRole('button', { name: 'Review', exact: true }).click();
+    await expect(page.locator('#focus-rail-stage')).toContainText(/You are in Review\./i);
+    await expect(page.locator('#focus-rail-title')).toContainText(/Review stage:/i);
+    await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.review_case/i);
+    await expect(page.locator('#support-strength-map')).toContainText(/Per-element proof map/i);
+    await expect(page.locator('#support-strength-map')).toContainText(/thin|unsupported|grounded/i);
     await expect(page.locator('#support-grid')).toContainText(/Protected activity/i);
     await expect(page.locator('#recommended-actions')).toContainText(/Check timing/i);
     await expect(page.locator('#review-synopsis-preview')).toContainText(/Jane Doe alleges retaliation/i);
@@ -514,6 +529,9 @@ test.describe('complaint generation workflow', () => {
     await waitForWorkspaceReady(page, { requireIntakeVisible: false });
 
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
+    await expect(page.locator('#focus-rail-stage')).toContainText(/You are in Draft\./i);
+    await expect(page.locator('#focus-rail-title')).toContainText(/Draft stage:/i);
+    await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.generate_complaint/i);
     await page.locator('#draft-mode').selectOption('llm_router');
     await page.locator('#requested-relief').fill('Back pay\nInjunctive relief');
     await page.locator('#generate-draft-button').click();
@@ -538,6 +556,9 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-export-integrity-preview')).toContainText(/Civil Action No\. is still a placeholder\./i);
 
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
+    await expect(page.locator('#focus-rail-stage')).toContainText(/You are in CLI \+ MCP\./i);
+    await expect(page.locator('#focus-rail-title')).toContainText(/CLI \+ MCP stage:/i);
+    await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.get_tooling_contract/i);
     const packageCard = page.locator('.tool-card').filter({ has: page.getByRole('heading', { name: 'Python package imports' }) }).first();
     const cliCard = page.locator('.tool-card').filter({ has: page.getByRole('heading', { name: 'Python CLI' }) }).first();
     const mcpCard = page.locator('.tool-card').filter({ has: page.getByRole('heading', { name: 'MCP stdio server' }) }).first();
@@ -571,6 +592,9 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Top defect:/i);
 
     await page.getByRole('button', { name: 'UX Audit', exact: true }).click();
+    await expect(page.locator('#focus-rail-stage')).toContainText(/You are in UX Audit\./i);
+    await expect(page.locator('#focus-rail-title')).toContainText(/UX Audit stage:/i);
+    await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.review_ui/i);
     await page.locator('#ux-review-provider').fill('llm_router');
     await page.locator('#ux-review-model').fill('multimodal_router');
     await page.locator('#run-ux-review-button').click();
@@ -612,7 +636,8 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#did-chip')).toContainText(cachedDid);
     await expect(page.locator('#draft-preview')).toContainText(/Edited final complaint body\./i);
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
-    await expect(page.locator('#download-packet-tool-markdown-button')).toBeEnabled();
+    await expect(page.locator('#download-packet-tool-markdown-button')).toBeDisabled();
+    await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('title', /Download is blocked until/i);
     await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('data-download-url', /output_format=markdown/);
   });
 

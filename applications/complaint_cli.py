@@ -11,6 +11,7 @@ import typer
 
 from complaint_generator.email_graphrag import build_email_duckdb_artifacts, search_email_graphrag_duckdb
 from complaint_generator.email_import import import_gmail_evidence
+from complaint_generator.email_pipeline import run_gmail_duckdb_pipeline, search_email_duckdb_corpus
 from applications.ui_review import run_ui_review_workflow
 
 from .complaint_workspace import ComplaintWorkspaceService
@@ -207,6 +208,115 @@ def import_local_evidence_command(
         evidence_root=evidence_root,
     )
     _print(payload)
+
+
+@app.command("run-gmail-duckdb-pipeline")
+def run_gmail_duckdb_pipeline_command(
+    user_id: str = "demo-user",
+    address: list[str] = typer.Option(..., "--address", help="Target address to match in From/To/Cc headers. Repeat for multiple addresses."),
+    claim_element_id: str = "causation",
+    folder: str = "INBOX",
+    folders: list[str] = typer.Option([], "--scan-folder", help="Additional Gmail IMAP folder to scan."),
+    years_back: Optional[int] = typer.Option(2, "--years-back", help="Convenience window for broad collection when --date-after is omitted."),
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
+    complaint_query: Optional[str] = None,
+    complaint_keyword: list[str] = typer.Option([], "--complaint-keyword", help="Complaint-specific keyword or phrase."),
+    min_relevance_score: float = 0.0,
+    checkpoint_name: str = "gmail-duckdb-pipeline",
+    uid_window_size: int = 500,
+    max_batches: int = 20,
+    duckdb_output_dir: Optional[str] = None,
+    append_to_existing_corpus: bool = False,
+    bm25_search_query: Optional[str] = None,
+    bm25_search_limit: int = 20,
+    evidence_root: Optional[str] = None,
+    gmail_user: Optional[str] = typer.Option(os.environ.get("GMAIL_USER") or os.environ.get("EMAIL_USER"), "--gmail-user"),
+    gmail_app_password: Optional[str] = typer.Option(os.environ.get("GMAIL_APP_PASSWORD") or os.environ.get("EMAIL_PASS"), "--gmail-app-password"),
+    use_gmail_oauth: bool = typer.Option(False, "--use-gmail-oauth"),
+    gmail_oauth_client_secrets: Optional[str] = typer.Option(os.environ.get("GMAIL_OAUTH_CLIENT_SECRETS"), "--gmail-oauth-client-secrets"),
+    gmail_oauth_token_cache: Optional[str] = typer.Option(os.environ.get("GMAIL_OAUTH_TOKEN_CACHE"), "--gmail-oauth-token-cache"),
+    gmail_oauth_open_browser: bool = typer.Option(True, "--gmail-oauth-open-browser/--no-gmail-oauth-browser"),
+    prompt_for_credentials: bool = typer.Option(False, "--prompt-for-credentials"),
+    use_keyring: bool = typer.Option(False, "--use-keyring"),
+    save_to_keyring: bool = typer.Option(False, "--save-to-keyring"),
+    use_ipfs_secrets_vault: bool = typer.Option(False, "--use-ipfs-secrets-vault"),
+    save_to_ipfs_secrets_vault: bool = typer.Option(False, "--save-to-ipfs-secrets-vault"),
+) -> None:
+    from complaint_generator.email_credentials import resolve_gmail_credentials
+
+    parser = argparse.ArgumentParser(prog="complaint-workspace run-gmail-duckdb-pipeline")
+    if use_gmail_oauth:
+        resolved_gmail_user = str(gmail_user or "").strip()
+        resolved_gmail_app_password = None
+        if not resolved_gmail_user:
+            parser.error("--gmail-user is required when --use-gmail-oauth is enabled.")
+        if not gmail_oauth_client_secrets:
+            parser.error("--gmail-oauth-client-secrets is required when --use-gmail-oauth is enabled.")
+    else:
+        resolved_gmail_user, resolved_gmail_app_password = resolve_gmail_credentials(
+            gmail_user=str(gmail_user or ""),
+            gmail_app_password=str(gmail_app_password or ""),
+            prompt_for_credentials=prompt_for_credentials,
+            use_keyring=use_keyring,
+            save_to_keyring_flag=save_to_keyring,
+            use_ipfs_secrets_vault=use_ipfs_secrets_vault,
+            save_to_ipfs_secrets_vault_flag=save_to_ipfs_secrets_vault,
+            parser=parser,
+        )
+
+    async def _run_pipeline() -> dict[str, object]:
+        return await run_gmail_duckdb_pipeline(
+            user_id=user_id,
+            addresses=address,
+            claim_element_id=claim_element_id,
+            folder=folder,
+            folders=folders,
+            years_back=years_back,
+            date_after=date_after,
+            date_before=date_before,
+            complaint_query=complaint_query,
+            complaint_keywords=complaint_keyword,
+            min_relevance_score=min_relevance_score,
+            workspace_root=service._session_dir,
+            evidence_root=Path(evidence_root) if evidence_root else None,
+            gmail_user=resolved_gmail_user,
+            gmail_app_password=resolved_gmail_app_password,
+            use_gmail_oauth=use_gmail_oauth,
+            gmail_oauth_client_secrets=gmail_oauth_client_secrets,
+            gmail_oauth_token_cache=gmail_oauth_token_cache,
+            gmail_oauth_open_browser=gmail_oauth_open_browser,
+            checkpoint_name=checkpoint_name,
+            uid_window_size=uid_window_size,
+            max_batches=max_batches,
+            duckdb_output_dir=duckdb_output_dir,
+            append_to_existing_corpus=append_to_existing_corpus,
+            bm25_search_query=bm25_search_query,
+            bm25_search_limit=bm25_search_limit,
+        )
+
+    _print(anyio.run(_run_pipeline))
+
+
+@app.command("search-email-duckdb")
+def search_email_duckdb_command(
+    index_path: str = typer.Option(..., "--index-path"),
+    query: str = typer.Option(..., "--query"),
+    limit: int = 20,
+    ranking: str = typer.Option("bm25", "--ranking"),
+    bm25_k1: float = typer.Option(1.2, "--bm25-k1"),
+    bm25_b: float = typer.Option(0.75, "--bm25-b"),
+) -> None:
+    _print(
+        search_email_duckdb_corpus(
+            index_path=index_path,
+            query=query,
+            limit=limit,
+            ranking=ranking,
+            bm25_k1=bm25_k1,
+            bm25_b=bm25_b,
+        )
+    )
 
 
 @app.command("review")

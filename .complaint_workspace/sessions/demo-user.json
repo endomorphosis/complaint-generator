@@ -717,386 +717,388 @@
   "latest_packet_export": null,
   "ui_readiness": {
     "acceptance_checks": [
-      "Add viewport tests (mobile/tablet/desktop) asserting draft pane min readable width and non-overlapping controls.",
-      "Assert exactly one primary CTA is visible per stage and remains visible after scrolling.",
-      "Capture screenshots for each stage with diagnostics collapsed vs expanded to verify hierarchy.",
-      "Add accessibility checks for minimum font size, color contrast, and button hit target size in draft/review surfaces.",
-      "Add full-page visual regression asserting no floating/off-canvas control boxes outside the main container.",
-      "Assert minimum computed font-size/line-height for review labels and body text.",
-      "Capture screenshots at mobile and desktop widths to verify sticky stage nav and action bar behavior.",
-      "Assert single primary CTA is visible and enabled/disabled strictly by MCP operation state."
+      "Assert desktop viewport keeps main container width >= 960px and prevents ultra-narrow content collapse.",
+      "Capture screenshots at 1280x800 and 390x844 for each stage to verify hierarchy and CTA visibility.",
+      "Assert exactly one primary CTA is visible per stage and has enabled/disabled/loading states during MCP calls.",
+      "Assert PASS/FAIL gate and key scores render in a dedicated summary component after draft generation.",
+      "Assert stage navigator reflects transitions without changing underlying MCP request sequence.",
+      "Add visual regression snapshots per stage breakpoint (desktop + mobile) to confirm spacing and hierarchy after layout refactor.",
+      "Assert only one primary CTA is visible per stage action bar.",
+      "Assert no horizontal overflow and minimum readable font size for form labels/body text."
     ],
     "actor_path_breaks": [],
     "broken_controls": [
       {
-        "control": "Primary submit/advance button",
-        "failure_mode": "Looks insufficiently distinct from surrounding controls due to crowded visual context.",
+        "control": "Primary stage action button(s)",
+        "failure_mode": "Visually under-emphasized relative to surrounding copy, making next-step affordance ambiguous.",
         "page": "workspace-draft",
-        "repair": "Use one high-contrast primary style per stage and consistent placement in sticky header/footer.",
-        "surface": "Stage actions"
+        "repair": "Increase prominence (size/contrast), pin position per stage, and add explicit action text tied to current step.",
+        "surface": "Main workflow sections"
       },
       {
-        "control": "Expand/collapse affordances",
-        "failure_mode": "Section boundaries and toggles are hard to parse in dense stacked cards.",
+        "control": "Section expand/collapse or navigation cues",
+        "failure_mode": "If present, they are not visually discoverable in the dense layout.",
         "page": "workspace-draft",
-        "repair": "Add explicit chevron toggles, larger hit areas, and clearer collapsed summaries.",
-        "surface": "Diagnostics/metadata sections"
+        "repair": "Use clear disclosure icons/labels and sticky in-page anchors for major sections.",
+        "surface": "Long-form output/review area"
       },
       {
-        "control": "Floating mini-panel controls (unlabeled in screenshot)",
-        "failure_mode": "Controls appear visually detached/clipped from the main page, implying broken placement or stale overlays.",
+        "control": "Primary orange action buttons (multiple instances)",
+        "failure_mode": "Visual sameness makes priority ambiguous and likely causes misclicks on non-primary actions.",
         "page": "workspace-evidence",
-        "repair": "Fix positioning context and z-index; hide or dock helper controls within the page container at all breakpoints.",
-        "surface": "Left gutter near lower/mid page"
+        "repair": "Restrict to one primary button per stage, demote others, and enforce deterministic button ordering.",
+        "surface": "Stage action blocks"
       },
       {
-        "control": "Primary export/next-step action",
-        "failure_mode": "Action emphasis appears weak versus surrounding blocks, making next step ambiguous.",
+        "control": "In-page section navigation (not visibly present)",
+        "failure_mode": "No obvious quick-jump control across a very long page.",
         "page": "workspace-evidence",
-        "repair": "Promote one persistent primary CTA with clear label and state feedback.",
-        "surface": "End-of-flow action region"
-      },
-      {
-        "control": "Connect",
-        "failure_mode": "Looks detached from immediate feedback context; users cannot tell what changes after click from visible UI alone.",
-        "page": "workspace-homepage",
-        "repair": "Show inline post-click state (spinner, connected badge, last sync timestamp) in the same row and disable conflicting actions until status resolves.",
-        "surface": "Continue existing complaint panel"
-      },
-      {
-        "control": "Review support truth",
-        "failure_mode": "Label is domain-specific and less immediately understandable than adjacent actions.",
-        "page": "workspace-homepage",
-        "repair": "Rename to a clearer verb-object label (e.g., \"Review evidence support\") and add one-line condition for when it should be used.",
-        "surface": "Primary hero action group"
-      },
-      {
-        "control": "Open builder",
-        "failure_mode": "Appears visually de-emphasized/disabled-looking compared with nearby actions, potentially signaling unavailable state without explanation.",
-        "page": "workspace-homepage",
-        "repair": "Use explicit enabled/disabled styling with reason text when disabled; if enabled, match other active CTA contrast and weight.",
-        "surface": "Bottom route cards"
+        "repair": "Add sticky stage nav with anchor links and active-section highlighting.",
+        "surface": "Long-form navigation"
       },
       {
         "control": "Primary orange action button(s)",
-        "failure_mode": "Appears visually ambiguous among nearby controls; primary intent is not consistently obvious.",
+        "failure_mode": "Multiple similarly styled primary buttons appear across long scroll, making the true next action unclear.",
         "page": "workspace-intake",
-        "repair": "Standardize one primary action style and location per stage, with clear disabled/loading states tied to existing MCP request status.",
-        "surface": "Main stage cards"
+        "repair": "Enforce a single active primary CTA per stage and visually disable/non-primary all others until stage criteria are met.",
+        "surface": "Stage transition action areas"
       },
       {
-        "control": "Stage links",
-        "failure_mode": "Active step is not strongly distinguishable in the screenshot.",
+        "control": "Stage/section header blocks",
+        "failure_mode": "Headers look informational but not obviously navigable, so users cannot quickly return to a prior stage.",
         "page": "workspace-intake",
-        "repair": "Add high-contrast active styling and scroll-sync to section headers.",
-        "surface": "Left sidebar navigation"
+        "repair": "Make headers anchor-linked with visible 'Jump to section' affordance and sticky companion navigation.",
+        "surface": "Section headers in long scroll"
+      },
+      {
+        "control": "Primary stage/action buttons (labels not legible in screenshot)",
+        "failure_mode": "Controls appear visually inaccessible due to extreme horizontal compression/off-canvas risk.",
+        "page": "workspace-integrations",
+        "repair": "Introduce responsive action container with fixed visibility and minimum width/touch size; verify labels remain readable at all supported breakpoints.",
+        "surface": "Complaint generator main workflow"
       }
     ],
     "carry_forward_assessment": {},
     "critic_verdict": "warning",
     "issue_counts": {
       "high": 8,
-      "low": 4,
-      "medium": 8
+      "low": 3,
+      "medium": 11
     },
     "issues": [
       {
         "page": "workspace-draft",
-        "problem": "Primary content is rendered in very narrow columns with tiny text, causing severe readability loss.",
-        "recommended_fix": "Increase base font size and line height, widen the main draft panel, and enforce responsive min-widths with stacked layout on smaller viewports.",
-        "severity": "high",
-        "surface": "Draft workspace",
-        "user_impact": "Users cannot reliably review legal wording or catch errors before export."
-      },
-      {
-        "page": "workspace-draft",
-        "problem": "Information density is excessive with many boxed sections and little visual separation between decision-critical and secondary metadata.",
-        "recommended_fix": "Group by workflow stage, collapse non-critical diagnostics by default, and promote key actions/status into a persistent top summary bar.",
-        "severity": "high",
-        "surface": "Whole page layout",
-        "user_impact": "Users spend more time searching for key actions and may miss high-risk content defects."
-      },
-      {
-        "page": "workspace-draft",
-        "problem": "Primary action controls appear visually diluted among many similar panels/buttons.",
-        "recommended_fix": "Apply clear primary/secondary button hierarchy, keep one dominant CTA per stage, and place stage-completion action consistently.",
-        "severity": "medium",
-        "surface": "Action area",
-        "user_impact": "Users may trigger wrong actions or fail to complete the intended next step."
-      },
-      {
-        "page": "workspace-draft",
-        "problem": "Field labels and values look tightly packed with limited whitespace and weak scan paths.",
-        "recommended_fix": "Use consistent spacing scale, stronger headings, and two-level typography hierarchy for labels vs values.",
-        "severity": "medium",
-        "surface": "Form and metadata blocks",
-        "user_impact": "Increases cognitive load and raises risk of misreading evidence, claim settings, or export options."
-      },
-      {
-        "page": "workspace-draft",
-        "problem": "Important quality signals (release gate/shape/alignment) are present but not visually integrated with draft decision points.",
-        "recommended_fix": "Attach inline guidance next to each score and provide direct links/buttons to the affected stage section.",
-        "severity": "low",
-        "surface": "Status/score presentation",
-        "user_impact": "Users may not connect scores to corrective actions before filing."
-      },
-      {
-        "page": "workspace-evidence",
-        "problem": "Typography and controls appear too small relative to page density, making labels and values hard to read.",
-        "recommended_fix": "Increase base font size and line height, enlarge key controls, and enforce minimum readable sizes for form labels/summary chips in the review path.",
+        "problem": "Primary content is constrained to an extremely narrow column, making nearly all text hard to read and compare.",
+        "recommended_fix": "Increase max content width (desktop), use a responsive two-column layout for form vs. output, and enforce readable line lengths (roughly 60-90 characters).",
         "severity": "high",
         "surface": "Complaint generator main page",
-        "user_impact": "Actors can miss key facts or status signals during filing review, increasing risk of bad submissions."
+        "user_impact": "Users cannot quickly verify facts, evidence, and draft quality; error detection and confidence drop sharply."
       },
       {
-        "page": "workspace-evidence",
-        "problem": "Detached/floating mini-panels are visible outside the primary column, suggesting overlap, clipping, or broken sticky positioning.",
-        "recommended_fix": "Constrain floating elements to the content container, fix z-index/position rules, and hide non-active helper panels at narrow widths.",
+        "page": "workspace-draft",
+        "problem": "Section hierarchy is visually weak; cards and labels blend together with minimal typographic contrast.",
+        "recommended_fix": "Strengthen heading scale/weight, add clearer card boundaries, and introduce persistent stage headers or a sticky progress rail.",
         "severity": "high",
-        "surface": "Left side of main content (lower/mid page)",
-        "user_impact": "Users may not trust which controls are active, and may click stale or hidden controls."
+        "surface": "Stage sections (Intake/Evidence/Review/Draft)",
+        "user_impact": "Users lose track of workflow stage and may edit the wrong section or miss required inputs."
       },
       {
-        "page": "workspace-evidence",
-        "problem": "Very long single-column layout lacks strong stage separators and persistent progress context.",
-        "recommended_fix": "Add a persistent stage rail or sticky progress header with clear current-stage highlight and jump links.",
+        "page": "workspace-draft",
+        "problem": "Primary action buttons appear visually small and easy to miss relative to surrounding text blocks.",
+        "recommended_fix": "Use one prominent primary CTA per stage with stronger contrast, consistent placement, and clear verb labels.",
         "severity": "medium",
-        "surface": "Full-page review flow",
-        "user_impact": "Users lose orientation between Intake/Evidence/Review/Draft, slowing verification and increasing omissions."
+        "surface": "Action controls",
+        "user_impact": "Users may not know the next step or may click secondary actions by mistake."
       },
       {
-        "page": "workspace-evidence",
-        "problem": "Visual hierarchy is flat (similar card styles, muted contrast, repeated micro-panels).",
-        "recommended_fix": "Promote key decision blocks (claim type, strategy, export readiness) with stronger contrast, spacing, and heading scale.",
+        "page": "workspace-draft",
+        "problem": "Critical result cues look embedded in dense prose rather than highlighted as decision signals.",
+        "recommended_fix": "Promote gate/status/score into compact badges or a summary panel with clear PASS/FAIL color semantics and short labels.",
         "severity": "medium",
-        "surface": "Section cards and metadata blocks",
-        "user_impact": "Critical filing signals blend with secondary metadata, reducing decision speed."
+        "surface": "Status/score area (release gate and scoring hints)",
+        "user_impact": "Users may miss that the draft is filing-ready or misunderstand whether additional edits are needed."
       },
       {
-        "page": "workspace-evidence",
-        "problem": "Primary CTA is not consistently dominant across the long page; action priority is visually diluted.",
-        "recommended_fix": "Use a sticky action footer/header with one primary CTA and clearly grouped secondary actions.",
+        "page": "workspace-draft",
+        "problem": "Inputs and explanatory text appear tightly packed with insufficient spacing.",
+        "recommended_fix": "Increase vertical rhythm, group related fields, and collapse non-critical helper copy behind expandable guidance.",
+        "severity": "medium",
+        "surface": "Form fields and helper text",
+        "user_impact": "Higher cognitive load, more skipped instructions, and increased data-entry mistakes."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Large low-information margins and flat background reduce focus on task-critical content.",
+        "recommended_fix": "Rebalance container widths and spacing so whitespace supports grouping rather than isolating a thin content strip.",
         "severity": "low",
+        "surface": "Page background and whitespace",
+        "user_impact": "Perceived clutter/imbalance and reduced scannability."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Information density is too high across a very long scroll with many tightly packed sections.",
+        "recommended_fix": "Introduce collapsible stage containers with a persistent stage stepper (Intake, Evidence, Review, Draft, Integration Discovery) and default each stage to a readable vertical rhythm.",
+        "severity": "high",
+        "surface": "End-to-end complaint page",
+        "user_impact": "Users can miss required fields or supporting evidence steps, reducing confidence in filing readiness."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Typography appears too small and visually compressed for form-heavy legal content.",
+        "recommended_fix": "Raise base font size and line-height for labels/body text, increase field padding, and enforce minimum readable size for metadata tables.",
+        "severity": "high",
+        "surface": "Global layout",
+        "user_impact": "Reduced readability increases input mistakes and makes review/verification slower."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Multiple visually similar orange action blocks compete for attention and likely dilute primary action clarity.",
+        "recommended_fix": "Use one dominant primary CTA per stage, demote secondary actions to neutral style, and add explicit action intent text near each button.",
+        "severity": "medium",
+        "surface": "Action areas with orange cards/buttons",
+        "user_impact": "Users may trigger the wrong action order (e.g., draft/export before resolving validation gaps)."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Section hierarchy is weak; cards and forms blend together with limited visual grouping.",
+        "recommended_fix": "Add stronger headings, stage-level summaries, and completion badges; increase spacing between major stage blocks.",
+        "severity": "medium",
+        "surface": "Section boundaries",
+        "user_impact": "Users struggle to map where they are in the complaint lifecycle and what remains."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Tabular/detail blocks appear cramped with low scanability.",
+        "recommended_fix": "Increase row height, add zebra/section dividers, and provide compact-to-expanded toggle for detailed evidence records.",
+        "severity": "medium",
+        "surface": "Evidence/data tables",
+        "user_impact": "Users can overlook missing evidence fields or inconsistencies before draft generation."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Validation and readiness messaging is not visually prominent relative to the rest of the page content.",
+        "recommended_fix": "Add a sticky validation summary panel with counts by stage and anchor links to unresolved items.",
+        "severity": "low",
+        "surface": "Status and validation messaging",
+        "user_impact": "Users may proceed without noticing fixable issues in earlier stages."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Excessive vertical length with many dense sections and no clear persistent progress anchor.",
+        "recommended_fix": "Add a sticky stage progress rail/header with jump links (Intake, Evidence, Review, Draft, Integration Discovery) and highlight current viewport stage.",
+        "severity": "high",
+        "surface": "Complaint generator single-page flow",
+        "user_impact": "Users can lose place in the workflow and miss required sections before generating/exporting."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Text appears very small and low-contrast in multiple cards.",
+        "recommended_fix": "Raise base font size and contrast for body, labels, and helper text; enforce WCAG AA contrast tokens.",
+        "severity": "high",
+        "surface": "Mid-page cards and forms",
+        "user_impact": "Reduced readability increases errors in legal complaint content review."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Primary action blocks appear visually similar across sections, making the main next step ambiguous.",
+        "recommended_fix": "Use one canonical primary CTA per stage, demote secondary actions to outline/tertiary styles, and add explicit stage-specific button labels.",
+        "severity": "medium",
+        "surface": "Action areas around orange CTA blocks",
+        "user_impact": "Users may trigger the wrong action or hesitate at key transitions."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Inputs and summaries are presented in long uninterrupted stacks with weak grouping.",
+        "recommended_fix": "Chunk fields into titled groups with concise helper copy and collapsible advanced sections.",
+        "severity": "medium",
+        "surface": "Form grouping in intake/evidence regions",
+        "user_impact": "Higher cognitive load and slower completion for first-time users."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Key outcomes (gate/pass, claim alignment, filing shape) are not visually prioritized enough versus surrounding detail.",
+        "recommended_fix": "Create a compact, pinned readiness summary card with badges and plain-language interpretation.",
+        "severity": "medium",
+        "surface": "Status and scoring panels",
+        "user_impact": "Users may miss readiness signals and over-review low-priority content."
+      },
+      {
+        "page": "workspace-intake",
+        "problem": "Large background area and narrow content column make the page feel cramped while wasting horizontal space.",
+        "recommended_fix": "Widen primary content container at desktop breakpoints and rebalance gutters/padding.",
+        "severity": "low",
+        "surface": "Page chrome and spacing",
+        "user_impact": "Unnecessary scrolling and reduced information density on desktop."
+      },
+      {
+        "page": "workspace-integrations",
+        "problem": "The usable content area appears constrained to a very thin column, with text and controls visually compressed/clipped.",
+        "recommended_fix": "Enforce a responsive min-width and container breakpoints; prevent parent flex/grid collapse; add overflow handling and mobile-specific stacking rules so core panels remain readable.",
+        "severity": "high",
+        "surface": "Complaint generator main page",
+        "user_impact": "Users cannot reliably read stage content, validate evidence, or use action controls, blocking filing readiness in practice."
+      },
+      {
+        "page": "workspace-integrations",
+        "problem": "Information density is too high in the visible strip, making labels and field values effectively illegible.",
+        "recommended_fix": "Increase minimum font size/line-height in narrow viewports, apply card padding, and switch multi-column sections to single-column under tablet/mobile breakpoints.",
+        "severity": "high",
+        "surface": "Complaint workflow panels",
+        "user_impact": "Users can miss claim details, stage status, or warnings, increasing legal/content risk."
+      },
+      {
+        "page": "workspace-integrations",
+        "problem": "Action controls appear either off-canvas or too compressed to identify confidently.",
+        "recommended_fix": "Pin primary CTA row in a visible sticky footer/header region on small widths and ensure buttons have minimum touch target size.",
+        "severity": "medium",
         "surface": "Primary action area",
-        "user_impact": "Users may hesitate on next step or miss final export action."
+        "user_impact": "Users may fail to proceed to export/next stage or trigger wrong actions."
       },
       {
-        "page": "workspace-homepage",
-        "problem": "Competing primary actions appear with similar visual weight (e.g., \"Start session fresh\", \"Open guided workspace\", \"Review support truth\").",
-        "recommended_fix": "Designate one primary CTA per role/state (new vs returning), demote others to secondary/tertiary styles, and add short helper text under each action clarifying when to use it.",
-        "severity": "high",
-        "surface": "Workspace home hero cards",
-        "user_impact": "Users may choose the wrong entry path and lose momentum at intake, increasing setup errors and rework."
-      },
-      {
-        "page": "workspace-homepage",
-        "problem": "Status blocks (identity, MCP tools, stage progress, case support) are dense and use low-contrast small text.",
-        "recommended_fix": "Increase font size/contrast, convert dense paragraphs to labeled key-value rows, and add clear success/warning badges for each status block.",
-        "severity": "high",
-        "surface": "Continue existing complaint panel",
-        "user_impact": "Operators cannot quickly confirm readiness or blockers, which delays transition from intake to drafting."
-      },
-      {
-        "page": "workspace-homepage",
-        "problem": "Tabs appear muted and potentially inactive-looking, with weak selected-state differentiation.",
-        "recommended_fix": "Strengthen active tab styling (contrast, weight, indicator), and ensure inactive tabs remain clearly actionable.",
+        "page": "workspace-integrations",
+        "problem": "A narrow side region is visible while main content is heavily constrained, suggesting layout priority imbalance.",
+        "recommended_fix": "Collapse or drawer-ize side navigation at smaller widths and reallocate width to complaint drafting/review content.",
         "severity": "medium",
-        "surface": "Top navigation/tabs",
-        "user_impact": "Users may not understand where they are in the tool, causing navigation hesitation and stage confusion."
-      },
-      {
-        "page": "workspace-homepage",
-        "problem": "Cards are text-heavy with limited visual distinction between stages and actions.",
-        "recommended_fix": "Add stronger stage icons/colors, shorten copy to one-line outcomes, and keep one explicit action per card.",
-        "severity": "medium",
-        "surface": "Guided path and route cards",
-        "user_impact": "Users must read too much before acting, increasing cognitive load during time-sensitive complaint preparation."
-      },
-      {
-        "page": "workspace-homepage",
-        "problem": "Large vertical sections stack with similar background tones and soft borders, reducing section boundaries.",
-        "recommended_fix": "Increase section contrast and spacing rhythm, and add clearer headers/subheaders for each workflow block.",
-        "severity": "low",
-        "surface": "Global layout spacing",
-        "user_impact": "Scanning the page feels flat; users may miss critical progression cues."
-      },
-      {
-        "page": "workspace-intake",
-        "problem": "Single very long page with many stacked cards and no strong visual chunking between stages.",
-        "recommended_fix": "Introduce clear stage containers with stronger headings, separators, and collapsible sections by stage while keeping existing data flow and submit actions unchanged.",
-        "severity": "high",
-        "surface": "Unified Complaint Workspace main content",
-        "user_impact": "Users must scroll extensively and can lose context about where they are in the filing process."
-      },
-      {
-        "page": "workspace-intake",
-        "problem": "Navigation appears narrow and text-dense, with weak emphasis on current step.",
-        "recommended_fix": "Increase nav width/typography clarity, add a persistent active-step indicator, and support click-to-scroll anchors for each stage section.",
-        "severity": "high",
-        "surface": "Left navigation rail",
-        "user_impact": "Users may miss the active stage or jump to the wrong section, slowing completion."
-      },
-      {
-        "page": "workspace-intake",
-        "problem": "Secondary text and labels appear low-contrast and visually similar to non-interactive content.",
-        "recommended_fix": "Raise contrast for labels and statuses, standardize token usage for muted text, and reserve muted styles for truly optional metadata.",
-        "severity": "medium",
-        "surface": "Card bodies and metadata rows",
-        "user_impact": "Important status/validation details are harder to read, especially during final review."
-      },
-      {
-        "page": "workspace-intake",
-        "problem": "Action hierarchy is unclear where multiple controls compete within the same viewport.",
-        "recommended_fix": "Use one consistent primary CTA per stage, demote secondary actions, and place stage-complete action at a predictable location.",
-        "severity": "medium",
-        "surface": "Primary/secondary actions",
-        "user_impact": "Users can hesitate or trigger lower-priority actions before completing required checks."
-      },
-      {
-        "page": "workspace-intake",
-        "problem": "Inconsistent spacing/padding across cards and sections reduces scannability.",
-        "recommended_fix": "Apply consistent spacing scale and card layout primitives across all stage panels.",
-        "severity": "low",
-        "surface": "Overall page rhythm",
-        "user_impact": "The interface feels noisy and increases cognitive load when verifying filing readiness."
+        "surface": "Navigation/left rail area",
+        "user_impact": "Space is wasted on non-primary chrome while task-critical complaint content is unreadable."
       }
     ],
     "latest_review_json_path": null,
     "latest_review_markdown_path": null,
     "optimization_targets": [],
     "playwright_followups": [
-      "Add viewport tests (mobile/tablet/desktop) asserting draft pane min readable width and non-overlapping controls.",
-      "Assert exactly one primary CTA is visible per stage and remains visible after scrolling.",
-      "Capture screenshots for each stage with diagnostics collapsed vs expanded to verify hierarchy.",
-      "Add accessibility checks for minimum font size, color contrast, and button hit target size in draft/review surfaces.",
-      "Add full-page visual regression asserting no floating/off-canvas control boxes outside the main container.",
-      "Assert minimum computed font-size/line-height for review labels and body text.",
-      "Capture screenshots at mobile and desktop widths to verify sticky stage nav and action bar behavior.",
-      "Assert single primary CTA is visible and enabled/disabled strictly by MCP operation state.",
-      "Add scroll-position test verifying stage highlight updates as sections enter viewport.",
-      "Assert only one primary CTA is rendered in the hero section for each mocked session state.",
-      "Capture screenshot snapshots for connected vs disconnected status panel states and verify badge/text changes.",
-      "Assert active tab has distinct visual class and aria-current semantics.",
-      "Assert disabled route actions include an explanatory tooltip or helper text.",
-      "Run visual regression on card density/contrast at desktop and mobile breakpoints.",
-      "Assert only one visible primary CTA per stage section at desktop width.",
-      "Capture screenshots at top/mid/bottom and verify sticky stage progress remains visible.",
-      "Assert sidebar active-stage state updates when scrolling to each stage anchor.",
-      "Run contrast checks on stage labels, statuses, and secondary metadata text.",
-      "Verify MCP-triggered loading/disabled states render on primary actions without changing request payloads."
+      "Assert desktop viewport keeps main container width >= 960px and prevents ultra-narrow content collapse.",
+      "Capture screenshots at 1280x800 and 390x844 for each stage to verify hierarchy and CTA visibility.",
+      "Assert exactly one primary CTA is visible per stage and has enabled/disabled/loading states during MCP calls.",
+      "Assert PASS/FAIL gate and key scores render in a dedicated summary component after draft generation.",
+      "Assert stage navigator reflects transitions without changing underlying MCP request sequence.",
+      "Add visual regression snapshots per stage breakpoint (desktop + mobile) to confirm spacing and hierarchy after layout refactor.",
+      "Assert only one primary CTA is visible per stage action bar.",
+      "Assert no horizontal overflow and minimum readable font size for form labels/body text.",
+      "Assert sticky stepper remains visible while scrolling and active stage updates correctly.",
+      "Assert validation summary anchors scroll to the correct stage section IDs.",
+      "Assert sticky stage navigator appears after first scroll and current stage updates as sections enter viewport.",
+      "Capture desktop screenshot at 1280px and verify primary content width uses intended max-width token.",
+      "Assert only one button per stage has primary variant at any time; others render secondary/tertiary.",
+      "Add visual regression check for text contrast and minimum font-size thresholds in card/body text.",
+      "Assert readiness summary card displays Release Gate, Claim Type, Filing Shape, and Alignment fields from MCP response.",
+      "Add viewport regression snapshots for 320, 375, 768, 1024, and desktop widths on the complaint page.",
+      "Assert main complaint content container width is above a readability threshold and not clipped by parent overflow.",
+      "Assert primary action buttons are visible and enabled/disabled states are reachable without horizontal scrolling.",
+      "Assert side navigation collapses at small breakpoints and does not reduce draft/review panel below minimum width."
     ],
     "recommended_changes": [
       {
-        "implementation_notes": "Create a responsive grid with a wide primary draft pane and secondary diagnostics rail; on narrow widths, stack rails beneath draft. Add max content width and typography tokens for legal-text readability.",
+        "implementation_notes": "Set a desktop max-width container, introduce breakpoint-based two-column composition (inputs left, outputs/status right), and keep mobile single-column stacking with larger tap targets.",
         "page": "workspace-draft",
-        "sdk_considerations": "Keep existing ComplaintMcpClient request/response contracts unchanged; this is a presentation-layer refactor only, with the same MCP stage payloads and event timing.",
-        "shared_code_path": "likely `src/pages/ComplaintGeneratorPage.tsx` and shared layout components under `src/components/workflow/`",
-        "title": "Refactor layout into stage-first responsive shell"
+        "sdk_considerations": "Do not alter MCP payload schemas; keep existing ComplaintMcpClient calls/events unchanged and only move visual containers around bound state.",
+        "shared_code_path": "likely: frontend/src/pages/ComplaintGeneratorPage.tsx",
+        "title": "Rebuild responsive shell for readable width"
       },
       {
-        "implementation_notes": "Add a sticky header showing current stage, gate status, and one next action button; demote utility actions to secondary controls.",
+        "implementation_notes": "Create a stage rail/chips component that mirrors Intake, Evidence, Review, Draft, Integration Discovery; highlight active stage and completion state.",
         "page": "workspace-draft",
-        "sdk_considerations": "Bind CTA actions to existing MCP workflow handlers (same method calls and state transitions), avoiding any client orchestration changes.",
-        "shared_code_path": "likely `src/components/workflow/StageHeader.tsx` and action toolbar component",
-        "title": "Introduce sticky stage header with single primary CTA"
+        "sdk_considerations": "Derive stage state from existing client-side workflow state; avoid introducing new MCP endpoints or changing call order.",
+        "shared_code_path": "likely: frontend/src/components/complaint/StageNavigator.tsx",
+        "title": "Add explicit stage navigator and sticky progress context"
       },
       {
-        "implementation_notes": "Collapse advanced metrics/log-like blocks by default, with explicit expand toggles and remembered panel state.",
+        "implementation_notes": "Render PASS/FAIL, claim type, filing shape score, and alignment score as compact badges with concise explanations near the top of Review/Draft output.",
         "page": "workspace-draft",
-        "sdk_considerations": "Do not alter data fetch cadence from ComplaintMcpClient; only change visibility/state in UI so MCP traffic and shared SDK behavior remain identical.",
-        "shared_code_path": "likely diagnostics panel components in `src/components/review/` or `src/components/debug/`",
-        "title": "Progressive disclosure for diagnostics panels"
+        "sdk_considerations": "Map directly from existing MCP response fields; no transformation that would break downstream ComplaintMcpClient consumers.",
+        "shared_code_path": "likely: frontend/src/components/complaint/ReviewSummaryCard.tsx",
+        "title": "Promote release gate and scoring into a summary card"
       },
       {
-        "implementation_notes": "Apply larger body text, improved line-height, paragraph spacing, and clearer heading scale specifically in draft/review text containers.",
+        "implementation_notes": "Introduce a reusable stage action bar with one primary action and contextual secondary actions, consistent placement, and disabled/loading states.",
         "page": "workspace-draft",
-        "sdk_considerations": "No changes to draft generation calls; preserve Draft stage MCP prompt/router flow and render returned text verbatim.",
-        "shared_code_path": "likely global styles in `src/styles/` and draft viewer component in `src/components/draft/`",
-        "title": "Readable legal-draft typography preset"
+        "sdk_considerations": "Keep current command handlers and async MCP invocation methods intact; only wrap them with clearer visual state and labels.",
+        "shared_code_path": "likely: frontend/src/components/complaint/StageActionBar.tsx",
+        "title": "Standardize action bar and button semantics"
       },
       {
-        "implementation_notes": "Audit sticky/absolute elements in the complaint page shell; enforce container bounds and responsive breakpoints to prevent detached side widgets.",
+        "implementation_notes": "Refactor the page into stage panels with a sticky top stepper and per-stage completion state; preserve current field components but render them under stage containers.",
         "page": "workspace-evidence",
-        "sdk_considerations": "UI-only CSS/layout changes; do not alter ComplaintMcpClient request/response contracts or MCP tool invocation order.",
-        "shared_code_path": "src/ui/pages/complaint-generator/*",
-        "title": "Stabilize layout and floating control containment"
+        "sdk_considerations": "Do not alter ComplaintMcpClient request/response contracts; only reorganize presentation state and keep existing MCP action calls bound to current handlers.",
+        "shared_code_path": "Likely in complaint page container and stage layout components (e.g., complaint workflow shell + section renderer).",
+        "title": "Stage-Stepper + Collapsible Workflow Shell"
       },
       {
-        "implementation_notes": "Add a sticky stage navigator (Intake, Evidence, Review, Draft, Integration Discovery) with anchor links and current-section highlighting.",
+        "implementation_notes": "Apply consistent spacing tokens, increase label/body font sizes, and normalize control heights across all visible form blocks and data cards.",
         "page": "workspace-evidence",
-        "sdk_considerations": "Bind nav state to existing workflow state already produced by MCP responses; avoid introducing alternate client-side truth that diverges from MCP stage data.",
-        "shared_code_path": "src/ui/components/workflow/StageNav.*",
-        "title": "Improve stage wayfinding for the long complaint flow"
+        "sdk_considerations": "Pure UI-layer changes; maintain identical payload shape sent through MCP workflow methods.",
+        "shared_code_path": "Shared UI tokens/theme layer and complaint form field components.",
+        "title": "Readable Form Density Pass"
       },
       {
-        "implementation_notes": "Increase typography scale, spacing, and contrast for labels/values; visually elevate filing-critical cards and de-emphasize secondary diagnostics.",
+        "implementation_notes": "Define one primary CTA per stage and convert extra orange actions to secondary/tertiary variants; add contextual helper text before irreversible actions.",
         "page": "workspace-evidence",
-        "sdk_considerations": "Preserve existing mapped fields from ComplaintMcpClient payloads; no schema changes, only rendering treatment.",
-        "shared_code_path": "src/ui/components/complaint/ReviewPanel.*",
-        "title": "Raise readability and hierarchy in review cards"
+        "sdk_considerations": "Keep existing MCP operation sequence intact; only re-label/re-order affordances without changing underlying action endpoints.",
+        "shared_code_path": "Button variant system and complaint stage action bars.",
+        "title": "Primary Action Hierarchy"
       },
       {
-        "implementation_notes": "Provide a persistent action bar with clear primary action and disabled/loading states tied to in-flight MCP operations.",
+        "implementation_notes": "Add a compact, always-visible summary showing unresolved items with click-to-scroll anchors into each stage.",
         "page": "workspace-evidence",
-        "sdk_considerations": "Keep current MCP mutation flow intact; ensure CTA state reflects existing MCP promise lifecycle and error handling.",
-        "shared_code_path": "src/ui/components/complaint/ActionBar.*",
-        "title": "Unify primary actions with sticky CTA region"
+        "sdk_considerations": "Reuse current validation outputs produced prior to MCP submit/draft calls; no changes to SDK transport or orchestration logic.",
+        "shared_code_path": "Validation aggregator component and complaint page scaffold.",
+        "title": "Sticky Validation Summary"
       },
       {
-        "implementation_notes": "Introduce a deterministic CTA priority map based on complaint/session state (new session, resumable session, ready-to-review). Render exactly one primary button and downgrade alternatives. Add concise sublabels like \"Use when no prior session exists.\"",
-        "page": "workspace-homepage",
-        "sdk_considerations": "Do not change command handlers that call ComplaintMcpClient; only remap which existing MCP-backed action is promoted to primary in the UI.",
-        "shared_code_path": "src/pages/workspace-home.* (or equivalent home route component) and shared button style tokens",
-        "title": "State-driven CTA hierarchy"
-      },
-      {
-        "implementation_notes": "Refactor the right panel into compact status items: Connection, Session ID, Tool Availability, Progress, Support Completeness. Use badge states (ok/warn/error) and progressive disclosure for long details.",
-        "page": "workspace-homepage",
-        "sdk_considerations": "Keep existing MCP polling/subscription sources intact; improve only presentation and grouping of fields returned from shared MCP status endpoints.",
-        "shared_code_path": "src/components/workspace/StatusPanel.* and status card primitives",
-        "title": "Readable status rail for MCP/session health"
-      },
-      {
-        "implementation_notes": "Apply explicit active state in tabs, add stage breadcrumb or current-step chip, and mirror stage names across nav and cards to reduce terminology drift.",
-        "page": "workspace-homepage",
-        "sdk_considerations": "Reuse existing route/state machine and ComplaintMcpClient stage values; avoid introducing parallel client-side stage enums that could desync from MCP.",
-        "shared_code_path": "src/components/navigation/* and workflow stage constants module",
-        "title": "Navigation clarity and stage orientation"
-      },
-      {
-        "implementation_notes": "Shorten each card to outcome-first text, move long explanatory text behind \"Learn more\", and standardize one action button per card with consistent verb naming.",
-        "page": "workspace-homepage",
-        "sdk_considerations": "Retain current MCP action intents; only adjust labels and card composition so the same backend operations are triggered.",
-        "shared_code_path": "src/components/workspace/StageCards.*",
-        "title": "Card copy compression and action affordance cleanup"
-      },
-      {
-        "implementation_notes": "Split the page into explicit Intake, Evidence, Review, Draft, and Integration Discovery stage panels with collapsible bodies and sticky stage header navigation.",
+        "implementation_notes": "Implement a sticky top or side stage navigator driven by section IDs and IntersectionObserver; include jump-to behavior and current-stage highlight.",
         "page": "workspace-intake",
-        "sdk_considerations": "Do not alter `ComplaintMcpClient` request/response shapes; only reorganize rendering and local UI state for section expansion/navigation.",
-        "shared_code_path": "frontend/src/pages/ComplaintWorkspacePage.tsx",
-        "title": "Stage-first layout refactor without backend contract changes"
+        "sdk_considerations": "UI-only change; keep existing ComplaintMcpClient calls and stage execution order unchanged.",
+        "shared_code_path": "complaint-generator route page component and stage layout wrapper",
+        "title": "Add sticky stage navigation and section anchors"
       },
       {
-        "implementation_notes": "Define one primary button style/placement per stage and move optional actions into tertiary links or overflow menus.",
+        "implementation_notes": "Update typography and color tokens for labels/body/helper text; enforce minimum font size and contrast in card/form components.",
         "page": "workspace-intake",
-        "sdk_considerations": "Keep existing MCP action handlers and event sequencing; only change visual priority and placement of controls bound to those handlers.",
-        "shared_code_path": "frontend/src/components/complaint/StageActions.tsx",
-        "title": "Action hierarchy and CTA normalization"
+        "sdk_considerations": "No MCP payload changes; only presentation updates around existing response rendering.",
+        "shared_code_path": "shared design tokens and complaint-generator card/form component styles",
+        "title": "Establish readability token baseline"
       },
       {
-        "implementation_notes": "Increase font size for dense metadata rows, improve color contrast for labels/statuses, and enforce spacing tokens across cards.",
+        "implementation_notes": "Define one primary CTA per stage, move secondary actions into less prominent styles, and add explicit labels tied to stage outcomes.",
         "page": "workspace-intake",
-        "sdk_considerations": "Pure presentation-layer change; no mutation to MCP payload construction, routing, or `ComplaintMcpClient` lifecycle.",
-        "shared_code_path": "frontend/src/styles/complaint-workspace.css",
-        "title": "Accessibility and readability pass"
+        "sdk_considerations": "Retain current ComplaintMcpClient method mapping; do not rename or re-route SDK actions, only adjust button wiring/display states.",
+        "shared_code_path": "stage action bar component and complaint workflow state controller",
+        "title": "Clarify primary actions per stage"
       },
       {
-        "implementation_notes": "Add sticky progress summary showing current stage, completion state, and quick-jump anchors.",
+        "implementation_notes": "Introduce a compact readiness panel showing Release Gate, Claim Type, Filing Shape, and Alignment with short guidance text.",
         "page": "workspace-intake",
-        "sdk_considerations": "Derive progress from existing stage state already populated via MCP responses; avoid introducing parallel client state that can drift from `ComplaintMcpClient` outputs.",
-        "shared_code_path": "frontend/src/components/complaint/WorkflowProgress.tsx",
-        "title": "Persistent workflow progress indicator"
+        "sdk_considerations": "Read existing MCP response fields as-is; avoid deriving alternate business logic outside the MCP result contract.",
+        "shared_code_path": "review/draft summary card component",
+        "title": "Promote release readiness summary"
+      },
+      {
+        "implementation_notes": "Increase max content width and optimize section spacing at desktop breakpoints while preserving mobile stacking.",
+        "page": "workspace-intake",
+        "sdk_considerations": "Layout-only; no impact to ComplaintMcpClient lifecycle, request timing, or response handling.",
+        "shared_code_path": "complaint-generator page container and responsive layout styles",
+        "title": "Desktop layout rebalance"
+      },
+      {
+        "implementation_notes": "Audit top-level wrappers for fixed widths, nested overflow, and flex-shrink behavior. Add explicit `min-width: 0` where needed, set content container max-width with centered layout, and introduce breakpoint-specific column stacking.",
+        "page": "workspace-integrations",
+        "sdk_considerations": "Limit changes to presentation and layout only; do not modify ComplaintMcpClient request/response contracts or MCP routing logic.",
+        "shared_code_path": "likely `src/pages/complaint-generator/*` or `src/app/complaint-generator/*` layout components",
+        "title": "Stabilize responsive layout constraints"
+      },
+      {
+        "implementation_notes": "Apply typography tokens for minimum readable sizes, add vertical spacing, and convert dense tables/rows into stacked summary blocks on mobile widths.",
+        "page": "workspace-integrations",
+        "sdk_considerations": "Keep existing stage data bindings intact; only re-render the same MCP-derived payload in a mobile-safe structure.",
+        "shared_code_path": "likely shared complaint stage components (Intake/Evidence/Review/Draft panels)",
+        "title": "Make stage content readable on narrow viewports"
+      },
+      {
+        "implementation_notes": "Ensure Next/Back/Export actions remain in viewport with sticky action bar and consistent disabled/loading states; avoid off-screen placement in collapsed layouts.",
+        "page": "workspace-integrations",
+        "sdk_considerations": "Preserve current async action handlers that call ComplaintMcpClient; only adjust positioning and affordance, not the MCP execution sequence.",
+        "shared_code_path": "likely workflow footer/header action component used by complaint generator",
+        "title": "Guarantee visible progression controls"
       }
     ],
     "release_blockers": [],
@@ -1105,13 +1107,13 @@
       "model": "gpt-5.3-codex",
       "page_review_backends": [
         {
-          "elapsed_seconds": 43.016,
+          "elapsed_seconds": 62.647,
           "id": "llm-router",
           "model": "gpt-5.3-codex",
           "original_screenshot_count": 1,
           "prepared_image_count": 1,
           "prepared_image_paths": [
-            "/home/barberb/complaint-generator/artifacts/ui_review/rehydrated-review-codex-codex-diagnostics/pages/prepared-images/workspace-draft.review.jpg"
+            "/home/barberb/complaint-generator/artifacts/ui_review/proof-priority-review-codex-codex-diagnostics/pages/prepared-images/workspace-draft.review.jpg"
           ],
           "prompt_chars": 1609,
           "prompt_mode": "compact",
@@ -1120,13 +1122,13 @@
           "strategy": "multimodal_router"
         },
         {
-          "elapsed_seconds": 52.171,
+          "elapsed_seconds": 67.826,
           "id": "llm-router",
           "model": "gpt-5.3-codex",
           "original_screenshot_count": 1,
           "prepared_image_count": 1,
           "prepared_image_paths": [
-            "/home/barberb/complaint-generator/artifacts/ui_review/rehydrated-review-codex-codex-diagnostics/pages/prepared-images/workspace-evidence.review.jpg"
+            "/home/barberb/complaint-generator/artifacts/ui_review/proof-priority-review-codex-codex-diagnostics/pages/prepared-images/workspace-evidence.review.jpg"
           ],
           "prompt_chars": 1612,
           "prompt_mode": "compact",
@@ -1135,30 +1137,30 @@
           "strategy": "multimodal_router"
         },
         {
-          "elapsed_seconds": 47.758,
+          "elapsed_seconds": 91.587,
           "id": "llm-router",
           "model": "gpt-5.3-codex",
           "original_screenshot_count": 1,
           "prepared_image_count": 1,
           "prepared_image_paths": [
-            "/home/barberb/complaint-generator/artifacts/ui_review/rehydrated-review-codex-codex-diagnostics/pages/prepared-images/workspace-homepage.review.jpg"
-          ],
-          "prompt_chars": 1612,
-          "prompt_mode": "compact",
-          "provider": "codex_cli",
-          "screenshot_count": 1,
-          "strategy": "multimodal_router"
-        },
-        {
-          "elapsed_seconds": 39.599,
-          "id": "llm-router",
-          "model": "gpt-5.3-codex",
-          "original_screenshot_count": 1,
-          "prepared_image_count": 1,
-          "prepared_image_paths": [
-            "/home/barberb/complaint-generator/artifacts/ui_review/rehydrated-review-codex-codex-diagnostics/pages/prepared-images/workspace-intake.review.jpg"
+            "/home/barberb/complaint-generator/artifacts/ui_review/proof-priority-review-codex-codex-diagnostics/pages/prepared-images/workspace-intake.review.jpg"
           ],
           "prompt_chars": 1610,
+          "prompt_mode": "compact",
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
+        },
+        {
+          "elapsed_seconds": 44.351,
+          "id": "llm-router",
+          "model": "gpt-5.3-codex",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 1,
+          "prepared_image_paths": [
+            "/home/barberb/complaint-generator/artifacts/ui_review/proof-priority-review-codex-codex-diagnostics/pages/prepared-images/workspace-integrations.review.jpg"
+          ],
+          "prompt_chars": 1616,
           "prompt_mode": "compact",
           "provider": "codex_cli",
           "screenshot_count": 1,
@@ -1173,13 +1175,13 @@
       "selected_screenshots": [
         "workspace-draft.png",
         "workspace-evidence.png",
-        "workspace-homepage.png",
-        "workspace-intake.png"
+        "workspace-intake.png",
+        "workspace-integrations.png"
       ],
       "skipped_screenshot_count": 2,
       "skipped_screenshots": [
-        "workspace-integrations.png",
-        "workspace-review.png"
+        "workspace-review.png",
+        "workspace-homepage.png"
       ],
       "strategy": "page_reviews"
     },
@@ -1188,18 +1190,18 @@
     "screenshot_findings": [],
     "sdk_invocations": [],
     "stage_findings": {
-      "Draft": "workspace-draft: Draft text area appears too narrow/small for legal-grade editing and final validation. | workspace-evidence: Draft/export readiness signals appear present, but CTA prominence and final-step clarity are visually diluted. | workspace-homepage: Draft entry appears available but readiness criteria and preconditions are not clearly surfaced. | workspace-intake: Draft section is present but visually buried in the long scroll, reducing confidence in final pre-filing checks.",
-      "Evidence": "workspace-draft: Evidence-related metadata appears dense and hard to scan, increasing verification risk. | workspace-evidence: Evidence-related blocks are visible but blend into surrounding cards, reducing evidence traceability at a glance. | workspace-homepage: Support/status information is present but too dense to quickly validate evidence readiness. | workspace-intake: Evidence-related cards appear dense with small text, making source/status verification harder than necessary.",
-      "Intake": "workspace-draft: Inputs appear present but visually crowded; field readability and grouping need clearer hierarchy. | workspace-evidence: Intake content appears present but visually compressed; field readability likely below comfortable review threshold. | workspace-homepage: Entry actions are not clearly prioritized for first-time vs returning complaints. | workspace-intake: Intake content is visible but crowded; field groups and decision-critical values are not strongly separated.",
-      "Integration Discovery": "workspace-draft: Integration/status hints are visible but not clearly tied to user actions; keep MCP flow unchanged while improving UI mapping. | workspace-evidence: Integration/diagnostic metadata appears mixed into the same visual tier as core complaint content, which can distract from filing decisions. | workspace-homepage: MCP connectivity is visible, but health/sync feedback lacks immediate, actionable clarity for safe progression. | workspace-intake: Integration/diagnostic-style blocks are visible but not clearly distinguished from core task flow, which can distract from filing progression.",
-      "Review": "workspace-draft: Review surface is overloaded with adjacent diagnostics, reducing proofreading reliability. | workspace-evidence: Review stage appears dense and long with weak hierarchy, increasing cognitive load for final validation. | workspace-homepage: Review-related actions exist but wording and hierarchy make review intent less obvious. | workspace-intake: Review area looks information-heavy with weak hierarchy, increasing the chance of skipping key validation details."
+      "Draft": "workspace-draft: Generated complaint block appears long and compressed, making legal-quality verification harder. | workspace-evidence: Draft-related actions are not strongly distinguished from other stage actions. | workspace-intake: Draft/output area is long and text-heavy; users may struggle to distinguish editable controls from final narrative content. | workspace-integrations: Draft review/export readiness is blocked by clipping/compression rather than content quality.",
+      "Evidence": "workspace-draft: Evidence-related content appears visually blended with adjacent sections, reducing traceability. | workspace-evidence: Evidence/detail blocks look cramped and hard to scan, increasing risk of omission. | workspace-intake: Evidence-related blocks are present but visually blend into surrounding cards, reducing scanability of key facts. | workspace-integrations: Evidence details likely exist but cannot be validated visually in current compressed render.",
+      "Intake": "workspace-draft: Input area appears text-dense with weak grouping, making required facts hard to scan. | workspace-evidence: Appears dense and label-heavy; readability and grouping need improvement for first-pass data capture. | workspace-intake: Appears dense and form-heavy with limited visual grouping; likely high cognitive load for initial completion. | workspace-integrations: Stage content appears present but unreadable due to severe width collapse.",
+      "Integration Discovery": "workspace-draft: No clear integration-status affordance is visible; MCP-backed workflow state is not prominently communicated. | workspace-evidence: Integration/status information is not visually separated enough from form content, reducing workflow clarity. | workspace-intake: Integration details appear late in the scroll with weak prominence; discovery/traceability cues should be easier to find. | workspace-integrations: No direct MCP integration failure is visible; issue appears UI-layer responsive/layout regression.",
+      "Review": "workspace-draft: Critical evaluation signals (gate/scores) are present but not visually elevated for quick decisions. | workspace-evidence: Review content appears buried in long-scroll context without strong visual checkpointing. | workspace-intake: Review information appears available but not sufficiently prioritized for rapid legal-quality verification. | workspace-integrations: Review usability is compromised because text and controls are not legible at captured width."
     },
-    "summary": "Aggregated 4 page-level screenshot reviews. The page appears extremely dense, vertically overlong, and visually compressed, with small text, weak hierarchy, and crowded side-by-side panels that make review and drafting hard to scan. The core flow is present, but readability and affordance quality look below filing-grade UX standards for a high-stakes retaliation complaint workflow. The page appears information-dense and filing-focused, but the visible presentation is hard to scan: text is very small, section hierarchy is weak, and at least one set of floating side controls appears detached/clipped from the main layout. The overall flow looks long and linear without strong stage wayfinding, which increases review errors even when underlying complaint quality is high. The page communicates the complaint workflow, but key actions and status signals are visually weak or ambiguous. The main risks are low hierarchy, unclear primary CTA selection, and hard-to-scan progress/status cards that can slow operators and clients even when the underlying MCP-backed flow is functioning.",
+    "summary": "Aggregated 4 page-level screenshot reviews. The page appears visually compressed into a narrow single-column strip with very dense text, weak hierarchy, and limited separation between stages. The UI likely functions, but readability and scan speed are poor, and key actions/status cues are easy to miss. Fixes should focus on layout, typography, spacing, and control clarity in the presentation layer without changing the shared ComplaintMcpClient or MCP request/response flow. The page appears functionally complete but visually overloaded: it is a very long, dense single-column workflow with small text, repeated orange CTA blocks, and weak stage separation. The main UX risk is not missing capability, but high cognitive load that can cause user errors during Intake/Evidence/Review before final complaint export. The page appears functionally complete but visually overloaded: it is very long, text-heavy, and uses small, low-contrast content blocks that make scanning difficult. The current layout likely slows users at handoff points (intake to evidence to draft/review), even though the underlying complaint generation flow seems to be working.",
     "tested_stages": [],
-    "updated_at": "2026-03-26T02:35:29.033326+00:00",
+    "updated_at": "2026-03-26T03:07:33.023908+00:00",
     "verdict": "Do not send to clients yet",
     "workflow_type": "page_reviews"
   },
-  "updated_at": "2026-03-26T02:35:29.033340+00:00",
+  "updated_at": "2026-03-26T03:07:33.023929+00:00",
   "user_id": "demo-user"
 }

@@ -17,6 +17,8 @@
             this._requestId = 1;
             this.didStorageKey = config.didStorageKey || 'complaintGenerator.did';
             this.lastToolCallStorageKey = config.lastToolCallStorageKey || 'complaintGenerator.sdkLastToolCall';
+            this.toolCallLedgerStorageKey = config.toolCallLedgerStorageKey || 'complaintGenerator.sdkToolLedger';
+            this.maxToolLedgerEntries = Number(config.maxToolLedgerEntries || 8);
         }
 
         initialize() {
@@ -75,6 +77,9 @@
             }
             try {
                 localStorage.setItem(this.lastToolCallStorageKey, JSON.stringify(detail));
+                const existing = this.getToolCallLedger();
+                const ledger = [detail].concat(existing).slice(0, this.maxToolLedgerEntries);
+                localStorage.setItem(this.toolCallLedgerStorageKey, JSON.stringify(ledger));
             } catch (error) {
                 return detail;
             }
@@ -98,6 +103,19 @@
                 return raw ? JSON.parse(raw) : null;
             } catch (error) {
                 return null;
+            }
+        }
+
+        getToolCallLedger() {
+            if (typeof localStorage === 'undefined') {
+                return [];
+            }
+            try {
+                const raw = localStorage.getItem(this.toolCallLedgerStorageKey);
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (error) {
+                return [];
             }
         }
 

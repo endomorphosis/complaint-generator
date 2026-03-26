@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
-import json
 from pathlib import Path
 
 import anyio
@@ -34,92 +33,23 @@ def test_build_parser_exposes_pipeline_and_bm25_flags():
 
 def test_run_pipeline_batches_imports_and_appends_duckdb(tmp_path, monkeypatch):
     module = _load_script_module()
-    manifest_one = tmp_path / "batch-one-manifest.json"
-    manifest_two = tmp_path / "batch-two-manifest.json"
-    manifest_three = tmp_path / "batch-three-manifest.json"
-    for manifest in (manifest_one, manifest_two, manifest_three):
-        manifest.write_text(json.dumps({"emails": []}), encoding="utf-8")
+    summary_path = tmp_path / "duckdb" / "gmail_duckdb_pipeline_summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
 
-    import_payloads = iter(
-        [
-            {
-                "status": "success",
-                "date_after": "2024-03-26",
-                "date_before": None,
-                "searched_message_count": 500,
-                "imported_count": 2,
-                "raw_email_total_bytes": 1000,
-                "manifest_path": str(manifest_one),
-                "checkpoint_path": str(tmp_path / "checkpoint.json"),
-            },
-            {
-                "status": "success",
-                "date_after": "2024-03-26",
-                "date_before": None,
-                "searched_message_count": 125,
-                "imported_count": 1,
-                "raw_email_total_bytes": 400,
-                "manifest_path": str(manifest_two),
-                "checkpoint_path": str(tmp_path / "checkpoint.json"),
-            },
-            {
-                "status": "success",
-                "date_after": "2024-03-26",
-                "date_before": None,
-                "searched_message_count": 0,
-                "imported_count": 0,
-                "raw_email_total_bytes": 0,
-                "manifest_path": str(manifest_three),
-                "checkpoint_path": str(tmp_path / "checkpoint.json"),
-            },
-        ]
-    )
-    import_calls = []
-    duckdb_calls = []
-    search_calls = []
-
-    async def fake_import_gmail_evidence(**kwargs):
-        import_calls.append(dict(kwargs))
-        return next(import_payloads)
-
-    def fake_build_email_duckdb_artifacts(*, manifest_path, output_dir=None, include_attachment_text=False, append=False):
-        duckdb_calls.append(
-            {
-                "manifest_path": manifest_path,
-                "output_dir": output_dir,
-                "append": append,
-                "include_attachment_text": include_attachment_text,
-            }
-        )
-        return {
-            "status": "created",
-            "duckdb_path": str(tmp_path / "duckdb" / "email_corpus.duckdb"),
-            "index_dir": str(tmp_path / "duckdb"),
-            "bm25_terms_parquet_path": str(tmp_path / "duckdb" / "email_bm25_terms.parquet"),
-        }
-
-    def fake_search_email_graphrag_duckdb(*, index_path, query, limit, ranking="bm25", bm25_k1=1.2, bm25_b=0.75):
-        search_calls.append(
-            {
-                "index_path": index_path,
-                "query": query,
-                "limit": limit,
-                "ranking": ranking,
-                "bm25_k1": bm25_k1,
-                "bm25_b": bm25_b,
-            }
-        )
+    async def fake_run_gmail_duckdb_pipeline(**kwargs):
+        summary_path.write_text("{}", encoding="utf-8")
         return {
             "status": "success",
-            "query": query,
-            "ranking": ranking,
-            "result_count": 2,
-            "results": [],
+            "pipeline": "gmail_duckdb_pipeline",
+            "stop_reason": "checkpoint_window_exhausted",
+            "batch_count": 2,
+            "total_imported_count": 3,
+            "total_searched_message_count": 625,
+            "summary_path": str(summary_path),
+            "received": kwargs,
         }
 
-    monkeypatch.setattr(module, "import_gmail_evidence", fake_import_gmail_evidence)
-    monkeypatch.setattr(module, "build_email_duckdb_artifacts", fake_build_email_duckdb_artifacts)
-    monkeypatch.setattr(module, "search_email_graphrag_duckdb", fake_search_email_graphrag_duckdb)
+    monkeypatch.setattr(module, "run_gmail_duckdb_pipeline", fake_run_gmail_duckdb_pipeline)
 
     args = argparse.Namespace(
         user_id="case-user",
@@ -163,12 +93,7 @@ def test_run_pipeline_batches_imports_and_appends_duckdb(tmp_path, monkeypatch):
     assert payload["batch_count"] == 2
     assert payload["total_imported_count"] == 3
     assert payload["total_searched_message_count"] == 625
-    assert len(import_calls) == 2
-    assert import_calls[0]["use_uid_checkpoint"] is True
-    assert import_calls[0]["years_back"] == 2
-    assert len(duckdb_calls) == 2
-    assert duckdb_calls[0]["append"] is False
-    assert duckdb_calls[1]["append"] is True
-    assert search_calls[0]["ranking"] == "bm25"
-    assert search_calls[0]["limit"] == 25
+    assert payload["received"]["years_back"] == 2
+    assert payload["received"]["uid_window_size"] == 500
+    assert payload["received"]["bm25_search_query"] == "termination grievance"
     assert Path(payload["summary_path"]).exists()

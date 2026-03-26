@@ -519,11 +519,141 @@
 
         .tab-panel {
             display: none;
+            margin-top: 18px;
+            padding: 24px;
+            border-radius: 26px;
+            border: 1px solid rgba(24, 34, 41, 0.1);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 242, 233, 0.86));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
         }
 
         .tab-panel.is-active {
             display: block;
             animation: fadeUp 180ms ease;
+        }
+
+        .stage-banner {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+            margin: 0 0 18px;
+            padding: 16px 18px;
+            border-radius: 22px;
+            border: 1px solid rgba(141, 61, 23, 0.14);
+            background: linear-gradient(180deg, rgba(255, 248, 241, 0.98), rgba(255, 244, 233, 0.9));
+        }
+
+        .stage-banner-copy strong,
+        .stage-banner-copy span,
+        .stage-banner-status strong,
+        .stage-banner-status span {
+            display: block;
+        }
+
+        .stage-banner-copy span,
+        .stage-banner-status span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.55;
+        }
+
+        .stage-banner-status {
+            padding: 12px 14px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+        }
+
+        .priority-rail {
+            display: grid;
+            gap: 14px;
+            grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+            margin: 18px 0 20px;
+        }
+
+        .priority-hero {
+            padding: 18px;
+            border-radius: 22px;
+            border: 1px solid rgba(141, 61, 23, 0.18);
+            background: linear-gradient(135deg, rgba(154, 52, 18, 0.96), rgba(194, 65, 12, 0.92));
+            box-shadow: 0 16px 36px rgba(154, 52, 18, 0.18);
+            color: white;
+        }
+
+        .priority-hero strong,
+        .priority-hero span {
+            display: block;
+        }
+
+        .priority-hero span {
+            margin-top: 8px;
+            line-height: 1.6;
+            color: rgba(255, 248, 241, 0.94);
+        }
+
+        .priority-hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .priority-hero .button-row,
+        .priority-hero-actions button {
+            pointer-events: auto;
+        }
+
+        .priority-hero button {
+            background: rgba(255, 255, 255, 0.92);
+            color: var(--accent-strong);
+            border-color: transparent;
+        }
+
+        .priority-hero button.primary {
+            background: white;
+            color: var(--accent-strong);
+        }
+
+        .priority-sidecard {
+            padding: 16px 18px;
+            border-radius: 22px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(251, 244, 236, 0.84));
+        }
+
+        .priority-sidecard strong,
+        .priority-sidecard span {
+            display: block;
+        }
+
+        .priority-sidecard span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.55;
+        }
+
+        .priority-checklist {
+            display: grid;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .priority-check {
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.76);
+        }
+
+        .priority-check strong,
+        .priority-check span {
+            display: block;
+        }
+
+        .priority-check span {
+            margin-top: 4px;
+            color: var(--muted);
+            line-height: 1.45;
         }
 
         @keyframes fadeUp {
@@ -1172,8 +1302,8 @@
                 </div>
                 <div class="list" id="queue-list">
                     <div class="queue-item">
-                        <strong>Action queue loading…</strong>
-                        <span>The workspace will suggest the next best complaint-handling move once the session is loaded.</span>
+                        <strong>Canonical action queue loading…</strong>
+                        <span>The workspace will suggest one authoritative complaint-handling sequence once the session is loaded.</span>
                     </div>
                 </div>
                 <div class="summary-stack">
@@ -1409,13 +1539,19 @@
                                 <span class="chip" id="session-tool-activity-status-chip">status: idle</span>
                             </div>
                             <div class="helper-text" id="session-tool-activity-note">When the workspace calls the SDK, the latest tool name and completion status will appear here.</div>
+                            <div class="diagnostic-list" id="session-tool-activity-ledger">
+                                <div class="diagnostic-item">
+                                    <strong>Invocation ledger is waiting for SDK activity.</strong>
+                                    <span>Recent MCP-backed browser actions will appear here with status and timestamps.</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>
 
                 <div class="action-grid">
-                    <section class="action-card" aria-label="Next best action">
-                        <span class="eyebrow" style="color: rgba(255,255,255,0.88);">Next Best Action</span>
+                    <section class="action-card" aria-label="Canonical next action">
+                        <span class="eyebrow" style="color: rgba(255,255,255,0.88);">Canonical Next Move</span>
                         <h2 id="action-title">Load the complaint session</h2>
                         <p id="action-detail">The workspace will turn the current complaint state into one concrete next move so the operator does not have to guess where to go next.</p>
                         <div class="button-row">
@@ -1455,6 +1591,16 @@
                 </div>
 
                 <section class="tab-panel is-active" data-tab-panel="intake">
+                    <div class="stage-banner">
+                        <div class="stage-banner-copy">
+                            <strong>Stage 1: Intake anchors the whole complaint.</strong>
+                            <span>Use this stage to capture the clearest version of the story before evidence, review, and draft language add complexity. Approximate wording is acceptable if it helps keep the sequence intact.</span>
+                        </div>
+                        <div class="stage-banner-status">
+                            <strong>What makes Intake ready to leave</strong>
+                            <span>Names, protected activity, adverse action, timeline, and harm are saved clearly enough that Review can evaluate support instead of guessing what happened.</span>
+                        </div>
+                    </div>
                     <h2>Intake Questions</h2>
                     <p class="muted">Capture the facts once, then reuse them everywhere else in the workflow. The optional court-caption field helps the complaint open with a more realistic court header when you know the right district.</p>
                     <div class="section-intro">
@@ -1493,6 +1639,16 @@
                 </section>
 
                 <section class="tab-panel" data-tab-panel="evidence">
+                    <div class="stage-banner">
+                        <div class="stage-banner-copy">
+                            <strong>Stage 2: Evidence closes the proof gaps.</strong>
+                            <span>Every testimony or document here should answer one question: what claim element does this actually strengthen? The best next item is usually the one tied to the weakest open gap.</span>
+                        </div>
+                        <div class="stage-banner-status">
+                            <strong>What makes Evidence ready to leave</strong>
+                            <span>The strongest missing element has at least one concrete supporting item, and the saved records are tied to the right claim elements before Draft takes over attention.</span>
+                        </div>
+                    </div>
                     <h2>Evidence Intake</h2>
                     <p class="muted">Collect both testimony and documents, and attach each item to a claim element so support gaps are obvious.</p>
                     <div class="section-intro">
@@ -1502,6 +1658,19 @@
                     <div class="callout">
                         <h3>What counts as helpful support</h3>
                         <p class="muted">Prefer concrete sources: emails, messages, witness accounts, meeting notes, timeline records, HR filings, performance reviews, and anything that helps anchor protected activity, employer knowledge, causation, or damages.</p>
+                    </div>
+                    <div class="priority-rail">
+                        <div class="priority-hero" id="evidence-priority-hero">
+                            <strong id="evidence-priority-title">The next proof move will appear here once review data loads.</strong>
+                            <span id="evidence-priority-detail">The workspace will point to the weakest supported element so the next testimony or document directly strengthens the complaint record.</span>
+                            <div class="chip-row" id="evidence-priority-chips"></div>
+                            <div class="priority-hero-actions" id="evidence-priority-actions"></div>
+                        </div>
+                        <div class="priority-sidecard">
+                            <strong>Why this should happen before Draft</strong>
+                            <span id="evidence-priority-blocker">Draft quality depends on whether the weakest element has named proof behind it, not just whether the story feels complete.</span>
+                            <div class="priority-checklist" id="evidence-priority-checklist"></div>
+                        </div>
                     </div>
                     <div class="tool-card" id="evidence-action-lane">
                         <h3>Start with the strongest next proof move</h3>
@@ -1805,11 +1974,34 @@
                 </section>
 
                 <section class="tab-panel" data-tab-panel="review">
+                    <div class="stage-banner">
+                        <div class="stage-banner-copy">
+                            <strong>Stage 3: Review decides whether the draft is merely generated or actually supported.</strong>
+                            <span>Use this checkpoint to separate “the complaint can be drafted” from “the complaint is grounded enough to trust.” Missing support is the clearest signal for what should happen next.</span>
+                        </div>
+                        <div class="stage-banner-status">
+                            <strong>What makes Review ready to leave</strong>
+                            <span>The support matrix is understandable, the case synopsis still matches the facts, and the next move is clearly either more proof or draft refinement.</span>
+                        </div>
+                    </div>
                     <h2>Support Review</h2>
                     <p class="muted">See which claim elements are already supported and which ones still need more evidence before the complaint is finalized.</p>
                     <div class="section-intro">
                         <strong>What to do here</strong>
                         <span>Use this stage to decide whether the complaint is merely drafted or genuinely supported. Missing elements are the best clue for what to collect next.</span>
+                    </div>
+                    <div class="priority-rail">
+                        <div class="priority-hero" id="review-priority-hero">
+                            <strong id="review-priority-title">The main review decision will appear here once the support matrix loads.</strong>
+                            <span id="review-priority-detail">Review is where the workspace should make the next move obvious: gather proof, refine the synopsis, or proceed to draft with eyes open.</span>
+                            <div class="chip-row" id="review-priority-chips"></div>
+                            <div class="priority-hero-actions" id="review-priority-actions"></div>
+                        </div>
+                        <div class="priority-sidecard">
+                            <strong>What is blocking filing confidence right now</strong>
+                            <span id="review-priority-blocker">The strongest blocker will appear here after the workspace compares support coverage, evidence counts, and the current release posture.</span>
+                            <div class="priority-checklist" id="review-priority-checklist"></div>
+                        </div>
                     </div>
                     <div class="review-board">
                         <div>
@@ -1817,6 +2009,10 @@
                             <div class="section-intro">
                                 <strong>Working case synopsis</strong>
                                 <span id="review-synopsis-preview">The case synopsis will appear here once the workspace has enough information to summarize the theory.</span>
+                            </div>
+                            <div class="tool-card" id="support-strength-map">
+                                <h3>Per-element proof map</h3>
+                                <p class="muted">The workspace will show which claim elements are supported, thin, or still unsupported once the support matrix loads.</p>
                             </div>
                             <div class="support-grid" id="support-grid"></div>
                             <div class="chip-row" id="recommended-actions"></div>
@@ -1832,6 +2028,16 @@
                 </section>
 
                 <section class="tab-panel" data-tab-panel="draft">
+                    <div class="stage-banner">
+                        <div class="stage-banner-copy">
+                            <strong>Stage 4: Draft turns the record into a filing, not just a document.</strong>
+                            <span>Keep release-gate and proof posture visible while editing so download never becomes the only thing the operator sees. A draft is strongest when it still reflects the supported record beside it.</span>
+                        </div>
+                        <div class="stage-banner-status">
+                            <strong>What makes Draft ready to leave</strong>
+                            <span>The complaint still matches the selected claim type, the caption and relief are concrete, and export is backed by a visible release-gate verdict rather than optimism alone.</span>
+                        </div>
+                    </div>
                     <h2>Draft and Edit</h2>
                     <p class="muted">Generate the complaint from the workspace state, then make final edits without leaving the same flow.</p>
                     <div class="section-intro">
@@ -1858,6 +2064,7 @@
                             <span>Before treating the draft as usable, make sure it names the parties clearly, ties the adverse action to the protected activity, describes the harm, and asks for relief that matches the record.</span>
                             <div class="soft-note" id="draft-synopsis-preview">The case synopsis will appear here as a drafting reference.</div>
                             <div class="soft-note" id="draft-generation-meta">Draft generation strategy details will appear here once a complaint is generated.</div>
+                            <div class="status draft-preview-shell"><pre id="draft-provenance-preview">Draft provenance will appear here once the complaint generator has run.</pre></div>
                             <div class="status draft-preview-shell"><pre id="draft-caption-preview">Caption preview will appear here once the party names and court caption are available.</pre></div>
                             <div class="status draft-preview-shell"><pre id="draft-contract-preview">Draft contract details will appear here once the complaint type and drafting path are selected.</pre></div>
                             <div class="status draft-preview-shell"><pre id="draft-readiness-preview">Filing-readiness guidance will appear here once the record is reviewed or a complaint is generated.</pre></div>
@@ -2223,6 +2430,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         const client = new ComplaintMcpClient();
         let workspaceUserId = new URLSearchParams(window.location.search).get('user_id') || null;
         let workspaceSession = null;
+        let activeWorkspaceTab = 'intake';
         let workspaceSessionTools = [];
         let workspaceCapabilities = null;
         let workspaceToolingContract = null;
@@ -2268,6 +2476,19 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 return raw ? JSON.parse(raw) : null;
             } catch (error) {
                 return null;
+            }
+        }
+
+        function loadSdkToolActivityLedger() {
+            if (typeof localStorage === 'undefined') {
+                return [];
+            }
+            try {
+                const raw = localStorage.getItem('complaintGenerator.sdkToolLedger');
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (error) {
+                return [];
             }
         }
 
@@ -2352,6 +2573,154 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 guidance: 'A shared complaint draft exists, but this tab is still hydrating the latest body and export artifacts.',
                 summary: 'A complaint draft exists, and the full body is still being loaded into this workspace view.',
             };
+        }
+
+        function focusRailStateForTab(tabName, sessionPayload) {
+            const session = (sessionPayload && sessionPayload.session) || {};
+            const review = (sessionPayload && sessionPayload.review) || {};
+            const overview = review.overview || {};
+            const supportMatrix = review.support_matrix || [];
+            const state = deriveWorkflowState(sessionPayload);
+            const nextQuestion = sessionPayload.next_question || null;
+            const missingItems = supportMatrix.filter((item) => !item.supported);
+            const evidenceCount = Number(overview.testimony_items || 0) + Number(overview.document_items || 0);
+            const weakestGap = resolveSupportGap(sessionPayload);
+            const weakestGapLabel = String((weakestGap && weakestGap.label) || 'the weakest claim element').trim();
+            const releaseGate = workspaceClientReleaseGate || {};
+            const tab = String(tabName || 'intake').trim() || 'intake';
+            const focusByTab = {
+                intake: {
+                    title: nextQuestion
+                        ? `Intake stage: answer ${nextQuestion.label || 'the next question'}`
+                        : 'Intake stage: verify the captured story',
+                    detail: nextQuestion
+                        ? 'Stay in Intake until the core narrative, timing, and parties are captured in plain language.'
+                        : 'The intake story is captured. This stage is now for correcting names, dates, and court-header details before moving on.',
+                    stage: `You are in Intake. ${nextQuestion ? 'The intake questionnaire is still active.' : 'The intake questionnaire is complete.'}`,
+                    readiness: nextQuestion
+                        ? `Primary proof posture: ${Object.keys(session.intake_answers || {}).length} intake fields saved, but the next narrative answer still matters more than route-hopping.`
+                        : 'Primary proof posture: the story is mapped well enough to move into evidence or review without guessing what happened.',
+                    exportSafety: 'Do not treat drafting or export as the current job while Intake is still open. Capture or correct the factual record first.',
+                    actionLabel: 'Continue in intake',
+                    targetTab: 'intake',
+                    sdkChip: 'sdk: complaint.submit_intake',
+                },
+                evidence: {
+                    title: missingItems.length
+                        ? `Evidence stage: strengthen ${weakestGapLabel}`
+                        : 'Evidence stage: attach corroboration to the record',
+                    detail: missingItems.length
+                        ? `Use testimony or documents that directly strengthen ${weakestGapLabel} before collecting anything more general.`
+                        : 'The record has some support already. Use this stage to add the strongest corroboration, not just more files.',
+                    stage: `You are in Evidence. ${evidenceCount} saved evidence item${evidenceCount === 1 ? '' : 's'} currently support the shared session.`,
+                    readiness: missingItems.length
+                        ? `${overview.supported_elements || 0} element${Number(overview.supported_elements || 0) === 1 ? '' : 's'} have support, but ${missingItems.length} still need stronger proof.`
+                        : evidenceCount
+                            ? 'The record has corroboration attached. Focus on the quality and element coverage of that support.'
+                            : 'No corroboration has been attached yet. Even one targeted item can materially improve trust in the complaint.',
+                    exportSafety: missingItems.length || evidenceCount <= 2
+                        ? 'Export remains secondary while evidence is still thin or uneven across claim elements.'
+                        : 'Evidence posture is improving, but export should still wait for review and release-gate confirmation.',
+                    actionLabel: 'Continue in evidence',
+                    targetTab: 'evidence',
+                    sdkChip: 'sdk: complaint.save_evidence',
+                },
+                review: {
+                    title: 'Review stage: inspect support gaps and filing risk',
+                    detail: missingItems.length
+                        ? `Review is where the weakest current gap, ${weakestGapLabel}, should be challenged before the draft is treated as trustworthy.`
+                        : 'Review is where the current support posture, release-gate status, and evidence coverage are checked together.',
+                    stage: `You are in Review. ${overview.supported_elements || 0} supported element${Number(overview.supported_elements || 0) === 1 ? '' : 's'} and ${missingItems.length} open gap${missingItems.length === 1 ? '' : 's'} are visible here.`,
+                    readiness: missingItems.length
+                        ? 'Treat the current complaint as provisional until the unsupported elements are closed or consciously accepted as weaknesses.'
+                        : 'The support matrix is coherent enough to compare the story, evidence, and complaint posture without switching contexts.',
+                    exportSafety: Object.keys(releaseGate).length
+                        ? `${String(releaseGate.verdict || 'unknown').toUpperCase()}: ${releaseGate.reason || 'Keep the release gate beside the review matrix before exporting.'}`
+                        : 'Run or refresh the release gate here before treating the complaint as export-ready.',
+                    actionLabel: 'Continue in review',
+                    targetTab: 'review',
+                    sdkChip: 'sdk: complaint.review_case',
+                },
+                draft: {
+                    title: state.builderReady
+                        ? 'Draft stage: refine the formal complaint carefully'
+                        : 'Draft stage: hold until the record is coherent enough to generate',
+                    detail: state.builderReady
+                        ? 'This stage is for drafting, editing, and checking the formal complaint against the live record.'
+                        : 'The builder should stay secondary until intake and evidentiary support are coherent enough for a formal complaint draft.',
+                    stage: `You are in Draft. ${state.builderReady ? 'A formal complaint draft can be generated or refined here.' : 'The draft stage is visible, but the record is still being built.'}`,
+                    readiness: state.builderReady
+                        ? evidenceCount <= 2
+                            ? 'Drafting is available, but the record is still thin. Treat every export cue as provisional.'
+                            : 'Drafting is available and the record has enough support to refine the complaint against the facts.'
+                        : 'Drafting is intentionally constrained while earlier stages still carry the main factual risk.',
+                    exportSafety: Object.keys(releaseGate).length
+                        ? `${String(releaseGate.verdict || 'unknown').toUpperCase()}: ${releaseGate.reason || 'Keep release-gate context visible beside the draft export controls.'}`
+                        : 'Use the integrity and release-gate checks here before trusting export controls.',
+                    actionLabel: 'Continue in draft',
+                    targetTab: 'draft',
+                    sdkChip: 'sdk: complaint.generate_complaint',
+                },
+                integrations: {
+                    title: 'CLI + MCP stage: operate the same session through shared tools',
+                    detail: 'Use this stage to inspect parity, diagnostics, export behavior, and tool surfaces without losing the current DID-backed session.',
+                    stage: 'You are in CLI + MCP. Package, CLI, MCP, and browser SDK routes should stay aligned here.',
+                    readiness: 'This stage is for operational visibility, not for replacing the main complaint workflow. Use it to verify parity and provenance.',
+                    exportSafety: 'Keep tool outputs tied to the same session and compare them against the release gate before treating them as final.',
+                    actionLabel: 'Continue in CLI + MCP',
+                    targetTab: 'integrations',
+                    sdkChip: 'sdk: complaint.get_tooling_contract',
+                },
+                'ux-review': {
+                    title: 'UX Audit stage: run actor/critic review on the real workflow',
+                    detail: 'Use this stage to compare the screenshots, complaint output, and shared tool surfaces, then turn criticism into the next repair pass.',
+                    stage: 'You are in UX Audit. This stage should feel distinct because it critiques the entire flow instead of advancing the complaint record directly.',
+                    readiness: 'This stage is ready when the browser journey and complaint artifacts are fresh enough to critique the current interface, not stale screenshots.',
+                    exportSafety: 'Export should not outrank UX review when the actor/critic loop is still finding trust or navigation defects.',
+                    actionLabel: 'Continue in UX Audit',
+                    targetTab: 'ux-review',
+                    sdkChip: 'sdk: complaint.review_ui',
+                },
+            };
+            return focusByTab[tab] || focusByTab.intake;
+        }
+
+        function buildCanonicalActionQueue(statePayload) {
+            const state = statePayload.state || {};
+            const nextQuestion = statePayload.nextQuestion || null;
+            const missingItems = Array.isArray(statePayload.missingItems) ? statePayload.missingItems : [];
+            const evidenceCount = Number(statePayload.evidenceCount || 0);
+            const supportedElements = Number(statePayload.supportedElements || 0);
+            const totalElements = Math.max(Number(statePayload.totalElements || 0), 1);
+            const draftState = statePayload.draftState || {};
+            const weakestGap = missingItems[0] || null;
+            const queue = [];
+
+            queue.push({
+                title: 'Complete',
+                detail: nextQuestion
+                    ? `${statePayload.answeredCount || 0} intake answers saved so far. The story is still being anchored before later stages should dominate attention.`
+                    : `${statePayload.answeredCount || 0} intake answers saved, ${supportedElements} of ${totalElements} tracked elements have some support, and ${evidenceCount} evidence item${evidenceCount === 1 ? '' : 's'} are on the record.`,
+            });
+            queue.push({
+                title: 'Do next',
+                detail: nextQuestion
+                    ? `Answer ${nextQuestion.label || 'the next intake question'} before switching attention to later-stage tooling.`
+                    : missingItems.length
+                        ? `Strengthen ${String((weakestGap && weakestGap.label) || 'the weakest claim element').toLowerCase()} with named proof before trusting the draft too much.`
+                        : !state.builderReady
+                            ? 'Generate the first complaint draft now that the record is coherent enough for a formal pass.'
+                            : 'Compare the existing draft to the support record and release-gate posture before exporting.',
+            });
+            queue.push({
+                title: 'Watch for',
+                detail: missingItems.length
+                    ? `${missingItems.length} open support gap${missingItems.length === 1 ? '' : 's'} still make the complaint more fragile than the UI should imply.`
+                    : evidenceCount <= 2
+                        ? 'The record is still lightly corroborated, so progress and export cues should be treated as provisional.'
+                        : String(draftState.guidance || 'Keep the draft aligned with the supported facts and requested relief.'),
+            });
+            return queue;
         }
 
         async function copyTextToClipboard(text, successMessage) {
@@ -2702,12 +3071,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         }
 
         function activateTab(tabName) {
+            activeWorkspaceTab = tabName || 'intake';
             document.querySelectorAll('.tab-button').forEach((node) => {
                 node.classList.toggle('is-active', node.dataset.tabTarget === tabName);
             });
             document.querySelectorAll('.tab-panel').forEach((node) => {
                 node.classList.toggle('is-active', node.dataset.tabPanel === tabName);
             });
+            if (workspaceSession) {
+                renderSidebar(workspaceSession);
+            }
         }
 
         function jumpToStage(tabName, focusSelector, statusMessage) {
@@ -3173,16 +3546,110 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const overview = review.overview || {};
             const items = testimony.concat(documents);
             const weakestGap = resolveSupportGap(reviewPayload);
+            const missingCount = Number(overview.missing_elements || 0);
+            const priorityTitle = document.getElementById('evidence-priority-title');
+            const priorityDetail = document.getElementById('evidence-priority-detail');
+            const priorityChips = document.getElementById('evidence-priority-chips');
+            const priorityActions = document.getElementById('evidence-priority-actions');
+            const priorityBlocker = document.getElementById('evidence-priority-blocker');
+            const priorityChecklist = document.getElementById('evidence-priority-checklist');
             document.getElementById('workbench-testimony-count').textContent = `${testimony.length} saved items`;
             document.getElementById('workbench-document-count').textContent = `${documents.length} saved items`;
-            document.getElementById('workbench-gap-count').textContent = `${overview.missing_elements || 0} elements need support`;
+            document.getElementById('workbench-gap-count').textContent = `${missingCount} elements need support`;
             document.getElementById('evidence-add-testimony-button').textContent = formatGapActionLabel('Add testimony', weakestGap);
             document.getElementById('evidence-add-document-button').textContent = formatGapActionLabel('Attach document', weakestGap);
-            document.getElementById('evidence-primary-guidance').textContent = (overview.missing_elements || 0) > 0
-                ? `There are ${overview.missing_elements || 0} open support gaps. Start with ${String((weakestGap && weakestGap.label) || 'the weakest element').toLowerCase()} so the next testimony or document clearly closes a named gap before returning to Draft.`
+            document.getElementById('evidence-primary-guidance').textContent = missingCount > 0
+                ? `There are ${missingCount} open support gaps. Start with ${String((weakestGap && weakestGap.label) || 'the weakest element').toLowerCase()} so the next testimony or document clearly closes a named gap before returning to Draft.`
                 : items.length
                     ? 'The core support record is taking shape. Add the next best corroborating item, then return to Review to check whether the theory still has weak spots.'
                     : 'Start with one focused testimony or document item that explains what it proves and why it matters.';
+            if (missingCount > 0 && weakestGap) {
+                priorityTitle.textContent = `Best next proof move: close ${weakestGap.label.toLowerCase()}.`;
+                priorityDetail.textContent = `The weakest supported part of the record is ${weakestGap.label.toLowerCase()}. Add one concrete item that directly proves it, then return to Review before drifting into Draft or export.`;
+                priorityBlocker.textContent = `The current blocker is not “no draft.” It is that ${weakestGap.label.toLowerCase()} still lacks enough support to make the complaint feel grounded.`;
+                priorityChips.innerHTML = `
+                    <span class="chip warn">${escapeHtml(String(missingCount))} open gaps</span>
+                    <span class="chip">${escapeHtml(weakestGap.label)}</span>
+                    <span class="chip">${escapeHtml(String(testimony.length))} testimony</span>
+                    <span class="chip">${escapeHtml(String(documents.length))} documents</span>
+                `;
+                priorityActions.innerHTML = `
+                    <button
+                        class="primary evidence-shortcut-action"
+                        type="button"
+                        data-evidence-kind="testimony"
+                        data-gap-id="${escapeHtml(weakestGap.id)}"
+                        data-gap-label="${escapeHtml(weakestGap.label)}"
+                    >Add testimony for ${escapeHtml(weakestGap.label)}</button>
+                    <button
+                        class="secondary evidence-shortcut-action"
+                        type="button"
+                        data-evidence-kind="document"
+                        data-gap-id="${escapeHtml(weakestGap.id)}"
+                        data-gap-label="${escapeHtml(weakestGap.label)}"
+                    >Upload document for ${escapeHtml(weakestGap.label)}</button>
+                    <button
+                        class="secondary review-gap-action"
+                        type="button"
+                        data-gap-id="${escapeHtml(weakestGap.id)}"
+                        data-gap-label="${escapeHtml(weakestGap.label)}"
+                    >Prefill support fields</button>
+                `;
+                priorityChecklist.innerHTML = `
+                    <div class="priority-check">
+                        <strong>Pick one named element</strong>
+                        <span>Do not collect generic material first. Tie the next item to ${escapeHtml(weakestGap.label.toLowerCase())}.</span>
+                    </div>
+                    <div class="priority-check">
+                        <strong>Explain why it matters</strong>
+                        <span>Use the evidence details field to say what this item proves and why it strengthens the case theory.</span>
+                    </div>
+                    <div class="priority-check">
+                        <strong>Come back to Review after saving</strong>
+                        <span>The point of this stage is to make the weakest gap smaller, not just make the evidence count larger.</span>
+                    </div>
+                `;
+            } else if (items.length) {
+                priorityTitle.textContent = 'Best next proof move: improve corroboration quality.';
+                priorityDetail.textContent = 'Core elements already have some support. Use this stage to add the cleanest corroborating record before treating the draft as filing-ready.';
+                priorityBlocker.textContent = 'The blocker is now proof quality and precision, not complete absence of support.';
+                priorityChips.innerHTML = `
+                    <span class="chip good">core elements mapped</span>
+                    <span class="chip">${escapeHtml(String(testimony.length))} testimony</span>
+                    <span class="chip">${escapeHtml(String(documents.length))} documents</span>
+                `;
+                priorityActions.innerHTML = `
+                    <button class="primary" id="evidence-priority-review-button" type="button">Review support posture</button>
+                `;
+                priorityChecklist.innerHTML = `
+                    <div class="priority-check">
+                        <strong>Add corroboration, not noise</strong>
+                        <span>Prefer the document or witness account that sharpens timing, knowledge, motive, or damages.</span>
+                    </div>
+                    <div class="priority-check">
+                        <strong>Pressure-test the synopsis</strong>
+                        <span>Make sure the saved evidence still supports the same case theory shown in Review and Draft.</span>
+                    </div>
+                `;
+            } else {
+                priorityTitle.textContent = 'Best next proof move: save the first targeted evidence item.';
+                priorityDetail.textContent = 'Start with the strongest available item and tie it to a claim element immediately so the support model has something real to work with.';
+                priorityBlocker.textContent = 'Without at least one named testimony or document item, Review and Draft will look more confident than the record deserves.';
+                priorityChips.innerHTML = '<span class="chip warn">0 evidence items saved</span>';
+                priorityActions.innerHTML = `
+                    <button class="primary" id="evidence-priority-first-item-button" type="button">Add first testimony item</button>
+                `;
+                priorityChecklist.innerHTML = `
+                    <div class="priority-check">
+                        <strong>Choose the strongest available fact</strong>
+                        <span>Prefer the item most likely to prove protected activity, employer knowledge, timing, or harm.</span>
+                    </div>
+                    <div class="priority-check">
+                        <strong>Name the source</strong>
+                        <span>Record whether it came from a witness, document, export, or file path so it can be revisited later.</span>
+                    </div>
+                `;
+            }
             if (!items.length) {
                 container.innerHTML = '<div class="item">No evidence saved yet.</div>';
                 return;
@@ -3200,17 +3667,73 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             `).join('');
         }
 
+        function describeSupportStrength(item) {
+            const testimonyCount = Number((item || {}).testimony_count || 0);
+            const documentCount = Number((item || {}).document_count || 0);
+            const intakeSupported = Boolean((item || {}).intake_supported);
+            const totalProofItems = testimonyCount + documentCount;
+            if ((item || {}).supported && documentCount > 0 && (testimonyCount > 0 || intakeSupported)) {
+                return {
+                    label: 'grounded',
+                    chipClass: 'good',
+                    detail: 'Has documentary or mixed proof behind the element.',
+                };
+            }
+            if ((item || {}).supported && (totalProofItems > 0 || intakeSupported)) {
+                return {
+                    label: 'thin',
+                    chipClass: 'warn',
+                    detail: 'Some support exists, but corroboration is still light.',
+                };
+            }
+            return {
+                label: 'unsupported',
+                chipClass: 'warn',
+                detail: 'Needs targeted proof before the complaint feels reliable on this point.',
+            };
+        }
+
         function renderReview(reviewPayload) {
             const review = reviewPayload.review || {};
             const supportGrid = document.getElementById('support-grid');
+            const supportStrengthMap = document.getElementById('support-strength-map');
             const recommended = document.getElementById('recommended-actions');
             const reviewOverview = document.getElementById('review-overview');
             const reviewGapList = document.getElementById('review-gap-list');
             const readinessList = document.getElementById('readiness-list');
+            const priorityTitle = document.getElementById('review-priority-title');
+            const priorityDetail = document.getElementById('review-priority-detail');
+            const priorityChips = document.getElementById('review-priority-chips');
+            const priorityActions = document.getElementById('review-priority-actions');
+            const priorityBlocker = document.getElementById('review-priority-blocker');
+            const priorityChecklist = document.getElementById('review-priority-checklist');
             const overview = review.overview || {};
             const missingItems = (review.support_matrix || []).filter((item) => !item.supported);
             const totalElements = (review.support_matrix || []).length || 0;
             const supportedElements = overview.supported_elements || 0;
+            const evidenceCount = Number(overview.testimony_items || 0) + Number(overview.document_items || 0);
+            const weakestGap = missingItems[0] || null;
+            supportStrengthMap.innerHTML = `
+                <h3>Per-element proof map</h3>
+                <p class="muted">Counts alone can be misleading. Use this map to see where the record is grounded, where it is still thin, and where direct proof is still missing.</p>
+                <div class="list">
+                    ${(review.support_matrix || []).map((item) => {
+                        const strength = describeSupportStrength(item);
+                        return `
+                            <div class="item">
+                                <strong>${escapeHtml(item.label)}</strong>
+                                <div class="chip-row">
+                                    <span class="chip ${escapeHtml(strength.chipClass)}">${escapeHtml(strength.label)}</span>
+                                    <span class="chip">intake: ${escapeHtml(item.intake_supported ? 'yes' : 'no')}</span>
+                                    <span class="chip">testimony: ${escapeHtml(String(item.testimony_count || 0))}</span>
+                                    <span class="chip">documents: ${escapeHtml(String(item.document_count || 0))}</span>
+                                </div>
+                                <div class="muted">${escapeHtml(strength.detail)}</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
             supportGrid.innerHTML = (review.support_matrix || []).map((item) => `
                 <div class="tool-card">
                     <h3>${escapeHtml(item.label)}</h3>
@@ -3231,6 +3754,82 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 <span class="chip">testimony: ${escapeHtml(String(overview.testimony_items || 0))}</span>
                 <span class="chip">documents: ${escapeHtml(String(overview.document_items || 0))}</span>
             `;
+            if (missingItems.length && weakestGap) {
+                priorityTitle.textContent = `Main review decision: do not trust export until ${weakestGap.label.toLowerCase()} is stronger.`;
+                priorityDetail.textContent = `The support matrix still has ${missingItems.length} open gap${missingItems.length === 1 ? '' : 's'}. The next move should be to close ${weakestGap.label.toLowerCase()} with named proof, not to let Draft become the default path.`;
+                priorityBlocker.textContent = `The filing-confidence blocker is ${weakestGap.label.toLowerCase()} plus ${missingItems.length - 1 > 0 ? `${missingItems.length - 1} other open support gap${missingItems.length - 1 === 1 ? '' : 's'}` : 'no other open core gaps yet'}.`;
+                priorityChips.innerHTML = `
+                    <span class="chip warn">${escapeHtml(String(missingItems.length))} open gaps</span>
+                    <span class="chip">${escapeHtml(weakestGap.label)}</span>
+                    <span class="chip">${escapeHtml(String(evidenceCount))} evidence items</span>
+                `;
+                priorityActions.innerHTML = `
+                    <button
+                        class="primary review-gap-action"
+                        type="button"
+                        data-gap-id="${escapeHtml(weakestGap.id)}"
+                        data-gap-label="${escapeHtml(weakestGap.label)}"
+                    >Prefill support for ${escapeHtml(weakestGap.label)}</button>
+                    <button
+                        class="secondary evidence-shortcut-action"
+                        type="button"
+                        data-evidence-kind="document"
+                        data-gap-id="${escapeHtml(weakestGap.id)}"
+                        data-gap-label="${escapeHtml(weakestGap.label)}"
+                    >Upload proof for ${escapeHtml(weakestGap.label)}</button>
+                `;
+                priorityChecklist.innerHTML = `
+                    <div class="priority-check">
+                        <strong>Keep Review honest</strong>
+                        <span>Use this stage to decide what the record still cannot prove clearly enough.</span>
+                    </div>
+                    <div class="priority-check">
+                        <strong>Pick the highest-pressure gap first</strong>
+                        <span>${escapeHtml(weakestGap.label)} is the cleanest next move because it still weakens overall filing confidence.</span>
+                    </div>
+                    <div class="priority-check">
+                        <strong>Only return to Draft after the gap narrows</strong>
+                        <span>Drafting should follow stronger support, not replace it.</span>
+                    </div>
+                `;
+            } else if (totalElements > 0) {
+                priorityTitle.textContent = 'Main review decision: the core theory is supported enough to shift into draft refinement.';
+                priorityDetail.textContent = 'Review is no longer showing uncovered core elements. The next move is to keep the synopsis, draft language, and requested relief aligned while checking export safety.';
+                priorityBlocker.textContent = 'The remaining risk is filing precision and release-gate posture, not an uncovered claim element.';
+                priorityChips.innerHTML = `
+                    <span class="chip good">${escapeHtml(String(supportedElements))}/${escapeHtml(String(totalElements))} elements supported</span>
+                    <span class="chip">${escapeHtml(String(evidenceCount))} evidence items</span>
+                `;
+                priorityActions.innerHTML = `
+                    <button class="primary" id="review-priority-open-draft-button" type="button">Open Draft</button>
+                    <button class="secondary" id="review-priority-open-evidence-button" type="button">Add corroboration anyway</button>
+                `;
+                priorityChecklist.innerHTML = `
+                    <div class="priority-check">
+                        <strong>Check the synopsis against the matrix</strong>
+                        <span>The short case theory should still match the supported elements shown here.</span>
+                    </div>
+                    <div class="priority-check">
+                        <strong>Let release-gate warnings stay visible</strong>
+                        <span>Even with support coverage, export should still be filtered through filing-shape and alignment checks.</span>
+                    </div>
+                `;
+            } else {
+                priorityTitle.textContent = 'Main review decision: build enough record for the matrix to become useful.';
+                priorityDetail.textContent = 'The review matrix is still too thin to offer a trustworthy next move. Finish more intake and save at least one targeted evidence item first.';
+                priorityBlocker.textContent = 'The blocker is sparse case state, not a specific supported element yet.';
+                priorityChips.innerHTML = '<span class="chip warn">review matrix still thin</span>';
+                priorityActions.innerHTML = `
+                    <button class="primary" id="review-priority-open-intake-button" type="button">Return to Intake</button>
+                    <button class="secondary" id="review-priority-open-evidence-seed-button" type="button">Seed first evidence item</button>
+                `;
+                priorityChecklist.innerHTML = `
+                    <div class="priority-check">
+                        <strong>Capture the baseline facts first</strong>
+                        <span>Review works best once the story and one piece of support are already on the record.</span>
+                    </div>
+                `;
+            }
             reviewGapList.innerHTML = missingItems.length
                 ? missingItems.map((item) => `
                     <div class="item">
@@ -3531,6 +4130,37 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const evidenceItemCount = Number(overview.testimony_items || 0) + Number(overview.document_items || 0);
             const missingElements = Number(overview.missing_elements || 0);
             const supportedElements = Number(overview.supported_elements || 0);
+            const releaseVerdict = String((currentReleaseGate && currentReleaseGate.verdict) || '').trim().toLowerCase();
+            const releasePass = releaseVerdict === 'pass';
+            const claimAlignmentScore = Number((currentReleaseGate && currentReleaseGate.claim_type_alignment_score) || 0);
+            const filingShapeScore = Number((currentReleaseGate && currentReleaseGate.filing_shape_score) || 0);
+            const plaintiffName = currentIntakeValue('party_name') || 'Plaintiff';
+            const defendantName = currentIntakeValue('opposing_party') || 'Defendant';
+            const placeholderPartyNames = /^(plaintiff|the complainant)$/i.test(plaintiffName) || /^(defendant|the opposing party)$/i.test(defendantName);
+            const currentStrategyLabel = String((draft.draft_strategy || selectedDraftMode || 'none')).trim().toLowerCase();
+            const exportHardBlockers = [];
+            if (missingElements > 0) {
+                exportHardBlockers.push(`${missingElements} claim element${missingElements === 1 ? '' : 's'} still need support`);
+            }
+            if (placeholderPartyNames) {
+                exportHardBlockers.push('party names still look like placeholders');
+            }
+            if (!currentDraftBody.trim()) {
+                exportHardBlockers.push('no complaint draft body is available yet');
+            }
+            const downloadBlockers = [];
+            if (!releasePass) {
+                downloadBlockers.push('release gate is not passing yet');
+            }
+            if (claimAlignmentScore > 0 && claimAlignmentScore < 80) {
+                downloadBlockers.push(`claim-type alignment is only ${claimAlignmentScore}`);
+            }
+            if (currentStrategyLabel === 'template' && !releasePass) {
+                downloadBlockers.push('the draft is still on the template fallback path');
+            }
+            const exportAllowed = exportHardBlockers.length === 0;
+            const downloadAllowed = exportAllowed && downloadBlockers.length === 0;
+            const packetExportAllowed = Boolean(latestPacketExport || currentDraftBody.trim() || resolvedDraft.hasDraft);
             const contractLines = [
                 `Claim type: ${draftClaimTypeLabel(selectedClaimType)}`,
                 `Expected complaint heading: COMPLAINT FOR ${String(selectedClaimType).replace(/_/g, ' ').toUpperCase()}`,
@@ -3540,6 +4170,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 `Draft body length: ${currentDraftBody.split(/\s+/).filter(Boolean).length} words`,
             ];
             document.getElementById('draft-contract-preview').textContent = contractLines.join('\n');
+            const provenanceLines = [
+                `Draft strategy used: ${draft.draft_strategy || selectedDraftMode || 'unknown'}`,
+                `Generator backend: ${draft.draft_backend && (draft.draft_backend.provider || draft.draft_backend.model) ? [draft.draft_backend.provider, draft.draft_backend.model].filter(Boolean).join(' / ') : 'not reported'}`,
+                `Claim type in editor: ${draftClaimTypeLabel(selectedClaimType)}`,
+                `Release-gate verdict: ${String((currentReleaseGate && currentReleaseGate.verdict) || 'unknown').toUpperCase()}`,
+                `Claim-type alignment score: ${claimAlignmentScore}`,
+                `Filing-shape score: ${filingShapeScore}`,
+                `Party names look specific: ${placeholderPartyNames ? 'no' : 'yes'}`,
+                exportHardBlockers.length ? `Export blockers: ${exportHardBlockers.join('; ')}` : 'Export blockers: none. The packet can be reviewed through export.',
+                downloadBlockers.length ? `Download blockers: ${downloadBlockers.join('; ')}` : 'Download blockers: none. The packet is eligible for download.',
+            ];
+            document.getElementById('draft-provenance-preview').textContent = provenanceLines.join('\n');
 
             const readinessLines = currentReleaseGate
                 ? [
@@ -3562,26 +4204,69 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         ? 'Next best move: close the missing support gaps before treating the complaint as filing-ready.'
                         : 'Next best move: keep the complaint aligned to the selected theory and requested relief while refining the filing language.',
                 ];
+            readinessLines.push(exportAllowed
+                ? (downloadAllowed
+                    ? 'Export posture: the packet can be exported and downloaded, but keep provenance and release-gate context visible while downloading.'
+                    : `Export posture: you can run export to refresh the packet review, but downloads stay blocked until ${downloadBlockers.join('; ')}.`)
+                : `Export posture: blocked until ${exportHardBlockers.join('; ')}.`);
             document.getElementById('draft-readiness-preview').textContent = readinessLines.join('\n');
             const exportSafetyLines = currentReleaseGate
                 ? [
-                    `Primary action right now: ${String(currentReleaseGate.verdict || '').toLowerCase() === 'pass' ? 'export is available, but keep the release gate visible while downloading.' : 'strengthen the record before treating export as the next step.'}`,
+                    `Primary action right now: ${exportAllowed ? (downloadAllowed ? 'export is available, but keep the release gate visible while downloading.' : 'run export to refresh the packet review, then wait for downloads to unlock.') : 'strengthen the record before treating export as the next step.'}`,
                     `Release gate verdict: ${String(currentReleaseGate.verdict || 'unknown').toUpperCase()}`,
                     currentReleaseGate.reason ? `Why this matters: ${currentReleaseGate.reason}` : 'Why this matters: the release gate has not yet explained the current blocker.',
                     missingElements > 0 ? `Open support gaps: ${missingElements}` : 'Open support gaps: none detected in the current review snapshot.',
                     `Evidence items in record: ${evidenceItemCount}`,
+                    exportAllowed
+                        ? (downloadAllowed ? 'Export and download controls are enabled for this record.' : `Export is enabled, but downloads are disabled because ${downloadBlockers.join('; ')}.`)
+                        : `Export controls are disabled because ${exportHardBlockers.join('; ')}.`,
                 ]
                 : [
-                    'Primary action right now: review support and draft posture before treating download as the main next step.',
+                    `Primary action right now: ${exportAllowed ? 'run export to produce a fresh release-gate review before treating download as the main next step.' : 'review support and draft posture before treating export as the main next step.'}`,
                     missingElements > 0
                         ? `There are still ${missingElements} support gaps in the current record.`
                         : 'No release-gate payload is cached yet, so export should be treated as provisional.',
                     `Evidence items in record: ${evidenceItemCount}`,
+                    exportAllowed
+                        ? (downloadAllowed ? 'Export and download controls are enabled for this record.' : `Export is enabled, but downloads are disabled because ${downloadBlockers.join('; ')}.`)
+                        : `Export controls are disabled because ${exportHardBlockers.join('; ')}.`,
                 ];
             document.getElementById('draft-export-safety-preview').textContent = exportSafetyLines.join('\n');
-            document.getElementById('draft-export-guidance').textContent = currentReleaseGate && String(currentReleaseGate.verdict || '').toLowerCase() === 'pass'
+            document.getElementById('draft-export-guidance').textContent = downloadAllowed
                 ? 'The complaint export path is available, but the safest flow still keeps release-gate context and next-step guidance beside the download buttons.'
+                : exportAllowed
+                    ? 'Use export to refresh the packet review, but keep downloads secondary until the release gate and provenance are safe.'
                 : 'Review and evidence should stay easier to choose than download whenever support gaps or release-gate blockers remain.';
+            const exportButtons = [
+                document.getElementById('export-packet-button'),
+                document.getElementById('export-packet-tool-button'),
+            ].filter(Boolean);
+            exportButtons.forEach((button) => {
+                setButtonGateState(
+                    button,
+                    packetExportAllowed,
+                    packetExportAllowed
+                        ? (exportAllowed
+                            ? 'Packet export is available so the release gate and packet analysis can be refreshed.'
+                            : `Packet export is blocked until ${exportHardBlockers.join('; ')}.`)
+                        : 'Generate or hydrate a complaint draft before exporting a packet.'
+                );
+            });
+            [
+                document.getElementById('download-packet-markdown-button'),
+                document.getElementById('download-packet-docx-button'),
+                document.getElementById('download-packet-pdf-button'),
+                document.getElementById('download-packet-tool-markdown-button'),
+                document.getElementById('download-packet-tool-docx-button'),
+                document.getElementById('download-packet-tool-pdf-button'),
+            ].filter(Boolean).forEach((button) => {
+                const packetReady = Boolean(latestPacketExport || currentDraftBody.trim());
+                button.disabled = !downloadAllowed || !packetReady;
+                button.setAttribute('aria-disabled', (!downloadAllowed || !packetReady) ? 'true' : 'false');
+                button.title = downloadAllowed
+                    ? (packetReady ? 'Download the exported complaint packet.' : 'Export the complaint packet before downloading it.')
+                    : `Download is blocked until ${downloadBlockers.join('; ')}.`;
+            });
             renderDraftExportIntegrity(sessionPayload);
         }
 
@@ -3609,6 +4294,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const queue = document.getElementById('queue-list');
             const blockerList = document.getElementById('blocker-list');
             const currentReleaseGate = workspaceClientReleaseGate || {};
+            const currentTabFocus = focusRailStateForTab(activeWorkspaceTab, sessionPayload);
             let readinessPercent = 8;
             let actionTab = 'intake';
             let actionTitle = 'Complete intake before moving on';
@@ -3722,6 +4408,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     detail: 'Once the shared state is available, the workspace will identify the strongest next move automatically.',
                 });
             }
+            const canonicalQueue = buildCanonicalActionQueue({
+                state,
+                nextQuestion,
+                missingItems,
+                evidenceCount,
+                supportedElements: overview.supported_elements || 0,
+                totalElements: (review.support_matrix || []).length || 0,
+                answeredCount,
+                draftState,
+            });
 
             document.getElementById('next-question-count').textContent = nextQuestion ? '1' : '0';
             document.getElementById('next-question-label').textContent = nextQuestion ? nextQuestion.prompt : 'Intake complete.';
@@ -3738,15 +4434,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('workflow-priority-text').textContent = nextActionText;
             document.getElementById('workflow-stage-detail').textContent = `Answered intake questions: ${answeredCount}. Supported elements: ${overview.supported_elements || 0}. Missing elements: ${overview.missing_elements || 0}.`;
             document.getElementById('workflow-stage-chip').textContent = `Current stage: ${stageLabel.toLowerCase()}`;
-            document.getElementById('workflow-stage-summary').textContent = `${answeredCount} intake answers saved, ${evidenceCount} evidence items collected, ${overview.supported_elements || 0} supported elements currently have some support behind them.`;
-            document.getElementById('workflow-next-action').textContent = nextActionText;
-            document.getElementById('workflow-draft-guidance').textContent = nextQuestion
-                ? 'Finish the remaining intake answers before treating any draft language as reliable.'
-                : missingItems.length
-                    ? `${missingItems.length} claim element${missingItems.length === 1 ? '' : 's'} still need stronger support before the filing feels dependable.`
-                    : evidenceCount <= 2
-                        ? 'The theory is mapped, but the record is still lightly corroborated. Add stronger support before treating export as final.'
-                        : draftState.guidance;
+            document.getElementById('workflow-stage-summary').textContent = canonicalQueue[0].detail;
+            document.getElementById('workflow-next-action').textContent = canonicalQueue[1].detail;
+            document.getElementById('workflow-draft-guidance').textContent = canonicalQueue[2].detail;
             document.getElementById('progress-title').textContent = state.builderReady
                 ? 'The complaint is in drafting and refinement mode'
                 : nextQuestion
@@ -3782,8 +4472,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('action-detail').textContent = actionDetail;
             document.getElementById('action-stage-chip').textContent = `stage: ${stageLabel.toLowerCase()}`;
             document.getElementById('action-support-chip').textContent = `support: ${overview.supported_elements || 0} supported / ${overview.missing_elements || 0} missing`;
+            document.getElementById('action-sdk-chip').textContent = currentTabFocus.sdkChip;
             actionButton.dataset.targetTab = actionTab;
-            focusRailActionButton.dataset.targetTab = actionTab;
             actionButton.textContent = actionTab === 'draft'
                 ? 'Go to draft'
                 : actionTab === 'evidence'
@@ -3798,27 +4488,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : actionTab === 'review'
                         ? 'Continue in review'
                         : 'Continue in intake';
-            document.getElementById('focus-rail-title').textContent = actionTitle.trim();
-            document.getElementById('focus-rail-detail').textContent = nextQuestion
-                ? 'Stay in one calm lane: finish the next intake answer, then reassess what proof or drafting step actually comes next.'
-                : missingItems.length
-                    ? `The main risk right now is unsupported claim elements. Use evidence actions that directly close the ${missingItems.length} weakest gap${missingItems.length === 1 ? '' : 's'}.`
-                    : state.builderReady
-                        ? 'The theory is far enough along to refine carefully, but export should stay secondary to release-gate and proof review.'
-                        : 'The core story is in place. Generate the first complaint draft only after checking whether the current support still feels too thin.';
-            document.getElementById('focus-rail-stage').textContent = `${stageLabel}. Next route: ${actionTab}.`;
-            document.getElementById('focus-rail-readiness').textContent = nextQuestion
-                ? `${answeredCount}/${Math.max(totalQuestions, 1)} intake answers saved. Keep building the factual record before trusting draft posture.`
-                : missingItems.length
-                    ? `${overview.supported_elements || 0} elements have support, but ${missingItems.length} still need stronger corroboration.`
-                    : evidenceCount <= 2
-                        ? `Draft path is open, but only ${evidenceCount} evidence item${evidenceCount === 1 ? '' : 's'} are attached. Treat readiness as provisional.`
-                        : `Record is materially supported enough to refine the complaint draft without losing track of the strongest next action.`;
-            document.getElementById('focus-rail-export-safety').textContent = currentReleaseGate && Object.keys(currentReleaseGate).length
-                ? `${String(currentReleaseGate.verdict || 'unknown').toUpperCase()}: ${currentReleaseGate.reason || 'Keep the release gate visible beside export controls.'}`
-                : missingItems.length || evidenceCount <= 2
-                    ? 'Hold export behind review and support-building until the release gate has a specific verdict and the record is less thin.'
-                    : 'No cached release-gate review yet. Export should stay secondary until packet analysis runs.';
+            document.getElementById('focus-rail-title').textContent = currentTabFocus.title;
+            document.getElementById('focus-rail-detail').textContent = currentTabFocus.detail;
+            document.getElementById('focus-rail-stage').textContent = currentTabFocus.stage;
+            document.getElementById('focus-rail-readiness').textContent = currentTabFocus.readiness;
+            document.getElementById('focus-rail-export-safety').textContent = currentTabFocus.exportSafety;
+            focusRailActionButton.dataset.targetTab = currentTabFocus.targetTab || actionTab;
+            focusRailActionButton.textContent = currentTabFocus.actionLabel || focusRailActionButton.textContent;
             document.getElementById('intake-soft-note').textContent = nextQuestion
                 ? 'Saving here only updates the shared workspace. You can keep improving answers as the record becomes clearer.'
                 : 'The intake is complete enough for the next step. You can still return later if details need correction.';
@@ -3828,16 +4504,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             setButtonGateState(document.getElementById('shortcut-review-button'), state.reviewReady, state.reviewGateReason);
             setButtonGateState(document.getElementById('shortcut-draft-button'), state.builderReady, state.builderGateReason);
             renderDraftReadiness(sessionPayload);
-            queue.innerHTML = `
+            queue.innerHTML = canonicalQueue.map((item) => `
                 <div class="queue-item">
-                    <strong>${escapeHtml(stageLabel)}</strong>
-                    <span>${escapeHtml(nextActionText)}</span>
+                    <strong>${escapeHtml(item.title)}</strong>
+                    <span>${escapeHtml(item.detail)}</span>
                 </div>
-                <div class="queue-item">
-                    <strong>Evidence posture</strong>
-                    <span>${escapeHtml(`${evidenceCount} saved items across ${overview.supported_elements || 0} supported elements.`)}</span>
-                </div>
-            `;
+            `).join('');
             blockerList.innerHTML = blockers.map((blocker) => `
                 <div class="diagnostic-item">
                     <strong>${escapeHtml(blocker.title)}</strong>
@@ -4605,7 +5277,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const activityToolChip = document.getElementById('session-tool-activity-tool-chip');
             const activityStatusChip = document.getElementById('session-tool-activity-status-chip');
             const activityNote = document.getElementById('session-tool-activity-note');
+            const activityLedger = document.getElementById('session-tool-activity-ledger');
             const lastActivity = latestSdkToolActivity || loadLastSdkToolActivity();
+            const ledgerEntries = loadSdkToolActivityLedger();
 
             didChip.textContent = `did: ${workspaceUserId || session.user_id || 'unknown'}`;
             phaseChip.textContent = `phase: ${state.phaseLabel}`;
@@ -4630,6 +5304,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 activityStatusChip.textContent = 'status: idle';
                 activityNote.textContent = 'When the workspace calls the SDK, the latest tool name and completion status will appear here.';
             }
+
+            activityLedger.innerHTML = ledgerEntries.length
+                ? ledgerEntries.map((entry) => `
+                    <div class="diagnostic-item">
+                        <strong>${escapeHtml(String(entry.tool_name || 'unknown tool'))}</strong>
+                        <span>${escapeHtml(`status: ${entry.status || 'unknown'} | started: ${entry.started_at || 'unknown'}${entry.finished_at ? ` | finished: ${entry.finished_at}` : ''}`)}</span>
+                    </div>
+                `).join('')
+                : `
+                    <div class="diagnostic-item">
+                        <strong>Invocation ledger is waiting for SDK activity.</strong>
+                        <span>Recent MCP-backed browser actions will appear here with status and timestamps.</span>
+                    </div>
+                `;
         }
 
         function renderFeatureWalkthrough(sessionPayload, tools) {
@@ -5846,7 +6534,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             setStatus('Shared case synopsis saved.');
         }
 
-        async function exportPacket() {
+        async function exportPacket(event) {
+            if (event && event.currentTarget && event.currentTarget.disabled) {
+                setStatus(event.currentTarget.title || 'Export is currently blocked by the release gate.');
+                return;
+            }
             setBusyStatus('Exporting the current lawsuit packet through the complaint MCP tools…');
             const packetPayload = await client.exportComplaintPacket(workspaceUserId);
             latestPacketExport = packetPayload;
@@ -5880,11 +6572,15 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         }
 
         function downloadPacket(event) {
+            const trigger = event && event.currentTarget ? event.currentTarget : null;
+            if (trigger && trigger.disabled) {
+                setStatus(trigger.title || 'Download is currently blocked by the release gate.');
+                return;
+            }
             if (!latestPacketExport) {
                 setStatus('Export the complaint packet before downloading it.');
                 return;
             }
-            const trigger = event && event.currentTarget ? event.currentTarget : null;
             if (!trigger || !trigger.dataset.downloadUrl) {
                 setStatus('Export the complaint packet before downloading it.');
                 return;
@@ -6216,6 +6912,33 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             const button = event.target.closest('.quick-action-button');
             if (!button) {
+                const priorityButton = event.target.closest('#evidence-priority-review-button, #evidence-priority-first-item-button, #review-priority-open-draft-button, #review-priority-open-evidence-button, #review-priority-open-intake-button, #review-priority-open-evidence-seed-button');
+                if (priorityButton) {
+                    if (priorityButton.id === 'evidence-priority-review-button') {
+                        jumpToStage('review', '#support-grid', 'Opened Review so the current support posture can be checked after evidence work.');
+                        return;
+                    }
+                    if (priorityButton.id === 'evidence-priority-first-item-button') {
+                        activateEvidenceComposer('testimony');
+                        return;
+                    }
+                    if (priorityButton.id === 'review-priority-open-draft-button') {
+                        jumpToStage('draft', '#draft-title', 'Opened Draft because the core support posture is now strong enough for draft refinement.');
+                        return;
+                    }
+                    if (priorityButton.id === 'review-priority-open-evidence-button') {
+                        jumpToStage('evidence', '#evidence-title', 'Opened Evidence to add corroboration before export.');
+                        return;
+                    }
+                    if (priorityButton.id === 'review-priority-open-intake-button') {
+                        jumpToStage('intake', '#intake-party_name', 'Opened Intake so the case baseline can be strengthened before review.');
+                        return;
+                    }
+                    if (priorityButton.id === 'review-priority-open-evidence-seed-button') {
+                        activateEvidenceComposer('testimony');
+                        return;
+                    }
+                }
                 const evidenceShortcutButton = event.target.closest('.evidence-shortcut-action');
                 if (evidenceShortcutButton) {
                     const gap = {

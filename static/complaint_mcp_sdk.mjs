@@ -7,6 +7,8 @@ class ComplaintMcpClient {
         this._requestId = 1;
         this.didStorageKey = options.didStorageKey || 'complaintGenerator.did';
         this.lastToolCallStorageKey = options.lastToolCallStorageKey || 'complaintGenerator.sdkLastToolCall';
+        this.toolCallLedgerStorageKey = options.toolCallLedgerStorageKey || 'complaintGenerator.sdkToolLedger';
+        this.maxToolLedgerEntries = Number(options.maxToolLedgerEntries || 8);
     }
 
     initialize() {
@@ -61,6 +63,9 @@ class ComplaintMcpClient {
         }
         try {
             localStorage.setItem(this.lastToolCallStorageKey, JSON.stringify(detail));
+            const existing = this.getToolCallLedger();
+            const ledger = [detail].concat(existing).slice(0, this.maxToolLedgerEntries);
+            localStorage.setItem(this.toolCallLedgerStorageKey, JSON.stringify(ledger));
         } catch (error) {
             return detail;
         }
@@ -84,6 +89,19 @@ class ComplaintMcpClient {
             return raw ? JSON.parse(raw) : null;
         } catch (error) {
             return null;
+        }
+    }
+
+    getToolCallLedger() {
+        if (typeof localStorage === 'undefined') {
+            return [];
+        }
+        try {
+            const raw = localStorage.getItem(this.toolCallLedgerStorageKey);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            return [];
         }
     }
 

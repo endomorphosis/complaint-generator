@@ -49,9 +49,11 @@ from complaint_generator import (
     optimize_ui,
     reset_session,
     review_case,
+    run_gmail_duckdb_pipeline,
     run_iterative_ui_ux_workflow,
     run_playwright_screenshot_audit,
     save_evidence,
+    search_email_duckdb_corpus,
     start_session,
     submit_intake_answers,
     tool_list_payload,
@@ -121,6 +123,8 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert any(tool["name"] == "complaint.review_ui" for tool in tool_payload["tools"])
     assert any(tool["name"] == "complaint.optimize_ui" for tool in tool_payload["tools"])
     assert any(tool["name"] == "complaint.run_browser_audit" for tool in tool_payload["tools"])
+    assert any(tool["name"] == "complaint.run_gmail_duckdb_pipeline" for tool in tool_payload["tools"])
+    assert any(tool["name"] == "complaint.search_email_duckdb_corpus" for tool in tool_payload["tools"])
     assert initialize_payload["result"]["serverInfo"]["name"] == "complaint-workspace-mcp"
     assert callable(generate_decentralized_id)
     assert callable(build_ui_ux_review_prompt)
@@ -147,6 +151,7 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(submit_intake_answers)
     assert callable(save_evidence)
     assert callable(review_case)
+    assert callable(run_gmail_duckdb_pipeline)
     assert callable(build_mediator_prompt)
     assert callable(get_workflow_capabilities)
     assert callable(generate_complaint)
@@ -159,6 +164,7 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(update_case_synopsis)
     assert callable(reset_session)
     assert callable(list_mcp_tools)
+    assert callable(search_email_duckdb_corpus)
     if HAS_MULTIPART:
         app = create_review_surface_app(mediator=object())
         assert any(

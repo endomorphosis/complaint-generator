@@ -62,7 +62,9 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.submit_intake",
         "complaint.save_evidence",
         "complaint.import_gmail_evidence",
+        "complaint.run_gmail_duckdb_pipeline",
         "complaint.import_local_evidence",
+        "complaint.search_email_duckdb_corpus",
         "complaint.review_case",
         "complaint.build_mediator_prompt",
         "complaint.get_complaint_readiness",
@@ -151,7 +153,9 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert cli_payload["all_core_flow_steps_exposed"] is True
     assert "generate" in cli_payload["cli_commands"]
     assert "import-gmail-evidence" in cli_payload["cli_commands"]
+    assert "run-gmail-duckdb-pipeline" in cli_payload["cli_commands"]
     assert "import-local-evidence" in cli_payload["cli_commands"]
+    assert "search-email-duckdb" in cli_payload["cli_commands"]
     assert "tooling-contract" in cli_payload["cli_commands"]
     assert "set-claim-type" in cli_payload["cli_commands"]
     assert "update-synopsis" in cli_payload["cli_commands"]
@@ -167,7 +171,9 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert package_payload["all_core_flow_steps_exposed"] is True
     assert "complaint.generate_complaint" in package_payload["mcp_tools"]
     assert "import_gmail_evidence" in package_payload["package_exports"]
+    assert "run_gmail_duckdb_pipeline" in package_payload["package_exports"]
     assert "import_local_evidence" in package_payload["package_exports"]
+    assert "search_email_duckdb_corpus" in package_payload["package_exports"]
     assert "update_claim_type" in package_payload["package_exports"]
     assert "update_case_synopsis" in package_payload["package_exports"]
     assert "importGmailEvidence" in package_payload["browser_sdk_methods"]
@@ -569,6 +575,199 @@ def test_import_local_evidence_cli_command(monkeypatch, tmp_path):
     documents = session["evidence"]["documents"]
     assert len(documents) == 1
     assert documents[0]["title"] == "Local import: timeline.txt"
+
+
+def test_run_gmail_duckdb_pipeline_cli_command(monkeypatch, tmp_path):
+    runner = CliRunner()
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-pipeline-cli-sessions")
+    monkeypatch.setattr(complaint_cli_impl, "service", service)
+
+    async def fake_run_gmail_duckdb_pipeline(**kwargs):
+        return {
+            "status": "success",
+            "pipeline": "gmail_duckdb_pipeline",
+            "user_id": kwargs["user_id"],
+            "batch_count": 2,
+            "total_imported_count": 3,
+            "duckdb_index": {"duckdb_path": str(tmp_path / "duckdb" / "email_corpus.duckdb")},
+            "bm25_search": {"query": "termination", "result_count": 2},
+        }
+
+    monkeypatch.setattr(complaint_cli_impl, "run_gmail_duckdb_pipeline", fake_run_gmail_duckdb_pipeline)
+
+    payload = _invoke_cli(
+        runner,
+        "run-gmail-duckdb-pipeline",
+        "--user-id",
+        "cli-user",
+        "--address",
+        "hr@example.com",
+        "--years-back",
+        "2",
+        "--uid-window-size",
+        "250",
+        "--max-batches",
+        "5",
+        "--gmail-user",
+        "user@gmail.com",
+        "--gmail-app-password",
+        "app-password",
+        "--bm25-search-query",
+        "termination",
+    )
+
+    assert payload["status"] == "success"
+    assert payload["pipeline"] == "gmail_duckdb_pipeline"
+    assert payload["batch_count"] == 2
+    assert payload["bm25_search"]["result_count"] == 2
+
+
+def test_search_email_duckdb_cli_command(monkeypatch, tmp_path):
+    runner = CliRunner()
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "email-search-cli-sessions")
+    monkeypatch.setattr(complaint_cli_impl, "service", service)
+    monkeypatch.setattr(
+        complaint_cli_impl,
+        "search_email_duckdb_corpus",
+        lambda **kwargs: {
+            "status": "success",
+            "query": kwargs["query"],
+            "ranking": kwargs["ranking"],
+            "result_count": 1,
+            "results": [{"subject": "Termination email"}],
+        },
+    )
+
+    payload = _invoke_cli(
+        runner,
+        "search-email-duckdb",
+        "--index-path",
+        str(tmp_path / "duckdb" / "email_corpus.duckdb"),
+        "--query",
+        "termination retaliation",
+        "--ranking",
+        "bm25",
+    )
+
+    assert payload["status"] == "success"
+    assert payload["ranking"] == "bm25"
+    assert payload["result_count"] == 1
+
+
+def test_run_gmail_duckdb_pipeline_mcp_tool(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-pipeline-mcp-sessions")
+    monkeypatch.setattr(
+        service,
+        "run_gmail_duckdb_pipeline",
+        lambda user_id, **kwargs: {
+            "status": "success",
+            "pipeline": "gmail_duckdb_pipeline",
+            "user_id": user_id,
+            "years_back": kwargs["years_back"],
+            "batch_count": 1,
+        },
+    )
+
+    payload = _call_mcp_tool(
+        service,
+        23_1,
+        "complaint.run_gmail_duckdb_pipeline",
+        {
+            "user_id": "mcp-user",
+            "addresses": ["hr@example.com"],
+            "years_back": 2,
+        },
+    )
+
+    assert payload["status"] == "success"
+    assert payload["years_back"] == 2
+    assert payload["batch_count"] == 1
+
+
+def test_search_email_duckdb_mcp_tool(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "email-search-mcp-sessions")
+    monkeypatch.setattr(
+        service,
+        "search_email_duckdb_corpus",
+        lambda **kwargs: {
+            "status": "success",
+            "query": kwargs["query"],
+            "result_count": 1,
+            "results": [{"subject": "Termination email"}],
+        },
+    )
+
+    payload = _call_mcp_tool(
+        service,
+        24_1,
+        "complaint.search_email_duckdb_corpus",
+        {
+            "index_path": str(tmp_path / "duckdb" / "email_corpus.duckdb"),
+            "query": "termination",
+        },
+    )
+
+    assert payload["status"] == "success"
+    assert payload["result_count"] == 1
+
+
+def test_run_gmail_duckdb_pipeline_api_route(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-pipeline-api-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    monkeypatch.setattr(
+        service,
+        "run_gmail_duckdb_pipeline",
+        lambda user_id, **kwargs: {
+            "status": "success",
+            "pipeline": "gmail_duckdb_pipeline",
+            "user_id": user_id,
+            "batch_count": 2,
+            "years_back": kwargs["years_back"],
+        },
+    )
+
+    response = client.post(
+        "/api/complaint-workspace/run-gmail-duckdb-pipeline",
+        json={"user_id": "api-user", "addresses": ["hr@example.com"], "years_back": 2},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["years_back"] == 2
+
+
+def test_search_email_duckdb_api_route(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "email-search-api-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    monkeypatch.setattr(
+        service,
+        "search_email_duckdb_corpus",
+        lambda **kwargs: {
+            "status": "success",
+            "ranking": kwargs["ranking"],
+            "result_count": 1,
+            "results": [{"subject": "Termination email"}],
+        },
+    )
+
+    response = client.post(
+        "/api/complaint-workspace/search-email-duckdb",
+        json={"index_path": str(tmp_path / "duckdb" / "email_corpus.duckdb"), "query": "termination", "ranking": "bm25"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["ranking"] == "bm25"
 
 
 def test_import_local_evidence_mcp_tool(tmp_path):

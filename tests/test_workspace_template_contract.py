@@ -214,9 +214,13 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "session-tool-activity-summary" in content
     assert "session-tool-activity-tool-chip" in content
     assert "session-tool-activity-status-chip" in content
+    assert "session-tool-activity-ledger" in content
     assert "renderSessionSyncStatus" in content
     assert "latestSdkToolActivity" in content
     assert "loadLastSdkToolActivity" in content
+    assert "loadSdkToolActivityLedger" in content
+    assert "complaintGenerator.sdkToolLedger" in content
+    assert "Invocation ledger is waiting for SDK activity." in content
     assert "complaint-mcp-sdk-call" in content
     assert "resolveDraftState" in content
     assert "draftStatusCopy" in content
@@ -257,6 +261,33 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Required section checks:" in content
     assert "Civil Action No. is still a placeholder." in content
     assert "formatGapActionLabel" in content
+    assert "activeWorkspaceTab" in content
+    assert "focusRailStateForTab" in content
+    assert "buildCanonicalActionQueue" in content
+    assert "Canonical action queue loading" in content
+    assert "Canonical Next Move" in content
+    assert "Complete" in content
+    assert "Do next" in content
+    assert "Watch for" in content
+    assert "support-strength-map" in content
+    assert "describeSupportStrength" in content
+    assert "Per-element proof map" in content
+    assert "Counts alone can be misleading." in content
+    assert "grounded" in content
+    assert "thin" in content
+    assert "unsupported" in content
+    assert "sdk: complaint.submit_intake" in content
+    assert "sdk: complaint.save_evidence" in content
+    assert "sdk: complaint.review_case" in content
+    assert "sdk: complaint.generate_complaint" in content
+    assert "sdk: complaint.get_tooling_contract" in content
+    assert "sdk: complaint.review_ui" in content
+    assert "You are in Intake." in content
+    assert "You are in Evidence." in content
+    assert "You are in Review." in content
+    assert "You are in Draft." in content
+    assert "You are in CLI + MCP." in content
+    assert "You are in UX Audit." in content
     assert "What name should we use for the person harmed?" in content
     assert "What did they report, oppose, or ask for help about?" in content
     assert "What happened after that?" in content
