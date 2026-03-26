@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from queue import Queue
 import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+import threading
+from time import perf_counter
 from typing import Any
 
 from backends import LLMRouterBackend, MultimodalRouterBackend
@@ -16,6 +19,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SCREENSHOT_TEST = "playwright/tests/complaint-flow.spec.js"
 DEFAULT_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_OPTIMIZER_PRIORITY = 90
+DEFAULT_UI_REVIEW_TIMEOUT_S = 10.0
+_TEXT_UI_REVIEW_TIMEOUTS = {
+    "codex": 120.0,
+    "codex_cli": 120.0,
+    "copilot_cli": 25.0,
+    "copilot_sdk": 25.0,
+    "hf_inference_api": 60.0,
+}
 DEFAULT_UI_UX_REVIEW_GOALS = [
     "Make the complaint generator easier for first-time complainants to complete without legal coaching.",
     "Keep intake, evidence, review, draft, package, CLI, MCP, and JavaScript SDK paths visibly connected as one workflow.",
@@ -92,6 +103,135 @@ def _resolve_review_goals(goals: list[str] | None) -> list[str]:
 def _resolve_review_notes(notes: str | None) -> str:
     cleaned = str(notes or "").strip()
     return cleaned or DEFAULT_UI_UX_REVIEW_NOTES
+
+
+def _call_with_timeout(fn, *, timeout_s: float):
+    result_queue: Queue[tuple[str, Any]] = Queue(maxsize=1)
+
+    def _runner():
+        try:
+            result_queue.put(("ok", fn()))
+        except Exception as exc:
+            result_queue.put(("err", exc))
+
+    worker = threading.Thread(target=_runner, name="ui-ux-workflow-timeout-worker", daemon=True)
+    worker.start()
+    worker.join(timeout=max(0.001, float(timeout_s)))
+    if worker.is_alive():
+        raise TimeoutError(f"UI/UX workflow router review timed out after {float(timeout_s):g}s")
+    status, payload = result_queue.get_nowait()
+    if status == "err":
+        raise payload
+    return payload
+
+
+def _ui_review_timeout_for_provider(provider: str | None) -> float:
+    normalized = str(provider or "").strip().lower()
+    provider_env = str(os.getenv(f"COMPLAINT_GENERATOR_UI_REVIEW_TIMEOUT_SECONDS_{normalized.upper()}", "") or "").strip()
+    global_env = str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_TIMEOUT_SECONDS", "") or "").strip()
+    for candidate in (provider_env, global_env):
+        if not candidate:
+            continue
+        try:
+            return max(1.0, float(candidate))
+        except Exception:
+            continue
+    return float(_TEXT_UI_REVIEW_TIMEOUTS.get(normalized, DEFAULT_UI_REVIEW_TIMEOUT_S))
+
+
+def _build_timeout_fallback_review_markdown(
+    *,
+    artifacts: list[dict[str, Any]],
+    multimodal_error: Exception | None,
+    fallback_error: Exception | None,
+) -> str:
+    export_artifact = next(
+        (
+            dict(item)
+            for item in artifacts
+            if isinstance(item, dict) and str(item.get("artifact_type") or "").strip() == "complaint_export"
+        ),
+        {},
+    )
+    claim_type = str(export_artifact.get("claim_type") or "current claim type").strip()
+    draft_strategy = str(export_artifact.get("draft_strategy") or "current draft strategy").strip()
+    filing_shape_score = str(export_artifact.get("filing_shape_score") or "unknown").strip()
+    alignment_score = str(export_artifact.get("claim_type_alignment_score") or "unknown").strip()
+    ui_hint = str(export_artifact.get("ui_suggestions_excerpt") or "").strip()
+    screenshot_names = [
+        str(item.get("name") or "").strip()
+        for item in artifacts
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    ]
+    screenshot_summary = ", ".join(screenshot_names[:5]) or "workspace screenshots"
+    fallback_reason = str(fallback_error or multimodal_error or "router review unavailable").strip()
+    primary_hint = ui_hint.splitlines()[0].strip() if ui_hint else (
+        "Keep release-gate, filing-shape, and export guidance visible before download."
+    )
+    return "\n".join(
+        [
+            "# Top Risks",
+            f"- Router-backed screenshot review timed out while auditing {screenshot_summary}, so the actor/critic loop is relying on complaint-output metadata instead of fresh visual reasoning.",
+            f"- Draft and export affordances must keep the release gate, filing-shape score, and claim-type alignment visible for {claim_type} / {draft_strategy} outputs.",
+            "",
+            "# High-Impact UX Fixes",
+            f"- {primary_hint}",
+            "- Preserve a visible release-gate badge and next-step explanation above export and download controls.",
+            "",
+            "# Complaint Journey Coverage",
+            "- Intake, evidence, review, draft, and export screenshots were captured successfully for the current complaint journey.",
+            "- The browser flow still needs screenshot-review fallback behavior so operators get actionable guidance even when router review is slow.",
+            "",
+            "# Hidden Or Missing Feature Paths",
+            "- The actor/critic workflow should never stall in `running_router_review`; return a fallback review artifact instead.",
+            "- Keep complaint.review_ui, complaint.optimize_ui, and complaint.run_browser_audit discoverable from the same workspace session.",
+            "",
+            "# Stage Findings",
+            "## Intake",
+            "- Intake appears covered by the browser audit, but the screenshot critic timed out before returning page-specific findings.",
+            "## Evidence",
+            "- Evidence capture should continue to explain which claim element each saved item strengthens before drafting becomes the dominant action.",
+            "## Review",
+            "- Review should keep support posture and remaining corroboration work visible before users trust the filing posture.",
+            "## Draft",
+            f"- Current export metadata reports filing-shape score {filing_shape_score} and claim-type alignment score {alignment_score}; keep those signals visible beside export controls.",
+            "## Integration Discovery",
+            "- Integration panels should expose actionable UI review, optimization, and browser-audit affordances without requiring command-line guesswork.",
+            "",
+            "# Actor Journey Findings",
+            "- The actor can still complete the browser complaint journey, but the optimizer must fall back gracefully when screenshot router review is unavailable.",
+            "- Broken optimizer behavior is itself a UX risk because operators lose confidence when the actor/critic lane appears to hang.",
+            "",
+            "# Critic Test Obligations",
+            "- Assert that review-ui and optimize-ui finish with either a router-backed report or a deterministic fallback report instead of hanging.",
+            "- Assert that release-gate, filing-shape score, and export guidance remain visible before markdown/pdf/docx download starts.",
+            "",
+            "# MCP/SDK Workflow Improvements",
+            "- Surface fallback status directly in the workspace so operators know when the optimizer used complaint-output metadata instead of live screenshot critique.",
+            "- Keep MCP tool status, last run time, and fallback reason visible through the same shared browser SDK workflow.",
+            "",
+            "# Actor Plan",
+            "- Ensure the optimizer always returns a review artifact within the configured timeout window.",
+            "- Keep export readiness, release-gate status, and next-step guidance visible even when screenshot critique falls back to artifact metadata.",
+            "",
+            "# Critic Verdict",
+            "- Warning: the complaint flow is working, but the optimizer path needs bounded router calls and an explicit fallback artifact to stay trustworthy.",
+            "",
+            "# Complaint Intake Language Fixes",
+            "- Preserve calm, plain-language explanations while making fallback and readiness signals more explicit for first-time complainants and operators.",
+            "",
+            "# Playwright Assertions To Add",
+            "- Add an assertion that optimizer progress never remains stuck at `running_router_review` after router timeouts.",
+            "- Add an assertion that the final draft/export surface still exposes release-gate and filing-shape guidance before download.",
+            "",
+            "# Implementation Order",
+            "- First, bound multimodal and text router calls with timeouts.",
+            "- Next, emit a deterministic fallback markdown review when both router paths fail.",
+            "- Finally, keep the fallback reason visible in workflow progress and review artifacts.",
+            "",
+            f"Fallback reason: {fallback_reason}",
+        ]
+    )
 
 
 def _markdown_heading_sections(markdown_text: str) -> dict[str, str]:
@@ -762,27 +902,74 @@ def review_screenshot_audit_with_llm_router(
         goals=goals,
     )
     image_paths = _artifact_image_paths(artifacts)
-    backend = MultimodalRouterBackend(
-        id=f"complaint-ui-ux-review-{iteration}",
-        provider=provider,
-        model=model,
-    )
+    timeout_s = _ui_review_timeout_for_provider(provider)
+    backend_metadata: dict[str, Any]
+    multimodal_error: Exception | None = None
     try:
-        review_text = backend(
-            prompt,
-            image_paths=image_paths,
-            system_prompt=(
-                "You are reviewing complaint intake and MCP dashboard screenshots. "
-                "Use the images and prompt together to find concrete UI/UX issues."
-            ),
-        )
-    except Exception:
-        fallback_backend = LLMRouterBackend(
-            id=f"complaint-ui-ux-review-{iteration}-fallback",
+        backend = MultimodalRouterBackend(
+            id=f"complaint-ui-ux-review-{iteration}",
             provider=provider,
             model=model,
         )
-        review_text = fallback_backend(prompt)
+        started_at = perf_counter()
+        review_text = _call_with_timeout(
+            lambda: backend(
+                prompt,
+                image_paths=image_paths,
+                system_prompt=(
+                    "You are reviewing complaint intake and MCP dashboard screenshots. "
+                    "Use the images and prompt together to find concrete UI/UX issues."
+                ),
+            ),
+            timeout_s=timeout_s,
+        )
+        backend_metadata = {
+            "id": getattr(backend, "id", f"complaint-ui-ux-review-{iteration}"),
+            "provider": getattr(backend, "provider", provider),
+            "model": getattr(backend, "model", model),
+            "strategy": "multimodal_router",
+            "elapsed_seconds": round(float(perf_counter() - started_at), 3),
+            "timeout_seconds": timeout_s,
+            "image_count": len(image_paths),
+        }
+    except Exception as exc:
+        multimodal_error = exc
+        try:
+            fallback_backend = LLMRouterBackend(
+                id=f"complaint-ui-ux-review-{iteration}-fallback",
+                provider=provider,
+                model=model,
+            )
+            started_at = perf_counter()
+            review_text = _call_with_timeout(
+                lambda: fallback_backend(prompt),
+                timeout_s=timeout_s,
+            )
+            backend_metadata = {
+                "id": getattr(fallback_backend, "id", f"complaint-ui-ux-review-{iteration}-fallback"),
+                "provider": getattr(fallback_backend, "provider", provider),
+                "model": getattr(fallback_backend, "model", model),
+                "strategy": "llm_router",
+                "elapsed_seconds": round(float(perf_counter() - started_at), 3),
+                "timeout_seconds": timeout_s,
+                "fallback_from": "multimodal_router",
+                "fallback_error": str(multimodal_error),
+            }
+        except Exception as fallback_exc:
+            review_text = _build_timeout_fallback_review_markdown(
+                artifacts=artifacts,
+                multimodal_error=multimodal_error,
+                fallback_error=fallback_exc,
+            )
+            backend_metadata = {
+                "id": f"complaint-ui-ux-review-{iteration}-fallback",
+                "provider": provider,
+                "model": model,
+                "strategy": "deterministic_fallback",
+                "timeout_seconds": timeout_s,
+                "multimodal_error": str(multimodal_error),
+                "fallback_error": str(fallback_exc),
+            }
     structured_review = structure_ui_ux_review(
         review_text=review_text,
         artifacts=artifacts,
@@ -792,6 +979,7 @@ def review_screenshot_audit_with_llm_router(
         "iteration": iteration,
         "artifact_count": len(artifacts),
         "review": review_text,
+        "backend": backend_metadata,
         "artifacts": artifacts,
         "structured_review": structured_review,
         "issues": list(structured_review.get("issues") or []),

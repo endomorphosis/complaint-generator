@@ -154,6 +154,15 @@ def _resolve_date_after(*, date_after: Optional[str], years_back: Optional[int])
     return anchor.fromordinal(anchor.toordinal() - (365 * years_value)).isoformat()
 
 
+def _imap_mailbox_name(folder: str) -> str:
+    value = str(folder or "").strip()
+    if not value:
+        return "INBOX"
+    if " " in value and not (value.startswith('"') and value.endswith('"')):
+        return f'"{value}"'
+    return value
+
+
 def _checkpoint_path(artifact_root: Path, checkpoint_name: Optional[str]) -> Path:
     name = _slugify_fragment(str(checkpoint_name or "default"), fallback="default")
     return artifact_root / "_state" / f"{name}_checkpoint.json"
@@ -289,11 +298,12 @@ async def _search_message_ids(
     limit: Optional[int] = None,
 ) -> list[bytes]:
     def _run() -> list[bytes]:
-        status, _ = connection.select(folder, readonly=True)
+        mailbox = _imap_mailbox_name(folder)
+        status, _ = connection.select(mailbox, readonly=True)
         if status != "OK":
             raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
         if limit is not None and limit > 0 and not date_after and not date_before:
-            status, count_data = connection.select(folder, readonly=True)
+            status, count_data = connection.select(mailbox, readonly=True)
             if status != "OK":
                 raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
             total_messages = int((count_data or [b"0"])[0] or b"0")
@@ -319,7 +329,7 @@ async def _search_message_ids(
 
 async def _fetch_recent_message_ids(connection: Any, *, folder: str, limit: int) -> list[bytes]:
     def _run() -> list[bytes]:
-        status, count_data = connection.select(folder, readonly=True)
+        status, count_data = connection.select(_imap_mailbox_name(folder), readonly=True)
         if status != "OK":
             raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
         total_messages = int((count_data or [b"0"])[0] or b"0")
@@ -338,7 +348,7 @@ async def _search_message_uids(
     after_uid: Optional[int] = None,
 ) -> list[bytes]:
     def _run() -> list[bytes]:
-        status, _ = connection.select(folder, readonly=True)
+        status, _ = connection.select(_imap_mailbox_name(folder), readonly=True)
         if status != "OK":
             raise RuntimeError(f"failed to open IMAP folder {folder!r}: {status}")
         criteria: list[str] = []

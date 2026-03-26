@@ -5,7 +5,7 @@ from pathlib import Path
 
 import anyio
 
-from complaint_generator.email_import import import_gmail_evidence
+from complaint_generator.email_import import _imap_mailbox_name, import_gmail_evidence
 from complaint_generator.workspace import ComplaintWorkspaceService
 
 
@@ -40,7 +40,7 @@ class _FakeConnection:
         }
 
     def select(self, folder: str, readonly: bool = True):
-        self._selected_folder = folder
+        self._selected_folder = str(folder or "").strip('"')
         messages = self._messages_by_folder.get(self._selected_folder, [])
         return "OK", [str(len(messages)).encode("ascii")]
 
@@ -97,6 +97,12 @@ class _FakeProcessor:
     async def disconnect(self):
         self.connected = False
         return {"status": "success"}
+
+
+def test_imap_mailbox_name_quotes_gmail_folders_with_spaces():
+    assert _imap_mailbox_name("INBOX") == "INBOX"
+    assert _imap_mailbox_name("[Gmail]/All Mail") == '"[Gmail]/All Mail"'
+    assert _imap_mailbox_name('"[Gmail]/All Mail"') == '"[Gmail]/All Mail"'
 
 
 def test_import_gmail_evidence_saves_matching_emails_and_attachments(tmp_path, monkeypatch):

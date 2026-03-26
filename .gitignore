@@ -41,3 +41,6 @@ artifacts/ui-audit-current
 # Local stray artifacts
 enhanced_daemon_manager.log
 .complaint_workspace/sessions
+output/gmail*
+output/*
+output/email_duckdb/starworks5_2y_20260326/email_corpus.duckdb.wal

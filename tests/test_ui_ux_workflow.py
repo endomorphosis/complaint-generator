@@ -559,6 +559,120 @@ def test_review_workflow_falls_back_to_text_router_when_multimodal_review_fails(
     review = review_screenshot_audit_with_llm_router(screenshot_dir=screenshot_dir, iteration=1)
 
     assert "Fallback text review" in review["review"]
+    assert review["backend"]["strategy"] == "llm_router"
+    assert review["backend"]["fallback_from"] == "multimodal_router"
+
+
+def test_review_workflow_returns_deterministic_fallback_when_all_router_paths_fail(monkeypatch, tmp_path):
+    screenshot_dir = tmp_path / "screens"
+    _write_artifact(screenshot_dir, "workspace")
+    (screenshot_dir / "workspace-export-artifacts.json").write_text(
+        json.dumps(
+            {
+                "name": "workspace-export-artifacts",
+                "artifact_type": "complaint_export",
+                "claim_type": "retaliation",
+                "draft_strategy": "llm_router",
+                "filing_shape_score": 100,
+                "claim_type_alignment_score": 100,
+                "ui_suggestions_excerpt": "Keep release-gate, filing-shape, and export guidance visible before download.",
+            }
+        )
+    )
+
+    class FailingMultimodalBackend:
+        def __init__(self, id, provider=None, model=None):
+            self.id = id
+            self.provider = provider
+            self.model = model
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            raise TimeoutError("vision timed out")
+
+    class FailingFallbackBackend:
+        def __init__(self, id, provider=None, model=None):
+            self.id = id
+            self.provider = provider
+            self.model = model
+
+        def __call__(self, prompt):
+            raise TimeoutError("text fallback timed out")
+
+    monkeypatch.setattr(workflow_module, "MultimodalRouterBackend", FailingMultimodalBackend)
+    monkeypatch.setattr(workflow_module, "LLMRouterBackend", FailingFallbackBackend)
+
+    review = review_screenshot_audit_with_llm_router(screenshot_dir=screenshot_dir, iteration=1)
+
+    assert "Router-backed screenshot review timed out" in review["review"]
+    assert review["backend"]["strategy"] == "deterministic_fallback"
+    assert "vision timed out" in review["backend"]["multimodal_error"]
+    assert "text fallback timed out" in review["backend"]["fallback_error"]
+    assert review["structured_review"]["critic_review"]["verdict"] == "warning"
+
+
+def test_iterative_workflow_writes_completed_review_when_router_paths_timeout(monkeypatch, tmp_path):
+    screenshot_dir = tmp_path / "screens"
+    output_dir = tmp_path / "reviews"
+    _write_artifact(screenshot_dir, "workspace")
+    (screenshot_dir / "workspace-export-artifacts.json").write_text(
+        json.dumps(
+            {
+                "name": "workspace-export-artifacts",
+                "artifact_type": "complaint_export",
+                "claim_type": "retaliation",
+                "draft_strategy": "llm_router",
+                "filing_shape_score": 92,
+                "claim_type_alignment_score": 88,
+            }
+        )
+    )
+
+    def fake_audit(**kwargs):
+        return {
+            "command": ["pytest"],
+            "returncode": 0,
+            "stdout": "1 passed",
+            "stderr": "",
+            "artifact_count": 1,
+            "artifacts": workflow_module.collect_screenshot_artifacts(screenshot_dir),
+            "screenshot_dir": str(screenshot_dir),
+        }
+
+    class FailingMultimodalBackend:
+        def __init__(self, id, provider=None, model=None):
+            self.id = id
+            self.provider = provider
+            self.model = model
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            raise TimeoutError("vision timed out")
+
+    class FailingFallbackBackend:
+        def __init__(self, id, provider=None, model=None):
+            self.id = id
+            self.provider = provider
+            self.model = model
+
+        def __call__(self, prompt):
+            raise TimeoutError("text timed out")
+
+    monkeypatch.setattr(workflow_module, "run_playwright_screenshot_audit", fake_audit)
+    monkeypatch.setattr(workflow_module, "MultimodalRouterBackend", FailingMultimodalBackend)
+    monkeypatch.setattr(workflow_module, "LLMRouterBackend", FailingFallbackBackend)
+
+    result = run_iterative_ui_ux_workflow(
+        screenshot_dir=screenshot_dir,
+        output_dir=output_dir,
+        iterations=1,
+    )
+
+    assert result["iterations"] == 1
+    assert result["review"]["critic_review"]["verdict"] == "warning"
+    assert result["runs"][0]["issues_count"] >= 1
+    progress_payload = json.loads((output_dir / "workflow-progress.json").read_text())
+    assert progress_payload["status"] == "completed"
+    assert (output_dir / "iteration-01-review.md").exists()
+    assert (output_dir / "iteration-01-review.json").exists()
 
 
 def test_closed_loop_ui_ux_improvement_delegates_to_optimizer(monkeypatch, tmp_path):

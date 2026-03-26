@@ -910,6 +910,31 @@
             margin-top: 12px;
         }
 
+        .decision-strip {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin: 18px 0 20px;
+        }
+
+        .decision-card {
+            padding: 16px;
+            border-radius: 20px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(251, 244, 236, 0.82));
+        }
+
+        .decision-card strong,
+        .decision-card span {
+            display: block;
+        }
+
+        .decision-card span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.55;
+        }
+
         .guidance-grid {
             grid-template-columns: repeat(3, minmax(0, 1fr));
             margin-top: 16px;
@@ -1039,6 +1064,31 @@
             margin-top: 6px;
             color: var(--muted);
             line-height: 1.55;
+        }
+
+        .support-summary-strip {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin: 14px 0 18px;
+        }
+
+        .support-summary-card {
+            padding: 14px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.76);
+        }
+
+        .support-summary-card strong,
+        .support-summary-card span {
+            display: block;
+        }
+
+        .support-summary-card span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.5;
         }
 
         .field-row,
@@ -1343,6 +1393,8 @@
             .draft-layout,
             .draft-action-rail,
             .draft-action-groups,
+            .decision-strip,
+            .support-summary-strip,
             .workbench-metrics,
             .shortcut-grid,
             .quick-action-grid,
@@ -1850,6 +1902,20 @@
                             <button class="secondary" id="evidence-open-review-button" type="button">Review Open Gaps</button>
                         </div>
                     </div>
+                    <div class="decision-strip" aria-label="Evidence decision strip">
+                        <div class="decision-card">
+                            <strong>Current goal</strong>
+                            <span>Attach one item that clearly strengthens the weakest claim element before broadening the record.</span>
+                        </div>
+                        <div class="decision-card">
+                            <strong>Biggest blocker</strong>
+                            <span>Evidence gets noisy when uploads are not tied to a specific element, source, and reason the item matters to the complaint theory.</span>
+                        </div>
+                        <div class="decision-card">
+                            <strong>Safest next move</strong>
+                            <span>Use the primary proof move above, then jump to Review to confirm the gap actually narrowed instead of just adding volume.</span>
+                        </div>
+                    </div>
                     <div class="panel-split">
                         <div class="workbench-card">
                             <strong>Support-gap workbench</strong>
@@ -2170,6 +2236,20 @@
                             <strong>What is blocking filing confidence right now</strong>
                             <span id="review-priority-blocker">The strongest blocker will appear here after the workspace compares support coverage, evidence counts, and the current release posture.</span>
                             <div class="priority-checklist" id="review-priority-checklist"></div>
+                        </div>
+                    </div>
+                    <div class="decision-strip" aria-label="Review decision strip">
+                        <div class="decision-card">
+                            <strong>Current goal</strong>
+                            <span>Decide whether the complaint is merely draftable or actually supported well enough to trust the filing posture.</span>
+                        </div>
+                        <div class="decision-card">
+                            <strong>Biggest blocker</strong>
+                            <span>Dense support cards can hide whether the real gap is corroboration, timing proof, or a release-gate reason to wait.</span>
+                        </div>
+                        <div class="decision-card">
+                            <strong>Safest next move</strong>
+                            <span>Use this stage to make one explicit choice: add proof, fix intake facts, or proceed to Draft with the blocker still visible.</span>
                         </div>
                     </div>
                     <div class="review-board">
@@ -3967,9 +4047,28 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const supportedElements = overview.supported_elements || 0;
             const evidenceCount = Number(overview.testimony_items || 0) + Number(overview.document_items || 0);
             const weakestGap = missingItems[0] || null;
+            const strengthBuckets = (review.support_matrix || []).reduce((acc, item) => {
+                const strength = describeSupportStrength(item);
+                acc[strength.label] = (acc[strength.label] || 0) + 1;
+                return acc;
+            }, { grounded: 0, thin: 0, unsupported: 0 });
             supportStrengthMap.innerHTML = `
                 <h3>Per-element proof map</h3>
                 <p class="muted">Counts alone can be misleading. Use this map to see where the record is grounded, where it is still thin, and where direct proof is still missing.</p>
+                <div class="support-summary-strip">
+                    <div class="support-summary-card">
+                        <strong>Grounded elements</strong>
+                        <span>${escapeHtml(String(strengthBuckets.grounded || 0))} elements have mixed or documentary proof behind them.</span>
+                    </div>
+                    <div class="support-summary-card">
+                        <strong>Thin elements</strong>
+                        <span>${escapeHtml(String(strengthBuckets.thin || 0))} elements have some support, but corroboration is still light.</span>
+                    </div>
+                    <div class="support-summary-card">
+                        <strong>Unsupported elements</strong>
+                        <span>${escapeHtml(String(strengthBuckets.unsupported || 0))} elements still need direct targeted proof before filing confidence should rise.</span>
+                    </div>
+                </div>
                 <div class="list">
                     ${(review.support_matrix || []).map((item) => {
                         const strength = describeSupportStrength(item);
@@ -3992,11 +4091,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 <div class="tool-card">
                     <h3>${escapeHtml(item.label)}</h3>
                     <div class="chip-row">
-                        <span class="chip ${item.supported ? 'good' : 'warn'}">${item.supported ? 'Supported' : 'Needs support'}</span>
+                        <span class="chip ${escapeHtml(describeSupportStrength(item).chipClass)}">${escapeHtml(describeSupportStrength(item).label)}</span>
                         <span class="chip">Intake ${item.intake_supported ? 'yes' : 'no'}</span>
                         <span class="chip">${item.testimony_count} testimony</span>
                         <span class="chip">${item.document_count} documents</span>
                     </div>
+                    <div class="muted" style="margin-top: 10px;">${escapeHtml(describeSupportStrength(item).detail)}</div>
+                    <div class="soft-note" style="margin-top: 12px;">${item.supported ? 'Next check: make sure the saved proof still matches the synopsis and requested relief.' : `Next move: add targeted proof that directly strengthens ${item.label.toLowerCase()}.`}</div>
                 </div>
             `).join('');
             recommended.innerHTML = (review.recommended_actions || []).map((item) => `
