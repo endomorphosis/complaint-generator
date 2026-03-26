@@ -150,6 +150,7 @@ async def run_gmail_duckdb_pipeline(
             checkpoint_name=checkpoint_name,
             uid_window_size=uid_window_size,
             uid_range_span=uid_range_span,
+            persist_to_workspace=False,
             gmail_user=gmail_user,
             gmail_app_password=gmail_app_password,
         )

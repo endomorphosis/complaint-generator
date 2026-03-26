@@ -6,7 +6,7 @@ from pathlib import Path
 
 import anyio
 
-from complaint_generator.email_import import _imap_mailbox_name, import_gmail_evidence
+from complaint_generator.email_import import _imap_mailbox_name, _message_artifact_dir, import_gmail_evidence
 from complaint_generator.workspace import ComplaintWorkspaceService
 
 
@@ -119,6 +119,19 @@ def test_imap_mailbox_name_quotes_gmail_folders_with_spaces():
     assert _imap_mailbox_name("INBOX") == "INBOX"
     assert _imap_mailbox_name("[Gmail]/All Mail") == '"[Gmail]/All Mail"'
     assert _imap_mailbox_name('"[Gmail]/All Mail"') == '"[Gmail]/All Mail"'
+
+
+def test_message_artifact_dir_uses_uid_sharded_paths(tmp_path):
+    path = _message_artifact_dir(
+        tmp_path,
+        imap_uid=12345,
+        message_id_header="<abc@example.test>",
+        fallback_index=1,
+        date_fragment="20260326",
+        subject="Termination email",
+    )
+    assert path.parent.name == "0012000-0012999"
+    assert "uid_0000012345_20260326_Termination-email" in str(path)
 
 
 def test_import_gmail_evidence_saves_matching_emails_and_attachments(tmp_path, monkeypatch):
@@ -237,6 +250,47 @@ def test_import_gmail_evidence_can_collect_all_messages_without_address_filter(t
     assert payload["imported_count"] == 2
     assert payload["skipped_count"] == 0
     assert sorted(item["subject"] for item in payload["imported"]) == ["Mailbox-wide email 1", "Mailbox-wide email 2"]
+
+
+def test_import_gmail_evidence_can_skip_workspace_persistence_for_bulk_collection(tmp_path, monkeypatch):
+    message = _build_email_bytes(
+        subject="Bulk mailbox email",
+        sender="alerts@example.com",
+        recipient="other@example.com",
+        body="Imported without touching the complaint session evidence store.",
+    )
+
+    monkeypatch.setattr(
+        "complaint_generator.email_import.create_email_processor",
+        lambda **kwargs: _FakeProcessor([message]),
+    )
+
+    workspace_root = tmp_path / "sessions"
+    evidence_root = tmp_path / "evidence"
+    service = ComplaintWorkspaceService(root_dir=workspace_root)
+
+    async def _run_import():
+        return await import_gmail_evidence(
+            addresses=[],
+            collect_all_messages=True,
+            user_id="case-user",
+            claim_element_id="causation",
+            workspace_root=workspace_root,
+            evidence_root=evidence_root,
+            folder="INBOX",
+            gmail_user="user@gmail.com",
+            gmail_app_password="app-password",
+            persist_to_workspace=False,
+            service=service,
+        )
+
+    payload = anyio.run(_run_import)
+
+    assert payload["persist_to_workspace"] is False
+    assert payload["imported_count"] == 1
+    assert payload["imported"][0]["workspace_evidence_id"] is None
+    session = service.get_session("case-user")["session"]
+    assert session["evidence"]["documents"] == []
 
 
 def test_import_gmail_evidence_filters_by_complaint_relevance(tmp_path, monkeypatch):

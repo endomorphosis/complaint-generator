@@ -143,6 +143,33 @@ def _default_evidence_root(workspace_root: Path) -> Path:
     return workspace_root / "evidence"
 
 
+def _artifact_shard_dir(artifact_root: Path, *, numeric_key: int) -> Path:
+    shard_size = 1000
+    shard_start = (max(0, int(numeric_key)) // shard_size) * shard_size
+    shard_end = shard_start + shard_size - 1
+    return artifact_root / f"{shard_start:07d}-{shard_end:07d}"
+
+
+def _message_artifact_dir(
+    artifact_root: Path,
+    *,
+    imap_uid: Optional[int],
+    message_id_header: str,
+    fallback_index: int,
+    date_fragment: str,
+    subject: str,
+) -> Path:
+    uid_value = int(imap_uid or 0)
+    message_id_fragment = _slugify_fragment(str(message_id_header or "").strip("<>"), fallback="")
+    subject_fragment = _slugify_fragment(subject, fallback="email")
+    if uid_value > 0:
+        shard_dir = _artifact_shard_dir(artifact_root, numeric_key=uid_value)
+        return shard_dir / f"uid_{uid_value:010d}_{date_fragment}_{subject_fragment}"
+    shard_dir = _artifact_shard_dir(artifact_root, numeric_key=fallback_index)
+    unique_fragment = message_id_fragment or f"{fallback_index:06d}"
+    return shard_dir / f"msg_{unique_fragment}_{date_fragment}_{subject_fragment}"
+
+
 def _resolve_date_after(*, date_after: Optional[str], years_back: Optional[int]) -> Optional[str]:
     explicit = str(date_after or "").strip()
     if explicit:
@@ -168,6 +195,11 @@ def _checkpoint_path(artifact_root: Path, checkpoint_name: Optional[str]) -> Pat
     return artifact_root / "_state" / f"{name}_checkpoint.json"
 
 
+def _progress_path(artifact_root: Path, checkpoint_name: Optional[str]) -> Path:
+    name = _slugify_fragment(str(checkpoint_name or "default"), fallback="default")
+    return artifact_root / "_state" / f"{name}_progress.json"
+
+
 def _load_checkpoint(artifact_root: Path, checkpoint_name: Optional[str]) -> dict[str, Any]:
     path = _checkpoint_path(artifact_root, checkpoint_name)
     if not path.exists():
@@ -183,6 +215,17 @@ def _load_checkpoint(artifact_root: Path, checkpoint_name: Optional[str]) -> dic
 
 def _save_checkpoint(artifact_root: Path, checkpoint_name: Optional[str], payload: dict[str, Any]) -> Path:
     path = _checkpoint_path(artifact_root, checkpoint_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _save_progress(
+    artifact_root: Path,
+    checkpoint_name: Optional[str],
+    payload: dict[str, Any],
+) -> Path:
+    path = _progress_path(artifact_root, checkpoint_name)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
@@ -561,6 +604,7 @@ async def import_gmail_evidence(
     checkpoint_name: Optional[str] = None,
     uid_window_size: Optional[int] = None,
     uid_range_span: int = 50000,
+    persist_to_workspace: bool = True,
     service: "ComplaintWorkspaceService" | None = None,
 ) -> dict[str, Any]:
     normalized_addresses = _normalize_addresses(addresses)
@@ -578,7 +622,7 @@ async def import_gmail_evidence(
     normalized_folders = _normalize_items(folders) if folders else []
     if not normalized_folders:
         normalized_folders = [str(folder or "INBOX").strip() or "INBOX"]
-    if service is None:
+    if persist_to_workspace and service is None:
         from applications.complaint_workspace import ComplaintWorkspaceService
 
         service = ComplaintWorkspaceService(root_dir=workspace_root_path)
@@ -595,6 +639,7 @@ async def import_gmail_evidence(
     artifact_root.mkdir(parents=True, exist_ok=True)
     checkpoint_payload = _load_checkpoint(artifact_root, checkpoint_name) if use_uid_checkpoint else None
     checkpoint_file_path = _checkpoint_path(artifact_root, checkpoint_name) if use_uid_checkpoint else None
+    progress_file_path = _progress_path(artifact_root, checkpoint_name)
 
     oauth_token_payload: dict[str, Any] | None = None
     if use_gmail_oauth:
@@ -616,10 +661,44 @@ async def import_gmail_evidence(
         skipped_count = 0
         relevance_filtered_count = 0
         searched_message_count = 0
+        checkpoint_flush_every = 50
         seen_message_headers: set[str] = set()
         global_index = 0
+
+        def _flush_incremental_progress(*, folder_name: str, folder_last_processed_uid: int) -> None:
+            nonlocal checkpoint_file_path
+            raw_email_total_bytes = sum(int(item.get("raw_size_bytes") or 0) for item in imported)
+            if use_uid_checkpoint and checkpoint_payload is not None:
+                folder_state = checkpoint_payload.setdefault("folders", {}).setdefault(folder_name, {})
+                folder_state["last_processed_uid"] = int(folder_last_processed_uid or 0)
+                folder_state["last_run_searched_message_count"] = len(message_ids)
+                folder_state["uid_range_span"] = int(uid_range_span or 0)
+                folder_state["updated_at"] = datetime.now(UTC).isoformat()
+                checkpoint_file_path = _save_checkpoint(artifact_root, checkpoint_name, checkpoint_payload)
+            _save_progress(
+                artifact_root,
+                checkpoint_name,
+                {
+                    "status": "running",
+                    "user_id": user_id,
+                    "gmail_user": gmail_user or "",
+                    "folder": folder_name,
+                    "folders": list(normalized_folders),
+                    "matched_addresses": list(normalized_addresses),
+                    "collect_all_messages": bool(collect_all_messages),
+                    "searched_message_count": int(searched_message_count),
+                    "imported_count": len(imported),
+                    "skipped_count": int(skipped_count),
+                    "relevance_filtered_count": int(relevance_filtered_count),
+                    "raw_email_total_bytes": int(raw_email_total_bytes),
+                    "checkpoint_path": str(checkpoint_file_path) if checkpoint_file_path is not None else None,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                },
+            )
+
         for folder_name in normalized_folders:
             folder_last_processed_uid = 0
+            processed_since_flush = 0
             try:
                 if use_uid_checkpoint:
                     folder_state = (checkpoint_payload or {}).setdefault("folders", {}).setdefault(folder_name, {})
@@ -642,6 +721,7 @@ async def import_gmail_evidence(
                         folder_state["historical_backfill_complete"] = bool(backfill_exhausted)
                         if folder_state["historical_backfill_complete"]:
                             folder_state["historical_backfill_completed_at"] = datetime.now(UTC).isoformat()
+                        _flush_incremental_progress(folder_name=folder_name, folder_last_processed_uid=folder_last_processed_uid)
                     else:
                         message_ids = await _search_message_uids(
                             processor.connection,
@@ -675,15 +755,22 @@ async def import_gmail_evidence(
                     raw_message = await _fetch_raw_message_by_uid(processor.connection, message_id)
                 else:
                     raw_message = await _fetch_raw_message(processor.connection, message_id)
+                processed_since_flush += 1
                 parsed_message = email.message_from_bytes(raw_message, policy=email.policy.default)
                 message_header_id = str(parsed_message.get("Message-ID") or "").strip().lower()
                 if message_header_id and message_header_id in seen_message_headers:
+                    if use_uid_checkpoint and processed_since_flush >= checkpoint_flush_every:
+                        _flush_incremental_progress(folder_name=folder_name, folder_last_processed_uid=folder_last_processed_uid)
+                        processed_since_flush = 0
                     continue
                 if message_header_id:
                     seen_message_headers.add(message_header_id)
                 header_addresses = _extract_header_addresses(parsed_message) | _extract_header_addresses_from_raw(raw_message)
                 if normalized_addresses and not collect_all_messages and not any(address in header_addresses for address in normalized_addresses):
                     skipped_count += 1
+                    if use_uid_checkpoint and processed_since_flush >= checkpoint_flush_every:
+                        _flush_incremental_progress(folder_name=folder_name, folder_last_processed_uid=folder_last_processed_uid)
+                        processed_since_flush = 0
                     continue
 
                 subject = str(parsed_message.get("Subject") or "").strip() or "Untitled email"
@@ -705,6 +792,9 @@ async def import_gmail_evidence(
                 )
                 if complaint_terms and float(relevance["score"]) < float(min_relevance_score):
                     relevance_filtered_count += 1
+                    if use_uid_checkpoint and processed_since_flush >= checkpoint_flush_every:
+                        _flush_incremental_progress(folder_name=folder_name, folder_last_processed_uid=folder_last_processed_uid)
+                        processed_since_flush = 0
                     continue
 
                 global_index += 1
@@ -714,7 +804,15 @@ async def import_gmail_evidence(
                         date_fragment = parsedate_to_datetime(email_date).strftime("%Y%m%d")
                 except Exception:
                     pass
-                message_dir = artifact_root / f"{global_index:04d}_{date_fragment}_{_slugify_fragment(subject, fallback='email')}"
+                imap_uid_value = _coerce_message_uid(message_id) if use_uid_checkpoint else 0
+                message_dir = _message_artifact_dir(
+                    artifact_root,
+                    imap_uid=imap_uid_value,
+                    message_id_header=str(parsed_message.get("Message-ID") or "").strip(),
+                    fallback_index=global_index,
+                    date_fragment=date_fragment,
+                    subject=subject,
+                )
                 message_dir.mkdir(parents=True, exist_ok=True)
 
                 eml_path = message_dir / "message.eml"
@@ -781,20 +879,22 @@ async def import_gmail_evidence(
                 if body_text:
                     summary_lines.extend(["", body_text[:4000]])
 
-                workspace_record = service.save_evidence(
-                    user_id,
-                    kind="document",
-                    claim_element_id=claim_element_id,
-                    title=f"Email import: {subject}",
-                    content="\n".join(summary_lines).strip(),
-                    source=f"gmail_imap_import:{folder_name}",
-                    attachment_names=attachment_names,
-                )
+                workspace_record = None
+                if persist_to_workspace and service is not None:
+                    workspace_record = service.save_evidence(
+                        user_id,
+                        kind="document",
+                        claim_element_id=claim_element_id,
+                        title=f"Email import: {subject}",
+                        content="\n".join(summary_lines).strip(),
+                        source=f"gmail_imap_import:{folder_name}",
+                        attachment_names=attachment_names,
+                    )
 
                 imported.append(
                     {
                         "message_id": message_id.decode("utf-8", errors="ignore"),
-                        "imap_uid": _coerce_message_uid(message_id) if use_uid_checkpoint else None,
+                        "imap_uid": imap_uid_value if use_uid_checkpoint else None,
                         "message_id_header": str(parsed_message.get("Message-ID") or "").strip(),
                         "folder": folder_name,
                         "subject": subject,
@@ -813,9 +913,13 @@ async def import_gmail_evidence(
                         "metadata_path": str(metadata_path),
                         "parsed_path": str(metadata_path),
                         "attachment_paths": [item["path"] for item in saved_attachments],
-                        "workspace_evidence_id": ((workspace_record.get("saved") or {}).get("id")),
+                        "workspace_evidence_id": (((workspace_record or {}).get("saved") or {}).get("id")),
                     }
                 )
+
+                if use_uid_checkpoint and processed_since_flush >= checkpoint_flush_every:
+                    _flush_incremental_progress(folder_name=folder_name, folder_last_processed_uid=folder_last_processed_uid)
+                    processed_since_flush = 0
 
             if use_uid_checkpoint and checkpoint_payload is not None:
                 folder_state = checkpoint_payload.setdefault("folders", {}).setdefault(folder_name, {})
@@ -823,6 +927,7 @@ async def import_gmail_evidence(
                 folder_state["last_run_searched_message_count"] = len(message_ids)
                 folder_state["uid_range_span"] = int(uid_range_span or 0)
                 folder_state["updated_at"] = datetime.now(UTC).isoformat()
+            _flush_incremental_progress(folder_name=folder_name, folder_last_processed_uid=folder_last_processed_uid)
 
         if use_uid_checkpoint and checkpoint_payload is not None:
             checkpoint_file_path = _save_checkpoint(artifact_root, checkpoint_name, checkpoint_payload)
@@ -854,6 +959,27 @@ async def import_gmail_evidence(
             checkpoint_payload=checkpoint_payload,
         )
         manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        _save_progress(
+            artifact_root,
+            checkpoint_name,
+            {
+                "status": "completed",
+                "user_id": user_id,
+                "gmail_user": gmail_user or "",
+                "folder": folder,
+                "folders": list(normalized_folders),
+                "matched_addresses": list(normalized_addresses),
+                "collect_all_messages": bool(collect_all_messages),
+                "searched_message_count": int(searched_message_count),
+                "imported_count": len(imported),
+                "skipped_count": int(skipped_count),
+                "relevance_filtered_count": int(relevance_filtered_count),
+                "raw_email_total_bytes": int(sum(int(item.get("raw_size_bytes") or 0) for item in imported)),
+                "checkpoint_path": str(checkpoint_file_path) if checkpoint_file_path is not None else None,
+                "manifest_path": str(manifest_path),
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+        )
         if use_gmail_oauth:
             manifest_payload["gmail_oauth"] = {
                 "client_secrets_path": str(Path(gmail_oauth_client_secrets).expanduser().resolve()) if gmail_oauth_client_secrets else "",
@@ -883,6 +1009,7 @@ async def import_gmail_evidence(
             "use_uid_checkpoint": bool(use_uid_checkpoint),
             "uid_window_size": int(uid_window_size) if uid_window_size is not None else None,
             "uid_range_span": int(uid_range_span or 0),
+            "persist_to_workspace": bool(persist_to_workspace),
             "searched_message_count": searched_message_count,
             "imported_count": len(imported),
             "skipped_count": skipped_count,

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 import threading
 from time import perf_counter
+from time import time
 from typing import Any
 
 from backends import LLMRouterBackend, MultimodalRouterBackend
@@ -706,6 +707,7 @@ def run_playwright_screenshot_audit(
     env.setdefault("RUN_LLM_TESTS", "1")
     env.setdefault("RUN_NETWORK_TESTS", "1")
     env.setdefault("RUN_HEAVY_TESTS", "1")
+    env["PLAYWRIGHT_TEST_PORT"] = str(19000 + (int(time() * 1000) % 1000))
     target_text = str(pytest_target or "").strip()
     if target_text.endswith(".js") or "playwright/tests/" in target_text:
         playwright_command = ["npm", "run", "test:e2e", "--", "--workers=1", target_text]

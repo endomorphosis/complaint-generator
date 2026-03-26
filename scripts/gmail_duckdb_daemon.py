@@ -71,13 +71,16 @@ def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
     artifact_root = evidence_root / str(args.user_id or "gmail-daemon") / "gmail-import"
     manifest_path = artifact_root / "email_import_manifest.json"
     checkpoint_path = artifact_root / "_state" / f"{str(args.checkpoint_name or 'default').strip() or 'default'}_checkpoint.json"
+    progress_path = artifact_root / "_state" / f"{str(args.checkpoint_name or 'default').strip() or 'default'}_progress.json"
 
     summary: dict[str, Any] = {
         "artifact_root": str(artifact_root),
         "manifest_path": str(manifest_path),
         "checkpoint_path": str(checkpoint_path),
+        "progress_path": str(progress_path),
         "manifest_exists": manifest_path.exists(),
         "checkpoint_exists": checkpoint_path.exists(),
+        "progress_exists": progress_path.exists(),
         "imported_count": 0,
         "searched_message_count": 0,
         "raw_email_total_bytes": 0,
@@ -91,16 +94,30 @@ def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
 
     if artifact_root.exists():
         try:
-            summary["artifact_directory_count"] = sum(1 for item in artifact_root.iterdir() if item.is_dir() and item.name != "_state")
+            summary["artifact_directory_count"] = sum(1 for item in artifact_root.rglob("*") if item.is_dir() and item.name != "_state" and item.parent != artifact_root / "_state")
         except Exception:
             summary["artifact_directory_count"] = 0
+
+    if progress_path.exists():
+        try:
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            summary["imported_count"] = int(progress.get("imported_count") or 0)
+            summary["searched_message_count"] = int(progress.get("searched_message_count") or 0)
+            summary["raw_email_total_bytes"] = int(progress.get("raw_email_total_bytes") or 0)
+            summary["progress_status"] = str(progress.get("status") or "")
+            summary["progress_updated_at"] = str(progress.get("updated_at") or "")
+            summary["progress_skipped_count"] = int(progress.get("skipped_count") or 0)
+            summary["progress_relevance_filtered_count"] = int(progress.get("relevance_filtered_count") or 0)
+        except Exception as exc:
+            summary["progress_error"] = str(exc)
 
     if manifest_path.exists():
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            summary["imported_count"] = int(manifest.get("imported_count") or 0)
-            summary["searched_message_count"] = int(manifest.get("searched_message_count") or 0)
-            summary["raw_email_total_bytes"] = int(manifest.get("raw_email_total_bytes") or 0)
+            if not progress_path.exists():
+                summary["imported_count"] = int(manifest.get("imported_count") or 0)
+                summary["searched_message_count"] = int(manifest.get("searched_message_count") or 0)
+                summary["raw_email_total_bytes"] = int(manifest.get("raw_email_total_bytes") or 0)
             summary["manifest_updated_at"] = datetime.fromtimestamp(manifest_path.stat().st_mtime, tz=UTC).isoformat()
         except Exception as exc:
             summary["manifest_error"] = str(exc)

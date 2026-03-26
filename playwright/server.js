@@ -972,6 +972,14 @@ function providerDiagnosticsPayload(userId = 'did:key:playwright-demo') {
     forced_provider: null,
     default_order: ['codex_cli', 'openai', 'copilot_cli', 'hf_inference_api'],
     effective_default_provider: 'codex_cli',
+    complaint_draft_default_order: ['codex_cli', 'copilot_cli', 'hf_inference_api'],
+    effective_complaint_draft_provider: 'codex_cli',
+    ui_review_default_provider: 'codex_cli',
+    ui_review_hf_fallback_model: 'Qwen/Qwen2.5-VL-7B-Instruct',
+    ui_review_multimodal_rate_limit_fallbacks: {
+      codex_cli: ['copilot_cli', 'hf_inference_api'],
+      copilot_cli: ['hf_inference_api'],
+    },
     providers: [
       {
         name: 'codex_cli',
