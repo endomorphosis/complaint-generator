@@ -249,10 +249,10 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "What is complete" in content
     assert "Exactly what to do next" in content
     assert "What still needs support" in content
-    assert "record: materially supported" in content
-    assert "record: thin corroboration" in content
-    assert "record: developing" in content
-    assert "record: early intake" in content
+    assert "readiness: intake underway" in content
+    assert "readiness: support gaps open" in content
+    assert "readiness: first draft available soon" in content
+    assert "readiness: ${sidebarCanonicalReadiness.formAssessment.label} form / ${sidebarCanonicalReadiness.supportAssessment.label} support" in content
     assert "% of workflow mapped" in content
     assert "draft-export-integrity-preview" in content
     assert "complaintSectionChecks" in content
@@ -317,6 +317,8 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert 'data-evidence-kind="testimony"' in content
     assert 'data-evidence-kind="document"' in content
     assert "draft-export-safety-preview" in content
+    assert "Open readiness check" in content
+    assert "Readiness check:" in content
     assert "Canonical filing readiness" in content
     assert "Pleading form quality:" in content
     assert "Evidence support strength:" in content
