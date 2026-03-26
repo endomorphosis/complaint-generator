@@ -2869,6 +2869,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                         <div class="tool-card">
                             <h3>Latest Review</h3>
                             <div class="chip-row" id="ux-review-metadata"></div>
+                            <div class="list" id="ux-review-runtime"></div>
                             <div class="feature-grid" id="ux-review-scorecard"></div>
                             <div class="status"><pre id="ux-review-summary">No UI review has been run yet.</pre></div>
                             <div class="list" id="ux-review-actor-critic"></div>
@@ -6716,8 +6717,15 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         function renderUiReviewScorecard(result) {
             const container = document.getElementById('ux-review-scorecard');
             const assessment = computeUiReviewAssessment(result || {});
+            const complaintSignals = extractComplaintOutputSignals(result);
             const workflowCoverage = `${assessment.testedStages.length}/7 stages`;
             const exposureCoverage = `${assessment.exposedTools.length}/${assessment.requiredTools.length} tools`;
+            const averageFilingShape = Number(complaintSignals.average_filing_shape_score || 0);
+            const averageAlignment = Number(complaintSignals.average_claim_type_alignment_score || 0);
+            const releaseGateVerdicts = Array.isArray(complaintSignals.release_gate_verdicts) ? complaintSignals.release_gate_verdicts : [];
+            const formalSectionGaps = Array.isArray(complaintSignals.formal_section_gaps) ? complaintSignals.formal_section_gaps : [];
+            const alignmentFailures = Array.isArray(complaintSignals.claim_type_alignment_failures) ? complaintSignals.claim_type_alignment_failures : [];
+            const exportFormats = Array.isArray(complaintSignals.export_formats) ? complaintSignals.export_formats : [];
             persistUiReviewAssessment(assessment, result);
             container.innerHTML = `
                 <div class="feature-item">
@@ -6759,6 +6767,23 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         <span class="chip">${escapeHtml(`${assessment.severityCounts.high} high / ${assessment.severityCounts.medium} medium / ${assessment.severityCounts.low} low`)}</span>
                     </div>
                     <span>${escapeHtml(assessment.brokenControls.length ? 'The actor/critic review still sees broken or misleading UI controls that need repair before trusting the flow.' : 'No structured broken-control findings were returned in this run.')}</span>
+                </div>
+                <div class="feature-item">
+                    <strong>Complaint output posture</strong>
+                    <div class="chip-row">
+                        ${releaseGateVerdicts.length ? `<span class="chip ${String(releaseGateVerdicts[0]).toLowerCase() === 'pass' ? 'good' : 'warn'}">release gate: ${escapeHtml(String(releaseGateVerdicts[0]))}</span>` : '<span class="chip warn">release gate: unknown</span>'}
+                        ${averageFilingShape ? `<span class="chip">${escapeHtml(`filing shape ${averageFilingShape}`)}</span>` : ''}
+                        ${averageAlignment ? `<span class="chip">${escapeHtml(`alignment ${averageAlignment}`)}</span>` : ''}
+                    </div>
+                    <span>${escapeHtml(
+                        formalSectionGaps.length
+                            ? `Formal section gaps: ${formalSectionGaps.join(', ')}.`
+                            : alignmentFailures.length
+                                ? `Claim-type alignment failures: ${alignmentFailures.join(', ')}.`
+                                : exportFormats.length
+                                    ? `Reviewed export formats: ${exportFormats.join(', ')}.`
+                                    : 'No structured complaint-output posture signals were returned.'
+                    )}</span>
                 </div>
             `;
         }
@@ -6938,9 +6963,91 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             `).join('');
         }
 
+        function renderUiReviewRuntime(result) {
+            const container = document.getElementById('ux-review-runtime');
+            if (!container) {
+                return;
+            }
+            const backend = result && result.backend && typeof result.backend === 'object'
+                ? result.backend
+                : {};
+            const strategy = String(backend.strategy || result.workflow_type || '').trim();
+            const provider = String(backend.provider || '').trim();
+            const model = String(backend.model || '').trim();
+            const fallbackFrom = String(backend.fallback_from || '').trim();
+            const fallbackError = String(backend.fallback_error || backend.multimodal_error || '').trim();
+            const timeoutSeconds = Number(backend.timeout_seconds || 0);
+            const latestProgress = result && result.latest_progress && typeof result.latest_progress === 'object'
+                ? result.latest_progress
+                : {};
+            const isFallback = strategy === 'deterministic_fallback' || Boolean(fallbackFrom);
+            const isBrowserAudit = strategy === 'browser_audit' || String(result && result.workflow_type || '').trim() === 'browser_audit';
+            const runtimeTitle = isBrowserAudit
+                ? 'Browser audit runtime'
+                : 'Review runtime';
+            let runtimeSummary = 'No runtime details were returned for this review.';
+            if (isBrowserAudit) {
+                runtimeSummary = 'This result came from the Playwright browser audit path rather than router critique.';
+            } else if (strategy === 'deterministic_fallback') {
+                runtimeSummary = 'This review used the deterministic fallback path because live router critique did not finish in time.';
+            } else if (fallbackFrom) {
+                runtimeSummary = `This review fell back from ${fallbackFrom} to ${strategy || 'a secondary router path'}.`;
+            } else if (strategy) {
+                runtimeSummary = `This review completed through the ${strategy} path.`;
+            }
+            const detailLines = [
+                strategy ? `Strategy: ${strategy}` : '',
+                provider ? `Provider: ${provider}` : '',
+                model ? `Model: ${model}` : '',
+                fallbackFrom ? `Fallback from: ${fallbackFrom}` : '',
+                timeoutSeconds > 0 ? `Timeout: ${timeoutSeconds}s` : '',
+                fallbackError ? `Fallback reason: ${fallbackError}` : '',
+            ].filter(Boolean);
+            const progressStatus = String(latestProgress.status || '').trim();
+            const progressIteration = Number(latestProgress.iteration || latestProgress.iterations_completed || 0);
+            const progressArtifactCount = Number(latestProgress.artifact_count || 0);
+            const progressSummary = isBrowserAudit
+                ? 'Workflow state: browser audit completed.'
+                : progressStatus
+                    ? `Workflow state: ${progressStatus.replace(/_/g, ' ')}.`
+                    : 'Workflow state: no persisted workflow-progress state was returned.';
+            const progressLines = [
+                progressStatus ? `Status: ${progressStatus}` : (isBrowserAudit ? 'Status: browser_audit_completed' : ''),
+                progressIteration > 0 ? `Iteration: ${progressIteration}` : '',
+                progressArtifactCount > 0 ? `Artifacts: ${progressArtifactCount}` : '',
+                latestProgress.review_json_path ? `Review JSON: ${latestProgress.review_json_path}` : '',
+                latestProgress.latest_review_json_path ? `Latest review JSON: ${latestProgress.latest_review_json_path}` : '',
+                latestProgress.stop_reason ? `Stop reason: ${latestProgress.stop_reason}` : '',
+            ].filter(Boolean);
+            container.innerHTML = `
+                <div class="item">
+                    <strong>${escapeHtml(runtimeTitle)}</strong>
+                    <div class="chip-row">
+                        ${strategy ? `<span class="chip ${isFallback ? 'warn' : 'good'}">strategy: ${escapeHtml(strategy)}</span>` : '<span class="chip warn">strategy: unknown</span>'}
+                        ${provider ? `<span class="chip">${escapeHtml(provider)}</span>` : ''}
+                        ${model ? `<span class="chip">${escapeHtml(model)}</span>` : ''}
+                        ${fallbackFrom ? `<span class="chip warn">fallback from: ${escapeHtml(fallbackFrom)}</span>` : ''}
+                    </div>
+                    <div class="muted">${escapeHtml(runtimeSummary)}</div>
+                    ${detailLines.length ? `<div class="status"><pre id="ux-review-runtime-details">${escapeHtml(detailLines.join('\n'))}</pre></div>` : ''}
+                </div>
+                <div class="item">
+                    <strong>Workflow state</strong>
+                    <div class="chip-row">
+                        ${progressStatus ? `<span class="chip ${progressStatus === 'completed' || progressStatus === 'review_written' ? 'good' : 'warn'}">status: ${escapeHtml(progressStatus)}</span>` : (isBrowserAudit ? '<span class="chip good">status: browser_audit_completed</span>' : '<span class="chip warn">status: unavailable</span>')}
+                        ${progressIteration > 0 ? `<span class="chip">iteration: ${escapeHtml(String(progressIteration))}</span>` : ''}
+                        ${progressArtifactCount > 0 ? `<span class="chip">artifacts: ${escapeHtml(String(progressArtifactCount))}</span>` : ''}
+                    </div>
+                    <div class="muted">${escapeHtml(progressSummary)}</div>
+                    ${progressLines.length ? `<div class="status"><pre id="ux-review-progress-details">${escapeHtml(progressLines.join('\n'))}</pre></div>` : ''}
+                </div>
+            `;
+        }
+
         function renderUiReviewResult(result) {
             const metadata = document.getElementById('ux-review-metadata');
             const summary = document.getElementById('ux-review-summary');
+            const runtime = document.getElementById('ux-review-runtime');
             const issues = document.getElementById('ux-review-issues');
             const runs = document.getElementById('ux-review-runs');
             const artifacts = document.getElementById('ux-review-artifacts');
@@ -6973,6 +7080,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : result && result.carry_forward_assessment && typeof result.carry_forward_assessment === 'object'
                     ? result.carry_forward_assessment
                     : {};
+            const complaintOutputSignals = extractComplaintOutputSignals(result);
             const backendStrategy = result && result.backend && result.backend.strategy ? result.backend.strategy : '';
 
             metadata.innerHTML = [
@@ -6984,11 +7092,17 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 result && result.output_dir ? `<span class="chip">output: ${escapeHtml(String(result.output_dir))}</span>` : '',
                 screenshotFindings.length ? `<span class="chip">screenshot findings: ${escapeHtml(String(screenshotFindings.length))}</span>` : '',
                 optimizationTargets.length ? `<span class="chip">optimization targets: ${escapeHtml(String(optimizationTargets.length))}</span>` : '',
+                Number(complaintOutputSignals.average_filing_shape_score || 0) ? `<span class="chip">filing shape: ${escapeHtml(String(complaintOutputSignals.average_filing_shape_score))}</span>` : '',
+                Number(complaintOutputSignals.average_claim_type_alignment_score || 0) ? `<span class="chip">alignment: ${escapeHtml(String(complaintOutputSignals.average_claim_type_alignment_score))}</span>` : '',
+                Array.isArray(complaintOutputSignals.release_gate_verdicts) && complaintOutputSignals.release_gate_verdicts.length ? `<span class="chip warn">release gate: ${escapeHtml(String(complaintOutputSignals.release_gate_verdicts[0]))}</span>` : '',
                 Array.isArray(carryForward.unresolved_findings) && carryForward.unresolved_findings.length ? `<span class="chip warn">unresolved prior findings: ${escapeHtml(String(carryForward.unresolved_findings.length))}</span>` : '',
                 result && result.latest_review_markdown_path ? `<span class="chip">latest markdown: ${escapeHtml(String(result.latest_review_markdown_path))}</span>` : '',
             ].filter(Boolean).join('');
 
             summary.textContent = normalizeUiReviewSummary(result);
+            if (runtime) {
+                renderUiReviewRuntime(result);
+            }
             renderUiReviewScorecard(result);
             renderActorCriticResult(result);
             renderStageFindings(result);
@@ -7080,6 +7194,23 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                                 </div>
                             </div>
                         ` : ''}
+                        ${(Array.isArray(complaintOutputSignals.release_gate_verdicts) && complaintOutputSignals.release_gate_verdicts.length) || (Array.isArray(complaintOutputSignals.formal_section_gaps) && complaintOutputSignals.formal_section_gaps.length) || (Array.isArray(complaintOutputSignals.claim_type_alignment_failures) && complaintOutputSignals.claim_type_alignment_failures.length) ? `
+                            <div class="item">
+                                <strong>Complaint-output signals</strong>
+                                <div class="chip-row">
+                                    ${Array.isArray(complaintOutputSignals.release_gate_verdicts) && complaintOutputSignals.release_gate_verdicts.length ? `<span class="chip warn">release gate: ${escapeHtml(String(complaintOutputSignals.release_gate_verdicts[0]))}</span>` : ''}
+                                    ${Number(complaintOutputSignals.average_filing_shape_score || 0) ? `<span class="chip">${escapeHtml(`filing shape ${String(complaintOutputSignals.average_filing_shape_score)}`)}</span>` : ''}
+                                    ${Number(complaintOutputSignals.average_claim_type_alignment_score || 0) ? `<span class="chip">${escapeHtml(`alignment ${String(complaintOutputSignals.average_claim_type_alignment_score)}`)}</span>` : ''}
+                                </div>
+                                <div class="muted">${escapeHtml(
+                                    Array.isArray(complaintOutputSignals.formal_section_gaps) && complaintOutputSignals.formal_section_gaps.length
+                                        ? `Formal section gaps: ${complaintOutputSignals.formal_section_gaps.join(', ')}.`
+                                        : Array.isArray(complaintOutputSignals.claim_type_alignment_failures) && complaintOutputSignals.claim_type_alignment_failures.length
+                                            ? `Claim-type alignment failures: ${complaintOutputSignals.claim_type_alignment_failures.join(', ')}.`
+                                            : 'The optimizer did not return additional complaint-output signal details.'
+                                )}</div>
+                            </div>
+                        ` : ''}
                     `
                 : '<div class="item"><strong>No optimizer artifacts yet.</strong><div class="muted">Run closed-loop optimization to capture patch paths, CIDs, and changed files.</div></div>';
 
@@ -7095,9 +7226,59 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : '<div class="item"><strong>No follow-up actions listed.</strong><div class="muted">Run another review after a UI pass to collect the next recommended screenshot assertions.</div></div>';
         }
 
+        function extractComplaintOutputSignals(result) {
+            const directSignals = result && result.review && typeof result.review === 'object' && result.review.complaint_output_signals && typeof result.review.complaint_output_signals === 'object'
+                ? result.review.complaint_output_signals
+                : result && result.complaint_output_signals && typeof result.complaint_output_signals === 'object'
+                    ? result.complaint_output_signals
+                    : null;
+            if (directSignals) {
+                return directSignals;
+            }
+            const outputAnalysis = latestComplaintOutputAnalysis || null;
+            const uiFeedback = outputAnalysis && typeof outputAnalysis === 'object'
+                ? (outputAnalysis.ui_feedback && typeof outputAnalysis.ui_feedback === 'object' ? outputAnalysis.ui_feedback : outputAnalysis)
+                : null;
+            if (!uiFeedback || typeof uiFeedback !== 'object') {
+                return {};
+            }
+            const releaseGate = uiFeedback.release_gate && typeof uiFeedback.release_gate === 'object' ? uiFeedback.release_gate : {};
+            const formalSectionsPresent = uiFeedback.formal_sections_present && typeof uiFeedback.formal_sections_present === 'object' ? uiFeedback.formal_sections_present : {};
+            const claimTypeAlignment = uiFeedback.claim_type_alignment && typeof uiFeedback.claim_type_alignment === 'object' ? uiFeedback.claim_type_alignment : {};
+            const formalSectionGaps = Object.entries(formalSectionsPresent)
+                .filter(([, present]) => !present)
+                .map(([name]) => String(name || '').trim())
+                .filter(Boolean);
+            const claimTypeAlignmentFailures = Object.entries(claimTypeAlignment)
+                .filter(([, matches]) => matches === false)
+                .map(([name]) => String(name || '').trim())
+                .filter(Boolean);
+            const exportFormats = latestPacketExport && latestPacketExport.artifacts && typeof latestPacketExport.artifacts === 'object'
+                ? Object.keys(latestPacketExport.artifacts).filter(Boolean)
+                : ['markdown', 'pdf', 'docx'];
+            return {
+                export_artifact_count: latestPacketExport ? 1 : 0,
+                claim_types: releaseGate.claim_type_label ? [String(releaseGate.claim_type_label)] : [],
+                draft_strategies: releaseGate.draft_strategy ? [String(releaseGate.draft_strategy)] : [],
+                filing_shape_scores: Number.isFinite(Number(uiFeedback.filing_shape_score)) ? [Number(uiFeedback.filing_shape_score)] : [],
+                claim_type_alignment_scores: Number.isFinite(Number(uiFeedback.claim_type_alignment_score)) ? [Number(uiFeedback.claim_type_alignment_score)] : [],
+                average_filing_shape_score: Number(uiFeedback.filing_shape_score || 0),
+                average_claim_type_alignment_score: Number(uiFeedback.claim_type_alignment_score || 0),
+                release_gate_verdicts: releaseGate.verdict ? [String(releaseGate.verdict)] : [],
+                release_gate_blocking_reasons: releaseGate.reason ? [String(releaseGate.reason)] : [],
+                formal_section_gaps: formalSectionGaps,
+                claim_type_alignment_failures: claimTypeAlignmentFailures,
+                export_formats: exportFormats,
+                ui_suggestion_hints: Array.isArray(uiFeedback.ui_suggestions)
+                    ? uiFeedback.ui_suggestions.map((item) => String((item && (item.title || item.recommendation)) || '').trim()).filter(Boolean)
+                    : [],
+            };
+        }
+
         function renderBrowserAuditResult(result) {
             const metadata = document.getElementById('ux-review-metadata');
             const summary = document.getElementById('ux-review-summary');
+            const runtime = document.getElementById('ux-review-runtime');
             const actorCritic = document.getElementById('ux-review-actor-critic');
             const repairBrief = document.getElementById('ux-review-repair-brief');
             const stageFindings = document.getElementById('ux-review-stage-findings');
@@ -7118,6 +7299,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             summary.textContent = artifactCount
                 ? `End-to-end complaint browser audit completed with ${artifactCount} screenshot artifact${artifactCount === 1 ? '' : 's'}.`
                 : 'End-to-end complaint browser audit completed, but no screenshot artifacts were returned.';
+            if (runtime) {
+                renderUiReviewRuntime(Object.assign({}, result, {
+                    workflow_type: 'browser_audit',
+                    latest_progress: {
+                        status: 'browser_audit_completed',
+                        artifact_count,
+                    },
+                    backend: {
+                        strategy: 'browser_audit',
+                    },
+                }));
+            }
 
             document.getElementById('ux-review-scorecard').innerHTML = `
                 <div class="feature-item">

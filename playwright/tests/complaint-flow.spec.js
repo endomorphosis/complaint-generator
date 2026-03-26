@@ -9,7 +9,7 @@ async function waitForWorkspaceReady(page, { requireIntakeVisible = true } = {})
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await expect(page.locator('#sdk-server-info')).toContainText(/complaint-workspace-mcp/i, { timeout: 20000 });
+      await expect(page.locator('#sdk-server-info')).toContainText(/complaint-workspace-(mcp|mock)/i, { timeout: 20000 });
       await expect(page.locator('#workspace-status')).toContainText(/synchronized|workspace ready|opened workspace|returned from|draft generated|intake answers saved|complaint readiness refreshed/i, { timeout: 20000 });
       await expect(page.locator('body')).toHaveAttribute('data-workspace-hydrated', /ready|partial/, { timeout: 20000 });
       if (requireIntakeVisible) {
@@ -628,17 +628,26 @@ test.describe('complaint generation workflow', () => {
     await page.locator('#ux-review-model').fill('multimodal_router');
     await page.locator('#run-ux-review-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Iterative UI\/UX review completed\./i, { timeout: 15000 });
+    await expect(page.locator('#ux-review-runtime')).toContainText(/Review runtime/i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/strategy:\s*(deterministic_fallback|llm_router|multimodal_router)/i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/completed through|fell back|deterministic fallback/i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/Workflow state/i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/status:\s*completed/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/llm_router/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/multimodal_router/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/Tighten review-to-draft gatekeeping/i);
     await expect(page.locator('#ux-review-scorecard')).toContainText(/7\/7 tools|7\/7 stages|7 stages/i);
     await expect(page.locator('#ux-review-scorecard')).toContainText(/complaint\.import_gmail_evidence/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/Complaint output posture/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/release gate: (warning|blocked)/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/filing shape/i);
     await expect(page.locator('#ux-review-actor-critic')).toContainText(/actor/i);
     await expect(page.locator('#ux-review-actor-critic')).toContainText(/critic/i);
     await expect(page.locator('#ux-review-actor-critic')).toContainText(/complaint\.import_gmail_evidence/i);
     await expect(page.locator('#ux-review-issues')).toContainText(/Export controls can still visually outrank the release gate/i);
     await expect(page.locator('#ux-review-stage-findings')).toContainText(/Complaint-output suggestion carried into router review/i);
     await expect(page.locator('#ux-review-stage-findings')).toContainText(/Gmail import affordance/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/Formal section gaps:/i);
     await expect(page.locator('#ux-review-followups')).toContainText(/Gmail import/i);
 
     await page.locator('#run-ux-closed-loop-button').click();
@@ -648,6 +657,9 @@ test.describe('complaint generation workflow', () => {
 
     await page.locator('#run-browser-audit-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/End-to-end complaint browser audit completed\./i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/Browser audit runtime/i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/strategy: browser_audit/i);
+    await expect(page.locator('#ux-review-runtime')).toContainText(/status:\s*browser_audit_completed/i);
     await expect(page.locator('#ux-review-summary')).toContainText(/End-to-end complaint browser audit completed with 6 screenshot artifacts\./i);
     await expect(page.locator('#ux-review-stage-findings')).toContainText(/Lawsuit-generation browser audit/i);
 
@@ -669,6 +681,62 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('title', /Download is blocked until/i);
     await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('data-download-url', /output_format=markdown/);
     await expect(page.locator('#draft-release-gate-summary')).toContainText(/Download blockers:/i);
+  });
+
+  test('workspace Gmail DuckDB controls run through the browser MCP flow and surface searchable evidence results', async ({ page }) => {
+    const recorder = {};
+    const did = `did:key:workspace-gmail-duckdb-${Date.now()}`;
+    await installCommonMocks(page, recorder);
+    await page.addInitScript((value) => {
+      window.localStorage.setItem('complaintGenerator.did', value);
+    }, did);
+    await page.goto('/workspace');
+    await waitForWorkspaceReady(page);
+
+    await page.getByRole('button', { name: 'Evidence', exact: true }).click();
+    await expect(page.locator('[data-tab-panel="evidence"]')).toHaveClass(/is-active/);
+    await expect(page.locator('#run-gmail-duckdb-pipeline-button')).toBeVisible();
+    await expect(page.locator('#search-email-duckdb-button')).toBeVisible();
+    await expect(page.locator('#gmail-import-cli-command')).toContainText(/import-gmail-evidence/i);
+    await expect(page.locator('#gmail-pipeline-summary-preview')).toContainText(/No Gmail DuckDB pipeline has been run/i);
+    await expect(page.locator('#email-duckdb-search-preview')).toContainText(/No DuckDB email search has been run/i);
+
+    await page.locator('#gmail-import-addresses').fill('hr@acme.example\nlegal@acme.example');
+    await page.locator('#gmail-import-user').fill('workspace-user@acme.example');
+    await page.locator('#gmail-import-password').fill('app-password-for-playwright');
+    await page.locator('#gmail-import-complaint-query').fill('subject:(termination OR retaliation)');
+    await page.locator('#gmail-pipeline-bm25-query').fill('termination retaliation timeline');
+    await page.locator('#run-gmail-duckdb-pipeline-button').click();
+
+    await expect(page.locator('#workspace-status')).toContainText(/Gmail DuckDB pipeline completed with 2 imported message\(s\)\./i);
+    await expect(page.locator('#gmail-pipeline-summary-preview')).toContainText(/Pipeline: gmail_duckdb_pipeline/i);
+    await expect(page.locator('#gmail-pipeline-summary-preview')).toContainText(/Imported count: 2/i);
+    await expect(page.locator('#gmail-pipeline-summary-preview')).toContainText(/BM25 query: termination retaliation timeline/i);
+    await expect(page.locator('#gmail-pipeline-summary-preview')).toContainText(/DuckDB path: \/tmp\/playwright-email-corpus\.duckdb/i);
+    await expect(page.locator('#gmail-pipeline-summary-chips')).toContainText(/duckdb ready/i);
+    await expect(page.locator('#email-duckdb-index-path')).toHaveValue('/tmp/playwright-email-corpus.duckdb');
+
+    await page.locator('#email-duckdb-query').fill('retaliation follow-up');
+    await page.locator('#search-email-duckdb-button').click();
+
+    await expect(page.locator('#workspace-status')).toContainText(/DuckDB email search completed with 2 hit\(s\)\./i);
+    await expect(page.locator('#email-duckdb-search-preview')).toContainText(/Query: retaliation follow-up/i);
+    await expect(page.locator('#email-duckdb-search-preview')).toContainText(/Index path: \/tmp\/playwright-email-corpus\.duckdb/i);
+    await expect(page.locator('#email-duckdb-search-preview')).toContainText(/Top results:/i);
+    await expect(page.locator('#email-duckdb-search-preview')).toContainText(/Termination email/i);
+    await expect(page.locator('#email-duckdb-search-preview')).toContainText(/HR retaliation follow-up/i);
+
+    await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
+    await page.locator('#refresh-tooling-contract-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Tooling contract refreshed\./i);
+    await expect(page.locator('#tool-list')).toContainText(/complaint\.run_gmail_duckdb_pipeline/i);
+    await expect(page.locator('#tool-list')).toContainText(/complaint\.search_email_duckdb_corpus/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/run_gmail_duckdb_pipeline/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/search_email_duckdb_corpus/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/runGmailDuckdbPipeline/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/searchEmailDuckdb/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/gmail_duckdb_pipeline/i);
+    await expect(page.locator('#tooling-contract-preview')).toContainText(/email_duckdb_search/i);
   });
 
   test('homepage to workspace journey ends with an actual generated complaint, downloadable markdown/pdf exports, and packet analysis', async ({ page }, testInfo) => {

@@ -163,3 +163,55 @@ def test_build_email_duckdb_index_can_append_manifests(tmp_path: Path) -> None:
     assert summary_one["append_mode"] is False
     assert summary_two["append_mode"] is True
     assert search_payload["result_count"] == 2
+
+
+def test_search_email_duckdb_index_falls_back_to_weighted_when_bm25_tables_are_empty(tmp_path: Path) -> None:
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    (bundle_dir / "message.eml").write_bytes(
+        (
+            b"From: hr@example.com\r\n"
+            b"To: employee@example.com\r\n"
+            b"Subject: Care card cancellation\r\n"
+            b"Message-ID: <msg-fallback@example.test>\r\n"
+            b"\r\n"
+            b"Care card cancellation details.\r\n"
+        )
+    )
+    manifest_path = tmp_path / "email_import_manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "emails": [
+                    {
+                        "subject": "Care card cancellation",
+                        "from": "hr@example.com",
+                        "to": "employee@example.com",
+                        "message_id_header": "<msg-fallback@example.test>",
+                        "bundle_dir": str(bundle_dir),
+                        "eml_path": str(bundle_dir / "message.eml"),
+                        "attachment_paths": [],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = build_email_duckdb_index(manifest_path=manifest_path, output_dir=tmp_path / "duckdb")
+    con = duckdb.connect(summary["duckdb_path"])
+    con.execute("DELETE FROM email_bm25_documents")
+    con.execute("DELETE FROM email_bm25_terms")
+    con.close()
+
+    search_payload = search_email_duckdb_index(
+        index_path=summary["duckdb_path"],
+        query="care card cancellation",
+        limit=5,
+        ranking="bm25",
+    )
+
+    assert search_payload["status"] == "success"
+    assert search_payload["ranking"] == "weighted"
+    assert search_payload["result_count"] == 1
+    assert search_payload["results"][0]["subject"] == "Care card cancellation"

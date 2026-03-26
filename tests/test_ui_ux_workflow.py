@@ -65,8 +65,14 @@ def test_build_ui_ux_review_prompt_includes_artifacts_and_surface_contract(tmp_p
                     "complaint_heading_matches": False,
                     "count_heading_matches": False,
                 },
+                "release_gate": {
+                    "verdict": "warning",
+                    "blocking_reason": "Formal section gaps remain before export.",
+                },
+                "formal_section_gaps": ["jurisdiction_and_venue", "signature_block"],
                 "markdown_filename": "jordan-example-complaint.md",
                 "pdf_filename": "jordan-example-complaint.pdf",
+                "docx_filename": "jordan-example-complaint.docx",
                 "markdown_excerpt": "Jordan Example brings this retaliation complaint against Acme Corporation.",
                 "pdf_header": "%PDF-1.4",
                 "ui_suggestions_excerpt": "Add stronger export warnings when support gaps remain.",
@@ -103,18 +109,37 @@ def test_build_ui_ux_review_prompt_includes_artifacts_and_surface_contract(tmp_p
     assert "Claim type: retaliation" in prompt
     assert "Draft strategy: llm_router" in prompt
     assert "Filing shape score: 86" in prompt
+    assert "Claim type alignment score: 35" in prompt
+    assert "Release gate verdict: warning" in prompt
+    assert "Release gate blocking reason: Formal section gaps remain before export." in prompt
+    assert "Formal section gaps:" in prompt
+    assert "jurisdiction_and_venue" in prompt
+    assert "signature_block" in prompt
     assert "formal pleading" in prompt
     assert "jurisdiction or venue section" in prompt
     assert "markdown, PDF, and docx downloads succeed" in prompt
     assert "claim-type alignment data" in prompt
     assert "Add stronger export warnings when support gaps remain." in prompt
+    assert "Complaint output summary across artifacts:" in prompt
+    assert "\"average_claim_type_alignment_score\": 35" in prompt
+    assert "\"average_filing_shape_score\": 86" in prompt
+    assert "\"release_gate_verdicts\": [" in prompt
+    assert "\"export_formats\": [" in prompt
     assert "complaint_generator.analyze_complaint_output" in prompt
+    assert "complaint_generator.run_gmail_duckdb_pipeline" in prompt
+    assert "complaint_generator.search_email_duckdb_corpus" in prompt
     assert "complaint-workspace export-markdown" in prompt
     assert "complaint-workspace export-pdf" in prompt
+    assert "complaint-workspace run-gmail-duckdb-pipeline" in prompt
+    assert "complaint-workspace search-email-duckdb" in prompt
     assert "complaint-workspace analyze-output" in prompt
     assert "complaint.analyze_complaint_output" in prompt
+    assert "complaint.run_gmail_duckdb_pipeline" in prompt
+    assert "complaint.search_email_duckdb_corpus" in prompt
     assert "exportComplaintMarkdown()" in prompt
     assert "exportComplaintPdf()" in prompt
+    assert "runGmailDuckdbPipeline()" in prompt
+    assert "searchEmailDuckdb()" in prompt
     assert "analyzeComplaintOutput()" in prompt
     assert "Use the screenshot evidence together with any complaint-output analysis excerpts" in prompt
     assert "claim type, draft strategy, and exported complaint filing quality remain aligned" in prompt
@@ -392,6 +417,7 @@ Warning: the flow is usable, but the screenshots still show misleading hierarchy
     assert len(structured["screenshot_findings"]) == 2
     assert structured["screenshot_findings"][0]["criticisms"]
     assert structured["optimization_targets"][0]["target_surface"]
+    assert structured["complaint_output_signals"]["export_artifact_count"] == 0
 
 
 def test_structure_ui_ux_review_builds_carry_forward_assessment_from_cached_ui_review_artifact(tmp_path):
@@ -445,6 +471,51 @@ Warning: the draft flow still needs a clearer next step.
     assert carry_forward["resolved_findings"][0]["stage"] == "Review"
     assert carry_forward["continued_optimization_targets"][0]["title"] == "UX repair 1"
     assert "still appear unresolved" in carry_forward["summary"]
+
+
+def test_structure_ui_ux_review_carries_complaint_output_signals_into_draft_stage_when_sections_are_missing(tmp_path):
+    _write_artifact(tmp_path, "workspace-draft", url="http://example.test/workspace?tab=draft")
+    artifacts = workflow_module.collect_screenshot_artifacts(tmp_path)
+    artifacts.append(
+        {
+            "name": "workspace-export-artifacts",
+            "artifact_type": "complaint_export",
+            "claim_type": "retaliation",
+            "draft_strategy": "llm_router",
+            "filing_shape_score": 78,
+            "claim_type_alignment_score": 42,
+            "release_gate": {"verdict": "warning", "blocking_reason": "Count heading is inconsistent."},
+            "formal_section_gaps": ["signature_block"],
+            "claim_type_alignment": {
+                "complaint_heading_matches": True,
+                "count_heading_matches": False,
+            },
+            "markdown_filename": "complaint.md",
+            "pdf_filename": "complaint.pdf",
+            "docx_filename": "complaint.docx",
+            "ui_suggestions_excerpt": "Keep the count heading warning visible before export.",
+        }
+    )
+
+    review_text = """# Top Risks
+- The draft/export surface still lets users miss a critical warning.
+
+# High-Impact UX Fixes
+- Keep formal complaint warnings pinned beside download controls.
+
+# Critic Verdict
+Warning: the draft still needs a stronger legal-output warning.
+"""
+
+    structured = structure_ui_ux_review(review_text=review_text, artifacts=artifacts, iteration=1)
+
+    assert structured["stage_findings"]["Draft"].startswith("The audited complaint output still shows a signature block gap")
+    assert structured["complaint_output_signals"]["average_filing_shape_score"] == 78
+    assert structured["complaint_output_signals"]["average_claim_type_alignment_score"] == 42
+    assert structured["complaint_output_signals"]["release_gate_verdicts"] == ["warning"]
+    assert structured["complaint_output_signals"]["formal_section_gaps"] == ["signature_block"]
+    assert structured["complaint_output_signals"]["claim_type_alignment_failures"] == ["count_heading_matches"]
+    assert structured["complaint_output_signals"]["export_formats"] == ["markdown", "pdf", "docx"]
 
 
 def test_review_workflow_routes_complaint_output_analysis_into_multimodal_prompt(monkeypatch, tmp_path):
@@ -667,7 +738,13 @@ def test_iterative_workflow_writes_completed_review_when_router_paths_timeout(mo
     )
 
     assert result["iterations"] == 1
+    assert result["backend"]["strategy"] == "deterministic_fallback"
+    assert "vision timed out" in result["backend"]["multimodal_error"]
+    assert "text timed out" in result["backend"]["fallback_error"]
+    assert result["latest_progress"]["status"] == "completed"
+    assert result["latest_progress"]["iterations_completed"] == 1
     assert result["review"]["critic_review"]["verdict"] == "warning"
+    assert result["runs"][0]["backend"]["strategy"] == "deterministic_fallback"
     assert result["runs"][0]["issues_count"] >= 1
     progress_payload = json.loads((output_dir / "workflow-progress.json").read_text())
     assert progress_payload["status"] == "completed"

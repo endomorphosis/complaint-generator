@@ -509,6 +509,8 @@ const workspaceToolList = [
   { name: 'complaint.submit_intake', description: 'Save complaint intake answers.' },
   { name: 'complaint.save_evidence', description: 'Save testimony or document evidence to the workspace.' },
   { name: 'complaint.import_gmail_evidence', description: 'Import matching Gmail messages and attachments into the complaint evidence workspace.' },
+  { name: 'complaint.run_gmail_duckdb_pipeline', description: 'Import Gmail evidence, build a DuckDB corpus, and optionally run an initial BM25 search for complaint support.' },
+  { name: 'complaint.search_email_duckdb_corpus', description: 'Search the generated email DuckDB corpus for complaint-supporting records and attachments.' },
   { name: 'complaint.review_case', description: 'Return the current support matrix and evidence review.' },
   { name: 'complaint.build_mediator_prompt', description: 'Build a testimony-ready chat mediator prompt from the shared case synopsis and support gaps.' },
   { name: 'complaint.get_complaint_readiness', description: 'Estimate whether the current complaint record is ready for drafting, still building, or already in draft refinement.' },
@@ -974,6 +976,8 @@ function buildWorkspaceToolingContract(userId) {
     'get_filing_provenance',
     'get_provider_diagnostics',
     'import_gmail_evidence',
+    'run_gmail_duckdb_pipeline',
+    'search_email_duckdb_corpus',
     'update_claim_type',
     'update_case_synopsis',
     'review_generated_exports',
@@ -986,6 +990,8 @@ function buildWorkspaceToolingContract(userId) {
     'answer',
     'save-evidence',
     'import-gmail-evidence',
+    'run-gmail-duckdb-pipeline',
+    'search-email-duckdb',
     'tooling-contract',
     'set-claim-type',
     'update-synopsis',
@@ -1007,6 +1013,8 @@ function buildWorkspaceToolingContract(userId) {
     'submitIntake',
     'saveEvidence',
     'importGmailEvidence',
+    'runGmailDuckdbPipeline',
+    'searchEmailDuckdb',
     'buildMediatorPrompt',
     'getComplaintReadiness',
     'getUiReadiness',
@@ -1075,6 +1083,22 @@ function buildWorkspaceToolingContract(userId) {
       cli_command: 'import-gmail-evidence',
       mcp_tool: 'complaint.import_gmail_evidence',
       browser_sdk_method: 'importGmailEvidence',
+      exposed_everywhere: true,
+    },
+    {
+      id: 'gmail_duckdb_pipeline',
+      package_export: 'run_gmail_duckdb_pipeline',
+      cli_command: 'run-gmail-duckdb-pipeline',
+      mcp_tool: 'complaint.run_gmail_duckdb_pipeline',
+      browser_sdk_method: 'runGmailDuckdbPipeline',
+      exposed_everywhere: true,
+    },
+    {
+      id: 'email_duckdb_search',
+      package_export: 'search_email_duckdb_corpus',
+      cli_command: 'search-email-duckdb',
+      mcp_tool: 'complaint.search_email_duckdb_corpus',
+      browser_sdk_method: 'searchEmailDuckdb',
       exposed_everywhere: true,
     },
     {
@@ -1403,6 +1427,13 @@ function buildWorkspaceComplaintOutputAnalysis(state) {
 function buildWorkspaceUiReviewResult(state, toolArgs = {}) {
   const analysis = buildWorkspaceComplaintOutputAnalysis(state);
   const suggestion = (((analysis.ui_feedback || {}).ui_suggestions || [])[0]) || {};
+  const formalSectionGaps = Object.entries((analysis.ui_feedback || {}).formal_sections_present || {})
+    .filter(([, present]) => !present)
+    .map(([name]) => name);
+  const claimTypeAlignment = (analysis.ui_feedback || {}).claim_type_alignment || {};
+  const claimTypeAlignmentFailures = Object.entries(claimTypeAlignment)
+    .filter(([, matches]) => matches === false)
+    .map(([name]) => name);
   const routerLabel = [toolArgs.provider, toolArgs.model].filter(Boolean).join(' / ') || 'default llm_router multimodal_router path';
   const complaintJourney = {
     tested_stages: ['chat', 'intake', 'evidence', 'review', 'draft', 'integrations', 'optimizer'],
@@ -1423,6 +1454,18 @@ function buildWorkspaceUiReviewResult(state, toolArgs = {}) {
   };
   return {
     latest_review: `Complaint-output suggestion carried into router review: ${String(suggestion.title || 'Promote complaint-output blockers')} via ${routerLabel}.`,
+    backend: {
+      strategy: 'multimodal_router',
+      provider: String(toolArgs.provider || 'llm_router'),
+      model: String(toolArgs.model || 'multimodal_router'),
+      timeout_seconds: 10,
+    },
+    latest_progress: {
+      status: 'completed',
+      iterations_completed: 1,
+      artifact_count: 6,
+      latest_review_json_path: 'artifacts/ui-optimizer-run/iteration-01-review.json',
+    },
     review: {
       summary: `Workspace mock review completed with ${routerLabel}. Complaint-output suggestion: ${String(suggestion.title || 'Promote complaint-output blockers')}.`,
       issues: [
@@ -1499,6 +1542,21 @@ function buildWorkspaceUiReviewResult(state, toolArgs = {}) {
         'Verify the release gate remains visible after export analysis and before download.',
         'Verify Gmail-imported evidence remains visible in the evidence list and review posture.',
       ],
+      complaint_output_signals: {
+        export_artifact_count: 1,
+        claim_types: [state.claim_type],
+        draft_strategies: [state.draft && state.draft.draft_strategy ? state.draft.draft_strategy : 'template'],
+        filing_shape_scores: [analysis.ui_feedback.filing_shape_score || 0],
+        claim_type_alignment_scores: [analysis.ui_feedback.claim_type_alignment_score || 0],
+        average_filing_shape_score: analysis.ui_feedback.filing_shape_score || 0,
+        average_claim_type_alignment_score: analysis.ui_feedback.claim_type_alignment_score || 0,
+        release_gate_verdicts: [((analysis.ui_feedback.release_gate || {}).verdict || 'warning')],
+        release_gate_blocking_reasons: [((analysis.ui_feedback.release_gate || {}).reason || 'Formal complaint posture still needs visible validation.')],
+        formal_section_gaps: formalSectionGaps,
+        claim_type_alignment_failures: claimTypeAlignmentFailures,
+        export_formats: ['markdown', 'pdf', 'docx'],
+        ui_suggestion_hints: (analysis.ui_feedback.ui_suggestions || []).map((item) => item.title || item.recommendation).filter(Boolean),
+      },
       playwright_followups: [
         'Capture the draft panel after export analysis so the release gate and complaint-output guidance remain visible.',
         'Capture the evidence panel after Gmail import to confirm imported documents stay legible in the case record.',
@@ -1520,6 +1578,11 @@ function buildWorkspaceUiOptimizationResult(state, toolArgs = {}) {
   return {
     workflow_type: 'ui_ux_closed_loop',
     rounds_executed: 1,
+    latest_progress: {
+      status: 'completed',
+      stop_reason: 'max_rounds_reached',
+      artifact_count: 6,
+    },
     latest_validation_review: `The optimizer path itself should stay discoverable from the shared dashboard shortcuts and tool panels. Complaint-output suggestion carried into optimization: ${String(suggestion.title || 'Promote complaint-output blockers')} via ${routerLabel}.`,
     changed_files: ['templates/workspace.html'],
   };
@@ -1793,6 +1856,60 @@ async function installCommonMocks(page, recorder = {}, options = {}) {
         review: buildWorkspaceReview(state),
         session: clone(state),
         case_synopsis: buildWorkspaceCaseSynopsis(state),
+      };
+    }
+    if (name === 'complaint.run_gmail_duckdb_pipeline') {
+      const addresses = Array.isArray(toolArgs.addresses) ? toolArgs.addresses.filter(Boolean) : [];
+      const importedRecords = addresses.map((address, index) => {
+        const collection = state.evidence.documents;
+        const record = {
+          id: `documents-${collection.length + 1}`,
+          kind: 'document',
+          claim_element_id: String(toolArgs.claim_element_id || 'causation'),
+          title: `DuckDB Gmail import ${index + 1}`,
+          content: `Pipeline-ingested Gmail evidence matched from ${String(address)}.`,
+          source: `gmail-duckdb:${String(address)}`,
+          attachment_names: [`gmail-duckdb-${index + 1}.eml`],
+          saved_at: '2026-03-22T12:14:00Z',
+        };
+        collection.push(record);
+        return record;
+      });
+      const bm25Query = String(toolArgs.bm25_search_query || '').trim();
+      return {
+        user_id: state.user_id,
+        pipeline: 'gmail_duckdb_pipeline',
+        imported_count: importedRecords.length,
+        searched_message_count: Math.max(importedRecords.length, 3),
+        imported_records: clone(importedRecords),
+        manifest_path: '/tmp/playwright-gmail-import-manifest.json',
+        duckdb_index: {
+          duckdb_path: '/tmp/playwright-email-corpus.duckdb',
+          parquet_path: '/tmp/playwright-email-corpus.parquet',
+        },
+        bm25_search: bm25Query ? {
+          query: bm25Query,
+          result_count: 2,
+          results: [
+            { id: 'email-1', subject: 'Termination email', score: 12.4 },
+            { id: 'email-2', subject: 'HR retaliation follow-up', score: 9.1 },
+          ],
+        } : null,
+        review: buildWorkspaceReview(state),
+        session: clone(state),
+        case_synopsis: buildWorkspaceCaseSynopsis(state),
+      };
+    }
+    if (name === 'complaint.search_email_duckdb_corpus') {
+      return {
+        index_path: String(toolArgs.index_path || '/tmp/playwright-email-corpus.duckdb'),
+        query: String(toolArgs.query || ''),
+        ranking: String(toolArgs.ranking || 'bm25'),
+        result_count: 2,
+        results: [
+          { id: 'email-1', subject: 'Termination email', score: 12.4 },
+          { id: 'email-2', subject: 'HR retaliation follow-up', score: 9.1 },
+        ],
       };
     }
     if (name === 'complaint.build_mediator_prompt') {

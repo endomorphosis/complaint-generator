@@ -95,6 +95,77 @@ def _artifact_image_paths(artifacts: list[dict[str, Any]]) -> list[str]:
     return image_paths
 
 
+def _unique_nonempty(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
+def _collect_complaint_output_signals(artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+    exports = [
+        dict(item)
+        for item in list(artifacts or [])
+        if isinstance(item, dict) and str(item.get("artifact_type") or "").strip() == "complaint_export"
+    ]
+    filing_shape_scores = [int(item.get("filing_shape_score") or 0) for item in exports if item.get("filing_shape_score") is not None]
+    alignment_scores = [int(item.get("claim_type_alignment_score") or 0) for item in exports if item.get("claim_type_alignment_score") is not None]
+    claim_type_alignment_failures: list[str] = []
+    export_formats: list[str] = []
+    for export in exports:
+        alignment = dict(export.get("claim_type_alignment") or {}) if isinstance(export.get("claim_type_alignment"), dict) else {}
+        for key, value in alignment.items():
+            if value is False:
+                claim_type_alignment_failures.append(str(key).strip())
+        for key in ("markdown_filename", "pdf_filename", "docx_filename"):
+            if str(export.get(key) or "").strip():
+                export_formats.append(key.replace("_filename", ""))
+        artifacts_block = dict(export.get("artifacts") or {}) if isinstance(export.get("artifacts"), dict) else {}
+        for key in artifacts_block.keys():
+            if str(key).strip():
+                export_formats.append(str(key).strip())
+    release_gate_verdicts = _unique_nonempty([
+        ((item.get("release_gate") or {}) if isinstance(item.get("release_gate"), dict) else {}).get("verdict")
+        for item in exports
+    ])
+    blocking_reasons = _unique_nonempty([
+        ((item.get("release_gate") or {}) if isinstance(item.get("release_gate"), dict) else {}).get("blocking_reason")
+        for item in exports
+    ])
+    formal_section_gaps = _unique_nonempty([
+        gap
+        for export in exports
+        for gap in list(export.get("formal_section_gaps") or [])
+    ])
+    ui_suggestion_hints = _unique_nonempty([
+        str(item.get("ui_suggestions_excerpt") or "").splitlines()[0]
+        for item in exports
+        if str(item.get("ui_suggestions_excerpt") or "").strip()
+    ])
+    return {
+        "export_artifact_count": len(exports),
+        "claim_types": _unique_nonempty([item.get("claim_type") for item in exports]),
+        "draft_strategies": _unique_nonempty([item.get("draft_strategy") for item in exports]),
+        "filing_shape_scores": filing_shape_scores,
+        "claim_type_alignment_scores": alignment_scores,
+        "average_filing_shape_score": round(sum(filing_shape_scores) / len(filing_shape_scores)) if filing_shape_scores else 0,
+        "average_claim_type_alignment_score": round(sum(alignment_scores) / len(alignment_scores)) if alignment_scores else 0,
+        "release_gate_verdicts": release_gate_verdicts,
+        "release_gate_blocking_reasons": blocking_reasons,
+        "formal_section_gaps": formal_section_gaps,
+        "claim_type_alignment_failures": _unique_nonempty(claim_type_alignment_failures),
+        "export_formats": _unique_nonempty(export_formats),
+        "ui_suggestion_hints": ui_suggestion_hints,
+    }
+
+
 def _resolve_review_goals(goals: list[str] | None) -> list[str]:
     cleaned = [goal.strip() for goal in (goals or []) if str(goal).strip()]
     return cleaned or list(DEFAULT_UI_UX_REVIEW_GOALS)
@@ -468,6 +539,7 @@ def structure_ui_ux_review(
     iteration: int,
 ) -> dict[str, Any]:
     sections = _markdown_heading_sections(review_text)
+    complaint_output_signals = _collect_complaint_output_signals(artifacts)
     top_risks = _markdown_bullets(sections.get("Top Risks", ""))
     fixes = _markdown_bullets(sections.get("High-Impact UX Fixes", ""))
     playwright_followups = _markdown_bullets(sections.get("Playwright Assertions To Add", "")) or _markdown_bullets(
@@ -507,6 +579,9 @@ def structure_ui_ux_review(
             stage_body = _extract_named_markdown_section(stage_section, stage)
             if stage_body:
                 stage_findings[stage] = _first_nonempty_line(stage_body)
+    if "Draft" not in stage_findings and complaint_output_signals["formal_section_gaps"]:
+        first_gap = complaint_output_signals["formal_section_gaps"][0].replace("_", " ")
+        stage_findings["Draft"] = f"The audited complaint output still shows a {first_gap} gap that the draft/export UI should make obvious before download."
 
     issues: list[dict[str, Any]] = []
     stage_order = list(stage_findings.keys()) or ["Workspace"]
@@ -608,6 +683,7 @@ def structure_ui_ux_review(
         "screenshot_findings": screenshot_findings,
         "optimization_targets": optimization_targets,
         "carry_forward_assessment": carry_forward_assessment,
+        "complaint_output_signals": complaint_output_signals,
         "review_sections": sections,
         "iteration": iteration,
     }
@@ -710,6 +786,7 @@ def build_ui_ux_review_prompt(
     resolved_notes = _resolve_review_notes(notes)
     workspace_html = _read_text(REPO_ROOT / "templates" / "workspace.html", limit=14000)
     sdk_source = _read_text(REPO_ROOT / "static" / "complaint_mcp_sdk.js", limit=8000)
+    complaint_output_signals = _collect_complaint_output_signals(artifacts)
     artifact_blocks = []
     for artifact in artifacts:
         lines = [
@@ -728,8 +805,16 @@ def build_ui_ux_review_prompt(
                     f"Claim type: {artifact.get('claim_type', '')}",
                     f"Draft strategy: {artifact.get('draft_strategy', '')}",
                     f"Filing shape score: {artifact.get('filing_shape_score', '')}",
+                    f"Claim type alignment score: {artifact.get('claim_type_alignment_score', '')}",
+                    f"Release gate verdict: {((artifact.get('release_gate') or {}) if isinstance(artifact.get('release_gate'), dict) else {}).get('verdict', '')}",
+                    f"Release gate blocking reason: {((artifact.get('release_gate') or {}) if isinstance(artifact.get('release_gate'), dict) else {}).get('blocking_reason', '')}",
+                    "Formal section gaps:",
+                    ", ".join(str(item).strip() for item in list(artifact.get("formal_section_gaps") or []) if str(item).strip()) or "(none reported)",
+                    "Claim-type alignment details:",
+                    json.dumps(artifact.get("claim_type_alignment", {}), indent=2, sort_keys=True),
                     f"Markdown filename: {artifact.get('markdown_filename', '')}",
                     f"PDF filename: {artifact.get('pdf_filename', '')}",
+                    f"DOCX filename: {artifact.get('docx_filename', '')}",
                     "Exported complaint markdown excerpt:",
                     str(artifact.get("markdown_excerpt", "")).strip(),
                     f"PDF header: {artifact.get('pdf_header', '')}",
@@ -792,6 +877,8 @@ def build_ui_ux_review_prompt(
         [
             "Surface artifacts:",
             "\n\n".join(artifact_blocks) or "No screenshot artifacts were captured.",
+            "Complaint output summary across artifacts:",
+            json.dumps(complaint_output_signals, indent=2, sort_keys=True),
             "External interface contract:",
             (
                 "Package exports: complaint_generator.ComplaintWorkspaceService, "
@@ -799,6 +886,8 @@ def build_ui_ux_review_prompt(
                 "complaint_generator.submit_intake_answers, "
                 "complaint_generator.save_evidence, "
                 "complaint_generator.import_gmail_evidence, "
+                "complaint_generator.run_gmail_duckdb_pipeline, "
+                "complaint_generator.search_email_duckdb_corpus, "
                 "complaint_generator.review_case, "
                 "complaint_generator.build_mediator_prompt, "
                 "complaint_generator.get_workflow_capabilities, "
@@ -824,9 +913,9 @@ def build_ui_ux_review_prompt(
                 "complaint_generator.run_closed_loop_ui_ux_improvement, "
                 "complaint_generator.run_end_to_end_complaint_browser_audit, "
                 "complaint_generator.create_ui_review_report\n"
-                "CLI tools: complaint-generator, complaint-workspace, complaint-generator-workspace, complaint-mcp-server, complaint-workspace import-gmail-evidence, complaint-workspace tooling-contract, complaint-workspace set-claim-type, complaint-workspace update-synopsis, complaint-workspace export-packet, complaint-workspace export-markdown, complaint-workspace export-pdf, complaint-workspace export-docx, complaint-workspace analyze-output, complaint-workspace review-ui, complaint-workspace optimize-ui, complaint-workspace browser-audit\n"
-                "MCP server tools: complaint.create_identity, complaint.list_intake_questions, complaint.list_claim_elements, complaint.start_session, complaint.submit_intake, complaint.save_evidence, complaint.import_gmail_evidence, complaint.review_case, complaint.build_mediator_prompt, complaint.get_workflow_capabilities, complaint.get_tooling_contract, complaint.generate_complaint, complaint.update_draft, complaint.export_complaint_packet, complaint.export_complaint_markdown, complaint.export_complaint_pdf, complaint.export_complaint_docx, complaint.analyze_complaint_output, complaint.review_generated_exports, complaint.update_claim_type, complaint.update_case_synopsis, complaint.reset_session, complaint.review_ui, complaint.optimize_ui, complaint.run_browser_audit\n"
-                "Browser SDK: window.ComplaintMcpSdk.ComplaintMcpClient with bootstrapWorkspace(), getOrCreateDid(), callTool(), importGmailEvidence(), getToolingContract(), exportComplaintPacket(), exportComplaintMarkdown(), exportComplaintPdf(), exportComplaintDocx(), analyzeComplaintOutput(), reviewGeneratedExports(), updateClaimType(), updateCaseSynopsis(), reviewUiArtifacts(), optimizeUiArtifacts(), and runBrowserAudit()"
+                "CLI tools: complaint-generator, complaint-workspace, complaint-generator-workspace, complaint-mcp-server, complaint-workspace import-gmail-evidence, complaint-workspace run-gmail-duckdb-pipeline, complaint-workspace search-email-duckdb, complaint-workspace tooling-contract, complaint-workspace set-claim-type, complaint-workspace update-synopsis, complaint-workspace export-packet, complaint-workspace export-markdown, complaint-workspace export-pdf, complaint-workspace export-docx, complaint-workspace analyze-output, complaint-workspace review-ui, complaint-workspace optimize-ui, complaint-workspace browser-audit\n"
+                "MCP server tools: complaint.create_identity, complaint.list_intake_questions, complaint.list_claim_elements, complaint.start_session, complaint.submit_intake, complaint.save_evidence, complaint.import_gmail_evidence, complaint.run_gmail_duckdb_pipeline, complaint.search_email_duckdb_corpus, complaint.review_case, complaint.build_mediator_prompt, complaint.get_workflow_capabilities, complaint.get_tooling_contract, complaint.generate_complaint, complaint.update_draft, complaint.export_complaint_packet, complaint.export_complaint_markdown, complaint.export_complaint_pdf, complaint.export_complaint_docx, complaint.analyze_complaint_output, complaint.review_generated_exports, complaint.update_claim_type, complaint.update_case_synopsis, complaint.reset_session, complaint.review_ui, complaint.optimize_ui, complaint.run_browser_audit\n"
+                "Browser SDK: window.ComplaintMcpSdk.ComplaintMcpClient with bootstrapWorkspace(), getOrCreateDid(), callTool(), importGmailEvidence(), runGmailDuckdbPipeline(), searchEmailDuckdb(), getToolingContract(), exportComplaintPacket(), exportComplaintMarkdown(), exportComplaintPdf(), exportComplaintDocx(), analyzeComplaintOutput(), reviewGeneratedExports(), updateClaimType(), updateCaseSynopsis(), reviewUiArtifacts(), optimizeUiArtifacts(), and runBrowserAudit()"
             ),
             "Current workspace HTML:",
             workspace_html,
@@ -1028,6 +1117,7 @@ def run_iterative_ui_ux_workflow(
     previous_review: str | None = initial_previous_review
     run_reports: list[dict[str, Any]] = []
     latest_structured_review: dict[str, Any] = {}
+    latest_backend: dict[str, Any] = {}
 
     for iteration in range(1, max(1, iterations) + 1):
         existing_artifacts = collect_screenshot_artifacts(screenshot_dir)
@@ -1116,10 +1206,12 @@ def run_iterative_ui_ux_workflow(
         )
         previous_review = review["review"]
         latest_structured_review = dict(review.get("structured_review") or {})
+        latest_backend = dict(review.get("backend") or {})
         run_reports.append(
             {
                 "iteration": iteration,
                 "audit": audit,
+                "backend": dict(review.get("backend") or {}),
                 "artifact_count": review["artifact_count"],
                 "review_excerpt": str(review["review"] or "")[:600],
                 "review_markdown_path": str(markdown_path),
@@ -1139,11 +1231,14 @@ def run_iterative_ui_ux_workflow(
             "latest_review_json_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.json") if run_reports else "",
         },
     )
+    latest_progress = json.loads(progress_path.read_text()) if progress_path.exists() else {}
     return {
         "iterations": len(run_reports),
         "screenshot_dir": str(screenshot_dir),
         "output_dir": str(target_output_dir),
         "latest_review": previous_review,
+        "backend": latest_backend,
+        "latest_progress": latest_progress,
         "review": latest_structured_review,
         "issues": list(latest_structured_review.get("issues") or []),
         "recommended_changes": list(latest_structured_review.get("recommended_changes") or []),
