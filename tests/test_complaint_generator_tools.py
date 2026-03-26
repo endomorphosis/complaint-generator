@@ -178,9 +178,13 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "update_case_synopsis" in package_payload["package_exports"]
     assert "importGmailEvidence" in package_payload["browser_sdk_methods"]
     assert "importLocalEvidence" in package_payload["browser_sdk_methods"]
+    assert "runGmailDuckdbPipeline" in package_payload["browser_sdk_methods"]
+    assert "searchEmailDuckdb" in package_payload["browser_sdk_methods"]
     assert "updateClaimType" in package_payload["browser_sdk_methods"]
     assert "updateCaseSynopsis" in package_payload["browser_sdk_methods"]
     assert "getToolingContract" in package_payload["browser_sdk_methods"]
+    assert any(step["id"] == "gmail_duckdb_pipeline" for step in package_payload["core_flow_steps"])
+    assert any(step["id"] == "email_duckdb_search" for step in package_payload["core_flow_steps"])
 
 
 def test_generate_api_route_forwards_llm_router_options(monkeypatch, tmp_path):

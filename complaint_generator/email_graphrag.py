@@ -19,6 +19,9 @@ try:
 except Exception:
     _repo_root = Path(__file__).resolve().parents[2] / "ipfs_datasets_py"
     if _repo_root.exists():
+        for _module_name in list(sys.modules):
+            if _module_name == "ipfs_datasets_py" or _module_name.startswith("ipfs_datasets_py."):
+                sys.modules.pop(_module_name, None)
         sys.path.insert(0, str(_repo_root))
         try:
             _module = importlib.import_module("ipfs_datasets_py.processors.multimedia.email_duckdb_index")

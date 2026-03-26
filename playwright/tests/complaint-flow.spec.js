@@ -613,6 +613,12 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Release gate verdict:/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Top defect:/i);
     await expect(page.locator('#draft-export-safety-preview')).toContainText(/Canonical filing readiness/i);
+    await expect(page.locator('#draft-release-gate-card')).toBeVisible();
+    await expect(page.locator('#draft-release-gate-summary')).toContainText(/Keep this gate visible before download/i);
+    await expect(page.locator('#draft-release-gate-summary')).toContainText(/Release gate verdict:/i);
+    await expect(page.locator('#draft-release-gate-next-step')).toContainText(/Next safest move:/i);
+    await expect(page.locator('#draft-release-open-review-button')).toBeVisible();
+    await expect(page.locator('#draft-release-open-integrations-button')).toBeVisible();
 
     await page.getByRole('button', { name: 'UX Audit', exact: true }).click();
     await expect(page.locator('#focus-rail-stage')).toContainText(/You are in UX Audit\./i);
@@ -662,6 +668,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#download-packet-tool-markdown-button')).toBeDisabled();
     await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('title', /Download is blocked until/i);
     await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('data-download-url', /output_format=markdown/);
+    await expect(page.locator('#draft-release-gate-summary')).toContainText(/Download blockers:/i);
   });
 
   test('homepage to workspace journey ends with an actual generated complaint, downloadable markdown/pdf exports, and packet analysis', async ({ page }, testInfo) => {
@@ -821,6 +828,13 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#workspace-status')).toContainText(/Complaint output analysis refreshed\./i);
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Release gate verdict:/i);
+    await expect(page.locator('#draft-release-gate-summary')).toContainText(/Release gate verdict:/i);
+    await expect(page.locator('#draft-release-gate-summary')).toContainText(/Top defect:/i);
+    await expect(page.locator('#draft-release-gate-next-step')).toContainText(/Next safest move:/i);
+    await page.locator('#draft-release-open-integrations-button').click();
+    await expect(page.locator('[data-tab-panel="integrations"]')).toHaveClass(/is-active/);
+    await expect(page.locator('#workspace-status')).toContainText(/Opened CLI \+ MCP from the draft release gate/i);
+    await page.getByRole('button', { name: 'Draft', exact: true }).click();
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
     await expect(page.locator('#complaint-output-analysis-preview')).toContainText(/"ui_feedback":/i);
     await expect(page.locator('#complaint-output-analysis-preview')).toContainText(/Release gate: (PASS|WARNING)/i);

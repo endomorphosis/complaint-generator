@@ -15,6 +15,21 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "gmail-import-summary-card" in content
     assert "gmail-import-summary-chips" in content
     assert "gmail-import-summary-preview" in content
+    assert "gmail-duckdb-pipeline-card" in content
+    assert "gmail-pipeline-output-dir" in content
+    assert "gmail-pipeline-max-batches" in content
+    assert "gmail-pipeline-bm25-query" in content
+    assert "gmail-pipeline-bm25-limit" in content
+    assert "run-gmail-duckdb-pipeline-button" in content
+    assert "gmail-pipeline-summary-chips" in content
+    assert "gmail-pipeline-summary-preview" in content
+    assert "email-duckdb-search-card" in content
+    assert "email-duckdb-index-path" in content
+    assert "email-duckdb-limit" in content
+    assert "email-duckdb-query" in content
+    assert "search-email-duckdb-button" in content
+    assert "email-duckdb-search-chips" in content
+    assert "email-duckdb-search-preview" in content
     assert "gmail-import-remember-user" in content
     assert "gmail-import-folders" in content
     assert "gmail-import-complaint-query" in content
@@ -53,6 +68,8 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "local-evidence-note" in content
     assert "import-local-evidence-button" in content
     assert "Import local evidence artifacts" in content
+    assert "Build Gmail DuckDB corpus" in content
+    assert "Search DuckDB email corpus" in content
     assert "Auto-suggest from content" in content
     assert "Bring local PDFs, screenshots, text exports, mailbox files, or whole directories" in content
     assert "One local path per line. Directories are scanned recursively for files." in content
@@ -67,6 +84,8 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "complaint.import_gmail_evidence" in content
     assert '"tool": "complaint.import_gmail_evidence"' in content
     assert "await client.importGmailEvidence({" in content
+    assert "await client.runGmailDuckdbPipeline({" in content
+    assert "await client.searchEmailDuckdb({" in content
     assert '"addresses": ["hr@example.com", "manager@example.com"]' in content
     assert '"use_uid_checkpoint": true' in content
     assert "copyTextToClipboard(" in content
@@ -80,6 +99,8 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "const checkpointName = document.getElementById('gmail-import-checkpoint-name').value.trim();" in content
     assert "const uidWindowSize = String(document.getElementById('gmail-import-uid-window-size').value || '').trim();" in content
     assert "let latestGmailImportResult = null;" in content
+    assert "let latestGmailDuckdbPipelineResult = null;" in content
+    assert "let latestEmailDuckdbSearchResult = null;" in content
     assert "setGmailImportAddresses(addresses)" in content
     assert "extractEmailAddresses(value)" in content
     assert "recordSuggestedGmailImportAddress(metadataByAddress, address, sourceLabel)" in content
@@ -157,6 +178,22 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "latestGmailImportResult = payload || null;" in content
     assert "latestGmailImportResult = null;" in content
     assert "renderGmailImportSummary();" in content
+    assert "renderGmailDuckdbPipelineSummary();" in content
+    assert "renderEmailDuckdbSearchSummary();" in content
+    assert "async function runGmailDuckdbPipelineFromWorkspace()" in content
+    assert "async function searchEmailDuckdbCorpusFromWorkspace()" in content
+    assert "No Gmail DuckDB pipeline has been run in this browser session yet." in content
+    assert "No DuckDB email search has been run in this browser session yet." in content
+    assert "document.getElementById('run-gmail-duckdb-pipeline-button').addEventListener('click', runGmailDuckdbPipelineFromWorkspace);" in content
+    assert "document.getElementById('search-email-duckdb-button').addEventListener('click', searchEmailDuckdbCorpusFromWorkspace);" in content
+    assert "Add at least one email address before running the Gmail DuckDB pipeline." in content
+    assert "Enter a DuckDB index path before searching the email corpus." in content
+    assert "Enter a search query before searching the email corpus." in content
+    assert "Gmail DuckDB pipeline completed with ${payload.imported_count || 0} imported message(s)." in content
+    assert "DuckDB email search completed with ${payload.result_count || (Array.isArray(payload.results) ? payload.results.length : 0)} hit(s)." in content
+    assert "Pipeline: ${pipelineName}" in content
+    assert "DuckDB path: ${duckdbPath || 'n/a'}" in content
+    assert "Top results:" in content
     assert "async function importLocalEvidence()" in content
     assert "await client.importLocalEvidence({" in content
     assert "Add at least one local file or directory path before importing local evidence." in content
@@ -227,6 +264,8 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "hydrateResolvedDraftState" in content
     assert "tooling-parity-preview" in content
     assert "sdkToMcpParityMap" in content
+    assert "runGmailDuckdbPipeline: 'complaint.run_gmail_duckdb_pipeline'" in content
+    assert "searchEmailDuckdb: 'complaint.search_email_duckdb_corpus'" in content
     assert "Browser SDK parity summary" in content
     assert "buildSessionBoundParityExamples" in content
     assert "Session-bound tooling handoff" in content

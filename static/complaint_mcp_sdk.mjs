@@ -234,6 +234,14 @@ class ComplaintMcpClient {
         return this.callTool('complaint.import_local_evidence', payload || {});
     }
 
+    runGmailDuckdbPipeline(payload) {
+        return this.callTool('complaint.run_gmail_duckdb_pipeline', payload || {});
+    }
+
+    searchEmailDuckdb(payload) {
+        return this.callTool('complaint.search_email_duckdb_corpus', payload || {});
+    }
+
     reviewCase(userId) {
         return this.callTool('complaint.review_case', {
             user_id: userId,

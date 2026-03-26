@@ -11,11 +11,13 @@
     }
   },
   "scripts": {
-    "test": "npm run test:e2e",
+    "test": "playwright test",
     "test:e2e": "playwright test",
     "test:e2e:list": "playwright test --list",
     "test:e2e:complaint-flow": "playwright test playwright/tests/complaint-flow.spec.js",
-    "test:e2e:navigation": "playwright test playwright/tests/navigation.spec.js"
+    "test:e2e:navigation": "playwright test playwright/tests/navigation.spec.js",
+    "test:e2e:full-flow": "playwright test playwright/tests/complaint-flow.spec.js --grep \"homepage to workspace journey ends with an actual generated complaint\"",
+    "test:e2e:workspace": "playwright test playwright/tests/complaint-flow.spec.js --grep \"workspace unifies intake, evidence, support review, draft editing, actor/critic audit, and MCP tool visibility\""
   },
   "devDependencies": {
     "@playwright/test": "^1.53.0"

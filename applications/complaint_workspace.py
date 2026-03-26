@@ -191,6 +191,8 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "saveEvidence",
     "importGmailEvidence",
     "importLocalEvidence",
+    "runGmailDuckdbPipeline",
+    "searchEmailDuckdb",
     "reviewCase",
     "buildMediatorPrompt",
     "getComplaintReadiness",
@@ -233,11 +235,23 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "mcp_tool": "complaint.import_gmail_evidence",
         "browser_sdk_method": "importGmailEvidence",
     },
+    "gmail_duckdb_pipeline": {
+        "package_export": "run_gmail_duckdb_pipeline",
+        "cli_command": "run-gmail-duckdb-pipeline",
+        "mcp_tool": "complaint.run_gmail_duckdb_pipeline",
+        "browser_sdk_method": "runGmailDuckdbPipeline",
+    },
     "local_evidence_import": {
         "package_export": "import_local_evidence",
         "cli_command": "import-local-evidence",
         "mcp_tool": "complaint.import_local_evidence",
         "browser_sdk_method": "importLocalEvidence",
+    },
+    "email_duckdb_search": {
+        "package_export": "search_email_duckdb_corpus",
+        "cli_command": "search-email-duckdb",
+        "mcp_tool": "complaint.search_email_duckdb_corpus",
+        "browser_sdk_method": "searchEmailDuckdb",
     },
     "support_review": {
         "package_export": "review_case",

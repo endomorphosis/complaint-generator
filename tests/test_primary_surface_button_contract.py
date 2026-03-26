@@ -19,6 +19,8 @@ def test_workspace_primary_buttons_are_wired():
         "save-evidence-button",
         "import-gmail-evidence-button",
         "import-local-evidence-button",
+        "run-gmail-duckdb-pipeline-button",
+        "search-email-duckdb-button",
         "generate-draft-button",
         "save-draft-button",
         "export-packet-button",

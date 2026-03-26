@@ -880,6 +880,26 @@
             line-height: 1.6;
         }
 
+        .draft-action-stack {
+            display: grid;
+            gap: 14px;
+        }
+
+        .release-gate-callout {
+            border-color: rgba(154, 52, 18, 0.2);
+            background: linear-gradient(180deg, rgba(255, 249, 243, 0.98), rgba(252, 240, 228, 0.92));
+            box-shadow: 0 16px 34px rgba(154, 52, 18, 0.08);
+        }
+
+        .release-gate-callout .chip-row {
+            margin-top: 12px;
+        }
+
+        .release-gate-callout .status {
+            margin-top: 14px;
+            background: rgba(255, 255, 255, 0.82);
+        }
+
         .draft-action-groups {
             display: grid;
             gap: 12px;
@@ -1089,6 +1109,60 @@
             margin-top: 6px;
             color: var(--muted);
             line-height: 1.5;
+        }
+
+        .support-state-card {
+            border-radius: 22px;
+            padding: 18px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(251, 244, 236, 0.82));
+        }
+
+        .support-state-card.is-grounded {
+            border-color: rgba(22, 101, 52, 0.24);
+            background: linear-gradient(180deg, rgba(241, 253, 245, 0.96), rgba(232, 248, 238, 0.88));
+        }
+
+        .support-state-card.is-thin {
+            border-color: rgba(180, 83, 9, 0.22);
+            background: linear-gradient(180deg, rgba(255, 250, 239, 0.96), rgba(252, 243, 224, 0.88));
+        }
+
+        .support-state-card.is-unsupported {
+            border-color: rgba(141, 61, 23, 0.2);
+            background: linear-gradient(180deg, rgba(255, 245, 240, 0.96), rgba(252, 236, 228, 0.88));
+        }
+
+        .support-state-header {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: flex-start;
+        }
+
+        .support-state-header strong {
+            font-size: 1rem;
+        }
+
+        .support-state-body {
+            margin-top: 12px;
+        }
+
+        .support-state-body p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .support-state-next {
+            margin-top: 12px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.7);
+            border: 1px dashed rgba(24, 34, 41, 0.1);
+            color: var(--muted);
+            line-height: 1.55;
         }
 
         .field-row,
@@ -2156,6 +2230,62 @@
                                 <div class="chip-row" id="gmail-import-summary-chips"></div>
                                 <div class="status draft-preview-shell"><pre id="gmail-import-summary-preview">No Gmail import has been run in this browser session yet.</pre></div>
                             </div>
+                            <div class="tool-card" id="gmail-duckdb-pipeline-card" style="margin-top: 16px;">
+                                <h3>Build Gmail DuckDB corpus</h3>
+                                <p class="muted">Run the resumable Gmail-to-DuckDB pipeline from the browser through the same MCP tool path, then reuse the resulting corpus for complaint-focused BM25 search.</p>
+                                <div class="field-grid">
+                                    <div class="field-row">
+                                        <div>
+                                            <label for="gmail-pipeline-output-dir">DuckDB Output Directory</label>
+                                            <input id="gmail-pipeline-output-dir" type="text" placeholder="artifacts/email-duckdb">
+                                        </div>
+                                        <div>
+                                            <label for="gmail-pipeline-max-batches">Max Batches</label>
+                                            <input id="gmail-pipeline-max-batches" type="number" min="1" step="1" value="10">
+                                        </div>
+                                    </div>
+                                    <div class="field-row">
+                                        <div>
+                                            <label for="gmail-pipeline-bm25-query">Immediate BM25 Query</label>
+                                            <input id="gmail-pipeline-bm25-query" type="text" placeholder="termination retaliation timeline">
+                                        </div>
+                                        <div>
+                                            <label for="gmail-pipeline-bm25-limit">BM25 Limit</label>
+                                            <input id="gmail-pipeline-bm25-limit" type="number" min="1" step="1" value="10">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="button-row" style="margin-top: 16px;">
+                                    <button class="secondary" id="run-gmail-duckdb-pipeline-button" type="button">Run Gmail DuckDB Pipeline</button>
+                                </div>
+                                <div class="chip-row" id="gmail-pipeline-summary-chips" style="margin-top: 12px;"></div>
+                                <div class="status draft-preview-shell"><pre id="gmail-pipeline-summary-preview">No Gmail DuckDB pipeline has been run in this browser session yet.</pre></div>
+                            </div>
+                            <div class="tool-card" id="email-duckdb-search-card" style="margin-top: 16px;">
+                                <h3>Search DuckDB email corpus</h3>
+                                <p class="muted">Use the corpus path produced by the Gmail pipeline or enter an existing DuckDB index path to search complaint-relevant mail directly from the browser.</p>
+                                <div class="field-grid">
+                                    <div class="field-row">
+                                        <div>
+                                            <label for="email-duckdb-index-path">DuckDB Index Path</label>
+                                            <input id="email-duckdb-index-path" type="text" placeholder="artifacts/email-duckdb/email_corpus.duckdb">
+                                        </div>
+                                        <div>
+                                            <label for="email-duckdb-limit">Search Limit</label>
+                                            <input id="email-duckdb-limit" type="number" min="1" step="1" value="10">
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label for="email-duckdb-query">Search Query</label>
+                                        <input id="email-duckdb-query" type="text" placeholder="termination retaliation hr complaint">
+                                    </div>
+                                </div>
+                                <div class="button-row" style="margin-top: 16px;">
+                                    <button class="secondary" id="search-email-duckdb-button" type="button">Search Email DuckDB Corpus</button>
+                                </div>
+                                <div class="chip-row" id="email-duckdb-search-chips" style="margin-top: 12px;"></div>
+                                <div class="status draft-preview-shell"><pre id="email-duckdb-search-preview">No DuckDB email search has been run in this browser session yet.</pre></div>
+                            </div>
                         </div>
                         <div class="evidence-form-shell" style="margin-top: 18px;">
                             <div class="section-intro">
@@ -2415,11 +2545,29 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="draft-action-card">
-                            <strong>Operator controls</strong>
-                            <span>Use the safety rail above when the filing posture is getting ahead of the record. Reset the shared session here only when you truly need a clean complaint run.</span>
-                            <div class="button-row">
-                                <button class="secondary" id="reset-session-button" type="button">Reset Workspace</button>
+                        <div class="draft-action-stack">
+                            <div class="draft-action-card release-gate-callout" id="draft-release-gate-card">
+                                <strong>Export decision gate</strong>
+                                <span>Keep this summary visible while deciding whether to export, review, or gather more proof. Download should never outrank the release gate.</span>
+                                <div class="chip-row" id="draft-release-gate-chip-row">
+                                    <span class="chip warn" id="draft-release-gate-chip">release gate: waiting</span>
+                                    <span class="chip" id="draft-release-shape-chip">filing shape: waiting</span>
+                                    <span class="chip" id="draft-release-support-chip">support: waiting</span>
+                                </div>
+                                <div class="status draft-preview-shell"><pre id="draft-release-gate-summary">Release-gate summary will stay here once the draft and export posture are available.</pre></div>
+                                <div class="soft-note" id="draft-release-gate-next-step">The next safest move will appear here after the workspace reviews the current draft and record.</div>
+                                <div class="button-row">
+                                    <button class="secondary" id="draft-release-open-review-button" type="button">Open Review</button>
+                                    <button class="secondary" id="draft-release-open-evidence-button" type="button">Add Support</button>
+                                    <button class="secondary" id="draft-release-open-integrations-button" type="button">Open CLI + MCP</button>
+                                </div>
+                            </div>
+                            <div class="draft-action-card">
+                                <strong>Operator controls</strong>
+                                <span>Use the safety rail above when the filing posture is getting ahead of the record. Reset the shared session here only when you truly need a clean complaint run.</span>
+                                <div class="button-row">
+                                    <button class="secondary" id="reset-session-button" type="button">Reset Workspace</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2469,6 +2617,8 @@ docx_artifact = export_complaint_docx("did:key:example", service=service)</pre>
 complaint-generator-workspace session --user-id did:key:example
 complaint-workspace answer --user-id did:key:example --question-id protected_activity --answer-text "Reported discrimination to HR"
 complaint-generator-workspace generate --user-id did:key:example --requested-relief "Back pay|Injunctive relief"
+complaint-workspace run-gmail-duckdb-pipeline --user-id did:key:example --address hr@example.com --complaint-keyword retaliation
+complaint-workspace search-email-duckdb --index-path artifacts/email_corpus.duckdb --query "termination retaliation"
 complaint-workspace export-markdown --user-id did:key:example
 complaint-workspace export-docx --user-id did:key:example
 complaint-workspace export-pdf --user-id did:key:example
@@ -2488,6 +2638,8 @@ tool: complaint.run_browser_audit</pre>
                             <pre>const client = new window.ComplaintMcpSdk.ComplaintMcpClient();
 const bootstrap = await client.bootstrapWorkspace();
 await client.callTool('complaint.review_case', { user_id: bootstrap.did });
+await client.runGmailDuckdbPipeline({ user_id: bootstrap.did, addresses: ['hr@example.com'] });
+await client.searchEmailDuckdb({ index_path: 'artifacts/email_corpus.duckdb', query: 'termination retaliation' });
 await client.exportComplaintMarkdown(bootstrap.did);
 await client.exportComplaintDocx(bootstrap.did);
 await client.exportComplaintPdf(bootstrap.did);
@@ -2756,6 +2908,8 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let latestComplaintOutputAnalysis = null;
         let latestUiReviewResult = null;
         let latestGmailImportResult = null;
+        let latestGmailDuckdbPipelineResult = null;
+        let latestEmailDuckdbSearchResult = null;
         let sdkPrimitiveSnapshot = null;
         let latestSdkToolActivity = null;
         let gmailImportDetectedAddresses = [];
@@ -4088,16 +4242,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 </div>
             `;
             supportGrid.innerHTML = (review.support_matrix || []).map((item) => `
-                <div class="tool-card">
-                    <h3>${escapeHtml(item.label)}</h3>
-                    <div class="chip-row">
+                <div class="support-state-card is-${escapeHtml(describeSupportStrength(item).label)}">
+                    <div class="support-state-header">
+                        <strong>${escapeHtml(item.label)}</strong>
                         <span class="chip ${escapeHtml(describeSupportStrength(item).chipClass)}">${escapeHtml(describeSupportStrength(item).label)}</span>
+                    </div>
+                    <div class="chip-row" style="margin-top: 10px;">
                         <span class="chip">Intake ${item.intake_supported ? 'yes' : 'no'}</span>
                         <span class="chip">${item.testimony_count} testimony</span>
                         <span class="chip">${item.document_count} documents</span>
                     </div>
-                    <div class="muted" style="margin-top: 10px;">${escapeHtml(describeSupportStrength(item).detail)}</div>
-                    <div class="soft-note" style="margin-top: 12px;">${item.supported ? 'Next check: make sure the saved proof still matches the synopsis and requested relief.' : `Next move: add targeted proof that directly strengthens ${item.label.toLowerCase()}.`}</div>
+                    <div class="support-state-body">
+                        <p>${escapeHtml(describeSupportStrength(item).detail)}</p>
+                    </div>
+                    <div class="support-state-next">${item.supported ? 'Next check: make sure the saved proof still matches the synopsis and requested relief.' : `Next move: add targeted proof that directly strengthens ${item.label.toLowerCase()}.`}</div>
                 </div>
             `).join('');
             recommended.innerHTML = (review.recommended_actions || []).map((item) => `
@@ -4349,6 +4507,90 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 summaryLines.push('');
                 summaryLines.push('Imported subjects:');
                 importedSubjects.forEach((subject) => summaryLines.push(`- ${subject}`));
+            }
+            previewNode.textContent = summaryLines.join('\n');
+        }
+
+        function renderGmailDuckdbPipelineSummary() {
+            const previewNode = document.getElementById('gmail-pipeline-summary-preview');
+            const chipsNode = document.getElementById('gmail-pipeline-summary-chips');
+            if (!previewNode || !chipsNode) {
+                return;
+            }
+            const payload = latestGmailDuckdbPipelineResult || null;
+            if (!payload || typeof payload !== 'object') {
+                chipsNode.innerHTML = '';
+                previewNode.textContent = 'No Gmail DuckDB pipeline has been run in this browser session yet.';
+                return;
+            }
+            const pipelineName = String(payload.pipeline || 'gmail_duckdb_pipeline');
+            const importedCount = Number(payload.imported_count || 0);
+            const searchedCount = Number(payload.searched_message_count || 0);
+            const duckdbIndex = payload.duckdb_index || {};
+            const bm25Search = payload.bm25_search || {};
+            const duckdbPath = String(duckdbIndex.duckdb_path || payload.duckdb_path || '').trim();
+            chipsNode.innerHTML = [
+                `<span class="chip good">${escapeHtml(pipelineName)}</span>`,
+                `<span class="chip">imported ${escapeHtml(String(importedCount))}</span>`,
+                `<span class="chip">searched ${escapeHtml(String(searchedCount))}</span>`,
+                duckdbPath ? `<span class="chip">duckdb ready</span>` : '<span class="chip warn">duckdb pending</span>',
+                bm25Search && Object.keys(bm25Search).length ? `<span class="chip">bm25 ${escapeHtml(String(bm25Search.result_count || 0))} hits</span>` : '',
+            ].filter(Boolean).join('');
+            const summaryLines = [
+                `Pipeline: ${pipelineName}`,
+                `Imported count: ${importedCount}`,
+                `Searched messages: ${searchedCount}`,
+                `Manifest path: ${String(payload.manifest_path || 'n/a')}`,
+                `DuckDB path: ${duckdbPath || 'n/a'}`,
+                `Parquet path: ${String(duckdbIndex.parquet_path || 'n/a')}`,
+            ];
+            if (bm25Search && Object.keys(bm25Search).length) {
+                summaryLines.push('');
+                summaryLines.push(`BM25 query: ${String(bm25Search.query || 'n/a')}`);
+                summaryLines.push(`BM25 result count: ${String(bm25Search.result_count || 0)}`);
+            }
+            previewNode.textContent = summaryLines.join('\n');
+            if (duckdbPath) {
+                const indexPathNode = document.getElementById('email-duckdb-index-path');
+                if (indexPathNode && !indexPathNode.value.trim()) {
+                    indexPathNode.value = duckdbPath;
+                }
+            }
+        }
+
+        function renderEmailDuckdbSearchSummary() {
+            const previewNode = document.getElementById('email-duckdb-search-preview');
+            const chipsNode = document.getElementById('email-duckdb-search-chips');
+            if (!previewNode || !chipsNode) {
+                return;
+            }
+            const payload = latestEmailDuckdbSearchResult || null;
+            if (!payload || typeof payload !== 'object') {
+                chipsNode.innerHTML = '';
+                previewNode.textContent = 'No DuckDB email search has been run in this browser session yet.';
+                return;
+            }
+            const resultCount = Number(payload.result_count || (Array.isArray(payload.results) ? payload.results.length : 0));
+            chipsNode.innerHTML = [
+                `<span class="chip good">${escapeHtml(String(payload.ranking || 'bm25'))}</span>`,
+                `<span class="chip">${escapeHtml(String(resultCount))} hits</span>`,
+                payload.index_path ? `<span class="chip">index loaded</span>` : '',
+            ].filter(Boolean).join('');
+            const summaryLines = [
+                `Query: ${String(payload.query || '')}`,
+                `Ranking: ${String(payload.ranking || 'bm25')}`,
+                `Index path: ${String(payload.index_path || 'n/a')}`,
+                `Result count: ${String(resultCount)}`,
+            ];
+            const topResults = Array.isArray(payload.results) ? payload.results.slice(0, 5) : [];
+            if (topResults.length) {
+                summaryLines.push('');
+                summaryLines.push('Top results:');
+                topResults.forEach((item, index) => {
+                    const subject = String(item.subject || item.title || item.id || `result-${index + 1}`);
+                    const score = item.score !== undefined ? ` (score ${String(item.score)})` : '';
+                    summaryLines.push(`${index + 1}. ${subject}${score}`);
+                });
             }
             previewNode.textContent = summaryLines.join('\n');
         }
@@ -4624,6 +4866,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const exportAllowed = exportHardBlockers.length === 0;
             const downloadAllowed = exportAllowed && downloadBlockers.length === 0;
             const packetExportAllowed = Boolean(latestPacketExport || currentDraftBody.trim() || resolvedDraft.hasDraft);
+            const releaseGateChip = document.getElementById('draft-release-gate-chip');
+            const releaseShapeChip = document.getElementById('draft-release-shape-chip');
+            const releaseSupportChip = document.getElementById('draft-release-support-chip');
+            const releaseGateSummaryNode = document.getElementById('draft-release-gate-summary');
+            const releaseGateNextStepNode = document.getElementById('draft-release-gate-next-step');
             const contractLines = [
                 `Claim type: ${draftClaimTypeLabel(selectedClaimType)}`,
                 `Expected complaint heading: COMPLAINT FOR ${String(selectedClaimType).replace(/_/g, ' ').toUpperCase()}`,
@@ -4679,6 +4926,43 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : exportAllowed
                     ? 'Export can refresh the packet review, but the canonical filing-readiness summary still shows why downloads stay blocked.'
                     : 'Review and evidence should stay easier to choose than download whenever the canonical filing-readiness summary still shows blockers.';
+            if (releaseGateChip) {
+                releaseGateChip.className = `chip ${downloadAllowed ? 'good' : 'warn'}`;
+                releaseGateChip.textContent = `release gate: ${releaseVerdict ? releaseVerdict.toUpperCase() : 'UNKNOWN'}`;
+            }
+            if (releaseShapeChip) {
+                const shapeTone = canonicalReadiness.formAssessment.label === 'pass'
+                    ? 'good'
+                    : canonicalReadiness.formAssessment.label === 'warning'
+                        ? 'warn'
+                        : 'warn';
+                releaseShapeChip.className = `chip ${shapeTone}`;
+                releaseShapeChip.textContent = `filing shape: ${canonicalReadiness.formAssessment.label.toUpperCase()} (${Number(filingShapeScore || 0)})`;
+            }
+            if (releaseSupportChip) {
+                releaseSupportChip.className = `chip ${canonicalReadiness.supportAssessment.label === 'grounded' ? 'good' : 'warn'}`;
+                releaseSupportChip.textContent = `support: ${canonicalReadiness.supportAssessment.label.toUpperCase()} (${Number(supportedElements || 0)}/${Math.max(Number(supportedElements || 0) + Number(missingElements || 0), 0)})`;
+            }
+            if (releaseGateSummaryNode) {
+                releaseGateSummaryNode.textContent = [
+                    'Keep this gate visible before download',
+                    `Release gate verdict: ${releaseVerdict ? releaseVerdict.toUpperCase() : 'UNKNOWN'}`,
+                    `Primary action: ${canonicalReadiness.primaryAction}`,
+                    exportHardBlockers.length ? `Export blockers: ${exportHardBlockers.join('; ')}` : 'Export blockers: none',
+                    downloadBlockers.length ? `Download blockers: ${downloadBlockers.join('; ')}` : 'Download blockers: none',
+                    issueItems.length ? `Top defect: ${String((issueItems[0] || {}).finding || '').trim()}` : 'Top defect: No complaint-output defect captured.',
+                ].join('\n');
+            }
+            if (releaseGateNextStepNode) {
+                const nextStepText = !exportAllowed
+                    ? 'Next safest move: return to Review or Evidence, then strengthen the unsupported record before exporting.'
+                    : !downloadAllowed
+                        ? 'Next safest move: refresh packet analysis and keep the release-gate warning beside the disabled download controls.'
+                        : canonicalReadiness.supportAssessment.label !== 'grounded'
+                            ? 'Next safest move: review the packet with the release gate still visible and decide whether more corroboration is needed before relying on the download.'
+                            : 'Next safest move: export and review the complaint packet with this gate still visible while you decide whether to download.';
+                releaseGateNextStepNode.textContent = nextStepText;
+            }
             const exportButtons = [
                 document.getElementById('export-packet-button'),
                 document.getElementById('export-packet-tool-button'),
@@ -5191,6 +5475,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 saveEvidence: 'complaint.save_evidence',
                 importGmailEvidence: 'complaint.import_gmail_evidence',
                 importLocalEvidence: 'complaint.import_local_evidence',
+                runGmailDuckdbPipeline: 'complaint.run_gmail_duckdb_pipeline',
+                searchEmailDuckdb: 'complaint.search_email_duckdb_corpus',
                 reviewCase: 'complaint.review_case',
                 buildMediatorPrompt: 'complaint.build_mediator_prompt',
                 getComplaintReadiness: 'complaint.get_complaint_readiness',
@@ -6202,6 +6488,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             renderWorkflowOperations();
             renderSdkDiagnostics();
             renderGmailImportSummary();
+            renderGmailDuckdbPipelineSummary();
+            renderEmailDuckdbSearchSummary();
             renderGmailImportCommandExamples();
             if (workspaceUiReadiness && typeof workspaceUiReadiness === 'object') {
                 renderUiReviewResult(normalizeUiReadinessResultForDisplay(workspaceUiReadiness));
@@ -7027,6 +7315,97 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             setStatus(`Imported ${payload.imported_count || 0} local evidence artifact(s) into the evidence workspace.`);
         }
 
+        async function runGmailDuckdbPipelineFromWorkspace() {
+            const addresses = currentGmailImportAddresses();
+            const gmailUser = document.getElementById('gmail-import-user').value.trim();
+            const gmailAppPassword = document.getElementById('gmail-import-password').value;
+            const useGmailOAuth = Boolean(document.getElementById('gmail-import-use-oauth').checked);
+            const gmailOauthClientSecrets = document.getElementById('gmail-import-oauth-client-secrets').value.trim();
+            const gmailOauthTokenCache = document.getElementById('gmail-import-oauth-token-cache').value.trim();
+            const gmailOauthOpenBrowser = Boolean(document.getElementById('gmail-import-oauth-open-browser').checked);
+            if (!addresses.length) {
+                activateTab('evidence');
+                setStatus('Add at least one email address before running the Gmail DuckDB pipeline.');
+                return;
+            }
+            if (!gmailUser) {
+                activateTab('evidence');
+                setStatus('Enter your Gmail address before running the Gmail DuckDB pipeline.');
+                return;
+            }
+            if (useGmailOAuth && !gmailOauthClientSecrets) {
+                activateTab('evidence');
+                setStatus('Add a Gmail OAuth client-secrets JSON path before using the Gmail DuckDB pipeline with OAuth.');
+                return;
+            }
+            if (!useGmailOAuth && !gmailAppPassword) {
+                activateTab('evidence');
+                setStatus('Enter your Gmail app password before running the Gmail DuckDB pipeline, or enable Gmail OAuth.');
+                return;
+            }
+            setBusyStatus('Building the Gmail DuckDB corpus through the shared MCP SDK path…');
+            const payload = await client.runGmailDuckdbPipeline({
+                user_id: workspaceUserId,
+                addresses,
+                claim_element_id: document.getElementById('gmail-import-claim-element').value,
+                folder: currentGmailImportFolders()[0] || 'INBOX',
+                folders: currentGmailImportFolders(),
+                gmail_user: gmailUser,
+                gmail_app_password: useGmailOAuth ? null : gmailAppPassword,
+                use_gmail_oauth: useGmailOAuth,
+                gmail_oauth_client_secrets: useGmailOAuth ? gmailOauthClientSecrets : null,
+                gmail_oauth_token_cache: useGmailOAuth && gmailOauthTokenCache ? gmailOauthTokenCache : null,
+                gmail_oauth_open_browser: useGmailOAuth ? gmailOauthOpenBrowser : null,
+                checkpoint_name: document.getElementById('gmail-import-checkpoint-name').value.trim() || 'gmail-duckdb-pipeline',
+                uid_window_size: Number(document.getElementById('gmail-import-uid-window-size').value || '500'),
+                max_batches: Number(document.getElementById('gmail-pipeline-max-batches').value || '10'),
+                date_after: document.getElementById('gmail-import-date-after').value || null,
+                date_before: document.getElementById('gmail-import-date-before').value || null,
+                complaint_query: document.getElementById('gmail-import-complaint-query').value.trim() || null,
+                complaint_keywords: currentGmailImportComplaintKeywords(),
+                min_relevance_score: Number(document.getElementById('gmail-import-min-relevance-score').value || '0'),
+                duckdb_output_dir: document.getElementById('gmail-pipeline-output-dir').value.trim() || null,
+                bm25_search_query: document.getElementById('gmail-pipeline-bm25-query').value.trim() || null,
+                bm25_search_limit: Number(document.getElementById('gmail-pipeline-bm25-limit').value || '10'),
+            });
+            latestGmailDuckdbPipelineResult = payload || null;
+            renderGmailDuckdbPipelineSummary();
+            if (payload && payload.bm25_search) {
+                latestEmailDuckdbSearchResult = Object.assign({}, payload.bm25_search, {
+                    index_path: ((payload.duckdb_index || {}).duckdb_path) || payload.index_path || '',
+                    ranking: 'bm25',
+                });
+                renderEmailDuckdbSearchSummary();
+            }
+            document.getElementById('gmail-import-password').value = '';
+            setStatus(`Gmail DuckDB pipeline completed with ${payload.imported_count || 0} imported message(s).`);
+        }
+
+        async function searchEmailDuckdbCorpusFromWorkspace() {
+            const indexPath = document.getElementById('email-duckdb-index-path').value.trim();
+            const query = document.getElementById('email-duckdb-query').value.trim();
+            if (!indexPath) {
+                activateTab('evidence');
+                setStatus('Enter a DuckDB index path before searching the email corpus.');
+                return;
+            }
+            if (!query) {
+                activateTab('evidence');
+                setStatus('Enter a search query before searching the email corpus.');
+                return;
+            }
+            setBusyStatus('Searching the DuckDB email corpus through the shared MCP SDK path…');
+            const payload = await client.searchEmailDuckdb({
+                index_path: indexPath,
+                query,
+                limit: Number(document.getElementById('email-duckdb-limit').value || '10'),
+                ranking: 'bm25',
+            });
+            latestEmailDuckdbSearchResult = payload || null;
+            renderEmailDuckdbSearchSummary();
+            setStatus(`DuckDB email search completed with ${payload.result_count || (Array.isArray(payload.results) ? payload.results.length : 0)} hit(s).`);
+        }
+
         async function generateDraft() {
             const requiredQuestions = ['party_name', 'opposing_party', 'protected_activity', 'adverse_action', 'timeline', 'harm'];
             const savedAnswers = ((workspaceSession || {}).session || {}).intake_answers || {};
@@ -7223,6 +7602,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         async function resetSession() {
             setBusyStatus('Resetting the workspace to a clean complaint session…');
             latestGmailImportResult = null;
+            latestGmailDuckdbPipelineResult = null;
+            latestEmailDuckdbSearchResult = null;
             workspaceSession = await client.resetSession(workspaceUserId);
             window.localStorage.removeItem(synopsisStorageKey());
             await refreshWorkspace();
@@ -7347,6 +7728,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         document.getElementById('evidence-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so the current support gaps can be checked before more evidence is added.'));
         document.getElementById('import-gmail-evidence-button').addEventListener('click', importGmailEvidence);
         document.getElementById('import-local-evidence-button').addEventListener('click', importLocalEvidence);
+        document.getElementById('run-gmail-duckdb-pipeline-button').addEventListener('click', runGmailDuckdbPipelineFromWorkspace);
+        document.getElementById('search-email-duckdb-button').addEventListener('click', searchEmailDuckdbCorpusFromWorkspace);
         document.getElementById('copy-gmail-import-cli-command').addEventListener('click', () => {
             copyTextToClipboard(
                 document.getElementById('gmail-import-cli-command').innerText,
@@ -7390,6 +7773,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         document.getElementById('download-packet-tool-pdf-button').addEventListener('click', downloadPacket);
         document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));
         document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));
+        document.getElementById('draft-release-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the draft release gate so support gaps can be checked before download.'));
+        document.getElementById('draft-release-open-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the draft release gate so the record can be strengthened before download.'));
+        document.getElementById('draft-release-open-integrations-button').addEventListener('click', () => jumpToStage('integrations', '#client-release-gate-preview', 'Opened CLI + MCP from the draft release gate so the export posture can be refreshed before download.'));
         document.getElementById('refresh-sdk-primitives-button').addEventListener('click', refreshSdkPrimitivesPanel);
         document.getElementById('save-synopsis-button').addEventListener('click', saveSynopsis);
         document.getElementById('reset-session-button').addEventListener('click', resetSession);
