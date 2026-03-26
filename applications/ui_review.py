@@ -31,6 +31,11 @@ _TEXT_UI_REVIEW_TIMEOUTS = {
     "copilot_cli": 25,
     "copilot_sdk": 25,
 }
+_MULTIMODAL_RATE_LIMIT_FALLBACKS = {
+    "codex": ("copilot_cli", "hf_inference_api"),
+    "codex_cli": ("copilot_cli", "hf_inference_api"),
+    "copilot_cli": ("hf_inference_api",),
+}
 
 
 def _format_router_backend_path(backend: Dict[str, Any]) -> str:
@@ -1347,6 +1352,54 @@ def _ui_review_page_executor_for_provider(provider: Optional[str]) -> str:
     return "process"
 
 
+def _ui_review_model_for_provider(provider: Optional[str]) -> Optional[str]:
+    normalized = str(provider or "").strip().lower()
+    if not normalized:
+        return None
+    env_key = f"COMPLAINT_GENERATOR_UI_REVIEW_MODEL_{normalized.upper()}"
+    value = str(os.getenv(env_key, "") or "").strip()
+    if value:
+        return value
+    generic = str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL", "") or "").strip()
+    if generic:
+        return generic
+    return DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER.get(normalized)
+
+
+def _is_rate_limit_router_error(error: Exception) -> bool:
+    message = str(error or "").strip().lower()
+    return any(
+        token in message
+        for token in (
+            "rate limit",
+            "usage limit",
+            "quota exceeded",
+            "too many requests",
+            "429",
+        )
+    )
+
+
+def _multimodal_rate_limit_fallback_chain(provider: Optional[str]) -> List[str]:
+    normalized = str(provider or "").strip().lower()
+    return list(_MULTIMODAL_RATE_LIMIT_FALLBACKS.get(normalized, ()))
+
+
+def _fallback_backend_kwargs(
+    backend_kwargs: Dict[str, Any],
+    *,
+    provider: str,
+) -> Dict[str, Any]:
+    updated = dict(backend_kwargs or {})
+    updated["provider"] = provider
+    fallback_model = _ui_review_model_for_provider(provider)
+    if fallback_model:
+        updated["model"] = fallback_model
+    else:
+        updated.pop("model", None)
+    return updated
+
+
 def _should_use_compact_ui_review_prompt(
     *,
     provider: Optional[str],
@@ -1545,6 +1598,7 @@ def create_ui_review_report(
 
     provider_name = str(backend_kwargs.get("provider") or "").strip()
     skip_multimodal = _provider_prefers_text_ui_review(provider_name)
+    fallback_attempts: List[Dict[str, Any]] = []
 
     multimodal_exc: Exception | None = None
     try:
@@ -1559,31 +1613,72 @@ def create_ui_review_report(
         )
     except Exception as exc:
         multimodal_exc = exc
-        try:
-            review_payload, backend_metadata = _review_with_text_router(
-                prompt=prompt,
-                backend_kwargs=backend_kwargs,
-            )
-            backend_metadata["fallback_from"] = "multimodal_router"
-            backend_metadata["fallback_error"] = str(multimodal_exc)
-            if skip_multimodal:
-                backend_metadata["multimodal_skipped"] = True
-        except Exception as exc:
-            review_payload = _deterministic_ui_review_fallback(
-                screenshots=screenshots,
-                artifact_metadata=list(artifact_metadata or []),
-                complaint_output_feedback=complaint_output_feedback,
-                multimodal_error=multimodal_exc,
-                fallback_error=exc,
-            )
-            backend_metadata = {
-                "id": backend_kwargs.get("id", "ui-review"),
-                "provider": backend_kwargs.get("provider"),
-                "model": backend_kwargs.get("model"),
-                "strategy": "fallback",
-                "multimodal_error": str(multimodal_exc),
-                "fallback_error": str(exc),
-            }
+        if _is_rate_limit_router_error(exc):
+            for fallback_provider in _multimodal_rate_limit_fallback_chain(provider_name):
+                candidate_kwargs = _fallback_backend_kwargs(backend_kwargs, provider=fallback_provider)
+                candidate_kwargs.update(
+                    _ui_review_codex_trace_kwargs(
+                        provider=fallback_provider,
+                        screenshots=screenshots,
+                        diagnostics_dir=resolved_diagnostics_dir,
+                    )
+                )
+                try:
+                    review_payload, backend_metadata = _review_with_multimodal_router(
+                        screenshots=screenshots,
+                        prompt=prompt,
+                        backend_kwargs=candidate_kwargs,
+                    )
+                    backend_metadata["fallback_from"] = "multimodal_router"
+                    backend_metadata["provider_fallback_from"] = provider_name or None
+                    backend_metadata["fallback_error"] = str(multimodal_exc)
+                    if fallback_attempts:
+                        backend_metadata["fallback_attempts"] = list(fallback_attempts)
+                    break
+                except Exception as fallback_exc:
+                    fallback_attempts.append(
+                        {
+                            "provider": fallback_provider,
+                            "model": candidate_kwargs.get("model"),
+                            "error": str(fallback_exc),
+                        }
+                    )
+            else:
+                review_payload = {}
+                backend_metadata = {}
+        else:
+            review_payload = {}
+            backend_metadata = {}
+        if not backend_metadata:
+            try:
+                review_payload, backend_metadata = _review_with_text_router(
+                    prompt=prompt,
+                    backend_kwargs=backend_kwargs,
+                )
+                backend_metadata["fallback_from"] = "multimodal_router"
+                backend_metadata["fallback_error"] = str(multimodal_exc)
+                if fallback_attempts:
+                    backend_metadata["fallback_attempts"] = list(fallback_attempts)
+                if skip_multimodal:
+                    backend_metadata["multimodal_skipped"] = True
+            except Exception as exc:
+                review_payload = _deterministic_ui_review_fallback(
+                    screenshots=screenshots,
+                    artifact_metadata=list(artifact_metadata or []),
+                    complaint_output_feedback=complaint_output_feedback,
+                    multimodal_error=multimodal_exc,
+                    fallback_error=exc,
+                )
+                backend_metadata = {
+                    "id": backend_kwargs.get("id", "ui-review"),
+                    "provider": backend_kwargs.get("provider"),
+                    "model": backend_kwargs.get("model"),
+                    "strategy": "fallback",
+                    "multimodal_error": str(multimodal_exc),
+                    "fallback_error": str(exc),
+                }
+                if fallback_attempts:
+                    backend_metadata["fallback_attempts"] = list(fallback_attempts)
     backend_metadata.setdefault("prompt_mode", "compact" if use_compact_prompt else "full")
 
     report = {

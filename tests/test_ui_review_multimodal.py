@@ -210,6 +210,82 @@ def test_create_ui_review_report_times_out_multimodal_and_falls_back_to_text(mon
     assert report["review"]["summary"] == "Timed out multimodal, text fallback succeeded."
 
 
+def test_create_ui_review_report_rate_limit_falls_back_provider_chain(monkeypatch, tmp_path: Path):
+    screenshot = tmp_path / "workspace.png"
+    screenshot.write_bytes(b"fake-png")
+    monkeypatch.setenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL_HF_INFERENCE_API", "hf-vision-model")
+
+    class FakeMultimodalBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            if self.provider == "codex_cli":
+                raise RuntimeError("Codex usage limit reached")
+            if self.provider == "copilot_cli":
+                raise RuntimeError("copilot_cli multimodal path unavailable: installed Copilot CLI does not advertise image input support")
+            assert self.provider == "hf_inference_api"
+            assert self.model == "hf-vision-model"
+            return '{"summary":"HF fallback review.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    class FakeTextBackend:
+        def __init__(self, **kwargs):
+            raise AssertionError("text fallback should not run when hf multimodal fallback succeeds")
+
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FakeMultimodalBackend)
+    monkeypatch.setattr(ui_review_module, "LLMRouterBackend", FakeTextBackend)
+
+    report = ui_review_module.create_ui_review_report([str(screenshot)])
+
+    assert report["backend"]["strategy"] == "multimodal_router"
+    assert report["backend"]["provider"] == "hf_inference_api"
+    assert report["backend"]["model"] == "hf-vision-model"
+    assert report["backend"]["provider_fallback_from"] == "codex_cli"
+    assert "usage limit" in report["backend"]["fallback_error"].lower()
+    assert report["backend"]["fallback_attempts"] == [
+        {
+            "provider": "copilot_cli",
+            "model": None,
+            "error": "copilot_cli multimodal path unavailable: installed Copilot CLI does not advertise image input support",
+        }
+    ]
+    assert report["review"]["summary"] == "HF fallback review."
+
+
+def test_create_ui_review_report_non_rate_limit_error_does_not_use_provider_chain(monkeypatch, tmp_path: Path):
+    screenshot = tmp_path / "workspace.png"
+    screenshot.write_bytes(b"fake-png")
+
+    class FakeMultimodalBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt, *, image_paths=None, system_prompt=None):
+            raise RuntimeError("vision parser exploded")
+
+    class FakeTextBackend:
+        def __init__(self, **kwargs):
+            self.id = kwargs.get("id", "ui-review")
+            self.provider = kwargs.get("provider")
+            self.model = kwargs.get("model")
+
+        def __call__(self, prompt):
+            return '{"summary":"Text fallback after non-rate-limit error.","issues":[],"recommended_changes":[],"workflow_gaps":[],"playwright_followups":[]}'
+
+    monkeypatch.setattr(ui_review_module, "MultimodalRouterBackend", FakeMultimodalBackend)
+    monkeypatch.setattr(ui_review_module, "LLMRouterBackend", FakeTextBackend)
+
+    report = ui_review_module.create_ui_review_report([str(screenshot)])
+
+    assert report["backend"]["strategy"] == "llm_router"
+    assert "fallback_attempts" not in report["backend"]
+    assert report["review"]["summary"] == "Text fallback after non-rate-limit error."
+
+
 def test_create_ui_review_report_defaults_to_verified_codex_profile(monkeypatch, tmp_path: Path):
     screenshot = tmp_path / "workspace.png"
     screenshot.write_bytes(b"fake-png")
