@@ -1442,7 +1442,7 @@
                         <span class="focus-rail-detail" id="focus-rail-detail">This rail keeps the current stage, next required action, and export-safety posture visible while you scroll through the workspace.</span>
                         <div class="button-row">
                             <button class="primary" id="focus-rail-action-button" type="button" data-target-tab="intake">Continue current step</button>
-                            <button class="secondary" id="focus-rail-review-button" type="button">Check review gate</button>
+                            <button class="secondary" id="focus-rail-review-button" type="button">Open readiness check</button>
                         </div>
                     </div>
                     <div class="focus-rail-grid">
@@ -1455,8 +1455,8 @@
                             <span id="focus-rail-readiness">The workspace is checking whether the record is still in intake, support-building, or drafting posture.</span>
                         </div>
                         <div class="focus-rail-card">
-                            <strong>Download safety</strong>
-                            <span id="focus-rail-export-safety">Export guidance will appear here once the release gate and draft posture are available.</span>
+                            <strong>Readiness check</strong>
+                            <span id="focus-rail-export-safety">Readiness guidance will appear here once the filing-check signals are available.</span>
                         </div>
                     </div>
                 </section>
@@ -2877,14 +2877,14 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                         ? `Strengthen ${String((weakestGap && weakestGap.label) || 'the weakest claim element').toLowerCase()} with named proof before trusting the draft too much.`
                         : !state.builderReady
                             ? 'Generate the first complaint draft now that the record is coherent enough for a formal pass.'
-                            : 'Compare the existing draft to the support record and release-gate posture before exporting.',
+                            : 'Run the filing-readiness check, then export only when the draft and support record still agree.',
             });
             queue.push({
                 title: 'Watch for',
                 detail: missingItems.length
-                    ? `${missingItems.length} open support gap${missingItems.length === 1 ? '' : 's'} still make the complaint more fragile than the UI should imply.`
+                    ? `${missingItems.length} open support gap${missingItems.length === 1 ? '' : 's'} still mean the complaint needs more support before it should feel settled.`
                     : evidenceCount <= 2
-                        ? 'The record is still lightly corroborated, so progress and export cues should be treated as provisional.'
+                        ? 'The record is still lightly supported, so success cues should be treated cautiously until more corroboration is attached.'
                         : String(draftState.guidance || 'Keep the draft aligned with the supported facts and requested relief.'),
             });
             return queue;
@@ -4552,6 +4552,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const stageIndexPostureChip = document.getElementById('stage-index-posture-chip');
             const currentReleaseGate = workspaceClientReleaseGate || {};
             const currentTabFocus = focusRailStateForTab(activeWorkspaceTab, sessionPayload);
+            const sidebarReleaseGate = (((latestComplaintOutputAnalysis || {}).ui_feedback || latestComplaintOutputAnalysis || {}).release_gate)
+                || ((latestPacketExport || {}).ui_feedback || {}).release_gate
+                || (workspaceClientReleaseGate && (workspaceClientReleaseGate.complaint_output_release_gate || workspaceClientReleaseGate.release_gate || workspaceClientReleaseGate))
+                || null;
+            const sidebarIssueItems = Array.isArray((((latestComplaintOutputAnalysis || {}).ui_feedback || latestComplaintOutputAnalysis || {}).issues))
+                ? (((latestComplaintOutputAnalysis || {}).ui_feedback || latestComplaintOutputAnalysis || {}).issues)
+                : [];
             let readinessPercent = 8;
             let actionTab = 'intake';
             let actionTitle = 'Complete intake before moving on';
@@ -4598,13 +4605,28 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const timeline = answers.timeline || 'a still-developing timeline';
             const theorySummary = `${partyName} is preparing a ${claimType} complaint against ${opposingParty}.`;
             const theoryDetail = `${partyName} describes ${protectedActivity}, followed by ${adverseAction}, with harm described as ${harm}. Timeline so far: ${timeline}.`;
-            const confidenceLabel = state.builderReady && evidenceCount > 2
-                ? 'record: materially supported'
-                : state.builderReady
-                    ? 'record: thin corroboration'
-                    : readinessPercent >= 55
-                        ? 'record: developing'
-                        : 'record: early intake';
+            const sidebarCanonicalReadiness = buildCanonicalFilingReadiness({
+                releaseGateVerdict: sidebarReleaseGate && sidebarReleaseGate.verdict,
+                releaseGateReason: sidebarReleaseGate && sidebarReleaseGate.reason,
+                supportedElements: overview.supported_elements || 0,
+                missingElements: overview.missing_elements || 0,
+                evidenceItemCount: evidenceCount,
+                filingShapeScore: Number((sidebarReleaseGate && sidebarReleaseGate.filing_shape_score) || 0),
+                claimAlignmentScore: Number((sidebarReleaseGate && sidebarReleaseGate.claim_type_alignment_score) || 0),
+                hasDraftBody: Boolean(String((((resolveDraftState(sessionPayload) || {}).draft) || {}).body || '').trim()),
+                exportAllowed: Boolean(state.builderReady),
+                downloadAllowed: Boolean(state.builderReady && sidebarReleaseGate && String(sidebarReleaseGate.verdict || '').trim().toLowerCase() === 'pass'),
+                exportHardBlockers: missingItems.length ? [`${missingItems.length} claim element${missingItems.length === 1 ? '' : 's'} still need support`] : [],
+                downloadBlockers: [],
+                issueItems: sidebarIssueItems,
+            });
+            const confidenceLabel = nextQuestion
+                ? 'readiness: intake underway'
+                : missingItems.length
+                    ? 'readiness: support gaps open'
+                    : state.builderReady
+                        ? `readiness: ${sidebarCanonicalReadiness.formAssessment.label} form / ${sidebarCanonicalReadiness.supportAssessment.label} support`
+                        : 'readiness: first draft available soon';
             const blockers = [];
             if (nextQuestion) {
                 blockers.push({
@@ -4745,7 +4767,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             document.getElementById('focus-rail-detail').textContent = currentTabFocus.detail;
             document.getElementById('focus-rail-stage').textContent = currentTabFocus.stage;
             document.getElementById('focus-rail-readiness').textContent = currentTabFocus.readiness;
-            document.getElementById('focus-rail-export-safety').textContent = currentTabFocus.exportSafety;
+            document.getElementById('focus-rail-export-safety').textContent = state.builderReady || activeWorkspaceTab === 'review' || activeWorkspaceTab === 'draft'
+                ? `Readiness check: ${sidebarCanonicalReadiness.primaryAction}`
+                : currentTabFocus.exportSafety;
             focusRailActionButton.dataset.targetTab = currentTabFocus.targetTab || actionTab;
             focusRailActionButton.textContent = currentTabFocus.actionLabel || focusRailActionButton.textContent;
             if (stageIndexTitle) {
@@ -7213,7 +7237,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 `Opened ${targetTab.charAt(0).toUpperCase()}${targetTab.slice(1)} from the workflow focus rail.`,
             );
         });
-        document.getElementById('focus-rail-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the workflow focus rail so support and release-gate posture can be checked.'));
+        document.getElementById('focus-rail-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the workflow focus rail so the filing-readiness check can be reviewed.'));
         document.getElementById('session-tool-open-surface-button').addEventListener('click', () => {
             const button = document.getElementById('session-tool-open-surface-button');
             jumpToStage(button.dataset.targetTab || 'integrations', button.dataset.focusSelector || '', button.dataset.statusMessage || 'Opened the surface related to the latest MCP activity.');
