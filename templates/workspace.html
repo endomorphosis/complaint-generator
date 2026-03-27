@@ -1613,9 +1613,9 @@
                         <div class="muted" id="next-question-label">Loading session...</div>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label" id="corroboration-strength-label">Element coverage</span>
-                        <span class="summary-value" id="supported-count">UNKNOWN</span>
-                        <div class="muted" id="missing-count-label">Corroboration strength: loading</div>
+                        <span class="summary-label" id="corroboration-strength-label">Element quality</span>
+                        <span class="summary-value" id="supported-count">UNVERIFIED</span>
+                        <div class="muted" id="missing-count-label">Quality status: loading</div>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Evidence collected</span>
@@ -2405,7 +2405,7 @@
                             <span class="chip" id="review-canonical-source-chip">source: loading</span>
                             <span class="chip" id="review-canonical-timestamp-chip">updated: loading</span>
                         </div>
-                        <div class="status draft-preview-shell"><pre id="review-canonical-release-gate-summary">Reason source: awaiting support and intake checks.</pre></div>
+                        <div class="status draft-preview-shell"><pre id="review-canonical-release-gate-summary">BLOCKED | awaiting support and intake checks | Fix now: Add Evidence</pre></div>
                         <div class="list" id="review-canonical-release-gate-reasons">
                             <div class="item"><strong>Missing elements will appear here once review data loads.</strong></div>
                         </div>
@@ -2490,7 +2490,7 @@
                             <span class="chip" id="draft-canonical-source-chip">source: loading</span>
                             <span class="chip" id="draft-canonical-timestamp-chip">updated: loading</span>
                         </div>
-                        <div class="status draft-preview-shell"><pre id="draft-canonical-release-gate-summary">Reason source: awaiting support and intake checks.</pre></div>
+                        <div class="status draft-preview-shell"><pre id="draft-canonical-release-gate-summary">BLOCKED | awaiting support and intake checks | Fix now: Add Evidence</pre></div>
                         <div class="list" id="draft-canonical-release-gate-reasons">
                             <div class="item"><strong>Missing elements will appear here once review data loads.</strong></div>
                         </div>
@@ -2600,7 +2600,7 @@
                             <strong>Run the filing workflow in order</strong>
                             <span>Keep one dominant next move visible, with generation, packet review, and next-step safety guidance on the same rail. Generate or save the draft first, run packet review second, and only download when the release gate and support posture make that safe.</span>
                             <div class="soft-note" id="draft-primary-action-note">Primary action guidance will appear here once filing readiness is evaluated.</div>
-                            <div class="soft-note" id="optimizer-repair-focus-note">Adversarial optimizer repair focus: UX repair 1: Ship one **canonical gate object** across Review/Draft/Export: `verdict`, `blocking_reasons`, `updated_at`, `reason_source`, `target_tab`. | UX repair 2: Hard-block generation/export/download on gate fail and placeholder checks (`Plaintiff`, `Defendant`, `APPROPRIATE JUDICIAL DISTRICT`, blank civil action). | UX repair 3: Split Review status into separate primary cards: `Coverage` and `Corroboration`; make corroboration deficits the default top panel.</div>
+                            <div class="soft-note" id="optimizer-repair-focus-note">Adversarial optimizer repair focus: UX repair 1: Unify all gate rendering to one canonical object across tabs: `status`, `blocking_reasons`, `next_best_action`, `updated_at`, `state_version`. | UX repair 2: Replace contradictory badges with deterministic chips: `Can Review`, `Can Draft`, `Can Download`. | UX repair 3: Hard-block export/download on placeholders or generic party/court fields; pin blocker banner above download controls.</div>
                             <div class="tool-card canonical-release-gate" id="unsupported-thin-blocker-panel">
                                 <h3 id="unsupported-thin-blocker-title">Unsupported/Thin elements blocker</h3>
                                 <p class="muted" id="unsupported-thin-blocker-summary">Generate, export, and download stay blocked until grounded evidence outweighs thin and unsupported elements.</p>
@@ -2640,6 +2640,7 @@
                                     <div class="button-row">
                                         <button class="secondary" id="draft-fix-intake-names-button" type="button">Fix Intake Names</button>
                                         <button class="secondary" id="draft-fix-caption-button" type="button">Fix Draft</button>
+                                        <button class="secondary" id="draft-fix-civil-action-button" type="button">Fix Civil Action No.</button>
                                     </div>
                                     <div class="button-row">
                                         <button class="secondary" id="export-packet-button" type="button">Export Complaint Packet</button>
@@ -2662,8 +2663,9 @@
                                 <span>Use one verdict before every export decision: PASS means export and download are currently safe enough to proceed; BLOCKED means fix the listed blockers first.</span>
                                 <div class="chip-row" id="draft-release-gate-chip-row">
                                     <span class="chip warn" id="draft-release-gate-chip">verdict: BLOCKED</span>
-                                    <span class="chip" id="draft-release-shape-chip">filing shape: waiting</span>
-                                    <span class="chip" id="draft-release-support-chip">support: waiting</span>
+                                    <span class="chip warn" id="draft-can-review-chip">Can Review</span>
+                                    <span class="chip warn" id="draft-can-draft-chip">Can Draft</span>
+                                    <span class="chip warn" id="draft-can-download-chip">Can Download</span>
                                 </div>
                                 <div class="confidence-strip" id="draft-confidence-card">
                                     <div class="confidence-card">
@@ -4921,6 +4923,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const downloadBlockers = Array.isArray(readinessPayload.downloadBlockers) ? readinessPayload.downloadBlockers : [];
             const issueItems = Array.isArray(readinessPayload.issueItems) ? readinessPayload.issueItems : [];
             const releaseReason = String(readinessPayload.releaseGateReason || '').trim();
+            const updatedAt = String(readinessPayload.updatedAt || '').trim() || new Date().toISOString();
+            const stateVersion = String(readinessPayload.stateVersion || 'workspace-gate-v1').trim();
             let primaryAction = 'Keep the draft, support record, and release checks aligned before exporting.';
 
             if (!exportAllowed) {
@@ -4937,9 +4941,30 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : supportAssessment.label === 'grounded'
                     ? 'available'
                     : 'available with caution';
+            const blockingReasons = exportBlockers.concat(downloadBlockers);
+            if (!blockingReasons.length && !downloadAllowed && releaseReason) {
+                blockingReasons.push(releaseReason);
+            }
+            const status = exportBlockers.length
+                ? 'BLOCKED'
+                : (!downloadAllowed || supportAssessment.label !== 'grounded')
+                    ? 'NEEDS_CORROBORATION'
+                    : 'READY';
+            const gate = {
+                status,
+                blocking_reasons: blockingReasons,
+                next_best_action: primaryAction,
+                updated_at: updatedAt,
+                state_version: stateVersion,
+            };
 
             const summaryLines = [
                 'Canonical filing readiness',
+                `Canonical status: ${gate.status}`,
+                gate.blocking_reasons.length ? `Canonical blockers: ${gate.blocking_reasons.join('; ')}` : 'Canonical blockers: none',
+                `Canonical next best action: ${gate.next_best_action}`,
+                `Canonical state version: ${gate.state_version}`,
+                `Canonical updated at: ${gate.updated_at}`,
                 `Pleading form quality: ${formAssessment.label.toUpperCase()}`,
                 `Evidence support strength: ${supportAssessment.label.toUpperCase()}`,
                 `Release gate verdict: ${releaseGateVerdict ? releaseGateVerdict.toUpperCase() : 'UNKNOWN'}`,
@@ -4963,7 +4988,78 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 formAssessment,
                 primaryAction,
                 summaryLines,
+                gate,
             };
+        }
+
+        function inferElementQualityStatus(supportedElements, missingElements, evidenceItemCount) {
+            if (Number(supportedElements || 0) > 0 && Number(missingElements || 0) === 0 && Number(evidenceItemCount || 0) > 0) {
+                return 'corroborated';
+            }
+            if (Number(supportedElements || 0) > 0 || Number(evidenceItemCount || 0) > 0) {
+                return 'intake-only';
+            }
+            return 'unverified';
+        }
+
+        function canonicalFixAction(exportHardBlockers) {
+            const blockers = Array.isArray(exportHardBlockers) ? exportHardBlockers : [];
+            if (blockers.some((item) => String(item || '').includes('party names'))) {
+                return { label: 'Fix Intake Names', targetTab: 'intake', focusSelector: '#intake-party_name' };
+            }
+            if (blockers.some((item) => String(item || '').includes('Civil Action No.'))) {
+                return { label: 'Fix Civil Action No.', targetTab: 'draft', focusSelector: '#draft-body' };
+            }
+            if (blockers.some((item) => String(item || '').includes('caption or title'))) {
+                return { label: 'Fix Draft Caption', targetTab: 'draft', focusSelector: '#draft-title' };
+            }
+            if (blockers.some((item) => String(item || '').includes('need support'))) {
+                return { label: 'Add Evidence', targetTab: 'evidence', focusSelector: '#evidence-title' };
+            }
+            if (blockers.some((item) => String(item || '').includes('no complaint draft body'))) {
+                return { label: 'Generate Draft', targetTab: 'draft', focusSelector: '#generate-draft-button' };
+            }
+            return { label: 'Open Review', targetTab: 'review', focusSelector: '#support-grid' };
+        }
+
+        function renderCanonicalGateBanner(prefix, readiness) {
+            const verdictNode = document.getElementById(`${prefix}-canonical-release-gate-verdict`);
+            const corroborationNode = document.getElementById(`${prefix}-canonical-corroboration-chip`);
+            const sourceNode = document.getElementById(`${prefix}-canonical-source-chip`);
+            const timestampNode = document.getElementById(`${prefix}-canonical-timestamp-chip`);
+            const summaryNode = document.getElementById(`${prefix}-canonical-release-gate-summary`);
+            const reasonsNode = document.getElementById(`${prefix}-canonical-release-gate-reasons`);
+            const ctaNode = document.getElementById(`${prefix}-canonical-blocker-cta`);
+            if (!verdictNode || !summaryNode || !reasonsNode || !ctaNode) {
+                return;
+            }
+            const gate = readiness && readiness.gate && typeof readiness.gate === 'object' ? readiness.gate : {};
+            const blockers = Array.isArray(gate.blocking_reasons) ? gate.blocking_reasons : [];
+            const releaseVerdict = String(gate.status || 'BLOCKED').trim().toUpperCase();
+            const reason = blockers[0] || 'No blocking reasons detected.';
+            const fixAction = canonicalFixAction(blockers);
+            verdictNode.className = `chip ${releaseVerdict === 'READY' ? 'good' : 'warn'}`;
+            verdictNode.textContent = `verdict: ${releaseVerdict}`;
+            if (corroborationNode && readiness && readiness.supportAssessment) {
+                corroborationNode.textContent = `corroboration: ${String(readiness.supportAssessment.label || 'unknown').toUpperCase()}`;
+            }
+            if (sourceNode) {
+                sourceNode.textContent = `source: canonical gate ${String(gate.state_version || 'workspace-gate-v1')}`;
+            }
+            if (timestampNode) {
+                timestampNode.textContent = `updated: ${String(gate.updated_at || new Date().toISOString())}`;
+            }
+            summaryNode.textContent = [
+                `${releaseVerdict} | ${reason} | Fix now: ${fixAction.label}`,
+                `Next action: ${String(gate.next_best_action || fixAction.label)}`,
+                `State version: ${String(gate.state_version || 'workspace-gate-v1')}`,
+            ].join('\n');
+            reasonsNode.innerHTML = blockers.length
+                ? blockers.map((item) => `<div class="item"><strong>${escapeHtml(String(item))}</strong></div>`).join('')
+                : '<div class="item"><strong>No blocker detected.</strong></div>';
+            ctaNode.textContent = `Fix now: ${fixAction.label}`;
+            ctaNode.dataset.targetTab = fixAction.targetTab;
+            ctaNode.dataset.focusSelector = fixAction.focusSelector;
         }
 
         function renderDraftReadiness(sessionPayload) {
@@ -4994,6 +5090,14 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const plaintiffName = currentIntakeValue('party_name') || 'Plaintiff';
             const defendantName = currentIntakeValue('opposing_party') || 'Defendant';
             const placeholderPartyNames = /^(plaintiff|the complainant)$/i.test(plaintiffName) || /^(defendant|the opposing party)$/i.test(defendantName);
+            const draftTitleText = String((document.getElementById('draft-title') || {}).value || draft.title || '').trim();
+            const placeholderWarnings = complaintPlaceholderWarnings(currentDraftBody);
+            const hasCivilActionPlaceholder = placeholderWarnings.some((warning) => String(warning || '').toLowerCase().includes('civil action no.'));
+            const courtHeaderInput = String(currentIntakeValue('court_header') || '').trim();
+            const hasGenericCourtField = !courtHeaderInput
+                || /appropriate judicial district/i.test(courtHeaderInput)
+                || /court header/i.test(courtHeaderInput)
+                || /court name/i.test(courtHeaderInput);
             const currentStrategyLabel = String((draft.draft_strategy || selectedDraftMode || 'none')).trim().toLowerCase();
             const draftFallbackChain = Array.isArray(draft.draft_backend_fallback_chain) ? draft.draft_backend_fallback_chain.filter(Boolean) : [];
             const exportHardBlockers = [];
@@ -5002,6 +5106,15 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             if (placeholderPartyNames) {
                 exportHardBlockers.push('party names still look like placeholders');
+            }
+            if (draftTitleText.length < 8) {
+                exportHardBlockers.push('caption or title still looks like a placeholder');
+            }
+            if (hasGenericCourtField) {
+                exportHardBlockers.push('court field is still missing or generic');
+            }
+            if (hasCivilActionPlaceholder) {
+                exportHardBlockers.push('Civil Action No. is still a placeholder');
             }
             if (!currentDraftBody.trim()) {
                 exportHardBlockers.push('no complaint draft body is available yet');
@@ -5030,8 +5143,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 document.getElementById('download-packet-pdf-button'),
             ].filter(Boolean);
             const releaseGateChip = document.getElementById('draft-release-gate-chip');
-            const releaseShapeChip = document.getElementById('draft-release-shape-chip');
-            const releaseSupportChip = document.getElementById('draft-release-support-chip');
+            const canReviewChip = document.getElementById('draft-can-review-chip');
+            const canDraftChip = document.getElementById('draft-can-draft-chip');
+            const canDownloadChip = document.getElementById('draft-can-download-chip');
             const unsupportedThinBlockerSummaryNode = document.getElementById('unsupported-thin-blocker-summary');
             const unsupportedThinBlockerCoverageNode = document.getElementById('unsupported-thin-blocker-coverage-note');
             const unsupportedThinBlockerChips = document.getElementById('unsupported-thin-blocker-chips');
@@ -5042,6 +5156,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const confidenceUnsupportedNode = document.getElementById('draft-confidence-unsupported');
             const releaseGateSummaryNode = document.getElementById('draft-release-gate-summary');
             const releaseGateNextStepNode = document.getElementById('draft-release-gate-next-step');
+            const workflowState = deriveWorkflowState(sessionPayload || {});
             const contractLines = [
                 `Claim type: ${draftClaimTypeLabel(selectedClaimType)}`,
                 `Expected complaint heading: COMPLAINT FOR ${String(selectedClaimType).replace(/_/g, ' ').toUpperCase()}`,
@@ -5079,7 +5194,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 exportHardBlockers,
                 downloadBlockers,
                 issueItems,
+                updatedAt: String((currentReleaseGate && currentReleaseGate.updated_at) || draft.updated_at || draft.generated_at || '').trim(),
+                stateVersion: String((currentReleaseGate && currentReleaseGate.state_version) || 'workspace-gate-v1'),
             });
+            renderCanonicalGateBanner('review', canonicalReadiness);
+            renderCanonicalGateBanner('draft', canonicalReadiness);
             document.getElementById('draft-status-gate').textContent = `${canonicalReadiness.formAssessment.label.toUpperCase()} form • ${canonicalReadiness.supportAssessment.label.toUpperCase()} support • ${downloadAllowed ? 'downloads available' : 'downloads blocked'}`;
             document.getElementById('draft-readiness-preview').textContent = canonicalReadiness.summaryLines.join('\n');
             if (confidenceGroundedNode) {
@@ -5130,15 +5249,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             if (artifactQualityWarningNode) {
                 const qualityWarnings = [];
                 if (placeholderPartyNames) {
-                    qualityWarnings.push('Party names still look generic, so fix Intake Names before export.');
+                    qualityWarnings.push('Party names still look generic, so fix Intake Names before export. <a class="surface-link" href="#intake-party_name">Fix now</a>');
                 }
-                if (String((draft.title || '')).trim().length < 8) {
-                    qualityWarnings.push('The caption or title still looks thin, so fix the caption before download.');
+                if (draftTitleText.length < 8) {
+                    qualityWarnings.push('The caption or title still looks thin, so fix the caption before download. <a class="surface-link" href="#draft-title">Fix now</a>');
+                }
+                if (hasCivilActionPlaceholder) {
+                    qualityWarnings.push('Civil Action No. is still placeholder text, so edit the draft body before export. <a class="surface-link" href="#draft-body">Fix now</a>');
                 }
                 if (!qualityWarnings.length) {
                     qualityWarnings.push('Artifact quality warnings will appear here before export when placeholders, generic party labels, or caption fallback are detected.');
                 }
-                artifactQualityWarningNode.textContent = qualityWarnings.join(' ');
+                artifactQualityWarningNode.innerHTML = qualityWarnings.join(' ');
             }
             document.getElementById('draft-export-safety-preview').textContent = [
                 canonicalReadiness.summaryLines[0],
@@ -5207,28 +5329,33 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             if (releaseGateChip) {
                 releaseGateChip.className = `chip ${downloadAllowed ? 'good' : 'warn'}`;
-                releaseGateChip.textContent = `release gate: ${releaseVerdict ? releaseVerdict.toUpperCase() : 'UNKNOWN'}`;
+                releaseGateChip.textContent = `status: ${String((canonicalReadiness.gate || {}).status || 'BLOCKED')}`;
             }
-            if (releaseShapeChip) {
-                const shapeTone = canonicalReadiness.formAssessment.label === 'pass'
-                    ? 'good'
-                    : canonicalReadiness.formAssessment.label === 'warning'
-                        ? 'warn'
-                        : 'warn';
-                releaseShapeChip.className = `chip ${shapeTone}`;
-                releaseShapeChip.textContent = `filing shape: ${canonicalReadiness.formAssessment.label.toUpperCase()} (${Number(filingShapeScore || 0)})`;
+            if (canReviewChip) {
+                canReviewChip.className = `chip ${workflowState.reviewReady ? 'good' : 'warn'}`;
+                canReviewChip.textContent = 'Can Review';
+                canReviewChip.title = workflowState.reviewReady ? 'Review stage is available.' : workflowState.reviewGateReason;
             }
-            if (releaseSupportChip) {
-                releaseSupportChip.className = `chip ${canonicalReadiness.supportAssessment.label === 'grounded' ? 'good' : 'warn'}`;
-                releaseSupportChip.textContent = `support: ${canonicalReadiness.supportAssessment.label.toUpperCase()} (${Number(supportedElements || 0)}/${Math.max(Number(supportedElements || 0) + Number(missingElements || 0), 0)})`;
+            if (canDraftChip) {
+                const canDraft = Boolean(workflowState.builderReady || currentDraftBody.trim());
+                canDraftChip.className = `chip ${canDraft ? 'good' : 'warn'}`;
+                canDraftChip.textContent = 'Can Draft';
+                canDraftChip.title = canDraft ? 'Draft editing/generation is currently available.' : workflowState.builderGateReason;
+            }
+            if (canDownloadChip) {
+                canDownloadChip.className = `chip ${downloadAllowed ? 'good' : 'warn'}`;
+                canDownloadChip.textContent = 'Can Download';
+                canDownloadChip.title = downloadAllowed ? 'Downloads are currently available.' : `Blocked: ${(downloadBlockers[0] || exportHardBlockers[0] || 'Release blockers are still open.')}`;
             }
             if (releaseGateSummaryNode) {
                 releaseGateSummaryNode.textContent = [
                     'Keep this gate visible before download',
+                    `${String((canonicalReadiness.gate || {}).status || (exportAllowed ? 'READY' : 'BLOCKED'))} | ${(canonicalReadiness.gate && canonicalReadiness.gate.blocking_reasons && canonicalReadiness.gate.blocking_reasons[0]) || 'No blocker detected.'} | Fix now: ${canonicalFixAction(exportHardBlockers).label}`,
                     `Release gate verdict: ${releaseVerdict ? releaseVerdict.toUpperCase() : 'UNKNOWN'}`,
                     `Primary action: ${canonicalReadiness.primaryAction}`,
                     exportHardBlockers.length ? `Export blockers: ${exportHardBlockers.join('; ')}` : 'Export blockers: none',
                     downloadBlockers.length ? `Download blockers: ${downloadBlockers.join('; ')}` : 'Download blockers: none',
+                    `State version: ${String((canonicalReadiness.gate || {}).state_version || 'workspace-gate-v1')}`,
                     issueItems.length ? `Top defect: ${String((issueItems[0] || {}).finding || '').trim()}` : 'Top defect: No complaint-output defect captured.',
                 ].join('\n');
             }
@@ -5249,13 +5376,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             exportButtons.forEach((button) => {
                 setButtonGateState(
                     button,
-                    packetExportAllowed,
+                    packetExportAllowed && exportAllowed,
                     packetExportAllowed
                         ? (exportAllowed
                             ? 'Packet export is available so the release gate and packet analysis can be refreshed.'
                             : `Packet export is blocked until ${exportHardBlockers.join('; ')}.`)
                         : 'Generate or hydrate a complaint draft before exporting a packet.'
                 );
+                if (packetExportAllowed && !exportAllowed) {
+                    button.title = `Packet export is blocked until ${exportHardBlockers.join('; ')}.`;
+                }
             });
             [
                 document.getElementById('download-packet-markdown-button'),
@@ -5294,12 +5424,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 inferredAssertions.push("await expect(page.locator('#draft-export-safety-preview')).toContainText('Primary action right now:');");
                 inferredAssertions.push("await expect(page.locator('#draft-primary-action-note')).toContainText('Primary action now:');");
                 inferredAssertions.push("await expect(page.locator('#draft-export-guidance')).toContainText('release-gate guidance');");
+                inferredAssertions.push("await expect(page.locator('#review-canonical-release-gate-summary')).toContainText('State version:');");
+                inferredAssertions.push("await expect(page.locator('#draft-canonical-release-gate-summary')).toContainText('Next action:');");
+                inferredAssertions.push("await expect(page.locator('#unsupported-thin-blocker-panel')).toBeVisible();");
             }
             if (unresolvedText.includes('next step') || unresolvedText.includes('guidance') || unresolvedText.includes('primary action')) {
                 inferredAssertions.push("await expect(page.locator('#draft-release-gate-next-step')).toContainText('Next safest move:');");
             }
             if (unresolvedText.includes('download') || unresolvedText.includes('blocked') || unresolvedText.includes('unsafe')) {
                 inferredAssertions.push("await expect(page.locator('#draft-release-gate-chip')).toBeVisible();");
+                inferredAssertions.push("await expect(page.locator('#draft-can-review-chip')).toBeVisible();");
+                inferredAssertions.push("await expect(page.locator('#draft-can-draft-chip')).toBeVisible();");
+                inferredAssertions.push("await expect(page.locator('#draft-can-download-chip')).toBeVisible();");
                 inferredAssertions.push("await expect(page.locator('#download-packet-markdown-button')).toBeDisabled();");
                 inferredAssertions.push("await expect(page.locator('#download-packet-docx-button')).toBeDisabled();");
                 inferredAssertions.push("await expect(page.locator('#download-packet-pdf-button')).toBeDisabled();");

@@ -763,45 +763,29 @@ class Optimizer:
                     codex_patch_path.write_text(patch_text, encoding="utf-8")
                     return updated_files, str(codex_patch_path), diagnostics
 
-                def _attempt_deterministic_workspace_autopatch() -> tuple[List[str], str | None, List[Dict[str, Any]]]:
+                def _attempt_deterministic_surface_autopatch() -> tuple[List[str], str | None, List[Dict[str, Any]]]:
                     diagnostics: List[Dict[str, Any]] = []
-                    workspace_rel_path = "templates/workspace.html"
-                    workspace_path = tracked_files.get(workspace_rel_path)
-                    if workspace_path is None:
-                        diagnostics.append(
-                            {
-                                "backend": "deterministic_workspace_fallback_optimizer",
-                                "status": "skipped",
-                                "reason": "templates/workspace.html was not part of the bounded target set.",
-                            }
-                        )
-                        return [], None, diagnostics
-
-                    brief_text = "\n".join(
-                        [
-                            str((brief or {}).get("recommended_action") or "").strip()
+                    def _selected_briefs_for(rel_path: str) -> List[Dict[str, Any]]:
+                        return [
+                            dict(brief)
                             for brief in selected_patch_briefs
-                            if str((brief or {}).get("recommended_action") or "").strip()
+                            if rel_path in [str(path).strip() for path in list((brief or {}).get("target_files") or []) if str(path).strip()]
                         ]
-                    ).lower()
-                    selected_workspace_briefs = [
-                        dict(brief)
-                        for brief in selected_patch_briefs
-                        if workspace_rel_path in [str(path).strip() for path in list((brief or {}).get("target_files") or []) if str(path).strip()]
-                    ]
-                    if not selected_workspace_briefs:
-                        diagnostics.append(
-                            {
-                                "backend": "deterministic_workspace_fallback_optimizer",
-                                "status": "skipped",
-                                "reason": "Selected patch briefs did not target templates/workspace.html.",
-                            }
-                        )
-                        return [], None, diagnostics
 
-                    updated_text = workspace_path.read_text(encoding="utf-8")
-                    original_text = updated_text
-                    replacements = [
+                    updated_files: List[str] = []
+
+                    def _apply_workspace_patch() -> None:
+                        workspace_rel_path = "templates/workspace.html"
+                        workspace_path = tracked_files.get(workspace_rel_path)
+                        if workspace_path is None:
+                            return
+                        selected_workspace_briefs = _selected_briefs_for(workspace_rel_path)
+                        if not selected_workspace_briefs:
+                            return
+
+                        updated_text = workspace_path.read_text(encoding="utf-8")
+                        original_text = updated_text
+                        replacements = [
                         (
                             "<h3>Canonical filing verdict</h3>",
                             "<h3>Canonical filing verdict bar</h3>",
@@ -858,63 +842,63 @@ class Optimizer:
                             "Fix Caption",
                             "Fix Draft",
                         ),
-                    ]
-                    for before_text, after_text in replacements:
-                        if before_text in updated_text and after_text not in updated_text:
-                            updated_text = updated_text.replace(before_text, after_text, 1)
+                        ]
+                        for before_text, after_text in replacements:
+                            if before_text in updated_text and after_text not in updated_text:
+                                updated_text = updated_text.replace(before_text, after_text, 1)
 
-                    blocker_anchor = "<div class=\"list\" id=\"unsupported-thin-blocker-reasons\">"
-                    blocker_note = (
+                        blocker_anchor = "<div class=\"list\" id=\"unsupported-thin-blocker-reasons\">"
+                        blocker_note = (
                         "                                <div class=\"soft-note\" id=\"unsupported-thin-blocker-coverage-note\">"
                         "Confidence stays blocked until unsupported elements are routed back to Review or Evidence instead of being hidden behind export or download actions."
                         "</div>\n"
-                    )
-                    if "id=\"unsupported-thin-blocker-coverage-note\"" not in updated_text and blocker_anchor in updated_text:
-                        updated_text = updated_text.replace(blocker_anchor, blocker_note + "                                " + blocker_anchor, 1)
-
-                    repair_focus_anchor = "id=\"optimizer-repair-focus-note\">"
-                    repair_focus_summary = " | ".join(
-                        [
-                            str((brief or {}).get("title") or "").strip()
-                            + (
-                                f": {str((brief or {}).get('recommended_action') or '').strip()}"
-                                if str((brief or {}).get("recommended_action") or "").strip()
-                                else ""
-                            )
-                            for brief in selected_workspace_briefs[:3]
-                            if str((brief or {}).get("title") or "").strip()
-                        ]
-                    ).strip()
-                    if repair_focus_summary:
-                        updated_focus_note = (
-                            "Adversarial optimizer repair focus: " + repair_focus_summary
                         )
-                        if repair_focus_anchor in updated_text:
-                            updated_text = re.sub(
-                                r'(id="optimizer-repair-focus-note">)(.*?)(</div>)',
-                                lambda match: match.group(1) + updated_focus_note + match.group(3),
-                                updated_text,
-                                count=1,
-                                flags=re.DOTALL,
-                            )
-                        else:
-                            repair_focus_insert_anchor = (
-                                "                            <div class=\"tool-card canonical-release-gate\" id=\"unsupported-thin-blocker-panel\">"
-                            )
-                            repair_focus_block = (
-                                "                            <div class=\"soft-note\" id=\"optimizer-repair-focus-note\">"
-                                + updated_focus_note
-                                + "</div>\n"
-                            )
-                            if repair_focus_insert_anchor in updated_text:
-                                updated_text = updated_text.replace(
-                                    repair_focus_insert_anchor,
-                                    repair_focus_block + repair_focus_insert_anchor,
-                                    1,
-                                )
+                        if "id=\"unsupported-thin-blocker-coverage-note\"" not in updated_text and blocker_anchor in updated_text:
+                            updated_text = updated_text.replace(blocker_anchor, blocker_note + "                                " + blocker_anchor, 1)
 
-                    confidence_anchor = "<div class=\"status draft-preview-shell\"><pre id=\"draft-release-gate-summary\">Verdict: BLOCKED"
-                    confidence_block = (
+                        repair_focus_anchor = "id=\"optimizer-repair-focus-note\">"
+                        repair_focus_summary = " | ".join(
+                            [
+                                str((brief or {}).get("title") or "").strip()
+                                + (
+                                    f": {str((brief or {}).get('recommended_action') or '').strip()}"
+                                    if str((brief or {}).get("recommended_action") or "").strip()
+                                    else ""
+                                )
+                                for brief in selected_workspace_briefs[:3]
+                                if str((brief or {}).get("title") or "").strip()
+                            ]
+                        ).strip()
+                        if repair_focus_summary:
+                            updated_focus_note = (
+                                "Adversarial optimizer repair focus: " + repair_focus_summary
+                            )
+                            if repair_focus_anchor in updated_text:
+                                updated_text = re.sub(
+                                    r'(id="optimizer-repair-focus-note">)(.*?)(</div>)',
+                                    lambda match: match.group(1) + updated_focus_note + match.group(3),
+                                    updated_text,
+                                    count=1,
+                                    flags=re.DOTALL,
+                                )
+                            else:
+                                repair_focus_insert_anchor = (
+                                    "                            <div class=\"tool-card canonical-release-gate\" id=\"unsupported-thin-blocker-panel\">"
+                                )
+                                repair_focus_block = (
+                                    "                            <div class=\"soft-note\" id=\"optimizer-repair-focus-note\">"
+                                    + updated_focus_note
+                                    + "</div>\n"
+                                )
+                                if repair_focus_insert_anchor in updated_text:
+                                    updated_text = updated_text.replace(
+                                        repair_focus_insert_anchor,
+                                        repair_focus_block + repair_focus_insert_anchor,
+                                        1,
+                                    )
+
+                        confidence_anchor = "<div class=\"status draft-preview-shell\"><pre id=\"draft-release-gate-summary\">Verdict: BLOCKED"
+                        confidence_block = (
                         "                                <div class=\"confidence-strip\" id=\"draft-confidence-card\">\n"
                         "                                    <div class=\"confidence-card\">\n"
                         "                                        <strong>Grounded</strong>\n"
@@ -929,46 +913,104 @@ class Optimizer:
                         "                                        <span id=\"draft-confidence-unsupported\">0 elements still need direct targeted proof before filing confidence should rise.</span>\n"
                         "                                    </div>\n"
                         "                                </div>\n"
-                    )
-                    if "id=\"draft-confidence-card\"" not in updated_text and confidence_anchor in updated_text:
-                        updated_text = updated_text.replace(confidence_anchor, confidence_block + confidence_anchor, 1)
+                        )
+                        if "id=\"draft-confidence-card\"" not in updated_text and confidence_anchor in updated_text:
+                            updated_text = updated_text.replace(confidence_anchor, confidence_block + confidence_anchor, 1)
 
-                    event_anchor = (
+                        event_anchor = (
                         "        document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));\n"
                         "        document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));\n"
-                    )
-                    event_block = (
+                        )
+                        event_block = (
                         event_anchor
                         + "        document.getElementById('unsupported-thin-go-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the unsupported-elements blocker so the record can be strengthened before export or download.'));\n"
                         + "        document.getElementById('unsupported-thin-go-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the unsupported-elements blocker so the filing verdict can be checked before export or download.'));\n"
                         + "        document.getElementById('draft-fix-intake-names-button').addEventListener('click', () => jumpToStage('intake', '#intake-party_name', 'Opened Intake so placeholder party names can be fixed before export.'));\n"
                         + "        document.getElementById('draft-fix-caption-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Focused the draft caption so the filing title can be fixed before export.'));\n"
-                    )
-                    if "unsupported-thin-go-evidence-button" not in updated_text and event_anchor in updated_text:
-                        updated_text = updated_text.replace(event_anchor, event_block, 1)
+                        )
+                        if "unsupported-thin-go-evidence-button" not in updated_text and event_anchor in updated_text:
+                            updated_text = updated_text.replace(event_anchor, event_block, 1)
 
-                    if updated_text == original_text:
+                        if updated_text != original_text:
+                            workspace_path.write_text(updated_text, encoding="utf-8")
+                            updated_files.append(workspace_rel_path)
+
+                    def _apply_app_shell_patch() -> None:
+                        shell_rel_path = "static/complaint_app_shell.js"
+                        shell_path = tracked_files.get(shell_rel_path)
+                        if shell_path is None:
+                            return
+                        if not _selected_briefs_for(shell_rel_path):
+                            return
+                        updated_text = shell_path.read_text(encoding="utf-8")
+                        original_text = updated_text
+                        if "Use the shared release gate in Workspace before trusting packet exports or downloads." not in updated_text:
+                            anchor = (
+                                "'<div class=\"cg-app-shell__phase-note\">Keep draft generation, packet export, and release-gate next-step guidance visible together before downloading complaint files.</div>',\n"
+                            )
+                            addition = (
+                                anchor
+                                + "            '<div class=\"cg-app-shell__phase-note\">Use the shared release gate in Workspace before trusting packet exports or downloads.</div>',\n"
+                            )
+                            if anchor in updated_text:
+                                updated_text = updated_text.replace(anchor, addition, 1)
+                        if "Open Workspace Draft Gate" not in updated_text:
+                            updated_text = updated_text.replace(
+                                "buildGatedLink('cg-app-shell__draft-step', '2. Export + review packet', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),",
+                                "buildGatedLink('cg-app-shell__draft-step', '2. Open Workspace Draft Gate', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),",
+                                1,
+                            )
+                        if updated_text != original_text:
+                            shell_path.write_text(updated_text, encoding="utf-8")
+                            updated_files.append(shell_rel_path)
+
+                    def _apply_playwright_spec_patch() -> None:
+                        spec_rel_path = "playwright/tests/complaint-flow.spec.js"
+                        spec_path = tracked_files.get(spec_rel_path)
+                        if spec_path is None:
+                            return
+                        if not _selected_briefs_for(spec_rel_path):
+                            return
+                        updated_text = spec_path.read_text(encoding="utf-8")
+                        original_text = updated_text
+                        anchor = "    await expect(page.locator('#ux-review-stage-findings')).toContainText(/Complaint-output suggestion carried into optimization/i);\n"
+                        assertion_block = (
+                            anchor
+                            + "    await expect(page.locator('#ux-review-scorecard')).toContainText(/3\\/3 selected repairs/i);\n"
+                            + "    await expect(page.locator('#ux-review-scorecard')).toContainText(/coverage 100%/i);\n"
+                            + "    await expect(page.locator('#ux-review-runs')).toContainText(/UX repair 1/i);\n"
+                        )
+                        if anchor in updated_text and "3\\/3 selected repairs" not in updated_text:
+                            updated_text = updated_text.replace(anchor, assertion_block, 1)
+                        if updated_text != original_text:
+                            spec_path.write_text(updated_text, encoding="utf-8")
+                            updated_files.append(spec_rel_path)
+
+                    _apply_workspace_patch()
+                    _apply_app_shell_patch()
+                    _apply_playwright_spec_patch()
+
+                    if not updated_files:
                         diagnostics.append(
                             {
-                                "backend": "deterministic_workspace_fallback_optimizer",
+                                "backend": "deterministic_surface_fallback_optimizer",
                                 "status": "no_changes",
-                                "reason": "The bounded workspace release-gate repairs were already present.",
+                                "reason": "The bounded deterministic surface repairs were already present or no selected target files matched known deterministic patchers.",
                             }
                         )
                         return [], None, diagnostics
 
-                    workspace_path.write_text(updated_text, encoding="utf-8")
-                    patch_path = output_dir / "fallback-deterministic-workspace.patch"
-                    patch_path.write_text(_build_patch_text([workspace_rel_path]), encoding="utf-8")
+                    patch_path = output_dir / "fallback-deterministic-surfaces.patch"
+                    patch_path.write_text(_build_patch_text(updated_files), encoding="utf-8")
                     diagnostics.append(
                         {
-                            "backend": "deterministic_workspace_fallback_optimizer",
+                            "backend": "deterministic_surface_fallback_optimizer",
                             "status": "applied",
-                            "changed_files": [workspace_rel_path],
+                            "changed_files": list(updated_files),
                             "patch_path": str(patch_path),
                         }
                     )
-                    return [workspace_rel_path], str(patch_path), diagnostics
+                    return list(updated_files), str(patch_path), diagnostics
 
                 updated_files, codex_patch_path, codex_diagnostics = _attempt_codex_autopatch()
                 if updated_files:
@@ -988,7 +1030,7 @@ class Optimizer:
                         },
                     )
 
-                deterministic_files, deterministic_patch_path, deterministic_diagnostics = _attempt_deterministic_workspace_autopatch()
+                deterministic_files, deterministic_patch_path, deterministic_diagnostics = _attempt_deterministic_surface_autopatch()
                 if deterministic_files:
                     patch_brief_coverage = _summarize_selected_patch_brief_coverage(deterministic_files)
                     self._last_generation_diagnostics = codex_diagnostics + deterministic_diagnostics
@@ -999,7 +1041,7 @@ class Optimizer:
                         metadata={
                             "changed_files": deterministic_files,
                             "recommendations": recommendations,
-                            "optimizer_backend": "deterministic_workspace_fallback_optimizer",
+                            "optimizer_backend": "deterministic_surface_fallback_optimizer",
                             "selected_patch_briefs": selected_patch_briefs,
                             "recommendation_coverage": recommendation_coverage,
                             **patch_brief_coverage,
@@ -3376,7 +3418,10 @@ class Optimizer:
                 seen_patch_brief_keys.add(key)
                 prioritized_with_carry_forward.append(dict(brief))
             prioritized_patch_briefs = prioritized_with_carry_forward
-        selected_patch_briefs = [dict(item) for item in prioritized_patch_briefs[:3]]
+        selected_patch_briefs = self._select_ui_patch_briefs(
+            prioritized_patch_briefs,
+            max_items=self._ui_patch_brief_batch_limit(prioritized_patch_briefs),
+        )
         top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
         selected_target_paths: List[Path] = []
         for brief in selected_patch_briefs:
@@ -4834,6 +4879,66 @@ class Optimizer:
 
         return sorted(normalized, key=_sort_key)
 
+    @staticmethod
+    def _select_ui_patch_briefs(
+        prioritized_patch_briefs: List[Dict[str, Any]],
+        *,
+        max_items: int = 3,
+    ) -> List[Dict[str, Any]]:
+        prioritized = [dict(item) for item in prioritized_patch_briefs if isinstance(item, dict)]
+        if max_items <= 0 or not prioritized:
+            return []
+
+        selected: List[Dict[str, Any]] = []
+        selected_keys: set[tuple[str, str, str]] = set()
+        covered_target_files: set[str] = set()
+
+        def _brief_key(brief: Dict[str, Any]) -> tuple[str, str, str]:
+            return (
+                str((brief or {}).get("title") or "").strip().lower(),
+                str((brief or {}).get("surface") or "").strip().lower(),
+                str((brief or {}).get("recommended_action") or "").strip().lower(),
+            )
+
+        def _target_files(brief: Dict[str, Any]) -> List[str]:
+            return [
+                str(path).strip()
+                for path in list((brief or {}).get("target_files") or [])
+                if str(path).strip()
+            ]
+
+        for brief in prioritized:
+            key = _brief_key(brief)
+            if key in selected_keys:
+                continue
+            target_files = _target_files(brief)
+            if not target_files:
+                continue
+            if any(path not in covered_target_files for path in target_files):
+                selected.append(dict(brief))
+                selected_keys.add(key)
+                covered_target_files.update(target_files)
+            if len(selected) >= max_items:
+                return selected[:max_items]
+
+        for brief in prioritized:
+            key = _brief_key(brief)
+            if key in selected_keys:
+                continue
+            selected.append(dict(brief))
+            selected_keys.add(key)
+            if len(selected) >= max_items:
+                break
+
+        return selected[:max_items]
+
+    @staticmethod
+    def _ui_patch_brief_batch_limit(prioritized_patch_briefs: List[Dict[str, Any]]) -> int:
+        prioritized = [dict(item) for item in prioritized_patch_briefs if isinstance(item, dict)]
+        if not prioritized:
+            return 0
+        return min(len(prioritized), 12)
+
     def build_ui_patch_tasks(
         self,
         *,
@@ -4871,7 +4976,10 @@ class Optimizer:
         prioritized_patch_briefs = self._prioritize_ui_patch_briefs(
             artifact_patch_briefs or list(bundle.patch_briefs or [])
         )
-        selected_patch_briefs = [dict(item) for item in prioritized_patch_briefs[:3]]
+        selected_patch_briefs = self._select_ui_patch_briefs(
+            prioritized_patch_briefs,
+            max_items=self._ui_patch_brief_batch_limit(prioritized_patch_briefs),
+        )
         top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
         selected_target_files: List[Path] = []
         for brief in selected_patch_briefs:

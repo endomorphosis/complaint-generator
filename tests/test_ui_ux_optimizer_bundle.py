@@ -833,3 +833,151 @@ def test_build_ui_ux_optimization_task_prioritizes_carry_forward_patch_briefs(mo
     assert report_summary["carry_forward_patch_briefs"][0]["title"] == "Carry forward release gate"
     assert report_summary["selected_patch_briefs"][0]["title"] == "Carry forward release gate"
     assert [str(path) for path in task.target_files] == ["templates/workspace.html", "static/complaint_app_shell.js"]
+
+
+def test_select_ui_patch_briefs_diversifies_across_target_files():
+    optimizer = Optimizer()
+
+    prioritized = [
+        {
+            "title": "Workspace warning 1",
+            "surface": "/workspace",
+            "recommended_action": "Keep the verdict visible.",
+            "target_files": ["templates/workspace.html"],
+            "severity": "critical",
+        },
+        {
+            "title": "Workspace warning 2",
+            "surface": "/workspace",
+            "recommended_action": "Keep the blocker summary pinned.",
+            "target_files": ["templates/workspace.html"],
+            "severity": "warning",
+        },
+        {
+            "title": "Shell CTA repair",
+            "surface": "/",
+            "recommended_action": "Route the shell CTA into the draft gate.",
+            "target_files": ["static/complaint_app_shell.js"],
+            "severity": "warning",
+        },
+        {
+            "title": "Playwright coverage repair",
+            "surface": "/workspace",
+            "recommended_action": "Assert the selected repair coverage in the browser flow.",
+            "target_files": ["playwright/tests/complaint-flow.spec.js"],
+            "severity": "warning",
+        },
+    ]
+
+    selected = optimizer._select_ui_patch_briefs(
+        prioritized,
+        max_items=optimizer._ui_patch_brief_batch_limit(prioritized),
+    )
+
+    assert [item["title"] for item in selected] == [
+        "Workspace warning 1",
+        "Shell CTA repair",
+        "Playwright coverage repair",
+        "Workspace warning 2",
+    ]
+
+
+def test_build_ui_patch_tasks_selects_diverse_patch_brief_batch(monkeypatch):
+    optimizer = Optimizer()
+    ui_review_report = {"summary": "Keep verdicts and CTA routing coherent."}
+
+    monkeypatch.setattr(
+        optimizer,
+        "build_ui_optimization_bundle",
+        lambda **kwargs: UIOptimizationBundle(
+            timestamp="2026-03-23T00:00:00+00:00",
+            screenshot_dir="screens",
+            screenshot_paths=["screens/workspace-draft.png"],
+            artifact_count=1,
+            summary="Keep filing readiness visible.",
+            issues=[],
+            recommended_changes=[
+                {"title": "Workspace warning 1"},
+                {"title": "Workspace warning 2"},
+                {"title": "Shell CTA repair"},
+                {"title": "Playwright coverage repair"},
+            ],
+            broken_controls=[],
+            complaint_journey={},
+            actor_plan={},
+            critic_review={},
+            playwright_followups=[],
+            target_files=[
+                "templates/workspace.html",
+                "static/complaint_app_shell.js",
+                "playwright/tests/complaint-flow.spec.js",
+            ],
+            complaint_output_feedback={},
+            patch_briefs=[
+                {
+                    "title": "Workspace warning 1",
+                    "surface": "/workspace",
+                    "problem": "The filing verdict is too easy to miss.",
+                    "recommended_action": "Keep the verdict visible.",
+                    "target_files": ["templates/workspace.html"],
+                    "severity": "critical",
+                },
+                {
+                    "title": "Workspace warning 2",
+                    "surface": "/workspace",
+                    "problem": "The blocker summary scrolls away.",
+                    "recommended_action": "Keep the blocker summary pinned.",
+                    "target_files": ["templates/workspace.html"],
+                    "severity": "warning",
+                },
+                {
+                    "title": "Shell CTA repair",
+                    "surface": "/",
+                    "problem": "The shell CTA misses the draft guardrail.",
+                    "recommended_action": "Route the shell CTA into the draft gate.",
+                    "target_files": ["static/complaint_app_shell.js"],
+                    "severity": "warning",
+                },
+                {
+                    "title": "Playwright coverage repair",
+                    "surface": "/workspace",
+                    "problem": "The browser contract does not assert repair coverage.",
+                    "recommended_action": "Assert the selected repair coverage in the browser flow.",
+                    "target_files": ["playwright/tests/complaint-flow.spec.js"],
+                    "severity": "warning",
+                },
+            ],
+        ),
+    )
+
+    tasks = optimizer.build_ui_patch_tasks(
+        ui_review_report=ui_review_report,
+        components={
+            "OptimizationTask": lambda **kwargs: SimpleNamespace(**kwargs),
+            "OptimizationMethod": SimpleNamespace(TEST_DRIVEN="TEST_DRIVEN"),
+            "OptimizerLLMRouter": None,
+            "optimizer_classes": {},
+        },
+    )
+
+    task = tasks[0]
+    report_summary = task.metadata["report_summary"]
+    assert [item["title"] for item in report_summary["selected_patch_briefs"]] == [
+        "Workspace warning 1",
+        "Shell CTA repair",
+        "Playwright coverage repair",
+        "Workspace warning 2",
+    ]
+    assert [str(path) for path in task.target_files] == [
+        "templates/workspace.html",
+        "static/complaint_app_shell.js",
+        "playwright/tests/complaint-flow.spec.js",
+    ]
+    assert report_summary["recommendation_coverage"]["selected_patch_briefs_count"] == 4
+
+
+def test_ui_patch_brief_batch_limit_carries_full_review_set_up_to_cap():
+    optimizer = Optimizer()
+    prioritized = [{"title": f"Repair {index}", "target_files": [f"file-{index}.txt"]} for index in range(1, 16)]
+
+    assert optimizer._ui_patch_brief_batch_limit(prioritized) == 12
