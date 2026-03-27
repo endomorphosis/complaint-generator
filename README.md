@@ -252,6 +252,8 @@ The standard regression workflow runs that helper in a separate `package-install
 
 The repo also includes a separate Node Playwright compatibility suite available through `npm test:e2e`, but that path runs against a stubbed server for browser-level compatibility checks. The Python regression runners remain the authoritative browser gate for the real FastAPI site surface.
 
+The stubbed Playwright server defaults to port `19030` so it does not collide as easily with local app servers already using `19000`. You can still override the port per run with `PLAYWRIGHT_TEST_PORT`, for example `PLAYWRIGHT_TEST_PORT=19045 npm run test:e2e:navigation`.
+
 The browser-focused UI/UX optimizer and screenshot-audit workflow now default to the full JavaScript complaint journey:
 
 ```bash

@@ -9,7 +9,7 @@ const staticDir = path.join(root, 'static');
 const sdkPreviewPath = path.join(root, 'ipfs_datasets_py', 'ipfs_accelerate_py', 'SDK_PLAYGROUND_PREVIEW.html');
 const ipfsDatasetsTemplatesDir = path.join(root, 'ipfs_datasets_py', 'ipfs_datasets_py', 'templates');
 const ipfsDatasetsStaticDir = path.join(root, 'ipfs_datasets_py', 'ipfs_datasets_py', 'static');
-const port = Number(process.env.PLAYWRIGHT_TEST_PORT || 19000);
+const port = Number(process.env.PLAYWRIGHT_TEST_PORT || 19030);
 
 function slugifyFilename(value) {
   return String(value || 'complaint-packet')

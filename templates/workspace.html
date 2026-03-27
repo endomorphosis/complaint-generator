@@ -5408,7 +5408,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     ? (downloadAllowed
                         ? 'Download the exported complaint packet.'
                         : `Download the exported packet artifact while the workspace keeps these blockers visible: ${downloadBlockers.join('; ')}.`)
-                    : 'Export the complaint packet before downloading it.';
+                    : 'Download is blocked until the complaint packet is exported.';
             });
             renderDraftExportIntegrity(sessionPayload);
         }
