@@ -1,5 +1,11 @@
 window.ChatPage = (function() {
-    const hostname = "localhost:19000";
+    const websocketOrigin = (function() {
+        if (typeof window !== 'undefined' && window.location) {
+            const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${socketProtocol}//${window.location.host}`;
+        }
+        return 'ws://localhost:19030';
+    })();
     const chatEntryUtils = window.ChatEntryUtils || {};
 
     function loadProfile(username, password) {
@@ -336,7 +342,7 @@ window.ChatPage = (function() {
         }
 
         try {
-            socket = new WebSocket("ws://" + hostname + "/api/chat");
+            socket = new WebSocket(websocketOrigin + "/api/chat");
             socket.onopen = function() {
                 socketReady = true;
             };

@@ -128,6 +128,8 @@ def _load_template(template_name: str) -> str:
     template = (TEMPLATES_DIR / template_name).read_text()
     template = template.replace('hostname = "http://localhost:19000";', "hostname = window.location.origin;")
     template = template.replace('hostname = "localhost:19000";', "hostname = window.location.origin;")
+    template = template.replace('hostname = "http://localhost:19030";', "hostname = window.location.origin;")
+    template = template.replace('hostname = "localhost:19030";', "hostname = window.location.origin;")
     template = template.replace("alert(JSON.stringify(testdata));", "console.log(JSON.stringify(testdata));")
     return template
 
@@ -136,6 +138,7 @@ def _load_static_asset(asset_name: str) -> str:
     asset = (STATIC_DIR / asset_name).read_text()
     if asset_name == "chat.js":
         asset = asset.replace('const hostname = "localhost:19000";', "const hostname = window.location.host;")
+        asset = asset.replace('const hostname = "localhost:19030";', "const hostname = window.location.host;")
     return asset
 
 

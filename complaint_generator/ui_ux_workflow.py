@@ -751,7 +751,7 @@ def run_playwright_screenshot_audit(
     env.setdefault("RUN_LLM_TESTS", "1")
     env.setdefault("RUN_NETWORK_TESTS", "1")
     env.setdefault("RUN_HEAVY_TESTS", "1")
-    env["PLAYWRIGHT_TEST_PORT"] = str(19000 + (int(time() * 1000) % 1000))
+    env["PLAYWRIGHT_TEST_PORT"] = str(19030 + (int(time() * 1000) % 1000))
     env["TMPDIR"] = str(tmp_root)
     env["TMP"] = str(tmp_root)
     env["TEMP"] = str(tmp_root)

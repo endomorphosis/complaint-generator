@@ -449,7 +449,7 @@ class SERVER:
             }
 
 
-        uvicorn.run(app, host="0.0.0.0", port=19000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("COMPLAINT_GENERATOR_PORT", "19030")))
         
     class SocketManager:
         def __init__(self):
