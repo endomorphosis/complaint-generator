@@ -619,7 +619,7 @@ Blocker reasons: waiting for readiness signals.</pre></div>
 
     updated = target_file.read_text(encoding="utf-8")
     assert result.status == "applied"
-    assert result.metadata["optimizer_backend"] == "deterministic_workspace_fallback_optimizer"
+    assert result.metadata["optimizer_backend"] == "deterministic_surface_fallback_optimizer"
     assert result.metadata["changed_files"] == ["templates/workspace.html"]
     assert result.metadata["covered_patch_brief_titles"] == ["UX repair 1", "UX repair 2", "UX repair 3"]
     assert result.metadata["selected_patch_brief_coverage_ratio"] == 1.0
@@ -627,6 +627,127 @@ Blocker reasons: waiting for readiness signals.</pre></div>
     assert "unsupported-thin-blocker-coverage-note" in updated
     assert "draft-confidence-card" in updated
     assert "unsupported-thin-go-evidence-button" in updated
+
+
+def test_fallback_local_optimizer_applies_deterministic_surface_patch_across_workspace_and_sdk(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    optimizer = Optimizer()
+    components = optimizer._fallback_agentic_optimizer_components()
+    fallback_cls = components["optimizer_classes"]["actor_critic"]
+    output_dir = tmp_path / "reviews"
+    output_dir.mkdir()
+
+    workspace_file = tmp_path / "templates" / "workspace.html"
+    workspace_file.parent.mkdir(parents=True)
+    workspace_file.write_text(
+        """
+<div class="tool-card canonical-release-gate" id="draft-canonical-release-gate">
+    <h3>Canonical filing verdict</h3>
+    <p class="muted">Pinned filing verdict for Review and Draft. One reason source drives both tabs.</p>
+</div>
+<div class="tool-card canonical-release-gate" id="unsupported-thin-blocker-panel">
+    <p class="muted" id="unsupported-thin-blocker-summary">Generate, export, and download stay blocked until the confidence gate is grounded.</p>
+    <div class="chip-row" id="unsupported-thin-blocker-chips">
+        <span class="chip">grounded: 0</span>
+        <span class="chip">thin: 0</span>
+        <span class="chip">unsupported: 0</span>
+    </div>
+    <div class="list" id="unsupported-thin-blocker-reasons"></div>
+</div>
+<div class="status draft-preview-shell"><pre id="draft-release-gate-summary">Verdict: BLOCKED</pre></div>
+<button id="draft-review-before-export-button" type="button">Review</button>
+<button id="draft-evidence-before-export-button" type="button">Evidence</button>
+<script>
+        document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));
+        document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));
+</script>
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    sdk_file = tmp_path / "static" / "complaint_mcp_sdk.js"
+    sdk_file.parent.mkdir(parents=True)
+    sdk_file.write_text(
+        """
+(function (globalScope) {
+class ComplaintMcpClient {
+    getToolCallLedger() {
+        if (typeof localStorage === 'undefined') {
+            return [];
+        }
+        try {
+            const raw = localStorage.getItem(this.toolCallLedgerStorageKey);
+            const parsed = raw ? JSON.parse(raw) : [];
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    getWorkflowCapabilities(userId) {
+        return this.callTool('complaint.get_workflow_capabilities', {
+            user_id: userId,
+        });
+    }
+
+    getToolingContract(userId) {
+        return this.callTool('complaint.get_tooling_contract', {
+            user_id: userId,
+        });
+    }
+
+    async getCanonicalReleaseGate(userId) {
+        return this.callTool('complaint.get_client_release_gate', {
+            user_id: userId,
+        });
+    }
+}
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("adversarial_harness.optimizer.shutil.which", lambda name: None)
+
+    task = SimpleNamespace(
+        task_id="ui-task",
+        target_files=[Path("templates/workspace.html"), Path("static/complaint_mcp_sdk.js")],
+        constraints={"output_dir": str(output_dir)},
+        metadata={
+            "report_summary": {
+                "selected_patch_briefs": [
+                    {
+                        "title": "UX repair 1",
+                        "recommended_action": "Make one canonical release-gate state across Review, Draft, and Export metadata.",
+                        "target_files": ["templates/workspace.html"],
+                    },
+                    {
+                        "title": "UX repair 7",
+                        "recommended_action": "Add a tool-impact ledger and workflow snapshot helper to the browser SDK.",
+                        "target_files": ["static/complaint_mcp_sdk.js"],
+                    },
+                ]
+            },
+        },
+    )
+
+    result = fallback_cls(agent_id="fallback-ui", llm_router=None).optimize(task)
+
+    workspace_updated = workspace_file.read_text(encoding="utf-8")
+    sdk_updated = sdk_file.read_text(encoding="utf-8")
+    assert result.status == "applied"
+    assert result.metadata["optimizer_backend"] == "deterministic_surface_fallback_optimizer"
+    assert result.metadata["changed_files"] == [
+        "templates/workspace.html",
+        "static/complaint_mcp_sdk.js",
+    ]
+    assert result.metadata["covered_patch_brief_titles"] == ["UX repair 1", "UX repair 7"]
+    assert result.metadata["selected_patch_brief_coverage_ratio"] == 1.0
+    assert "Canonical filing verdict bar" in workspace_updated
+    assert "getToolImpactSummary()" in sdk_updated
+    assert "getWorkflowOperationSnapshot(userId)" in sdk_updated
 
 
 def test_fallback_local_optimizer_rolls_back_suspicious_empty_file_outputs(monkeypatch, tmp_path):
@@ -976,8 +1097,8 @@ def test_build_ui_patch_tasks_selects_diverse_patch_brief_batch(monkeypatch):
     assert report_summary["recommendation_coverage"]["selected_patch_briefs_count"] == 4
 
 
-def test_ui_patch_brief_batch_limit_carries_full_review_set_up_to_cap():
+def test_ui_patch_brief_batch_limit_carries_full_review_set():
     optimizer = Optimizer()
     prioritized = [{"title": f"Repair {index}", "target_files": [f"file-{index}.txt"]} for index in range(1, 16)]
 
-    assert optimizer._ui_patch_brief_batch_limit(prioritized) == 12
+    assert optimizer._ui_patch_brief_batch_limit(prioritized) == 15

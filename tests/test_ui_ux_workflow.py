@@ -476,6 +476,28 @@ Warning: the draft flow still needs a clearer next step.
     assert "still appear unresolved" in carry_forward["summary"]
 
 
+def test_structure_ui_ux_review_keeps_operator_mode_ui_repairs_on_workspace_surface(tmp_path):
+    _write_artifact(tmp_path, "workspace-integrations", url="http://example.test/workspace?tab=integrations")
+    artifacts = workflow_module.collect_screenshot_artifacts(tmp_path)
+
+    review_text = """# Top Risks
+- The diagnostics area overwhelms client users and hides the next action.
+
+# High-Impact UX Fixes
+- Add Client Mode default and Operator Mode drawer for package/CLI/MCP/SDK diagnostics.
+
+# Stage Findings
+## Integration Discovery
+The integrations tab needs a calmer default view with advanced diagnostics behind a drawer.
+
+# Critic Verdict
+Warning: diagnostics are powerful but the default UX is too developer-heavy.
+"""
+    structured = structure_ui_ux_review(review_text=review_text, artifacts=artifacts, iteration=1)
+
+    assert structured["recommended_changes"][0]["shared_code_path"] == "templates/workspace.html"
+
+
 def test_structure_ui_ux_review_carries_complaint_output_signals_into_draft_stage_when_sections_are_missing(tmp_path):
     _write_artifact(tmp_path, "workspace-draft", url="http://example.test/workspace?tab=draft")
     artifacts = workflow_module.collect_screenshot_artifacts(tmp_path)

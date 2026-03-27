@@ -964,6 +964,67 @@ class Optimizer:
                             shell_path.write_text(updated_text, encoding="utf-8")
                             updated_files.append(shell_rel_path)
 
+                    def _apply_sdk_patch() -> None:
+                        sdk_rel_path = "static/complaint_mcp_sdk.js"
+                        sdk_path = tracked_files.get(sdk_rel_path)
+                        if sdk_path is None:
+                            return
+                        if not _selected_briefs_for(sdk_rel_path):
+                            return
+                        updated_text = sdk_path.read_text(encoding="utf-8")
+                        original_text = updated_text
+                        ledger_anchor = (
+                            "    getToolCallLedger() {\n"
+                            "        if (typeof localStorage === 'undefined') {\n"
+                            "            return [];\n"
+                            "        }\n"
+                            "        try {\n"
+                            "            const raw = localStorage.getItem(this.toolCallLedgerStorageKey);\n"
+                            "            const parsed = raw ? JSON.parse(raw) : [];\n"
+                            "            return Array.isArray(parsed) ? parsed : [];\n"
+                            "        } catch (error) {\n"
+                            "            return [];\n"
+                            "        }\n"
+                            "    }\n"
+                        )
+                        ledger_block = (
+                            ledger_anchor
+                            + "\n"
+                            + "    getToolImpactSummary() {\n"
+                            + "        const ledger = this.getToolCallLedger();\n"
+                            + "        const latest = ledger[0] || null;\n"
+                            + "        const successCount = ledger.filter((item) => String((item && item.status) || '').toLowerCase() === 'success').length;\n"
+                            + "        const errorCount = ledger.filter((item) => String((item && item.status) || '').toLowerCase() === 'error').length;\n"
+                            + "        return {\n"
+                            + "            total_calls: ledger.length,\n"
+                            + "            success_count: successCount,\n"
+                            + "            error_count: errorCount,\n"
+                            + "            latest_tool_name: latest ? String(latest.tool_name || '').trim() : '',\n"
+                            + "            latest_status: latest ? String(latest.status || '').trim() : '',\n"
+                            + "            latest_finished_at: latest ? String(latest.finished_at || '').trim() : '',\n"
+                            + "        };\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    async getWorkflowOperationSnapshot(userId) {\n"
+                            + "        const [releaseGate, workflowCapabilities, toolingContract] = await Promise.all([\n"
+                            + "            this.getCanonicalReleaseGate(userId),\n"
+                            + "            this.getWorkflowCapabilities(userId),\n"
+                            + "            this.getToolingContract(userId),\n"
+                            + "        ]);\n"
+                            + "        return {\n"
+                            + "            tool_impact_summary: this.getToolImpactSummary(),\n"
+                            + "            canonical_release_gate: releaseGate,\n"
+                            + "            workflow_capabilities: workflowCapabilities,\n"
+                            + "            tooling_contract: toolingContract,\n"
+                            + "        };\n"
+                            + "    }\n"
+                        )
+                        if "getToolImpactSummary()" not in updated_text and ledger_anchor in updated_text:
+                            updated_text = updated_text.replace(ledger_anchor, ledger_block, 1)
+                        if updated_text != original_text:
+                            sdk_path.write_text(updated_text, encoding="utf-8")
+                            updated_files.append(sdk_rel_path)
+
                     def _apply_playwright_spec_patch() -> None:
                         spec_rel_path = "playwright/tests/complaint-flow.spec.js"
                         spec_path = tracked_files.get(spec_rel_path)
@@ -988,6 +1049,7 @@ class Optimizer:
 
                     _apply_workspace_patch()
                     _apply_app_shell_patch()
+                    _apply_sdk_patch()
                     _apply_playwright_spec_patch()
 
                     if not updated_files:
@@ -4937,7 +4999,7 @@ class Optimizer:
         prioritized = [dict(item) for item in prioritized_patch_briefs if isinstance(item, dict)]
         if not prioritized:
             return 0
-        return min(len(prioritized), 12)
+        return len(prioritized)
 
     def build_ui_patch_tasks(
         self,

@@ -607,9 +607,21 @@ def structure_ui_ux_review(
         stage_artifacts = _match_artifacts_to_stage(artifacts, related_stage)
         shared_code_path = "templates/workspace.html"
         artifact_context = _artifact_text_context(stage_artifacts[0]) if stage_artifacts else ""
-        if "sdk" in fix.lower() or "tool" in fix.lower() or "integration" in fix.lower() or "sdk" in artifact_context:
+        fix_lower = fix.lower()
+        workspace_ui_terms = (
+            "client mode",
+            "operator mode",
+            "drawer",
+            "panel",
+            "sidebar",
+            "tab",
+            "cta",
+        )
+        if any(term in fix_lower for term in workspace_ui_terms):
+            shared_code_path = "templates/workspace.html"
+        elif "sdk" in fix_lower or "tool" in fix_lower or "integration" in fix_lower or "sdk" in artifact_context:
             shared_code_path = "static/complaint_mcp_sdk.js"
-        elif "playwright" in fix.lower():
+        elif "playwright" in fix_lower:
             shared_code_path = "playwright/tests/complaint-flow.spec.js"
         recommended_changes.append(
             {
