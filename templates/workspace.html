@@ -39,6 +39,7 @@
             }
             font-family: "Public Sans", "Segoe UI", sans-serif;
         }
+            --workspace-sticky-interaction-offset: 460px;
 
         .shell {
             max-width: 1440px;
@@ -999,8 +1000,9 @@
         }
 
         .tab-row {
-            position: relative;
-            z-index: 5;
+            position: sticky;
+            top: 110px;
+            z-index: 7;
             padding: 12px;
             margin: 0;
             border-radius: 22px;
@@ -1013,14 +1015,14 @@
         .tab-button {
             background: rgba(255, 255, 255, 0.72);
             position: relative;
-            z-index: 6;
+            z-index: 8;
         }
             .tab-panel button,
             .tab-panel input,
             .tab-panel select,
             .tab-panel textarea,
             .tab-panel a.surface-link {
-                scroll-margin-top: 320px;
+                scroll-margin-top: var(--workspace-sticky-interaction-offset);
             }
 
         .stage-index-shell {
@@ -1502,6 +1504,10 @@
             .tab-panel,
             .stage-index-shell {
                 padding: 18px;
+            }
+
+            :root {
+                --workspace-sticky-interaction-offset: 280px;
             }
 
             .hero-grid,
@@ -4553,14 +4559,6 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const resolvedDraft = resolveDraftState(sessionPayload);
             const draft = resolvedDraft.draft || {};
             const claimType = String((sessionPayload.session || {}).claim_type || sessionPayload.claim_type || 'retaliation');
-            const packetDownloadButtons = [
-                document.getElementById('download-packet-markdown-button'),
-                document.getElementById('download-packet-docx-button'),
-                document.getElementById('download-packet-pdf-button'),
-                document.getElementById('download-packet-tool-markdown-button'),
-                document.getElementById('download-packet-tool-docx-button'),
-                document.getElementById('download-packet-tool-pdf-button'),
-            ].filter(Boolean);
             document.getElementById('draft-title').value = draft.title || '';
             document.getElementById('requested-relief').value = (draft.requested_relief || []).join('\n');
             document.getElementById('draft-body').value = draft.body || '';
@@ -4577,12 +4575,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     ? 'A complaint draft exists, but no complaint packet export is cached yet.'
                     : 'No complaint packet exported yet.');
             if (!latestPacketExport && draft.body) {
-                packetDownloadButtons.forEach((button) => {
-                    const outputFormat = (button.dataset.outputFormat || '').trim() || 'markdown';
-                    const suffix = outputFormat === 'pdf' ? 'pdf' : outputFormat === 'docx' ? 'docx' : 'md';
-                    button.disabled = false;
-                    button.dataset.downloadFilename = `${slugifyFilename(draft.title || 'complaint-packet')}.${suffix}`;
-                    button.dataset.downloadUrl = client.downloadComplaintPacketUrl(workspaceUserId, outputFormat);
+                configurePacketDownloadButtons({
+                    packetTitle: draft.title || 'complaint-packet',
+                    disabled: false,
                 });
             }
             renderCaptionPreview();
@@ -5379,31 +5374,41 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             exportButtons.forEach((button) => {
                 setButtonGateState(
                     button,
-                    packetExportAllowed && exportAllowed,
-                    packetExportAllowed
-                        ? (exportAllowed
-                            ? 'Packet export is available so the release gate and packet analysis can be refreshed.'
-                            : `Packet export is blocked until ${exportHardBlockers.join('; ')}.`)
-                        : 'Generate or hydrate a complaint draft before exporting a packet.'
+                        packetExportAllowed,
+                        packetExportAllowed
+                            ? (exportAllowed
+                                ? 'Packet export is available so the release gate and packet analysis can be refreshed.'
+                                : `Packet export is still available so the release gate, packet analysis, and blocker warnings can be refreshed before download. Current blockers: ${exportHardBlockers.join('; ')}.`)
+                            : 'Generate or hydrate a complaint draft before exporting a packet.'
                 );
-                if (packetExportAllowed && !exportAllowed) {
-                    button.title = `Packet export is blocked until ${exportHardBlockers.join('; ')}.`;
+                    if (packetExportAllowed && !exportAllowed) {
+                        button.title = `Packet export will refresh the packet review, but downloads stay blocked until ${exportHardBlockers.join('; ')}.`;
                 }
             });
+            const packetReadyForDownload = Boolean(latestPacketExport);
             [
                 document.getElementById('download-packet-markdown-button'),
                 document.getElementById('download-packet-docx-button'),
                 document.getElementById('download-packet-pdf-button'),
+            ].filter(Boolean).forEach((button) => {
+                button.disabled = !downloadAllowed || !packetReadyForDownload;
+                button.setAttribute('aria-disabled', (!downloadAllowed || !packetReadyForDownload) ? 'true' : 'false');
+                button.title = downloadAllowed
+                    ? (packetReadyForDownload ? 'Download the exported complaint packet.' : 'Export the complaint packet before downloading it.')
+                    : `Download is blocked until ${downloadBlockers.join('; ')}.`;
+            });
+            [
                 document.getElementById('download-packet-tool-markdown-button'),
                 document.getElementById('download-packet-tool-docx-button'),
                 document.getElementById('download-packet-tool-pdf-button'),
             ].filter(Boolean).forEach((button) => {
-                const packetReady = Boolean(latestPacketExport || currentDraftBody.trim());
-                button.disabled = !downloadAllowed || !packetReady;
-                button.setAttribute('aria-disabled', (!downloadAllowed || !packetReady) ? 'true' : 'false');
-                button.title = downloadAllowed
-                    ? (packetReady ? 'Download the exported complaint packet.' : 'Export the complaint packet before downloading it.')
-                    : `Download is blocked until ${downloadBlockers.join('; ')}.`;
+                button.disabled = !packetReadyForDownload;
+                button.setAttribute('aria-disabled', packetReadyForDownload ? 'false' : 'true');
+                button.title = packetReadyForDownload
+                    ? (downloadAllowed
+                        ? 'Download the exported complaint packet.'
+                        : `Download the exported packet artifact while the workspace keeps these blockers visible: ${downloadBlockers.join('; ')}.`)
+                    : 'Export the complaint packet before downloading it.';
             });
             renderDraftExportIntegrity(sessionPayload);
         }
@@ -5880,23 +5885,52 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
 
         function normalizeProviderDiagnostics(payload) {
             const diagnostics = payload && typeof payload === 'object' ? payload : {};
-            const defaultOrder = Array.isArray(diagnostics.default_order) ? diagnostics.default_order.filter(Boolean) : [];
+            const normalizeToken = (value) => {
+                const token = String(value || '').trim();
+                if (!token) {
+                    return '';
+                }
+                const lowered = token.toLowerCase();
+                return ['none', 'unknown', 'unavailable', 'null', 'undefined'].includes(lowered) ? '' : token;
+            };
+            const providers = Array.isArray(diagnostics.providers) ? diagnostics.providers : [];
+            const defaultOrder = Array.isArray(diagnostics.default_order) && diagnostics.default_order.length
+                ? diagnostics.default_order.filter(Boolean)
+                : providers.map((item) => String((item && item.name) || '').trim()).filter(Boolean);
             const complaintDraftDefaultOrder = Array.isArray(diagnostics.complaint_draft_default_order) && diagnostics.complaint_draft_default_order.length
                 ? diagnostics.complaint_draft_default_order.filter(Boolean)
                 : ['codex_cli', 'copilot_cli', 'hf_inference_api'];
-            const effectiveDefaultProvider = String(diagnostics.effective_default_provider || '').trim() || 'none';
-            const effectiveComplaintDraftProvider = String(diagnostics.effective_complaint_draft_provider || '').trim()
+            const effectiveDefaultProvider = normalizeToken(diagnostics.effective_default_provider)
+                || defaultOrder[0]
                 || complaintDraftDefaultOrder[0]
-                || effectiveDefaultProvider;
-            const uiReviewDefaultProvider = String(diagnostics.ui_review_default_provider || '').trim()
+                || 'codex_cli';
+            const effectiveComplaintDraftProvider = normalizeToken(diagnostics.effective_complaint_draft_provider)
+                || complaintDraftDefaultOrder[0]
                 || effectiveDefaultProvider
                 || 'codex_cli';
+            const uiReviewDefaultProvider = normalizeToken(diagnostics.ui_review_default_provider)
+                || effectiveDefaultProvider
+                || 'codex_cli';
+            const uiReviewDefaultModel = normalizeToken(diagnostics.ui_review_default_model)
+                || 'gpt-5.3-codex';
+            const uiReviewFallbacks = (diagnostics.ui_review_multimodal_rate_limit_fallbacks && typeof diagnostics.ui_review_multimodal_rate_limit_fallbacks === 'object')
+                ? diagnostics.ui_review_multimodal_rate_limit_fallbacks
+                : {
+                    codex_cli: ['copilot_cli', 'hf_inference_api'],
+                    copilot_cli: ['hf_inference_api'],
+                };
+            const uiReviewHfFallbackModel = normalizeToken(diagnostics.ui_review_hf_fallback_model)
+                || 'Qwen/Qwen2.5-VL-7B-Instruct';
             return Object.assign({}, diagnostics, {
+                providers,
                 default_order: defaultOrder,
                 complaint_draft_default_order: complaintDraftDefaultOrder,
                 effective_default_provider: effectiveDefaultProvider,
                 effective_complaint_draft_provider: effectiveComplaintDraftProvider,
                 ui_review_default_provider: uiReviewDefaultProvider,
+                ui_review_default_model: uiReviewDefaultModel,
+                ui_review_multimodal_rate_limit_fallbacks: uiReviewFallbacks,
+                ui_review_hf_fallback_model: uiReviewHfFallbackModel,
             });
         }
 
@@ -6398,8 +6432,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             });
         }
 
-        function syncPacketDownloadState() {
-            const downloadButtons = [
+        function getPacketDownloadButtons() {
+            return [
                 document.getElementById('download-packet-markdown-button'),
                 document.getElementById('download-packet-docx-button'),
                 document.getElementById('download-packet-pdf-button'),
@@ -6407,6 +6441,26 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 document.getElementById('download-packet-tool-docx-button'),
                 document.getElementById('download-packet-tool-pdf-button'),
             ].filter(Boolean);
+        }
+
+        function configurePacketDownloadButtons(options) {
+            const settings = options && typeof options === 'object' ? options : {};
+            const packetTitle = String(settings.packetTitle || 'complaint-packet').trim() || 'complaint-packet';
+            const disabled = Boolean(settings.disabled);
+            getPacketDownloadButtons().forEach((button) => {
+                const outputFormat = (button.dataset.outputFormat || '').trim() || 'markdown';
+                const suffix = outputFormat === 'pdf' ? 'pdf' : outputFormat === 'docx' ? 'docx' : 'md';
+                button.disabled = disabled;
+                button.dataset.downloadFilename = disabled
+                    ? ''
+                    : `${slugifyFilename(packetTitle)}.${suffix}`;
+                button.dataset.downloadUrl = disabled
+                    ? ''
+                    : client.downloadComplaintPacketUrl(workspaceUserId, outputFormat);
+            });
+        }
+
+        function syncPacketDownloadState() {
             const currentDraft = (((workspaceSession || {}).session) || {}).draft || (workspaceSession || {}).draft || null;
             const packet = latestPacketExport && latestPacketExport.packet
                 ? latestPacketExport.packet
@@ -6414,19 +6468,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     ? { title: currentDraft.title }
                     : null;
             if (!packet) {
-                downloadButtons.forEach((button) => {
-                    button.disabled = true;
-                    button.dataset.downloadFilename = '';
-                    button.dataset.downloadUrl = '';
-                });
+                configurePacketDownloadButtons({ disabled: true });
                 return;
             }
-            downloadButtons.forEach((button) => {
-                const outputFormat = (button.dataset.outputFormat || '').trim() || 'markdown';
-                const suffix = outputFormat === 'pdf' ? 'pdf' : outputFormat === 'docx' ? 'docx' : 'md';
-                button.disabled = false;
-                button.dataset.downloadFilename = `${slugifyFilename(packet.title || 'complaint-packet')}.${suffix}`;
-                button.dataset.downloadUrl = client.downloadComplaintPacketUrl(workspaceUserId, outputFormat);
+            configurePacketDownloadButtons({
+                packetTitle: packet.title || 'complaint-packet',
+                disabled: false,
             });
         }
 
@@ -7109,6 +7156,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             });
         }
 
+
+            function inferUiReviewArtifactPath(pathValue, outputFormat) {
+                const path = String(pathValue || '').trim();
+                if (!path) {
+                    return '';
+                }
+                if (outputFormat === 'json' && path.endsWith('.md')) {
+                    return path.replace(/\.md$/i, '.json');
+                }
+                if (outputFormat === 'markdown' && path.endsWith('.json')) {
+                    return path.replace(/\.json$/i, '.md');
+                }
+                return path;
+            }
         function countIssuesBySeverity(items) {
             const counts = { high: 0, medium: 0, low: 0 };
             (items || []).forEach((item) => {
@@ -7523,6 +7584,8 @@ function renderUiReviewScorecard(result) {
             const latestProgress = result && result.latest_progress && typeof result.latest_progress === 'object'
                 ? result.latest_progress
                 : {};
+            const runList = Array.isArray(result && result.runs) ? result.runs : [];
+            const latestRun = runList.length ? (runList[runList.length - 1] || {}) : {};
             const isFallback = strategy === 'deterministic_fallback' || Boolean(fallbackFrom);
             const isBrowserAudit = strategy === 'browser_audit' || String(result && result.workflow_type || '').trim() === 'browser_audit';
             const runtimeTitle = isBrowserAudit
@@ -7549,17 +7612,23 @@ function renderUiReviewScorecard(result) {
             const progressStatus = String(latestProgress.status || (result ? 'completed' : '')).trim();
             const progressIteration = Number(latestProgress.iteration || latestProgress.iterations_completed || 0);
             const progressArtifactCount = Number(latestProgress.artifact_count || 0);
-            const latestJsonPath = String(
+            const latestJsonPath = inferUiReviewArtifactPath(String(
                 result && result.latest_review_json_path
+                || result && result.latest_review_markdown_path
                 || latestProgress.latest_review_json_path
                 || latestProgress.review_json_path
+                || latestProgress.latest_review_markdown_path
+                || latestRun.review_json_path
+                || latestRun.review_markdown_path
                 || ''
-            ).trim();
-            const latestMarkdownPath = String(
+            ).trim(), 'json');
+            const latestMarkdownPath = inferUiReviewArtifactPath(String(
                 result && result.latest_review_markdown_path
                 || latestProgress.latest_review_markdown_path
+                || latestRun.review_markdown_path
+                || latestJsonPath
                 || ''
-            ).trim();
+            ).trim(), 'markdown');
             const progressSummary = isBrowserAudit
                 ? 'Workflow state: browser audit completed.'
                 : progressStatus
@@ -7648,6 +7717,7 @@ function renderUiReviewScorecard(result) {
                 : Array.isArray(result && result.playwright_followups)
                     ? result.playwright_followups
                     : [];
+            const latestRun = runList.length ? (runList[runList.length - 1] || {}) : {};
             const carryForward = result && result.review && result.review.carry_forward_assessment && typeof result.review.carry_forward_assessment === 'object'
                 ? result.review.carry_forward_assessment
                 : result && result.carry_forward_assessment && typeof result.carry_forward_assessment === 'object'
@@ -7671,19 +7741,25 @@ function renderUiReviewScorecard(result) {
                 || result && result.latest_review_markdown_path
                 || latestProgress.latest_review_json_path
                 || latestProgress.review_json_path
+                || latestRun.review_json_path
+                || latestRun.review_markdown_path
                 || ''
             ).trim();
-            const latestJsonArtifactPath = String(
+            const latestJsonArtifactPath = inferUiReviewArtifactPath(String(
                 result && result.latest_review_json_path
                 || latestProgress.latest_review_json_path
                 || latestProgress.review_json_path
+                || latestRun.review_json_path
+                || latestArtifactPath
                 || ''
-            ).trim();
-            const latestMarkdownArtifactPath = String(
+            ).trim(), 'json');
+            const latestMarkdownArtifactPath = inferUiReviewArtifactPath(String(
                 result && result.latest_review_markdown_path
                 || latestProgress.latest_review_markdown_path
+                || latestRun.review_markdown_path
+                || latestArtifactPath
                 || ''
-            ).trim();
+            ).trim(), 'markdown');
 
             metadata.innerHTML = [
                 result && result.iterations ? `<span class="chip good">iterations: ${escapeHtml(String(result.iterations))}</span>` : '',
@@ -7702,8 +7778,8 @@ function renderUiReviewScorecard(result) {
                 Array.isArray(complaintOutputSignals.release_gate_verdicts) && complaintOutputSignals.release_gate_verdicts.length ? `<span class="chip warn">release gate: ${escapeHtml(String(complaintOutputSignals.release_gate_verdicts[0]))}</span>` : '',
                 Array.isArray(carryForward.unresolved_findings) && carryForward.unresolved_findings.length ? `<span class="chip warn">unresolved prior findings: ${escapeHtml(String(carryForward.unresolved_findings.length))}</span>` : '',
                 `<span class="chip">${escapeHtml(freshnessLabel)}</span>`,
-                latestArtifactPath ? `<span class="chip">latest artifact: ${escapeHtml(String(latestArtifactPath))}</span>` : '',
-                result && result.latest_review_markdown_path ? `<span class="chip">latest markdown: ${escapeHtml(String(result.latest_review_markdown_path))}</span>` : '',
+                (latestJsonArtifactPath || latestMarkdownArtifactPath || latestArtifactPath) ? `<span class="chip">latest artifact: ${escapeHtml(String(latestJsonArtifactPath || latestMarkdownArtifactPath || latestArtifactPath))}</span>` : '',
+                latestMarkdownArtifactPath ? `<span class="chip">latest markdown: ${escapeHtml(String(latestMarkdownArtifactPath))}</span>` : '',
             ].filter(Boolean).join('');
 
             summary.textContent = normalizeUiReviewSummary(result);
