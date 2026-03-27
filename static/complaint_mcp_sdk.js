@@ -316,19 +316,33 @@ class ComplaintMcpClient {
         const updatedAt = String((gate && gate.updated_at) || (source && source.updated_at) || '').trim() || new Date().toISOString();
         const gateSource = String((gate && gate.source) || (source && source.source) || 'complaint.get_client_release_gate').trim();
         const version = String((gate && (gate.version || gate.state_version)) || (source && (source.version || source.state_version)) || 'workspace-gate-v1').trim();
+        const reason = String((gate && gate.reason) || '').trim() || (blockers[0] || '');
+        const unblockAction = String((gate && (gate.next_best_action || gate.unblock_action)) || '').trim();
+        const status = String((gate && gate.status) || verdict || 'unknown').trim().toUpperCase();
         return {
             verdict,
+            status,
             blockers,
+            blocking_reasons: blockers,
             updated_at: updatedAt,
             source: gateSource,
             version,
+            state_version: version,
+            next_best_action: unblockAction,
             canonical_gate: {
                 verdict,
+                status,
+                reason,
+                unblock_action: unblockAction,
+                next_best_action: unblockAction,
                 source: gateSource,
                 timestamp: updatedAt,
                 version,
+                state_version: version,
+                blocking_reasons: blockers,
             },
-            reason: String((gate && gate.reason) || '').trim(),
+            reason,
+            unblock_action: unblockAction,
             claim_type_label: String((gate && gate.claim_type_label) || '').trim() || 'Unknown',
             draft_strategy: String((gate && gate.draft_strategy) || '').trim() || 'template',
             filing_shape_score: Number((gate && gate.filing_shape_score) || 0),

@@ -264,24 +264,45 @@
             || String(complaintReadiness.verdict || '').toLowerCase() === 'draft in progress'
             ? ' is-good'
             : ' is-warn';
+        const canonicalReleaseGate = state.canonicalReleaseGate || {};
+        const releaseGateVerdict = String(canonicalReleaseGate.verdict || 'unknown').trim().toLowerCase();
+        const releaseGateSafe = releaseGateVerdict === 'client_safe' || releaseGateVerdict === 'pass' || releaseGateVerdict === 'ready';
+        const releaseGateBlockers = Array.isArray(canonicalReleaseGate.blockers) ? canonicalReleaseGate.blockers : [];
+        const releaseGateReason = String(canonicalReleaseGate.reason || '').trim() || releaseGateBlockers[0] || 'Refresh the release gate before treating complaint output as safe to download.';
+        const releaseGateVersion = String(canonicalReleaseGate.version || '').trim() || 'workspace-gate-v1';
+        const releaseGateTone = releaseGateSafe ? ' is-good' : ' is-warn';
+        const releaseGateNextStep = String(canonicalReleaseGate.unblock_action || '').trim() || (releaseGateSafe
+            ? 'Keep packet export and next-step guidance visible while downloading.'
+            : 'Use Review or Evidence to close blockers, then refresh packet export and gate checks.');
+        const shellDraftState = resolveShellDraftState(state.sessionPayload || {}, state.complaintReadiness || null);
         const primaryActionKey = !workflowState.reviewReady
             ? 'workspace'
-            : (!workflowState.builderReady ? 'review' : 'builder');
+            : (!workflowState.builderReady
+                ? 'review'
+                : (!shellDraftState.hasDraft
+                    ? 'builder'
+                    : (!releaseGateSafe ? 'export' : 'builder')));
         const primaryActionHref = primaryActionKey === 'workspace'
             ? buildShellSurfaceUrl('/workspace', context)
             : primaryActionKey === 'review'
                 ? buildShellSurfaceUrl('/claim-support-review', context)
-                : buildShellSurfaceUrl('/document', context);
+                : primaryActionKey === 'export'
+                    ? buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' })
+                    : buildShellSurfaceUrl('/document', context);
         const primaryActionLabel = primaryActionKey === 'workspace'
             ? 'Primary: Continue Intake'
             : primaryActionKey === 'review'
                 ? 'Primary: Close Support Gaps'
-                : 'Primary: Draft Complaint';
+                : primaryActionKey === 'export'
+                    ? 'Primary: Export + Review Gate'
+                    : 'Primary: Draft Complaint';
         const workflowNextStep = primaryActionKey === 'workspace'
             ? 'Primary action: continue intake in Workspace, then reopen Review once enough factual detail is saved.'
             : primaryActionKey === 'review'
                 ? 'Primary action: resolve support gaps in Review before moving into formal drafting.'
-                : 'Primary action: generate or refine the complaint draft in Builder, then use Workspace export + release-gate checks before download.';
+                : primaryActionKey === 'export'
+                    ? 'Primary action: keep generation, packet export, and release-gate next-step guidance visible together before any download.'
+                    : 'Primary action: generate or refine the complaint draft in Builder, then use Workspace export + release-gate checks before download.';
         const draftFlowEnabled = workflowState.builderReady;
         const draftFlowReason = draftFlowEnabled
             ? 'Draft flow rail is available because this session is ready for drafting.'
@@ -290,6 +311,7 @@
             buildGatedLink('cg-app-shell__action', 'Open Workspace', buildShellSurfaceUrl('/workspace', context), true, ''),
             buildGatedLink('cg-app-shell__action', 'Open Review', buildShellSurfaceUrl('/claim-support-review', context), workflowState.reviewReady, workflowState.reviewGateReason),
             buildGatedLink('cg-app-shell__action', 'Open Builder', buildShellSurfaceUrl('/document', context), workflowState.builderReady, workflowState.builderGateReason),
+            buildGatedLink('cg-app-shell__action', 'Open Export Rail', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),
             '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/mlwysiwyg', context) + '">Edit Draft</a>',
         ];
         const secondaryActionLinks = actionLinks.filter((link) => {
@@ -298,6 +320,9 @@
             }
             if (primaryActionKey === 'review') {
                 return link.indexOf('Open Review') === -1;
+            }
+            if (primaryActionKey === 'export') {
+                return link.indexOf('Open Export Rail') === -1;
             }
             return link.indexOf('Open Builder') === -1;
         });
@@ -351,17 +376,26 @@
             (readinessUpdated ? '<div class="cg-app-shell__readiness-meta">Updated: ' + safeText(readinessUpdated, '') + '</div>' : ''),
             '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/workspace', context, { target_tab: 'ux-review' }) + '">Open UX Audit</a>',
             '</div>',
+            '<div class="cg-app-shell__section-title">Complaint Output Gate</div>',
+            '<div class="cg-app-shell__readiness' + releaseGateTone + '" id="cg-app-shell-release-gate">',
+            '<div class="cg-app-shell__readiness-header"><strong>Client gate: ' + safeText(String(canonicalReleaseGate.verdict || 'unknown').toUpperCase(), 'UNKNOWN') + '</strong><span>' + safeText(releaseGateVersion, 'workspace-gate-v1') + '</span></div>',
+            '<div class="cg-app-shell__readiness-copy">' + safeText(releaseGateReason, 'Refresh the release gate before treating complaint output as safe to download.') + '</div>',
+            '<div class="cg-app-shell__readiness-meta">' + safeText(releaseGateBlockers.length ? ('Blockers: ' + releaseGateBlockers.join('; ')) : 'Blockers: none reported in the latest gate response.', '') + '</div>',
+            '<div class="cg-app-shell__readiness-meta">Next step: ' + safeText(releaseGateNextStep, '') + '</div>',
+            '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }) + '">Open Draft + Export Rail</a>',
+            '</div>',
             '<div class="cg-app-shell__section-title">Next Actions</div>',
-            '<div class="cg-app-shell__actions">',
-            buildGatedLink('cg-app-shell__action is-primary', primaryActionLabel, primaryActionHref, primaryActionKey === 'workspace' ? true : (primaryActionKey === 'review' ? workflowState.reviewReady : workflowState.builderReady), primaryActionKey === 'review' ? workflowState.reviewGateReason : (primaryActionKey === 'builder' ? workflowState.builderGateReason : '')),
+            '<div class="cg-app-shell__actions" id="cg-app-shell-actions">',
+            buildGatedLink('cg-app-shell__action is-primary', primaryActionLabel, primaryActionHref, primaryActionKey === 'workspace' ? true : (primaryActionKey === 'review' ? workflowState.reviewReady : (primaryActionKey === 'export' ? draftFlowEnabled : workflowState.builderReady)), primaryActionKey === 'review' ? workflowState.reviewGateReason : (primaryActionKey === 'builder' ? workflowState.builderGateReason : (primaryActionKey === 'export' ? draftFlowReason : ''))).replace('class="cg-app-shell__action is-primary', 'id="cg-app-shell-primary-action" data-stage-primary="true" class="cg-app-shell__action is-primary'),
             secondaryActionLinks.join(''),
             '</div>',
-            '<div class="cg-app-shell__workflow-rail' + (workflowState.builderReady ? '' : ' is-warn') + '">',
+            '<div class="cg-app-shell__workflow-rail' + (workflowState.builderReady && releaseGateSafe ? '' : ' is-warn') + '" id="cg-app-shell-workflow-rail">',
             '<div class="cg-app-shell__phase-note">' + safeText(workflowNextStep, '') + '</div>',
             '<div class="cg-app-shell__phase-note">Keep draft generation, packet export, and release-gate next-step guidance visible together before downloading complaint files.</div>',
+            (!releaseGateSafe ? '<div class="cg-app-shell__phase-note">Release gate warning: ' + safeText(releaseGateReason, '') + '</div>' : ''),
             '</div>',
             '<div class="cg-app-shell__section-title">Draft Flow Rail</div>',
-            '<div class="cg-app-shell__draft-rail' + (draftFlowEnabled ? '' : ' is-warn') + '">',
+            '<div class="cg-app-shell__draft-rail' + (draftFlowEnabled && releaseGateSafe ? '' : ' is-warn') + '" id="cg-app-shell-draft-flow-rail">',
             '<div class="cg-app-shell__phase-note">Keep one visible sequence: generate or refine, export and review, then confirm the release-gate next step.</div>',
             '<div class="cg-app-shell__draft-flow-grid">',
             buildGatedLink('cg-app-shell__draft-step', '1. Generate / refine draft', buildShellSurfaceUrl('/document', context), draftFlowEnabled, draftFlowReason),
@@ -409,6 +443,7 @@
         let sessionPayload = null;
         let complaintReadiness = null;
         let uiReadiness = null;
+        let canonicalReleaseGate = null;
         let status = 'Using shared complaint workspace shell.';
 
         try {
@@ -433,6 +468,7 @@
             sessionPayload = await client.getSession(did);
             complaintReadiness = await client.getComplaintReadiness(did);
             uiReadiness = await client.getUiReadiness(did);
+            canonicalReleaseGate = await client.getCanonicalReleaseGate(did);
             status = 'Shared session loaded for ' + did + '.';
         } catch (error) {
             status = 'Shared session unavailable: ' + error.message;
@@ -444,6 +480,7 @@
             sessionPayload: sessionPayload,
             complaintReadiness: complaintReadiness,
             uiReadiness: uiReadiness,
+            canonicalReleaseGate: canonicalReleaseGate,
             status: status,
         });
     }

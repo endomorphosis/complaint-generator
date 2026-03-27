@@ -1314,7 +1314,10 @@ def review_complaint_output_with_llm_router(
         backend_kwargs["provider"] = provider
     if model:
         backend_kwargs["model"] = model
-    backend_kwargs.setdefault("timeout", DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S)
+    backend_kwargs.setdefault(
+        "timeout",
+        _complaint_output_review_timeout_for_provider(backend_kwargs.get("provider")),
+    )
     backend_kwargs.setdefault("allow_local_fallback", False)
     backend_kwargs.setdefault("retry_max_attempts", 1)
     backend = LLMRouterBackend(**backend_kwargs)
@@ -1643,6 +1646,24 @@ def _call_with_timeout(fn, *, timeout_s: float):
 def _provider_prefers_text_ui_review(provider: Optional[str]) -> bool:
     normalized = str(provider or "").strip().lower()
     return normalized in _TEXT_ONLY_UI_REVIEW_PROVIDERS
+
+
+def _complaint_output_review_timeout_for_provider(provider: Optional[str]) -> float:
+    explicit = str(os.getenv("COMPLAINT_OUTPUT_REVIEW_TIMEOUT_SECONDS", "") or "").strip()
+    if explicit:
+        try:
+            return max(5.0, float(explicit))
+        except Exception:
+            pass
+    normalized = str(provider or "").strip().lower()
+    if normalized:
+        provider_override = str(os.getenv(f"COMPLAINT_OUTPUT_REVIEW_TIMEOUT_SECONDS_{normalized.upper()}", "") or "").strip()
+        if provider_override:
+            try:
+                return max(5.0, float(provider_override))
+            except Exception:
+                pass
+    return max(float(DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S), _ui_review_timeout_for_provider(provider))
 
 
 def _ui_review_timeout_for_provider(provider: Optional[str]) -> float:

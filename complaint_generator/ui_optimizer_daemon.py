@@ -58,10 +58,19 @@ def _pid_is_running(pid: int) -> bool:
     if int(pid or 0) <= 0:
         return False
     try:
-        os.kill(int(pid), 0)
+        completed = subprocess.run(
+            ["ps", "-p", str(int(pid)), "-o", "stat="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
     except OSError:
         return False
-    return True
+    stat = str(completed.stdout or "").strip()
+    if not stat:
+        return False
+    return "Z" not in stat.upper()
 
 
 def _matching_daemon_pids(*, user_id: str, artifact_root: Path) -> list[int]:
@@ -270,6 +279,11 @@ def _build_status_payload(
     consecutive_errors: int,
     last_result: dict[str, Any] | None = None,
     error: str | None = None,
+    phase_started_at: str | None = None,
+    retry_started_at: str | None = None,
+    next_retry_at: str | None = None,
+    error_kind: str | None = None,
+    error_summary: str | None = None,
 ) -> dict[str, Any]:
     pid = None
     if pid_file.exists():
@@ -282,9 +296,19 @@ def _build_status_payload(
         recommendation_coverage = dict(last_result.get("recommendation_coverage") or {})
         if not recommendation_coverage:
             recommendation_coverage = _extract_optimizer_recommendation_coverage(last_result.get("optimizer_result"))
+    now = datetime.now(UTC)
+    phase_started_dt = _parse_iso_datetime(phase_started_at)
+    retry_started_dt = _parse_iso_datetime(retry_started_at)
+    next_retry_dt = _parse_iso_datetime(next_retry_at)
     return {
         "status": state,
         "phase": phase,
+        "phase_started_at": phase_started_at,
+        "phase_elapsed_seconds": _elapsed_seconds(phase_started_dt, now=now),
+        "retry_started_at": retry_started_at,
+        "retry_elapsed_seconds": _elapsed_seconds(retry_started_dt, now=now),
+        "next_retry_at": next_retry_at,
+        "seconds_until_next_retry": _seconds_until(next_retry_dt, now=now),
         "user_id": args.user_id,
         "artifact_root": str(Path(args.artifact_root).expanduser().resolve()),
         "workspace_root": str(Path(args.workspace_root).expanduser().resolve()),
@@ -308,8 +332,10 @@ def _build_status_payload(
         "consecutive_errors": int(consecutive_errors),
         "last_result": last_result,
         "recommendation_coverage": recommendation_coverage,
+        "error_kind": error_kind,
+        "error_summary": error_summary,
         "error": error,
-        "updated_at": datetime.now(UTC).isoformat(),
+        "updated_at": now.isoformat(),
     }
 
 
@@ -325,6 +351,11 @@ def _write_status(
     consecutive_errors: int,
     last_result: dict[str, Any] | None = None,
     error: str | None = None,
+    phase_started_at: str | None = None,
+    retry_started_at: str | None = None,
+    next_retry_at: str | None = None,
+    error_kind: str | None = None,
+    error_summary: str | None = None,
 ) -> dict[str, Any]:
     payload = _build_status_payload(
         args=args,
@@ -337,6 +368,11 @@ def _write_status(
         consecutive_errors=consecutive_errors,
         last_result=last_result,
         error=error,
+        phase_started_at=phase_started_at,
+        retry_started_at=retry_started_at,
+        next_retry_at=next_retry_at,
+        error_kind=error_kind,
+        error_summary=error_summary,
     )
     _write_json(status_file, payload)
     return payload
@@ -364,6 +400,45 @@ def _review_json_excerpt(review_payload: dict[str, Any]) -> str:
     if findings:
         return str(findings[0])[:400]
     return ""
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _elapsed_seconds(started_at: datetime | None, *, now: datetime) -> float | None:
+    if started_at is None:
+        return None
+    return max((now - started_at).total_seconds(), 0.0)
+
+
+def _seconds_until(target_at: datetime | None, *, now: datetime) -> float | None:
+    if target_at is None:
+        return None
+    return max((target_at - now).total_seconds(), 0.0)
+
+
+def _classify_error(error: str | None) -> tuple[str | None, str | None]:
+    text = str(error or "").strip()
+    if not text:
+        return None, None
+    lowered = text.lower()
+    if any(token in lowered for token in ("rate limit", "rate-limit", "too many requests", "429")):
+        return "rate_limited", "Provider rate limit encountered; backing off before retry."
+    if any(token in lowered for token in ("timed out", "timeout", "deadline exceeded")):
+        return "timeout", "A long-running step timed out; backing off before retry."
+    if any(token in lowered for token in ("service unavailable", "temporarily unavailable", "503", "connection reset")):
+        return "provider_unavailable", "Provider unavailable; backing off before retry."
+    return "error", text.splitlines()[0][:240]
 
 
 def _extract_optimizer_recommendation_coverage(optimizer_result: dict[str, Any] | None) -> dict[str, Any]:
@@ -415,6 +490,21 @@ def _extract_optimizer_recommendation_coverage(optimizer_result: dict[str, Any] 
         "latest_changed_files": latest_changed_files,
         "latest_optimizer_status": latest_status,
     }
+
+
+def _extract_optimizer_changed_files(optimizer_result: dict[str, Any] | None) -> list[str]:
+    if not isinstance(optimizer_result, dict):
+        return []
+    direct = _unique_nonempty(list(optimizer_result.get("changed_files") or []))
+    if direct:
+        return direct
+    nested: list[str] = []
+    for cycle in list(optimizer_result.get("cycles") or []):
+        if not isinstance(cycle, dict):
+            continue
+        optimizer_cycle = dict(cycle.get("optimizer_result") or {})
+        nested.extend(list(optimizer_cycle.get("changed_files") or []))
+    return _unique_nonempty(nested)
 
 
 def _run_cycle(
@@ -525,6 +615,7 @@ def _run_cycle(
         "browser_audit": browser_audit,
         "browser_audit_attempts": browser_audit_attempts,
         "optimizer_result": optimizer_result,
+        "optimizer_changed_files": _extract_optimizer_changed_files(optimizer_result),
         "adversarial_goals": adversarial_goals,
         "goal_source": "adversarial_feedback",
         "pre_export_review": pre_export_review,
@@ -543,6 +634,7 @@ def _run_cycle(
             "optimizer_workflow_type": str(optimizer_result.get("workflow_type") or ""),
             "optimizer_rounds_executed": int(optimizer_result.get("rounds_executed") or 0),
             "optimizer_stop_reason": str(optimizer_result.get("stop_reason") or ""),
+            "optimizer_changed_file_count": len(_extract_optimizer_changed_files(optimizer_result)),
             "filing_shape_score": int(((export_review.get("aggregate") or {}).get("average_filing_shape_score") or 0)),
             "claim_type_alignment_score": int(((export_review.get("aggregate") or {}).get("average_claim_type_alignment_score") or 0)),
             "export_review_excerpt": _review_json_excerpt(export_review),
@@ -570,10 +662,15 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
     last_result: dict[str, Any] | None = None
     state: dict[str, Any] = {
         "phase": "starting",
+        "phase_started_at": datetime.now(UTC).isoformat(),
         "cycle_count": 0,
         "consecutive_errors": 0,
         "last_result": None,
         "error": None,
+        "retry_started_at": None,
+        "next_retry_at": None,
+        "error_kind": None,
+        "error_summary": None,
     }
 
     def _heartbeat() -> None:
@@ -589,6 +686,11 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                 consecutive_errors=int(state.get("consecutive_errors") or 0),
                 last_result=state.get("last_result"),
                 error=state.get("error"),
+                phase_started_at=state.get("phase_started_at"),
+                retry_started_at=state.get("retry_started_at"),
+                next_retry_at=state.get("next_retry_at"),
+                error_kind=state.get("error_kind"),
+                error_summary=state.get("error_summary"),
             )
             time.sleep(15.0)
 
@@ -601,12 +703,15 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
         phase="starting",
         cycle_count=0,
         consecutive_errors=0,
+        phase_started_at=state.get("phase_started_at"),
     )
     heartbeat = threading.Thread(target=_heartbeat, name="ui-optimizer-daemon-heartbeat", daemon=True)
     heartbeat.start()
 
     try:
         def _set_phase(phase: str, *, error: str | None = None) -> None:
+            if str(state.get("phase") or "") != phase:
+                state["phase_started_at"] = datetime.now(UTC).isoformat()
             state["phase"] = phase
             _write_status(
                 args=args,
@@ -619,6 +724,11 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                 consecutive_errors=consecutive_errors,
                 last_result=last_result,
                 error=error if error is not None else state.get("error"),
+                phase_started_at=state.get("phase_started_at"),
+                retry_started_at=state.get("retry_started_at"),
+                next_retry_at=state.get("next_retry_at"),
+                error_kind=state.get("error_kind"),
+                error_summary=state.get("error_summary"),
             )
 
         while not _STOP_REQUESTED:
@@ -627,6 +737,10 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
             state["cycle_count"] = cycle_count
             _set_phase("running_cycle.prepare")
             try:
+                state["retry_started_at"] = None
+                state["next_retry_at"] = None
+                state["error_kind"] = None
+                state["error_summary"] = None
                 last_result = _run_cycle(
                     args,
                     artifact_root=artifact_root,
@@ -637,7 +751,12 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                 state["last_result"] = last_result
                 state["error"] = None
                 state["consecutive_errors"] = 0
+                state["retry_started_at"] = None
+                state["next_retry_at"] = None
+                state["error_kind"] = None
+                state["error_summary"] = None
                 state["phase"] = "sleeping"
+                state["phase_started_at"] = datetime.now(UTC).isoformat()
                 _write_status(
                     args=args,
                     pid_file=pid_file,
@@ -648,12 +767,18 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                     cycle_count=cycle_count,
                     consecutive_errors=0,
                     last_result=last_result,
+                    phase_started_at=state.get("phase_started_at"),
                 )
             except Exception as exc:
+                error_text = str(exc)
+                error_kind, error_summary = _classify_error(error_text)
                 consecutive_errors += 1
-                state["error"] = str(exc)
+                state["error"] = error_text
                 state["consecutive_errors"] = consecutive_errors
                 state["phase"] = "error"
+                state["phase_started_at"] = datetime.now(UTC).isoformat()
+                state["error_kind"] = error_kind
+                state["error_summary"] = error_summary
                 _write_status(
                     args=args,
                     pid_file=pid_file,
@@ -664,26 +789,50 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                     cycle_count=cycle_count,
                     consecutive_errors=consecutive_errors,
                     last_result=last_result,
-                    error=str(exc),
+                    error=error_text,
+                    phase_started_at=state.get("phase_started_at"),
+                    retry_started_at=state.get("retry_started_at"),
+                    next_retry_at=state.get("next_retry_at"),
+                    error_kind=state.get("error_kind"),
+                    error_summary=state.get("error_summary"),
                 )
                 if _STOP_REQUESTED:
                     break
                 if int(args.max_consecutive_errors or 0) > 0 and consecutive_errors >= int(args.max_consecutive_errors):
                     raise
-                state["phase"] = "retrying_after_error"
+                retry_seconds = max(float(args.retry_seconds or 0.0), 0.0)
+                retry_started_at = datetime.now(UTC)
+                next_retry_at = retry_started_at.timestamp() + retry_seconds
+                state["retry_started_at"] = retry_started_at.isoformat()
+                state["next_retry_at"] = datetime.fromtimestamp(next_retry_at, tz=UTC).isoformat()
+                if error_kind == "rate_limited":
+                    retry_phase = "backing_off.rate_limited"
+                elif error_kind == "timeout":
+                    retry_phase = "backing_off.timeout"
+                elif error_kind == "provider_unavailable":
+                    retry_phase = "backing_off.provider_unavailable"
+                else:
+                    retry_phase = "retrying_after_error"
+                state["phase"] = retry_phase
+                state["phase_started_at"] = retry_started_at.isoformat()
                 _write_status(
                     args=args,
                     pid_file=pid_file,
                     status_file=status_file,
                     log_file=log_file,
                     state="running",
-                    phase="retrying_after_error",
+                    phase=retry_phase,
                     cycle_count=cycle_count,
                     consecutive_errors=consecutive_errors,
                     last_result=last_result,
-                    error=str(exc),
+                    error=error_text,
+                    phase_started_at=state.get("phase_started_at"),
+                    retry_started_at=state.get("retry_started_at"),
+                    next_retry_at=state.get("next_retry_at"),
+                    error_kind=state.get("error_kind"),
+                    error_summary=state.get("error_summary"),
                 )
-                time.sleep(max(float(args.retry_seconds or 0.0), 0.0))
+                time.sleep(retry_seconds)
                 continue
             if _STOP_REQUESTED:
                 break
@@ -703,6 +852,11 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
             consecutive_errors=consecutive_errors,
             last_result=last_result,
             error=state.get("error"),
+            phase_started_at=state.get("phase_started_at"),
+            retry_started_at=state.get("retry_started_at"),
+            next_retry_at=state.get("next_retry_at"),
+            error_kind=state.get("error_kind"),
+            error_summary=state.get("error_summary"),
         )
         _cleanup_pid_file(pid_file)
     return {

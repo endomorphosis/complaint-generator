@@ -105,6 +105,35 @@ class ComplaintMcpClient {
         }
     }
 
+    getToolImpactSummary() {
+        const ledger = this.getToolCallLedger();
+        const latest = ledger[0] || null;
+        const successCount = ledger.filter((item) => String((item && item.status) || '').toLowerCase() === 'success').length;
+        const errorCount = ledger.filter((item) => String((item && item.status) || '').toLowerCase() === 'error').length;
+        return {
+            total_calls: ledger.length,
+            success_count: successCount,
+            error_count: errorCount,
+            latest_tool_name: latest ? String(latest.tool_name || '').trim() : '',
+            latest_status: latest ? String(latest.status || '').trim() : '',
+            latest_finished_at: latest ? String(latest.finished_at || '').trim() : '',
+        };
+    }
+
+    async getWorkflowOperationSnapshot(userId) {
+        const [releaseGate, workflowCapabilities, toolingContract] = await Promise.all([
+            this.getCanonicalReleaseGate(userId),
+            this.getWorkflowCapabilities(userId),
+            this.getToolingContract(userId),
+        ]);
+        return {
+            tool_impact_summary: this.getToolImpactSummary(),
+            canonical_release_gate: releaseGate,
+            workflow_capabilities: workflowCapabilities,
+            tooling_contract: toolingContract,
+        };
+    }
+
     ping() {
         return this.callJsonRpc('ping', {});
     }
@@ -270,6 +299,59 @@ class ComplaintMcpClient {
         return this.callTool('complaint.get_client_release_gate', {
             user_id: userId,
         });
+    }
+
+    toCanonicalReleaseGate(payload) {
+        const source = (payload && typeof payload === 'object') ? payload : {};
+        const gate = source.complaint_output_release_gate || source.release_gate || source;
+        const verdict = String((gate && (gate.verdict || gate.status)) || 'unknown').trim().toLowerCase() || 'unknown';
+        const blockers = Array.isArray(gate && gate.blockers)
+            ? gate.blockers
+            : Array.isArray(gate && gate.blocking_reasons)
+                ? gate.blocking_reasons
+                : String((gate && gate.reason) || '').trim()
+                    ? [String(gate.reason).trim()]
+                    : [];
+        const updatedAt = String((gate && gate.updated_at) || (source && source.updated_at) || '').trim() || new Date().toISOString();
+        const gateSource = String((gate && gate.source) || (source && source.source) || 'complaint.get_client_release_gate').trim();
+        const version = String((gate && (gate.version || gate.state_version)) || (source && (source.version || source.state_version)) || 'workspace-gate-v1').trim();
+        const reason = String((gate && gate.reason) || '').trim() || (blockers[0] || '');
+        const unblockAction = String((gate && (gate.next_best_action || gate.unblock_action)) || '').trim();
+        const status = String((gate && gate.status) || verdict || 'unknown').trim().toUpperCase();
+        return {
+            verdict,
+            status,
+            blockers,
+            blocking_reasons: blockers,
+            updated_at: updatedAt,
+            source: gateSource,
+            version,
+            state_version: version,
+            next_best_action: unblockAction,
+            canonical_gate: {
+                verdict,
+                status,
+                reason,
+                unblock_action: unblockAction,
+                next_best_action: unblockAction,
+                source: gateSource,
+                timestamp: updatedAt,
+                version,
+                state_version: version,
+                blocking_reasons: blockers,
+            },
+            reason,
+            unblock_action: unblockAction,
+            claim_type_label: String((gate && gate.claim_type_label) || '').trim() || 'Unknown',
+            draft_strategy: String((gate && gate.draft_strategy) || '').trim() || 'template',
+            filing_shape_score: Number((gate && gate.filing_shape_score) || 0),
+            claim_type_alignment_score: Number((gate && gate.claim_type_alignment_score) || 0),
+        };
+    }
+
+    async getCanonicalReleaseGate(userId) {
+        const payload = await this.getClientReleaseGate(userId);
+        return this.toCanonicalReleaseGate(payload);
     }
 
     getWorkflowCapabilities(userId) {
