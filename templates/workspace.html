@@ -753,6 +753,31 @@
             margin-top: 16px;
         }
 
+        .integration-live-grid {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            margin-top: 12px;
+        }
+
+        .integration-live-card {
+            padding: 14px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+        }
+
+        .integration-live-card strong,
+        .integration-live-card span {
+            display: block;
+        }
+
+        .integration-live-card span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
         .integration-grid > .tool-card:last-child {
             grid-column: 1 / -1;
         }
@@ -1879,6 +1904,7 @@
                                 <span class="chip" id="session-tool-activity-tool-chip">tool: pending</span>
                                 <span class="chip" id="session-tool-activity-status-chip">status: idle</span>
                             </div>
+                            <div class="helper-text" id="session-tool-impact-summary">UI impact summary will appear after shared SDK calls run.</div>
                             <div class="helper-text" id="session-tool-activity-note">When the workspace calls the SDK, the latest tool name and completion status will appear here.</div>
                             <div class="button-row">
                                 <button class="primary" id="session-tool-open-surface-button" type="button">Open related surface</button>
@@ -2438,6 +2464,22 @@
                         <strong>What to do here</strong>
                         <span>Use this stage to decide whether the complaint is merely drafted or genuinely supported. Missing elements are the best clue for what to collect next.</span>
                     </div>
+                    <div class="tool-card canonical-release-gate" id="review-canonical-release-gate" style="margin-bottom: 14px;">
+                        <h3>Review gate banner</h3>
+                        <div class="chip-row">
+                            <span class="chip warn" id="review-canonical-release-gate-verdict">verdict: BLOCKED</span>
+                            <span class="chip" id="review-canonical-corroboration-chip">corroboration: loading</span>
+                            <span class="chip" id="review-canonical-source-chip">source: loading</span>
+                            <span class="chip" id="review-canonical-timestamp-chip">updated: loading</span>
+                        </div>
+                        <div class="status draft-preview-shell"><pre id="review-canonical-release-gate-summary">Verdict: BLOCKED | Blocking reason: loading | Next action: loading | Source timestamp: loading</pre></div>
+                        <div class="list" id="review-canonical-release-gate-reasons">
+                            <div class="item"><strong>Review blockers will appear here once support and release-gate signals load.</strong></div>
+                        </div>
+                        <div class="button-row">
+                            <button class="primary" id="review-canonical-blocker-cta" type="button">Fix now</button>
+                        </div>
+                    </div>
                     <div class="priority-rail">
                         <div class="priority-hero" id="review-priority-hero">
                             <strong id="review-priority-title">The main review decision will appear here once the support matrix loads.</strong>
@@ -2508,6 +2550,22 @@
                     <div class="section-intro">
                         <strong>What to do here</strong>
                         <span>Generate a first draft once the timeline, protected activity, adverse action, and harm feel stable. Then refine clarity, tone, and requested relief before treating it as final.</span>
+                    </div>
+                    <div class="tool-card canonical-release-gate" id="draft-canonical-release-gate" style="margin-bottom: 14px;">
+                        <h3>Draft gate banner</h3>
+                        <div class="chip-row">
+                            <span class="chip warn" id="draft-canonical-release-gate-verdict">verdict: BLOCKED</span>
+                            <span class="chip" id="draft-canonical-corroboration-chip">corroboration: loading</span>
+                            <span class="chip" id="draft-canonical-source-chip">source: loading</span>
+                            <span class="chip" id="draft-canonical-timestamp-chip">updated: loading</span>
+                        </div>
+                        <div class="status draft-preview-shell"><pre id="draft-canonical-release-gate-summary">Verdict: BLOCKED | Blocking reason: loading | Next action: loading | Source timestamp: loading</pre></div>
+                        <div class="list" id="draft-canonical-release-gate-reasons">
+                            <div class="item"><strong>Draft blockers will appear here once support and release-gate signals load.</strong></div>
+                        </div>
+                        <div class="button-row">
+                            <button class="primary" id="draft-canonical-blocker-cta" type="button">Fix now</button>
+                        </div>
                     </div>
                     <div class="callout">
                         <h3>Draft when the case theory is coherent</h3>
@@ -2605,7 +2663,7 @@
                             <strong>Run the filing workflow in order</strong>
                             <span>Keep one dominant next move visible, with generation, packet review, and next-step safety guidance on the same rail. Generate or save the draft first, run packet review second, and only download when the release gate and support posture make that safe.</span>
                             <div class="soft-note" id="draft-primary-action-note">Primary action guidance will appear here once filing readiness is evaluated.</div>
-                            <div class="soft-note" id="optimizer-repair-focus-note">Adversarial optimizer repair focus: UX repair 2: Split support into two explicit badges: `Coverage` and `Corroboration`; block export on corroboration threshold unless override is acknowledged/logged. | UX repair 3: Add hard preflight blockers for placeholders (party names, district fallback, civil action placeholder) before export/download. | UX repair 4: Make Draft warning rail sticky and primary with direct actions: `Open weakest element composer`, `Go to evidence workbench`; demote Draft/Export actions when blocked.</div>
+                            <div class="soft-note" id="optimizer-repair-focus-note">Adversarial optimizer repair focus: UX repair 1: Create one canonical cross-tab gate banner using the same source object with required fields: `verdict`, `blocking_reason`, `next_action`, `source`, `timestamp`. | UX repair 2: Hard-block markdown/pdf/docx downloads whenever gate is blocked; allow only **Diagnostic Preview (Not Filing-Ready)**. | UX repair 3: Replace `Fix now: Open Review` with context-aware CTA: `Add corroboration in Evidence` or `Resolve placeholders in Draft`.</div>
                             <div class="tool-card canonical-release-gate" id="unsupported-thin-blocker-panel">
                                 <h3 id="unsupported-thin-blocker-title">Unsupported/Thin elements blocker</h3>
                                 <p class="muted" id="unsupported-thin-blocker-summary">Generate, export, and download stay blocked until grounded evidence outweighs thin and unsupported elements.</p>
@@ -2649,6 +2707,7 @@
                                     </div>
                                     <div class="button-row">
                                         <button class="secondary" id="export-packet-button" type="button">Export Complaint Packet</button>
+                                        <button class="secondary" id="export-packet-diagnostic-button" type="button" data-export-mode="diagnostic">Export Diagnostic Packet</button>
                                     </div>
                                 </div>
                                 <div class="draft-action-group">
@@ -2730,6 +2789,22 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                             <span>Readiness, mediator handoff, export review, and UX audit should all be visible and runnable from this tab without digging through long reference blocks.</span>
                         </div>
                     </div>
+                    <div class="tool-card canonical-release-gate" id="export-canonical-release-gate" style="margin-bottom: 16px;">
+                        <h3>Export and artifact metadata gate banner</h3>
+                        <div class="chip-row">
+                            <span class="chip warn" id="export-canonical-release-gate-verdict">verdict: BLOCKED</span>
+                            <span class="chip" id="export-canonical-corroboration-chip">corroboration: loading</span>
+                            <span class="chip" id="export-canonical-source-chip">source: loading</span>
+                            <span class="chip" id="export-canonical-timestamp-chip">updated: loading</span>
+                        </div>
+                        <div class="status draft-preview-shell"><pre id="export-canonical-release-gate-summary">Verdict: BLOCKED | Blocking reason: loading | Next action: loading | Source timestamp: loading</pre></div>
+                        <div class="list" id="export-canonical-release-gate-reasons">
+                            <div class="item"><strong>Export blockers will appear here once release-gate and artifact metadata load.</strong></div>
+                        </div>
+                        <div class="button-row">
+                            <button class="primary" id="export-canonical-blocker-cta" type="button">Fix now</button>
+                        </div>
+                    </div>
                     <div class="tool-card" style="margin-bottom: 16px;">
                         <h3>Start with a live tool workflow</h3>
                         <p class="muted">Use these first when you want to confirm the shared tool contract, prepare the mediator handoff, export the complaint packet, or continue the actor/critic UI review without scanning the whole tools page.</p>
@@ -2739,6 +2814,11 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                             <button class="secondary" id="integrations-start-export-button" type="button">Export and Review Packet</button>
                             <button class="secondary" id="integrations-start-ux-audit-button" type="button">Open UX Audit Workflow</button>
                         </div>
+                    </div>
+                    <div class="tool-card" id="integration-live-cards">
+                        <h3>Session-bound integration live actions</h3>
+                        <p class="muted">Live pass/fail badges for Package, CLI, MCP, and SDK are bound to the current DID/session.</p>
+                        <div class="integration-live-grid" id="integration-live-actions"></div>
                     </div>
                     <div class="integration-grid">
                         <div class="tool-card">
@@ -2831,8 +2911,9 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 <button class="secondary" id="build-mediator-prompt-button" type="button">Preview Mediator Brief</button>
                                 <button class="secondary" id="export-packet-tool-button" type="button">Export Packet via Tools</button>
                                 <button class="secondary" id="analyze-complaint-output-button" type="button">Analyze Exported Complaint</button>
-                                <button class="secondary" id="review-generated-exports-button" type="button">Run Export Critic</button>
-                                <button class="secondary" id="download-packet-tool-markdown-button" type="button" data-output-format="markdown" disabled>Download Markdown</button>
+                                    <button class="secondary" id="review-generated-exports-button" type="button">Run Export Critic</button>
+                                    <button class="secondary" id="export-packet-tool-diagnostic-button" type="button" data-export-mode="diagnostic">Export Diagnostic Packet</button>
+                                    <button class="secondary" id="download-packet-tool-markdown-button" type="button" data-output-format="markdown" disabled>Download Markdown</button>
                                 <button class="secondary" id="download-packet-tool-docx-button" type="button" data-output-format="docx" disabled>Download DOCX</button>
                                 <button class="secondary" id="download-packet-tool-pdf-button" type="button" data-output-format="pdf" disabled>Download PDF</button>
                             </div>
