@@ -112,7 +112,7 @@ class State:
 		self.chat_history = {}
 
 		self.hostname = "http://10.10.0.10:1792"
-		self.hostname2 = "http://localhost:19000"
+		self.hostname2 = os.getenv("COMPLAINT_GENERATOR_ORIGIN", "http://localhost:19030")
 
 	def response(self):
 		warnings.warn(
