@@ -498,6 +498,31 @@
             line-height: 1.5;
         }
 
+        .confidence-strip {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin: 12px 0;
+        }
+
+        .confidence-card {
+            padding: 12px 14px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        .confidence-card strong,
+        .confidence-card span {
+            display: block;
+        }
+
+        .confidence-card span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
         .diagnostic-card textarea {
             margin-top: 12px;
             min-height: 130px;
@@ -828,6 +853,7 @@
 
         .draft-preview-shell {
             margin-top: 14px;
+            pointer-events: none;
         }
 
         .draft-status-scan {
@@ -886,9 +912,18 @@
         }
 
         .canonical-release-gate {
+            position: sticky;
+            top: 12px;
+            z-index: 3;
             border-color: rgba(154, 52, 18, 0.2);
             background: linear-gradient(180deg, rgba(255, 249, 243, 0.98), rgba(252, 240, 228, 0.92));
             box-shadow: 0 16px 34px rgba(154, 52, 18, 0.08);
+            pointer-events: none;
+        }
+
+        .canonical-release-gate button,
+        .canonical-release-gate a {
+            pointer-events: auto;
         }
 
         .canonical-release-gate .chip-row {
@@ -961,6 +996,8 @@
         }
 
         .tab-row {
+            position: relative;
+            z-index: 5;
             padding: 12px;
             margin: 0;
             border-radius: 22px;
@@ -972,6 +1009,8 @@
 
         .tab-button {
             background: rgba(255, 255, 255, 0.72);
+            position: relative;
+            z-index: 6;
         }
 
         .stage-index-shell {
@@ -987,6 +1026,12 @@
             background: rgba(250, 243, 235, 0.96);
             box-shadow: 0 14px 28px rgba(24, 34, 41, 0.07);
             backdrop-filter: blur(10px);
+            pointer-events: none;
+        }
+
+        .stage-index-shell button,
+        .stage-index-shell a {
+            pointer-events: auto;
         }
 
         .stage-index-summary strong,
@@ -1568,9 +1613,9 @@
                         <div class="muted" id="next-question-label">Loading session...</div>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Supported claim elements</span>
-                        <span class="summary-value" id="supported-count">0</span>
-                        <div class="muted" id="missing-count-label">0 need more support</div>
+                        <span class="summary-label" id="corroboration-strength-label">Element coverage</span>
+                        <span class="summary-value" id="supported-count">UNKNOWN</span>
+                        <div class="muted" id="missing-count-label">Corroboration strength: loading</div>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Evidence collected</span>
@@ -1620,26 +1665,28 @@
 
                 <section class="focus-rail" aria-label="Current workflow focus">
                     <div class="focus-rail-summary">
-                        <span class="eyebrow">Current Focus</span>
-                        <strong class="focus-rail-title" id="focus-rail-title">The workspace is preparing the safest next step.</strong>
-                        <span class="focus-rail-detail" id="focus-rail-detail">This rail keeps the current stage, next required action, and export-safety posture visible while you scroll through the workspace.</span>
+                        <span class="eyebrow">Canonical Blocker Rail</span>
+                        <strong class="focus-rail-title" id="focus-rail-title">Review + Draft + Export share one blocker source.</strong>
+                        <span class="focus-rail-detail" id="focus-rail-detail">This sticky rail keeps one verdict, one blocker summary, one corroboration grade, and one primary CTA visible while you work.</span>
                         <div class="button-row">
-                            <button class="primary" id="focus-rail-action-button" type="button" data-target-tab="intake">Continue current step</button>
-                            <button class="secondary" id="focus-rail-review-button" type="button">Open readiness check</button>
+                            <button class="primary" id="focus-rail-action-button" type="button" data-target-tab="intake">Primary action: go to intake</button>
                         </div>
                     </div>
                     <div class="focus-rail-grid">
                         <div class="focus-rail-card">
-                            <strong>Current stage</strong>
-                            <span id="focus-rail-stage">Loading current stage…</span>
+                            <strong>Verdict</strong>
+                            <span id="focus-rail-verdict">Verdict is loading…</span>
+                            <span class="muted" id="focus-rail-stage">Current stage is loading…</span>
                         </div>
                         <div class="focus-rail-card">
-                            <strong>Where things stand</strong>
-                            <span id="focus-rail-readiness">The workspace is checking whether the record is still in intake, support-building, or drafting posture.</span>
+                            <strong>Blockers</strong>
+                            <span id="focus-rail-blockers">Blockers are loading…</span>
+                            <span class="muted" id="focus-rail-readiness">Readiness guidance is loading…</span>
                         </div>
                         <div class="focus-rail-card">
-                            <strong>Readiness check</strong>
-                            <span id="focus-rail-export-safety">Readiness guidance will appear here once the filing-check signals are available.</span>
+                            <strong>Corroboration grade</strong>
+                            <span id="focus-rail-corroboration">Corroboration grade is loading…</span>
+                            <span class="muted" id="focus-rail-export-safety">Export safety guidance is loading…</span>
                         </div>
                     </div>
                 </section>
@@ -2349,6 +2396,23 @@
                             <span>The support matrix is understandable, the case synopsis still matches the facts, and the next move is clearly either more proof or draft refinement.</span>
                         </div>
                     </div>
+                    <div class="tool-card canonical-release-gate" id="review-canonical-release-gate">
+                        <h3>Canonical filing verdict bar</h3>
+                        <p class="muted">Pinned filing verdict for Review, Draft, and Export. One reason source keeps PASS, BLOCKED, and corroboration posture aligned across every decision point.</p>
+                        <div class="chip-row">
+                            <span class="chip warn" id="review-canonical-release-gate-verdict">verdict: BLOCKED</span>
+                            <span class="chip" id="review-canonical-corroboration-chip">corroboration: loading</span>
+                            <span class="chip" id="review-canonical-source-chip">source: loading</span>
+                            <span class="chip" id="review-canonical-timestamp-chip">updated: loading</span>
+                        </div>
+                        <div class="status draft-preview-shell"><pre id="review-canonical-release-gate-summary">Reason source: awaiting support and intake checks.</pre></div>
+                        <div class="list" id="review-canonical-release-gate-reasons">
+                            <div class="item"><strong>Missing elements will appear here once review data loads.</strong></div>
+                        </div>
+                        <div class="button-row">
+                            <button class="primary" id="review-canonical-blocker-cta" type="button">Add Evidence</button>
+                        </div>
+                    </div>
                     <h2>Support Review</h2>
                     <p class="muted">See which claim elements are already supported and which ones still need more evidence before the complaint is finalized.</p>
                     <div class="section-intro">
@@ -2370,15 +2434,15 @@
                     </div>
                     <div class="decision-strip" aria-label="Review decision strip">
                         <div class="decision-card">
-                            <strong>Current goal</strong>
+                            <strong>Coverage</strong>
                             <span>Decide whether the complaint is merely draftable or actually supported well enough to trust the filing posture.</span>
                         </div>
                         <div class="decision-card">
-                            <strong>Biggest blocker</strong>
+                            <strong>Corroboration</strong>
                             <span>Dense support cards can hide whether the real gap is corroboration, timing proof, or a release-gate reason to wait.</span>
                         </div>
                         <div class="decision-card">
-                            <strong>Safest next move</strong>
+                            <strong>Filing Gate</strong>
                             <span>Use this stage to make one explicit choice: add proof, fix intake facts, or proceed to Draft with the blocker still visible.</span>
                         </div>
                     </div>
@@ -2415,6 +2479,23 @@
                         <div class="stage-banner-status">
                             <strong>What makes Draft ready to leave</strong>
                             <span>The complaint still matches the selected claim type, the caption and relief are concrete, and export is backed by a visible release-gate verdict rather than optimism alone.</span>
+                        </div>
+                    </div>
+                    <div class="tool-card canonical-release-gate" id="draft-canonical-release-gate">
+                        <h3>Canonical filing verdict bar</h3>
+                        <p class="muted">Pinned filing verdict for Review, Draft, and Export. One reason source keeps BLOCKED, NEEDS CORROBORATION, and READY aligned across the workflow.</p>
+                        <div class="chip-row">
+                            <span class="chip warn" id="draft-canonical-release-gate-verdict">verdict: BLOCKED</span>
+                            <span class="chip" id="draft-canonical-corroboration-chip">corroboration: loading</span>
+                            <span class="chip" id="draft-canonical-source-chip">source: loading</span>
+                            <span class="chip" id="draft-canonical-timestamp-chip">updated: loading</span>
+                        </div>
+                        <div class="status draft-preview-shell"><pre id="draft-canonical-release-gate-summary">Reason source: awaiting support and intake checks.</pre></div>
+                        <div class="list" id="draft-canonical-release-gate-reasons">
+                            <div class="item"><strong>Missing elements will appear here once review data loads.</strong></div>
+                        </div>
+                        <div class="button-row">
+                            <button class="primary" id="draft-canonical-blocker-cta" type="button">Add Evidence</button>
                         </div>
                     </div>
                     <h2>Draft and Edit</h2>
@@ -2519,6 +2600,26 @@
                             <strong>Run the filing workflow in order</strong>
                             <span>Keep one dominant next move visible, with generation, packet review, and next-step safety guidance on the same rail. Generate or save the draft first, run packet review second, and only download when the release gate and support posture make that safe.</span>
                             <div class="soft-note" id="draft-primary-action-note">Primary action guidance will appear here once filing readiness is evaluated.</div>
+                            <div class="soft-note" id="optimizer-repair-focus-note">Adversarial optimizer repair focus: UX repair 1: Pin one canonical release object across Review/Draft/Export: `verdict`, `blocking_reason`, `source`, `updated_at`; no blank reason allowed when blocked. | UX repair 2: Hard-block generation/export/download on placeholder or generic-party detection with inline `Fix now` links back to intake fields. | UX repair 3: Replace “supported count” prominence with filing tiers: `Draftable`, `Needs corroboration`, `Filing-ready`.</div>
+                            <div class="tool-card canonical-release-gate" id="unsupported-thin-blocker-panel">
+                                <h3 id="unsupported-thin-blocker-title">Unsupported/Thin elements blocker</h3>
+                                <p class="muted" id="unsupported-thin-blocker-summary">Generate, export, and download stay blocked until grounded evidence outweighs thin and unsupported elements.</p>
+                                <div class="chip-row" id="unsupported-thin-blocker-chips">
+                                    <span class="chip warn">confidence: blocked</span>
+                                    <span class="chip">grounded evidence: 0</span>
+                                    <span class="chip">thin evidence: 0</span>
+                                    <span class="chip">unsupported elements: 0</span>
+                                </div>
+                                <div class="soft-note" id="unsupported-thin-blocker-coverage-note">Confidence stays blocked until unsupported elements are routed back to Review or Evidence instead of being hidden behind export or download actions.</div>
+                                <div class="list" id="unsupported-thin-blocker-reasons">
+                                    <div class="item"><strong>Waiting for support matrix and release-gate signals.</strong></div>
+                                </div>
+                                <div class="button-row">
+                                    <button class="primary" id="unsupported-thin-go-evidence-button" type="button">Go to Evidence</button>
+                                    <button class="secondary" id="unsupported-thin-go-review-button" type="button">Go to Review</button>
+                                    <a class="surface-link" id="unsupported-thin-add-evidence-link" href="/workspace?target_tab=evidence">Add Evidence (Session Link)</a>
+                                </div>
+                            </div>
                             <div class="draft-action-groups">
                                 <div class="draft-action-group">
                                     <strong>1. Generate or save</strong>
@@ -2531,6 +2632,15 @@
                                 <div class="draft-action-group">
                                     <strong>2. Review the packet</strong>
                                     <span>Run the packet export and complaint-output review before treating file downloads as the endpoint of this stage.</span>
+                                    <div class="soft-note" id="draft-artifact-quality-warning">Artifact quality warnings will appear here before export when placeholders, generic party labels, or caption fallback are detected.</div>
+                                    <label for="draft-internal-review-only-confirm" class="helper-text" style="display: block; margin-top: 8px;">
+                                        <input id="draft-internal-review-only-confirm" type="checkbox">
+                                        I confirm this export is a draft for internal review only.
+                                    </label>
+                                    <div class="button-row">
+                                        <button class="secondary" id="draft-fix-intake-names-button" type="button">Fix Intake Names</button>
+                                        <button class="secondary" id="draft-fix-caption-button" type="button">Fix Draft</button>
+                                    </div>
                                     <div class="button-row">
                                         <button class="secondary" id="export-packet-button" type="button">Export Complaint Packet</button>
                                     </div>
@@ -2555,11 +2665,28 @@
                                     <span class="chip" id="draft-release-shape-chip">filing shape: waiting</span>
                                     <span class="chip" id="draft-release-support-chip">support: waiting</span>
                                 </div>
+                                <div class="confidence-strip" id="draft-confidence-card">
+                                    <div class="confidence-card">
+                                        <strong>Grounded</strong>
+                                        <span id="draft-confidence-grounded">0 elements are backed by mixed or documentary proof.</span>
+                                    </div>
+                                    <div class="confidence-card">
+                                        <strong>Thin</strong>
+                                        <span id="draft-confidence-thin">0 elements still need corroboration before export confidence should rise.</span>
+                                    </div>
+                                    <div class="confidence-card">
+                                        <strong>Unsupported</strong>
+                                        <span id="draft-confidence-unsupported">0 elements still need direct targeted proof before filing confidence should rise.</span>
+                                    </div>
+                                </div>
                                 <div class="status draft-preview-shell"><pre id="draft-release-gate-summary">Verdict: BLOCKED
 Blocker reasons: waiting for readiness signals.</pre></div>
                                 <div class="soft-note" id="draft-release-gate-next-step">Primary CTA guidance will appear here after the workspace reviews the current draft and record.</div>
                                 <div class="button-row">
                                     <button class="primary" id="draft-release-primary-cta" type="button" data-action="open_review">Open Review</button>
+                                    <button class="secondary" id="draft-release-open-review-button" type="button">Open Review</button>
+                                    <button class="secondary" id="draft-release-open-evidence-button" type="button">Add Support</button>
+                                    <button class="secondary" id="draft-release-open-integrations-button" type="button">Open CLI + MCP</button>
                                 </div>
                             </div>
                             <div class="draft-action-card">
@@ -4212,15 +4339,15 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 <p class="muted">Counts alone can be misleading. Use this map to see where the record is grounded, where it is still thin, and where direct proof is still missing.</p>
                 <div class="support-summary-strip">
                     <div class="support-summary-card">
-                        <strong>Grounded elements</strong>
+                        <strong>Coverage</strong>
                         <span>${escapeHtml(String(strengthBuckets.grounded || 0))} elements have mixed or documentary proof behind them.</span>
                     </div>
                     <div class="support-summary-card">
-                        <strong>Thin elements</strong>
+                        <strong>Corroboration</strong>
                         <span>${escapeHtml(String(strengthBuckets.thin || 0))} elements have some support, but corroboration is still light.</span>
                     </div>
                     <div class="support-summary-card">
-                        <strong>Unsupported elements</strong>
+                        <strong>Filing Gate</strong>
                         <span>${escapeHtml(String(strengthBuckets.unsupported || 0))} elements still need direct targeted proof before filing confidence should rise.</span>
                     </div>
                 </div>
@@ -4881,6 +5008,14 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const releaseGateChip = document.getElementById('draft-release-gate-chip');
             const releaseShapeChip = document.getElementById('draft-release-shape-chip');
             const releaseSupportChip = document.getElementById('draft-release-support-chip');
+            const unsupportedThinBlockerSummaryNode = document.getElementById('unsupported-thin-blocker-summary');
+            const unsupportedThinBlockerCoverageNode = document.getElementById('unsupported-thin-blocker-coverage-note');
+            const unsupportedThinBlockerChips = document.getElementById('unsupported-thin-blocker-chips');
+            const unsupportedThinBlockerReasons = document.getElementById('unsupported-thin-blocker-reasons');
+            const artifactQualityWarningNode = document.getElementById('draft-artifact-quality-warning');
+            const confidenceGroundedNode = document.getElementById('draft-confidence-grounded');
+            const confidenceThinNode = document.getElementById('draft-confidence-thin');
+            const confidenceUnsupportedNode = document.getElementById('draft-confidence-unsupported');
             const releaseGateSummaryNode = document.getElementById('draft-release-gate-summary');
             const releaseGateNextStepNode = document.getElementById('draft-release-gate-next-step');
             const contractLines = [
@@ -4923,6 +5058,64 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             });
             document.getElementById('draft-status-gate').textContent = `${canonicalReadiness.formAssessment.label.toUpperCase()} form • ${canonicalReadiness.supportAssessment.label.toUpperCase()} support • ${downloadAllowed ? 'downloads available' : 'downloads blocked'}`;
             document.getElementById('draft-readiness-preview').textContent = canonicalReadiness.summaryLines.join('\n');
+            if (confidenceGroundedNode) {
+                confidenceGroundedNode.textContent = `${Number(supportedElements || 0)} element${Number(supportedElements || 0) === 1 ? '' : 's'} are backed by mixed or documentary proof.`;
+            }
+            if (confidenceThinNode) {
+                const thinCount = Math.max(evidenceItemCount > 0 ? Math.min(missingElements, evidenceItemCount) : 0, 0);
+                confidenceThinNode.textContent = `${thinCount} element${thinCount === 1 ? '' : 's'} still need corroboration before export confidence should rise.`;
+            }
+            if (confidenceUnsupportedNode) {
+                confidenceUnsupportedNode.textContent = `${Number(missingElements || 0)} element${Number(missingElements || 0) === 1 ? '' : 's'} still need direct targeted proof before filing confidence should rise.`;
+            }
+            if (unsupportedThinBlockerSummaryNode) {
+                unsupportedThinBlockerSummaryNode.textContent = downloadAllowed
+                    ? 'Grounded evidence currently outweighs thin and unsupported elements, so export and download can be reviewed together.'
+                    : exportAllowed
+                        ? 'Export can refresh the packet review, but grounded evidence still does not outweigh thin and unsupported elements enough for download.'
+                        : 'Generate, export, and download stay blocked until grounded evidence outweighs thin and unsupported elements.';
+            }
+            if (unsupportedThinBlockerCoverageNode) {
+                unsupportedThinBlockerCoverageNode.textContent = !downloadAllowed
+                    ? `Confidence is still blocked by ${missingElements} unsupported element${missingElements === 1 ? '' : 's'} and ${Math.max(evidenceItemCount - supportedElements, 0)} lightly corroborated evidence item${Math.max(evidenceItemCount - supportedElements, 0) === 1 ? '' : 's'}. Route back to Review or Evidence before treating export as the next step.`
+                    : 'Confidence is grounded enough to let export and download stay visible together, but keep the verdict rail beside the packet review while you decide whether to download.';
+            }
+            if (unsupportedThinBlockerChips) {
+                unsupportedThinBlockerChips.innerHTML = [
+                    `<span class="chip ${downloadAllowed ? 'good' : 'warn'}">confidence: ${downloadAllowed ? 'grounded' : exportAllowed ? 'thin' : 'blocked'}</span>`,
+                    `<span class="chip">grounded evidence: ${Number(supportedElements || 0)}</span>`,
+                    `<span class="chip">thin evidence: ${Math.max(evidenceItemCount - supportedElements, 0)}</span>`,
+                    `<span class="chip">unsupported elements: ${Number(missingElements || 0)}</span>`,
+                ].join('');
+            }
+            if (unsupportedThinBlockerReasons) {
+                const blockerItems = [];
+                if (missingElements > 0) {
+                    blockerItems.push(`${missingElements} claim element${missingElements === 1 ? '' : 's'} still need direct support before filing confidence can rise.`);
+                }
+                if (placeholderPartyNames) {
+                    blockerItems.push('Party names still look like placeholders, so the caption and body should be fixed before export.');
+                }
+                if (!currentDraftBody.trim()) {
+                    blockerItems.push('No complaint draft body is available yet, so the filing verdict cannot move past blocked.');
+                }
+                unsupportedThinBlockerReasons.innerHTML = blockerItems.length
+                    ? blockerItems.map((item) => `<div class="item"><strong>${escapeHtml(item)}</strong></div>`).join('')
+                    : '<div class="item"><strong>Grounded evidence currently outweighs thin and unsupported elements.</strong></div>';
+            }
+            if (artifactQualityWarningNode) {
+                const qualityWarnings = [];
+                if (placeholderPartyNames) {
+                    qualityWarnings.push('Party names still look generic, so fix Intake Names before export.');
+                }
+                if (String((draft.title || '')).trim().length < 8) {
+                    qualityWarnings.push('The caption or title still looks thin, so fix the caption before download.');
+                }
+                if (!qualityWarnings.length) {
+                    qualityWarnings.push('Artifact quality warnings will appear here before export when placeholders, generic party labels, or caption fallback are detected.');
+                }
+                artifactQualityWarningNode.textContent = qualityWarnings.join(' ');
+            }
             document.getElementById('draft-export-safety-preview').textContent = [
                 canonicalReadiness.summaryLines[0],
                 `Primary action right now: ${canonicalReadiness.primaryAction}`,
@@ -4935,10 +5128,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : `Export controls are disabled because ${exportHardBlockers.join('; ')}.`,
             ].join('\n');
             document.getElementById('draft-export-guidance').textContent = downloadAllowed
-                ? 'The complaint export path is available, and the canonical filing-readiness summary should stay beside the download buttons while you review the packet.'
+                ? 'The complaint export path is available. Keep complaint generation state, packet export controls, and next-step release-gate guidance visible together while you review the packet.'
                 : exportAllowed
-                    ? 'Export can refresh the packet review, but the canonical filing-readiness summary still shows why downloads stay blocked.'
-                    : 'Review and evidence should stay easier to choose than download whenever the canonical filing-readiness summary still shows blockers.';
+                    ? 'Export can refresh the packet review, but keep complaint generation state, packet export controls, and next-step release-gate guidance visible together while downloads stay blocked.'
+                    : 'Review and evidence should stay easier to choose than download whenever filing blockers remain, and generation/export/next-step guidance should stay visible together.';
             if (generateDraftButton) {
                 generateDraftButton.classList.remove('primary');
                 generateDraftButton.classList.add('secondary');
@@ -5067,11 +5260,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const inferredAssertions = [];
             if (screenshotFindings.length || unresolved.length) {
                 inferredAssertions.push("await expect(page.locator('#focus-rail-action-button')).toBeVisible();");
+                inferredAssertions.push("await expect(page.locator('#action-button')).toBeVisible();");
             }
-            if (screenshotFindings.length || unresolvedText.includes('release gate') || unresolvedText.includes('export')) {
+            if (screenshotFindings.length || unresolved.length || unresolvedText.includes('primary action') || unresolvedText.includes('next step')) {
+                inferredAssertions.push("await expect(page.locator('#focus-rail-action-button')).toContainText('Primary action:');");
+            }
+            if (screenshotFindings.length || unresolved.length || unresolvedText.includes('release gate') || unresolvedText.includes('export')) {
                 inferredAssertions.push("await expect(page.locator('#draft-release-gate-summary')).toContainText('Primary action:');");
                 inferredAssertions.push("await expect(page.locator('#draft-export-safety-preview')).toContainText('Primary action right now:');");
                 inferredAssertions.push("await expect(page.locator('#draft-primary-action-note')).toContainText('Primary action now:');");
+                inferredAssertions.push("await expect(page.locator('#draft-export-guidance')).toContainText('release-gate guidance');");
             }
             if (unresolvedText.includes('next step') || unresolvedText.includes('guidance') || unresolvedText.includes('primary action')) {
                 inferredAssertions.push("await expect(page.locator('#draft-release-gate-next-step')).toContainText('Next safest move:');");
@@ -5319,21 +5517,25 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         ? 'Go to review'
                         : 'Go to intake';
             focusRailActionButton.textContent = actionTab === 'draft'
-                ? 'Continue in draft'
+                ? 'Primary action: go to draft'
                 : actionTab === 'evidence'
-                    ? 'Continue in evidence'
+                    ? 'Primary action: go to evidence'
                     : actionTab === 'review'
-                        ? 'Continue in review'
-                        : 'Continue in intake';
+                        ? 'Primary action: go to review'
+                        : 'Primary action: go to intake';
             document.getElementById('focus-rail-title').textContent = currentTabFocus.title;
             document.getElementById('focus-rail-detail').textContent = currentTabFocus.detail;
+            document.getElementById('focus-rail-verdict').textContent = `Verdict: ${String(sidebarCanonicalReadiness.verdictLabel || currentTabFocus.stage || 'loading').trim()}`;
+            document.getElementById('focus-rail-blockers').textContent = state.builderReady || activeWorkspaceTab === 'review' || activeWorkspaceTab === 'draft'
+                ? `Primary blocker: ${sidebarCanonicalReadiness.primaryAction}`
+                : currentTabFocus.readiness;
+            document.getElementById('focus-rail-corroboration').textContent = `Corroboration grade: ${String((sidebarCanonicalReadiness.supportAssessment || {}).label || 'loading').trim().toUpperCase()}${(sidebarCanonicalReadiness.supportAssessment || {}).detail ? ` - ${sidebarCanonicalReadiness.supportAssessment.detail}` : ''}`;
             document.getElementById('focus-rail-stage').textContent = currentTabFocus.stage;
             document.getElementById('focus-rail-readiness').textContent = currentTabFocus.readiness;
             document.getElementById('focus-rail-export-safety').textContent = state.builderReady || activeWorkspaceTab === 'review' || activeWorkspaceTab === 'draft'
                 ? `Readiness check: ${sidebarCanonicalReadiness.primaryAction}`
                 : currentTabFocus.exportSafety;
-            focusRailActionButton.dataset.targetTab = currentTabFocus.targetTab || actionTab;
-            focusRailActionButton.textContent = currentTabFocus.actionLabel || focusRailActionButton.textContent;
+            focusRailActionButton.dataset.targetTab = actionTab;
             if (stageIndexTitle) {
                 stageIndexTitle.textContent = currentTabFocus.title;
             }
@@ -8179,9 +8381,22 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         document.getElementById('download-packet-tool-pdf-button').addEventListener('click', downloadPacket);
         document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));
         document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));
-        document.getElementById('draft-release-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the draft release gate so support gaps can be checked before download.'));
-        document.getElementById('draft-release-open-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the draft release gate so the record can be strengthened before download.'));
-        document.getElementById('draft-release-open-integrations-button').addEventListener('click', () => jumpToStage('integrations', '#client-release-gate-preview', 'Opened CLI + MCP from the draft release gate so the export posture can be refreshed before download.'));
+        document.getElementById('unsupported-thin-go-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the unsupported-elements blocker so the record can be strengthened before export or download.'));
+        document.getElementById('unsupported-thin-go-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the unsupported-elements blocker so the filing verdict can be checked before export or download.'));
+        document.getElementById('draft-fix-intake-names-button').addEventListener('click', () => jumpToStage('intake', '#intake-party_name', 'Opened Intake so placeholder party names can be fixed before export.'));
+        document.getElementById('draft-fix-caption-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Focused the draft caption so the filing title can be fixed before export.'));
+        const draftReleaseOpenReviewButton = document.getElementById('draft-release-open-review-button');
+        if (draftReleaseOpenReviewButton) {
+            draftReleaseOpenReviewButton.addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the draft release gate so support gaps can be checked before download.'));
+        }
+        const draftReleaseOpenEvidenceButton = document.getElementById('draft-release-open-evidence-button');
+        if (draftReleaseOpenEvidenceButton) {
+            draftReleaseOpenEvidenceButton.addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the draft release gate so the record can be strengthened before download.'));
+        }
+        const draftReleaseOpenIntegrationsButton = document.getElementById('draft-release-open-integrations-button');
+        if (draftReleaseOpenIntegrationsButton) {
+            draftReleaseOpenIntegrationsButton.addEventListener('click', () => jumpToStage('integrations', '#client-release-gate-preview', 'Opened CLI + MCP from the draft release gate so the export posture can be refreshed before download.'));
+        }
         document.getElementById('refresh-sdk-primitives-button').addEventListener('click', refreshSdkPrimitivesPanel);
         document.getElementById('save-synopsis-button').addEventListener('click', saveSynopsis);
         document.getElementById('reset-session-button').addEventListener('click', resetSession);
@@ -8217,7 +8432,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 `Opened ${targetTab.charAt(0).toUpperCase()}${targetTab.slice(1)} from the workflow focus rail.`,
             );
         });
-        document.getElementById('focus-rail-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the workflow focus rail so the filing-readiness check can be reviewed.'));
+        const focusRailReviewButton = document.getElementById('focus-rail-review-button');
+        if (focusRailReviewButton) {
+            focusRailReviewButton.addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the workflow focus rail so the filing-readiness check can be reviewed.'));
+        }
         document.getElementById('session-tool-open-surface-button').addEventListener('click', () => {
             const button = document.getElementById('session-tool-open-surface-button');
             jumpToStage(button.dataset.targetTab || 'integrations', button.dataset.focusSelector || '', button.dataset.statusMessage || 'Opened the surface related to the latest MCP activity.');

@@ -282,6 +282,10 @@
             : primaryActionKey === 'review'
                 ? 'Primary action: resolve support gaps in Review before moving into formal drafting.'
                 : 'Primary action: generate or refine the complaint draft in Builder, then use Workspace export + release-gate checks before download.';
+        const draftFlowEnabled = workflowState.builderReady;
+        const draftFlowReason = draftFlowEnabled
+            ? 'Draft flow rail is available because this session is ready for drafting.'
+            : workflowState.builderGateReason;
         const actionLinks = [
             buildGatedLink('cg-app-shell__action', 'Open Workspace', buildShellSurfaceUrl('/workspace', context), true, ''),
             buildGatedLink('cg-app-shell__action', 'Open Review', buildShellSurfaceUrl('/claim-support-review', context), workflowState.reviewReady, workflowState.reviewGateReason),
@@ -355,6 +359,15 @@
             '<div class="cg-app-shell__workflow-rail' + (workflowState.builderReady ? '' : ' is-warn') + '">',
             '<div class="cg-app-shell__phase-note">' + safeText(workflowNextStep, '') + '</div>',
             '<div class="cg-app-shell__phase-note">Keep draft generation, packet export, and release-gate next-step guidance visible together before downloading complaint files.</div>',
+            '</div>',
+            '<div class="cg-app-shell__section-title">Draft Flow Rail</div>',
+            '<div class="cg-app-shell__draft-rail' + (draftFlowEnabled ? '' : ' is-warn') + '">',
+            '<div class="cg-app-shell__phase-note">Keep one visible sequence: generate or refine, export and review, then confirm the release-gate next step.</div>',
+            '<div class="cg-app-shell__draft-flow-grid">',
+            buildGatedLink('cg-app-shell__draft-step', '1. Generate / refine draft', buildShellSurfaceUrl('/document', context), draftFlowEnabled, draftFlowReason),
+            buildGatedLink('cg-app-shell__draft-step', '2. Export + review packet', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),
+            buildGatedLink('cg-app-shell__draft-step', '3. Check next-step gate', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),
+            '</div>',
             '</div>',
             '<div class="cg-app-shell__meta">This sidebar is backed by the same cached DID and complaint workspace session used by the CLI, MCP tools, and browser SDK.</div>',
             '</div>',

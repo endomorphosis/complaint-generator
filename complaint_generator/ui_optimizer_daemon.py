@@ -64,6 +64,42 @@ def _pid_is_running(pid: int) -> bool:
     return True
 
 
+def _matching_daemon_pids(*, user_id: str, artifact_root: Path) -> list[int]:
+    target_user = str(user_id or "").strip()
+    target_artifact_root = str(artifact_root).strip()
+    if not target_user or not target_artifact_root:
+        return []
+    try:
+        completed = subprocess.run(
+            ["ps", "-eo", "pid=,args="],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return []
+    matches: list[int] = []
+    for raw_line in str(completed.stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line or "complaint_generator.ui_optimizer_daemon run" not in line:
+            continue
+        if f"--user-id {target_user}" not in line:
+            continue
+        if f"--artifact-root {target_artifact_root}" not in line:
+            continue
+        parts = line.split(None, 1)
+        if not parts:
+            continue
+        try:
+            pid = int(parts[0])
+        except Exception:
+            continue
+        if _pid_is_running(pid):
+            matches.append(pid)
+    return sorted(set(matches))
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -637,6 +673,7 @@ def _build_run_command(
 
 def _start_daemon(args: argparse.Namespace) -> dict[str, Any]:
     artifact_root, pid_file, status_file, log_file = _resolve_runtime_paths(args)
+    matching_pids = _matching_daemon_pids(user_id=args.user_id, artifact_root=artifact_root)
     if pid_file.exists():
         try:
             existing_pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
@@ -646,11 +683,22 @@ def _start_daemon(args: argparse.Namespace) -> dict[str, Any]:
             return {
                 "status": "already_running",
                 "pid": existing_pid,
+                "matching_pids": matching_pids or [existing_pid],
                 "artifact_root": str(artifact_root),
                 "pid_file": str(pid_file),
                 "status_file": str(status_file),
                 "log_file": str(log_file),
             }
+    if matching_pids:
+        return {
+            "status": "already_running",
+            "pid": int(matching_pids[0]),
+            "matching_pids": matching_pids,
+            "artifact_root": str(artifact_root),
+            "pid_file": str(pid_file),
+            "status_file": str(status_file),
+            "log_file": str(log_file),
+        }
 
     cmd = _build_run_command(args, pid_file=pid_file, status_file=status_file, log_file=log_file)
     log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -689,6 +737,7 @@ def _status_payload(args: argparse.Namespace) -> dict[str, Any]:
         "artifact_root": str(artifact_root),
         "pid": pid,
         "running": _pid_is_running(pid),
+        "matching_pids": _matching_daemon_pids(user_id=args.user_id, artifact_root=artifact_root),
         "pid_file": str(pid_file),
         "status_file": str(status_file),
         "log_file": str(log_file),
@@ -704,7 +753,9 @@ def _stop_daemon(args: argparse.Namespace) -> dict[str, Any]:
             pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
         except Exception:
             pid = 0
-    if pid <= 0 or not _pid_is_running(pid):
+    matching_pids = _matching_daemon_pids(user_id=args.user_id, artifact_root=artifact_root)
+    target_pids = sorted(set(([pid] if pid > 0 and _pid_is_running(pid) else []) + matching_pids))
+    if not target_pids:
         return {
             "status": "not_running",
             "artifact_root": str(artifact_root),
@@ -712,10 +763,15 @@ def _stop_daemon(args: argparse.Namespace) -> dict[str, Any]:
             "status_file": str(status_file),
             "log_file": str(log_file),
         }
-    os.kill(pid, signal.SIGTERM)
+    for target_pid in target_pids:
+        try:
+            os.kill(target_pid, signal.SIGTERM)
+        except OSError:
+            continue
     return {
         "status": "stopping",
-        "pid": pid,
+        "pid": int(target_pids[0]),
+        "matching_pids": target_pids,
         "artifact_root": str(artifact_root),
         "pid_file": str(pid_file),
         "status_file": str(status_file),

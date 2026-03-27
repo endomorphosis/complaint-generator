@@ -273,6 +273,25 @@ class ComplaintMcpClient {
         });
     }
 
+    toCanonicalReleaseGate(payload) {
+        const source = (payload && typeof payload === 'object') ? payload : {};
+        const gate = source.complaint_output_release_gate || source.release_gate || source;
+        const verdict = String((gate && gate.verdict) || 'unknown').trim().toLowerCase() || 'unknown';
+        return {
+            verdict,
+            reason: String((gate && gate.reason) || '').trim(),
+            claim_type_label: String((gate && gate.claim_type_label) || '').trim() || 'Unknown',
+            draft_strategy: String((gate && gate.draft_strategy) || '').trim() || 'template',
+            filing_shape_score: Number((gate && gate.filing_shape_score) || 0),
+            claim_type_alignment_score: Number((gate && gate.claim_type_alignment_score) || 0),
+        };
+    }
+
+    async getCanonicalReleaseGate(userId) {
+        const payload = await this.getClientReleaseGate(userId);
+        return this.toCanonicalReleaseGate(payload);
+    }
+
     getWorkflowCapabilities(userId) {
         return this.callTool('complaint.get_workflow_capabilities', {
             user_id: userId,

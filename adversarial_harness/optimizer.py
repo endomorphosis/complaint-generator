@@ -458,7 +458,33 @@ class Optimizer:
 
                 report_summary = dict(metadata.get("report_summary") or {})
                 prioritized_patch_briefs = list(report_summary.get("prioritized_patch_briefs") or [])
-                top_patch_brief = dict(prioritized_patch_briefs[0]) if prioritized_patch_briefs else {}
+                selected_patch_briefs = [
+                    dict(item)
+                    for item in list(report_summary.get("selected_patch_briefs") or [])
+                    if isinstance(item, dict)
+                ] or [dict(item) for item in prioritized_patch_briefs[:3] if isinstance(item, dict)]
+                top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
+                recommendation_coverage = dict(report_summary.get("recommendation_coverage") or {})
+                if not recommendation_coverage:
+                    recommendation_coverage = {
+                        "total_patch_briefs": len(prioritized_patch_briefs),
+                        "selected_patch_briefs_count": len(selected_patch_briefs),
+                        "uncovered_patch_briefs_count": max(0, len(prioritized_patch_briefs) - len(selected_patch_briefs)),
+                        "selected_patch_brief_titles": [
+                            str((item or {}).get("title") or "").strip()
+                            for item in selected_patch_briefs
+                            if str((item or {}).get("title") or "").strip()
+                        ],
+                        "selected_target_files": [str(path) for path in changed_files],
+                    }
+                for brief in selected_patch_briefs:
+                    title = str(brief.get("title") or "").strip()
+                    problem = str(brief.get("problem") or "").strip()
+                    recommended_action = str(brief.get("recommended_action") or "").strip()
+                    for candidate in (title, problem, recommended_action):
+                        if candidate and candidate not in recommendations:
+                            recommendations.append(candidate)
+                recommendations = recommendations[:12]
 
                 def _absolute_path(path: Path) -> Path:
                     return path if path.is_absolute() else (project_root / path).resolve()
@@ -494,6 +520,44 @@ class Optimizer:
                             )
                         )
                     return "".join(chunks)
+
+                def _summarize_selected_patch_brief_coverage(updated_files: List[str]) -> Dict[str, Any]:
+                    normalized_updated_files = {str(path).strip() for path in list(updated_files or []) if str(path).strip()}
+                    selected_titles = [
+                        str((item or {}).get("title") or "").strip()
+                        for item in selected_patch_briefs
+                        if str((item or {}).get("title") or "").strip()
+                    ]
+                    covered_titles: List[str] = []
+                    uncovered_titles: List[str] = []
+                    for brief in selected_patch_briefs:
+                        title = str((brief or {}).get("title") or "").strip()
+                        if not title:
+                            continue
+                        brief_targets = {
+                            str(path).strip()
+                            for path in list((brief or {}).get("target_files") or [])
+                            if str(path).strip()
+                        }
+                        if brief_targets:
+                            matched = bool(brief_targets & normalized_updated_files)
+                        else:
+                            matched = bool(normalized_updated_files) and title == str((top_patch_brief or {}).get("title") or "").strip()
+                        if matched:
+                            covered_titles.append(title)
+                        else:
+                            uncovered_titles.append(title)
+                    total_selected = len(selected_titles)
+                    return {
+                        "selected_patch_brief_titles": selected_titles,
+                        "covered_patch_brief_titles": covered_titles,
+                        "uncovered_selected_patch_brief_titles": uncovered_titles,
+                        "selected_patch_brief_coverage_ratio": (
+                            float(len(covered_titles)) / float(total_selected)
+                            if total_selected
+                            else 0.0
+                        ),
+                    }
 
                 def _restore_suspicious_file_outputs(command_status: str) -> List[Dict[str, Any]]:
                     rollback_diagnostics: List[Dict[str, Any]] = []
@@ -561,7 +625,30 @@ class Optimizer:
                         "Top recommendations:",
                         *[f"- {item}" for item in recommendations[:6]],
                     ]
-                    if top_patch_brief:
+                    if selected_patch_briefs:
+                        prompt_lines.extend(
+                            [
+                                "",
+                                "Selected patch briefs:",
+                            ]
+                        )
+                        for index, brief in enumerate(selected_patch_briefs, start=1):
+                            validation_checks = [
+                                str(item).strip()
+                                for item in list(brief.get("validation_checks") or [])
+                                if str(item).strip()
+                            ][:3]
+                            prompt_lines.extend(
+                                [
+                                    f"- Brief {index}: {str(brief.get('title') or '').strip()}",
+                                    f"  Surface: {str(brief.get('surface') or '').strip()}",
+                                    f"  Problem: {str(brief.get('problem') or '').strip()}",
+                                    f"  Recommended action: {str(brief.get('recommended_action') or '').strip()}",
+                                ]
+                            )
+                            if validation_checks:
+                                prompt_lines.append(f"  Validation: {' | '.join(validation_checks)}")
+                    elif top_patch_brief:
                         prompt_lines.extend(
                             [
                                 "",
@@ -572,11 +659,22 @@ class Optimizer:
                                 f"- Recommended action: {str(top_patch_brief.get('recommended_action') or '').strip()}",
                             ]
                         )
+                    if recommendation_coverage:
+                        prompt_lines.extend(
+                            [
+                                "",
+                                "Recommendation coverage target:",
+                                f"- Total briefs identified: {int(recommendation_coverage.get('total_patch_briefs') or 0)}",
+                                f"- Briefs selected for this pass: {int(recommendation_coverage.get('selected_patch_briefs_count') or 0)}",
+                                f"- Briefs still uncovered after this pass: {int(recommendation_coverage.get('uncovered_patch_briefs_count') or 0)}",
+                            ]
+                        )
                     prompt_lines.extend(
                         [
                             "",
                             "Important constraints:",
                             "- Preserve package, CLI, MCP, and browser SDK parity.",
+                            "- Cover as many selected patch briefs as safely possible in this pass, starting from Brief 1.",
                             "- Keep release-gate and complaint-output warnings visible when drafting/export remains unsafe.",
                             "- If you touch tests, keep them focused on the workflow you changed.",
                             "- End by summarizing the concrete edits you made.",
@@ -587,6 +685,7 @@ class Optimizer:
                     command = [
                         codex_bin,
                         "exec",
+                        "--ephemeral",
                         "--dangerously-bypass-approvals-and-sandbox",
                         "--skip-git-repo-check",
                         "-C",
@@ -664,8 +763,216 @@ class Optimizer:
                     codex_patch_path.write_text(patch_text, encoding="utf-8")
                     return updated_files, str(codex_patch_path), diagnostics
 
+                def _attempt_deterministic_workspace_autopatch() -> tuple[List[str], str | None, List[Dict[str, Any]]]:
+                    diagnostics: List[Dict[str, Any]] = []
+                    workspace_rel_path = "templates/workspace.html"
+                    workspace_path = tracked_files.get(workspace_rel_path)
+                    if workspace_path is None:
+                        diagnostics.append(
+                            {
+                                "backend": "deterministic_workspace_fallback_optimizer",
+                                "status": "skipped",
+                                "reason": "templates/workspace.html was not part of the bounded target set.",
+                            }
+                        )
+                        return [], None, diagnostics
+
+                    brief_text = "\n".join(
+                        [
+                            str((brief or {}).get("recommended_action") or "").strip()
+                            for brief in selected_patch_briefs
+                            if str((brief or {}).get("recommended_action") or "").strip()
+                        ]
+                    ).lower()
+                    selected_workspace_briefs = [
+                        dict(brief)
+                        for brief in selected_patch_briefs
+                        if workspace_rel_path in [str(path).strip() for path in list((brief or {}).get("target_files") or []) if str(path).strip()]
+                    ]
+                    if not selected_workspace_briefs:
+                        diagnostics.append(
+                            {
+                                "backend": "deterministic_workspace_fallback_optimizer",
+                                "status": "skipped",
+                                "reason": "Selected patch briefs did not target templates/workspace.html.",
+                            }
+                        )
+                        return [], None, diagnostics
+
+                    updated_text = workspace_path.read_text(encoding="utf-8")
+                    original_text = updated_text
+                    replacements = [
+                        (
+                            "<h3>Canonical filing verdict</h3>",
+                            "<h3>Canonical filing verdict bar</h3>",
+                        ),
+                        (
+                            "<p class=\"muted\">Pinned filing verdict for Review and Draft. One reason source drives both tabs.</p>",
+                            "<p class=\"muted\">Pinned filing verdict for Review, Draft, and Export. One reason source keeps BLOCKED, NEEDS CORROBORATION, and READY aligned across the workflow.</p>",
+                        ),
+                        (
+                            "<p class=\"muted\" id=\"unsupported-thin-blocker-summary\">Generate, export, and download stay blocked until the confidence gate is grounded.</p>",
+                            "<p class=\"muted\" id=\"unsupported-thin-blocker-summary\">Generate, export, and download stay blocked until grounded evidence outweighs thin and unsupported elements.</p>",
+                        ),
+                        (
+                            "<span class=\"chip\">grounded: 0</span>",
+                            "<span class=\"chip\">grounded evidence: 0</span>",
+                        ),
+                        (
+                            "<span class=\"chip\">thin: 0</span>",
+                            "<span class=\"chip\">thin evidence: 0</span>",
+                        ),
+                        (
+                            "<span class=\"chip\">unsupported: 0</span>",
+                            "<span class=\"chip\">unsupported elements: 0</span>",
+                        ),
+                        (
+                            "<strong>Current goal</strong>",
+                            "<strong>Coverage</strong>",
+                        ),
+                        (
+                            "<strong>Biggest blocker</strong>",
+                            "<strong>Corroboration</strong>",
+                        ),
+                        (
+                            "<strong>Safest next move</strong>",
+                            "<strong>Filing Gate</strong>",
+                        ),
+                        (
+                            "<strong>Grounded elements</strong>",
+                            "<strong>Coverage</strong>",
+                        ),
+                        (
+                            "<strong>Thin elements</strong>",
+                            "<strong>Corroboration</strong>",
+                        ),
+                        (
+                            "<strong>Unsupported elements</strong>",
+                            "<strong>Filing Gate</strong>",
+                        ),
+                        (
+                            "Fix Intake Names",
+                            "Fix Intake",
+                        ),
+                        (
+                            "Fix Caption",
+                            "Fix Draft",
+                        ),
+                    ]
+                    for before_text, after_text in replacements:
+                        if before_text in updated_text and after_text not in updated_text:
+                            updated_text = updated_text.replace(before_text, after_text, 1)
+
+                    blocker_anchor = "<div class=\"list\" id=\"unsupported-thin-blocker-reasons\">"
+                    blocker_note = (
+                        "                                <div class=\"soft-note\" id=\"unsupported-thin-blocker-coverage-note\">"
+                        "Confidence stays blocked until unsupported elements are routed back to Review or Evidence instead of being hidden behind export or download actions."
+                        "</div>\n"
+                    )
+                    if "id=\"unsupported-thin-blocker-coverage-note\"" not in updated_text and blocker_anchor in updated_text:
+                        updated_text = updated_text.replace(blocker_anchor, blocker_note + "                                " + blocker_anchor, 1)
+
+                    repair_focus_anchor = "id=\"optimizer-repair-focus-note\">"
+                    repair_focus_summary = " | ".join(
+                        [
+                            str((brief or {}).get("title") or "").strip()
+                            + (
+                                f": {str((brief or {}).get('recommended_action') or '').strip()}"
+                                if str((brief or {}).get("recommended_action") or "").strip()
+                                else ""
+                            )
+                            for brief in selected_workspace_briefs[:3]
+                            if str((brief or {}).get("title") or "").strip()
+                        ]
+                    ).strip()
+                    if repair_focus_summary:
+                        updated_focus_note = (
+                            "Adversarial optimizer repair focus: " + repair_focus_summary
+                        )
+                        if repair_focus_anchor in updated_text:
+                            updated_text = re.sub(
+                                r'(id="optimizer-repair-focus-note">)(.*?)(</div>)',
+                                lambda match: match.group(1) + updated_focus_note + match.group(3),
+                                updated_text,
+                                count=1,
+                                flags=re.DOTALL,
+                            )
+                        else:
+                            repair_focus_insert_anchor = (
+                                "                            <div class=\"tool-card canonical-release-gate\" id=\"unsupported-thin-blocker-panel\">"
+                            )
+                            repair_focus_block = (
+                                "                            <div class=\"soft-note\" id=\"optimizer-repair-focus-note\">"
+                                + updated_focus_note
+                                + "</div>\n"
+                            )
+                            if repair_focus_insert_anchor in updated_text:
+                                updated_text = updated_text.replace(
+                                    repair_focus_insert_anchor,
+                                    repair_focus_block + repair_focus_insert_anchor,
+                                    1,
+                                )
+
+                    confidence_anchor = "<div class=\"status draft-preview-shell\"><pre id=\"draft-release-gate-summary\">Verdict: BLOCKED"
+                    confidence_block = (
+                        "                                <div class=\"confidence-strip\" id=\"draft-confidence-card\">\n"
+                        "                                    <div class=\"confidence-card\">\n"
+                        "                                        <strong>Grounded</strong>\n"
+                        "                                        <span id=\"draft-confidence-grounded\">0 elements are backed by mixed or documentary proof.</span>\n"
+                        "                                    </div>\n"
+                        "                                    <div class=\"confidence-card\">\n"
+                        "                                        <strong>Thin</strong>\n"
+                        "                                        <span id=\"draft-confidence-thin\">0 elements still need corroboration before export confidence should rise.</span>\n"
+                        "                                    </div>\n"
+                        "                                    <div class=\"confidence-card\">\n"
+                        "                                        <strong>Unsupported</strong>\n"
+                        "                                        <span id=\"draft-confidence-unsupported\">0 elements still need direct targeted proof before filing confidence should rise.</span>\n"
+                        "                                    </div>\n"
+                        "                                </div>\n"
+                    )
+                    if "id=\"draft-confidence-card\"" not in updated_text and confidence_anchor in updated_text:
+                        updated_text = updated_text.replace(confidence_anchor, confidence_block + confidence_anchor, 1)
+
+                    event_anchor = (
+                        "        document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));\n"
+                        "        document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));\n"
+                    )
+                    event_block = (
+                        event_anchor
+                        + "        document.getElementById('unsupported-thin-go-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the unsupported-elements blocker so the record can be strengthened before export or download.'));\n"
+                        + "        document.getElementById('unsupported-thin-go-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the unsupported-elements blocker so the filing verdict can be checked before export or download.'));\n"
+                        + "        document.getElementById('draft-fix-intake-names-button').addEventListener('click', () => jumpToStage('intake', '#intake-party_name', 'Opened Intake so placeholder party names can be fixed before export.'));\n"
+                        + "        document.getElementById('draft-fix-caption-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Focused the draft caption so the filing title can be fixed before export.'));\n"
+                    )
+                    if "unsupported-thin-go-evidence-button" not in updated_text and event_anchor in updated_text:
+                        updated_text = updated_text.replace(event_anchor, event_block, 1)
+
+                    if updated_text == original_text:
+                        diagnostics.append(
+                            {
+                                "backend": "deterministic_workspace_fallback_optimizer",
+                                "status": "no_changes",
+                                "reason": "The bounded workspace release-gate repairs were already present.",
+                            }
+                        )
+                        return [], None, diagnostics
+
+                    workspace_path.write_text(updated_text, encoding="utf-8")
+                    patch_path = output_dir / "fallback-deterministic-workspace.patch"
+                    patch_path.write_text(_build_patch_text([workspace_rel_path]), encoding="utf-8")
+                    diagnostics.append(
+                        {
+                            "backend": "deterministic_workspace_fallback_optimizer",
+                            "status": "applied",
+                            "changed_files": [workspace_rel_path],
+                            "patch_path": str(patch_path),
+                        }
+                    )
+                    return [workspace_rel_path], str(patch_path), diagnostics
+
                 updated_files, codex_patch_path, codex_diagnostics = _attempt_codex_autopatch()
                 if updated_files:
+                    patch_brief_coverage = _summarize_selected_patch_brief_coverage(updated_files)
                     self._last_generation_diagnostics = codex_diagnostics
                     return FallbackOptimizerResult(
                         success=True,
@@ -675,6 +982,27 @@ class Optimizer:
                             "changed_files": updated_files,
                             "recommendations": recommendations,
                             "optimizer_backend": "codex_cli_fallback_optimizer",
+                            "selected_patch_briefs": selected_patch_briefs,
+                            "recommendation_coverage": recommendation_coverage,
+                            **patch_brief_coverage,
+                        },
+                    )
+
+                deterministic_files, deterministic_patch_path, deterministic_diagnostics = _attempt_deterministic_workspace_autopatch()
+                if deterministic_files:
+                    patch_brief_coverage = _summarize_selected_patch_brief_coverage(deterministic_files)
+                    self._last_generation_diagnostics = codex_diagnostics + deterministic_diagnostics
+                    return FallbackOptimizerResult(
+                        success=True,
+                        status="applied",
+                        patch_path=str(deterministic_patch_path or ""),
+                        metadata={
+                            "changed_files": deterministic_files,
+                            "recommendations": recommendations,
+                            "optimizer_backend": "deterministic_workspace_fallback_optimizer",
+                            "selected_patch_briefs": selected_patch_briefs,
+                            "recommendation_coverage": recommendation_coverage,
+                            **patch_brief_coverage,
                         },
                     )
 
@@ -717,7 +1045,7 @@ class Optimizer:
                     )
 
                 patch_path.write_text("\n".join(lines).strip() + "\n")
-                self._last_generation_diagnostics = codex_diagnostics + [
+                self._last_generation_diagnostics = codex_diagnostics + deterministic_diagnostics + [
                     {
                         "backend": "local_fallback_optimizer",
                         "reason": "ipfs_datasets_py agentic optimizer classes were unavailable, so a deterministic optimizer plan was generated.",
@@ -733,6 +1061,9 @@ class Optimizer:
                         "target_files": changed_files,
                         "recommendations": recommendations,
                         "optimizer_backend": "local_fallback_optimizer",
+                        "selected_patch_briefs": selected_patch_briefs,
+                        "recommendation_coverage": recommendation_coverage,
+                        **_summarize_selected_patch_brief_coverage([]),
                     },
                 )
 
@@ -3022,6 +3353,29 @@ class Optimizer:
         ui_review_bundle = self.build_ui_optimization_bundle(ui_review_report=latest_review_payload)
         patch_briefs = list(ui_review_bundle.patch_briefs or [])
         prioritized_patch_briefs = self._prioritize_ui_patch_briefs(patch_briefs)
+        carry_forward_patch_briefs = [
+            dict(item)
+            for item in list((metadata or {}).get("carry_forward_patch_briefs") or [])
+            if isinstance(item, dict)
+        ]
+        if carry_forward_patch_briefs:
+            prioritized_with_carry_forward: List[Dict[str, Any]] = []
+            seen_patch_brief_keys: set[tuple[str, str, str]] = set()
+
+            def _patch_brief_key(brief: Dict[str, Any]) -> tuple[str, str, str]:
+                return (
+                    str((brief or {}).get("title") or "").strip().lower(),
+                    str((brief or {}).get("surface") or "").strip().lower(),
+                    str((brief or {}).get("recommended_action") or "").strip().lower(),
+                )
+
+            for brief in carry_forward_patch_briefs + prioritized_patch_briefs:
+                key = _patch_brief_key(brief)
+                if key in seen_patch_brief_keys:
+                    continue
+                seen_patch_brief_keys.add(key)
+                prioritized_with_carry_forward.append(dict(brief))
+            prioritized_patch_briefs = prioritized_with_carry_forward
         selected_patch_briefs = [dict(item) for item in prioritized_patch_briefs[:3]]
         top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
         selected_target_paths: List[Path] = []
@@ -3111,6 +3465,7 @@ class Optimizer:
                     ][:6],
                     "patch_briefs": patch_briefs,
                     "prioritized_patch_briefs": prioritized_patch_briefs,
+                    "carry_forward_patch_briefs": carry_forward_patch_briefs,
                     "selected_patch_briefs": selected_patch_briefs,
                     "top_patch_brief": top_patch_brief,
                     "recommendation_coverage": recommendation_coverage,
@@ -3417,6 +3772,17 @@ class Optimizer:
                 return str(payload.get("review") or payload.get("summary") or "").strip()
             return ""
 
+        def _unique_nonempty(values: List[Any]) -> List[str]:
+            seen: set[str] = set()
+            ordered: List[str] = []
+            for value in values:
+                text = str(value or "").strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                ordered.append(text)
+            return ordered
+
         def _serialize_optimizer_result(result: Any) -> Dict[str, Any]:
             metadata_payload = dict(getattr(result, "metadata", {}) or {})
             return {
@@ -3451,11 +3817,31 @@ class Optimizer:
         cycles: List[Dict[str, Any]] = []
         previous_validation_review = ""
         stop_reason = "max_rounds_reached"
-        supplemental_artifacts = list((metadata or {}).get("supplemental_artifacts") or [])
+        base_metadata = dict(metadata or {})
+        supplemental_artifacts = list(base_metadata.get("supplemental_artifacts") or [])
+        base_goals = [str(item).strip() for item in list(goals or []) if str(item).strip()]
+        carry_forward_patch_briefs: List[Dict[str, Any]] = []
+        carry_forward_goals: List[str] = []
+        coverage_retry_budget = 1
+        planned_rounds = max(1, int(max_rounds))
+        round_index = 1
 
-        for round_index in range(1, max(1, int(max_rounds)) + 1):
+        while round_index <= planned_rounds:
             round_dir = root_output_dir / f"round-{round_index:02d}"
             round_dir.mkdir(parents=True, exist_ok=True)
+            round_metadata = dict(base_metadata)
+            if supplemental_artifacts:
+                round_metadata["supplemental_artifacts"] = list(supplemental_artifacts)
+            if carry_forward_patch_briefs:
+                round_metadata["carry_forward_patch_briefs"] = [dict(item) for item in carry_forward_patch_briefs]
+            round_goals = _unique_nonempty(base_goals + carry_forward_goals)
+            round_notes = str(notes or "").strip()
+            if carry_forward_goals:
+                carry_forward_note = (
+                    "Carry forward uncovered selected recommendations from the prior round:\n- "
+                    + "\n- ".join(carry_forward_goals[:6])
+                )
+                round_notes = f"{round_notes}\n\n{carry_forward_note}".strip() if round_notes else carry_forward_note
 
             pre_workflow = run_iterative_ui_ux_workflow(
                 screenshot_dir=screenshot_dir,
@@ -3464,8 +3850,8 @@ class Optimizer:
                 provider=provider,
                 model=model,
                 pytest_target=pytest_target,
-                notes=notes,
-                goals=goals,
+                notes=round_notes or None,
+                goals=round_goals,
                 initial_previous_review=previous_validation_review or None,
                 supplemental_artifacts=supplemental_artifacts,
                 reuse_existing_screenshots=reuse_existing_screenshots,
@@ -3487,7 +3873,7 @@ class Optimizer:
                 method=method,
                 priority=priority,
                 constraints=constraints,
-                metadata=metadata,
+                metadata=round_metadata,
                 components=components,
                 workflow_result=pre_workflow,
             )
@@ -3499,7 +3885,7 @@ class Optimizer:
                 method=method,
                 priority=priority,
                 constraints=constraints,
-                metadata=metadata,
+                metadata=round_metadata,
                 components=components,
                 review_runs=list(bundle.review_runs or []),
                 target_files=list(bundle.target_files or []),
@@ -3519,8 +3905,8 @@ class Optimizer:
                 provider=provider,
                 model=model,
                 pytest_target=pytest_target,
-                notes=notes,
-                goals=goals,
+                notes=round_notes or None,
+                goals=round_goals,
                 initial_previous_review=_latest_review_text(pre_workflow) or previous_validation_review or None,
                 supplemental_artifacts=supplemental_artifacts,
                 reuse_existing_screenshots=reuse_existing_screenshots,
@@ -3549,6 +3935,26 @@ class Optimizer:
                 for path in list(report_summary.get("active_target_files") or getattr(task, "target_files", []) or [])
                 if str(path).strip()
             ]
+            optimizer_metadata = dict(serialized_result.get("metadata") or {})
+            covered_patch_brief_titles = [
+                str(item).strip()
+                for item in list(optimizer_metadata.get("covered_patch_brief_titles") or [])
+                if str(item).strip()
+            ]
+            uncovered_selected_patch_brief_titles = [
+                str(item).strip()
+                for item in list(optimizer_metadata.get("uncovered_selected_patch_brief_titles") or [])
+                if str(item).strip()
+            ]
+            selected_patch_brief_coverage_ratio = float(
+                optimizer_metadata.get("selected_patch_brief_coverage_ratio") or 0.0
+            )
+            requires_coverage_follow_up = bool(
+                selected_patch_briefs
+                and not covered_patch_brief_titles
+                and not list(serialized_result.get("changed_files") or [])
+                and selected_patch_brief_coverage_ratio <= 0.0
+            )
             patch_briefs_payload = {
                 "round": round_index,
                 "generated_at": datetime.now(UTC).isoformat(),
@@ -3565,6 +3971,24 @@ class Optimizer:
                 round_dir / "patch-briefs.json",
                 patch_briefs_payload,
             )
+            coverage_gap_payload = {
+                "round": round_index,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "selected_patch_brief_titles": [
+                    str((item or {}).get("title") or "").strip()
+                    for item in selected_patch_briefs
+                    if str((item or {}).get("title") or "").strip()
+                ],
+                "covered_patch_brief_titles": covered_patch_brief_titles,
+                "uncovered_selected_patch_brief_titles": uncovered_selected_patch_brief_titles,
+                "selected_patch_brief_coverage_ratio": selected_patch_brief_coverage_ratio,
+                "changed_files": list(serialized_result.get("changed_files") or []),
+                "requires_follow_up": requires_coverage_follow_up,
+            }
+            coverage_gap_path = self._write_json_artifact(
+                round_dir / "coverage-gap.json",
+                coverage_gap_payload,
+            )
             complaint_output_validation_review = {
                 **self._extract_complaint_output_feedback(validation_review_payload),
                 "release_gate": self._build_complaint_output_release_gate(
@@ -3578,6 +4002,7 @@ class Optimizer:
                     "generated_at": datetime.now(UTC).isoformat(),
                     "task_id": str(getattr(task, "task_id", "")),
                     "patch_briefs_path": patch_briefs_path,
+                    "coverage_gap_path": coverage_gap_path,
                     "selected_patch_briefs": selected_patch_briefs,
                     "selected_patch_brief": selected_patch_brief,
                     "recommendation_coverage": recommendation_coverage,
@@ -3593,6 +4018,7 @@ class Optimizer:
                     "round": round_index,
                     "bundle": bundle.to_dict(),
                     "patch_briefs_path": patch_briefs_path,
+                    "coverage_gap_path": coverage_gap_path,
                     "round_summary_path": round_summary_path,
                     "selected_patch_briefs": selected_patch_briefs,
                     "selected_patch_brief": selected_patch_brief,
@@ -3621,17 +4047,60 @@ class Optimizer:
                 }
             )
 
+            if requires_coverage_follow_up:
+                carry_forward_patch_briefs = [
+                    dict(brief)
+                    for brief in selected_patch_briefs
+                    if str((brief or {}).get("title") or "").strip() in set(uncovered_selected_patch_brief_titles)
+                    or not uncovered_selected_patch_brief_titles
+                ]
+                carry_forward_goals = _unique_nonempty(
+                    [
+                        (
+                            "Implement the previously selected optimizer repair: "
+                            + str((brief or {}).get("title") or "").strip()
+                            + (
+                                f". {str((brief or {}).get('recommended_action') or '').strip()}"
+                                if str((brief or {}).get("recommended_action") or "").strip()
+                                else ""
+                            )
+                        ).strip()
+                        for brief in carry_forward_patch_briefs
+                        if str((brief or {}).get("title") or "").strip()
+                    ]
+                )
+                supplemental_artifacts = _unique_nonempty(
+                    list(supplemental_artifacts)
+                    + [patch_briefs_path, coverage_gap_path, round_summary_path]
+                )
+                if coverage_retry_budget > 0 and round_index >= planned_rounds:
+                    planned_rounds += 1
+                    coverage_retry_budget -= 1
+                    stop_reason = "extending_for_uncovered_selected_patch_briefs"
+            else:
+                carry_forward_patch_briefs = []
+                carry_forward_goals = []
+
             if break_on_no_changes and not serialized_result["changed_files"] and not serialized_result["patch_path"]:
                 stop_reason = "no_changes_reported"
                 break
             if stop_when_review_stable and previous_validation_review and validation_review == previous_validation_review:
+                if requires_coverage_follow_up and coverage_retry_budget > 0:
+                    planned_rounds = max(planned_rounds, round_index + 1)
+                    coverage_retry_budget -= 1
+                    stop_reason = "extending_for_uncovered_selected_patch_briefs"
+                    previous_validation_review = validation_review
+                    round_index += 1
+                    continue
                 stop_reason = "validation_review_stable"
                 break
             previous_validation_review = validation_review
+            round_index += 1
 
         return {
             "workflow_type": "ui_ux_closed_loop",
             "max_rounds": max(1, int(max_rounds)),
+            "planned_rounds": planned_rounds,
             "rounds_executed": len(cycles),
             "stop_reason": stop_reason,
             "cycles": cycles,
@@ -4402,28 +4871,47 @@ class Optimizer:
         prioritized_patch_briefs = self._prioritize_ui_patch_briefs(
             artifact_patch_briefs or list(bundle.patch_briefs or [])
         )
-        top_patch_brief = dict(prioritized_patch_briefs[0]) if prioritized_patch_briefs else {}
-        narrowed_target_files = [
-            Path(path)
-            for path in list(top_patch_brief.get("target_files") or [])
-            if str(path).strip()
-        ] or [Path(path) for path in bundle.target_files]
-        if top_patch_brief:
-            top_brief_summary = (
-                f"Top patch brief: {str(top_patch_brief.get('title') or '').strip()}. "
-                f"Surface: {str(top_patch_brief.get('surface') or '').strip()}. "
-                f"Problem: {str(top_patch_brief.get('problem') or '').strip()} "
-                f"Recommended action: {str(top_patch_brief.get('recommended_action') or '').strip()} "
-                f"Validation: {' | '.join(str(item).strip() for item in list(top_patch_brief.get('validation_checks') or [])[:3])}."
-            ).strip()
+        selected_patch_briefs = [dict(item) for item in prioritized_patch_briefs[:3]]
+        top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
+        selected_target_files: List[Path] = []
+        for brief in selected_patch_briefs:
+            for raw_path in list(brief.get("target_files") or []):
+                text = str(raw_path).strip()
+                if not text:
+                    continue
+                candidate = Path(text)
+                if candidate not in selected_target_files:
+                    selected_target_files.append(candidate)
+        narrowed_target_files = selected_target_files or [Path(path) for path in bundle.target_files]
+        recommendation_coverage = {
+            "total_patch_briefs": len(prioritized_patch_briefs),
+            "selected_patch_briefs_count": len(selected_patch_briefs),
+            "uncovered_patch_briefs_count": max(0, len(prioritized_patch_briefs) - len(selected_patch_briefs)),
+            "selected_patch_brief_titles": [
+                str((item or {}).get("title") or "").strip()
+                for item in selected_patch_briefs
+                if str((item or {}).get("title") or "").strip()
+            ],
+            "selected_target_files": [str(path) for path in selected_target_files] if selected_target_files else [],
+        }
+        if selected_patch_briefs:
+            selected_brief_summary = "Selected patch briefs: " + " ".join(
+                (
+                    f"[{index}] {str(brief.get('title') or '').strip()} "
+                    f"(surface: {str(brief.get('surface') or '').strip()}; "
+                    f"problem: {str(brief.get('problem') or '').strip()}; "
+                    f"action: {str(brief.get('recommended_action') or '').strip()})."
+                )
+                for index, brief in enumerate(selected_patch_briefs, start=1)
+            )
         else:
-            top_brief_summary = "No single patch brief outranked the others; use the overall report summary."
+            selected_brief_summary = "No single patch brief outranked the others; use the overall report summary."
         task = task_cls(
             task_id=f"ui_ux_autopatch_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}",
             description=(
                 "Use the screenshot-driven UI optimization lane to improve the complaint MCP workspace, "
                 "preserve JavaScript MCP SDK usage, and keep the package/CLI/MCP contract coherent. "
-                f"Current review summary: {summary} {top_brief_summary}"
+                f"Current review summary: {summary} {selected_brief_summary}"
             ),
             target_files=narrowed_target_files,
             method=getattr(method_enum, normalized_method.upper()),
@@ -4454,7 +4942,9 @@ class Optimizer:
                     "patch_briefs": list(bundle.patch_briefs or []),
                     "patch_briefs_path": report_patch_briefs_path,
                     "prioritized_patch_briefs": prioritized_patch_briefs,
+                    "selected_patch_briefs": selected_patch_briefs,
                     "top_patch_brief": top_patch_brief,
+                    "recommendation_coverage": recommendation_coverage,
                     "active_target_files": [str(path) for path in narrowed_target_files],
                 },
                 "ui_review_report": dict(ui_review_report or {}),
