@@ -485,6 +485,64 @@ test.describe('website surface navigation', () => {
     await expect(page).toHaveURL(/\/document/);
   });
 
+  test('review handoff back to workspace preserves exported packet context after reload', async ({ page }) => {
+    const did = `did:key:review-return-${Date.now()}`;
+    await page.addInitScript((value) => {
+      window.localStorage.setItem('complaintGenerator.did', value);
+    }, did);
+
+    await page.goto('/workspace');
+    await waitForWorkspaceReady(page);
+
+    await page.locator('#intake-party_name').fill('Jane Doe');
+    await page.locator('#intake-opposing_party').fill('Acme Corporation');
+    await page.locator('#intake-protected_activity').fill('Reported discrimination to HR');
+    await page.locator('#intake-adverse_action').fill('Termination two days later');
+    await page.locator('#intake-timeline').fill('Complaint on March 8, termination on March 10');
+    await page.locator('#intake-harm').fill('Lost wages and benefits');
+    await page.locator('#intake-court_header').fill('FOR THE NORTHERN DISTRICT OF CALIFORNIA');
+    await page.locator('#save-intake-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Intake answers saved/i);
+
+    await page.getByRole('button', { name: 'Evidence', exact: true }).click();
+    await page.locator('#evidence-kind').selectOption('document');
+    await page.locator('#evidence-claim-element').selectOption('causation');
+    await page.locator('#evidence-title').fill('Termination email');
+    await page.locator('#evidence-source').fill('Inbox export');
+    await page.locator('#evidence-content').fill('The termination followed the HR complaint within two days.');
+    await page.locator('#save-evidence-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Evidence saved and support review refreshed/i);
+
+    await page.getByRole('button', { name: 'Draft', exact: true }).click();
+    await page.locator('#draft-title').fill('Jane Doe v. Acme Corporation Complaint');
+    await page.locator('#requested-relief').fill('Back pay\nInjunctive relief');
+    await page.locator('#generate-draft-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Complaint draft generated through the llm_router formal complaint path/i);
+    await expect(page.locator('#draft-preview')).toContainText(/Jane Doe brings this retaliation complaint against Acme Corporation/i);
+
+    await page.locator('#export-packet-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Complaint packet exported/i);
+    await expect(page.locator('#packet-preview')).toContainText(/Title: Jane Doe v\. Acme Corporation Complaint/i);
+
+    await page.goto(`/claim-support-review?claim_type=retaliation&user_id=${encodeURIComponent(did)}&workspace_user_id=${encodeURIComponent(did)}`);
+    await expect(page.locator('#review-open-workspace-link')).toBeVisible();
+    await page.locator('#review-open-workspace-link').click();
+    await expect(page).toHaveURL(/\/workspace\?/);
+    await expect(page).toHaveURL(new RegExp(`user_id=${encodeURIComponent(did).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    await expect(page).toHaveURL(/target_tab=review/);
+    await expect(page.locator('#workspace-status')).toContainText(/Returned from review to the workspace/i, { timeout: 20000 });
+    await expect(page.locator('#did-chip')).toContainText(did);
+    await expect(page.locator('[data-tab-target="review"]')).toHaveClass(/is-active/);
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await expect(page.locator('#did-chip')).toContainText(did);
+    await expect(page.locator('[data-tab-target="review"]')).toHaveClass(/is-active/);
+    await page.getByRole('button', { name: 'Draft', exact: true }).click();
+    await expect(page.locator('#packet-preview')).toContainText(/Title: Jane Doe v\. Acme Corporation Complaint/i);
+    await expect(page.locator('#packet-preview')).toContainText(/Jane Doe brings this retaliation complaint against Acme Corporation/i);
+    await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('data-download-url', /output_format=markdown/);
+  });
+
   test('dashboard hub and every mounted shell route are reachable in the JS stub surface', async ({ page }) => {
     await page.goto('/dashboards');
     await expect(page.locator('body')).toContainText(/Unified Dashboard Hub/i);
@@ -551,10 +609,8 @@ test.describe('website surface navigation', () => {
     await page.locator('#shortcut-intake-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Opened Intake/i);
     await expect(page.locator('#intake-party_name')).toBeFocused();
-    await page.locator('#quick-action-grid').getByRole('button', { name: 'Open Review' }).click();
-    await expect(page.locator('#workspace-status')).toContainText(/Opened Review/i);
-    await expect(page.locator('#support-grid')).toBeVisible();
-    await page.locator('#shortcut-intake-button').click();
+    await expect(page.locator('#shortcut-review-button')).toBeDisabled();
+    await expect(page.locator('#shortcut-review-button')).toHaveAttribute('title', /Finish more intake and save at least one targeted evidence item/i);
 
     await page.locator('#intake-party_name').fill('Jane Doe');
     await page.locator('#intake-opposing_party').fill('Acme Corporation');
@@ -599,6 +655,10 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#workspace-status')).toContainText(/Evidence saved and support review refreshed/i);
     await expect(page.locator('#evidence-list')).toContainText(/Termination email/i);
     await expect(page.locator('#evidence-list')).toContainText(/termination-email\.txt/i);
+    await expect(page.locator('#shortcut-review-button')).toBeEnabled();
+    await page.locator('#shortcut-review-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Opened Review/i);
+    await expect(page.locator('#support-grid')).toBeVisible();
 
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
     await page.locator('#draft-title').fill('Jane Doe v. Acme Corporation Complaint');
@@ -607,7 +667,7 @@ test.describe('website surface navigation', () => {
 
     await expect(page.locator('#workspace-status')).toContainText(/Complaint draft generated through the llm_router formal complaint path/i);
     await expect(page.locator('#draft-preview')).toContainText(/Jane Doe brings this retaliation complaint against Acme Corporation/i);
-    await expect(page.locator('#feature-walkthrough-list')).toContainText(/A complaint draft exists and can be revised directly/i);
+    await expect(page.locator('#feature-walkthrough-list')).toContainText(/A complaint draft exists and can be refined/i);
     await page.locator('#export-packet-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Complaint packet exported/i);
     await expect(page.locator('#packet-preview')).toContainText(/Title: Jane Doe v\. Acme Corporation Complaint/i);

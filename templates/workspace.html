@@ -34,6 +34,9 @@
                 radial-gradient(circle at top left, rgba(141, 61, 23, 0.16), transparent 26%),
                 radial-gradient(circle at 85% 0%, rgba(241, 204, 169, 0.72), transparent 22%),
                 linear-gradient(180deg, var(--bg-deep) 0%, var(--bg) 100%);
+            html {
+                scroll-padding-top: 320px;
+            }
             font-family: "Public Sans", "Segoe UI", sans-serif;
         }
 
@@ -1012,11 +1015,18 @@
             position: relative;
             z-index: 6;
         }
+            .tab-panel button,
+            .tab-panel input,
+            .tab-panel select,
+            .tab-panel textarea,
+            .tab-panel a.surface-link {
+                scroll-margin-top: 320px;
+            }
 
         .stage-index-shell {
             position: sticky;
             top: 12px;
-            z-index: 2;
+            z-index: 6;
             display: grid;
             gap: 12px;
             margin-bottom: 20px;
@@ -5875,6 +5885,28 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             `).join('');
         }
 
+        function normalizeProviderDiagnostics(payload) {
+            const diagnostics = payload && typeof payload === 'object' ? payload : {};
+            const defaultOrder = Array.isArray(diagnostics.default_order) ? diagnostics.default_order.filter(Boolean) : [];
+            const complaintDraftDefaultOrder = Array.isArray(diagnostics.complaint_draft_default_order) && diagnostics.complaint_draft_default_order.length
+                ? diagnostics.complaint_draft_default_order.filter(Boolean)
+                : ['codex_cli', 'copilot_cli', 'hf_inference_api'];
+            const effectiveDefaultProvider = String(diagnostics.effective_default_provider || '').trim() || 'none';
+            const effectiveComplaintDraftProvider = String(diagnostics.effective_complaint_draft_provider || '').trim()
+                || complaintDraftDefaultOrder[0]
+                || effectiveDefaultProvider;
+            const uiReviewDefaultProvider = String(diagnostics.ui_review_default_provider || '').trim()
+                || effectiveDefaultProvider
+                || 'codex_cli';
+            return Object.assign({}, diagnostics, {
+                default_order: defaultOrder,
+                complaint_draft_default_order: complaintDraftDefaultOrder,
+                effective_default_provider: effectiveDefaultProvider,
+                effective_complaint_draft_provider: effectiveComplaintDraftProvider,
+                ui_review_default_provider: uiReviewDefaultProvider,
+            });
+        }
+
         function renderWorkflowOperations() {
             const mediatorNode = document.getElementById('mediator-prompt-preview');
             const capabilitiesNode = document.getElementById('workflow-capabilities-preview');
@@ -6110,19 +6142,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
 
             if (workspaceProviderDiagnostics) {
+                const normalizedProviderDiagnostics = normalizeProviderDiagnostics(workspaceProviderDiagnostics);
                 const providerLines = [
                     'Router provider diagnostics',
-                    `Forced provider: ${String(workspaceProviderDiagnostics.forced_provider || 'auto')}`,
-                    `Effective default: ${String(workspaceProviderDiagnostics.effective_default_provider || 'none')}`,
-                    `Complaint draft default: ${String(workspaceProviderDiagnostics.effective_complaint_draft_provider || 'none')}`,
-                    `Complaint draft fallback chain: ${Array.isArray(workspaceProviderDiagnostics.complaint_draft_default_order) ? workspaceProviderDiagnostics.complaint_draft_default_order.join(' -> ') : 'unknown'}`,
-                    `Preference order: ${Array.isArray(workspaceProviderDiagnostics.default_order) ? workspaceProviderDiagnostics.default_order.join(' -> ') : 'unknown'}`,
-                    `UI review default: ${[workspaceProviderDiagnostics.ui_review_default_provider, workspaceProviderDiagnostics.ui_review_default_model].map((item) => String(item || '').trim()).filter(Boolean).join(' / ') || 'unknown'}`,
-                    `UI review rate-limit fallback chain: ${Array.isArray((workspaceProviderDiagnostics.ui_review_multimodal_rate_limit_fallbacks || {}).codex_cli) ? workspaceProviderDiagnostics.ui_review_multimodal_rate_limit_fallbacks.codex_cli.join(' -> ') : 'unknown'}`,
-                    `UI review HF fallback model: ${String(workspaceProviderDiagnostics.ui_review_hf_fallback_model || 'unknown')}`,
+                    `Forced provider: ${String(normalizedProviderDiagnostics.forced_provider || 'auto')}`,
+                    `Effective default: ${String(normalizedProviderDiagnostics.effective_default_provider || 'none')}`,
+                    `Complaint draft default: ${String(normalizedProviderDiagnostics.effective_complaint_draft_provider || 'none')}`,
+                    `Complaint draft fallback chain: ${Array.isArray(normalizedProviderDiagnostics.complaint_draft_default_order) ? normalizedProviderDiagnostics.complaint_draft_default_order.join(' -> ') : 'unknown'}`,
+                    `Preference order: ${Array.isArray(normalizedProviderDiagnostics.default_order) ? normalizedProviderDiagnostics.default_order.join(' -> ') : 'unknown'}`,
+                    `UI review default: ${[normalizedProviderDiagnostics.ui_review_default_provider, normalizedProviderDiagnostics.ui_review_default_model].map((item) => String(item || '').trim()).filter(Boolean).join(' / ') || 'unknown'}`,
+                    `UI review rate-limit fallback chain: ${Array.isArray((normalizedProviderDiagnostics.ui_review_multimodal_rate_limit_fallbacks || {}).codex_cli) ? normalizedProviderDiagnostics.ui_review_multimodal_rate_limit_fallbacks.codex_cli.join(' -> ') : 'unknown'}`,
+                    `UI review HF fallback model: ${String(normalizedProviderDiagnostics.ui_review_hf_fallback_model || 'unknown')}`,
                     '',
                 ];
-                (workspaceProviderDiagnostics.providers || []).forEach((item) => {
+                (normalizedProviderDiagnostics.providers || []).forEach((item) => {
                     providerLines.push(
                         `${String(item.name || 'provider')}: ${item.available ? 'available' : 'unavailable'}`
                         + (item.credential_source ? ` via ${String(item.credential_source)}` : '')
@@ -6137,7 +6170,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         providerLines.push(`  ${String(item.reason)}`);
                     }
                 });
-                providerDiagnosticsNode.textContent = `${providerLines.join('\n')}\n\n${JSON.stringify(workspaceProviderDiagnostics, null, 2)}`;
+                providerDiagnosticsNode.textContent = `${providerLines.join('\n')}\n\n${JSON.stringify(normalizedProviderDiagnostics, null, 2)}`;
             } else {
                 providerDiagnosticsNode.textContent = 'No provider-diagnostics payload loaded yet.';
             }
