@@ -315,11 +315,19 @@ class ComplaintMcpClient {
                     : [];
         const updatedAt = String((gate && gate.updated_at) || (source && source.updated_at) || '').trim() || new Date().toISOString();
         const gateSource = String((gate && gate.source) || (source && source.source) || 'complaint.get_client_release_gate').trim();
+        const version = String((gate && (gate.version || gate.state_version)) || (source && (source.version || source.state_version)) || 'workspace-gate-v1').trim();
         return {
             verdict,
             blockers,
             updated_at: updatedAt,
             source: gateSource,
+            version,
+            canonical_gate: {
+                verdict,
+                source: gateSource,
+                timestamp: updatedAt,
+                version,
+            },
             reason: String((gate && gate.reason) || '').trim(),
             claim_type_label: String((gate && gate.claim_type_label) || '').trim() || 'Unknown',
             draft_strategy: String((gate && gate.draft_strategy) || '').trim() || 'template',

@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from applications.complaint_workspace import ComplaintWorkspaceService
 from complaint_generator.ui_ux_workflow import (
@@ -417,7 +417,13 @@ def _extract_optimizer_recommendation_coverage(optimizer_result: dict[str, Any] 
     }
 
 
-def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: int) -> dict[str, Any]:
+def _run_cycle(
+    args: argparse.Namespace,
+    *,
+    artifact_root: Path,
+    cycle_number: int,
+    phase_hook: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     service = ComplaintWorkspaceService(root_dir=Path(args.workspace_root))
     cycle_root = _cycle_dir(artifact_root, cycle_number)
     screenshot_dir = cycle_root / "screens"
@@ -427,6 +433,8 @@ def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: i
     screenshot_dir.mkdir(parents=True, exist_ok=True)
     optimize_output_dir.mkdir(parents=True, exist_ok=True)
 
+    if phase_hook:
+        phase_hook("running_cycle.generate_draft")
     draft_payload = service.generate_complaint(
         args.user_id,
         use_llm=bool(args.use_llm_draft),
@@ -437,6 +445,8 @@ def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: i
     )
     markdown_export = service.export_complaint_markdown(args.user_id)
     pdf_export = service.export_complaint_pdf(args.user_id)
+    if phase_hook:
+        phase_hook("running_cycle.review_exports")
     pre_export_review = service.review_generated_exports(
         args.user_id,
         provider=args.provider,
@@ -454,6 +464,8 @@ def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: i
 
     browser_audit_attempts: list[dict[str, Any]] = []
     browser_audit: dict[str, Any] = {}
+    if phase_hook:
+        phase_hook("running_cycle.browser_audit")
     for attempt in range(1, 3):
         browser_audit = run_end_to_end_complaint_browser_audit(
             screenshot_dir=screenshot_dir,
@@ -472,6 +484,8 @@ def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: i
             f"stdout:\n{browser_audit.get('stdout', '')}\n\nstderr:\n{browser_audit.get('stderr', '')}"
         )
 
+    if phase_hook:
+        phase_hook("running_cycle.optimize_ui")
     optimizer_result = optimize_ui(
         screenshot_dir=screenshot_dir,
         user_id=args.user_id,
@@ -489,6 +503,8 @@ def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: i
         service=service,
     )
 
+    if phase_hook:
+        phase_hook("running_cycle.review_exports.final")
     export_review = service.review_generated_exports(
         args.user_id,
         provider=args.provider,
@@ -590,13 +606,33 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
     heartbeat.start()
 
     try:
+        def _set_phase(phase: str, *, error: str | None = None) -> None:
+            state["phase"] = phase
+            _write_status(
+                args=args,
+                pid_file=pid_file,
+                status_file=status_file,
+                log_file=log_file,
+                state="running",
+                phase=phase,
+                cycle_count=cycle_count,
+                consecutive_errors=consecutive_errors,
+                last_result=last_result,
+                error=error if error is not None else state.get("error"),
+            )
+
         while not _STOP_REQUESTED:
             _prune_old_cycle_artifacts(artifact_root)
             cycle_count += 1
             state["cycle_count"] = cycle_count
-            state["phase"] = "running_cycle"
+            _set_phase("running_cycle.prepare")
             try:
-                last_result = _run_cycle(args, artifact_root=artifact_root, cycle_number=cycle_count)
+                last_result = _run_cycle(
+                    args,
+                    artifact_root=artifact_root,
+                    cycle_number=cycle_count,
+                    phase_hook=_set_phase,
+                )
                 consecutive_errors = 0
                 state["last_result"] = last_result
                 state["error"] = None
