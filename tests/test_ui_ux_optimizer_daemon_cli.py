@@ -150,7 +150,16 @@ def test_run_daemon_refreshes_complaint_artifacts_and_writes_status(tmp_path, mo
             "cycles": [
                 {
                     "round": 1,
-                    "optimizer_result": {"changed_files": ["templates/workspace.html", "playwright/tests/complaint-flow.spec.js"]},
+                    "optimizer_result": {
+                        "status": "applied",
+                        "changed_files": ["templates/workspace.html", "playwright/tests/complaint-flow.spec.js"],
+                        "metadata": {
+                            "selected_patch_brief_titles": ["UX repair 1", "UX repair 2"],
+                            "covered_patch_brief_titles": ["UX repair 1"],
+                            "uncovered_selected_patch_brief_titles": ["UX repair 2"],
+                            "selected_patch_brief_coverage_ratio": 0.5,
+                        },
+                    },
                 }
             ],
         }
@@ -210,6 +219,12 @@ def test_run_daemon_refreshes_complaint_artifacts_and_writes_status(tmp_path, mo
     assert status_payload["status"] == "completed"
     assert status_payload["cycle_count"] == 1
     assert status_payload["last_result"]["summary"]["filing_shape_score"] == 88
+    assert status_payload["recommendation_coverage"]["selected_patch_briefs_total"] == 2
+    assert status_payload["recommendation_coverage"]["covered_patch_briefs_total"] == 1
+    assert status_payload["recommendation_coverage"]["overall_selected_patch_brief_coverage_ratio"] == 0.5
+    assert status_payload["last_result"]["recommendation_coverage"]["selected_patch_briefs_total"] == 2
+    assert status_payload["last_result"]["recommendation_coverage"]["covered_patch_briefs_total"] == 1
+    assert status_payload["last_result"]["recommendation_coverage"]["overall_selected_patch_brief_coverage_ratio"] == 0.5
     assert status_payload["last_result"]["goal_source"] == "adversarial_feedback"
     assert status_payload["last_result"]["summary"]["adversarial_goal_count"] >= 5
     assert captured["generate_complaint"]["use_llm"] is True
@@ -285,7 +300,33 @@ def test_start_status_and_stop_daemon_commands(tmp_path, monkeypatch):
     assert "--goal" in captured["cmd"]
 
     pid_file.write_text("515151\n", encoding="utf-8")
-    status_file.write_text(json.dumps({"status": "running", "cycle_count": 2}), encoding="utf-8")
+    status_file.write_text(
+        json.dumps(
+            {
+                "status": "running",
+                "cycle_count": 2,
+                "last_result": {
+                    "optimizer_result": {
+                        "cycles": [
+                            {
+                                "optimizer_result": {
+                                    "status": "applied",
+                                    "changed_files": ["templates/workspace.html"],
+                                    "metadata": {
+                                        "selected_patch_brief_titles": ["UX repair 1", "UX repair 2", "UX repair 3"],
+                                        "covered_patch_brief_titles": ["UX repair 1", "UX repair 2", "UX repair 3"],
+                                        "uncovered_selected_patch_brief_titles": [],
+                                        "selected_patch_brief_coverage_ratio": 1.0,
+                                    },
+                                }
+                            }
+                        ]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     status_args = argparse.Namespace(
         command="status",
@@ -300,6 +341,9 @@ def test_start_status_and_stop_daemon_commands(tmp_path, monkeypatch):
     status_payload = module._status_payload(status_args)
     assert status_payload["running"] is True
     assert status_payload["status_payload"]["cycle_count"] == 2
+    assert status_payload["recommendation_coverage"]["selected_patch_briefs_total"] == 3
+    assert status_payload["recommendation_coverage"]["covered_patch_briefs_total"] == 3
+    assert status_payload["recommendation_coverage"]["overall_selected_patch_brief_coverage_ratio"] == 1.0
 
     stop_args = argparse.Namespace(
         command="stop",

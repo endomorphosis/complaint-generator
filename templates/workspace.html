@@ -2600,7 +2600,7 @@
                             <strong>Run the filing workflow in order</strong>
                             <span>Keep one dominant next move visible, with generation, packet review, and next-step safety guidance on the same rail. Generate or save the draft first, run packet review second, and only download when the release gate and support posture make that safe.</span>
                             <div class="soft-note" id="draft-primary-action-note">Primary action guidance will appear here once filing readiness is evaluated.</div>
-                            <div class="soft-note" id="optimizer-repair-focus-note">Adversarial optimizer repair focus: UX repair 1: Pin one canonical release object across Review/Draft/Export: `verdict`, `blocking_reason`, `source`, `updated_at`; no blank reason allowed when blocked. | UX repair 2: Hard-block generation/export/download on placeholder or generic-party detection with inline `Fix now` links back to intake fields. | UX repair 3: Replace “supported count” prominence with filing tiers: `Draftable`, `Needs corroboration`, `Filing-ready`.</div>
+                            <div class="soft-note" id="optimizer-repair-focus-note">Adversarial optimizer repair focus: UX repair 1: Ship one **canonical gate object** across Review/Draft/Export: `verdict`, `blocking_reasons`, `updated_at`, `reason_source`, `target_tab`. | UX repair 2: Hard-block generation/export/download on gate fail and placeholder checks (`Plaintiff`, `Defendant`, `APPROPRIATE JUDICIAL DISTRICT`, blank civil action). | UX repair 3: Split Review status into separate primary cards: `Coverage` and `Corroboration`; make corroboration deficits the default top panel.</div>
                             <div class="tool-card canonical-release-gate" id="unsupported-thin-blocker-panel">
                                 <h3 id="unsupported-thin-blocker-title">Unsupported/Thin elements blocker</h3>
                                 <p class="muted" id="unsupported-thin-blocker-summary">Generate, export, and download stay blocked until grounded evidence outweighs thin and unsupported elements.</p>
@@ -4107,6 +4107,30 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             const draft = ((((workspaceSession || {}).draft) || (((workspaceSession || {}).session) || {}).draft) || {});
             return Array.isArray(draft.requested_relief) ? draft.requested_relief.filter(Boolean) : [];
+        }
+
+        function persistSurfaceHandoff(targetUrl) {
+            if (!targetUrl || typeof window === 'undefined' || !window.localStorage) {
+                return;
+            }
+            try {
+                const resolvedUrl = new URL(targetUrl, window.location.origin);
+                if (!resolvedUrl.pathname.startsWith('/chat')) {
+                    return;
+                }
+                const params = resolvedUrl.searchParams;
+                const payload = {
+                    source: String(params.get('source') || '').trim(),
+                    userId: String(params.get('user_id') || '').trim(),
+                    caseSynopsis: String(params.get('case_synopsis') || '').trim(),
+                    prefillMessage: String(params.get('prefill_message') || '').trim(),
+                    returnTo: String(params.get('return_to') || '').trim(),
+                    savedAt: new Date().toISOString(),
+                };
+                window.localStorage.setItem('complaintWorkspaceHandoff', JSON.stringify(payload));
+            } catch (error) {
+                console.warn('Unable to persist workspace handoff context.', error);
+            }
         }
 
         function buildCaptionPreview() {
@@ -7052,10 +7076,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
         }
 
-        function renderUiReviewScorecard(result) {
+function renderUiReviewScorecard(result) {
             const container = document.getElementById('ux-review-scorecard');
             const assessment = computeUiReviewAssessment(result || {});
             const complaintSignals = extractComplaintOutputSignals(result);
+            const optimizerCoverage = extractOptimizerRecommendationCoverage(result);
             const workflowCoverage = `${assessment.testedStages.length}/7 stages`;
             const exposureCoverage = `${assessment.exposedTools.length}/${assessment.requiredTools.length} tools`;
             const averageFilingShape = Number(complaintSignals.average_filing_shape_score || 0);
@@ -7064,6 +7089,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const formalSectionGaps = Array.isArray(complaintSignals.formal_section_gaps) ? complaintSignals.formal_section_gaps : [];
             const alignmentFailures = Array.isArray(complaintSignals.claim_type_alignment_failures) ? complaintSignals.claim_type_alignment_failures : [];
             const exportFormats = Array.isArray(complaintSignals.export_formats) ? complaintSignals.export_formats : [];
+            const selectedBriefs = Array.isArray(optimizerCoverage.latest_selected_patch_brief_titles) ? optimizerCoverage.latest_selected_patch_brief_titles : [];
+            const coveredBriefs = Array.isArray(optimizerCoverage.latest_covered_patch_brief_titles) ? optimizerCoverage.latest_covered_patch_brief_titles : [];
+            const uncoveredBriefs = Array.isArray(optimizerCoverage.latest_uncovered_selected_patch_brief_titles) ? optimizerCoverage.latest_uncovered_selected_patch_brief_titles : [];
+            const coverageRatio = Number(optimizerCoverage.overall_selected_patch_brief_coverage_ratio || 0);
+            const latestChangedFiles = Array.isArray(optimizerCoverage.latest_changed_files) ? optimizerCoverage.latest_changed_files : [];
             persistUiReviewAssessment(assessment, result);
             container.innerHTML = `
                 <div class="feature-item">
@@ -7121,6 +7151,19 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                                 : exportFormats.length
                                     ? `Reviewed export formats: ${exportFormats.join(', ')}.`
                                     : 'No structured complaint-output posture signals were returned.'
+                    )}</span>
+                </div>
+                <div class="feature-item">
+                    <strong>Optimizer repair coverage</strong>
+                    <div class="chip-row">
+                        ${selectedBriefs.length ? `<span class="chip ${coverageRatio >= 1 ? 'good' : 'warn'}">${escapeHtml(`${coveredBriefs.length}/${selectedBriefs.length} selected repairs`)}</span>` : '<span class="chip warn">no repair batch</span>'}
+                        ${selectedBriefs.length ? `<span class="chip">${escapeHtml(`coverage ${(coverageRatio * 100).toFixed(0)}%`)}</span>` : ''}
+                        ${latestChangedFiles.length ? `<span class="chip">${escapeHtml(`${latestChangedFiles.length} changed file${latestChangedFiles.length === 1 ? '' : 's'}`)}</span>` : ''}
+                    </div>
+                    <span>${escapeHtml(
+                        selectedBriefs.length
+                            ? `Covered repairs: ${coveredBriefs.join(', ')}.${uncoveredBriefs.length ? ` Uncovered repairs: ${uncoveredBriefs.join(', ')}.` : ''}${latestChangedFiles.length ? ` Changed files: ${latestChangedFiles.join(', ')}.` : ''}`
+                            : 'Run closed-loop optimization to see which selected repairs were actually covered by the latest patch lane.'
                     )}</span>
                 </div>
             `;
@@ -7449,6 +7492,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     ? result.carry_forward_assessment
                     : {};
             const complaintOutputSignals = extractComplaintOutputSignals(result);
+            const optimizerCoverage = extractOptimizerRecommendationCoverage(result);
             const backendStrategy = result && result.backend && result.backend.strategy ? result.backend.strategy : '';
             const latestProgress = result && result.latest_progress && typeof result.latest_progress === 'object'
                 ? result.latest_progress
@@ -7488,6 +7532,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 result && result.output_dir ? `<span class="chip">output: ${escapeHtml(String(result.output_dir))}</span>` : '',
                 screenshotFindings.length ? `<span class="chip">screenshot findings: ${escapeHtml(String(screenshotFindings.length))}</span>` : '',
                 optimizationTargets.length ? `<span class="chip">optimization targets: ${escapeHtml(String(optimizationTargets.length))}</span>` : '',
+                Number(optimizerCoverage.selected_patch_briefs_total || 0) ? `<span class="chip">selected repairs: ${escapeHtml(String(optimizerCoverage.selected_patch_briefs_total))}</span>` : '',
+                Number(optimizerCoverage.covered_patch_briefs_total || 0) ? `<span class="chip good">covered repairs: ${escapeHtml(String(optimizerCoverage.covered_patch_briefs_total))}</span>` : '',
+                Number(optimizerCoverage.overall_selected_patch_brief_coverage_ratio || 0) ? `<span class="chip good">coverage: ${escapeHtml(`${Math.round(Number(optimizerCoverage.overall_selected_patch_brief_coverage_ratio || 0) * 100)}%`)}</span>` : '',
                 Number(complaintOutputSignals.average_filing_shape_score || 0) ? `<span class="chip">filing shape: ${escapeHtml(String(complaintOutputSignals.average_filing_shape_score))}</span>` : '',
                 Number(complaintOutputSignals.average_claim_type_alignment_score || 0) ? `<span class="chip">alignment: ${escapeHtml(String(complaintOutputSignals.average_claim_type_alignment_score))}</span>` : '',
                 Array.isArray(complaintOutputSignals.release_gate_verdicts) && complaintOutputSignals.release_gate_verdicts.length ? `<span class="chip warn">release gate: ${escapeHtml(String(complaintOutputSignals.release_gate_verdicts[0]))}</span>` : '',
@@ -7533,6 +7580,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                             <div class="muted">${escapeHtml((((cycle.validation_review || {}).latest_review || '') || 'Closed-loop validation completed.').slice(0, 240))}</div>
                             <div class="chip-row">
                                 ${((cycle.optimizer_result || {}).changed_files || []).map((item) => `<span class="chip">${escapeHtml(String(item))}</span>`).join('')}
+                                ${Array.isArray((((cycle.optimizer_result || {}).metadata || {}).covered_patch_brief_titles))
+                                    ? ((((cycle.optimizer_result || {}).metadata || {}).covered_patch_brief_titles).map((item) => `<span class="chip good">${escapeHtml(String(item))}</span>`).join(''))
+                                    : ''}
                             </div>
                         </div>
                     `).join('')
@@ -7544,6 +7594,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     const patchPath = optimizerResult.patch_path || '';
                     const patchCid = optimizerResult.patch_cid || '';
                     const changedFiles = Array.isArray(optimizerResult.changed_files) ? optimizerResult.changed_files : [];
+                    const optimizerMetadata = optimizerResult.metadata && typeof optimizerResult.metadata === 'object' ? optimizerResult.metadata : {};
+                    const selectedPatchBriefTitles = Array.isArray(optimizerMetadata.selected_patch_brief_titles) ? optimizerMetadata.selected_patch_brief_titles : [];
+                    const coveredPatchBriefTitles = Array.isArray(optimizerMetadata.covered_patch_brief_titles) ? optimizerMetadata.covered_patch_brief_titles : [];
+                    const uncoveredPatchBriefTitles = Array.isArray(optimizerMetadata.uncovered_selected_patch_brief_titles) ? optimizerMetadata.uncovered_selected_patch_brief_titles : [];
+                    const coverageRatio = Number(optimizerMetadata.selected_patch_brief_coverage_ratio || 0);
                     return `
                         <div class="item">
                             <strong>Patch artifact for round ${escapeHtml(String(cycle.round || '?'))}</strong>
@@ -7551,7 +7606,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                             ${patchCid ? `<div class="muted">CID: ${escapeHtml(String(patchCid))}</div>` : ''}
                             <div class="chip-row">
                                 ${changedFiles.map((item) => `<span class="chip">${escapeHtml(String(item))}</span>`).join('')}
+                                ${selectedPatchBriefTitles.length ? `<span class="chip">selected repairs: ${escapeHtml(String(selectedPatchBriefTitles.length))}</span>` : ''}
+                                ${coveredPatchBriefTitles.length ? `<span class="chip good">covered repairs: ${escapeHtml(String(coveredPatchBriefTitles.length))}</span>` : ''}
+                                ${selectedPatchBriefTitles.length ? `<span class="chip ${coverageRatio >= 1 ? 'good' : 'warn'}">coverage: ${escapeHtml(`${Math.round(coverageRatio * 100)}%`)}</span>` : ''}
                             </div>
+                            ${coveredPatchBriefTitles.length ? `<div class="muted">Covered briefs: ${escapeHtml(coveredPatchBriefTitles.join(', '))}</div>` : ''}
+                            ${uncoveredPatchBriefTitles.length ? `<div class="muted">Still uncovered: ${escapeHtml(uncoveredPatchBriefTitles.join(', '))}</div>` : ''}
                         </div>
                     `;
                 }).join('')
@@ -7640,7 +7700,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : '<div class="item"><strong>No follow-up actions listed.</strong><div class="muted">Run another review after a UI pass to collect the next recommended screenshot assertions.</div></div>';
         }
 
-        function extractComplaintOutputSignals(result) {
+function extractComplaintOutputSignals(result) {
             const directSignals = result && result.review && typeof result.review === 'object' && result.review.complaint_output_signals && typeof result.review.complaint_output_signals === 'object'
                 ? result.review.complaint_output_signals
                 : result && result.complaint_output_signals && typeof result.complaint_output_signals === 'object'
@@ -7686,6 +7746,70 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 ui_suggestion_hints: Array.isArray(uiFeedback.ui_suggestions)
                     ? uiFeedback.ui_suggestions.map((item) => String((item && (item.title || item.recommendation)) || '').trim()).filter(Boolean)
                     : [],
+            };
+        }
+
+        function extractOptimizerRecommendationCoverage(result) {
+            const directCoverage = result && result.recommendation_coverage && typeof result.recommendation_coverage === 'object'
+                ? result.recommendation_coverage
+                : null;
+            if (directCoverage) {
+                return directCoverage;
+            }
+            const cycles = Array.isArray(result && result.cycles) ? result.cycles : [];
+            let selectedTotal = 0;
+            let coveredTotal = 0;
+            let roundsWithSelected = 0;
+            let latestSelected = [];
+            let latestCovered = [];
+            let latestUncovered = [];
+            let latestChangedFiles = [];
+            let latestStatus = '';
+            const ratios = [];
+            cycles.forEach((cycle) => {
+                const optimizerResult = cycle && cycle.optimizer_result && typeof cycle.optimizer_result === 'object'
+                    ? cycle.optimizer_result
+                    : {};
+                const metadata = optimizerResult.metadata && typeof optimizerResult.metadata === 'object'
+                    ? optimizerResult.metadata
+                    : {};
+                const selected = Array.isArray(metadata.selected_patch_brief_titles)
+                    ? metadata.selected_patch_brief_titles.map((item) => String(item || '').trim()).filter(Boolean)
+                    : [];
+                const covered = Array.isArray(metadata.covered_patch_brief_titles)
+                    ? metadata.covered_patch_brief_titles.map((item) => String(item || '').trim()).filter(Boolean)
+                    : [];
+                const uncovered = Array.isArray(metadata.uncovered_selected_patch_brief_titles)
+                    ? metadata.uncovered_selected_patch_brief_titles.map((item) => String(item || '').trim()).filter(Boolean)
+                    : [];
+                const changedFiles = Array.isArray(optimizerResult.changed_files)
+                    ? optimizerResult.changed_files.map((item) => String(item || '').trim()).filter(Boolean)
+                    : [];
+                const ratio = Number(metadata.selected_patch_brief_coverage_ratio || 0);
+                if (!selected.length) {
+                    return;
+                }
+                roundsWithSelected += 1;
+                selectedTotal += selected.length;
+                coveredTotal += covered.length;
+                ratios.push(ratio);
+                latestSelected = selected;
+                latestCovered = covered;
+                latestUncovered = uncovered;
+                latestChangedFiles = changedFiles;
+                latestStatus = String(optimizerResult.status || '').trim();
+            });
+            return {
+                rounds_with_selected_patch_briefs: roundsWithSelected,
+                selected_patch_briefs_total: selectedTotal,
+                covered_patch_briefs_total: coveredTotal,
+                overall_selected_patch_brief_coverage_ratio: selectedTotal ? (coveredTotal / selectedTotal) : 0,
+                average_selected_patch_brief_coverage_ratio: ratios.length ? (ratios.reduce((sum, value) => sum + value, 0) / ratios.length) : 0,
+                latest_selected_patch_brief_titles: latestSelected,
+                latest_covered_patch_brief_titles: latestCovered,
+                latest_uncovered_selected_patch_brief_titles: latestUncovered,
+                latest_changed_files: latestChangedFiles,
+                latest_optimizer_status: latestStatus,
             };
         }
 
@@ -8484,6 +8608,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 }
                 const targetUrl = handoffButton.dataset.handoffUrl || handoffButton.getAttribute('href') || '';
                 if (targetUrl) {
+                    persistSurfaceHandoff(targetUrl);
                     window.location.assign(targetUrl);
                 }
                 return;

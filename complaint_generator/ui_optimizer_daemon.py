@@ -277,6 +277,11 @@ def _build_status_payload(
             pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
         except Exception:
             pid = None
+    recommendation_coverage: dict[str, Any] = {}
+    if isinstance(last_result, dict):
+        recommendation_coverage = dict(last_result.get("recommendation_coverage") or {})
+        if not recommendation_coverage:
+            recommendation_coverage = _extract_optimizer_recommendation_coverage(last_result.get("optimizer_result"))
     return {
         "status": state,
         "phase": phase,
@@ -302,6 +307,7 @@ def _build_status_payload(
         "cycle_count": int(cycle_count),
         "consecutive_errors": int(consecutive_errors),
         "last_result": last_result,
+        "recommendation_coverage": recommendation_coverage,
         "error": error,
         "updated_at": datetime.now(UTC).isoformat(),
     }
@@ -360,6 +366,57 @@ def _review_json_excerpt(review_payload: dict[str, Any]) -> str:
     return ""
 
 
+def _extract_optimizer_recommendation_coverage(optimizer_result: dict[str, Any] | None) -> dict[str, Any]:
+    cycles = list((optimizer_result or {}).get("cycles") or [])
+    selected_total = 0
+    covered_total = 0
+    rounds_with_selected = 0
+    latest_selected_titles: list[str] = []
+    latest_covered_titles: list[str] = []
+    latest_uncovered_titles: list[str] = []
+    latest_changed_files: list[str] = []
+    latest_status = ""
+    ratios: list[float] = []
+
+    for cycle in cycles:
+        optimizer_cycle = cycle.get("optimizer_result") or {}
+        metadata = optimizer_cycle.get("metadata") or {}
+        selected_titles = [str(item).strip() for item in list(metadata.get("selected_patch_brief_titles") or []) if str(item).strip()]
+        covered_titles = [str(item).strip() for item in list(metadata.get("covered_patch_brief_titles") or []) if str(item).strip()]
+        uncovered_titles = [
+            str(item).strip() for item in list(metadata.get("uncovered_selected_patch_brief_titles") or []) if str(item).strip()
+        ]
+        ratio = float(metadata.get("selected_patch_brief_coverage_ratio") or 0.0)
+        changed_files = [str(item).strip() for item in list(optimizer_cycle.get("changed_files") or []) if str(item).strip()]
+        status = str(optimizer_cycle.get("status") or "").strip()
+
+        if selected_titles:
+            rounds_with_selected += 1
+            selected_total += len(selected_titles)
+            covered_total += len(covered_titles)
+            ratios.append(ratio)
+            latest_selected_titles = selected_titles
+            latest_covered_titles = covered_titles
+            latest_uncovered_titles = uncovered_titles
+            latest_changed_files = changed_files
+            latest_status = status
+
+    overall_ratio = (covered_total / selected_total) if selected_total else 0.0
+    average_ratio = (sum(ratios) / len(ratios)) if ratios else 0.0
+    return {
+        "rounds_with_selected_patch_briefs": rounds_with_selected,
+        "selected_patch_briefs_total": selected_total,
+        "covered_patch_briefs_total": covered_total,
+        "overall_selected_patch_brief_coverage_ratio": overall_ratio,
+        "average_selected_patch_brief_coverage_ratio": average_ratio,
+        "latest_selected_patch_brief_titles": latest_selected_titles,
+        "latest_covered_patch_brief_titles": latest_covered_titles,
+        "latest_uncovered_selected_patch_brief_titles": latest_uncovered_titles,
+        "latest_changed_files": latest_changed_files,
+        "latest_optimizer_status": latest_status,
+    }
+
+
 def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: int) -> dict[str, Any]:
     service = ComplaintWorkspaceService(root_dir=Path(args.workspace_root))
     cycle_root = _cycle_dir(artifact_root, cycle_number)
@@ -395,13 +452,23 @@ def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: i
         seed_goals=list(args.goals or []),
     )
 
-    browser_audit = run_end_to_end_complaint_browser_audit(
-        screenshot_dir=screenshot_dir,
-        pytest_target=args.pytest_target,
-    )
+    browser_audit_attempts: list[dict[str, Any]] = []
+    browser_audit: dict[str, Any] = {}
+    for attempt in range(1, 3):
+        browser_audit = run_end_to_end_complaint_browser_audit(
+            screenshot_dir=screenshot_dir,
+            pytest_target=args.pytest_target,
+        )
+        browser_audit_attempt = dict(browser_audit)
+        browser_audit_attempt["attempt"] = attempt
+        browser_audit_attempts.append(browser_audit_attempt)
+        if int(browser_audit.get("returncode") or 0) == 0:
+            break
+        if attempt < 2:
+            time.sleep(3.0)
     if int(browser_audit.get("returncode") or 0) != 0:
         raise RuntimeError(
-            "Browser audit failed before optimization.\n"
+            "Browser audit failed before optimization after 2 attempts.\n"
             f"stdout:\n{browser_audit.get('stdout', '')}\n\nstderr:\n{browser_audit.get('stderr', '')}"
         )
 
@@ -440,6 +507,7 @@ def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: i
         "export_review_path": str(export_review_path),
         "cycle_manifest_path": str(cycle_manifest_path),
         "browser_audit": browser_audit,
+        "browser_audit_attempts": browser_audit_attempts,
         "optimizer_result": optimizer_result,
         "adversarial_goals": adversarial_goals,
         "goal_source": "adversarial_feedback",
@@ -465,6 +533,8 @@ def _run_cycle(args: argparse.Namespace, *, artifact_root: Path, cycle_number: i
             "adversarial_goal_count": len(adversarial_goals),
         },
     }
+    result["recommendation_coverage"] = _extract_optimizer_recommendation_coverage(optimizer_result)
+    result["summary"]["recommendation_coverage"] = dict(result["recommendation_coverage"])
     _write_json(cycle_manifest_path, result)
     return result
 
@@ -731,17 +801,26 @@ def _status_payload(args: argparse.Namespace) -> dict[str, Any]:
             pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
         except Exception:
             pid = 0
+    matching_pids = _matching_daemon_pids(user_id=args.user_id, artifact_root=artifact_root)
+    live_pid = int(matching_pids[0]) if matching_pids else pid
     status_payload = _load_json(status_file)
+    last_result = status_payload.get("last_result") if isinstance(status_payload, dict) else None
+    recommendation_coverage = {}
+    if isinstance(last_result, dict):
+        recommendation_coverage = dict(last_result.get("recommendation_coverage") or {})
+        if not recommendation_coverage:
+            recommendation_coverage = _extract_optimizer_recommendation_coverage(last_result.get("optimizer_result"))
     return {
         "status": "ok",
         "artifact_root": str(artifact_root),
-        "pid": pid,
-        "running": _pid_is_running(pid),
-        "matching_pids": _matching_daemon_pids(user_id=args.user_id, artifact_root=artifact_root),
+        "pid": live_pid,
+        "running": _pid_is_running(live_pid),
+        "matching_pids": matching_pids,
         "pid_file": str(pid_file),
         "status_file": str(status_file),
         "log_file": str(log_file),
         "status_payload": status_payload,
+        "recommendation_coverage": recommendation_coverage,
     }
 
 

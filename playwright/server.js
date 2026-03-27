@@ -1545,6 +1545,7 @@ function buildStubUiOptimizationResult(args = {}, userId = 'did:key:playwright-d
   const analysis = buildComplaintOutputAnalysis(userId);
   const suggestion = (((analysis.ui_feedback || {}).ui_suggestions || [])[0]) || {};
   const routerLabel = [args.provider, args.model].filter(Boolean).join(' / ') || 'default llm_router multimodal_router path';
+  const selectedPatchBriefTitles = ['UX repair 1', 'UX repair 2', 'UX repair 3'];
   return {
     workflow_type: 'ui_ux_closed_loop',
     max_rounds: Number(args.max_rounds || 2),
@@ -1566,6 +1567,18 @@ function buildStubUiOptimizationResult(args = {}, userId = 'did:key:playwright-d
     critic_test_obligations: [
       'Verify the actor can save the mediator synopsis, upload evidence, review support, generate the complaint, and revise the draft.',
     ],
+    recommendation_coverage: {
+      rounds_with_selected_patch_briefs: 1,
+      selected_patch_briefs_total: 3,
+      covered_patch_briefs_total: 3,
+      overall_selected_patch_brief_coverage_ratio: 1.0,
+      average_selected_patch_brief_coverage_ratio: 1.0,
+      latest_selected_patch_brief_titles: selectedPatchBriefTitles,
+      latest_covered_patch_brief_titles: selectedPatchBriefTitles,
+      latest_uncovered_selected_patch_brief_titles: [],
+      latest_changed_files: ['templates/workspace.html', 'static/complaint_mcp_sdk.js'],
+      latest_optimizer_status: 'applied',
+    },
     cycles: [
       {
         round: 1,
@@ -1579,7 +1592,13 @@ function buildStubUiOptimizationResult(args = {}, userId = 'did:key:playwright-d
           patch_path: 'artifacts/ui-audit/round-01.patch',
           patch_cid: 'bafyuiuxround01',
           changed_files: ['templates/workspace.html', 'static/complaint_mcp_sdk.js'],
-          metadata: { changed_files: ['templates/workspace.html', 'static/complaint_mcp_sdk.js'] },
+          metadata: {
+            changed_files: ['templates/workspace.html', 'static/complaint_mcp_sdk.js'],
+            selected_patch_brief_titles: selectedPatchBriefTitles,
+            covered_patch_brief_titles: selectedPatchBriefTitles,
+            uncovered_selected_patch_brief_titles: [],
+            selected_patch_brief_coverage_ratio: 1.0,
+          },
         },
         validation_review: {
           latest_review: `# Top Risks\n- ${routerLabel} kept complaint-output blockers visible during validation.`,

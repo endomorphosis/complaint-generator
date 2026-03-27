@@ -100,7 +100,25 @@ window.ChatPage = (function() {
         const prefillMessage = String(params.get('prefill_message') || '').trim();
         const returnTo = String(params.get('return_to') || '').trim();
         if (!(source || userId || caseSynopsis || prefillMessage || returnTo)) {
-            return null;
+            try {
+                const cached = window.localStorage.getItem('complaintWorkspaceHandoff');
+                if (!cached) {
+                    return null;
+                }
+                const payload = JSON.parse(cached);
+                if (!payload || typeof payload !== 'object') {
+                    return null;
+                }
+                return {
+                    source: String(payload.source || '').trim(),
+                    userId: String(payload.userId || '').trim(),
+                    caseSynopsis: String(payload.caseSynopsis || '').trim(),
+                    prefillMessage: String(payload.prefillMessage || '').trim(),
+                    returnTo: String(payload.returnTo || '').trim(),
+                };
+            } catch (error) {
+                return null;
+            }
         }
         return {
             source,

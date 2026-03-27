@@ -1578,6 +1578,7 @@ function buildWorkspaceUiOptimizationResult(state, toolArgs = {}) {
   const analysis = buildWorkspaceComplaintOutputAnalysis(state);
   const suggestion = (((analysis.ui_feedback || {}).ui_suggestions || [])[0]) || {};
   const routerLabel = [toolArgs.provider, toolArgs.model].filter(Boolean).join(' / ') || 'default llm_router multimodal_router path';
+  const selectedPatchBriefTitles = ['UX repair 1', 'UX repair 2', 'UX repair 3'];
   return {
     workflow_type: 'ui_ux_closed_loop',
     rounds_executed: 1,
@@ -1590,6 +1591,36 @@ function buildWorkspaceUiOptimizationResult(state, toolArgs = {}) {
     updated_at: '2026-03-22T12:40:00Z',
     latest_validation_review: `The optimizer path itself should stay discoverable from the shared dashboard shortcuts and tool panels. Complaint-output suggestion carried into optimization: ${String(suggestion.title || 'Promote complaint-output blockers')} via ${routerLabel}.`,
     changed_files: ['templates/workspace.html'],
+    recommendation_coverage: {
+      rounds_with_selected_patch_briefs: 1,
+      selected_patch_briefs_total: 3,
+      covered_patch_briefs_total: 3,
+      overall_selected_patch_brief_coverage_ratio: 1.0,
+      average_selected_patch_brief_coverage_ratio: 1.0,
+      latest_selected_patch_brief_titles: selectedPatchBriefTitles,
+      latest_covered_patch_brief_titles: selectedPatchBriefTitles,
+      latest_uncovered_selected_patch_brief_titles: [],
+      latest_changed_files: ['templates/workspace.html'],
+      latest_optimizer_status: 'applied',
+    },
+    cycles: [
+      {
+        round: 1,
+        validation_review: {
+          latest_review: `Complaint-output suggestion carried into optimization: ${String(suggestion.title || 'Promote complaint-output blockers')} via ${routerLabel}.`,
+        },
+        optimizer_result: {
+          status: 'applied',
+          changed_files: ['templates/workspace.html'],
+          metadata: {
+            selected_patch_brief_titles: selectedPatchBriefTitles,
+            covered_patch_brief_titles: selectedPatchBriefTitles,
+            uncovered_selected_patch_brief_titles: [],
+            selected_patch_brief_coverage_ratio: 1.0,
+          },
+        },
+      },
+    ],
   };
 }
 

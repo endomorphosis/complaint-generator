@@ -668,6 +668,12 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#workspace-status')).toContainText(/Closed-loop UI\/UX optimization completed\./i);
     await expect(page.locator('#ux-review-summary')).toContainText(/Tighten review-to-draft gatekeeping/i);
     await expect(page.locator('#ux-review-stage-findings')).toContainText(/Complaint-output suggestion carried into optimization/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/3\/3 selected repairs/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/coverage 100%/i);
+    await expect(page.locator('#ux-review-scorecard')).toContainText(/Changed files: templates\/workspace\.html/i);
+    await expect(page.locator('#ux-review-runs')).toContainText(/UX repair 1/i);
+    await expect(page.locator('#ux-review-artifacts')).toContainText(/covered repairs: 3/i);
+    await expect(page.locator('#ux-review-artifacts')).toContainText(/Covered briefs: UX repair 1, UX repair 2, UX repair 3/i);
 
     await page.locator('#run-browser-audit-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/End-to-end complaint browser audit completed\./i);
