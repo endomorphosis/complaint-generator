@@ -60,6 +60,7 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.list_claim_elements",
         "complaint.start_session",
         "complaint.submit_intake",
+        "complaint.run_intake_chat_turn",
         "complaint.save_evidence",
         "complaint.import_gmail_evidence",
         "complaint.run_gmail_duckdb_pipeline",
@@ -156,6 +157,7 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "run-gmail-duckdb-pipeline" in cli_payload["cli_commands"]
     assert "import-local-evidence" in cli_payload["cli_commands"]
     assert "search-email-duckdb" in cli_payload["cli_commands"]
+    assert "chat-turn" in cli_payload["cli_commands"]
     assert "tooling-contract" in cli_payload["cli_commands"]
     assert "set-claim-type" in cli_payload["cli_commands"]
     assert "update-synopsis" in cli_payload["cli_commands"]
@@ -174,17 +176,73 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "run_gmail_duckdb_pipeline" in package_payload["package_exports"]
     assert "import_local_evidence" in package_payload["package_exports"]
     assert "search_email_duckdb_corpus" in package_payload["package_exports"]
+    assert "run_intake_chat_turn" in package_payload["package_exports"]
     assert "update_claim_type" in package_payload["package_exports"]
     assert "update_case_synopsis" in package_payload["package_exports"]
     assert "importGmailEvidence" in package_payload["browser_sdk_methods"]
     assert "importLocalEvidence" in package_payload["browser_sdk_methods"]
     assert "runGmailDuckdbPipeline" in package_payload["browser_sdk_methods"]
     assert "searchEmailDuckdb" in package_payload["browser_sdk_methods"]
+    assert "runIntakeChatTurn" in package_payload["browser_sdk_methods"]
     assert "updateClaimType" in package_payload["browser_sdk_methods"]
     assert "updateCaseSynopsis" in package_payload["browser_sdk_methods"]
     assert "getToolingContract" in package_payload["browser_sdk_methods"]
     assert any(step["id"] == "gmail_duckdb_pipeline" for step in package_payload["core_flow_steps"])
     assert any(step["id"] == "email_duckdb_search" for step in package_payload["core_flow_steps"])
+    assert any(step["id"] == "intake_chat" for step in package_payload["core_flow_steps"])
+
+
+def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_path):
+    runner = CliRunner()
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "intake-chat-sessions")
+    monkeypatch.setattr(complaint_cli_impl, "service", service)
+
+    first_turn = _invoke_cli(runner, "chat-turn", "--user-id", "chat-user")
+    assert first_turn["inquiry"]["question_id"] == "party_name"
+    assert first_turn["accepted_answer"] is None
+
+    cli_turn = _invoke_cli(
+        runner,
+        "chat-turn",
+        "--user-id",
+        "chat-user",
+        "--message",
+        "Jordan Example",
+    )
+    assert cli_turn["accepted_answer"]["question_id"] == "party_name"
+    assert cli_turn["next_question"]["id"] == "opposing_party"
+
+    mcp_turn = _call_mcp_tool(
+        service,
+        19_1,
+        "complaint.run_intake_chat_turn",
+        {
+            "user_id": "chat-user",
+            "message": "Acme Corporation",
+            "question_id": "opposing_party",
+        },
+    )
+    assert mcp_turn["accepted_answer"]["question_id"] == "opposing_party"
+    assert mcp_turn["next_question"]["id"] == "protected_activity"
+
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/complaint-workspace/intake-chat",
+        json={
+            "user_id": "chat-user",
+            "message": "Reported discrimination to HR",
+            "question_id": "protected_activity",
+        },
+    )
+
+    assert response.status_code == 200
+    api_turn = response.json()
+    assert api_turn["accepted_answer"]["question_id"] == "protected_activity"
+    assert api_turn["next_question"]["id"] == "adverse_action"
 
 
 def test_generate_api_route_forwards_llm_router_options(monkeypatch, tmp_path):
@@ -898,6 +956,9 @@ def test_all_cli_commands_are_exercised_end_to_end(monkeypatch, tmp_path):
         "Reported discrimination to HR",
     )
     assert answer_payload["session"]["intake_answers"]["protected_activity"] == "Reported discrimination to HR"
+
+    chat_turn_payload = _invoke_cli(runner, "chat-turn", "--user-id", "cli-user")
+    assert chat_turn_payload["inquiry"]["question_id"] == "party_name"
 
     evidence_payload = _invoke_cli(
         runner,

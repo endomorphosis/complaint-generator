@@ -33,6 +33,14 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
         "required": ["answers"],
     },
+    "complaint.run_intake_chat_turn": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "message": {"type": "string"},
+            "question_id": {"type": "string"},
+        },
+    },
     "complaint.save_evidence": {
         "type": "object",
         "properties": {

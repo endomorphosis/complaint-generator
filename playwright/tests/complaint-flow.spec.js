@@ -856,7 +856,11 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#ux-review-runs')).toContainText(/UX repair 1|Round 1|Single review response/i);
     await expect(page.locator('#ux-review-artifacts')).toContainText(/Patch artifact for round 1|round-01\.patch|templates\/workspace\.html/i);
 
-    await page.locator('#run-browser-audit-button').click();
+    const browserAuditButton = page.locator('#run-browser-audit-button');
+    await expect(browserAuditButton).toBeVisible();
+    await expect(browserAuditButton).toBeEnabled();
+    await browserAuditButton.scrollIntoViewIfNeeded();
+    await browserAuditButton.evaluate((node) => node.click());
     await expect(page.locator('#workspace-status')).toContainText(/End-to-end complaint browser audit completed\./i);
     await expect(page.locator('#ux-review-runtime')).toContainText(/Browser audit runtime/i);
     await expect(page.locator('#ux-review-runtime')).toContainText(/strategy: browser_audit/i);

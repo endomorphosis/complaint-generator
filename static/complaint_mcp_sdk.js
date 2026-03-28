@@ -310,6 +310,14 @@ class ComplaintMcpClient {
         });
     }
 
+    runIntakeChatTurn(userId, message, questionId) {
+        return this.callTool('complaint.run_intake_chat_turn', {
+            user_id: userId,
+            message: message || undefined,
+            question_id: questionId || undefined,
+        });
+    }
+
     saveEvidence(userId, payload) {
         return this.callTool('complaint.save_evidence', Object.assign({
             user_id: userId,

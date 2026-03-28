@@ -16,6 +16,12 @@ class IntakeRequest(BaseModel):
     answers: Dict[str, Any] = Field(default_factory=dict)
 
 
+class IntakeChatTurnRequest(BaseModel):
+    user_id: Optional[str] = None
+    message: Optional[str] = None
+    question_id: Optional[str] = None
+
+
 class EvidenceRequest(BaseModel):
     user_id: Optional[str] = None
     kind: str = "testimony"
@@ -148,6 +154,14 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
     @router.post("/api/complaint-workspace/intake")
     async def submit_intake(request: IntakeRequest) -> Dict[str, Any]:
         return workspace.submit_intake_answers(request.user_id, request.answers)
+
+    @router.post("/api/complaint-workspace/intake-chat")
+    async def intake_chat_turn(request: IntakeChatTurnRequest) -> Dict[str, Any]:
+        return workspace.run_intake_chat_turn(
+            request.user_id,
+            message=request.message,
+            question_id=request.question_id,
+        )
 
     @router.post("/api/complaint-workspace/evidence")
     async def save_evidence(request: EvidenceRequest) -> Dict[str, Any]:

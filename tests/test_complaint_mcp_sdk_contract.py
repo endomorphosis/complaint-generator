@@ -10,6 +10,8 @@ def test_browser_sdk_surfaces_legal_search_diagnostics_contract():
     shell_js = (REPO_ROOT / "static" / "complaint_app_shell.js").read_text(encoding="utf-8")
 
     for content in (commonjs_sdk, esm_sdk):
+        assert "runIntakeChatTurn(userId, message, questionId)" in content
+        assert "complaint.run_intake_chat_turn" in content
         assert "_extractToolDiagnostics(payload)" in content
         assert "_buildToolDiagnosticSummary(payload)" in content
         assert "diagnostic_summary: diagnosticSummary" in content

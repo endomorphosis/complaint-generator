@@ -129,6 +129,7 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "create_identity",
     "start_session",
     "submit_intake_answers",
+    "run_intake_chat_turn",
     "save_evidence",
     "import_gmail_evidence",
     "run_gmail_duckdb_pipeline",
@@ -161,6 +162,7 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "identity",
     "session",
     "answer",
+    "chat-turn",
     "add-evidence",
     "import-gmail-evidence",
     "run-gmail-duckdb-pipeline",
@@ -194,6 +196,7 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "bootstrapWorkspace",
     "getSession",
     "submitIntake",
+    "runIntakeChatTurn",
     "saveEvidence",
     "importGmailEvidence",
     "importLocalEvidence",
@@ -228,6 +231,12 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "answer",
         "mcp_tool": "complaint.submit_intake",
         "browser_sdk_method": "submitIntake",
+    },
+    "intake_chat": {
+        "package_export": "run_intake_chat_turn",
+        "cli_command": "chat-turn",
+        "mcp_tool": "complaint.run_intake_chat_turn",
+        "browser_sdk_method": "runIntakeChatTurn",
     },
     "evidence_capture": {
         "package_export": "save_evidence",
@@ -1255,6 +1264,115 @@ class ComplaintWorkspaceService:
             if not str(answers.get(question["id"]) or "").strip():
                 return question
         return None
+
+    def _question_by_id(self, question_id: Optional[str]) -> Optional[Dict[str, str]]:
+        normalized_question_id = str(question_id or "").strip()
+        if not normalized_question_id:
+            return None
+        for question in _INTAKE_QUESTIONS:
+            if question["id"] == normalized_question_id:
+                return question
+        return None
+
+    def _build_intake_chat_explanation(self, question: Dict[str, str], state: Dict[str, Any]) -> Dict[str, Any]:
+        review = self._build_review(state)
+        support_matrix = list(review.get("support_matrix") or [])
+        first_gap = next((item for item in support_matrix if not item.get("supported")), None)
+        focus_gap = (
+            f"Current biggest support gap: {str(first_gap.get('label') or '').lower()}."
+            if first_gap
+            else "Core claim elements already have at least some recorded support."
+        )
+        guidance = {
+            "party_name": {
+                "why_this_matters": "This anchors who the complaint belongs to across the CLI, web workspace, and later evidence collection.",
+                "how_to_answer": "Use the name that should appear in the complaint caption or intake record.",
+            },
+            "opposing_party": {
+                "why_this_matters": "This identifies the target organization or person so the record, draft, and evidence search stay pointed at the right defendant.",
+                "how_to_answer": "Name the employer, housing provider, agency, or other party you are complaining about.",
+            },
+            "protected_activity": {
+                "why_this_matters": "This is usually the first element that explains why the later adverse action may have been unlawful retaliation or interference.",
+                "how_to_answer": "Describe what you reported, opposed, requested, or disclosed before things got worse.",
+            },
+            "adverse_action": {
+                "why_this_matters": "This captures what happened to you after the protected activity and helps define damages and liability.",
+                "how_to_answer": "Describe the concrete action taken against you, such as termination, denial, discipline, or eviction threat.",
+            },
+            "timeline": {
+                "why_this_matters": "Timing is often what connects the protected activity to the adverse action and exposes causation gaps.",
+                "how_to_answer": "Give the key dates or sequence in plain language, even if you only know approximate timing.",
+            },
+            "harm": {
+                "why_this_matters": "This clarifies damages and what relief the complaint should eventually request.",
+                "how_to_answer": "List the practical harm you suffered, such as lost wages, housing instability, denied benefits, or emotional distress.",
+            },
+            "court_header": {
+                "why_this_matters": "This helps format the eventual complaint draft correctly when you already know the court or forum.",
+                "how_to_answer": "If you know the court caption, provide it. If not, you can say that you are unsure.",
+            },
+        }.get(question["id"], {})
+        return {
+            "question_id": question["id"],
+            "why_this_matters": guidance.get("why_this_matters") or "This helps tighten the intake record before evidence and legal research begin.",
+            "how_to_answer": guidance.get("how_to_answer") or "Answer in plain language with the most concrete facts you know right now.",
+            "review_focus": focus_gap,
+        }
+
+    def _build_intake_chat_payload(
+        self,
+        state: Dict[str, Any],
+        *,
+        accepted_answer: Optional[Dict[str, Any]] = None,
+        requested_question_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        answers = state.get("intake_answers") or {}
+        review = self._build_review(state)
+        questions = self._build_question_status(answers)
+        active_question = self._question_by_id(requested_question_id) if requested_question_id else self._next_question(answers)
+        answered_count = len([item for item in questions if item.get("is_answered")])
+        total_questions = len(questions)
+        if active_question:
+            lead_in = "Let's start with the basics." if answered_count == 0 else "I have that. Next:" if accepted_answer else "Next question:"
+            message = f"{lead_in} {active_question['prompt']}"
+            explanation = self._build_intake_chat_explanation(active_question, state)
+        else:
+            message = (
+                "Intake complete. I have the core complaint facts. Next, review the synopsis, add corroborating evidence, "
+                "and use the mediator follow-up flow to tighten proof gaps."
+            )
+            explanation = {
+                "question_id": None,
+                "why_this_matters": "The intake record is complete enough to hand off into evidence collection and complaint drafting.",
+                "how_to_answer": "No further intake answer is required right now.",
+                "review_focus": "Shift attention to corroborating documents, witness testimony, and legal support.",
+            }
+        return {
+            "user_id": str(state.get("user_id") or DEFAULT_USER_ID),
+            "message": message,
+            "inquiry": {
+                "question_id": active_question["id"],
+                "label": active_question["label"],
+                "prompt": active_question["prompt"],
+                "placeholder": active_question.get("placeholder") or "",
+            }
+            if active_question
+            else None,
+            "explanation": explanation,
+            "accepted_answer": deepcopy(accepted_answer) if accepted_answer else None,
+            "questions": questions,
+            "next_question": self._next_question(answers),
+            "review": review,
+            "case_synopsis": self._build_case_synopsis(state),
+            "session": deepcopy(state),
+            "conversation_state": {
+                "answered_question_count": answered_count,
+                "total_question_count": total_questions,
+                "is_complete": active_question is None,
+                "remaining_question_ids": [item["id"] for item in _INTAKE_QUESTIONS if not str(answers.get(item["id"]) or "").strip()],
+            },
+        }
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
         answers = state.get("intake_answers") or {}
@@ -3684,6 +3802,40 @@ class ComplaintWorkspaceService:
         self._save_state(state)
         return self.get_session(str(state.get("user_id")))
 
+    def run_intake_chat_turn(
+        self,
+        user_id: Optional[str],
+        *,
+        message: Optional[str] = None,
+        question_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        target_question = self._question_by_id(question_id) if question_id else self._next_question(state.get("intake_answers") or {})
+        if question_id and target_question is None:
+            raise ValueError(f"Unknown intake question_id: {question_id}")
+
+        accepted_answer: Optional[Dict[str, Any]] = None
+        normalized_message = str(message or "").strip()
+        if normalized_message:
+            if target_question is None:
+                raise ValueError("The intake flow is already complete for this session.")
+            answer_map = state.setdefault("intake_answers", {})
+            history = state.setdefault("intake_history", [])
+            answer_map[target_question["id"]] = normalized_message
+            accepted_answer = {
+                "question_id": target_question["id"],
+                "answer": normalized_message,
+                "captured_at": _utc_now(),
+            }
+            history.append(deepcopy(accepted_answer))
+
+        self._save_state(state)
+        return self._build_intake_chat_payload(
+            state,
+            accepted_answer=accepted_answer,
+            requested_question_id=question_id if accepted_answer is None else None,
+        )
+
     def save_evidence(
         self,
         user_id: Optional[str],
@@ -3971,6 +4123,7 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.list_claim_elements", "description": "List the tracked claim elements used for evidence and review."},
                 {"name": "complaint.start_session", "description": "Load or initialize a complaint workspace session."},
                 {"name": "complaint.submit_intake", "description": "Save complaint intake answers."},
+                {"name": "complaint.run_intake_chat_turn", "description": "Advance the shared mediator-style intake chat one turn and persist the captured answer."},
                 {"name": "complaint.save_evidence", "description": "Save testimony or document evidence to the workspace."},
                 {"name": "complaint.import_gmail_evidence", "description": "Import matching Gmail messages and attachments into the complaint evidence workspace."},
                 {"name": "complaint.run_gmail_duckdb_pipeline", "description": "Run a checkpointed Gmail-to-DuckDB pipeline across many mailbox windows and optional BM25 search."},
@@ -4015,6 +4168,12 @@ class ComplaintWorkspaceService:
             return self.get_session(args.get("user_id"))
         if tool_name == "complaint.submit_intake":
             return self.submit_intake_answers(args.get("user_id"), args.get("answers") or {})
+        if tool_name == "complaint.run_intake_chat_turn":
+            return self.run_intake_chat_turn(
+                args.get("user_id"),
+                message=args.get("message"),
+                question_id=args.get("question_id"),
+            )
         if tool_name == "complaint.save_evidence":
             return self.save_evidence(
                 args.get("user_id"),

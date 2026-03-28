@@ -1,4 +1,5 @@
 {
+  "case_synopsis": "",
   "claim_type": "retaliation",
   "created_at": "2026-03-23T01:53:41.551856+00:00",
   "draft": null,
@@ -6,8 +7,25 @@
     "documents": [],
     "testimony": []
   },
-  "intake_answers": {},
-  "intake_history": [],
-  "updated_at": "2026-03-23T04:35:09.185283+00:00",
+  "intake_answers": {
+    "opposing_party": "Housing Authority of Clackamas County, and Quantum Residential",
+    "party_name": "Benjamin Barber and Jane Cortez"
+  },
+  "intake_history": [
+    {
+      "answer": "Benjamin Barber and Jane Cortez",
+      "captured_at": "2026-03-28T17:42:58.263205+00:00",
+      "question_id": "party_name"
+    },
+    {
+      "answer": "Housing Authority of Clackamas County, and Quantum Residential",
+      "captured_at": "2026-03-28T17:42:58.263218+00:00",
+      "question_id": "opposing_party"
+    }
+  ],
+  "latest_export_critic": null,
+  "latest_packet_export": null,
+  "ui_readiness": null,
+  "updated_at": "2026-03-28T17:44:04.948511+00:00",
   "user_id": "did:key:3f9542d258f6ccddf8e318787f6f485911da0f70eddfafca5a8467c53f208c1b"
 }

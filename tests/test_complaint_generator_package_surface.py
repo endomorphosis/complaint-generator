@@ -54,6 +54,7 @@ from complaint_generator import (
     optimize_ui,
     reset_session,
     review_case,
+    run_intake_chat_turn,
     run_gmail_duckdb_pipeline,
     run_iterative_ui_ux_workflow,
     run_playwright_screenshot_audit,
@@ -159,6 +160,7 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(list_intake_questions)
     assert callable(list_claim_elements)
     assert callable(submit_intake_answers)
+    assert callable(run_intake_chat_turn)
     assert callable(save_evidence)
     assert callable(review_case)
     assert callable(run_gmail_duckdb_pipeline)
@@ -217,6 +219,10 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
         service=service,
     )
     assert intake_payload["session"]["intake_answers"]["party_name"] == "Jordan Example"
+
+    chat_turn_payload = run_intake_chat_turn("package-wrapper-user", service=service)
+    assert chat_turn_payload["inquiry"]["question_id"] == "court_header"
+    assert chat_turn_payload["conversation_state"]["is_complete"] is False
 
     evidence_payload = save_evidence(
         "package-wrapper-user",

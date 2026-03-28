@@ -76,6 +76,21 @@ def submit_intake_answers(
     return _resolve_service(service, root_dir=root_dir).submit_intake_answers(user_id, answers)
 
 
+def run_intake_chat_turn(
+    user_id: Optional[str],
+    *,
+    message: Optional[str] = None,
+    question_id: Optional[str] = None,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).run_intake_chat_turn(
+        user_id,
+        message=message,
+        question_id=question_id,
+    )
+
+
 def save_evidence(
     user_id: Optional[str],
     *,
@@ -639,6 +654,7 @@ __all__ = [
     "reset_session",
     "review_ui",
     "review_case",
+    "run_intake_chat_turn",
     "run_gmail_duckdb_pipeline",
     "run_browser_audit",
     "run_closed_loop_ui_ux_improvement",

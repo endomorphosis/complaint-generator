@@ -67,6 +67,48 @@ def answer(user_id: str = "demo-user", question_id: str = "", answer_text: str =
     _print(service.submit_intake_answers(user_id, {question_id: answer_text}))
 
 
+@app.command("chat-turn")
+def chat_turn(
+    user_id: str = "demo-user",
+    message: Optional[str] = None,
+    question_id: Optional[str] = None,
+) -> None:
+    _print(
+        service.run_intake_chat_turn(
+            user_id,
+            message=message,
+            question_id=question_id,
+        )
+    )
+
+
+@app.command("chat")
+def chat(user_id: str = "demo-user", max_turns: int = 0) -> None:
+    payload = service.run_intake_chat_turn(user_id)
+    accepted_turns = 0
+
+    while True:
+        typer.echo(str(payload.get("message") or "").strip())
+        inquiry = dict(payload.get("inquiry") or {})
+        if not inquiry:
+            break
+        if max_turns > 0 and accepted_turns >= max_turns:
+            typer.echo("Chat paused. Resume with the same user ID to continue the saved intake.")
+            break
+        answer_text = input("> ").strip()
+        if not answer_text:
+            typer.echo("Please enter a response or stop the command and resume later with the same user ID.")
+            continue
+        payload = service.run_intake_chat_turn(
+            user_id,
+            message=answer_text,
+            question_id=str(inquiry.get("question_id") or "") or None,
+        )
+        accepted_turns += 1
+
+    typer.echo(f"Current synopsis: {str(payload.get('case_synopsis') or '').strip() or 'No synopsis recorded yet.'}")
+
+
 @app.command("add-evidence")
 def add_evidence(
     user_id: str = "demo-user",

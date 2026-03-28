@@ -16,6 +16,7 @@ from complaint_generator import (
     handle_jsonrpc_message,
     import_gmail_evidence,
     import_local_evidence,
+    run_intake_chat_turn,
     run_gmail_duckdb_pipeline,
     run_main,
     search_email_duckdb_corpus,
@@ -91,6 +92,7 @@ def test_package_exports_expose_workspace_review_and_entrypoint_helpers():
         "importLocalEvidence",
         "getProviderDiagnostics",
         "getToolingContract",
+        "runIntakeChatTurn",
         "updateClaimType",
         "_extractToolDiagnostics",
         "_buildToolDiagnosticSummary",
@@ -126,6 +128,18 @@ def test_workspace_cli_is_exposed_through_package_entrypoint(monkeypatch, tmp_pa
     payload = json.loads(result.stdout)
     assert payload["session"]["user_id"] == "pkg-user"
     assert payload["session"]["intake_answers"]["protected_activity"] == "Reported retaliation to HR"
+
+
+def test_package_exposes_shared_intake_chat_turn_wrapper(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-chat-sessions")
+
+    opening = run_intake_chat_turn("pkg-chat-user", service=service)
+    assert opening["inquiry"]["question_id"] == "party_name"
+    assert opening["accepted_answer"] is None
+
+    follow_up = run_intake_chat_turn("pkg-chat-user", message="Jordan Example", service=service)
+    assert follow_up["accepted_answer"]["question_id"] == "party_name"
+    assert follow_up["next_question"]["id"] == "opposing_party"
 
 
 def test_stdio_mcp_server_responds_with_initialize_and_tool_payload(monkeypatch, tmp_path):

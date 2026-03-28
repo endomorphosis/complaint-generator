@@ -7,6 +7,7 @@ from lib.log import make_logger
 from mediator.exceptions import UserPresentableException
 from datetime import datetime
 from glob import glob
+from uuid import uuid4
 
 log = make_logger('cli')
 
@@ -14,6 +15,7 @@ log = make_logger('cli')
 class CLI:
 	def __init__(self, mediator):
 		self.mediator = mediator
+		self._temporary_session_announced = False
 
 		log.info('created CLI app')
 
@@ -30,18 +32,19 @@ class CLI:
 
 	def loop(self):
 		while True:
-			
-			if self.mediator.state.hashed_username is not None and self.mediator.state.hashed_password is not None:
-				profile = self.mediator.state.load_profile(self, {"hashed_username": self.mediator.state.hashed_username, "hashed_password": self.mediator.state.hashed_password})
+			request_results = self._ensure_session_identity()
+			if self._using_temporary_session():
+				profile = {"data": {}}
 			else:
-				if self.mediator.state.username is None:	
-					self.mediator.state.username = input('Username:\n> ')
-			
-				if self.mediator.state.password is None:
-					self.mediator.state.password = input('Password:\n> ')
-				profile = self.mediator.state.load_profile(self, {"username": self.mediator.state.username, "password": self.mediator.state.password})
+				try:
+					profile = self.mediator.state.load_profile({"results": request_results})
+				except Exception as exception:
+					self.print_error('profile load failed, continuing with a local-only session: %s' % exception)
+					profile = {"data": {}}
+			if not isinstance(profile, dict):
+				profile = {"data": {}}
 
-			last_question = self.mediator.state.last_question
+			last_question = self._resolve_prompt_text()
 
 			text = input(last_question + '> ')
 			self.mediator.state.answered_questions["last_question"] = text
@@ -51,13 +54,65 @@ class CLI:
 			elif text[0] != '!':
 				self.feed(text)
 			else:
-				self.interpret_command(text[len(last_question + '> '):])
+				self.interpret_command(text[1:])
 
-			self.mediator.state.last_question.pop(0)
-			self.mediator.state.store_profile(self, profile)
+			if isinstance(self.mediator.state.last_question, list) and self.mediator.state.last_question:
+				self.mediator.state.last_question.pop(0)
+			if not self._using_temporary_session():
+				try:
+					self.mediator.state.store_profile({"results": {
+						**request_results,
+						"data": profile.get("data", {}) if isinstance(profile, dict) else {},
+					}})
+				except Exception as exception:
+					self.print_error('profile save failed, continuing with a local-only session: %s' % exception)
+
+	def _ensure_session_identity(self):
+		if self.mediator.state.hashed_username is not None and self.mediator.state.hashed_password is not None:
+			return {
+				"hashed_username": self.mediator.state.hashed_username,
+				"hashed_password": self.mediator.state.hashed_password,
+			}
+		if self.mediator.state.username is None or self.mediator.state.password is None:
+			temporary_id = f"temporary-{uuid4().hex[:12]}"
+			self.mediator.state.username = temporary_id
+			self.mediator.state.password = temporary_id
+			if not self._temporary_session_announced:
+				print('Using a temporary local session. No username or password is required.')
+				self._temporary_session_announced = True
+		return {
+			"username": self.mediator.state.username,
+			"password": self.mediator.state.password,
+		}
+
+	def _using_temporary_session(self):
+		username = str(self.mediator.state.username or '')
+		password = str(self.mediator.state.password or '')
+		return username.startswith('temporary-') and password == username
+
+	def _resolve_prompt_text(self):
+		last_question = self.mediator.state.last_question
+		if isinstance(last_question, list) and last_question:
+			return str(last_question[0] or '').strip() or 'Response'
+		if isinstance(last_question, str) and last_question.strip():
+			return last_question.strip()
+		payload_getter = getattr(self.mediator, 'get_current_inquiry_payload', None)
+		if callable(payload_getter):
+			try:
+				payload = payload_getter() or {}
+				inquiry = payload.get('inquiry') or {}
+				question = str(inquiry.get('question') or payload.get('question') or '').strip()
+				if question:
+					return question
+			except Exception:
+				pass
+		return 'Response'
 
 	def feed(self, text=None):
 		try:
+			if text is not None:
+				print('\033[96m%s\033[0m' % f'You: {text}')
+			print('\033[93m%s\033[0m' % 'Mediator is thinking...')
 			response = self.mediator.io(text)
 			self.print_response(response)
 			payload_getter = getattr(self.mediator, 'get_current_inquiry_payload', None)
@@ -981,6 +1036,7 @@ class CLI:
 
 
 	def print_response(self, text):
+		print('\033[92m%s\033[0m' % 'Mediator response:')
 		print('\033[1m%s\033[0m' % text)
 
 	def print_error(self, text):
