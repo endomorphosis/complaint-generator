@@ -71,7 +71,7 @@
         }
     </style>
     <script>
-        hostname = "localhost:19000";
+        hostname = window.location.host;
 
         function document_print(window) {
             $("input").css("border", "none");

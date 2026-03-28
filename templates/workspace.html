@@ -21,10 +21,15 @@
             --warn: #b45309;
             --shadow: 0 20px 50px rgba(24, 34, 41, 0.12);
             --shadow-strong: 0 28px 64px rgba(24, 34, 41, 0.16);
+            --workspace-sticky-interaction-offset: 460px;
         }
 
         * {
             box-sizing: border-box;
+        }
+
+        html {
+            scroll-padding-top: 320px;
         }
 
         body {
@@ -34,12 +39,8 @@
                 radial-gradient(circle at top left, rgba(141, 61, 23, 0.16), transparent 26%),
                 radial-gradient(circle at 85% 0%, rgba(241, 204, 169, 0.72), transparent 22%),
                 linear-gradient(180deg, var(--bg-deep) 0%, var(--bg) 100%);
-            html {
-                scroll-padding-top: 320px;
-            }
             font-family: "Public Sans", "Segoe UI", sans-serif;
         }
-            --workspace-sticky-interaction-offset: 460px;
 
         .shell {
             max-width: 1440px;
