@@ -198,6 +198,12 @@ class CLI:
 				)
 			)
 			sections.append(
+				self._format_search_warning_summary(
+					'follow-up plan legal retrieval warnings:',
+					follow_up_plan_summary,
+				)
+			)
+			sections.append(
 				self._format_temporal_follow_up_summary(
 					'follow-up plan chronology summary:',
 					follow_up_plan_summary,
@@ -214,6 +220,12 @@ class CLI:
 			sections.append(
 				self._format_authority_search_history_summary(
 					'follow-up history authority search summary:',
+					follow_up_history_summary,
+				)
+			)
+			sections.append(
+				self._format_search_warning_summary(
+					'follow-up history legal retrieval warnings:',
 					follow_up_history_summary,
 				)
 			)
@@ -492,6 +504,42 @@ class CLI:
 				lines.append(f'  source_context: {source_context_summary}')
 		return '' if len(lines) == 1 else '\n'.join(lines)
 
+	def _format_search_warning_summary(self, title, follow_up_summary):
+		lines = [title]
+		for claim_type in sorted(follow_up_summary.keys()):
+			summary = follow_up_summary.get(claim_type, {})
+			if not isinstance(summary, dict):
+				continue
+			warning_count = int(summary.get('search_warning_count', 0) or 0)
+			warning_summary = summary.get('search_warning_summary', []) if isinstance(summary.get('search_warning_summary'), list) else []
+			warning_code_counts = summary.get('warning_code_counts', {}) if isinstance(summary.get('warning_code_counts'), dict) else {}
+			warning_family_counts = summary.get('warning_family_counts', {}) if isinstance(summary.get('warning_family_counts'), dict) else {}
+			hf_dataset_id_counts = summary.get('hf_dataset_id_counts', {}) if isinstance(summary.get('hf_dataset_id_counts'), dict) else {}
+			if warning_count <= 0 or not warning_summary:
+				continue
+			lines.append(f'- {claim_type}: warnings={warning_count}')
+			if warning_family_counts:
+				family_labels = self._format_cli_count_labels(warning_family_counts)
+				lines.append(f'  warning_families: {family_labels}')
+			if warning_code_counts:
+				warning_labels = self._format_cli_count_labels(warning_code_counts)
+				lines.append(f'  warning_codes: {warning_labels}')
+			if hf_dataset_id_counts:
+				dataset_labels = ', '.join(
+					f"{dataset_id}={count}" for dataset_id, count in sorted(hf_dataset_id_counts.items())
+				)
+				lines.append(f'  hf_datasets: {dataset_labels}')
+			primary_warning = warning_summary[0] if warning_summary else {}
+			warning_message = str(primary_warning.get('warning_message') or '').strip()
+			warning_code = str(primary_warning.get('warning_code') or '').strip()
+			warning_family = self._humanize_cli_label(primary_warning.get('family')) or 'Unknown'
+			if warning_message:
+				message_prefix = f'{warning_family}'
+				if warning_code:
+					message_prefix += f' [{warning_code}]'
+				lines.append(f'  latest_warning: {message_prefix} {warning_message}')
+		return '' if len(lines) == 1 else '\n'.join(lines)
+
 	def _format_temporal_follow_up_summary(self, title, follow_up_summary):
 		lines = [title]
 		for claim_type in sorted(follow_up_summary.keys()):
@@ -671,6 +719,12 @@ class CLI:
 				)
 			)
 			sections.append(
+				self._format_search_warning_summary(
+					'follow-up execution legal retrieval warnings:',
+					follow_up_execution_summary,
+				)
+			)
+			sections.append(
 				self._format_temporal_follow_up_summary(
 					'follow-up execution chronology summary:',
 					follow_up_execution_summary,
@@ -696,6 +750,12 @@ class CLI:
 			sections.append(
 				self._format_authority_search_history_summary(
 					'follow-up history authority search summary:',
+					post_execution_history_summary,
+				)
+			)
+			sections.append(
+				self._format_search_warning_summary(
+					'follow-up history legal retrieval warnings:',
 					post_execution_history_summary,
 				)
 			)

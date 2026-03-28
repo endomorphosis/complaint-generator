@@ -4693,6 +4693,12 @@ class Mediator:
 							search_all=True,
 							authority_families=program_authority_families or None,
 						)
+						search_result_counts = {
+							key: len(value)
+							for key, value in search_results.items()
+							if isinstance(value, list)
+						}
+						search_warning_summary = list(search_results.get('search_warning_summary') or [])
 						authority_result_count = self._count_authority_follow_up_results(search_results)
 						stored_counts = self.store_legal_authorities(
 							search_results,
@@ -4708,7 +4714,8 @@ class Mediator:
 							'zero_result': authority_result_count <= 0,
 							'metadata': self._build_follow_up_record_metadata(
 								task,
-								search_results={key: len(value) for key, value in search_results.items()},
+								search_results=search_result_counts,
+								search_warning_summary=search_warning_summary,
 								query_variants=task.get('queries', {}).get('authority', []),
 								task_query=task_query_text,
 								effective_query=query_text,
@@ -4740,7 +4747,9 @@ class Mediator:
 							'selected_search_program_families': list(program_authority_families),
 							'search_program_summary': task.get('authority_search_program_summary', {}),
 							'search_programs': list(task.get('authority_search_programs') or []),
-							'search_results': {key: len(value) for key, value in search_results.items()},
+							'search_results': search_result_counts,
+							'search_diagnostics': dict(search_results.get('search_diagnostics') or {}),
+							'search_warning_summary': search_warning_summary,
 							'stored_counts': stored_counts,
 						}
 				if lane_execution_records:
