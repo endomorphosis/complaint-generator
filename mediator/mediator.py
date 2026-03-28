@@ -2487,10 +2487,34 @@ class Mediator:
 		Returns:
 			Dictionary with search results by source type
 		"""
+		def _build_warning_summary(search_diagnostics):
+			if not isinstance(search_diagnostics, dict):
+				return []
+			summary = []
+			for family, payload in search_diagnostics.items():
+				if family == 'source_availability' or not isinstance(payload, dict):
+					continue
+				warning_code = str(payload.get('warning_code') or '').strip()
+				warning_message = str(payload.get('warning_message') or '').strip()
+				if not warning_code or not warning_message:
+					continue
+				summary.append(
+					{
+						'family': family,
+						'warning_code': warning_code,
+						'warning_message': warning_message,
+						'state_code': str(payload.get('state_code') or '').strip(),
+						'hf_dataset_id': str(payload.get('hf_dataset_id') or '').strip(),
+					}
+				)
+			return summary
+
 		if search_all:
-			return self.legal_authority_search.search_all_sources(
+			results = self.legal_authority_search.search_all_sources(
 				query, claim_type, jurisdiction, authority_families=authority_families
 			)
+			results['search_warning_summary'] = _build_warning_summary(results.get('search_diagnostics'))
+			return results
 		else:
 			# Default to US Code search
 			results = {
@@ -2505,6 +2529,7 @@ class Mediator:
 				query=query,
 				state=jurisdiction,
 			)
+			results['search_warning_summary'] = _build_warning_summary(results.get('search_diagnostics'))
 			return results
 	
 	def store_legal_authorities(self, authorities: Dict[str, List[Dict[str, Any]]], 
@@ -5148,6 +5173,7 @@ class Mediator:
 			'claim_types': classification.get('claim_types', []),
 			'authorities_found': {},
 			'authorities_diagnostics': {},
+			'authorities_warning_summary': {},
 			'authorities_stored': {},
 			'support_summary': {},
 			'claim_coverage_matrix': {},
@@ -5191,6 +5217,9 @@ class Mediator:
 			}
 			results['authorities_diagnostics'][claim_type] = dict(
 				search_results.get('search_diagnostics') or {}
+			)
+			results['authorities_warning_summary'][claim_type] = list(
+				search_results.get('search_warning_summary') or []
 			)
 			results['authorities_stored'][claim_type] = stored_counts
 			support_summary = self.summarize_claim_support(user_id, claim_type)

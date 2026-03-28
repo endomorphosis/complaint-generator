@@ -1577,6 +1577,8 @@ class TestMediatorLegalAuthorityIntegration:
                 assert 'state_statutes' in results
                 assert 'administrative_rules' in results
                 assert 'search_diagnostics' in results
+                assert 'search_warning_summary' in results
+                assert results['search_warning_summary'] == []
                 
                 # Store
                 stored = mediator.store_legal_authorities(results, claim_type='civil rights')
@@ -1735,6 +1737,8 @@ class TestMediatorLegalAuthorityIntegration:
                 assert auto_results['intake_summary_handoff']['ready_to_advance'] == mediator.get_three_phase_status()['intake_readiness']['ready_to_advance']
                 assert auto_results['intake_summary_handoff']['complainant_summary_confirmation']['confirmed'] is True
                 assert 'civil rights' in auto_results['authorities_diagnostics']
+                assert 'civil rights' in auto_results['authorities_warning_summary']
+                assert auto_results['authorities_warning_summary']['civil rights'] == []
                 assert auto_results['authorities_stored']['civil rights']['total_records'] == 3
                 assert auto_results['authorities_stored']['civil rights']['total_new'] == 0
                 assert auto_results['authorities_stored']['civil rights']['total_reused'] == 3
