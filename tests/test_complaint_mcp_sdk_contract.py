@@ -17,5 +17,7 @@ def test_browser_sdk_surfaces_legal_search_diagnostics_contract():
         assert "authorities_diagnostics" in content
 
     assert "Latest retrieval warning:" in shell_js
+    assert "Retrieval warning details:" in shell_js
     assert "diagnostic_summary" in shell_js
     assert "latestToolDiagnosticSummary" in shell_js
+    assert "formatToolDiagnosticMeta" in shell_js

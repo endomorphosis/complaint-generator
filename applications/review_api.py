@@ -19,7 +19,7 @@ from claim_support_review import (
 from .document_api import attach_document_routes
 
 try:
-    import multipart  # type: ignore  # noqa: F401
+    import python_multipart  # type: ignore  # noqa: F401
 
     _MULTIPART_AVAILABLE = True
 except Exception:

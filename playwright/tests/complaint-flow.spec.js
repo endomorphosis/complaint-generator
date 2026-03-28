@@ -2,7 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 
 const { test, expect } = require('@playwright/test');
-const { installCommonMocks, documentGenerationResponse } = require('./helpers/fixtures');
+const { installCommonMocks, documentGenerationResponse, reviewPayload } = require('./helpers/fixtures');
 
 async function waitForWorkspaceReady(page, { requireIntakeVisible = true } = {}) {
   await expect(page.locator('body')).toContainText(/Unified Complaint Workspace/i, { timeout: 30000 });
@@ -231,6 +231,182 @@ test.describe('complaint generation workflow', () => {
     expect(recorder.saveUploadedDocumentRequest.filename).toBe('review-upload-evidence.txt');
     expect(recorder.saveUploadedDocumentRequest.bodyText).toContain('retaliation:2');
     expect(recorder.saveUploadedDocumentRequest.bodyText).toContain('Uploaded termination notice');
+  });
+
+  test('review dashboard surfaces legal retrieval warnings in signals and execution feedback', async ({ page }) => {
+    const recorder = {};
+    await installCommonMocks(page, recorder);
+
+    const warningEntries = [
+      {
+        family: 'state_statutes',
+        warning_code: 'hf_dataset_files_missing',
+        warning_message: 'Dataset missing Oregon parquet coverage.',
+        state_code: 'OR',
+        hf_dataset_id: 'justicedao/ipfs_state_laws',
+      },
+      {
+        family: 'administrative_rules',
+        warning_code: 'hf_state_rows_missing',
+        warning_message: 'Dataset exposes no Oregon admin rows.',
+        state_code: 'OR',
+        hf_dataset_id: 'justicedao/ipfs_state_admin_rules',
+      },
+    ];
+    const reviewWithWarnings = JSON.parse(JSON.stringify(reviewPayload));
+    reviewWithWarnings.follow_up_plan_summary.retaliation = {
+      ...reviewWithWarnings.follow_up_plan_summary.retaliation,
+      search_warning_count: 2,
+      warning_family_counts: {
+        state_statutes: 1,
+        administrative_rules: 1,
+      },
+      warning_code_counts: {
+        hf_dataset_files_missing: 1,
+        hf_state_rows_missing: 1,
+      },
+      hf_dataset_id_counts: {
+        'justicedao/ipfs_state_laws': 1,
+        'justicedao/ipfs_state_admin_rules': 1,
+      },
+      search_warning_summary: warningEntries,
+    };
+    reviewWithWarnings.follow_up_history_summary.retaliation = {
+      ...reviewWithWarnings.follow_up_history_summary.retaliation,
+      search_warning_count: 1,
+      warning_family_counts: {
+        state_statutes: 1,
+      },
+      warning_code_counts: {
+        hf_dataset_files_missing: 1,
+      },
+      hf_dataset_id_counts: {
+        'justicedao/ipfs_state_laws': 1,
+      },
+      search_warning_summary: [warningEntries[0]],
+    };
+
+    await page.route('**/api/claim-support/review', async (route) => {
+      recorder.reviewRequest = route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(JSON.parse(JSON.stringify(reviewWithWarnings))),
+      });
+    });
+
+    await page.route('**/api/claim-support/execute-follow-up', async (route) => {
+      recorder.executeRequest = route.request().postDataJSON();
+      const postExecutionReview = JSON.parse(JSON.stringify(reviewWithWarnings));
+      postExecutionReview.follow_up_history_summary.retaliation = {
+        ...postExecutionReview.follow_up_history_summary.retaliation,
+        search_warning_count: 1,
+        warning_family_counts: {
+          state_statutes: 1,
+        },
+        warning_code_counts: {
+          hf_dataset_files_missing: 1,
+        },
+        hf_dataset_id_counts: {
+          'justicedao/ipfs_state_laws': 1,
+        },
+        search_warning_summary: [warningEntries[0]],
+      };
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          execution_id: 8,
+          outcome_status: 'completed',
+          notes: 'Follow-up execution completed.',
+          follow_up_execution_summary: {
+            retaliation: {
+              executed_task_count: 1,
+              skipped_task_count: 0,
+              suppressed_task_count: 0,
+              cooldown_skipped_task_count: 0,
+              manual_review_task_count: 0,
+              contradiction_task_count: 0,
+              reasoning_gap_task_count: 0,
+              temporal_gap_task_count: 0,
+              fact_gap_task_count: 0,
+              adverse_authority_task_count: 0,
+              parse_quality_task_count: 0,
+              quality_gap_targeted_task_count: 0,
+              temporal_gap_targeted_task_count: 0,
+              semantic_cluster_count: 0,
+              semantic_duplicate_count: 0,
+              support_by_kind: {},
+              support_by_source: {},
+              source_family_counts: {},
+              record_scope_counts: {},
+              artifact_family_counts: {},
+              corpus_family_counts: {},
+              content_origin_counts: {},
+              primary_missing_fact_counts: {},
+              missing_fact_bundle_counts: {},
+              satisfied_fact_bundle_counts: {},
+              follow_up_focus_counts: {},
+              query_strategy_counts: {},
+              proof_decision_source_counts: {},
+              resolution_status_counts: {},
+              temporal_resolution_status_counts: {},
+              resolution_applied_counts: {},
+              temporal_rule_status_counts: {},
+              temporal_rule_blocking_reason_counts: {},
+              adaptive_retry_task_count: 0,
+              priority_penalized_task_count: 0,
+              adaptive_query_strategy_counts: {},
+              adaptive_retry_reason_counts: {},
+              last_adaptive_retry: null,
+              authority_search_program_task_count: 0,
+              authority_search_program_count: 0,
+              authority_search_program_type_counts: {},
+              authority_search_intent_counts: {},
+              primary_authority_program_type_counts: {},
+              primary_authority_program_bias_counts: {},
+              primary_authority_program_rule_bias_counts: {},
+              rule_candidate_backed_task_count: 0,
+              total_rule_candidate_count: 0,
+              matched_claim_element_rule_count: 0,
+              rule_candidate_type_counts: {},
+              search_warning_count: 2,
+              warning_family_counts: {
+                state_statutes: 1,
+                administrative_rules: 1,
+              },
+              warning_code_counts: {
+                hf_dataset_files_missing: 1,
+                hf_state_rows_missing: 1,
+              },
+              hf_dataset_id_counts: {
+                'justicedao/ipfs_state_laws': 1,
+                'justicedao/ipfs_state_admin_rules': 1,
+              },
+              search_warning_summary: warningEntries,
+            },
+          },
+          post_execution_review: postExecutionReview,
+        }),
+      });
+    });
+
+    await page.goto('/claim-support-review?claim_type=retaliation&user_id=demo-user&section=claims_for_relief');
+    await page.getByRole('button', { name: 'Load Review' }).click();
+
+    await expect(page.locator('#signal-legal-retrieval-warnings')).toHaveText('3');
+    await expect(page.locator('#signal-legal-retrieval-warning-chips')).toContainText(/Plan Hf Dataset Files Missing/i);
+    await expect(page.locator('#signal-legal-retrieval-warning-chips')).toContainText(/History Hf Dataset Files Missing/i);
+    await expect(page.locator('#signal-legal-retrieval-warning-note')).toContainText(/dataset justicedao\/ipfs_state_laws/i);
+    await expect(page.locator('#signal-legal-retrieval-warning-note')).toContainText(/state OR/i);
+
+    await page.getByRole('button', { name: 'Execute Follow-Up' }).click();
+
+    await expect(page.locator('#execution-result-card')).toBeVisible();
+    await expect(page.locator('#execution-result-chips')).toContainText(/legal warnings 2/i);
+    await expect(page.locator('#execution-result-notes')).toContainText(/Latest legal retrieval warning:/i);
+    await expect(page.locator('#execution-result-notes')).toContainText(/dataset justicedao\/ipfs_state_laws/i);
+    expect(recorder.executeRequest.claim_type).toBe('retaliation');
   });
 
   test('user can go through intake questions and see them across chat, profile, and results surfaces', async ({ page }) => {

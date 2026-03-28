@@ -3621,7 +3621,8 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
     authority_search_program_metrics = _aggregate_authority_search_program_metrics(tasks)
     rule_candidate_metrics = _aggregate_rule_candidate_metrics(tasks)
     fact_targeting_metrics = _aggregate_fact_targeting_metrics(tasks)
-    return {
+    warning_metrics = _aggregate_search_warning_metrics(tasks)
+    summary = {
         "task_count": len(tasks),
         "blocked_task_count": claim_plan.get("blocked_task_count", 0),
         "graph_supported_task_count": len(
@@ -3751,6 +3752,9 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
         ],
         "recommended_actions": recommended_actions,
     }
+    if warning_metrics["search_warning_summary"]:
+        summary.update(warning_metrics)
+    return summary
 
 
 def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dict[str, Any]:

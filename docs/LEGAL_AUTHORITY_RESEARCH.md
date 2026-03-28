@@ -358,8 +358,9 @@ Per-claim results include:
 - `claim_contradiction_candidates[claim_type]`: heuristic contradiction candidates for operator review.
 - `claim_support_snapshots[claim_type]`: persisted snapshot ids and metadata for the stored gap and contradiction diagnostics.
 - `follow_up_plan[claim_type]`: next-step authority or evidence retrieval tasks derived from the current support gaps.
-- `follow_up_plan_summary[claim_type]`: compact task, suppression, authority-program, parse-remediation, chronology-follow-up, and graph-source-context counts for the queued follow-up work.
-- `follow_up_history[claim_type]` and `follow_up_history_summary[claim_type]`: persisted execution-ledger audit trail plus compact status, program-choice, retry, chronology-follow-up, and source-lineage counts for prior follow-up work.
+- `follow_up_plan_summary[claim_type]`: compact task, suppression, authority-program, parse-remediation, chronology-follow-up, graph-source-context, and optional legal-retrieval warning counts for the queued follow-up work.
+- `follow_up_history[claim_type]` and `follow_up_history_summary[claim_type]`: persisted execution-ledger audit trail plus compact status, program-choice, retry, chronology-follow-up, source-lineage, and optional legal-retrieval warning counts for prior follow-up work.
+- `authorities_warning_summary[claim_type]`: compact per-claim Hugging Face search warning entries with `family`, `warning_code`, `warning_message`, `state_code`, and `hf_dataset_id` when dataset coverage or state rows are missing.
 
 ## Advanced Usage
 

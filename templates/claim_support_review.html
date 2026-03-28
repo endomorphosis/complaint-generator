@@ -1031,6 +1031,12 @@
                             <span class="signal-number" id="signal-follow-up-source-context">0</span>
                             <div class="chip-row" id="signal-follow-up-source-context-chips"></div>
                         </div>
+                        <div class="signal-card">
+                            <span class="signal-label">Legal retrieval warnings</span>
+                            <span class="signal-number" id="signal-legal-retrieval-warnings">0</span>
+                            <div class="chip-row" id="signal-legal-retrieval-warning-chips"></div>
+                            <div class="packet-card-meta" id="signal-legal-retrieval-warning-note">No legal retrieval warnings recorded.</div>
+                        </div>
                     </div>
                 </div>
 
@@ -2295,6 +2301,68 @@
             container.innerHTML = entries.length
                 ? entries.map(([label, count]) => `<span class="chip">${label}: ${count}</span>`).join('')
                 : `<span class="chip">${emptyLabel}</span>`;
+        }
+
+        function normalizeSearchWarningEntries(value) {
+            return Array.isArray(value)
+                ? value.filter((entry) => entry && typeof entry === 'object')
+                : [];
+        }
+
+        function buildFollowUpWarningSignalState(planSummary, historySummary) {
+            const warningSignals = {};
+            const planWarningCount = Number((planSummary && planSummary.search_warning_count) || 0);
+            const historyWarningCount = Number((historySummary && historySummary.search_warning_count) || 0);
+            if (planWarningCount > 0) {
+                warningSignals['Plan warnings'] = planWarningCount;
+            }
+            if (historyWarningCount > 0) {
+                warningSignals['History warnings'] = historyWarningCount;
+            }
+            const planWarningCodes = (planSummary && typeof planSummary.warning_code_counts === 'object')
+                ? planSummary.warning_code_counts
+                : {};
+            const historyWarningCodes = (historySummary && typeof historySummary.warning_code_counts === 'object')
+                ? historySummary.warning_code_counts
+                : {};
+            Object.entries(planWarningCodes).forEach(([code, count]) => {
+                warningSignals[`Plan ${humanizeQueryValue(code)}`] = Number(count || 0);
+            });
+            Object.entries(historyWarningCodes).forEach(([code, count]) => {
+                warningSignals[`History ${humanizeQueryValue(code)}`] = Number(count || 0);
+            });
+            const historyWarnings = normalizeSearchWarningEntries(historySummary && historySummary.search_warning_summary);
+            const planWarnings = normalizeSearchWarningEntries(planSummary && planSummary.search_warning_summary);
+            const primaryWarning = historyWarnings[0] || planWarnings[0] || null;
+            const totalWarningCount = planWarningCount + historyWarningCount;
+            return {
+                totalWarningCount,
+                warningSignals,
+                primaryWarning,
+            };
+        }
+
+        function formatSearchWarningNote(primaryWarning) {
+            if (!primaryWarning || typeof primaryWarning !== 'object') {
+                return 'No legal retrieval warnings recorded.';
+            }
+            const family = humanizeQueryValue(primaryWarning.family || 'unknown');
+            const warningCode = String(primaryWarning.warning_code || '').trim();
+            const warningMessage = String(primaryWarning.warning_message || '').trim();
+            const stateCode = String(primaryWarning.state_code || '').trim();
+            const datasetId = String(primaryWarning.hf_dataset_id || '').trim();
+            const noteParts = [];
+            noteParts.push(`${family}${warningCode ? ` [${warningCode}]` : ''}`);
+            if (stateCode) {
+                noteParts.push(`state ${stateCode}`);
+            }
+            if (datasetId) {
+                noteParts.push(`dataset ${datasetId}`);
+            }
+            if (warningMessage) {
+                noteParts.push(warningMessage);
+            }
+            return noteParts.join(' · ');
         }
 
         function renderFormulaPreviewDetails(title, formulas, emptyLabel) {
@@ -4931,6 +4999,11 @@
             const resolutionStatusCounts = (executionSummary && executionSummary.resolution_status_counts) || {};
             const resolutionAppliedCounts = (executionSummary && executionSummary.resolution_applied_counts) || {};
             const taskCount = executionSummary ? Number(executionSummary.executed_task_count || 0) : 0;
+            const legalWarningCount = executionSummary ? Number(executionSummary.search_warning_count || 0) : 0;
+            const legalWarningSummary = executionSummary && Array.isArray(executionSummary.search_warning_summary)
+                ? executionSummary.search_warning_summary
+                : [];
+            const latestLegalWarning = legalWarningSummary[0] || null;
             const parseQualityTaskCount = qualitySummary ? Number(qualitySummary.parse_quality_task_count || 0) : 0;
             const status = qualitySummary ? (qualitySummary.quality_improvement_status || 'unknown') : 'unknown';
             const recommendedNextAction = qualitySummary ? (qualitySummary.recommended_next_action || '') : '';
@@ -4942,6 +5015,7 @@
             const chips = [];
             if (taskCount) chips.push(`<span class="chip">executed ${taskCount}</span>`);
             if (parseQualityTaskCount) chips.push(`<span class="chip">parse tasks ${parseQualityTaskCount}</span>`);
+            if (legalWarningCount) chips.push(`<span class="chip">legal warnings ${legalWarningCount}</span>`);
             chips.push(`<span class="chip">low-quality ${preLowQualityCount} → ${postLowQualityCount}</span>`);
             if (recommendedNextAction) chips.push(`<span class="chip">recommendation ${recommendedNextAction}</span>`);
             const handoffLabel = buildResolutionCountSummaryLabel('handoffs', resolutionStatusCounts, 2, { requireHandoff: true });
@@ -4973,6 +5047,9 @@
             if (handoffLabel || exhaustedLabel) {
                 notes = `${notes} ${[handoffLabel, exhaustedLabel].filter(Boolean).join(' · ')}.`;
             }
+            if (latestLegalWarning) {
+                notes = `${notes} Latest legal retrieval warning: ${formatSearchWarningNote(latestLegalWarning)}.`;
+            }
 
             card.hidden = false;
             card.classList.toggle('is-error', status === 'regressed');
@@ -4990,6 +5067,7 @@
             const historyNormalized = Object.values(historyResolutionCounts).reduce((total, value) => total + Number(value || 0), 0);
             const sourceContextCount = Object.values(sourceFamilyCounts).reduce((total, value) => total + Number(value || 0), 0);
             const sourceContextSignals = buildFollowUpSourceSignalCounts(planSummary);
+            const warningSignalState = buildFollowUpWarningSignalState(planSummary, historySummary);
             const parseQualityTaskCount = Number((planSummary && planSummary.parse_quality_task_count) || 0);
             const parseQualityTaskSignals = {};
             const temporalGapTaskCount = Number((planSummary && planSummary.temporal_gap_task_count) || 0);
@@ -5021,11 +5099,14 @@
             document.getElementById('signal-history-normalized').textContent = historyNormalized;
             document.getElementById('signal-parse-quality-tasks').textContent = parseQualityTaskCount;
             document.getElementById('signal-follow-up-source-context').textContent = sourceContextCount;
+            document.getElementById('signal-legal-retrieval-warnings').textContent = warningSignalState.totalWarningCount;
             renderSignalChips('signal-temporal-gap-task-chips', temporalGapSignals, 'No chronology follow-up tasks');
             renderSignalChips('signal-plan-normalized-chips', planResolutionCounts, 'No normalized plan tasks');
             renderSignalChips('signal-history-normalized-chips', historyResolutionCounts, 'No normalized history events');
             renderSignalChips('signal-parse-quality-task-chips', parseQualityTaskSignals, 'No parse remediation tasks');
             renderSignalChips('signal-follow-up-source-context-chips', sourceContextSignals, 'No graph-backed source context');
+            renderSignalChips('signal-legal-retrieval-warning-chips', warningSignalState.warningSignals, 'No legal retrieval warnings');
+            document.getElementById('signal-legal-retrieval-warning-note').textContent = formatSearchWarningNote(warningSignalState.primaryWarning);
         }
 
         function renderElements(elements) {

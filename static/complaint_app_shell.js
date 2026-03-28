@@ -185,6 +185,30 @@
         return summary || null;
     }
 
+    function formatToolDiagnosticMeta(primaryWarning) {
+        if (!primaryWarning || typeof primaryWarning !== 'object') {
+            return '';
+        }
+        const fragments = [];
+        const family = String(primaryWarning.family || '').trim();
+        const warningCode = String(primaryWarning.warning_code || '').trim();
+        const stateCode = String(primaryWarning.state_code || '').trim();
+        const datasetId = String(primaryWarning.hf_dataset_id || '').trim();
+        if (family) {
+            fragments.push('Family: ' + family);
+        }
+        if (warningCode) {
+            fragments.push('Code: ' + warningCode);
+        }
+        if (stateCode) {
+            fragments.push('State: ' + stateCode);
+        }
+        if (datasetId) {
+            fragments.push('Dataset: ' + datasetId);
+        }
+        return fragments.join(' | ');
+    }
+
     function readShellContext(state) {
         const params = new URLSearchParams(window.location.search);
         const sessionPayload = state && state.sessionPayload ? state.sessionPayload : {};
@@ -261,6 +285,7 @@
         const toolDiagnosticPrimary = toolDiagnosticSummary && toolDiagnosticSummary.primary_warning
             ? toolDiagnosticSummary.primary_warning
             : null;
+        const toolDiagnosticMeta = formatToolDiagnosticMeta(toolDiagnosticPrimary);
         const readinessTone = readiness && String(readiness.verdict || '').toLowerCase() === 'client-safe'
             ? ' is-good'
             : readiness
@@ -378,6 +403,7 @@
             '<div class="cg-app-shell__phase-note">' + safeText(lastToolCall && lastToolCall.finished_at ? ('Updated: ' + lastToolCall.finished_at) : 'Updated: waiting for the next shared SDK action.') + '</div>',
             (lastToolCall && lastToolCall.status ? '<div class="cg-app-shell__phase-note">Status: ' + safeText(lastToolCall.status, 'unknown') + (lastToolCall.error_message ? ' (' + safeText(lastToolCall.error_message, '') + ')' : '') + '</div>' : ''),
             (toolDiagnosticPrimary ? '<div class="cg-app-shell__phase-note">Latest retrieval warning: ' + safeText(toolDiagnosticPrimary.warning_message, '') + '</div>' : ''),
+            (toolDiagnosticMeta ? '<div class="cg-app-shell__phase-note">Retrieval warning details: ' + safeText(toolDiagnosticMeta, '') + '</div>' : ''),
             '</div>',
             '<div class="cg-app-shell__section-title">UI Readiness</div>',
             '<div class="cg-app-shell__readiness' + readinessTone + '" id="cg-app-shell-readiness">',

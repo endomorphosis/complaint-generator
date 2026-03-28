@@ -332,6 +332,9 @@ def test_claim_support_review_template_exists_and_targets_review_endpoints():
     assert "signal-supportive-authorities" in content
     assert "signal-adverse-authorities" in content
     assert "signal-follow-up-source-context" in content
+    assert "signal-legal-retrieval-warnings" in content
+    assert "signal-legal-retrieval-warning-chips" in content
+    assert "signal-legal-retrieval-warning-note" in content
     assert "execution-result-card" in content
     assert "parse_quality_recommendation" in content
     assert "authority_treatment_summary" in content
@@ -347,6 +350,14 @@ def test_claim_support_review_template_exists_and_targets_review_endpoints():
     assert "authority program ${task.authority_search_program_summary.primary_program_type}" in content
     assert "authority bias ${task.authority_search_program_summary.primary_program_bias}" in content
     assert "rule bias ${task.authority_search_program_summary.primary_program_rule_bias}" in content
+    assert "Legal retrieval warnings" in content
+    assert "Latest legal retrieval warning:" in content
+    assert "No legal retrieval warnings recorded." in content
+    assert "No legal retrieval warnings" in content
+    assert "buildFollowUpWarningSignalState" in content
+    assert "formatSearchWarningNote" in content
+    assert "Plan ${humanizeQueryValue(code)}" in content
+    assert "History ${humanizeQueryValue(code)}" in content
     assert "primary gap: ${entry.primary_missing_fact}" in content
     assert "covered facts: ${satisfiedFactBundle.length}" in content
     assert "History programs: ${selectedProgramTypes.map(([label, count]) => `${label}=${count}`).join(', ')}" in content
