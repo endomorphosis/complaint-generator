@@ -24,8 +24,12 @@ from integrations.ipfs_datasets.types import (
 )
 from integrations.ipfs_datasets.legal import (
     LEGAL_SCRAPERS_AVAILABLE,
+    LEGAL_SOURCE_AVAILABILITY,
+    get_last_legal_search_diagnostic,
     search_federal_register,
     search_recap_documents,
+    search_state_administrative_rules,
+    search_state_laws,
     search_us_code,
 )
 from claim_support_review import _merge_intake_summary_handoff_metadata
@@ -165,6 +169,12 @@ class LegalAuthoritySearchHook:
         if not LEGAL_SCRAPERS_AVAILABLE:
             self.mediator.log('legal_authority_warning',
                 message='Legal scrapers not fully available - some features may be limited')
+        elif not all(bool(value) for value in LEGAL_SOURCE_AVAILABILITY.values()):
+            self.mediator.log(
+                'legal_authority_warning',
+                message='Some legal scraper families are degraded',
+                source_availability=dict(LEGAL_SOURCE_AVAILABILITY),
+            )
         if not WEB_ARCHIVING_AVAILABLE:
             self.mediator.log('legal_authority_warning',
                 message='Web archiving not available - web search disabled')
@@ -182,6 +192,59 @@ class LegalAuthoritySearchHook:
                     message=f'Failed to initialize web archiving: {e}')
         else:
             self.web_search = None
+
+    def _log_hf_coverage_warning(
+        self,
+        *,
+        search_type: str,
+        query: str,
+        state: Optional[str],
+        results: List[Dict[str, Any]],
+        diagnostic_key: str,
+    ) -> None:
+        diagnostic = get_last_legal_search_diagnostic(diagnostic_key)
+        if not diagnostic or results:
+            return
+        warning_code = str(diagnostic.get('warning_code') or '').strip()
+        warning_message = str(diagnostic.get('warning_message') or '').strip()
+        if not warning_code or not warning_message:
+            return
+        self.mediator.log(
+            'legal_authority_warning',
+            message=warning_message,
+            warning_code=warning_code,
+            search_type=search_type,
+            query=query,
+            state=state,
+            search_diagnostic=diagnostic,
+        )
+
+    def _collect_search_diagnostics(
+        self,
+        *,
+        query: str,
+        state: Optional[str],
+    ) -> Dict[str, Any]:
+        diagnostics: Dict[str, Any] = {
+            'source_availability': dict(LEGAL_SOURCE_AVAILABILITY),
+        }
+
+        for bucket_name, search_key in (
+            ('state_statutes', 'search_state_laws'),
+            ('administrative_rules', 'search_state_administrative_rules'),
+        ):
+            diagnostic = get_last_legal_search_diagnostic(search_key)
+            if not diagnostic:
+                continue
+            if str(diagnostic.get('query') or '') != str(query or ''):
+                continue
+            diagnostic_state = str(diagnostic.get('state_code') or '').strip().upper()
+            requested_state = str(state or '').strip().upper()
+            if requested_state and diagnostic_state and diagnostic_state != requested_state:
+                continue
+            diagnostics[bucket_name] = diagnostic
+
+        return diagnostics
     
     def search_us_code(self, query: str, title: Optional[str] = None,
                       max_results: int = 10) -> List[Dict[str, Any]]:
@@ -269,6 +332,78 @@ class LegalAuthoritySearchHook:
         except Exception as e:
             self.mediator.log('legal_authority_search_error',
                 search_type='federal_register', error=str(e))
+            return []
+
+    def search_state_laws(self, query: str,
+                          state: Optional[str] = None,
+                          max_results: int = 10,
+                          allow_live_scrape_fallback: bool = False) -> List[Dict[str, Any]]:
+        """Search state statutory law via the ipfs legal adapter."""
+        if not LEGAL_SCRAPERS_AVAILABLE or search_state_laws is None:
+            self.mediator.log('legal_authority_unavailable',
+                search_type='state_law', query=query)
+            return []
+
+        try:
+            results = search_state_laws(
+                query=query,
+                state=state,
+                max_results=max_results,
+                allow_live_scrape_fallback=allow_live_scrape_fallback,
+            )
+
+            self.mediator.log('legal_authority_search',
+                search_type='state_law', query=query, state=state, found=len(results))
+
+            self._log_hf_coverage_warning(
+                search_type='state_law',
+                query=query,
+                state=state,
+                results=results,
+                diagnostic_key='search_state_laws',
+            )
+
+            return results
+
+        except Exception as e:
+            self.mediator.log('legal_authority_search_error',
+                search_type='state_law', error=str(e), state=state)
+            return []
+
+    def search_administrative_law(self, query: str,
+                                  state: Optional[str] = None,
+                                  max_results: int = 10,
+                                  allow_live_scrape_fallback: bool = False) -> List[Dict[str, Any]]:
+        """Search state administrative rules via the ipfs legal adapter."""
+        if not LEGAL_SCRAPERS_AVAILABLE or search_state_administrative_rules is None:
+            self.mediator.log('legal_authority_unavailable',
+                search_type='administrative_law', query=query)
+            return []
+
+        try:
+            results = search_state_administrative_rules(
+                query=query,
+                state=state,
+                max_results=max_results,
+                allow_live_scrape_fallback=allow_live_scrape_fallback,
+            )
+
+            self.mediator.log('legal_authority_search',
+                search_type='administrative_law', query=query, state=state, found=len(results))
+
+            self._log_hf_coverage_warning(
+                search_type='administrative_law',
+                query=query,
+                state=state,
+                results=results,
+                diagnostic_key='search_state_administrative_rules',
+            )
+
+            return results
+
+        except Exception as e:
+            self.mediator.log('legal_authority_search_error',
+                search_type='administrative_law', error=str(e), state=state)
             return []
     
     def search_case_law(self, query: str, jurisdiction: Optional[str] = None,
@@ -503,19 +638,34 @@ Return only the search terms, one per line."""
         include_web_archives = not normalized_families or bool(
             normalized_families & {'agency_guidance', 'administrative_rule'}
         )
+        state_code = jurisdiction if isinstance(jurisdiction, str) and len(jurisdiction.strip()) == 2 else jurisdiction
 
         results = {
             'statutes': [],
+            'state_statutes': [],
             'regulations': [],
+            'administrative_rules': [],
             'case_law': [],
             'web_archives': []
         }
 
         if include_statutes:
             results['statutes'] = self.search_us_code(query, max_results=5)
+            results['state_statutes'] = self.search_state_laws(
+                query,
+                state=state_code,
+                max_results=5,
+                allow_live_scrape_fallback=False,
+            )
 
         if include_regulations:
             results['regulations'] = self.search_federal_register(query, max_results=5)
+            results['administrative_rules'] = self.search_administrative_law(
+                query,
+                state=state_code,
+                max_results=5,
+                allow_live_scrape_fallback=False,
+            )
 
         if include_case_law:
             results['case_law'] = self.search_case_law(query, jurisdiction, max_results=5)
@@ -536,10 +686,17 @@ Return only the search terms, one per line."""
             authority_families=sorted(normalized_families),
             searched_sources={
                 'statutes': include_statutes,
+                'state_statutes': include_statutes,
                 'regulations': include_regulations,
+                'administrative_rules': include_regulations,
                 'case_law': include_case_law,
                 'web_archives': include_web_archives,
             })
+
+        results['search_diagnostics'] = self._collect_search_diagnostics(
+            query=query,
+            state=state_code,
+        )
         
         return results
 

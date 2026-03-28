@@ -1,0 +1,21 @@
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_browser_sdk_surfaces_legal_search_diagnostics_contract():
+    commonjs_sdk = (REPO_ROOT / "static" / "complaint_mcp_sdk.js").read_text(encoding="utf-8")
+    esm_sdk = (REPO_ROOT / "static" / "complaint_mcp_sdk.mjs").read_text(encoding="utf-8")
+    shell_js = (REPO_ROOT / "static" / "complaint_app_shell.js").read_text(encoding="utf-8")
+
+    for content in (commonjs_sdk, esm_sdk):
+        assert "_extractToolDiagnostics(payload)" in content
+        assert "_buildToolDiagnosticSummary(payload)" in content
+        assert "diagnostic_summary: diagnosticSummary" in content
+        assert "search_diagnostics" in content
+        assert "authorities_diagnostics" in content
+
+    assert "Latest retrieval warning:" in shell_js
+    assert "diagnostic_summary" in shell_js
+    assert "latestToolDiagnosticSummary" in shell_js

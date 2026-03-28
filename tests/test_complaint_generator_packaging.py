@@ -92,9 +92,15 @@ def test_package_exports_expose_workspace_review_and_entrypoint_helpers():
         "getProviderDiagnostics",
         "getToolingContract",
         "updateClaimType",
+        "_extractToolDiagnostics",
+        "_buildToolDiagnosticSummary",
     ):
         assert method_name in commonjs_sdk
         assert method_name in esm_sdk
+
+    shell_sdk = (REPO_ROOT / "static" / "complaint_app_shell.js").read_text(encoding="utf-8")
+    assert "Latest retrieval warning:" in shell_sdk
+    assert "diagnostic_summary" in shell_sdk
 
 
 def test_workspace_cli_is_exposed_through_package_entrypoint(monkeypatch, tmp_path):

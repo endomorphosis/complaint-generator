@@ -2495,10 +2495,16 @@ class Mediator:
 			# Default to US Code search
 			results = {
 				'statutes': self.legal_authority_search.search_us_code(query),
+				'state_statutes': self.legal_authority_search.search_state_laws(query, state=jurisdiction),
 				'regulations': [],
+				'administrative_rules': self.legal_authority_search.search_administrative_law(query, state=jurisdiction),
 				'case_law': [],
 				'web_archives': []
 			}
+			results['search_diagnostics'] = self.legal_authority_search._collect_search_diagnostics(
+				query=query,
+				state=jurisdiction,
+			)
 			return results
 	
 	def store_legal_authorities(self, authorities: Dict[str, List[Dict[str, Any]]], 
@@ -2531,9 +2537,13 @@ class Mediator:
 			'total_support_links_reused': 0,
 		}
 		for auth_type, auth_list in authorities.items():
+			if not isinstance(auth_list, list):
+				continue
 			if auth_list:
 				# Add type info to each authority
 				for auth in auth_list:
+					if not isinstance(auth, dict):
+						continue
 					auth['type'] = auth_type.rstrip('s')  # statutes -> statute
 					if search_programs and not auth.get('search_programs'):
 						auth['search_programs'] = [
@@ -5137,6 +5147,7 @@ class Mediator:
 		results = {
 			'claim_types': classification.get('claim_types', []),
 			'authorities_found': {},
+			'authorities_diagnostics': {},
 			'authorities_stored': {},
 			'support_summary': {},
 			'claim_coverage_matrix': {},
@@ -5176,8 +5187,11 @@ class Mediator:
 			)
 			
 			results['authorities_found'][claim_type] = {
-				k: len(v) for k, v in search_results.items()
+				k: len(v) for k, v in search_results.items() if isinstance(v, list)
 			}
+			results['authorities_diagnostics'][claim_type] = dict(
+				search_results.get('search_diagnostics') or {}
+			)
 			results['authorities_stored'][claim_type] = stored_counts
 			support_summary = self.summarize_claim_support(user_id, claim_type)
 			results['support_summary'][claim_type] = support_summary.get('claims', {}).get(

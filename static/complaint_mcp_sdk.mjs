@@ -143,6 +143,63 @@ class ComplaintMcpClient {
         return result.tools || [];
     }
 
+    _extractToolDiagnostics(payload) {
+        const structured = payload && typeof payload === 'object' ? payload : {};
+        const diagnostics = [];
+        const directSearchDiagnostics = structured.search_diagnostics && typeof structured.search_diagnostics === 'object'
+            ? structured.search_diagnostics
+            : null;
+        const authorityDiagnostics = structured.authorities_diagnostics && typeof structured.authorities_diagnostics === 'object'
+            ? structured.authorities_diagnostics
+            : null;
+
+        const appendDiagnosticEntries = (scope, container) => {
+            if (!container || typeof container !== 'object') {
+                return;
+            }
+            Object.entries(container).forEach(([key, value]) => {
+                if (!value || typeof value !== 'object' || !value.warning_code) {
+                    return;
+                }
+                diagnostics.push({
+                    scope: scope,
+                    family: key,
+                    warning_code: String(value.warning_code || '').trim(),
+                    warning_message: String(value.warning_message || '').trim(),
+                    state_code: String(value.state_code || '').trim(),
+                    hf_dataset_id: String(value.hf_dataset_id || '').trim(),
+                });
+            });
+        };
+
+        appendDiagnosticEntries('search', directSearchDiagnostics);
+        if (authorityDiagnostics) {
+            Object.entries(authorityDiagnostics).forEach(([claimType, value]) => {
+                if (!value || typeof value !== 'object') {
+                    return;
+                }
+                const claimScope = 'claim:' + String(claimType || '').trim();
+                appendDiagnosticEntries(claimScope, value);
+            });
+        }
+
+        return diagnostics;
+    }
+
+    _buildToolDiagnosticSummary(payload) {
+        const diagnostics = this._extractToolDiagnostics(payload);
+        const warningCount = diagnostics.length;
+        const primary = diagnostics[0] || null;
+        return {
+            warning_count: warningCount,
+            warnings: diagnostics,
+            primary_warning: primary,
+            summary_text: primary && primary.warning_message
+                ? primary.warning_message
+                : '',
+        };
+    }
+
     async callTool(toolName, argumentsPayload) {
         const startedAt = new Date().toISOString();
         try {
@@ -150,11 +207,14 @@ class ComplaintMcpClient {
                 name: toolName,
                 arguments: argumentsPayload || {},
             });
+            const structuredContent = result && result.structuredContent ? result.structuredContent : result;
+            const diagnosticSummary = this._buildToolDiagnosticSummary(structuredContent);
             this._publishLastToolCall({
                 tool_name: toolName,
                 status: 'success',
                 started_at: startedAt,
                 finished_at: new Date().toISOString(),
+                diagnostic_summary: diagnosticSummary,
             });
             if (result && result.structuredContent) {
                 return result.structuredContent;

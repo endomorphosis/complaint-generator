@@ -178,6 +178,13 @@
         }
     }
 
+    function latestToolDiagnosticSummary(lastToolCall) {
+        const summary = lastToolCall && lastToolCall.diagnostic_summary && typeof lastToolCall.diagnostic_summary === 'object'
+            ? lastToolCall.diagnostic_summary
+            : null;
+        return summary || null;
+    }
+
     function readShellContext(state) {
         const params = new URLSearchParams(window.location.search);
         const sessionPayload = state && state.sessionPayload ? state.sessionPayload : {};
@@ -250,6 +257,10 @@
         const readinessStages = readiness && Array.isArray(readiness.tested_stages) ? readiness.tested_stages : [];
         const readinessBlockers = readiness && Array.isArray(readiness.release_blockers) ? readiness.release_blockers : [];
         const readinessTools = readiness && Array.isArray(readiness.exposed_tools) ? readiness.exposed_tools : [];
+        const toolDiagnosticSummary = latestToolDiagnosticSummary(lastToolCall);
+        const toolDiagnosticPrimary = toolDiagnosticSummary && toolDiagnosticSummary.primary_warning
+            ? toolDiagnosticSummary.primary_warning
+            : null;
         const readinessTone = readiness && String(readiness.verdict || '').toLowerCase() === 'client-safe'
             ? ' is-good'
             : readiness
@@ -366,6 +377,7 @@
             '<div class="cg-app-shell__readiness-copy">' + safeText(lastToolCall && lastToolCall.tool_name ? ('Last MCP tool: ' + lastToolCall.tool_name) : 'No MCP tool calls have been cached for this browser session yet.') + '</div>',
             '<div class="cg-app-shell__phase-note">' + safeText(lastToolCall && lastToolCall.finished_at ? ('Updated: ' + lastToolCall.finished_at) : 'Updated: waiting for the next shared SDK action.') + '</div>',
             (lastToolCall && lastToolCall.status ? '<div class="cg-app-shell__phase-note">Status: ' + safeText(lastToolCall.status, 'unknown') + (lastToolCall.error_message ? ' (' + safeText(lastToolCall.error_message, '') + ')' : '') + '</div>' : ''),
+            (toolDiagnosticPrimary ? '<div class="cg-app-shell__phase-note">Latest retrieval warning: ' + safeText(toolDiagnosticPrimary.warning_message, '') + '</div>' : ''),
             '</div>',
             '<div class="cg-app-shell__section-title">UI Readiness</div>',
             '<div class="cg-app-shell__readiness' + readinessTone + '" id="cg-app-shell-readiness">',
