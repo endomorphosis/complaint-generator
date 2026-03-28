@@ -3,9 +3,12 @@
 import os
 import json
 import re
+from html import unescape
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
+
+import requests
 
 from integrations.ipfs_datasets.provenance import (
     build_document_parse_contract,
@@ -59,6 +62,142 @@ _ARTIFACT_FAMILY_CORPUS_FAMILY = {
     'legal_authority_text': 'legal_authority',
     'legal_authority_reference': 'legal_authority',
 }
+
+_LEGAL_SEARCH_USER_AGENT = 'complaint-generator/1.0'
+_HOUSING_QUERY_HINTS = {
+    'housing',
+    'voucher',
+    'hud',
+    'pha',
+    'public',
+    'authority',
+    'accommodation',
+    'termination',
+    'hearing',
+    'retaliation',
+    'disability',
+    'fraud',
+    'orientation',
+    'informal',
+    'review',
+}
+_OREGON_STATUTE_REFERENCE_CATALOG = [
+    {
+        'citation': 'ORS 659A.145',
+        'title': 'Discrimination against individual with disability in real property transactions prohibited',
+        'url': 'https://oregon.public.law/statutes/ors_659a.145',
+        'topics': ['disability', 'accommodation', 'housing', 'retaliation', 'reasonable'],
+    },
+    {
+        'citation': 'ORS Chapter 456',
+        'title': 'Oregon Housing Authorities Law',
+        'url': 'https://www.oregonlegislature.gov/bills_laws/ors/ors456.html',
+        'topics': ['housing', 'authority', 'clackamas', 'public', 'voucher'],
+    },
+]
+_FEDERAL_STATUTE_REFERENCE_CATALOG = [
+    {
+        'citation': '42 U.S.C. § 3604(f)(3)(B)',
+        'title': 'Fair Housing Act reasonable accommodations',
+        'url': 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section3604&num=0&edition=prelim',
+        'topics': ['fair', 'housing', 'reasonable', 'accommodation', 'disability', 'dwelling'],
+    },
+    {
+        'citation': '42 U.S.C. § 1437d(k)',
+        'title': 'Public housing grievance procedures',
+        'url': 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1437d&num=0&edition=prelim',
+        'topics': ['grievance', 'hearing', 'termination', 'public', 'housing', 'procedure'],
+    },
+    {
+        'citation': '42 U.S.C. § 1437f',
+        'title': 'Low-income housing assistance',
+        'url': 'https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1437f&num=0&edition=prelim',
+        'topics': ['voucher', 'section', 'housing', 'assistance', 'termination', 'participant'],
+    },
+]
+_AGENCY_GUIDANCE_REFERENCE_CATALOG = [
+    {
+        'domain': 'hud.gov',
+        'source': 'hud_guidance_fallback',
+        'title': 'Housing Choice Voucher Program Guidebook',
+        'url': 'https://www.hud.gov/helping-americans/housing-choice-vouchers-guidebook',
+        'summary': 'HUD guidebook with chapters on informal hearings, reviews, terminations, fair housing, and reasonable accommodation requirements.',
+        'topics': ['voucher', 'housing', 'guidebook', 'informal', 'hearing', 'review', 'termination', 'reasonable', 'accommodation'],
+    },
+    {
+        'domain': 'hud.gov',
+        'source': 'hud_guidance_fallback',
+        'title': 'Housing Choice Vouchers Guidance and Notices',
+        'url': 'https://www.hud.gov/helping-americans/housing-choice-vouchers-guidance',
+        'summary': 'HUD page collecting HCV guidance, notices, and administrative resources for PHAs.',
+        'topics': ['voucher', 'housing', 'guidance', 'notice', 'pha', 'administrative'],
+    },
+    {
+        'domain': 'hud.gov',
+        'source': 'hud_guidance_fallback',
+        'title': 'HUD/DOJ Joint Statement on Reasonable Accommodations under the Fair Housing Act',
+        'url': 'https://www.hud.gov/sites/documents/JOINTSTATEMENT.PDF',
+        'summary': 'Joint federal guidance on reasonable accommodations for people with disabilities under the Fair Housing Act.',
+        'topics': ['reasonable', 'accommodation', 'fair', 'housing', 'disability'],
+    },
+    {
+        'domain': 'clackamas.us',
+        'source': 'clackamas_guidance_fallback',
+        'title': 'Housing Choice Voucher Programs | Clackamas County',
+        'url': 'https://www.clackamas.us/housingauthority/section8.html',
+        'summary': 'Clackamas HACC program page describing voucher processes and reasonable accommodation availability for applicants and participants.',
+        'topics': ['clackamas', 'housing', 'voucher', 'reasonable', 'accommodation', 'participant', 'applicant'],
+    },
+    {
+        'domain': 'clackamas.us',
+        'source': 'clackamas_guidance_fallback',
+        'title': 'Housing Authority of Clackamas County Administrative Plan',
+        'url': 'https://dochub.clackamas.us/documents/drupal/76861a83-9a1a-43ee-becb-f8556827f676',
+        'summary': 'Administrative plan material for the Housing Authority of Clackamas County, including Housing Choice Voucher program procedures.',
+        'topics': ['clackamas', 'administrative', 'plan', 'housing', 'authority', 'voucher', 'hearing', 'procedure'],
+    },
+]
+
+
+def _strip_html(value: str) -> str:
+    return re.sub(r'<[^>]+>', ' ', unescape(str(value or ''))).replace('\xa0', ' ').strip()
+
+
+def _query_terms(value: str) -> List[str]:
+    return [
+        token.lower()
+        for token in re.findall(r'[a-zA-Z0-9\.]+', str(value or ''))
+        if len(token) >= 3
+    ]
+
+
+def _text_overlap_score(query: str, *values: str) -> float:
+    query_tokens = set(_query_terms(query))
+    if not query_tokens:
+        return 0.0
+    haystack_tokens = set()
+    for value in values:
+        haystack_tokens.update(_query_terms(value))
+    if not haystack_tokens:
+        return 0.0
+    overlap = query_tokens & haystack_tokens
+    hint_overlap = query_tokens & _HOUSING_QUERY_HINTS
+    score = len(overlap) / max(len(query_tokens), 1)
+    if overlap & _HOUSING_QUERY_HINTS:
+        score += 0.25
+    elif hint_overlap and haystack_tokens & _HOUSING_QUERY_HINTS:
+        score += 0.15
+    return score
+
+
+def _extract_cfr_sections(query: str) -> List[str]:
+    sections: List[str] = []
+    for match in re.findall(r'(?:\b\d+\s*cfr\s*)?(\d{2,4}\.\d{1,4})', str(query or ''), flags=re.IGNORECASE):
+        section = str(match).strip()
+        if not section or section in sections:
+            continue
+        sections.append(section)
+    return sections
 
 
 def _resolve_artifact_identity(*, content_origin: str = '', artifact_family: str = '', corpus_family: str = '') -> Dict[str, str]:
@@ -245,6 +384,383 @@ class LegalAuthoritySearchHook:
             diagnostics[bucket_name] = diagnostic
 
         return diagnostics
+    def _http_get_json(self, url: str, *, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        response = requests.get(
+            url,
+            params=params or {},
+            timeout=20,
+            headers={'User-Agent': _LEGAL_SEARCH_USER_AGENT},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    def _http_get_text(self, url: str) -> str:
+        response = requests.get(
+            url,
+            timeout=20,
+            headers={'User-Agent': _LEGAL_SEARCH_USER_AGENT},
+        )
+        response.raise_for_status()
+        return response.text or ''
+
+    def _dedupe_authority_rows(self, rows: List[Dict[str, Any]], *, max_results: int) -> List[Dict[str, Any]]:
+        deduped: List[Dict[str, Any]] = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            key = (
+                str(row.get('url') or '').strip().lower(),
+                str(row.get('citation') or '').strip().lower(),
+                str(row.get('title') or '').strip().lower(),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(row)
+            if len(deduped) >= max_results:
+                break
+        return deduped
+
+    def _normalize_ecfr_result(self, item: Dict[str, Any], *, query: str) -> Dict[str, Any]:
+        hierarchy = item.get('hierarchy') if isinstance(item.get('hierarchy'), dict) else {}
+        section = str(hierarchy.get('section') or '').strip()
+        title_number = str(hierarchy.get('title') or '').strip()
+        citation = ''
+        if title_number and section:
+            citation = f"{title_number} C.F.R. § {section}"
+        headings = item.get('headings') if isinstance(item.get('headings'), dict) else {}
+        part_heading = str(headings.get('part') or '').strip()
+        section_heading = str(headings.get('section') or '').strip()
+        title = section_heading or part_heading or citation or 'eCFR regulation'
+        excerpt = _strip_html(item.get('full_text_excerpt') or '')
+        url = (
+            f"https://www.ecfr.gov/current/title-{title_number}/subtitle-B/chapter-IX/part-{hierarchy.get('part')}/"
+            f"subpart-{hierarchy.get('subpart')}/section-{section}"
+            if title_number and hierarchy.get('part') and hierarchy.get('subpart') and section
+            else ''
+        )
+        relevance = float(item.get('score') or 0.0)
+        if relevance <= 0:
+            relevance = max(_text_overlap_score(query, title, excerpt, citation), 0.25)
+        return {
+            'type': 'regulation',
+            'source': 'ecfr',
+            'citation': citation or item.get('label') or 'C.F.R. result',
+            'title': title,
+            'content': excerpt,
+            'url': url,
+            'metadata': {
+                'hierarchy': hierarchy,
+                'headings': headings,
+                'search_backend': 'ecfr_api',
+            },
+            'relevance_score': relevance,
+        }
+
+    def _search_ecfr_fallback(self, query: str, *, max_results: int = 10) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        search_queries = _extract_cfr_sections(query) or [query]
+        if query not in search_queries:
+            search_queries.append(query)
+        for search_query in search_queries[:3]:
+            try:
+                payload = self._http_get_json(
+                    'https://www.ecfr.gov/api/search/v1/results',
+                    params={
+                        'query': search_query,
+                        'per_page': max_results,
+                        'order': 'relevance',
+                    },
+                )
+            except Exception as exc:
+                self.mediator.log(
+                    'legal_authority_search_error',
+                    search_type='ecfr_fallback',
+                    query=search_query,
+                    error=str(exc),
+                )
+                continue
+
+            items = payload.get('results')
+            if not isinstance(items, list):
+                continue
+            rows.extend(
+                self._normalize_ecfr_result(item, query=query)
+                for item in items
+                if isinstance(item, dict)
+            )
+        rows = [row for row in rows if _text_overlap_score(query, row.get('title', ''), row.get('content', ''), row.get('citation', '')) >= 0.18]
+        return self._dedupe_authority_rows(sorted(rows, key=lambda item: float(item.get('relevance_score') or 0.0), reverse=True), max_results=max_results)
+
+    def _normalize_courtlistener_result(self, item: Dict[str, Any], *, query: str) -> Dict[str, Any]:
+        citations = item.get('citation')
+        citation_text = ''
+        if isinstance(citations, list) and citations:
+            first = citations[0]
+            if isinstance(first, dict):
+                citation_text = str(first.get('cite') or first.get('volume') or '').strip()
+            else:
+                citation_text = str(first).strip()
+        if not citation_text:
+            citation_text = str(item.get('caseName') or item.get('caseNameFull') or item.get('docketNumber') or '').strip()
+        absolute_url = str(item.get('absolute_url') or '').strip()
+        if absolute_url and absolute_url.startswith('/'):
+            absolute_url = f"https://www.courtlistener.com{absolute_url}"
+        title = str(item.get('caseNameFull') or item.get('caseName') or citation_text or 'Case law result').strip()
+        court = str(item.get('court') or item.get('court_citation_string') or '').strip()
+        date_filed = str(item.get('dateFiled') or '').strip()
+        content = ' '.join(part for part in [court, date_filed, str(item.get('snippet') or '').strip()] if part).strip()
+        score = 0.0
+        meta = item.get('meta') if isinstance(item.get('meta'), dict) else {}
+        meta_score = meta.get('score') if isinstance(meta.get('score'), dict) else {}
+        try:
+            score = float(meta_score.get('bm25') or 0.0)
+        except Exception:
+            score = 0.0
+        if score <= 0:
+            score = max(_text_overlap_score(query, title, content, citation_text), 0.25)
+        return {
+            'type': 'case_law',
+            'source': 'courtlistener',
+            'citation': citation_text or title,
+            'title': title,
+            'content': content,
+            'url': absolute_url,
+            'metadata': {
+                'court': court,
+                'court_id': item.get('court_id'),
+                'date_filed': date_filed,
+                'cluster_id': item.get('cluster_id'),
+                'search_backend': 'courtlistener_api',
+            },
+            'relevance_score': score,
+        }
+
+    def _search_courtlistener_fallback(self, query: str, jurisdiction: Optional[str] = None,
+                                       *, max_results: int = 10) -> List[Dict[str, Any]]:
+        normalized: List[tuple[bool, Dict[str, Any]]] = []
+        jurisdiction_text = str(jurisdiction or '').lower().strip()
+        query_tokens = set(_query_terms(query))
+        simplified_parts: List[str] = []
+        if 'housing' in query_tokens and 'authority' in query_tokens:
+            simplified_parts.append('housing authority')
+        if 'voucher' in query_tokens:
+            simplified_parts.append('voucher')
+        if 'termination' in query_tokens:
+            simplified_parts.append('termination')
+        if 'family' in query_tokens and 'obligations' in query_tokens:
+            simplified_parts.append('family obligations')
+        if 'informal' in query_tokens or 'hearing' in query_tokens or 'review' in query_tokens:
+            simplified_parts.append('informal hearing')
+        if 'reasonable' in query_tokens or 'accommodation' in query_tokens:
+            simplified_parts.append('reasonable accommodation')
+        if 'retaliation' in query_tokens:
+            simplified_parts.append('retaliation')
+        search_queries = [query]
+        simplified_query = ' '.join(simplified_parts).strip()
+        if simplified_query and simplified_query.lower() != query.lower():
+            search_queries.append(simplified_query)
+        if 'housing authority' in simplified_query and 'voucher' in query_tokens:
+            search_queries.append('housing authority voucher termination')
+
+        for search_query in search_queries[:3]:
+            params: Dict[str, Any] = {
+                'q': search_query,
+                'page_size': max_results,
+                'type': 'o',
+            }
+            try:
+                payload = self._http_get_json(
+                    'https://www.courtlistener.com/api/rest/v4/search/',
+                    params=params,
+                )
+            except Exception as exc:
+                self.mediator.log(
+                    'legal_authority_search_error',
+                    search_type='courtlistener_fallback',
+                    query=search_query,
+                    error=str(exc),
+                )
+                continue
+
+            items = payload.get('results')
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                row = self._normalize_courtlistener_result(item, query=query)
+                court_blob = ' '.join(
+                    [
+                        str(item.get('court') or ''),
+                        str(item.get('court_citation_string') or ''),
+                        str(item.get('court_id') or ''),
+                    ]
+                ).lower()
+                if _text_overlap_score(query, row.get('title', ''), row.get('content', ''), row.get('citation', '')) < 0.12:
+                    continue
+                jurisdiction_match = (
+                    not jurisdiction_text
+                    or jurisdiction_text in court_blob
+                    or jurisdiction_text in row['content'].lower()
+                    or (
+                        jurisdiction_text in {'or', 'oregon'}
+                        and ('oregon' in court_blob or 'or.' in court_blob)
+                    )
+                    or (
+                        jurisdiction_text in {'9th', 'ninth circuit'}
+                        and ('9th' in court_blob or 'ninth' in court_blob)
+                    )
+                )
+                normalized.append((jurisdiction_match, row))
+        normalized.sort(
+            key=lambda item: (
+                1 if item[0] else 0,
+                float(item[1].get('relevance_score') or 0.0),
+            ),
+            reverse=True,
+        )
+        return self._dedupe_authority_rows([row for _, row in normalized], max_results=max_results)
+
+    def _search_oregon_statutes_fallback(self, query: str, *, max_results: int = 10) -> List[Dict[str, Any]]:
+        query_lower = str(query or '').lower()
+        if 'oregon' not in query_lower and 'ors' not in query_lower and 'clackamas' not in query_lower:
+            return []
+        rows: List[Dict[str, Any]] = []
+        for item in _OREGON_STATUTE_REFERENCE_CATALOG:
+            overlap = _text_overlap_score(query, item.get('citation', ''), item.get('title', ''), ' '.join(item.get('topics') or []))
+            if overlap < 0.12:
+                continue
+            content = ''
+            try:
+                text = self._http_get_text(item['url'])
+                title_match = re.search(r'<title>(.*?)</title>', text, flags=re.IGNORECASE | re.DOTALL)
+                meta_match = re.search(r'<meta[^>]+name=[\'"]description[\'"][^>]+content=[\'"]([^\'"]+)[\'"]', text, flags=re.IGNORECASE)
+                title = _strip_html(title_match.group(1)) if title_match else str(item.get('title') or '')
+                content = _strip_html(meta_match.group(1)) if meta_match else ''
+            except Exception as exc:
+                self.mediator.log(
+                    'legal_authority_search_error',
+                    search_type='oregon_statute_fallback',
+                    query=query,
+                    citation=item.get('citation'),
+                    error=str(exc),
+                )
+                title = str(item.get('title') or '')
+            rows.append(
+                {
+                    'type': 'state_statute',
+                    'source': 'oregon_public_law' if 'public.law' in item['url'] else 'oregon_legislature',
+                    'citation': str(item.get('citation') or ''),
+                    'title': title,
+                    'content': content,
+                    'url': item['url'],
+                    'metadata': {
+                        'topics': list(item.get('topics') or []),
+                        'search_backend': 'oregon_statute_fallback',
+                    },
+                    'relevance_score': max(overlap, 0.2),
+                }
+            )
+        rows.sort(key=lambda item: float(item.get('relevance_score') or 0.0), reverse=True)
+        return self._dedupe_authority_rows(rows, max_results=max_results)
+
+    def _search_federal_statutes_fallback(self, query: str, *, max_results: int = 10) -> List[Dict[str, Any]]:
+        query_lower = str(query or '').lower()
+        if not any(token in query_lower for token in ('fair housing', 'reasonable accommodation', 'voucher', 'section 8', 'housing', 'termination', 'hearing', 'grievance', '1437', '3604')):
+            return []
+        rows: List[Dict[str, Any]] = []
+        for item in _FEDERAL_STATUTE_REFERENCE_CATALOG:
+            overlap = _text_overlap_score(query, item.get('citation', ''), item.get('title', ''), ' '.join(item.get('topics') or []))
+            if overlap < 0.12:
+                continue
+            content = ''
+            title = str(item.get('title') or '')
+            try:
+                text = self._http_get_text(item['url'])
+                title_match = re.search(r'<title>(.*?)</title>', text, flags=re.IGNORECASE | re.DOTALL)
+                if title_match:
+                    title = _strip_html(title_match.group(1))
+            except Exception as exc:
+                self.mediator.log(
+                    'legal_authority_search_error',
+                    search_type='federal_statute_fallback',
+                    query=query,
+                    citation=item.get('citation'),
+                    error=str(exc),
+                )
+            rows.append(
+                {
+                    'type': 'statute',
+                    'source': 'uscode_house',
+                    'citation': str(item.get('citation') or ''),
+                    'title': title,
+                    'content': content,
+                    'url': item['url'],
+                    'metadata': {
+                        'topics': list(item.get('topics') or []),
+                        'search_backend': 'federal_statute_fallback',
+                    },
+                    'relevance_score': max(overlap, 0.2),
+                }
+            )
+        rows.sort(key=lambda item: float(item.get('relevance_score') or 0.0), reverse=True)
+        return self._dedupe_authority_rows(rows, max_results=max_results)
+
+    def _search_agency_guidance_fallback(self, domain: str, query: Optional[str] = None,
+                                         *, max_results: int = 20) -> List[Dict[str, Any]]:
+        domain_text = str(domain or '').strip().lower()
+        query_text = str(query or '').strip()
+        rows: List[Dict[str, Any]] = []
+        for item in _AGENCY_GUIDANCE_REFERENCE_CATALOG:
+            if str(item.get('domain') or '').strip().lower() != domain_text:
+                continue
+            overlap = _text_overlap_score(
+                query_text,
+                item.get('title', ''),
+                item.get('summary', ''),
+                ' '.join(item.get('topics') or []),
+            ) if query_text else 0.25
+            if query_text and overlap < 0.10:
+                continue
+            rows.append(
+                {
+                    'type': 'agency_guidance',
+                    'source': str(item.get('source') or 'agency_guidance_fallback'),
+                    'citation': str(item.get('title') or ''),
+                    'title': str(item.get('title') or ''),
+                    'content': str(item.get('summary') or ''),
+                    'url': str(item.get('url') or ''),
+                    'metadata': {
+                        'domain': domain_text,
+                        'topics': list(item.get('topics') or []),
+                        'search_backend': 'agency_guidance_fallback',
+                    },
+                    'relevance_score': max(overlap, 0.2),
+                }
+            )
+        rows.sort(key=lambda item: float(item.get('relevance_score') or 0.0), reverse=True)
+        return self._dedupe_authority_rows(rows, max_results=max_results)
+
+    def _filter_regulation_results(self, query: str, rows: List[Dict[str, Any]], *, max_results: int) -> List[Dict[str, Any]]:
+        filtered: List[Dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            title = str(row.get('title') or '')
+            content = str(row.get('content') or row.get('abstract') or '')
+            citation = str(row.get('citation') or '')
+            source = str(row.get('source') or '').lower()
+            score = _text_overlap_score(query, title, content, citation)
+            if source == 'federal_register' and score < 0.12:
+                continue
+            normalized = dict(row)
+            normalized['relevance_score'] = float(normalized.get('relevance_score') or score or 0.25)
+            filtered.append(normalized)
+        filtered.sort(key=lambda item: float(item.get('relevance_score') or 0.0), reverse=True)
+        return self._dedupe_authority_rows(filtered, max_results=max_results)
     
     def search_us_code(self, query: str, title: Optional[str] = None,
                       max_results: int = 10) -> List[Dict[str, Any]]:
@@ -262,7 +778,11 @@ class LegalAuthoritySearchHook:
         if not LEGAL_SCRAPERS_AVAILABLE or search_us_code is None:
             self.mediator.log('legal_authority_unavailable', 
                 search_type='us_code', query=query)
-            return []
+            return self._dedupe_authority_rows(
+                self._search_federal_statutes_fallback(query, max_results=max_results)
+                + self._search_oregon_statutes_fallback(query, max_results=max_results),
+                max_results=max_results,
+            )
         
         try:
             # Use LLM to generate search terms if needed
@@ -285,10 +805,23 @@ class LegalAuthoritySearchHook:
                     self.mediator.log('legal_authority_search_error',
                         search_type='us_code', term=term, error=str(e))
             
+            fallback_results: List[Dict[str, Any]] = self._search_federal_statutes_fallback(query, max_results=max_results)
+            if (
+                'oregon' in str(query or '').lower()
+                or 'ors' in str(query or '').lower()
+                or 'clackamas' in str(query or '').lower()
+            ) or not results:
+                fallback_results.extend(self._search_oregon_statutes_fallback(query, max_results=max_results))
+
+            combined = self._dedupe_authority_rows(
+                list(results) + list(fallback_results),
+                max_results=max_results,
+            )
+
             self.mediator.log('legal_authority_search',
-                search_type='us_code', query=query, found=len(results))
+                search_type='us_code', query=query, found=len(combined))
             
-            return results[:max_results]
+            return combined
             
         except Exception as e:
             self.mediator.log('legal_authority_search_error',
@@ -314,7 +847,7 @@ class LegalAuthoritySearchHook:
         if not LEGAL_SCRAPERS_AVAILABLE or search_federal_register is None:
             self.mediator.log('legal_authority_unavailable',
                 search_type='federal_register', query=query)
-            return []
+            return self._search_ecfr_fallback(query, max_results=max_results)
         
         try:
             results = search_federal_register(
@@ -323,11 +856,32 @@ class LegalAuthoritySearchHook:
                 end_date=end_date,
                 max_results=max_results
             )
+
+            filtered = self._filter_regulation_results(query, results, max_results=max_results)
+            fallback_results: List[Dict[str, Any]] = []
+            query_lower = str(query or '').lower()
+            if (
+                not filtered
+                or 'cfr' in query_lower
+                or 'voucher' in query_lower
+                or 'hud' in query_lower
+                or 'housing' in query_lower
+            ):
+                fallback_results = self._search_ecfr_fallback(query, max_results=max_results)
+            combined_rows = (
+                fallback_results + filtered
+                if ('cfr' in query_lower or bool(_extract_cfr_sections(query)))
+                else filtered + fallback_results
+            )
+            combined = self._dedupe_authority_rows(
+                combined_rows,
+                max_results=max_results,
+            )
             
             self.mediator.log('legal_authority_search',
-                search_type='federal_register', query=query, found=len(results))
+                search_type='federal_register', query=query, found=len(combined))
             
-            return results
+            return combined
             
         except Exception as e:
             self.mediator.log('legal_authority_search_error',
@@ -422,7 +976,11 @@ class LegalAuthoritySearchHook:
         if not LEGAL_SCRAPERS_AVAILABLE or search_recap_documents is None:
             self.mediator.log('legal_authority_unavailable',
                 search_type='case_law', query=query)
-            return []
+            return self._search_courtlistener_fallback(
+                query,
+                jurisdiction=jurisdiction,
+                max_results=max_results,
+            )
         
         try:
             results = search_recap_documents(
@@ -430,11 +988,33 @@ class LegalAuthoritySearchHook:
                 court=jurisdiction,
                 max_results=max_results
             )
+            normalized_results = self._dedupe_authority_rows(
+                [
+                    {
+                        **result,
+                        'source': result.get('source', 'recap'),
+                    }
+                    for result in results
+                    if isinstance(result, dict)
+                ],
+                max_results=max_results,
+            )
+            fallback_results: List[Dict[str, Any]] = []
+            if not normalized_results:
+                fallback_results = self._search_courtlistener_fallback(
+                    query,
+                    jurisdiction=jurisdiction,
+                    max_results=max_results,
+                )
+            combined = self._dedupe_authority_rows(
+                normalized_results + fallback_results,
+                max_results=max_results,
+            )
             
             self.mediator.log('legal_authority_search',
-                search_type='case_law', query=query, found=len(results))
+                search_type='case_law', query=query, found=len(combined))
             
-            return results
+            return combined
             
         except Exception as e:
             self.mediator.log('legal_authority_search_error',
@@ -457,23 +1037,26 @@ class LegalAuthoritySearchHook:
         if not self.web_search:
             self.mediator.log('legal_authority_unavailable',
                 search_type='web_archive', domain=domain)
-            return []
+            return self._search_agency_guidance_fallback(domain, query=query, max_results=max_results)
         
         try:
             results = self.web_search.search_domain(
                 domain=domain,
                 max_matches=max_results
             )
+            normalized_results = [dict(item) for item in results if isinstance(item, dict)]
+            if not normalized_results:
+                normalized_results = self._search_agency_guidance_fallback(domain, query=query, max_results=max_results)
             
             self.mediator.log('legal_authority_search',
-                search_type='web_archive', domain=domain, found=len(results))
+                search_type='web_archive', domain=domain, found=len(normalized_results))
             
-            return results
+            return normalized_results
             
         except Exception as e:
             self.mediator.log('legal_authority_search_error',
                 search_type='web_archive', error=str(e))
-            return []
+            return self._search_agency_guidance_fallback(domain, query=query, max_results=max_results)
     
     def _generate_search_terms(self, query: str) -> List[str]:
         """Generate search terms from query using LLM."""
@@ -657,6 +1240,8 @@ Return only the search terms, one per line."""
                 max_results=5,
                 allow_live_scrape_fallback=False,
             )
+            if not results['statutes']:
+                results['statutes'] = self._search_oregon_statutes_fallback(query, max_results=5)
 
         if include_regulations:
             results['regulations'] = self.search_federal_register(query, max_results=5)
@@ -674,7 +1259,7 @@ Return only the search terms, one per line."""
             legal_domains = ['law.cornell.edu', 'law.justia.com', 'findlaw.com']
             for domain in legal_domains:
                 try:
-                    web_results = self.search_web_archives(domain, max_results=3)
+                    web_results = self.search_web_archives(domain, query=query, max_results=3)
                     results['web_archives'].extend(web_results)
                 except Exception:
                     pass

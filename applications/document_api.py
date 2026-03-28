@@ -133,6 +133,8 @@ class FormalComplaintDocumentRequest(BaseModel):
     optimization_model_name: Optional[str] = None
     optimization_llm_config: Dict[str, Any] = Field(default_factory=dict)
     optimization_persist_artifacts: bool = False
+    email_timeline_handoff_path: Optional[str] = None
+    email_authority_enrichment_path: Optional[str] = None
     output_dir: Optional[str] = None
     output_formats: List[str] = Field(default_factory=lambda: ["docx", "pdf"])
 
@@ -1466,6 +1468,8 @@ def create_document_router(mediator: Any) -> APIRouter:
             optimization_provider=request.optimization_provider,
             optimization_model_name=request.optimization_model_name,
             optimization_persist_artifacts=request.optimization_persist_artifacts,
+            email_timeline_handoff_path=request.email_timeline_handoff_path,
+            email_authority_enrichment_path=request.email_authority_enrichment_path,
             output_dir=request.output_dir,
             output_formats=request.output_formats,
         )

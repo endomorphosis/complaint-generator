@@ -877,6 +877,8 @@ class CLI:
 			affidavit_venue_lines=options.get('affidavit_venue_lines'),
 			affidavit_jurat=options.get('affidavit_jurat'),
 			affidavit_notary_block=options.get('affidavit_notary_block'),
+			email_timeline_handoff_path=options.get('email_timeline_handoff_path'),
+			email_authority_enrichment_path=options.get('email_authority_enrichment_path'),
 			output_dir=output_dir,
 			output_formats=options.get('output_formats'),
 		)

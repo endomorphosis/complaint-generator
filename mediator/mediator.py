@@ -10769,6 +10769,8 @@ class Mediator:
 		optimization_model_name: str = None,
 		optimization_llm_config: Dict[str, Any] = None,
 		optimization_persist_artifacts: bool = False,
+		email_timeline_handoff_path: str = None,
+		email_authority_enrichment_path: str = None,
 		output_dir: str = None,
 		output_formats: List[str] = None,
 	):
@@ -10820,6 +10822,8 @@ class Mediator:
 			optimization_model_name=optimization_model_name,
 			optimization_llm_config=optimization_llm_config,
 			optimization_persist_artifacts=optimization_persist_artifacts,
+			email_timeline_handoff_path=email_timeline_handoff_path,
+			email_authority_enrichment_path=email_authority_enrichment_path,
 			output_dir=output_dir,
 			output_formats=output_formats,
 		)
