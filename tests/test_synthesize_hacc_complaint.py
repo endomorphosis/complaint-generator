@@ -167,6 +167,30 @@ def test_conversation_facts_excludes_irrelevant_employment_style_intake():
     assert "hacc grievance process" in facts[0].lower()
 
 
+def test_session_complainant_facts_fall_back_to_state_inquiries():
+    session = {
+        "conversation_history": [],
+        "state": {
+            "inquiries": [
+                {
+                    "question": "Who is named as the plaintiff, and who are the defendants (including entities and individuals)?",
+                    "answer": "Benjamin Barber, Jane Cortez, and Julio Cortez vs Housing Authority of Clackamas County and Quantum Residential",
+                },
+                {
+                    "question": "Are there any language barriers, health issues, or capacity concerns that affected prior communications?",
+                    "answer": "Julio Regal Florez-Cortez is incapable of writing in any language, which affected his ability to use a writing-only hearing request procedure.",
+                },
+            ]
+        },
+    }
+
+    facts = MODULE._session_complainant_facts(session, limit=3)
+
+    assert len(facts) == 2
+    assert any("Julio Cortez" in item for item in facts)
+    assert any("incapable of writing in any language" in item for item in facts)
+
+
 def test_normalize_incident_summary_rewrites_hacc_scaffold_description():
     summary = MODULE._normalize_incident_summary("Retaliation complaint anchored to HACC core housing policies.")
 
@@ -723,6 +747,42 @@ def test_factual_and_proposed_allegations_use_anchored_intake_chronology_when_av
     expected = "The intake chronology places protected activity on March 1, 2025 before adverse action on March 15, 2025. The later date is derived from reported timing (two weeks after)."
     assert expected in factual
     assert expected in proposed
+
+
+def test_factual_and_proposed_allegations_use_state_inquiries_when_history_missing():
+    seed = {
+        "description": "Retaliation complaint anchored to HACC core housing policies.",
+        "key_facts": {
+            "anchor_sections": ["grievance_hearing", "appeal_rights", "adverse_action"],
+            "evidence_summary": "HACC policy defines a grievance as a tenant dispute concerning HACC action or inaction.",
+        },
+    }
+    session = {
+        "conversation_history": [],
+        "state": {
+            "inquiries": [
+                {
+                    "question": "Who is named as the plaintiff, and who are the defendants (including entities and individuals)?",
+                    "answer": "Benjamin Barber, Jane Cortez, and Julio Cortez vs Housing Authority of Clackamas County and Quantum Residential",
+                },
+                {
+                    "question": "Are there any language barriers, health issues, or capacity concerns that affected prior communications?",
+                    "answer": "Julio Regal Florez-Cortez is incapable of writing in any language, which affected his ability to use a writing-only hearing request procedure.",
+                },
+                {
+                    "question": "Can you describe the full timeline of events in chronological order, including exact dates and locations?",
+                    "answer": "In October 2025, I asked for the lease to be bifurcated because of abuse. In November 2025, I obtained a restraining order. In January 2026, HACC removed me from the lease and restored the restrained party.",
+                },
+            ]
+        },
+    }
+
+    factual = MODULE._factual_allegations(seed, session)
+    proposed = MODULE._proposed_allegations(seed, session, "hud")
+
+    assert any("Intake party identification" in item and "Julio Cortez" in item for item in factual)
+    assert any("Intake communication barrier fact" in item and "writing-only hearing request procedure" in item for item in factual)
+    assert any("During intake, the complainant stated that" in item and "restraining order" in item for item in proposed)
 
 
 def test_anchored_chronology_lines_generalize_to_notice_hearing_and_response_sequences():

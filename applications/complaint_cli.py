@@ -1,17 +1,89 @@
 from __future__ import annotations
 
 import argparse
-import anyio
+import inspect
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
-import typer
+try:
+    import typer
+except ModuleNotFoundError:
+    class _MiniTyperApp:
+        def __init__(self, help: str | None = None) -> None:
+            self.help = help or ""
+            self._commands: dict[str, object] = {}
 
-from complaint_generator.email_graphrag import build_email_duckdb_artifacts, search_email_graphrag_duckdb
-from complaint_generator.email_import import import_gmail_evidence
-from complaint_generator.email_pipeline import run_gmail_duckdb_pipeline, search_email_duckdb_corpus
+        def command(self, name: str):
+            def _decorator(func):
+                self._commands[name] = func
+                return func
+
+            return _decorator
+
+        def __call__(self) -> None:
+            argv = sys.argv[1:]
+            if not argv:
+                raise SystemExit(self.help or "No command provided.")
+            command_name = argv[0]
+            func = self._commands.get(command_name)
+            if func is None:
+                raise SystemExit(f"Unknown command: {command_name}")
+            signature = inspect.signature(func)
+            parsed: dict[str, object] = {}
+            list_defaults = {
+                name: list(param.default)
+                for name, param in signature.parameters.items()
+                if isinstance(param.default, list)
+            }
+            index = 1
+            while index < len(argv):
+                token = argv[index]
+                if not token.startswith("--"):
+                    index += 1
+                    continue
+                key = token[2:].replace("-", "_")
+                parameter = signature.parameters.get(key)
+                if parameter is None:
+                    index += 1
+                    continue
+                default = parameter.default
+                if isinstance(default, bool):
+                    parsed[key] = True
+                    index += 1
+                    continue
+                if index + 1 >= len(argv):
+                    raise SystemExit(f"Missing value for --{token[2:]}")
+                value = argv[index + 1]
+                if isinstance(default, list):
+                    list_defaults.setdefault(key, []).append(value)
+                else:
+                    parsed[key] = value
+                index += 2
+            for key, values in list_defaults.items():
+                parsed[key] = values
+            func(**parsed)
+
+    class _MiniTyperModule:
+        Typer = _MiniTyperApp
+
+        @staticmethod
+        def Option(default=None, *args, **kwargs):
+            return default
+
+        @staticmethod
+        def Argument(default=None, *args, **kwargs):
+            return default
+
+        @staticmethod
+        def echo(value) -> None:
+            print(value)
+
+    typer = _MiniTyperModule()
+
+from complaint_generator.legacy_session_migration import migrate_legacy_session
 from applications.ui_review import run_ui_review_workflow
 
 from .complaint_workspace import ComplaintWorkspaceService
@@ -168,7 +240,11 @@ def import_gmail_evidence_command(
     use_ipfs_secrets_vault: bool = typer.Option(False, "--use-ipfs-secrets-vault"),
     save_to_ipfs_secrets_vault: bool = typer.Option(False, "--save-to-ipfs-secrets-vault"),
 ) -> None:
+    import anyio
+
     from complaint_generator.email_credentials import resolve_gmail_credentials
+    from complaint_generator.email_graphrag import build_email_duckdb_artifacts, search_email_graphrag_duckdb
+    from complaint_generator.email_import import import_gmail_evidence
 
     parser = argparse.ArgumentParser(prog="complaint-workspace import-gmail-evidence")
     if not collect_all_messages and not list(address or []):
@@ -256,6 +332,21 @@ def import_local_evidence_command(
     _print(payload)
 
 
+@app.command("migrate-legacy-session")
+def migrate_legacy_session_command(
+    statefile: str = str(Path("/home/barberb/HACC/complaint-generator/statefiles/temporary-cli-session-latest.json")),
+    workspace_root: str = str(Path("/home/barberb/HACC/workspace")),
+    user_id: str = "did:key:legacy-temporary-session",
+) -> None:
+    _print(
+        migrate_legacy_session(
+            statefile=Path(statefile),
+            workspace_root=Path(workspace_root),
+            user_id=user_id,
+        )
+    )
+
+
 @app.command("run-gmail-duckdb-pipeline")
 def run_gmail_duckdb_pipeline_command(
     user_id: str = "demo-user",
@@ -291,7 +382,10 @@ def run_gmail_duckdb_pipeline_command(
     use_ipfs_secrets_vault: bool = typer.Option(False, "--use-ipfs-secrets-vault"),
     save_to_ipfs_secrets_vault: bool = typer.Option(False, "--save-to-ipfs-secrets-vault"),
 ) -> None:
+    import anyio
+
     from complaint_generator.email_credentials import resolve_gmail_credentials
+    from complaint_generator.email_pipeline import run_gmail_duckdb_pipeline
 
     parser = argparse.ArgumentParser(prog="complaint-workspace run-gmail-duckdb-pipeline")
     if not collect_all_messages and not list(address or []):
@@ -359,6 +453,8 @@ def search_email_duckdb_command(
     bm25_k1: float = typer.Option(1.2, "--bm25-k1"),
     bm25_b: float = typer.Option(0.75, "--bm25-b"),
 ) -> None:
+    from complaint_generator.email_pipeline import search_email_duckdb_corpus
+
     _print(
         search_email_duckdb_corpus(
             index_path=index_path,

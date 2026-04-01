@@ -453,6 +453,90 @@ def _conversation_facts(conversation_history: List[Dict[str, Any]], limit: int =
     return facts
 
 
+def _session_inquiry_answers(
+    session: Dict[str, Any],
+    *,
+    limit: int = 8,
+    question_markers: Sequence[str] | None = None,
+) -> List[str]:
+    state = session.get("state") if isinstance(session.get("state"), dict) else {}
+    inquiries = [dict(item) for item in list(state.get("inquiries") or []) if isinstance(item, dict)]
+    answers: List[str] = []
+    seen = set()
+    markers = tuple(str(item).lower() for item in list(question_markers or []) if str(item).strip())
+    for inquiry in inquiries:
+        question = " ".join(str(inquiry.get("question") or "").split()).strip().lower()
+        if markers and not any(marker in question for marker in markers):
+            continue
+        answer = " ".join(str(inquiry.get("answer") or "").split()).strip()
+        if not answer:
+            continue
+        if _is_irrelevant_non_housing_fact(answer):
+            continue
+        normalized = answer.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        answers.append(answer)
+        if len(answers) >= limit:
+            break
+    return answers
+
+
+def _session_complainant_facts(session: Dict[str, Any], limit: int = 8) -> List[str]:
+    facts: List[str] = []
+    seen = set()
+    for value in _conversation_facts(list(session.get("conversation_history") or []), limit=limit * 2):
+        normalized = value.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        facts.append(value)
+        if len(facts) >= limit:
+            return facts
+    for value in _session_inquiry_answers(session, limit=limit * 2):
+        normalized = value.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        facts.append(value)
+        if len(facts) >= limit:
+            break
+    return facts
+
+
+def _session_timeline_points(session: Dict[str, Any], limit: int = 4) -> List[str]:
+    timeline_points: List[str] = []
+    seen = set()
+    for fact in _collect_timeline_points(list(session.get("conversation_history") or []), limit=limit * 2):
+        normalized = fact.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        timeline_points.append(fact)
+        if len(timeline_points) >= limit:
+            return timeline_points
+    for answer in _session_inquiry_answers(
+        session,
+        limit=limit * 2,
+        question_markers=(
+            "what event or events started this dispute",
+            "full timeline of events",
+            "chronological order",
+            "exact dates",
+            "when",
+        ),
+    ):
+        normalized = answer.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        timeline_points.append(answer)
+        if len(timeline_points) >= limit:
+            break
+    return timeline_points
+
+
 def _is_irrelevant_non_housing_fact(text: str) -> bool:
     lowered = " ".join(str(text or "").split()).lower()
     if not lowered:
@@ -3031,7 +3115,7 @@ def _merge_drafting_readiness_signals(seed: Dict[str, Any], grounding_bundle: Di
     }
 
 
-def _promote_structured_handoff_from_seed(seed: Dict[str, Any], limit: int = 4) -> Dict[str, Any]:
+def _promote_structured_handoff_from_seed(seed: Dict[str, Any], limit: int = 6) -> Dict[str, Any]:
     key_facts = dict(seed.get("key_facts") or {})
     summary_lines: List[str] = []
     factual_lines: List[str] = []
@@ -4308,6 +4392,55 @@ def _factual_allegations(seed: Dict[str, Any], session: Dict[str, Any], limit: i
         if _normalize_intake_objective(item)
     ]
     unresolved_objectives = [item for item in unresolved_objectives if not _intake_objective_is_satisfied(session, item)]
+    description = _normalize_incident_summary(seed.get("description") or key_facts.get("incident_summary") or "")
+    protected_bases = [str(item) for item in list(key_facts.get("protected_bases") or []) if str(item)]
+    if description:
+        allegations.append(f"The complaint centers on {description.rstrip('.')}")
+    if protected_bases:
+        allegations.append(f"The intake and evidence record suggest a dispute implicating protected basis concerns related to {', '.join(protected_bases)}")
+
+    party_identification = _session_inquiry_answers(
+        session,
+        limit=1,
+        question_markers=("who is named as the plaintiff", "who are the defendants"),
+    )
+    if party_identification:
+        allegations.append(f"Intake party identification: {_short_intake_answer(party_identification[0])}")
+
+    communication_barrier = _session_inquiry_answers(
+        session,
+        limit=1,
+        question_markers=("language barriers", "capacity concerns", "affected prior communications"),
+    )
+    if communication_barrier:
+        allegations.append(f"Intake communication barrier fact: {_short_intake_answer(communication_barrier[0])}")
+
+    for section in [str(item) for item in list(key_facts.get("anchor_sections") or []) if str(item)]:
+        allegation = _section_allegation(section)
+        if allegation:
+            allegations.append(allegation)
+
+    for line in _anchored_chronology_lines(session, limit=1):
+        allegations.append(line)
+
+    summarized_facts: List[str] = []
+    for fact in _session_complainant_facts(session, limit=6):
+        summary = _summarize_intake_fact(fact)
+        if summary:
+            summarized_facts.append(summary)
+
+    for summary in _dedupe_fact_summaries(summarized_facts, limit=2):
+        allegations.append(f"Case-specific intake fact: {summary}")
+
+    timeline_summaries: List[str] = []
+    for fact in _session_timeline_points(session, limit=3):
+        summarized_fact = _summarize_timeline_fact(fact)
+        if summarized_fact:
+            timeline_summaries.append(summarized_fact)
+
+    for summarized_fact in _dedupe_timeline_summaries(timeline_summaries, limit=1):
+        allegations.append(f"Timeline detail from intake: {summarized_fact}")
+
     if readiness["phase_status"] != "ready":
         blockers = ", ".join(readiness.get("blockers") or [])
         allegations.append(
@@ -4477,34 +4610,11 @@ def _factual_allegations(seed: Dict[str, Any], session: Dict[str, Any], limit: i
         allegations.append(
             "File-evidence support remains thin; allegations should identify record-level artifacts (notice/email/letter/portal entries) for each timing and actor anchor."
         )
-    description = _normalize_incident_summary(seed.get("description") or key_facts.get("incident_summary") or "")
-    protected_bases = [str(item) for item in list(key_facts.get("protected_bases") or []) if str(item)]
-    if description:
-        allegations.append(f"The complaint centers on {description.rstrip('.')}")
-    if protected_bases:
-        allegations.append(f"The intake and evidence record suggest a dispute implicating protected basis concerns related to {', '.join(protected_bases)}")
-
-    for section in [str(item) for item in list(key_facts.get("anchor_sections") or []) if str(item)]:
-        allegation = _section_allegation(section)
-        if allegation:
-            allegations.append(allegation)
-
-    for line in _anchored_chronology_lines(session, limit=1):
-        allegations.append(line)
 
     for line in handoff_summary_lines[:2]:
         allegations.append(f"Structured summary-of-facts handoff: {_short_intake_answer(line)}")
     for line in handoff_fact_lines[:2]:
         allegations.append(f"Structured factual handoff line: {_short_intake_answer(line)}")
-
-    timeline_summaries: List[str] = []
-    for fact in _collect_timeline_points(list(session.get("conversation_history") or []), limit=3):
-        summarized_fact = _summarize_timeline_fact(fact)
-        if summarized_fact:
-            timeline_summaries.append(summarized_fact)
-
-    for summarized_fact in _dedupe_timeline_summaries(timeline_summaries, limit=1):
-        allegations.append(f"Timeline detail from intake: {summarized_fact}")
 
     for line in handoff_exhibit_lines[:2]:
         allegations.append(f"Exhibit description handoff: {_short_intake_answer(line)}")
@@ -4747,7 +4857,7 @@ def _claims_theory(seed: Dict[str, Any], session: Dict[str, Any], filing_forum: 
     if protected_bases:
         claims.append(f"The available record suggests the dispute may implicate protected basis concerns related to {', '.join(protected_bases)}")
     description = str(seed.get("description") or "").lower()
-    intake_excerpt = " ".join(_conversation_facts(list(session.get("conversation_history") or []), limit=3)).lower()
+    intake_excerpt = " ".join(_session_complainant_facts(session, limit=3)).lower()
     retaliation_flag = "retaliat" in description or "retaliat" in intake_excerpt
     authority_line = _authority_claim_line(authority_hints, sections, retaliation=retaliation_flag)
     if authority_line:
@@ -6106,7 +6216,7 @@ def _proposed_allegations(seed: Dict[str, Any], session: Dict[str, Any], filing_
     for line in _anchored_chronology_lines(session, limit=2):
         allegations.append(line)
     summarized_facts: List[str] = []
-    for fact in _conversation_facts(list(session.get("conversation_history") or []), limit=5):
+    for fact in _session_complainant_facts(session, limit=5):
         summary = _summarize_intake_fact(fact)
         if summary:
             summarized_facts.append(summary)
