@@ -30,6 +30,10 @@ DEFAULT_PARTIES = {
     "plaintiff": "Complainant / tenant or program participant (name to be inserted).",
     "defendant": "Housing Authority of Clackamas County (HACC).",
 }
+MASTER_EMAIL_IMPORT_DIR = PROJECT_ROOT.parent / "evidence" / "email_imports" / "starworks5-master-case-email-import"
+MASTER_EMAIL_MANIFEST_PATH = MASTER_EMAIL_IMPORT_DIR / "email_import_manifest.json"
+MASTER_EMAIL_GRAPHRAG_SUMMARY_PATH = MASTER_EMAIL_IMPORT_DIR / "graphrag" / "email_graphrag_summary.json"
+MASTER_EMAIL_DUCKDB_PATH = MASTER_EMAIL_IMPORT_DIR / "graphrag" / "duckdb" / "email_search.duckdb"
 
 FILING_FORUM_CHOICES = ("court", "hud", "state_agency")
 ACTOR_CRITIC_PHASE_FOCUS_ORDER = ("graph_analysis", "document_generation", "intake_questioning")
@@ -67,6 +71,17 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 def _load_json(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _canonical_master_email_artifacts() -> Dict[str, Any]:
+    return {
+        "manifest_path": str(MASTER_EMAIL_MANIFEST_PATH),
+        "graphrag_summary_path": str(MASTER_EMAIL_GRAPHRAG_SUMMARY_PATH),
+        "duckdb_index_path": str(MASTER_EMAIL_DUCKDB_PATH),
+        "manifest_exists": MASTER_EMAIL_MANIFEST_PATH.is_file(),
+        "graphrag_summary_exists": MASTER_EMAIL_GRAPHRAG_SUMMARY_PATH.is_file(),
+        "duckdb_index_exists": MASTER_EMAIL_DUCKDB_PATH.is_file(),
+    }
 
 
 def _pick_best_session(results_payload: Dict[str, Any], preset: str | None = None) -> Dict[str, Any]:
@@ -6868,6 +6883,7 @@ def main(argv: List[str] | None = None) -> int:
             "completed_intake_worksheet_json": str(completed_intake_worksheet_path) if completed_intake_worksheet_path else None,
             "completed_grounded_intake_worksheet_json": str(completed_grounded_intake_worksheet_path) if completed_grounded_intake_worksheet_path else None,
             "search_summary": search_summary,
+            "canonical_master_email_corpus": _canonical_master_email_artifacts(),
         },
     }
     package["refreshed_grounding_state"] = _refreshed_grounding_state(

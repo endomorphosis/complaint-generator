@@ -23,6 +23,17 @@ def test_existing_optional_path_returns_path_for_existing_file(tmp_path):
     assert MODULE._existing_optional_path(artifact) == artifact
 
 
+def test_canonical_master_email_artifacts_points_to_master_case_corpus():
+    payload = MODULE._canonical_master_email_artifacts()
+
+    assert payload["manifest_path"].endswith("evidence/email_imports/starworks5-master-case-email-import/email_import_manifest.json")
+    assert payload["graphrag_summary_path"].endswith("evidence/email_imports/starworks5-master-case-email-import/graphrag/email_graphrag_summary.json")
+    assert payload["duckdb_index_path"].endswith("evidence/email_imports/starworks5-master-case-email-import/graphrag/duckdb/email_search.duckdb")
+    assert payload["manifest_exists"] is True
+    assert payload["graphrag_summary_exists"] is True
+    assert payload["duckdb_index_exists"] is True
+
+
 def test_graph_readiness_counts_only_blocking_open_temporal_issues():
     session = {
         "final_state": {

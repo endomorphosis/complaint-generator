@@ -17,7 +17,7 @@ try:
         search_email_duckdb_index as _search_email_duckdb_index,
     )
 except Exception:
-    _repo_root = Path(__file__).resolve().parents[2] / "ipfs_datasets_py"
+    _repo_root = Path(__file__).resolve().parents[1] / "ipfs_datasets_py"
     if _repo_root.exists():
         for _module_name in list(sys.modules):
             if _module_name == "ipfs_datasets_py" or _module_name.startswith("ipfs_datasets_py."):
@@ -110,7 +110,7 @@ def _email_record_to_corpus_text(record: dict[str, Any]) -> str:
         lines.append(f"Attachment filename: {path.name}")
         # Keep email GraphRAG lightweight by default: use native text extraction
         # for PDFs/text attachments and skip heavy OCR unless we explicitly opt in.
-        extraction = extract_attachment_text(path, use_ocr=False)
+        extraction = extract_attachment_text(path, use_ocr=True)
         attachment_text = str(extraction.get("text") or "").strip()
         if attachment_text:
             lines.append(f"Attachment text from {path.name}: {attachment_text}")
@@ -123,6 +123,7 @@ def build_email_graphrag_artifacts(
     output_dir: str | Path | None = None,
     emit_duckdb_index: bool = True,
     append_duckdb_index: bool = False,
+    include_attachment_text_in_search: bool = True,
 ) -> dict[str, Any]:
     manifest_file = Path(manifest_path).expanduser().resolve()
     manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
@@ -181,7 +182,7 @@ def build_email_graphrag_artifacts(
                 duckdb_index_summary = _build_email_duckdb_index(
                     manifest_path=manifest_file,
                     output_dir=graphrag_dir / "duckdb",
-                    include_attachment_text=False,
+                    include_attachment_text=include_attachment_text_in_search,
                     append=append_duckdb_index,
                 )
             except ImportError as exc:
@@ -196,6 +197,7 @@ def build_email_graphrag_artifacts(
         "graph_path": str(graph_path),
         "corpus_records_path": str(corpus_path),
         "duckdb_index": duckdb_index_summary,
+        "include_attachment_text_in_search": bool(include_attachment_text_in_search),
     }
     summary_path = graphrag_dir / "email_graphrag_summary.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -207,7 +209,7 @@ def build_email_duckdb_artifacts(
     *,
     manifest_path: str | Path,
     output_dir: str | Path | None = None,
-    include_attachment_text: bool = False,
+    include_attachment_text: bool = True,
     append: bool = False,
 ) -> dict[str, Any]:
     if _build_email_duckdb_index is None:

@@ -103,6 +103,25 @@ def test_main_prints_inspection_for_latest_run(tmp_path, capsys):
         ),
         encoding="utf-8",
     )
+    (grounded_run / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "source_artifacts": {
+                    "canonical_master_email_corpus": {
+                        "manifest_path": "/tmp/master/email_import_manifest.json",
+                        "graphrag_summary_path": "/tmp/master/graphrag/email_graphrag_summary.json",
+                        "duckdb_index_path": "/tmp/master/graphrag/duckdb/email_search.duckdb",
+                    }
+                },
+                "artifacts": {
+                    "canonical_master_email_manifest_json": "/tmp/master/email_import_manifest.json",
+                    "canonical_master_email_graphrag_summary_json": "/tmp/master/graphrag/email_graphrag_summary.json",
+                    "canonical_master_email_duckdb": "/tmp/master/graphrag/duckdb/email_search.duckdb",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = cli.main(["--grounded-root", str(tmp_path)])
     captured = capsys.readouterr()
@@ -110,6 +129,9 @@ def test_main_prints_inspection_for_latest_run(tmp_path, capsys):
     assert result == 0
     assert "Workflow stage: post_grounded_follow_up" in captured.out
     assert "continue_drafting" in captured.out
+    assert "Canonical master email corpus:" in captured.out
+    assert "/tmp/master/email_import_manifest.json" in captured.out
+    assert "/tmp/master/graphrag/duckdb/email_search.duckdb" in captured.out
 
 
 def test_main_prints_json_for_explicit_output_dir(tmp_path, capsys):
@@ -121,6 +143,25 @@ def test_main_prints_json_for_explicit_output_dir(tmp_path, capsys):
         encoding="utf-8",
     )
     (grounded_run / "grounded_workflow_history.json").write_text(json.dumps([]), encoding="utf-8")
+    (grounded_run / "run_summary.json").write_text(
+        json.dumps(
+            {
+                "source_artifacts": {
+                    "canonical_master_email_corpus": {
+                        "manifest_path": "/tmp/master/email_import_manifest.json",
+                        "graphrag_summary_path": "/tmp/master/graphrag/email_graphrag_summary.json",
+                        "duckdb_index_path": "/tmp/master/graphrag/duckdb/email_search.duckdb",
+                    }
+                },
+                "artifacts": {
+                    "canonical_master_email_manifest_json": "/tmp/master/email_import_manifest.json",
+                    "canonical_master_email_graphrag_summary_json": "/tmp/master/graphrag/email_graphrag_summary.json",
+                    "canonical_master_email_duckdb": "/tmp/master/graphrag/duckdb/email_search.duckdb",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = cli.main(["--output-dir", str(grounded_run), "--json"])
     captured = capsys.readouterr()
@@ -129,6 +170,8 @@ def test_main_prints_json_for_explicit_output_dir(tmp_path, capsys):
     assert result == 0
     assert payload["output_dir"] == str(grounded_run.resolve())
     assert payload["workflow_status"]["workflow_stage"] == "pre_grounded_follow_up"
+    assert payload["canonical_master_email_corpus"]["manifest_path"] == "/tmp/master/email_import_manifest.json"
+    assert payload["artifacts"]["canonical_master_email_duckdb"] == "/tmp/master/graphrag/duckdb/email_search.duckdb"
 
 
 def test_list_grounded_runs_summarizes_available_run_dirs(tmp_path):

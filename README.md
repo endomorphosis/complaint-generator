@@ -186,6 +186,41 @@ complaint-generator-mcp
 .venv/bin/python -m complaint_generator.mcp_server
 ```
 
+### HACC Master Email Corpus
+
+The HACC workspace now has a canonical merged email corpus that combines the confirmed local case emails with the recommended packet exhibit emails.
+
+Canonical artifacts:
+
+- Manifest: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/email_import_manifest.json`
+- GraphRAG summary: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/graphrag/email_graphrag_summary.json`
+- Search index: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/graphrag/duckdb/email_search.duckdb`
+
+Use the repo-local helper to rebuild or search that corpus without retyping the long paths:
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --search-query 'hcv orientation living room' \
+  --search-limit 5
+```
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --agentic-query 'mobility accommodation retaliation' \
+  --complaint-keyword voucher \
+  --seed-term 'ashley ferron' \
+  --seed-participant aferron@clackamas.us \
+  --required-participant-domain clackamas.us
+```
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --rebuild
+```
+
 **Browser SDK and unified workspace page:**
 
 - The browser SDK is served from `/static/complaint_mcp_sdk.js`
