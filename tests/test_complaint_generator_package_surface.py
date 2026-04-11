@@ -37,8 +37,10 @@ from complaint_generator import (
     get_client_release_gate,
     get_filing_provenance,
     get_formal_diagnostics,
+    get_packaged_docket_operator_dashboard,
     get_provider_diagnostics,
     get_tooling_contract,
+    load_packaged_docket_operator_dashboard_report,
     review_generated_exports,
     export_complaint_packet,
     export_complaint_markdown,
@@ -140,7 +142,9 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(get_tooling_contract)
     assert callable(get_filing_provenance)
     assert callable(get_formal_diagnostics)
+    assert callable(get_packaged_docket_operator_dashboard)
     assert callable(get_provider_diagnostics)
+    assert callable(load_packaged_docket_operator_dashboard_report)
     assert callable(review_generated_exports)
     assert callable(create_review_dashboard_app)
     assert callable(review_ui)

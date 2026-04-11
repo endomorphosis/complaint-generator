@@ -4469,6 +4469,67 @@ class ComplaintWorkspaceService:
         self._save_state(state)
         return self.get_session(str(state["user_id"]))
 
+    def get_packaged_docket_operator_dashboard(self, manifest_path: str | Path) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import get_packaged_docket_operator_dashboard
+
+        resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
+        dashboard = get_packaged_docket_operator_dashboard(resolved_manifest)
+        return {
+            **dict(dashboard),
+            "manifest_path": resolved_manifest,
+            "source": "complaint_workspace_packaged_operator_dashboard",
+        }
+
+    def load_packaged_docket_operator_dashboard_report(
+        self,
+        manifest_path: str | Path,
+        *,
+        report_format: str = "parsed",
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import load_packaged_docket_operator_dashboard_report
+
+        resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
+        normalized_format = str(report_format or "parsed").strip().lower()
+        report = load_packaged_docket_operator_dashboard_report(
+            resolved_manifest,
+            report_format=normalized_format,
+        )
+        return {
+            "manifest_path": resolved_manifest,
+            "report_format": normalized_format,
+            "report": report,
+            "source": "complaint_workspace_packaged_operator_dashboard_report",
+        }
+
+    def execute_packaged_docket_proof_revalidation_queue(
+        self,
+        manifest_path: str | Path,
+        *,
+        top_k: int = 10,
+        min_priority: str = "low",
+        queue_limit: Optional[int] = None,
+        execution_top_k: int = 10,
+        chain_until_satisfied: bool = True,
+        attach_refreshed_packets: bool = False,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import execute_packaged_docket_proof_revalidation_queue
+
+        resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
+        execution = execute_packaged_docket_proof_revalidation_queue(
+            resolved_manifest,
+            top_k=int(top_k or 10),
+            min_priority=str(min_priority or "low"),
+            queue_limit=int(queue_limit) if queue_limit is not None else None,
+            execution_top_k=int(execution_top_k or 10),
+            chain_until_satisfied=bool(chain_until_satisfied),
+            attach_refreshed_packets=bool(attach_refreshed_packets),
+        )
+        return {
+            **dict(execution),
+            "manifest_path": resolved_manifest,
+            "source": "complaint_workspace_packaged_proof_revalidation_queue_execution",
+        }
+
     def list_mcp_tools(self) -> Dict[str, Any]:
         return {
             "tools": [
@@ -4501,6 +4562,9 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.get_filing_provenance", "description": "Return the shared routing provenance for complaint generation, filing critique, export critique, and cached UI review workflows."},
                 {"name": "complaint.get_provider_diagnostics", "description": "Report which llm_router providers are actually usable on this machine, in the same order the router will prefer them."},
                 {"name": "complaint.review_generated_exports", "description": "Review generated complaint export artifacts through llm_router and turn filing-output weaknesses into UI/UX repair suggestions."},
+                {"name": "complaint.get_packaged_docket_operator_dashboard", "description": "Load the combined packaged docket operator dashboard for a docket bundle manifest."},
+                {"name": "complaint.load_packaged_docket_operator_dashboard_report", "description": "Load the archived packaged docket operator dashboard report artifact for a docket bundle manifest."},
+                {"name": "complaint.execute_packaged_docket_proof_revalidation_queue", "description": "Execute the packaged docket proof revalidation queue for a docket bundle manifest and return execution summaries."},
                 {"name": "complaint.update_claim_type", "description": "Set the current complaint type so drafting and review stay aligned to the right legal claim shape."},
                 {"name": "complaint.update_case_synopsis", "description": "Persist a shared case synopsis that stays visible across workspace, CLI, and MCP flows."},
                 {"name": "complaint.reset_session", "description": "Clear the complaint workspace session."},
@@ -4678,6 +4742,32 @@ class ComplaintWorkspaceService:
                 config_path=args.get("config_path"),
                 backend_id=args.get("backend_id"),
                 notes=args.get("notes"),
+            )
+        if tool_name == "complaint.get_packaged_docket_operator_dashboard":
+            manifest_path = str(args.get("manifest_path") or "").strip()
+            if not manifest_path:
+                raise ValueError("complaint.get_packaged_docket_operator_dashboard requires manifest_path.")
+            return self.get_packaged_docket_operator_dashboard(manifest_path)
+        if tool_name == "complaint.load_packaged_docket_operator_dashboard_report":
+            manifest_path = str(args.get("manifest_path") or "").strip()
+            if not manifest_path:
+                raise ValueError("complaint.load_packaged_docket_operator_dashboard_report requires manifest_path.")
+            return self.load_packaged_docket_operator_dashboard_report(
+                manifest_path,
+                report_format=str(args.get("report_format") or "parsed"),
+            )
+        if tool_name == "complaint.execute_packaged_docket_proof_revalidation_queue":
+            manifest_path = str(args.get("manifest_path") or "").strip()
+            if not manifest_path:
+                raise ValueError("complaint.execute_packaged_docket_proof_revalidation_queue requires manifest_path.")
+            return self.execute_packaged_docket_proof_revalidation_queue(
+                manifest_path,
+                top_k=int(args.get("top_k") or 10),
+                min_priority=str(args.get("min_priority") or "low"),
+                queue_limit=int(args["queue_limit"]) if args.get("queue_limit") is not None else None,
+                execution_top_k=int(args.get("execution_top_k") or 10),
+                chain_until_satisfied=bool(True if args.get("chain_until_satisfied") is None else args.get("chain_until_satisfied")),
+                attach_refreshed_packets=bool(args.get("attach_refreshed_packets") or False),
             )
         if tool_name == "complaint.update_claim_type":
             return self.update_claim_type(args.get("user_id"), args.get("claim_type"))

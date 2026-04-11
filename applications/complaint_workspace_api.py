@@ -139,6 +139,16 @@ class JsonRpcRequest(BaseModel):
     params: Dict[str, Any] = Field(default_factory=dict)
 
 
+class PackagedDocketRevalidationRequest(BaseModel):
+    manifest_path: str
+    top_k: int = 10
+    min_priority: str = "low"
+    queue_limit: Optional[int] = None
+    execution_top_k: int = 10
+    chain_until_satisfied: bool = True
+    attach_refreshed_packets: bool = False
+
+
 def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceService] = None) -> APIRouter:
     router = APIRouter()
     workspace = service or ComplaintWorkspaceService()
@@ -304,6 +314,34 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
     @router.get("/api/complaint-workspace/mcp/tools")
     async def list_mcp_tools() -> Dict[str, Any]:
         return tool_list_payload(workspace)
+
+    @router.get("/api/complaint-workspace/packaged-docket/operator-dashboard")
+    async def get_packaged_docket_operator_dashboard_route(manifest_path: str) -> Dict[str, Any]:
+        return workspace.get_packaged_docket_operator_dashboard(manifest_path)
+
+    @router.get("/api/complaint-workspace/packaged-docket/operator-dashboard-report")
+    async def load_packaged_docket_operator_dashboard_report_route(
+        manifest_path: str,
+        report_format: str = Query(default="parsed"),
+    ) -> Dict[str, Any]:
+        return workspace.load_packaged_docket_operator_dashboard_report(
+            manifest_path,
+            report_format=report_format,
+        )
+
+    @router.post("/api/complaint-workspace/packaged-docket/revalidation/execute")
+    async def execute_packaged_docket_revalidation_route(
+        request: PackagedDocketRevalidationRequest,
+    ) -> Dict[str, Any]:
+        return workspace.execute_packaged_docket_proof_revalidation_queue(
+            request.manifest_path,
+            top_k=request.top_k,
+            min_priority=request.min_priority,
+            queue_limit=request.queue_limit,
+            execution_top_k=request.execution_top_k,
+            chain_until_satisfied=request.chain_until_satisfied,
+            attach_refreshed_packets=request.attach_refreshed_packets,
+        )
 
     @router.post("/api/complaint-workspace/mcp/call")
     async def call_mcp_tool(request: McpCallRequest) -> Dict[str, Any]:

@@ -3031,6 +3031,77 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 <div class="status draft-preview-shell"><pre id="claim-alignment-preview">No claim-alignment review run yet.</pre></div>
                             </div>
                         </div>
+                        <div class="tool-card" id="packaged-docket-operator-card">
+                            <span class="integrations-stack-label">Packaged Docket Ops</span>
+                            <h3>Load Packaged Legal Ops Dashboard</h3>
+                            <p class="muted">Paste a packaged docket manifest path to inspect the persisted operator dashboard or load the archived report directly through the shared browser MCP SDK.</p>
+                            <div class="field-row">
+                                <div>
+                                    <label for="packaged-docket-manifest-path">Bundle Manifest Path</label>
+                                    <input id="packaged-docket-manifest-path" type="text" placeholder="/path/to/bundle_manifest.json">
+                                </div>
+                                <div>
+                                    <label for="packaged-docket-report-format">Archived Report Format</label>
+                                    <select id="packaged-docket-report-format">
+                                        <option value="text">text</option>
+                                        <option value="parsed">parsed</option>
+                                        <option value="markdown">markdown</option>
+                                        <option value="json">json</option>
+                                        <option value="row">row</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="button-row">
+                                <button class="primary" id="load-packaged-docket-dashboard-button" type="button">Load Docket Dashboard</button>
+                                <button class="secondary" id="load-packaged-docket-dashboard-report-button" type="button">Load Archived Report</button>
+                                <button class="secondary" id="execute-packaged-docket-revalidation-button" type="button">Run Revalidation Queue</button>
+                            </div>
+                            <div class="chip-row" id="packaged-docket-dashboard-chips">
+                                <span class="chip" id="packaged-docket-dashboard-source-chip">source: not loaded</span>
+                                <span class="chip" id="packaged-docket-dashboard-review-chip">review: n/a</span>
+                                <span class="chip" id="packaged-docket-dashboard-run-chip">runs: n/a</span>
+                            </div>
+                            <div class="feature-grid" id="packaged-docket-dashboard-scorecard">
+                                <div class="metric-card">
+                                    <strong>Pending Review</strong>
+                                    <span id="packaged-docket-dashboard-pending-count">0 items</span>
+                                </div>
+                                <div class="metric-card">
+                                    <strong>High Priority</strong>
+                                    <span id="packaged-docket-dashboard-high-priority-count">0 items</span>
+                                </div>
+                                <div class="metric-card">
+                                    <strong>Queue Size</strong>
+                                    <span id="packaged-docket-dashboard-queue-count">0 items</span>
+                                </div>
+                                <div class="metric-card">
+                                    <strong>Latest Source</strong>
+                                    <span id="packaged-docket-dashboard-latest-source">n/a</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label>Dashboard Summary</label>
+                                <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-preview">No packaged docket operator dashboard loaded yet.</pre></div>
+                            </div>
+                            <div class="field-grid">
+                                <div>
+                                    <label>Latest Revalidation Run</label>
+                                    <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-latest-run-preview">No packaged docket revalidation run loaded yet.</pre></div>
+                                </div>
+                                <div>
+                                    <label>Queue Status</label>
+                                    <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-queue-preview">No packaged docket revalidation queue loaded yet.</pre></div>
+                                </div>
+                            </div>
+                            <div>
+                                <label>Revalidation Execution</label>
+                                <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-execution-preview">No packaged docket revalidation execution run yet.</pre></div>
+                            </div>
+                            <div>
+                                <label>Archived Operator Report</label>
+                                <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-report-preview">No packaged docket operator dashboard report loaded yet.</pre></div>
+                            </div>
+                        </div>
                         <div class="tool-card">
                             <span class="integrations-stack-label">Diagnostics</span>
                             <h3>SDK Diagnostics</h3>
@@ -3178,6 +3249,9 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let workspaceFormalDiagnostics = null;
         let workspaceFilingProvenance = null;
         let workspaceProviderDiagnostics = null;
+        let latestPackagedDocketOperatorDashboard = null;
+        let latestPackagedDocketOperatorDashboardReport = null;
+        let latestPackagedDocketRevalidationExecution = null;
         let latestPacketExport = null;
         let latestComplaintOutputAnalysis = null;
         let latestUiReviewResult = null;
@@ -8688,6 +8762,129 @@ function extractComplaintOutputSignals(result) {
             setStatus('Provider diagnostics refreshed.');
         }
 
+        function renderPackagedDocketOperatorDashboardPanel() {
+            const dashboard = latestPackagedDocketOperatorDashboard || {};
+            const reportPayload = latestPackagedDocketOperatorDashboardReport || {};
+            const executionPayload = latestPackagedDocketRevalidationExecution || {};
+            const summary = dashboard.summary || {};
+            const inspection = dashboard.inspection || {};
+            const snapshot = dashboard.proof_revalidation_snapshot || {};
+            const currentStatus = snapshot.current_status || {};
+            const latestRun = snapshot.latest_run_summary || {};
+            const nextQueueItem = snapshot.next_queue_item_summary || {};
+            const executionSummary = executionPayload.best_execution_summary || executionPayload.best_execution || {};
+            document.getElementById('packaged-docket-dashboard-source-chip').textContent = `source: ${String(dashboard.source || 'not loaded')}`;
+            document.getElementById('packaged-docket-dashboard-review-chip').textContent = `review: ${String(currentStatus.review_required_work_item_count || 0)}`;
+            document.getElementById('packaged-docket-dashboard-run-chip').textContent = `runs: ${String(summary.revalidation_run_count || latestRun.run_id || '0')}`;
+            document.getElementById('packaged-docket-dashboard-pending-count').textContent = `${String(currentStatus.review_required_work_item_count || 0)} item(s)`;
+            document.getElementById('packaged-docket-dashboard-high-priority-count').textContent = `${String(currentStatus.high_priority_revalidation_count || 0)} item(s)`;
+            document.getElementById('packaged-docket-dashboard-queue-count').textContent = `${String(currentStatus.queue_count || 0)} item(s)`;
+            document.getElementById('packaged-docket-dashboard-latest-source').textContent = String(latestRun.best_terminal_source_type || 'n/a');
+            document.getElementById('packaged-docket-dashboard-preview').textContent = dashboard.source
+                ? [
+                    `Manifest path: ${String(dashboard.manifest_path || document.getElementById('packaged-docket-manifest-path').value.trim() || '')}`,
+                    `Case: ${String(dashboard.case_name || '')}`,
+                    `Court: ${String(dashboard.court || '')}`,
+                    `Latest routing reason: ${String(inspection.latest_routing_reason || 'n/a')}`,
+                    `Pending review count: ${String(currentStatus.review_required_work_item_count || 0)}`,
+                    `High priority revalidation count: ${String(currentStatus.high_priority_revalidation_count || 0)}`,
+                    `Latest terminal source: ${String(latestRun.best_terminal_source_type || 'n/a')}`,
+                ].join('\n')
+                : 'No packaged docket operator dashboard loaded yet.';
+            document.getElementById('packaged-docket-dashboard-latest-run-preview').textContent = latestRun.run_id
+                ? [
+                    `Run ID: ${String(latestRun.run_id || '')}`,
+                    `Terminal source: ${String(latestRun.best_terminal_source_type || 'n/a')}`,
+                    `Support strength: ${String(latestRun.best_terminal_support_strength || 'n/a')}`,
+                    `Attached packets: ${String(latestRun.attached_packet_count || 0)}`,
+                ].join('\n')
+                : 'No packaged docket revalidation run loaded yet.';
+            document.getElementById('packaged-docket-dashboard-queue-preview').textContent = (currentStatus.queue_count || nextQueueItem.work_item_id)
+                ? [
+                    `Queue count: ${String(currentStatus.queue_count || 0)}`,
+                    `Next work item: ${String(nextQueueItem.work_item_id || 'n/a')}`,
+                    `Next priority: ${String(nextQueueItem.proof_revalidation_priority || 'n/a')}`,
+                    `Next status: ${String(nextQueueItem.proof_revalidation_status || 'n/a')}`,
+                ].join('\n')
+                : 'No packaged docket revalidation queue loaded yet.';
+            document.getElementById('packaged-docket-dashboard-execution-preview').textContent = executionPayload.source
+                ? [
+                    `Executed count: ${String(executionPayload.executed_count || 0)}`,
+                    `Best source: ${String(executionSummary.source_type || executionSummary.source || 'n/a')}`,
+                    `Support strength: ${String(executionSummary.support_strength || 'n/a')}`,
+                    `Work item: ${String(executionSummary.work_item_id || executionSummary.source_id || 'n/a')}`,
+                ].join('\n')
+                : 'No packaged docket revalidation execution run yet.';
+            const report = reportPayload.report;
+            document.getElementById('packaged-docket-dashboard-report-preview').textContent = reportPayload.report_format
+                ? (typeof report === 'string' ? report : JSON.stringify(report || {}, null, 2))
+                : 'No packaged docket operator dashboard report loaded yet.';
+        }
+
+        async function loadPackagedDocketOperatorDashboardPanel() {
+            const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
+            if (!manifestPath) {
+                activateTab('integrations');
+                setStatus('Add a packaged docket bundle manifest path before loading the operator dashboard.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Loading the packaged docket operator dashboard through the shared MCP SDK…');
+            try {
+                latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(manifestPath);
+                renderPackagedDocketOperatorDashboardPanel();
+                setStatus('Packaged docket operator dashboard loaded.');
+            } catch (error) {
+                console.error(error);
+                setStatus(`Packaged docket operator dashboard failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function loadPackagedDocketOperatorDashboardReportPanel() {
+            const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
+            const reportFormat = document.getElementById('packaged-docket-report-format').value;
+            if (!manifestPath) {
+                activateTab('integrations');
+                setStatus('Add a packaged docket bundle manifest path before loading the archived operator report.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Loading the archived packaged docket operator dashboard report through the shared MCP SDK…');
+            try {
+                latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat);
+                renderPackagedDocketOperatorDashboardPanel();
+                setStatus('Archived packaged docket operator dashboard report loaded.');
+            } catch (error) {
+                console.error(error);
+                setStatus(`Packaged docket operator dashboard report failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function executePackagedDocketRevalidationPanel() {
+            const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
+            const reportFormat = document.getElementById('packaged-docket-report-format').value;
+            if (!manifestPath) {
+                activateTab('integrations');
+                setStatus('Add a packaged docket bundle manifest path before running the revalidation queue.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Running packaged docket proof revalidation through the shared MCP SDK…');
+            try {
+                latestPackagedDocketRevalidationExecution = await client.executePackagedDocketProofRevalidationQueue(manifestPath, {
+                    chain_until_satisfied: true,
+                    min_priority: 'low',
+                });
+                latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(manifestPath);
+                latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat);
+                renderPackagedDocketOperatorDashboardPanel();
+                setStatus('Packaged docket proof revalidation queue executed.');
+            } catch (error) {
+                console.error(error);
+                setStatus(`Packaged docket proof revalidation failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
         async function previewMediatorBrief() {
             setBusyStatus('Refreshing the mediator testimony brief through the MCP tools…');
             workspaceMediatorPrompt = await client.buildMediatorPrompt(workspaceUserId);
@@ -8858,6 +9055,9 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('refresh-formal-diagnostics-button').addEventListener('click', refreshFormalDiagnosticsPanel);
         document.getElementById('refresh-filing-provenance-button').addEventListener('click', refreshFilingProvenancePanel);
         document.getElementById('refresh-provider-diagnostics-button').addEventListener('click', refreshProviderDiagnosticsPanel);
+        document.getElementById('load-packaged-docket-dashboard-button').addEventListener('click', loadPackagedDocketOperatorDashboardPanel);
+        document.getElementById('load-packaged-docket-dashboard-report-button').addEventListener('click', loadPackagedDocketOperatorDashboardReportPanel);
+        document.getElementById('execute-packaged-docket-revalidation-button').addEventListener('click', executePackagedDocketRevalidationPanel);
         document.getElementById('build-mediator-prompt-button').addEventListener('click', previewMediatorBrief);
         document.getElementById('analyze-complaint-output-button').addEventListener('click', analyzeComplaintOutputPanel);
         document.getElementById('review-generated-exports-button').addEventListener('click', reviewGeneratedExportsPanel);

@@ -755,6 +755,8 @@ def test_review_surface_app_registers_dashboard_and_api_routes():
         ("/api/complaint-workspace/generate", "POST"),
         ("/api/complaint-workspace/update-draft", "POST"),
         ("/api/complaint-workspace/reset", "POST"),
+        ("/api/complaint-workspace/packaged-docket/operator-dashboard", "GET"),
+        ("/api/complaint-workspace/packaged-docket/operator-dashboard-report", "GET"),
         ("/api/complaint-workspace/mcp/tools", "GET"),
         ("/api/complaint-workspace/mcp/call", "POST"),
         ("/api/complaint-workspace/mcp/rpc", "POST"),

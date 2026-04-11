@@ -434,6 +434,25 @@ class ComplaintMcpClient {
         });
     }
 
+    getPackagedDocketOperatorDashboard(manifestPath) {
+        return this.callTool('complaint.get_packaged_docket_operator_dashboard', {
+            manifest_path: manifestPath,
+        });
+    }
+
+    loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat = 'parsed') {
+        return this.callTool('complaint.load_packaged_docket_operator_dashboard_report', {
+            manifest_path: manifestPath,
+            report_format: reportFormat || 'parsed',
+        });
+    }
+
+    executePackagedDocketProofRevalidationQueue(manifestPath, options = {}) {
+        return this.callTool('complaint.execute_packaged_docket_proof_revalidation_queue', Object.assign({
+            manifest_path: manifestPath,
+        }, options || {}));
+    }
+
     generateComplaint(userId, payload) {
         return this.callTool('complaint.generate_complaint', Object.assign({
             user_id: userId,

@@ -6,13 +6,15 @@ from io import BytesIO
 
 import backends
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 import pytest
 from typer.testing import CliRunner
+from ipfs_datasets_py.processors.legal_data import DocketDatasetBuilder
 
 from applications import complaint_cli as complaint_cli_impl
 from applications.complaint_workspace_api import attach_complaint_workspace_routes
 from applications.complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
-from complaint_generator import ComplaintWorkspaceService, analyze_complaint_output, get_client_release_gate, get_formal_diagnostics, get_provider_diagnostics, get_tooling_contract, optimize_ui, review_generated_exports, review_ui, run_browser_audit
+from complaint_generator import ComplaintWorkspaceService, analyze_complaint_output, get_client_release_gate, get_formal_diagnostics, get_packaged_docket_operator_dashboard, get_provider_diagnostics, get_tooling_contract, load_packaged_docket_operator_dashboard_report, optimize_ui, review_generated_exports, review_ui, run_browser_audit
 
 
 pytestmark = [pytest.mark.no_auto_network]
@@ -46,6 +48,36 @@ def _call_mcp_tool(service: ComplaintWorkspaceService, request_id: int, tool_nam
     result = response["result"]
     assert result["isError"] is False
     return result["structuredContent"]
+
+
+def _build_packaged_docket_manifest(tmp_path, *, routing_reason: str = "Workspace dashboard routing reason.") -> str:
+    dataset = DocketDatasetBuilder().build_from_docket(
+        {
+            "docket_id": "workspace-docket-1",
+            "case_name": "Workspace Packaged Docket",
+            "court": "D. Example",
+            "documents": [
+                {
+                    "id": "doc_1",
+                    "title": "Complaint",
+                    "text": "Plaintiff seeks relief under 42 U.S.C. § 1983.",
+                },
+            ],
+        }
+    )
+    dataset.metadata["latest_proof_packet_routing_explanation"] = {
+        "routing_reason": routing_reason,
+        "routing_evidence": [{"citation_text": "42 U.S.C. § 1983"}],
+        "preferred_corpus_priority": ["us_code"],
+        "preferred_state_codes": [],
+        "authority_backed": True,
+    }
+    package = dataset.write_package(
+        tmp_path / "workspace_packaged_docket_bundle",
+        package_name="workspace_packaged_docket_bundle",
+        include_car=False,
+    )
+    return str(package["manifest_json_path"])
 
 
 def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
@@ -83,6 +115,8 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.get_formal_diagnostics",
         "complaint.get_filing_provenance",
         "complaint.get_provider_diagnostics",
+        "complaint.get_packaged_docket_operator_dashboard",
+        "complaint.load_packaged_docket_operator_dashboard_report",
         "complaint.review_generated_exports",
         "complaint.update_claim_type",
         "complaint.update_case_synopsis",
@@ -96,6 +130,8 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     assert all("inputSchema" in tool for tool in payload["tools"])
     assert tools_by_name["complaint.get_tooling_contract"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
     assert tools_by_name["complaint.get_filing_provenance"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.get_packaged_docket_operator_dashboard"]["inputSchema"]["required"] == ["manifest_path"]
+    assert tools_by_name["complaint.load_packaged_docket_operator_dashboard_report"]["inputSchema"]["required"] == ["manifest_path"]
 
 
 def test_client_release_gate_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp_path):
@@ -1484,6 +1520,65 @@ def test_filing_provenance_is_exposed_across_package_cli_and_mcp(monkeypatch, tm
 
     package_payload = get_filing_provenance("provenance-user", service=service)
     assert package_payload["ui_workflow_type"] == "ui_ux_closed_loop"
+
+
+def test_packaged_docket_operator_dashboard_is_exposed_across_package_mcp_and_api(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-packaged-docket-tools")
+    manifest_path = _build_packaged_docket_manifest(
+        tmp_path,
+        routing_reason="Workspace packaged dashboard routing reason.",
+    )
+
+    package_payload = get_packaged_docket_operator_dashboard(
+        manifest_path,
+        service=service,
+    )
+    assert package_payload["source"] == "complaint_workspace_packaged_operator_dashboard"
+    assert package_payload["inspection"]["latest_routing_reason"] == "Workspace packaged dashboard routing reason."
+
+    report_payload = load_packaged_docket_operator_dashboard_report(
+        manifest_path,
+        report_format="text",
+        service=service,
+    )
+    assert report_payload["report_format"] == "text"
+    assert "Packaged Docket Operator Dashboard" in report_payload["report"]
+
+    mcp_payload = _call_mcp_tool(
+        service,
+        94,
+        "complaint.get_packaged_docket_operator_dashboard",
+        {"manifest_path": manifest_path},
+    )
+    assert mcp_payload["manifest_path"] == str(manifest_path)
+    assert mcp_payload["inspection"]["latest_routing_reason"] == "Workspace packaged dashboard routing reason."
+
+    mcp_report_payload = _call_mcp_tool(
+        service,
+        95,
+        "complaint.load_packaged_docket_operator_dashboard_report",
+        {"manifest_path": manifest_path, "report_format": "parsed"},
+    )
+    assert mcp_report_payload["report_format"] == "parsed"
+    assert mcp_report_payload["report"]["source"] == "packaged_operator_dashboard"
+
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    client = TestClient(app)
+
+    dashboard_response = client.get(
+        "/api/complaint-workspace/packaged-docket/operator-dashboard",
+        params={"manifest_path": manifest_path},
+    )
+    assert dashboard_response.status_code == 200
+    assert dashboard_response.json()["inspection"]["latest_routing_reason"] == "Workspace packaged dashboard routing reason."
+
+    report_response = client.get(
+        "/api/complaint-workspace/packaged-docket/operator-dashboard-report",
+        params={"manifest_path": manifest_path, "report_format": "text"},
+    )
+    assert report_response.status_code == 200
+    assert "Packaged Docket Operator Dashboard" in report_response.json()["report"]
 
 
 def test_successful_llm_draft_persists_effective_router_backend_metadata(monkeypatch, tmp_path):

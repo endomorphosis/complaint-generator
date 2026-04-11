@@ -253,6 +253,34 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "backend_id": {"type": "string"},
         },
     },
+    "complaint.get_packaged_docket_operator_dashboard": {
+        "type": "object",
+        "properties": {
+            "manifest_path": {"type": "string"},
+        },
+        "required": ["manifest_path"],
+    },
+    "complaint.load_packaged_docket_operator_dashboard_report": {
+        "type": "object",
+        "properties": {
+            "manifest_path": {"type": "string"},
+            "report_format": {"type": "string", "enum": ["json", "markdown", "text", "parsed", "row"]},
+        },
+        "required": ["manifest_path"],
+    },
+    "complaint.execute_packaged_docket_proof_revalidation_queue": {
+        "type": "object",
+        "properties": {
+            "manifest_path": {"type": "string"},
+            "top_k": {"type": "integer"},
+            "min_priority": {"type": "string"},
+            "queue_limit": {"type": "integer"},
+            "execution_top_k": {"type": "integer"},
+            "chain_until_satisfied": {"type": "boolean"},
+            "attach_refreshed_packets": {"type": "boolean"},
+        },
+        "required": ["manifest_path"],
+    },
     "complaint.update_claim_type": {
         "type": "object",
         "properties": {

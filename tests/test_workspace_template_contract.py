@@ -211,11 +211,57 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Tooling contract refreshed." in content
     assert "refresh-provider-diagnostics-button" in content
     assert "provider-diagnostics-preview" in content
+    assert "packaged-docket-manifest-path" in content
+    assert "packaged-docket-report-format" in content
+    assert "load-packaged-docket-dashboard-button" in content
+    assert "load-packaged-docket-dashboard-report-button" in content
+    assert "execute-packaged-docket-revalidation-button" in content
+    assert "packaged-docket-dashboard-preview" in content
+    assert "packaged-docket-dashboard-report-preview" in content
+    assert "packaged-docket-dashboard-execution-preview" in content
+    assert "packaged-docket-dashboard-source-chip" in content
+    assert "packaged-docket-dashboard-review-chip" in content
+    assert "packaged-docket-dashboard-run-chip" in content
+    assert "packaged-docket-dashboard-scorecard" in content
+    assert "packaged-docket-dashboard-pending-count" in content
+    assert "packaged-docket-dashboard-high-priority-count" in content
+    assert "packaged-docket-dashboard-queue-count" in content
+    assert "packaged-docket-dashboard-latest-source" in content
+    assert "packaged-docket-dashboard-latest-run-preview" in content
+    assert "packaged-docket-dashboard-queue-preview" in content
     assert "workspaceProviderDiagnostics = null;" in content
+    assert "latestPackagedDocketOperatorDashboard = null;" in content
+    assert "latestPackagedDocketOperatorDashboardReport = null;" in content
+    assert "latestPackagedDocketRevalidationExecution = null;" in content
     assert "latestUiReviewResult = null;" in content
     assert "normalizeUiReadinessResultForDisplay" in content
     assert "client.getProviderDiagnostics(workspaceUserId)" in content
     assert "client.getToolingContract(workspaceUserId)" in content
+    assert "client.getPackagedDocketOperatorDashboard(manifestPath)" in content
+    assert "client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat)" in content
+    assert "client.executePackagedDocketProofRevalidationQueue(manifestPath, {" in content
+    assert "function renderPackagedDocketOperatorDashboardPanel()" in content
+    assert "async function loadPackagedDocketOperatorDashboardPanel()" in content
+    assert "async function loadPackagedDocketOperatorDashboardReportPanel()" in content
+    assert "async function executePackagedDocketRevalidationPanel()" in content
+    assert "Packaged Docket Ops" in content
+    assert "Load Packaged Legal Ops Dashboard" in content
+    assert "Pending Review" in content
+    assert "High Priority" in content
+    assert "Queue Size" in content
+    assert "Latest Revalidation Run" in content
+    assert "Queue Status" in content
+    assert "Loading the packaged docket operator dashboard through the shared MCP SDK…" in content
+    assert "Running packaged docket proof revalidation through the shared MCP SDK…" in content
+    assert "Packaged docket proof revalidation queue executed." in content
+    assert "Archived packaged docket operator dashboard report loaded." in content
+    assert "document.getElementById('packaged-docket-dashboard-pending-count').textContent" in content
+    assert "document.getElementById('packaged-docket-dashboard-latest-run-preview').textContent" in content
+    assert "document.getElementById('packaged-docket-dashboard-queue-preview').textContent" in content
+    assert "document.getElementById('packaged-docket-dashboard-execution-preview').textContent" in content
+    assert "document.getElementById('load-packaged-docket-dashboard-button').addEventListener('click', loadPackagedDocketOperatorDashboardPanel);" in content
+    assert "document.getElementById('load-packaged-docket-dashboard-report-button').addEventListener('click', loadPackagedDocketOperatorDashboardReportPanel);" in content
+    assert "document.getElementById('execute-packaged-docket-revalidation-button').addEventListener('click', executePackagedDocketRevalidationPanel);" in content
     assert "refreshProviderDiagnosticsPanel()" in content
     assert "Provider diagnostics refreshed." in content
     assert "Router provider diagnostics" in content
