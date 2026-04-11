@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from xml.sax.saxutils import escape
 
+from complaint_phases.legal_document import parse_legal_document
+
 try:
     import anyio
 except ModuleNotFoundError:
@@ -737,6 +739,27 @@ def _court_header_line(value: Optional[str]) -> str:
     if "DISTRICT OF" in upper:
         return f"FOR {upper}" if upper.startswith("THE ") else f"FOR THE {upper}"
     return "FOR THE APPROPRIATE JUDICIAL DISTRICT"
+
+
+def _build_export_structure_summary(markdown_text: str) -> Dict[str, Any]:
+    parsed = parse_legal_document(str(markdown_text or ""))
+    payload = parsed.to_dict()
+    header = payload.get("header") if isinstance(payload.get("header"), dict) else {}
+    sections = payload.get("sections") if isinstance(payload.get("sections"), list) else []
+    payload["summary"] = {
+        "has_header": bool(header),
+        "court_line_count": len(header.get("court_lines") or []),
+        "party_line_count": len(header.get("party_lines") or []),
+        "title_line_count": len(header.get("title_lines") or []),
+        "section_count": len(sections),
+        "section_kinds": [str(section.get("kind") or "") for section in sections[:20] if isinstance(section, dict)],
+        "numbered_paragraph_count": int(payload.get("numbered_paragraph_count") or 0),
+        "bullet_count": int(payload.get("bullet_count") or 0),
+        "code_block_count": int(payload.get("code_block_count") or 0),
+        "all_caps_heading_count": int(payload.get("all_caps_heading_count") or 0),
+        "title": str(payload.get("title") or ""),
+    }
+    return payload
 
 
 def _slugify_filename(value: str) -> str:
@@ -3555,12 +3578,34 @@ class ComplaintWorkspaceService:
         ui_feedback = dict(analysis.get("ui_feedback") or {})
         diagnostics = dict(ui_feedback.get("formal_diagnostics") or {})
         packet_summary = dict(analysis.get("packet_summary") or {})
+        try:
+            markdown_artifact = self.build_export_artifact(user_id, "markdown")
+            markdown_text = markdown_artifact.get("body", b"").decode("utf-8", errors="replace")
+            export_structure = _build_export_structure_summary(markdown_text)
+        except Exception as exc:
+            export_structure = {
+                "error": str(exc),
+                "summary": {
+                    "has_header": False,
+                    "court_line_count": 0,
+                    "party_line_count": 0,
+                    "title_line_count": 0,
+                    "section_count": 0,
+                    "section_kinds": [],
+                    "numbered_paragraph_count": 0,
+                    "bullet_count": 0,
+                    "code_block_count": 0,
+                    "all_caps_heading_count": 0,
+                    "title": "",
+                },
+            }
         return {
             "user_id": str(analysis.get("user_id") or user_id or DEFAULT_USER_ID),
             "claim_type_alignment_score": int(ui_feedback.get("claim_type_alignment_score") or 0),
             "filing_shape_score": int(ui_feedback.get("filing_shape_score") or 0),
             "release_gate": deepcopy(ui_feedback.get("release_gate") or {}),
             "formal_diagnostics": diagnostics,
+            "export_structure": export_structure,
             "router_backend": deepcopy(((ui_feedback.get("router_review") or {}).get("backend") or {})),
             "packet_summary": {
                 "has_draft": bool(packet_summary.get("has_draft")),

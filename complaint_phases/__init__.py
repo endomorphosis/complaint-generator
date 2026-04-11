@@ -45,6 +45,32 @@ from .legal_graph import (
     LegalElement,
     LegalRelation
 )
+from .deontic_logic import (
+    DeonticGraphBuilder,
+    DeonticGraph,
+    DeonticNode,
+    DeonticRule,
+    DeonticNodeType,
+    DeonticModality,
+)
+from .legal_document import (
+    PleadingHeader,
+    PleadingCaption,
+    DocumentSection,
+    ParsedLegalDocument,
+    build_pleading_caption,
+    extract_pleading_header,
+    paginate_pleading_lines,
+    parse_legal_document,
+    render_pleading_caption_block,
+)
+from .support_map import (
+    FilingSupportReference,
+    MotionSupportMap,
+    SupportFact,
+    SupportMapBuilder,
+    SupportMapEntry,
+)
 from .neurosymbolic_matcher import NeurosymbolicMatcher
 
 __all__ = [
@@ -77,5 +103,25 @@ __all__ = [
     'LegalGraph',
     'LegalElement',
     'LegalRelation',
+    'DeonticGraphBuilder',
+    'DeonticGraph',
+    'DeonticNode',
+    'DeonticRule',
+    'DeonticNodeType',
+    'DeonticModality',
+    'PleadingHeader',
+    'PleadingCaption',
+    'DocumentSection',
+    'ParsedLegalDocument',
+    'build_pleading_caption',
+    'extract_pleading_header',
+    'paginate_pleading_lines',
+    'parse_legal_document',
+    'render_pleading_caption_block',
+    'FilingSupportReference',
+    'MotionSupportMap',
+    'SupportFact',
+    'SupportMapBuilder',
+    'SupportMapEntry',
     'NeurosymbolicMatcher',
 ]
