@@ -4530,6 +4530,41 @@ class ComplaintWorkspaceService:
             "source": "complaint_workspace_packaged_proof_revalidation_queue_execution",
         }
 
+    def persist_packaged_docket_proof_revalidation_queue(
+        self,
+        manifest_path: str | Path,
+        output_dir: str | Path,
+        *,
+        package_name: Optional[str] = None,
+        include_car: bool = True,
+        top_k: int = 10,
+        min_priority: str = "low",
+        queue_limit: Optional[int] = None,
+        execution_top_k: int = 10,
+        chain_until_satisfied: bool = True,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import persist_packaged_docket_proof_revalidation_queue
+
+        resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
+        resolved_output_dir = str(Path(str(output_dir)).expanduser().resolve())
+        persisted = persist_packaged_docket_proof_revalidation_queue(
+            resolved_manifest,
+            resolved_output_dir,
+            package_name=str(package_name).strip() if package_name is not None and str(package_name).strip() else None,
+            include_car=bool(include_car),
+            top_k=int(top_k or 10),
+            min_priority=str(min_priority or "low"),
+            queue_limit=int(queue_limit) if queue_limit is not None else None,
+            execution_top_k=int(execution_top_k or 10),
+            chain_until_satisfied=bool(chain_until_satisfied),
+        )
+        return {
+            **dict(persisted),
+            "manifest_path": resolved_manifest,
+            "output_dir": resolved_output_dir,
+            "source": "complaint_workspace_packaged_proof_revalidation_queue_persist",
+        }
+
     def list_mcp_tools(self) -> Dict[str, Any]:
         return {
             "tools": [
@@ -4565,6 +4600,7 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.get_packaged_docket_operator_dashboard", "description": "Load the combined packaged docket operator dashboard for a docket bundle manifest."},
                 {"name": "complaint.load_packaged_docket_operator_dashboard_report", "description": "Load the archived packaged docket operator dashboard report artifact for a docket bundle manifest."},
                 {"name": "complaint.execute_packaged_docket_proof_revalidation_queue", "description": "Execute the packaged docket proof revalidation queue for a docket bundle manifest and return execution summaries."},
+                {"name": "complaint.persist_packaged_docket_proof_revalidation_queue", "description": "Execute packaged docket proof revalidation and write a refreshed parquet/CAR bundle to an output directory."},
                 {"name": "complaint.update_claim_type", "description": "Set the current complaint type so drafting and review stay aligned to the right legal claim shape."},
                 {"name": "complaint.update_case_synopsis", "description": "Persist a shared case synopsis that stays visible across workspace, CLI, and MCP flows."},
                 {"name": "complaint.reset_session", "description": "Clear the complaint workspace session."},
@@ -4768,6 +4804,24 @@ class ComplaintWorkspaceService:
                 execution_top_k=int(args.get("execution_top_k") or 10),
                 chain_until_satisfied=bool(True if args.get("chain_until_satisfied") is None else args.get("chain_until_satisfied")),
                 attach_refreshed_packets=bool(args.get("attach_refreshed_packets") or False),
+            )
+        if tool_name == "complaint.persist_packaged_docket_proof_revalidation_queue":
+            manifest_path = str(args.get("manifest_path") or "").strip()
+            output_dir = str(args.get("output_dir") or "").strip()
+            if not manifest_path:
+                raise ValueError("complaint.persist_packaged_docket_proof_revalidation_queue requires manifest_path.")
+            if not output_dir:
+                raise ValueError("complaint.persist_packaged_docket_proof_revalidation_queue requires output_dir.")
+            return self.persist_packaged_docket_proof_revalidation_queue(
+                manifest_path,
+                output_dir,
+                package_name=str(args.get("package_name") or "").strip() or None,
+                include_car=bool(True if args.get("include_car") is None else args.get("include_car")),
+                top_k=int(args.get("top_k") or 10),
+                min_priority=str(args.get("min_priority") or "low"),
+                queue_limit=int(args["queue_limit"]) if args.get("queue_limit") is not None else None,
+                execution_top_k=int(args.get("execution_top_k") or 10),
+                chain_until_satisfied=bool(True if args.get("chain_until_satisfied") is None else args.get("chain_until_satisfied")),
             )
         if tool_name == "complaint.update_claim_type":
             return self.update_claim_type(args.get("user_id"), args.get("claim_type"))

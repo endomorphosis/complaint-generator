@@ -494,6 +494,33 @@ def execute_packaged_docket_proof_revalidation_queue(
     )
 
 
+def persist_packaged_docket_proof_revalidation_queue(
+    manifest_path: str | Path,
+    output_dir: str | Path,
+    *,
+    package_name: Optional[str] = None,
+    include_car: bool = True,
+    top_k: int = 10,
+    min_priority: str = "low",
+    queue_limit: Optional[int] = None,
+    execution_top_k: int = 10,
+    chain_until_satisfied: bool = True,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).persist_packaged_docket_proof_revalidation_queue(
+        manifest_path,
+        output_dir,
+        package_name=package_name,
+        include_car=include_car,
+        top_k=top_k,
+        min_priority=min_priority,
+        queue_limit=queue_limit,
+        execution_top_k=execution_top_k,
+        chain_until_satisfied=chain_until_satisfied,
+    )
+
+
 def review_generated_exports(
     user_id: Optional[str] = None,
     *,
@@ -689,6 +716,7 @@ __all__ = [
     "get_packaged_docket_operator_dashboard",
     "load_packaged_docket_operator_dashboard_report",
     "execute_packaged_docket_proof_revalidation_queue",
+    "persist_packaged_docket_proof_revalidation_queue",
     "review_generated_exports",
     "update_claim_type",
     "generate_decentralized_id",

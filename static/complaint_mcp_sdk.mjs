@@ -453,6 +453,13 @@ class ComplaintMcpClient {
         }, options || {}));
     }
 
+    persistPackagedDocketProofRevalidationQueue(manifestPath, outputDir, options = {}) {
+        return this.callTool('complaint.persist_packaged_docket_proof_revalidation_queue', Object.assign({
+            manifest_path: manifestPath,
+            output_dir: outputDir,
+        }, options || {}));
+    }
+
     generateComplaint(userId, payload) {
         return this.callTool('complaint.generate_complaint', Object.assign({
             user_id: userId,

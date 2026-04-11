@@ -15,9 +15,11 @@ def test_browser_sdk_surfaces_legal_search_diagnostics_contract():
         assert "getPackagedDocketOperatorDashboard(manifestPath)" in content
         assert "loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat = 'parsed')" in content
         assert "executePackagedDocketProofRevalidationQueue(manifestPath, options = {})" in content
+        assert "persistPackagedDocketProofRevalidationQueue(manifestPath, outputDir, options = {})" in content
         assert "complaint.get_packaged_docket_operator_dashboard" in content
         assert "complaint.load_packaged_docket_operator_dashboard_report" in content
         assert "complaint.execute_packaged_docket_proof_revalidation_queue" in content
+        assert "complaint.persist_packaged_docket_proof_revalidation_queue" in content
         assert "_extractToolDiagnostics(payload)" in content
         assert "_buildToolDiagnosticSummary(payload)" in content
         assert "diagnostic_summary: diagnosticSummary" in content

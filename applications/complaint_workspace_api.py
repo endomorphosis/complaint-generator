@@ -149,6 +149,18 @@ class PackagedDocketRevalidationRequest(BaseModel):
     attach_refreshed_packets: bool = False
 
 
+class PackagedDocketRevalidationPersistRequest(BaseModel):
+    manifest_path: str
+    output_dir: str
+    package_name: Optional[str] = None
+    include_car: bool = True
+    top_k: int = 10
+    min_priority: str = "low"
+    queue_limit: Optional[int] = None
+    execution_top_k: int = 10
+    chain_until_satisfied: bool = True
+
+
 def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceService] = None) -> APIRouter:
     router = APIRouter()
     workspace = service or ComplaintWorkspaceService()
@@ -341,6 +353,22 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             execution_top_k=request.execution_top_k,
             chain_until_satisfied=request.chain_until_satisfied,
             attach_refreshed_packets=request.attach_refreshed_packets,
+        )
+
+    @router.post("/api/complaint-workspace/packaged-docket/revalidation/persist")
+    async def persist_packaged_docket_revalidation_route(
+        request: PackagedDocketRevalidationPersistRequest,
+    ) -> Dict[str, Any]:
+        return workspace.persist_packaged_docket_proof_revalidation_queue(
+            request.manifest_path,
+            request.output_dir,
+            package_name=request.package_name,
+            include_car=request.include_car,
+            top_k=request.top_k,
+            min_priority=request.min_priority,
+            queue_limit=request.queue_limit,
+            execution_top_k=request.execution_top_k,
+            chain_until_satisfied=request.chain_until_satisfied,
         )
 
     @router.post("/api/complaint-workspace/mcp/call")

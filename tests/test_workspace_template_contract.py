@@ -213,12 +213,25 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "provider-diagnostics-preview" in content
     assert "packaged-docket-manifest-path" in content
     assert "packaged-docket-report-format" in content
+    assert "packaged-docket-attach-refreshed-packets" in content
+    assert "packaged-docket-min-priority" in content
+    assert "packaged-docket-execution-top-k" in content
+    assert "packaged-docket-output-dir" in content
+    assert "packaged-docket-package-name" in content
+    assert "packaged-docket-include-car" in content
     assert "load-packaged-docket-dashboard-button" in content
     assert "load-packaged-docket-dashboard-report-button" in content
     assert "execute-packaged-docket-revalidation-button" in content
+    assert "persist-packaged-docket-revalidation-button" in content
+    assert "copy-packaged-docket-persist-manifest-button" in content
+    assert "copy-packaged-docket-persist-root-button" in content
+    assert "use-latest-packaged-docket-manifest-button" in content
+    assert "clear-packaged-docket-preferences-button" in content
+    assert "packaged-docket-manifest-history-preview" in content
     assert "packaged-docket-dashboard-preview" in content
     assert "packaged-docket-dashboard-report-preview" in content
     assert "packaged-docket-dashboard-execution-preview" in content
+    assert "packaged-docket-dashboard-persist-preview" in content
     assert "packaged-docket-dashboard-source-chip" in content
     assert "packaged-docket-dashboard-review-chip" in content
     assert "packaged-docket-dashboard-run-chip" in content
@@ -233,17 +246,43 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "latestPackagedDocketOperatorDashboard = null;" in content
     assert "latestPackagedDocketOperatorDashboardReport = null;" in content
     assert "latestPackagedDocketRevalidationExecution = null;" in content
+    assert "latestPackagedDocketRevalidationPersist = null;" in content
     assert "latestUiReviewResult = null;" in content
+    assert "function packagedDocketManifestStorageKey()" in content
+    assert "function packagedDocketManifestHistoryStorageKey()" in content
+    assert "function packagedDocketPreferencesStorageKey()" in content
+    assert "loadLatestPackagedDocketManifestPreference()" in content
+    assert "persistLatestPackagedDocketManifestPreference(manifestPath)" in content
+    assert "loadPackagedDocketManifestHistory()" in content
+    assert "persistPackagedDocketManifestHistory(manifestPath)" in content
+    assert "clearPackagedDocketPreferences()" in content
+    assert "loadPackagedDocketPreferences()" in content
+    assert "persistPackagedDocketPreferences()" in content
+    assert "hydratePackagedDocketPreferences()" in content
+    assert "resetPackagedDocketPreferenceControls()" in content
+    assert "renderPackagedDocketManifestHistory()" in content
     assert "normalizeUiReadinessResultForDisplay" in content
     assert "client.getProviderDiagnostics(workspaceUserId)" in content
     assert "client.getToolingContract(workspaceUserId)" in content
     assert "client.getPackagedDocketOperatorDashboard(manifestPath)" in content
     assert "client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat)" in content
     assert "client.executePackagedDocketProofRevalidationQueue(manifestPath, {" in content
+    assert "client.persistPackagedDocketProofRevalidationQueue(manifestPath, outputDir, {" in content
+    assert "attach_refreshed_packets: attachRefreshedPackets" in content
+    assert "execution_top_k: executionTopK" in content
+    assert "min_priority: minPriority" in content
+    assert "include_car: includeCar" in content
+    assert "package_name: packageName || undefined" in content
     assert "function renderPackagedDocketOperatorDashboardPanel()" in content
     assert "async function loadPackagedDocketOperatorDashboardPanel()" in content
     assert "async function loadPackagedDocketOperatorDashboardReportPanel()" in content
     assert "async function executePackagedDocketRevalidationPanel()" in content
+    assert "async function persistPackagedDocketRevalidationPanel()" in content
+    assert "async function copyPackagedDocketPersistManifestPath()" in content
+    assert "async function copyPackagedDocketPersistPackageRoot()" in content
+    assert "async function useLatestPackagedDocketManifestPreference()" in content
+    assert "async function clearSavedPackagedDocketPreferences()" in content
+    assert "async function usePackagedDocketManifestHistoryItem(event)" in content
     assert "Packaged Docket Ops" in content
     assert "Load Packaged Legal Ops Dashboard" in content
     assert "Pending Review" in content
@@ -253,15 +292,48 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Queue Status" in content
     assert "Loading the packaged docket operator dashboard through the shared MCP SDK…" in content
     assert "Running packaged docket proof revalidation through the shared MCP SDK…" in content
-    assert "Packaged docket proof revalidation queue executed." in content
+    assert "Persisting a refreshed packaged docket bundle through the shared MCP SDK…" in content
+    assert "Packaged docket proof revalidation queue executed at ${minPriority} priority and refreshed packets were attached." in content
+    assert "Packaged docket proof revalidation queue executed at ${minPriority} priority without attaching refreshed packets." in content
+    assert "Refreshed packaged docket bundle persisted to ${String(latestPackagedDocketRevalidationPersist.package_root || outputDir)}." in content
+    assert "Persisted packaged docket manifest path copied." in content
+    assert "Persisted packaged docket package root copied." in content
+    assert "Loaded the latest persisted packaged docket manifest path into the panel." in content
+    assert "Loaded a recent packaged docket manifest path from history." in content
+    assert "No persisted packaged docket manifest has been remembered in this browser yet." in content
+    assert "Cleared the saved packaged docket manifest and operator preferences for this browser session." in content
     assert "Archived packaged docket operator dashboard report loaded." in content
     assert "document.getElementById('packaged-docket-dashboard-pending-count').textContent" in content
     assert "document.getElementById('packaged-docket-dashboard-latest-run-preview').textContent" in content
     assert "document.getElementById('packaged-docket-dashboard-queue-preview').textContent" in content
     assert "document.getElementById('packaged-docket-dashboard-execution-preview').textContent" in content
+    assert "document.getElementById('packaged-docket-dashboard-persist-preview').textContent" in content
+    assert "document.getElementById('packaged-docket-attach-refreshed-packets').checked" in content
+    assert "document.getElementById('packaged-docket-min-priority').value" in content
+    assert "document.getElementById('packaged-docket-execution-top-k').value" in content
+    assert "document.getElementById('packaged-docket-output-dir').value" in content
+    assert "document.getElementById('packaged-docket-package-name').value" in content
+    assert "document.getElementById('packaged-docket-include-car').checked" in content
+    assert "document.getElementById('packaged-docket-manifest-path').value = loadLatestPackagedDocketManifestPreference()" in content
+    assert "persistPackagedDocketPreferences();" in content
+    assert "hydratePackagedDocketPreferences();" in content
+    assert "renderPackagedDocketManifestHistory();" in content
+    assert "data-packaged-docket-history-manifest" in content
     assert "document.getElementById('load-packaged-docket-dashboard-button').addEventListener('click', loadPackagedDocketOperatorDashboardPanel);" in content
     assert "document.getElementById('load-packaged-docket-dashboard-report-button').addEventListener('click', loadPackagedDocketOperatorDashboardReportPanel);" in content
     assert "document.getElementById('execute-packaged-docket-revalidation-button').addEventListener('click', executePackagedDocketRevalidationPanel);" in content
+    assert "document.getElementById('persist-packaged-docket-revalidation-button').addEventListener('click', persistPackagedDocketRevalidationPanel);" in content
+    assert "document.getElementById('copy-packaged-docket-persist-manifest-button').addEventListener('click', copyPackagedDocketPersistManifestPath);" in content
+    assert "document.getElementById('copy-packaged-docket-persist-root-button').addEventListener('click', copyPackagedDocketPersistPackageRoot);" in content
+    assert "document.getElementById('use-latest-packaged-docket-manifest-button').addEventListener('click', useLatestPackagedDocketManifestPreference);" in content
+    assert "document.getElementById('clear-packaged-docket-preferences-button').addEventListener('click', clearSavedPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-output-dir').addEventListener('input', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-package-name').addEventListener('input', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-include-car').addEventListener('change', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-min-priority').addEventListener('change', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-execution-top-k').addEventListener('input', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-attach-refreshed-packets').addEventListener('change', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-manifest-history-preview').addEventListener('click', usePackagedDocketManifestHistoryItem);" in content
     assert "refreshProviderDiagnosticsPanel()" in content
     assert "Provider diagnostics refreshed." in content
     assert "Router provider diagnostics" in content

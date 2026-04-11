@@ -3051,15 +3051,58 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                     </select>
                                 </div>
                             </div>
+                            <div class="chip-row">
+                                <label class="checkbox-label" for="packaged-docket-attach-refreshed-packets">
+                                    <input id="packaged-docket-attach-refreshed-packets" type="checkbox">
+                                    Attach refreshed proof packets during revalidation
+                                </label>
+                            </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="packaged-docket-min-priority">Minimum Queue Priority</label>
+                                    <select id="packaged-docket-min-priority">
+                                        <option value="low">low</option>
+                                        <option value="medium">medium</option>
+                                        <option value="high">high</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="packaged-docket-execution-top-k">Execution Top K</label>
+                                    <input id="packaged-docket-execution-top-k" type="number" min="1" step="1" value="10">
+                                </div>
+                            </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="packaged-docket-output-dir">Persist Output Directory</label>
+                                    <input id="packaged-docket-output-dir" type="text" placeholder="/path/to/refreshed-package-output">
+                                </div>
+                                <div>
+                                    <label for="packaged-docket-package-name">Persist Package Name</label>
+                                    <input id="packaged-docket-package-name" type="text" placeholder="optional-package-name">
+                                </div>
+                            </div>
+                            <div class="chip-row">
+                                <label class="checkbox-label" for="packaged-docket-include-car">
+                                    <input id="packaged-docket-include-car" type="checkbox" checked>
+                                    Include CAR artifact when persisting refreshed bundle
+                                </label>
+                            </div>
                             <div class="button-row">
                                 <button class="primary" id="load-packaged-docket-dashboard-button" type="button">Load Docket Dashboard</button>
                                 <button class="secondary" id="load-packaged-docket-dashboard-report-button" type="button">Load Archived Report</button>
                                 <button class="secondary" id="execute-packaged-docket-revalidation-button" type="button">Run Revalidation Queue</button>
+                                <button class="secondary" id="persist-packaged-docket-revalidation-button" type="button">Persist Revalidated Bundle</button>
+                                <button class="secondary" id="use-latest-packaged-docket-manifest-button" type="button">Use Latest Persisted Manifest</button>
+                                <button class="secondary" id="clear-packaged-docket-preferences-button" type="button">Clear Saved Preferences</button>
                             </div>
                             <div class="chip-row" id="packaged-docket-dashboard-chips">
                                 <span class="chip" id="packaged-docket-dashboard-source-chip">source: not loaded</span>
                                 <span class="chip" id="packaged-docket-dashboard-review-chip">review: n/a</span>
                                 <span class="chip" id="packaged-docket-dashboard-run-chip">runs: n/a</span>
+                            </div>
+                            <div>
+                                <label>Recent Persisted Manifests</label>
+                                <div class="list" id="packaged-docket-manifest-history-preview"></div>
                             </div>
                             <div class="feature-grid" id="packaged-docket-dashboard-scorecard">
                                 <div class="metric-card">
@@ -3096,6 +3139,14 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                             <div>
                                 <label>Revalidation Execution</label>
                                 <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-execution-preview">No packaged docket revalidation execution run yet.</pre></div>
+                            </div>
+                            <div>
+                                <label>Persisted Bundle</label>
+                                <div class="button-row">
+                                    <button class="secondary" id="copy-packaged-docket-persist-manifest-button" type="button">Copy Manifest Path</button>
+                                    <button class="secondary" id="copy-packaged-docket-persist-root-button" type="button">Copy Package Root</button>
+                                </div>
+                                <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-persist-preview">No refreshed packaged docket bundle has been persisted yet.</pre></div>
                             </div>
                             <div>
                                 <label>Archived Operator Report</label>
@@ -3252,6 +3303,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let latestPackagedDocketOperatorDashboard = null;
         let latestPackagedDocketOperatorDashboardReport = null;
         let latestPackagedDocketRevalidationExecution = null;
+        let latestPackagedDocketRevalidationPersist = null;
         let latestPacketExport = null;
         let latestComplaintOutputAnalysis = null;
         let latestUiReviewResult = null;
@@ -3604,6 +3656,157 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
 
         function synopsisStorageKey() {
             return `complaint-workspace-synopsis:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function packagedDocketManifestStorageKey() {
+            return `complaint-workspace-packaged-docket-manifest:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function packagedDocketManifestHistoryStorageKey() {
+            return `complaint-workspace-packaged-docket-manifest-history:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function packagedDocketPreferencesStorageKey() {
+            return `complaint-workspace-packaged-docket-preferences:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function loadLatestPackagedDocketManifestPreference() {
+            if (typeof window.localStorage === 'undefined') {
+                return '';
+            }
+            return String(window.localStorage.getItem(packagedDocketManifestStorageKey()) || '').trim();
+        }
+
+        function persistLatestPackagedDocketManifestPreference(manifestPath) {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            const normalized = String(manifestPath || '').trim();
+            if (!normalized) {
+                window.localStorage.removeItem(packagedDocketManifestStorageKey());
+                return;
+            }
+            window.localStorage.setItem(packagedDocketManifestStorageKey(), normalized);
+        }
+
+        function loadPackagedDocketManifestHistory() {
+            if (typeof window.localStorage === 'undefined') {
+                return [];
+            }
+            try {
+                const raw = window.localStorage.getItem(packagedDocketManifestHistoryStorageKey());
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed.map((item) => String(item || '').trim()).filter(Boolean) : [];
+            } catch (error) {
+                console.warn('Failed to parse packaged docket manifest history', error);
+                return [];
+            }
+        }
+
+        function persistPackagedDocketManifestHistory(manifestPath) {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            const normalized = String(manifestPath || '').trim();
+            if (!normalized) {
+                return;
+            }
+            const nextHistory = [
+                normalized,
+                ...loadPackagedDocketManifestHistory().filter((item) => item !== normalized),
+            ].slice(0, 5);
+            window.localStorage.setItem(packagedDocketManifestHistoryStorageKey(), JSON.stringify(nextHistory));
+        }
+
+        function clearPackagedDocketPreferences() {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            window.localStorage.removeItem(packagedDocketManifestStorageKey());
+            window.localStorage.removeItem(packagedDocketManifestHistoryStorageKey());
+            window.localStorage.removeItem(packagedDocketPreferencesStorageKey());
+        }
+
+        function loadPackagedDocketPreferences() {
+            if (typeof window.localStorage === 'undefined') {
+                return {};
+            }
+            try {
+                const raw = window.localStorage.getItem(packagedDocketPreferencesStorageKey());
+                const parsed = raw ? JSON.parse(raw) : {};
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch (error) {
+                console.warn('Failed to parse packaged docket preferences', error);
+                return {};
+            }
+        }
+
+        function persistPackagedDocketPreferences() {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            const payload = {
+                output_dir: document.getElementById('packaged-docket-output-dir').value.trim(),
+                package_name: document.getElementById('packaged-docket-package-name').value.trim(),
+                include_car: Boolean(document.getElementById('packaged-docket-include-car').checked),
+                min_priority: document.getElementById('packaged-docket-min-priority').value || 'low',
+                execution_top_k: Math.max(1, Number(document.getElementById('packaged-docket-execution-top-k').value || '10')),
+                attach_refreshed_packets: Boolean(document.getElementById('packaged-docket-attach-refreshed-packets').checked),
+            };
+            window.localStorage.setItem(packagedDocketPreferencesStorageKey(), JSON.stringify(payload));
+        }
+
+        function hydratePackagedDocketPreferences() {
+            const preferences = loadPackagedDocketPreferences();
+            const outputDirNode = document.getElementById('packaged-docket-output-dir');
+            const packageNameNode = document.getElementById('packaged-docket-package-name');
+            const includeCarNode = document.getElementById('packaged-docket-include-car');
+            const minPriorityNode = document.getElementById('packaged-docket-min-priority');
+            const executionTopKNode = document.getElementById('packaged-docket-execution-top-k');
+            const attachPacketsNode = document.getElementById('packaged-docket-attach-refreshed-packets');
+            if (outputDirNode && preferences.output_dir && !outputDirNode.value.trim()) {
+                outputDirNode.value = String(preferences.output_dir);
+            }
+            if (packageNameNode && preferences.package_name && !packageNameNode.value.trim()) {
+                packageNameNode.value = String(preferences.package_name);
+            }
+            if (includeCarNode && typeof preferences.include_car === 'boolean') {
+                includeCarNode.checked = preferences.include_car;
+            }
+            if (minPriorityNode && preferences.min_priority) {
+                minPriorityNode.value = String(preferences.min_priority);
+            }
+            if (executionTopKNode && preferences.execution_top_k) {
+                executionTopKNode.value = String(preferences.execution_top_k);
+            }
+            if (attachPacketsNode && typeof preferences.attach_refreshed_packets === 'boolean') {
+                attachPacketsNode.checked = preferences.attach_refreshed_packets;
+            }
+        }
+
+        function resetPackagedDocketPreferenceControls() {
+            document.getElementById('packaged-docket-manifest-path').value = '';
+            document.getElementById('packaged-docket-output-dir').value = '';
+            document.getElementById('packaged-docket-package-name').value = '';
+            document.getElementById('packaged-docket-include-car').checked = true;
+            document.getElementById('packaged-docket-min-priority').value = 'low';
+            document.getElementById('packaged-docket-execution-top-k').value = '10';
+            document.getElementById('packaged-docket-attach-refreshed-packets').checked = false;
+        }
+
+        function renderPackagedDocketManifestHistory() {
+            const historyNode = document.getElementById('packaged-docket-manifest-history-preview');
+            if (!historyNode) {
+                return;
+            }
+            const history = loadPackagedDocketManifestHistory();
+            if (!history.length) {
+                historyNode.innerHTML = '<div class="muted">No persisted packaged docket manifests remembered yet.</div>';
+                return;
+            }
+            historyNode.innerHTML = history.map((manifestPath) => `
+                <button class="secondary" type="button" data-packaged-docket-history-manifest="${escapeHtml(manifestPath)}">${escapeHtml(manifestPath)}</button>
+            `).join('');
         }
 
         function gmailImportUserStorageKey() {
@@ -8766,6 +8969,7 @@ function extractComplaintOutputSignals(result) {
             const dashboard = latestPackagedDocketOperatorDashboard || {};
             const reportPayload = latestPackagedDocketOperatorDashboardReport || {};
             const executionPayload = latestPackagedDocketRevalidationExecution || {};
+            const persistedPayload = latestPackagedDocketRevalidationPersist || {};
             const summary = dashboard.summary || {};
             const inspection = dashboard.inspection || {};
             const snapshot = dashboard.proof_revalidation_snapshot || {};
@@ -8810,11 +9014,22 @@ function extractComplaintOutputSignals(result) {
             document.getElementById('packaged-docket-dashboard-execution-preview').textContent = executionPayload.source
                 ? [
                     `Executed count: ${String(executionPayload.executed_count || 0)}`,
+                    `Attached refreshed packets: ${String(Boolean(executionPayload.attach_refreshed_packets || executionPayload.attached_package_view))}`,
+                    `Minimum priority: ${String(executionPayload.min_priority || 'low')}`,
+                    `Execution top K: ${String(executionPayload.execution_top_k || 10)}`,
                     `Best source: ${String(executionSummary.source_type || executionSummary.source || 'n/a')}`,
                     `Support strength: ${String(executionSummary.support_strength || 'n/a')}`,
                     `Work item: ${String(executionSummary.work_item_id || executionSummary.source_id || 'n/a')}`,
                 ].join('\n')
                 : 'No packaged docket revalidation execution run yet.';
+            document.getElementById('packaged-docket-dashboard-persist-preview').textContent = persistedPayload.source
+                ? [
+                    `Persisted: ${String(Boolean(persistedPayload.persisted))}`,
+                    `Package root: ${String(persistedPayload.package_root || 'n/a')}`,
+                    `Manifest JSON: ${String(persistedPayload.manifest_json_path || 'n/a')}`,
+                    `CAR manifest: ${String(persistedPayload.car_manifest_path || 'n/a')}`,
+                ].join('\n')
+                : 'No refreshed packaged docket bundle has been persisted yet.';
             const report = reportPayload.report;
             document.getElementById('packaged-docket-dashboard-report-preview').textContent = reportPayload.report_format
                 ? (typeof report === 'string' ? report : JSON.stringify(report || {}, null, 2))
@@ -8832,6 +9047,9 @@ function extractComplaintOutputSignals(result) {
             setBusyStatus('Loading the packaged docket operator dashboard through the shared MCP SDK…');
             try {
                 latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(manifestPath);
+                persistLatestPackagedDocketManifestPreference(manifestPath);
+                persistPackagedDocketManifestHistory(manifestPath);
+                renderPackagedDocketManifestHistory();
                 renderPackagedDocketOperatorDashboardPanel();
                 setStatus('Packaged docket operator dashboard loaded.');
             } catch (error) {
@@ -8852,6 +9070,9 @@ function extractComplaintOutputSignals(result) {
             setBusyStatus('Loading the archived packaged docket operator dashboard report through the shared MCP SDK…');
             try {
                 latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat);
+                persistLatestPackagedDocketManifestPreference(manifestPath);
+                persistPackagedDocketManifestHistory(manifestPath);
+                renderPackagedDocketManifestHistory();
                 renderPackagedDocketOperatorDashboardPanel();
                 setStatus('Archived packaged docket operator dashboard report loaded.');
             } catch (error) {
@@ -8863,6 +9084,9 @@ function extractComplaintOutputSignals(result) {
         async function executePackagedDocketRevalidationPanel() {
             const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
             const reportFormat = document.getElementById('packaged-docket-report-format').value;
+            const attachRefreshedPackets = Boolean(document.getElementById('packaged-docket-attach-refreshed-packets').checked);
+            const minPriority = document.getElementById('packaged-docket-min-priority').value || 'low';
+            const executionTopK = Math.max(1, Number(document.getElementById('packaged-docket-execution-top-k').value || '10'));
             if (!manifestPath) {
                 activateTab('integrations');
                 setStatus('Add a packaged docket bundle manifest path before running the revalidation queue.');
@@ -8872,17 +9096,131 @@ function extractComplaintOutputSignals(result) {
             setBusyStatus('Running packaged docket proof revalidation through the shared MCP SDK…');
             try {
                 latestPackagedDocketRevalidationExecution = await client.executePackagedDocketProofRevalidationQueue(manifestPath, {
+                    attach_refreshed_packets: attachRefreshedPackets,
                     chain_until_satisfied: true,
-                    min_priority: 'low',
+                    execution_top_k: executionTopK,
+                    min_priority: minPriority,
                 });
+                persistPackagedDocketPreferences();
                 latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(manifestPath);
                 latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat);
                 renderPackagedDocketOperatorDashboardPanel();
-                setStatus('Packaged docket proof revalidation queue executed.');
+                setStatus(attachRefreshedPackets
+                    ? `Packaged docket proof revalidation queue executed at ${minPriority} priority and refreshed packets were attached.`
+                    : `Packaged docket proof revalidation queue executed at ${minPriority} priority without attaching refreshed packets.`);
             } catch (error) {
                 console.error(error);
                 setStatus(`Packaged docket proof revalidation failed: ${String((error && error.message) || error || 'Unknown error')}`);
             }
+        }
+
+        async function persistPackagedDocketRevalidationPanel() {
+            const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
+            const reportFormat = document.getElementById('packaged-docket-report-format').value;
+            const outputDir = document.getElementById('packaged-docket-output-dir').value.trim();
+            const packageName = document.getElementById('packaged-docket-package-name').value.trim();
+            const includeCar = Boolean(document.getElementById('packaged-docket-include-car').checked);
+            const minPriority = document.getElementById('packaged-docket-min-priority').value || 'low';
+            const executionTopK = Math.max(1, Number(document.getElementById('packaged-docket-execution-top-k').value || '10'));
+            if (!manifestPath) {
+                activateTab('integrations');
+                setStatus('Add a packaged docket bundle manifest path before persisting a refreshed bundle.');
+                return;
+            }
+            if (!outputDir) {
+                activateTab('integrations');
+                setStatus('Add a persist output directory before writing a refreshed bundle.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Persisting a refreshed packaged docket bundle through the shared MCP SDK…');
+            try {
+                latestPackagedDocketRevalidationPersist = await client.persistPackagedDocketProofRevalidationQueue(manifestPath, outputDir, {
+                    chain_until_satisfied: true,
+                    execution_top_k: executionTopK,
+                    include_car: includeCar,
+                    min_priority: minPriority,
+                    package_name: packageName || undefined,
+                });
+                persistPackagedDocketPreferences();
+                const nextManifestPath = String(
+                    latestPackagedDocketRevalidationPersist.manifest_json_path
+                    || latestPackagedDocketRevalidationPersist.manifest_path
+                    || manifestPath,
+                );
+                document.getElementById('packaged-docket-manifest-path').value = nextManifestPath;
+                persistLatestPackagedDocketManifestPreference(nextManifestPath);
+                persistPackagedDocketManifestHistory(nextManifestPath);
+                renderPackagedDocketManifestHistory();
+                latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(nextManifestPath);
+                latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(nextManifestPath, reportFormat);
+                renderPackagedDocketOperatorDashboardPanel();
+                setStatus(`Refreshed packaged docket bundle persisted to ${String(latestPackagedDocketRevalidationPersist.package_root || outputDir)}.`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Persisting packaged docket revalidation failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function copyPackagedDocketPersistManifestPath() {
+            const manifestPath = String(
+                (latestPackagedDocketRevalidationPersist && latestPackagedDocketRevalidationPersist.manifest_json_path)
+                || document.getElementById('packaged-docket-manifest-path').value.trim()
+                || '',
+            );
+            if (!manifestPath) {
+                setStatus('Persist a refreshed packaged docket bundle before copying the manifest path.');
+                return;
+            }
+            await copyTextToClipboard(manifestPath, 'Persisted packaged docket manifest path copied.');
+        }
+
+        async function copyPackagedDocketPersistPackageRoot() {
+            const packageRoot = String(
+                (latestPackagedDocketRevalidationPersist && latestPackagedDocketRevalidationPersist.package_root)
+                || ''
+            );
+            if (!packageRoot) {
+                setStatus('Persist a refreshed packaged docket bundle before copying the package root.');
+                return;
+            }
+            await copyTextToClipboard(packageRoot, 'Persisted packaged docket package root copied.');
+        }
+
+        async function useLatestPackagedDocketManifestPreference() {
+            const storedManifestPath = loadLatestPackagedDocketManifestPreference();
+            if (!storedManifestPath) {
+                activateTab('integrations');
+                setStatus('No persisted packaged docket manifest has been remembered in this browser yet.');
+                return;
+            }
+            document.getElementById('packaged-docket-manifest-path').value = storedManifestPath;
+            activateTab('integrations');
+            renderPackagedDocketManifestHistory();
+            setStatus('Loaded the latest persisted packaged docket manifest path into the panel.');
+        }
+
+        async function clearSavedPackagedDocketPreferences() {
+            clearPackagedDocketPreferences();
+            resetPackagedDocketPreferenceControls();
+            activateTab('integrations');
+            renderPackagedDocketManifestHistory();
+            setStatus('Cleared the saved packaged docket manifest and operator preferences for this browser session.');
+        }
+
+        async function usePackagedDocketManifestHistoryItem(event) {
+            const trigger = event.target.closest('[data-packaged-docket-history-manifest]');
+            if (!trigger) {
+                return;
+            }
+            const manifestPath = String(trigger.getAttribute('data-packaged-docket-history-manifest') || '').trim();
+            if (!manifestPath) {
+                return;
+            }
+            document.getElementById('packaged-docket-manifest-path').value = manifestPath;
+            persistLatestPackagedDocketManifestPreference(manifestPath);
+            activateTab('integrations');
+            setStatus('Loaded a recent packaged docket manifest path from history.');
         }
 
         async function previewMediatorBrief() {
@@ -9058,6 +9396,18 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('load-packaged-docket-dashboard-button').addEventListener('click', loadPackagedDocketOperatorDashboardPanel);
         document.getElementById('load-packaged-docket-dashboard-report-button').addEventListener('click', loadPackagedDocketOperatorDashboardReportPanel);
         document.getElementById('execute-packaged-docket-revalidation-button').addEventListener('click', executePackagedDocketRevalidationPanel);
+        document.getElementById('persist-packaged-docket-revalidation-button').addEventListener('click', persistPackagedDocketRevalidationPanel);
+        document.getElementById('copy-packaged-docket-persist-manifest-button').addEventListener('click', copyPackagedDocketPersistManifestPath);
+        document.getElementById('copy-packaged-docket-persist-root-button').addEventListener('click', copyPackagedDocketPersistPackageRoot);
+        document.getElementById('use-latest-packaged-docket-manifest-button').addEventListener('click', useLatestPackagedDocketManifestPreference);
+        document.getElementById('clear-packaged-docket-preferences-button').addEventListener('click', clearSavedPackagedDocketPreferences);
+        document.getElementById('packaged-docket-output-dir').addEventListener('input', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-package-name').addEventListener('input', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-include-car').addEventListener('change', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-min-priority').addEventListener('change', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-execution-top-k').addEventListener('input', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-attach-refreshed-packets').addEventListener('change', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-manifest-history-preview').addEventListener('click', usePackagedDocketManifestHistoryItem);
         document.getElementById('build-mediator-prompt-button').addEventListener('click', previewMediatorBrief);
         document.getElementById('analyze-complaint-output-button').addEventListener('click', analyzeComplaintOutputPanel);
         document.getElementById('review-generated-exports-button').addEventListener('click', reviewGeneratedExportsPanel);
@@ -9304,6 +9654,9 @@ function extractComplaintOutputSignals(result) {
             };
             renderWorkspace(bootstrap.session);
             hydrateGmailImportUser();
+            document.getElementById('packaged-docket-manifest-path').value = loadLatestPackagedDocketManifestPreference() || document.getElementById('packaged-docket-manifest-path').value;
+            hydratePackagedDocketPreferences();
+            renderPackagedDocketManifestHistory();
             renderTools(workspaceSessionTools);
             renderSdkServerInfo(bootstrap.initialization, workspaceSessionTools);
             setStatus(`Workspace synchronized for ${workspaceUserId}.`);

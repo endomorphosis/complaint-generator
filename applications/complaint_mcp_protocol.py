@@ -281,6 +281,21 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
         "required": ["manifest_path"],
     },
+    "complaint.persist_packaged_docket_proof_revalidation_queue": {
+        "type": "object",
+        "properties": {
+            "manifest_path": {"type": "string"},
+            "output_dir": {"type": "string"},
+            "package_name": {"type": "string"},
+            "include_car": {"type": "boolean"},
+            "top_k": {"type": "integer"},
+            "min_priority": {"type": "string"},
+            "queue_limit": {"type": "integer"},
+            "execution_top_k": {"type": "integer"},
+            "chain_until_satisfied": {"type": "boolean"},
+        },
+        "required": ["manifest_path", "output_dir"],
+    },
     "complaint.update_claim_type": {
         "type": "object",
         "properties": {
