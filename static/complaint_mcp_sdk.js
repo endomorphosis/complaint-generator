@@ -435,6 +435,19 @@ class ComplaintMcpClient {
         });
     }
 
+    getWorkspaceDataSchema(userId, options = {}) {
+        return this.callTool('complaint.get_workspace_data_schema', Object.assign({
+            user_id: userId,
+        }, options || {}));
+    }
+
+    migrateLegacyWorkspaceData(userId, outputDir, options = {}) {
+        return this.callTool('complaint.migrate_legacy_workspace_data', Object.assign({
+            user_id: userId,
+            output_dir: outputDir,
+        }, options || {}));
+    }
+
     getPackagedDocketOperatorDashboard(manifestPath) {
         return this.callTool('complaint.get_packaged_docket_operator_dashboard', {
             manifest_path: manifestPath,

@@ -505,6 +505,52 @@ def tooling_contract(user_id: str = "demo-user") -> None:
     _print(service.get_tooling_contract(user_id))
 
 
+@app.command("workspace-data-schema")
+def workspace_data_schema(
+    user_id: str = "demo-user",
+    manifest_path: Optional[str] = None,
+    statefile_path: Optional[str] = None,
+    evidence_db_path: Optional[str] = None,
+    legal_authority_db_path: Optional[str] = None,
+    claim_support_db_path: Optional[str] = None,
+) -> None:
+    _print(
+        service.get_workspace_data_schema(
+            user_id,
+            manifest_path=manifest_path,
+            statefile_path=statefile_path,
+            evidence_db_path=evidence_db_path,
+            legal_authority_db_path=legal_authority_db_path,
+            claim_support_db_path=claim_support_db_path,
+        )
+    )
+
+
+@app.command("migrate-legacy-workspace-data")
+def migrate_legacy_workspace_data_command(
+    user_id: str = "demo-user",
+    output_dir: Optional[str] = None,
+    statefile_path: Optional[str] = None,
+    evidence_db_path: Optional[str] = None,
+    legal_authority_db_path: Optional[str] = None,
+    claim_support_db_path: Optional[str] = None,
+    package_name: Optional[str] = None,
+    include_car: bool = True,
+) -> None:
+    _print(
+        service.migrate_legacy_workspace_data(
+            user_id,
+            output_dir=output_dir,
+            statefile_path=statefile_path,
+            evidence_db_path=evidence_db_path,
+            legal_authority_db_path=legal_authority_db_path,
+            claim_support_db_path=claim_support_db_path,
+            package_name=package_name,
+            include_car=include_car,
+        )
+    )
+
+
 @app.command("generate")
 def generate(
     user_id: str = "demo-user",
