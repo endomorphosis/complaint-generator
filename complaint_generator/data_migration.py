@@ -536,6 +536,11 @@ def build_workspace_schema_snapshot(
                 "reason": "Expose graph-aware MCP affordances because the packaged workspace includes knowledge-graph entities and relationships.",
             }
         )
+    chain_load_order = [
+        str(item)
+        for item in list(package_result.get("chain_load_order") or [])
+        if str(item).strip()
+    ] or [str(piece.get("piece_id") or "") for piece in pieces if str(piece.get("piece_id") or "")]
     return {
         "schema_version": SCHEMA_SNAPSHOT_VERSION,
         "dataset_id": str(dataset_payload.get("dataset_id") or ""),
@@ -544,7 +549,7 @@ def build_workspace_schema_snapshot(
         "source_type": str(dataset_payload.get("source_type") or "workspace"),
         "summary": dict(package_result.get("summary") or {}),
         "piece_schemas": piece_schemas,
-        "chain_load_order": [str(piece.get("piece_id") or "") for piece in pieces if str(piece.get("piece_id") or "")],
+        "chain_load_order": chain_load_order,
         "document_fields": document_fields,
         "document_metadata_fields": metadata_fields,
         "collection_fields": collection_fields,
@@ -701,7 +706,10 @@ def migrate_legacy_workspace_data(
     single_parquet_path = output_root / f"{_slug(bundle_name)}.workspace_dataset.parquet"
 
     if write_dataset_json:
-        dataset.write_json(dataset_json_path)
+        dataset_json_path.write_text(
+            json.dumps(_jsonable(dataset.to_dict()), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
     if write_single_parquet:
         export_workspace_dataset_single_parquet(dataset, single_parquet_path)
 
@@ -751,6 +759,7 @@ def inspect_workspace_data_schema(
         package_result = {
             "summary": summary_view,
             "pieces": list((summary_view.get("package_manifest") or {}).get("pieces") or []),
+            "chain_load_order": list((summary_view.get("package_manifest") or {}).get("chain_load_order") or []),
         }
         snapshot = build_workspace_schema_snapshot(package_result=package_result, dataset=package)
         snapshot["source"] = "packaged_workspace_manifest"
