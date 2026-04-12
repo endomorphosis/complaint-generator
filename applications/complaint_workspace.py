@@ -168,6 +168,10 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "get_formal_diagnostics",
     "get_filing_provenance",
     "get_provider_diagnostics",
+    "view_docket_dataset",
+    "search_docket_dataset",
+    "get_docket_dataset_metadata",
+    "get_docket_dataset_graph",
     "review_generated_exports",
     "update_claim_type",
     "update_case_synopsis",
@@ -201,6 +205,10 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "formal-diagnostics",
     "filing-provenance",
     "provider-diagnostics",
+    "docket-view",
+    "docket-search",
+    "docket-metadata",
+    "docket-graph",
     "review-exports",
     "set-claim-type",
     "update-synopsis",
@@ -242,6 +250,17 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "optimizeUiArtifacts",
     "runBrowserAudit",
 ]
+
+_DOCKET_ISSUE_ENTITY_KEYWORDS = (
+    "issue",
+    "legal_issue",
+    "claim",
+    "cause_of_action",
+    "violation",
+    "defense",
+    "right",
+    "duty",
+)
 _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
     "intake": {
         "package_export": "submit_intake_answers",
@@ -4543,6 +4562,246 @@ class ComplaintWorkspaceService:
         self._save_state(state)
         return self.get_session(str(state["user_id"]))
 
+    @staticmethod
+    def _resolve_docket_path(path_value: str | Path) -> str:
+        return str(Path(str(path_value)).expanduser().resolve())
+
+    def _load_docket_dataset_payload(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import DocketDatasetBuilder, load_packaged_docket_dataset
+
+        resolved_path = self._resolve_docket_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
+        if normalized_type == "packaged":
+            dataset = load_packaged_docket_dataset(resolved_path)
+        elif normalized_type == "json":
+            dataset = DocketDatasetBuilder().build_from_json_file(resolved_path)
+        else:
+            raise ValueError(f"Unsupported docket input_type: {input_type}")
+        return dict(dataset.to_dict() if hasattr(dataset, "to_dict") else dataset)
+
+    @staticmethod
+    def _build_docket_document_view(
+        dataset_payload: Dict[str, Any],
+        *,
+        include_document_text: bool,
+        document_limit: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        documents = list(dataset_payload.get("documents") or [])
+        if document_limit is not None:
+            documents = documents[: max(0, int(document_limit))]
+        view: List[Dict[str, Any]] = []
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            row = {
+                "id": document.get("id"),
+                "title": document.get("title"),
+                "date_filed": document.get("date_filed"),
+                "document_number": document.get("document_number"),
+                "source_url": document.get("source_url"),
+                "metadata": dict(document.get("metadata") or {}),
+            }
+            if include_document_text:
+                row["text"] = document.get("text")
+            view.append(row)
+        return view
+
+    @staticmethod
+    def _issue_links_from_knowledge_graph(knowledge_graph: Dict[str, Any]) -> Dict[str, Any]:
+        entities = [
+            dict(entity)
+            for entity in list((knowledge_graph or {}).get("entities") or [])
+            if isinstance(entity, dict)
+        ]
+        relationships = [
+            dict(relationship)
+            for relationship in list((knowledge_graph or {}).get("relationships") or [])
+            if isinstance(relationship, dict)
+        ]
+        entity_by_id = {
+            str(entity.get("id") or ""): entity
+            for entity in entities
+            if str(entity.get("id") or "").strip()
+        }
+
+        def _entity_matches_issue(entity: Dict[str, Any]) -> bool:
+            haystacks = [
+                str(entity.get("type") or ""),
+                str(entity.get("label") or ""),
+                str(entity.get("name") or ""),
+                str(entity.get("category") or ""),
+                str((entity.get("metadata") or {}).get("type") or ""),
+                str((entity.get("metadata") or {}).get("category") or ""),
+            ]
+            lowered = " ".join(haystacks).lower()
+            return any(keyword in lowered for keyword in _DOCKET_ISSUE_ENTITY_KEYWORDS)
+
+        issue_entities = [entity for entity in entities if _entity_matches_issue(entity)]
+        issue_entity_ids = {
+            str(entity.get("id") or "")
+            for entity in issue_entities
+            if str(entity.get("id") or "").strip()
+        }
+        issue_links: List[Dict[str, Any]] = []
+        for relationship in relationships:
+            source_id = str(
+                relationship.get("source")
+                or relationship.get("source_id")
+                or relationship.get("from")
+                or relationship.get("head")
+                or ""
+            ).strip()
+            target_id = str(
+                relationship.get("target")
+                or relationship.get("target_id")
+                or relationship.get("to")
+                or relationship.get("tail")
+                or ""
+            ).strip()
+            if not source_id or not target_id:
+                continue
+            if source_id not in issue_entity_ids and target_id not in issue_entity_ids:
+                continue
+            issue_links.append(
+                {
+                    "id": relationship.get("id"),
+                    "type": relationship.get("type") or relationship.get("label"),
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "source_entity": entity_by_id.get(source_id),
+                    "target_entity": entity_by_id.get(target_id),
+                    "metadata": dict(relationship.get("metadata") or {}),
+                }
+            )
+        return {
+            "entities": entities,
+            "relationships": relationships,
+            "issue_entities": issue_entities,
+            "issue_links": issue_links,
+            "entity_count": len(entities),
+            "relationship_count": len(relationships),
+            "issue_entity_count": len(issue_entities),
+            "issue_link_count": len(issue_links),
+        }
+
+    def view_docket_dataset(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+        include_document_text: bool = False,
+        document_limit: Optional[int] = 25,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import summarize_docket_dataset
+
+        resolved_path = self._resolve_docket_path(input_path)
+        dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
+        summary = summarize_docket_dataset(dataset_payload)
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "summary": dict(summary),
+            "documents": self._build_docket_document_view(
+                dataset_payload,
+                include_document_text=bool(include_document_text),
+                document_limit=document_limit,
+            ),
+            "metadata": dict(dataset_payload.get("metadata") or {}),
+            "source": "complaint_workspace_docket_view",
+        }
+
+    def search_docket_dataset(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+        query: str,
+        search_backend: str = "bm25",
+        top_k: int = 10,
+        vector_dimension: int = 32,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import (
+            search_docket_dataset_bm25,
+            search_docket_dataset_vector,
+            summarize_docket_dataset,
+        )
+
+        resolved_path = self._resolve_docket_path(input_path)
+        normalized_backend = str(search_backend or "bm25").strip().lower()
+        dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
+        if normalized_backend == "bm25":
+            results = search_docket_dataset_bm25(dataset_payload, query, top_k=int(top_k or 10))
+        elif normalized_backend == "vector":
+            results = search_docket_dataset_vector(
+                dataset_payload,
+                query,
+                top_k=int(top_k or 10),
+                vector_dimension=int(vector_dimension or 32),
+            )
+        else:
+            raise ValueError(f"Unsupported docket search backend: {search_backend}")
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "query": str(query or ""),
+            "search_backend": normalized_backend,
+            "summary": dict(summarize_docket_dataset(dataset_payload)),
+            "search_results": dict(results),
+            "source": "complaint_workspace_docket_search",
+        }
+
+    def get_docket_dataset_metadata(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import summarize_docket_dataset
+
+        resolved_path = self._resolve_docket_path(input_path)
+        dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
+        summary = dict(summarize_docket_dataset(dataset_payload))
+        metadata = dict(dataset_payload.get("metadata") or {})
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "dataset_id": dataset_payload.get("dataset_id"),
+            "docket_id": dataset_payload.get("docket_id"),
+            "case_name": dataset_payload.get("case_name"),
+            "court": dataset_payload.get("court"),
+            "summary": summary,
+            "metadata": metadata,
+            "document_count": len(list(dataset_payload.get("documents") or [])),
+            "source": "complaint_workspace_docket_metadata",
+        }
+
+    def get_docket_dataset_graph(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+    ) -> Dict[str, Any]:
+        resolved_path = self._resolve_docket_path(input_path)
+        dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
+        knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
+        graph_projection = self._issue_links_from_knowledge_graph(knowledge_graph)
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "dataset_id": dataset_payload.get("dataset_id"),
+            "docket_id": dataset_payload.get("docket_id"),
+            "case_name": dataset_payload.get("case_name"),
+            "court": dataset_payload.get("court"),
+            "metadata": dict(dataset_payload.get("metadata") or {}),
+            "knowledge_graph": graph_projection,
+            "source": "complaint_workspace_docket_graph",
+        }
+
     def get_packaged_docket_operator_dashboard(self, manifest_path: str | Path) -> Dict[str, Any]:
         from ipfs_datasets_py.processors.legal_data import get_packaged_docket_operator_dashboard
 
@@ -4672,6 +4931,10 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.get_formal_diagnostics", "description": "Return the compact formal-complaint diagnostics summary for the current complaint draft and export state."},
                 {"name": "complaint.get_filing_provenance", "description": "Return the shared routing provenance for complaint generation, filing critique, export critique, and cached UI review workflows."},
                 {"name": "complaint.get_provider_diagnostics", "description": "Report which llm_router providers are actually usable on this machine, in the same order the router will prefer them."},
+                {"name": "complaint.view_docket_dataset", "description": "Load a docket dataset from packaged or source JSON input and return docket documents, summary, and metadata for dashboard viewing."},
+                {"name": "complaint.search_docket_dataset", "description": "Search a docket dataset with bm25 or vector retrieval and return matching docket entries for dashboard exploration."},
+                {"name": "complaint.get_docket_dataset_metadata", "description": "Return the docket dataset summary and metadata used by the complaint MCP dashboard."},
+                {"name": "complaint.get_docket_dataset_graph", "description": "Return knowledge-graph entities, relationships, and extracted legal-issue links for a docket dataset."},
                 {"name": "complaint.review_generated_exports", "description": "Review generated complaint export artifacts through llm_router and turn filing-output weaknesses into UI/UX repair suggestions."},
                 {"name": "complaint.get_packaged_docket_operator_dashboard", "description": "Load the combined packaged docket operator dashboard for a docket bundle manifest."},
                 {"name": "complaint.load_packaged_docket_operator_dashboard_report", "description": "Load the archived packaged docket operator dashboard report artifact for a docket bundle manifest."},
@@ -4864,6 +5127,47 @@ class ComplaintWorkspaceService:
             return self.get_filing_provenance(args.get("user_id"))
         if tool_name == "complaint.get_provider_diagnostics":
             return self.get_provider_diagnostics(args.get("user_id"))
+        if tool_name == "complaint.view_docket_dataset":
+            input_path = str(args.get("input_path") or "").strip()
+            if not input_path:
+                raise ValueError("complaint.view_docket_dataset requires input_path.")
+            return self.view_docket_dataset(
+                input_path,
+                input_type=str(args.get("input_type") or "packaged"),
+                include_document_text=bool(args.get("include_document_text") or False),
+                document_limit=int(args["document_limit"]) if args.get("document_limit") is not None else 25,
+            )
+        if tool_name == "complaint.search_docket_dataset":
+            input_path = str(args.get("input_path") or "").strip()
+            query = str(args.get("query") or "").strip()
+            if not input_path:
+                raise ValueError("complaint.search_docket_dataset requires input_path.")
+            if not query:
+                raise ValueError("complaint.search_docket_dataset requires query.")
+            return self.search_docket_dataset(
+                input_path,
+                input_type=str(args.get("input_type") or "packaged"),
+                query=query,
+                search_backend=str(args.get("search_backend") or "bm25"),
+                top_k=int(args.get("top_k") or 10),
+                vector_dimension=int(args.get("vector_dimension") or 32),
+            )
+        if tool_name == "complaint.get_docket_dataset_metadata":
+            input_path = str(args.get("input_path") or "").strip()
+            if not input_path:
+                raise ValueError("complaint.get_docket_dataset_metadata requires input_path.")
+            return self.get_docket_dataset_metadata(
+                input_path,
+                input_type=str(args.get("input_type") or "packaged"),
+            )
+        if tool_name == "complaint.get_docket_dataset_graph":
+            input_path = str(args.get("input_path") or "").strip()
+            if not input_path:
+                raise ValueError("complaint.get_docket_dataset_graph requires input_path.")
+            return self.get_docket_dataset_graph(
+                input_path,
+                input_type=str(args.get("input_type") or "packaged"),
+            )
         if tool_name == "complaint.review_generated_exports":
             return self.review_generated_exports(
                 args.get("user_id"),

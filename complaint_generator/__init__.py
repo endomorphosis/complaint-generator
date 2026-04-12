@@ -16,6 +16,8 @@ from .workspace import (
     analyze_complaint_output,
     execute_packaged_docket_proof_revalidation_queue,
     persist_packaged_docket_proof_revalidation_queue,
+    get_docket_dataset_graph,
+    get_docket_dataset_metadata,
     get_formal_diagnostics,
     get_filing_provenance,
     get_packaged_docket_operator_dashboard,
@@ -40,11 +42,13 @@ from .workspace import (
     run_gmail_duckdb_pipeline,
     run_browser_audit,
     save_evidence,
+    search_docket_dataset,
     search_email_duckdb_corpus,
     start_session,
     submit_intake_answers,
     update_case_synopsis,
     update_draft,
+    view_docket_dataset,
 )
 
 __all__ = [
@@ -73,6 +77,8 @@ __all__ = [
     "analyze_complaint_output",
     "execute_packaged_docket_proof_revalidation_queue",
     "persist_packaged_docket_proof_revalidation_queue",
+    "get_docket_dataset_graph",
+    "get_docket_dataset_metadata",
     "get_formal_diagnostics",
     "get_filing_provenance",
     "get_packaged_docket_operator_dashboard",
@@ -115,6 +121,7 @@ __all__ = [
     "ui_optimizer_daemon_status",
     "ui_optimizer_daemon_stop",
     "save_evidence",
+    "search_docket_dataset",
     "search_email_duckdb_corpus",
     "start_session",
     "submit_intake_answers",
@@ -122,6 +129,7 @@ __all__ = [
     "update_claim_type",
     "update_case_synopsis",
     "update_draft",
+    "view_docket_dataset",
 ]
 
 __version__ = "0.1.0"

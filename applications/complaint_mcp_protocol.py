@@ -264,6 +264,44 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "type": "object",
         "properties": {"user_id": {"type": "string"}},
     },
+    "complaint.view_docket_dataset": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "input_type": {"type": "string", "enum": ["packaged", "json"]},
+            "include_document_text": {"type": "boolean"},
+            "document_limit": {"type": "integer"},
+        },
+        "required": ["input_path"],
+    },
+    "complaint.search_docket_dataset": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "input_type": {"type": "string", "enum": ["packaged", "json"]},
+            "query": {"type": "string"},
+            "search_backend": {"type": "string", "enum": ["bm25", "vector"]},
+            "top_k": {"type": "integer"},
+            "vector_dimension": {"type": "integer"},
+        },
+        "required": ["input_path", "query"],
+    },
+    "complaint.get_docket_dataset_metadata": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "input_type": {"type": "string", "enum": ["packaged", "json"]},
+        },
+        "required": ["input_path"],
+    },
+    "complaint.get_docket_dataset_graph": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "input_type": {"type": "string", "enum": ["packaged", "json"]},
+        },
+        "required": ["input_path"],
+    },
     "complaint.review_generated_exports": {
         "type": "object",
         "properties": {

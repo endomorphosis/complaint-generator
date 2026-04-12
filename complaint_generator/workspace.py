@@ -495,6 +495,70 @@ def get_provider_diagnostics(
     return _resolve_service(service, root_dir=root_dir).get_provider_diagnostics(user_id)
 
 
+def view_docket_dataset(
+    input_path: str | Path,
+    *,
+    input_type: str = "packaged",
+    include_document_text: bool = False,
+    document_limit: int = 25,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).view_docket_dataset(
+        input_path,
+        input_type=input_type,
+        include_document_text=include_document_text,
+        document_limit=document_limit,
+    )
+
+
+def search_docket_dataset(
+    input_path: str | Path,
+    *,
+    query: str,
+    input_type: str = "packaged",
+    search_backend: str = "bm25",
+    top_k: int = 10,
+    vector_dimension: int = 32,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).search_docket_dataset(
+        input_path,
+        input_type=input_type,
+        query=query,
+        search_backend=search_backend,
+        top_k=top_k,
+        vector_dimension=vector_dimension,
+    )
+
+
+def get_docket_dataset_metadata(
+    input_path: str | Path,
+    *,
+    input_type: str = "packaged",
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_docket_dataset_metadata(
+        input_path,
+        input_type=input_type,
+    )
+
+
+def get_docket_dataset_graph(
+    input_path: str | Path,
+    *,
+    input_type: str = "packaged",
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_docket_dataset_graph(
+        input_path,
+        input_type=input_type,
+    )
+
+
 def get_packaged_docket_operator_dashboard(
     manifest_path: str | Path,
     *,

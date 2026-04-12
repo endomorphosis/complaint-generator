@@ -582,6 +582,54 @@ def provider_diagnostics(user_id: str = "demo-user") -> None:
     _print(service.get_provider_diagnostics(user_id))
 
 
+@app.command("docket-view")
+def docket_view(
+    input_path: str,
+    input_type: str = "packaged",
+    include_document_text: bool = False,
+    document_limit: int = 25,
+) -> None:
+    _print(
+        service.view_docket_dataset(
+            input_path,
+            input_type=input_type,
+            include_document_text=include_document_text,
+            document_limit=document_limit,
+        )
+    )
+
+
+@app.command("docket-search")
+def docket_search(
+    input_path: str,
+    query: str,
+    input_type: str = "packaged",
+    search_backend: str = "bm25",
+    top_k: int = 10,
+    vector_dimension: int = 32,
+) -> None:
+    _print(
+        service.search_docket_dataset(
+            input_path,
+            input_type=input_type,
+            query=query,
+            search_backend=search_backend,
+            top_k=top_k,
+            vector_dimension=vector_dimension,
+        )
+    )
+
+
+@app.command("docket-metadata")
+def docket_metadata(input_path: str, input_type: str = "packaged") -> None:
+    _print(service.get_docket_dataset_metadata(input_path, input_type=input_type))
+
+
+@app.command("docket-graph")
+def docket_graph(input_path: str, input_type: str = "packaged") -> None:
+    _print(service.get_docket_dataset_graph(input_path, input_type=input_type))
+
+
 @app.command("review-exports")
 def review_exports(
     user_id: str = "demo-user",
