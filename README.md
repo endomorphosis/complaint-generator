@@ -139,6 +139,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 
+# Note: the base environment intentionally excludes the third-party `brave-search`
+# package because its published dependency line conflicts with the MCP/httpx stack
+# used by this workspace. Install it only in an isolated optional environment if
+# you specifically need that client.
+
 # (Optional) Configure API keys
 export OPENAI_API_KEY="your-key"
 export BRAVE_SEARCH_API_KEY="your-key"
