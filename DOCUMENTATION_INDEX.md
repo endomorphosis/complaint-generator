@@ -90,6 +90,8 @@ Complete index of all documentation in the complaint-generator repository.
 ### IPFS Integration
 - [docs/IPFS_DATASETS_INTEGRATION.md](docs/IPFS_DATASETS_INTEGRATION.md) - IPFS integration guide
 - [docs/IPFS_DATASETS_PY_INTEGRATION.md](docs/IPFS_DATASETS_PY_INTEGRATION.md) - Current-state `ipfs_datasets_py` integration guide for adapters, mediator hooks, search, parsing, graphs, and reasoning workflows
+- [ipfs_datasets_py/README.md](ipfs_datasets_py/README.md) - IPFS Datasets Python CLI and API overview (including docket/workspace bundle tooling)
+- [ipfs_datasets_py/scripts/ops/legal_data/README.md](ipfs_datasets_py/scripts/ops/legal_data/README.md) - Legal data ops scripts for docket and workspace bundles
 - [docs/IPFS_DATASETS_PY_IMPROVEMENT_PLAN.md](docs/IPFS_DATASETS_PY_IMPROVEMENT_PLAN.md) - Comprehensive integration roadmap for legal scrapers, search, graph reasoning, theorem validation, and archival tooling
 - [docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md](docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md) - Implementation backlog with work packages, dependencies, acceptance criteria, and sprint sequencing
 - [docs/IPFS_DATASETS_PY_NEXT_BATCH_PLAN.md](docs/IPFS_DATASETS_PY_NEXT_BATCH_PLAN.md) - Concrete next implementation batches with file targets, validation commands, and stop or go criteria

@@ -19,8 +19,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from complaint_generator.email_credentials import resolve_gmail_credentials
-from complaint_generator.email_pipeline import run_gmail_duckdb_pipeline
+from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
+from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
 
 
 _STOP_REQUESTED = False

@@ -242,9 +242,12 @@ def import_gmail_evidence_command(
 ) -> None:
     import anyio
 
-    from complaint_generator.email_credentials import resolve_gmail_credentials
-    from complaint_generator.email_graphrag import build_email_duckdb_artifacts, search_email_graphrag_duckdb
-    from complaint_generator.email_import import import_gmail_evidence
+    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
+    from ipfs_datasets_py.processors.legal_data.email_corpus import (
+        build_email_duckdb_artifacts,
+        search_email_graphrag_duckdb,
+    )
+    from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
 
     parser = argparse.ArgumentParser(prog="complaint-workspace import-gmail-evidence")
     if not collect_all_messages and not list(address or []):
@@ -384,8 +387,8 @@ def run_gmail_duckdb_pipeline_command(
 ) -> None:
     import anyio
 
-    from complaint_generator.email_credentials import resolve_gmail_credentials
-    from complaint_generator.email_pipeline import run_gmail_duckdb_pipeline
+    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
+    from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
 
     parser = argparse.ArgumentParser(prog="complaint-workspace run-gmail-duckdb-pipeline")
     if not collect_all_messages and not list(address or []):
@@ -453,7 +456,7 @@ def search_email_duckdb_command(
     bm25_k1: float = typer.Option(1.2, "--bm25-k1"),
     bm25_b: float = typer.Option(0.75, "--bm25-b"),
 ) -> None:
-    from complaint_generator.email_pipeline import search_email_duckdb_corpus
+    from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
 
     _print(
         search_email_duckdb_corpus(

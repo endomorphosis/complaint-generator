@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from complaint_generator.email_seed_planner import build_email_seed_plan
+from ipfs_datasets_py.processors.legal_data.email_seed_planner import build_email_seed_plan
 
 
 def build_parser() -> argparse.ArgumentParser:

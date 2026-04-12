@@ -205,7 +205,51 @@ Primary next improvements:
 - define claim-type-specific predicate templates
 - persist validation runs, failed premises, and contradictory predicates
 
-### 7. Vector search and MCP gateway features
+### 7. Workspace Dataset Bundles (Index + Package)
+
+Workspace dataset bundles are implemented in `ipfs_datasets_py.processors.legal_data` and expose a docket-like bundle layout for mixed evidence corpora (emails, chat exports, drive dumps, or web captures). Use workspace bundles when you want to stage a large evidence workspace with knowledge graphs, BM25, and vector indices ready now while deferring deeper downstream processing.
+
+Recommended use inside complaint-generator:
+
+- ingest mixed evidence exports into a normalized workspace dataset object
+- generate knowledge graphs and retrieval indices for faster later review
+- package workspace datasets into chain-loadable artifacts for IPFS and parquet-first storage
+
+Preferred CLI workflow:
+
+```bash
+# Export a single-parquet workspace bundle from a JSON workspace payload
+ipfs-datasets workspace --action export --input-path /path/to/workspace.json \
+  --output-parquet /tmp/workspace_bundle.parquet --json
+
+# Package a chain-loadable workspace bundle (parquet + optional CAR)
+ipfs-datasets workspace --action package --input-path /path/to/discord_export.json \
+  --output-dir /tmp/workspace_bundle --package-name workspace_bundle --json
+
+# Inspect the packaged bundle summary
+ipfs-datasets workspace --action package-summary --input-path /tmp/workspace_bundle/bundle_manifest.json --json
+```
+
+Direct upstream usage (when adapter integration is not required yet):
+
+```python
+from ipfs_datasets_py.processors.legal_data import (
+    WorkspaceDatasetBuilder,
+    package_workspace_dataset,
+)
+
+builder = WorkspaceDatasetBuilder()
+dataset = builder.build_from_workspace({
+    "workspace_id": "ws-01",
+    "workspace_name": "Evidence Workspace",
+    "documents": [{"id": "doc-1", "title": "Email", "text": "Sample evidence"}],
+})
+
+package = package_workspace_dataset(dataset, output_dir="/tmp/workspace_bundle", package_name="workspace_bundle")
+print(package["manifest_json_path"])
+```
+
+### 8. Vector search and MCP gateway features
 
 `integrations/ipfs_datasets/vector_store.py` and `integrations/ipfs_datasets/mcp_gateway.py` should remain adapter seams until there is a concrete complaint-generator workflow that needs them.
 

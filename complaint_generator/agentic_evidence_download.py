@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.parse import urlparse
 
-from complaint_generator.evidence_relevance import build_complaint_terms, generate_email_search_plan, score_email_relevance
+from ipfs_datasets_py.processors.legal_data.email_relevance import (
+    build_complaint_terms,
+    generate_email_search_plan,
+    score_email_relevance,
+)
 from integrations.ipfs_datasets.search import evaluate_scraped_content, scrape_web_content, search_multi_engine_web
 
 

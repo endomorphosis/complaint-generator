@@ -8,15 +8,19 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from complaint_generator.email_agentic_search import search_email_corpus_agentic
-from complaint_generator.email_graphrag import build_email_graphrag_artifacts, search_email_graphrag_duckdb
+from ipfs_datasets_py.processors.legal_data.email_agentic_search import search_email_corpus_agentic
+from ipfs_datasets_py.processors.legal_data.email_workspace import (
+    build_email_workspace_corpus as build_email_graphrag_artifacts,
+    canonical_email_corpus_paths,
+    search_email_workspace_corpus as search_email_graphrag_duckdb,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MASTER_IMPORT_DIR = REPO_ROOT / "evidence" / "email_imports" / "starworks5-master-case-email-import"
-MASTER_MANIFEST_PATH = MASTER_IMPORT_DIR / "email_import_manifest.json"
-MASTER_GRAPHRAG_DIR = MASTER_IMPORT_DIR / "graphrag"
-MASTER_DUCKDB_PATH = MASTER_GRAPHRAG_DIR / "duckdb" / "email_search.duckdb"
+MASTER_CORPUS = canonical_email_corpus_paths(repo_root=REPO_ROOT, case_slug="starworks5-master-case-email-import")
+MASTER_MANIFEST_PATH = MASTER_CORPUS.manifest_path
+MASTER_GRAPHRAG_DIR = MASTER_CORPUS.graphrag_dir
+MASTER_DUCKDB_PATH = MASTER_CORPUS.duckdb_path
 
 
 def build_parser() -> argparse.ArgumentParser:

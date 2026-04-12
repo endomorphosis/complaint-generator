@@ -4221,7 +4221,7 @@ class ComplaintWorkspaceService:
         uid_window_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         async def _run_import() -> Dict[str, Any]:
-            from complaint_generator.email_import import import_gmail_evidence
+            from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
 
             return await import_gmail_evidence(
                 addresses=addresses,
@@ -4285,7 +4285,7 @@ class ComplaintWorkspaceService:
         bm25_search_limit: int = 20,
     ) -> Dict[str, Any]:
         async def _run_pipeline() -> Dict[str, Any]:
-            from complaint_generator.email_pipeline import run_gmail_duckdb_pipeline
+            from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
 
             return await run_gmail_duckdb_pipeline(
                 user_id=str(user_id or DEFAULT_USER_ID),
@@ -4330,7 +4330,7 @@ class ComplaintWorkspaceService:
         bm25_k1: float = 1.2,
         bm25_b: float = 0.75,
     ) -> Dict[str, Any]:
-        from complaint_generator.email_pipeline import search_email_duckdb_corpus
+        from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
 
         return search_email_duckdb_corpus(
             index_path=index_path,
