@@ -157,6 +157,8 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "get_client_release_gate",
     "get_workflow_capabilities",
     "get_tooling_contract",
+    "get_workspace_data_schema",
+    "migrate_legacy_workspace_data",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -2944,7 +2946,7 @@ class ComplaintWorkspaceService:
                 "browser_sdk_method": mapping["browser_sdk_method"],
                 "exposed_everywhere": exposed_everywhere,
             })
-        return {
+        payload = {
             "user_id": str(user_id or DEFAULT_USER_ID),
             "package_exports": package_exports,
             "cli_commands": cli_commands,
@@ -2954,6 +2956,77 @@ class ComplaintWorkspaceService:
             "missing_exposures": missing_exposures,
             "all_core_flow_steps_exposed": not missing_exposures,
         }
+        if user_id:
+            try:
+                payload["workspace_data_schema"] = self.get_workspace_data_schema(user_id)
+            except Exception as exc:
+                payload["workspace_data_schema_error"] = str(exc)
+        return payload
+
+    def get_workspace_data_schema(
+        self,
+        user_id: Optional[str] = None,
+        *,
+        manifest_path: Optional[str | Path] = None,
+        statefile_path: Optional[str | Path] = None,
+        evidence_db_path: Optional[str | Path] = None,
+        legal_authority_db_path: Optional[str | Path] = None,
+        claim_support_db_path: Optional[str | Path] = None,
+    ) -> Dict[str, Any]:
+        from complaint_generator.data_migration import inspect_workspace_data_schema
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        if manifest_path is not None:
+            snapshot = inspect_workspace_data_schema(manifest_path=manifest_path)
+        else:
+            state = self._load_state(resolved_user_id)
+            snapshot = inspect_workspace_data_schema(
+                state=state,
+                statefile_path=statefile_path,
+                evidence_db_path=evidence_db_path,
+                legal_authority_db_path=legal_authority_db_path,
+                claim_support_db_path=claim_support_db_path,
+                user_id=resolved_user_id,
+            )
+        snapshot["user_id"] = resolved_user_id
+        snapshot["source"] = str(snapshot.get("source") or "workspace_data_schema")
+        return snapshot
+
+    def migrate_legacy_workspace_data(
+        self,
+        user_id: Optional[str] = None,
+        *,
+        output_dir: Optional[str | Path] = None,
+        statefile_path: Optional[str | Path] = None,
+        evidence_db_path: Optional[str | Path] = None,
+        legal_authority_db_path: Optional[str | Path] = None,
+        claim_support_db_path: Optional[str | Path] = None,
+        package_name: Optional[str] = None,
+        include_car: bool = True,
+    ) -> Dict[str, Any]:
+        from complaint_generator.data_migration import migrate_legacy_workspace_data
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        target_output_dir = (
+            Path(output_dir).expanduser().resolve()
+            if output_dir is not None
+            else (self._session_dir / "dataset_migrations" / _slugify_user_id(resolved_user_id)).resolve()
+        )
+        state = self._load_state(resolved_user_id)
+        result = migrate_legacy_workspace_data(
+            output_dir=target_output_dir,
+            state=state,
+            statefile_path=statefile_path,
+            evidence_db_path=evidence_db_path,
+            legal_authority_db_path=legal_authority_db_path,
+            claim_support_db_path=claim_support_db_path,
+            user_id=resolved_user_id,
+            package_name=package_name,
+            include_car=include_car,
+        )
+        result["user_id"] = resolved_user_id
+        result["output_dir"] = str(target_output_dir)
+        return result
 
     def get_workflow_capabilities(self, user_id: Optional[str]) -> Dict[str, Any]:
         session = self.get_session(user_id)
@@ -3031,6 +3104,7 @@ class ComplaintWorkspaceService:
             "ui_readiness": self.get_ui_readiness(user_id),
             "client_release_gate": self.get_client_release_gate(user_id),
             "tooling_contract": self.get_tooling_contract(user_id),
+            "workspace_data_schema": self.get_workspace_data_schema(session["session"]["user_id"]),
             "capabilities": capabilities,
         }
 
@@ -4586,6 +4660,8 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.get_client_release_gate", "description": "Combine complaint readiness, UI readiness, and complaint-output quality into one client-safety release gate."},
                 {"name": "complaint.get_workflow_capabilities", "description": "Summarize which complaint-workflow abilities are currently available for the session."},
                 {"name": "complaint.get_tooling_contract", "description": "Show how the core complaint workflow is exposed across package exports, CLI commands, MCP tools, and browser SDK methods."},
+                {"name": "complaint.get_workspace_data_schema", "description": "Inspect the current or packaged workspace dataset schema so MCP and UI surfaces can follow the actual parquet data model."},
+                {"name": "complaint.migrate_legacy_workspace_data", "description": "Project legacy complaint session and mediator DuckDB state into a packaged workspace dataset stored as parquet pieces."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
                 {"name": "complaint.export_complaint_packet", "description": "Export the current lawsuit complaint packet with intake, evidence, review, and draft content."},
@@ -4729,6 +4805,26 @@ class ComplaintWorkspaceService:
             return self.get_workflow_capabilities(args.get("user_id"))
         if tool_name == "complaint.get_tooling_contract":
             return self.get_tooling_contract(args.get("user_id"))
+        if tool_name == "complaint.get_workspace_data_schema":
+            return self.get_workspace_data_schema(
+                args.get("user_id"),
+                manifest_path=args.get("manifest_path"),
+                statefile_path=args.get("statefile_path"),
+                evidence_db_path=args.get("evidence_db_path"),
+                legal_authority_db_path=args.get("legal_authority_db_path"),
+                claim_support_db_path=args.get("claim_support_db_path"),
+            )
+        if tool_name == "complaint.migrate_legacy_workspace_data":
+            return self.migrate_legacy_workspace_data(
+                args.get("user_id"),
+                output_dir=args.get("output_dir"),
+                statefile_path=args.get("statefile_path"),
+                evidence_db_path=args.get("evidence_db_path"),
+                legal_authority_db_path=args.get("legal_authority_db_path"),
+                claim_support_db_path=args.get("claim_support_db_path"),
+                package_name=args.get("package_name"),
+                include_car=bool(args.get("include_car", True)),
+            )
         if tool_name == "complaint.generate_complaint":
             return self.generate_complaint(
                 args.get("user_id"),

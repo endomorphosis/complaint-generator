@@ -180,6 +180,30 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "type": "object",
         "properties": {"user_id": {"type": "string"}},
     },
+    "complaint.get_workspace_data_schema": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "manifest_path": {"type": "string"},
+            "statefile_path": {"type": "string"},
+            "evidence_db_path": {"type": "string"},
+            "legal_authority_db_path": {"type": "string"},
+            "claim_support_db_path": {"type": "string"},
+        },
+    },
+    "complaint.migrate_legacy_workspace_data": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "output_dir": {"type": "string"},
+            "statefile_path": {"type": "string"},
+            "evidence_db_path": {"type": "string"},
+            "legal_authority_db_path": {"type": "string"},
+            "claim_support_db_path": {"type": "string"},
+            "package_name": {"type": "string"},
+            "include_car": {"type": "boolean"},
+        },
+    },
     "complaint.generate_complaint": {
         "type": "object",
         "properties": {

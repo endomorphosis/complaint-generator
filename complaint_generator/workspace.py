@@ -335,6 +335,52 @@ def get_tooling_contract(
     return _resolve_service(service, root_dir=root_dir).get_tooling_contract(user_id)
 
 
+def get_workspace_data_schema(
+    user_id: Optional[str] = None,
+    *,
+    manifest_path: Optional[str | Path] = None,
+    statefile_path: Optional[str | Path] = None,
+    evidence_db_path: Optional[str | Path] = None,
+    legal_authority_db_path: Optional[str | Path] = None,
+    claim_support_db_path: Optional[str | Path] = None,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_workspace_data_schema(
+        user_id,
+        manifest_path=str(manifest_path) if manifest_path is not None else None,
+        statefile_path=str(statefile_path) if statefile_path is not None else None,
+        evidence_db_path=str(evidence_db_path) if evidence_db_path is not None else None,
+        legal_authority_db_path=str(legal_authority_db_path) if legal_authority_db_path is not None else None,
+        claim_support_db_path=str(claim_support_db_path) if claim_support_db_path is not None else None,
+    )
+
+
+def migrate_legacy_workspace_data(
+    user_id: Optional[str] = None,
+    *,
+    output_dir: Optional[str | Path] = None,
+    statefile_path: Optional[str | Path] = None,
+    evidence_db_path: Optional[str | Path] = None,
+    legal_authority_db_path: Optional[str | Path] = None,
+    claim_support_db_path: Optional[str | Path] = None,
+    package_name: Optional[str] = None,
+    include_car: bool = True,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).migrate_legacy_workspace_data(
+        user_id,
+        output_dir=str(output_dir) if output_dir is not None else None,
+        statefile_path=str(statefile_path) if statefile_path is not None else None,
+        evidence_db_path=str(evidence_db_path) if evidence_db_path is not None else None,
+        legal_authority_db_path=str(legal_authority_db_path) if legal_authority_db_path is not None else None,
+        claim_support_db_path=str(claim_support_db_path) if claim_support_db_path is not None else None,
+        package_name=package_name,
+        include_car=include_car,
+    )
+
+
 def generate_complaint(
     user_id: Optional[str],
     *,
@@ -703,6 +749,8 @@ __all__ = [
     "get_complaint_readiness",
     "get_ui_readiness",
     "get_client_release_gate",
+    "get_tooling_contract",
+    "get_workspace_data_schema",
     "create_identity",
     "create_complaint_workspace_router",
     "export_complaint_packet",
@@ -722,6 +770,7 @@ __all__ = [
     "generate_decentralized_id",
     "generate_complaint",
     "get_workflow_capabilities",
+    "migrate_legacy_workspace_data",
     "import_gmail_evidence",
     "list_claim_elements",
     "list_intake_questions",
