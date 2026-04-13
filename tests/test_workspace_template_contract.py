@@ -236,8 +236,14 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "workspace-data-schema-piece-chip" in content
     assert "workspace-data-schema-filter-chip" in content
     assert "workspace-data-filter-dimensions" in content
+    assert "workspace-data-filter-controls" in content
     assert "workspace-data-piece-schema-list" in content
     assert "workspace-data-query-plan-preview" in content
+    assert "workspace-data-search-query" in content
+    assert "workspace-data-search-backend" in content
+    assert "workspace-data-search-top-k" in content
+    assert "search-workspace-data-button" in content
+    assert "workspace-data-search-results-preview" in content
     assert "Workspace Data Ops" in content
     assert "Inspect and Migrate Workspace Dataset Primitives" in content
     assert "packaged-docket-manifest-path" in content
@@ -287,6 +293,8 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "function getWorkspaceSchemaSnapshot()" in content
     assert "function getSchemaHintIndex()" in content
     assert "function buildSchemaDrivenQueryPlan(schema, options = {})" in content
+    assert "function renderWorkspaceDataFilterControls(filterDimensions)" in content
+    assert "function buildWorkspaceDataSearchFilters()" in content
     assert "title: 'Inspect workspace parquet schema'" in content
     assert "loadWorkspaceDataPreferences()" in content
     assert "persistWorkspaceDataPreferences()" in content
@@ -307,12 +315,18 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "client.getToolingContract(workspaceUserId)" in content
     assert "client.getWorkspaceDataSchema(workspaceUserId, payload)" in content
     assert "client.migrateLegacyWorkspaceData(workspaceUserId, outputDir, Object.assign({}, payload, {" in content
+    assert "client.searchWorkspaceDataset(inputPath, query, Object.assign({" in content
     assert "Schema-guided recommendation:" in content
     assert "Recommended schema-first workflow:" in content
     assert "These tools inspect the parquet-backed workspace schema" in content
     assert "Schema-driven query plan" in content
     assert "Preferred filters:" in content
     assert "Suggested MCP-first sequence:" in content
+    assert "Searching the packaged workspace dataset through the shared MCP tools…" in content
+    assert "Workspace dataset search completed with ${String(((latestWorkspaceDatasetSearch.search_results || {}).result_count) || 0)} hit(s)." in content
+    assert "Add a workspace manifest path before searching the packaged workspace dataset." in content
+    assert "Enter a workspace dataset query before searching." in content
+    assert "document.getElementById('search-workspace-data-button').addEventListener('click', searchWorkspaceDataPanel);" in content
     assert "client.getPackagedDocketOperatorDashboard(manifestPath)" in content
     assert "client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat)" in content
     assert "client.executePackagedDocketProofRevalidationQueue(manifestPath, {" in content

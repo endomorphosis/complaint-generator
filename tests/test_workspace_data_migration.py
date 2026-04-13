@@ -358,3 +358,57 @@ def test_schema_guided_recommendations_surface_across_contracts(tmp_path):
     assert schema_snapshot["summary"]["document_count"] >= 2
     assert any(item["id"] == "workspace_schema_refresh" for item in workflow_capabilities["schema_guided_recommendations"])
     assert workflow_capabilities["workspace_data_schema"]["schema_version"] == "workspace_data_schema.v1"
+
+
+def test_search_workspace_dataset_supports_schema_filters(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-search-sessions")
+    user_id = "workspace-search-user"
+    service.submit_intake_answers(
+        user_id,
+        {
+            "party_name": "Casey Example",
+            "opposing_party": "Housing Authority of Clackamas County",
+            "protected_activity": "Requested a reasonable accommodation.",
+            "adverse_action": "Received an eviction notice.",
+            "timeline": "Request in January 2026; notice in February 2026.",
+            "harm": "Housing instability and lost time.",
+            "court_header": "FOR THE DISTRICT OF OREGON",
+        },
+    )
+    evidence_db = _build_evidence_db(tmp_path / "workspace-search-evidence.duckdb", user_id=user_id)
+    output_dir = tmp_path / "workspace-search-output"
+    migrated = service.migrate_legacy_workspace_data(
+        user_id,
+        output_dir=output_dir,
+        evidence_db_path=evidence_db,
+        include_car=False,
+    )
+
+    search_payload = service.search_workspace_dataset(
+        migrated["manifest_json_path"],
+        query="lease notice",
+        search_backend="bm25",
+        claim_type="housing_discrimination",
+        claim_element_id="causation",
+        source_type="workspace",
+    )
+    assert search_payload["source"] == "complaint_workspace_dataset_search"
+    assert search_payload["applied_filters"]["claim_type"] == "housing_discrimination"
+    assert search_payload["search_results"]["result_count"] >= 1
+
+    tool_names = {tool["name"] for tool in tool_list_payload(service)["tools"]}
+    assert "complaint.search_workspace_dataset" in tool_names
+
+    mcp_search = _call_mcp_tool(
+        service,
+        203,
+        "complaint.search_workspace_dataset",
+        {
+            "input_path": migrated["manifest_json_path"],
+            "query": "lease notice",
+            "search_backend": "bm25",
+            "claim_type": "housing_discrimination",
+            "claim_element_id": "causation",
+        },
+    )
+    assert mcp_search["search_results"]["result_count"] >= 1

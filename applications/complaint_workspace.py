@@ -4747,7 +4747,17 @@ class ComplaintWorkspaceService:
                         ]
                     )
                 values = {str(value).strip().lower() for value in candidates if str(value or "").strip()}
-                if expected.lower() not in values:
+                expected_lower = expected.lower()
+                if key == "source_type":
+                    matched = any(
+                        expected_lower == value
+                        or expected_lower in value
+                        or value in expected_lower
+                        for value in values
+                    )
+                else:
+                    matched = expected_lower in values
+                if not matched:
                     return False
             return True
 

@@ -9486,6 +9486,37 @@ function extractComplaintOutputSignals(result) {
             await copyTextToClipboard(manifestPath, 'Workspace dataset manifest path copied.');
         }
 
+        async function searchWorkspaceDataPanel() {
+            const inputPath = document.getElementById('workspace-data-manifest-path').value.trim();
+            const query = document.getElementById('workspace-data-search-query').value.trim();
+            const searchBackend = document.getElementById('workspace-data-search-backend').value || 'bm25';
+            const topK = Math.max(1, Number(document.getElementById('workspace-data-search-top-k').value || '8'));
+            if (!inputPath) {
+                activateTab('integrations');
+                setStatus('Add a workspace manifest path before searching the packaged workspace dataset.');
+                return;
+            }
+            if (!query) {
+                activateTab('integrations');
+                setStatus('Enter a workspace dataset query before searching.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Searching the packaged workspace dataset through the shared MCP tools…');
+            try {
+                latestWorkspaceDatasetSearch = await client.searchWorkspaceDataset(inputPath, query, Object.assign({
+                    input_type: 'packaged',
+                    search_backend: searchBackend,
+                    top_k: topK,
+                }, buildWorkspaceDataSearchFilters()));
+                renderWorkflowOperations();
+                setStatus(`Workspace dataset search completed with ${String(((latestWorkspaceDatasetSearch.search_results || {}).result_count) || 0)} hit(s).`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Workspace dataset search failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
         function renderPackagedDocketOperatorDashboardPanel() {
             const dashboard = latestPackagedDocketOperatorDashboard || {};
             const reportPayload = latestPackagedDocketOperatorDashboardReport || {};
@@ -9918,6 +9949,7 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('refresh-workspace-data-schema-panel-button').addEventListener('click', refreshWorkspaceDataSchemaPanel);
         document.getElementById('migrate-legacy-workspace-data-button').addEventListener('click', migrateLegacyWorkspaceDataPanel);
         document.getElementById('copy-workspace-data-manifest-button').addEventListener('click', copyWorkspaceDataMigrationManifestPath);
+        document.getElementById('search-workspace-data-button').addEventListener('click', searchWorkspaceDataPanel);
         document.getElementById('load-packaged-docket-dashboard-button').addEventListener('click', loadPackagedDocketOperatorDashboardPanel);
         document.getElementById('load-packaged-docket-dashboard-report-button').addEventListener('click', loadPackagedDocketOperatorDashboardReportPanel);
         document.getElementById('execute-packaged-docket-revalidation-button').addEventListener('click', executePackagedDocketRevalidationPanel);
