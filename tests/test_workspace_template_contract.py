@@ -352,6 +352,12 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "async function loadPackagedDocketOperatorDashboardReportPanel()" in content
     assert "async function executePackagedDocketRevalidationPanel()" in content
     assert "async function persistPackagedDocketRevalidationPanel()" in content
+    assert "function publishWorkspaceSyncEvent(detail)" in content
+    assert "complaint-mcp-sync" in content
+    assert "workspace-packaged-docket-dashboard" in content
+    assert "workspace-packaged-docket-report" in content
+    assert "workspace-packaged-docket-revalidation" in content
+    assert "workspace-packaged-docket-persist" in content
     assert "async function copyPackagedDocketPersistManifestPath()" in content
     assert "async function copyPackagedDocketPersistPackageRoot()" in content
     assert "async function useLatestPackagedDocketManifestPreference()" in content

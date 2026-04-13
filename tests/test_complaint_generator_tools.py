@@ -415,6 +415,64 @@ def test_upload_local_evidence_api_route_imports_files_and_note(tmp_path):
     assert any(record["title"] == "Dashboard upload note" for record in testimony)
 
 
+@pytest.mark.no_auto_llm
+def test_workspace_session_reset_clears_uploaded_dashboard_state(tmp_path):
+    if not HAS_MULTIPART:
+        pytest.skip("python-multipart is not installed")
+
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "dashboard-reset-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    client = TestClient(app)
+
+    upload_response = client.post(
+        "/api/complaint-workspace/upload-local-evidence",
+        data={
+            "user_id": "dashboard-reset-user",
+            "claim_element_id": "causation",
+            "kind": "document",
+            "note_title": "Reset verification note",
+            "note": "This upload should disappear after reset.",
+            "source": "dashboard-chat-upload",
+        },
+        files=[
+            (
+                "files",
+                ("timeline.txt", b"The timeline changed after the hearing notice arrived.", "text/plain"),
+            ),
+        ],
+    )
+    assert upload_response.status_code == 200
+    uploaded_payload = upload_response.json()
+    assert uploaded_payload["session"]["evidence"]["documents"]
+    assert uploaded_payload["session"]["evidence"]["testimony"]
+
+    session_response = client.get(
+        "/api/complaint-workspace/session",
+        params={"user_id": "dashboard-reset-user"},
+    )
+    assert session_response.status_code == 200
+    session_payload = session_response.json()
+    assert len(session_payload["session"]["evidence"]["documents"]) == 1
+    assert len(session_payload["session"]["evidence"]["testimony"]) == 1
+
+    reset_response = client.post(
+        "/api/complaint-workspace/reset",
+        json={"user_id": "dashboard-reset-user"},
+    )
+    assert reset_response.status_code == 200
+
+    refreshed_session_response = client.get(
+        "/api/complaint-workspace/session",
+        params={"user_id": "dashboard-reset-user"},
+    )
+    assert refreshed_session_response.status_code == 200
+    refreshed_session_payload = refreshed_session_response.json()
+    assert refreshed_session_payload["session"]["user_id"] == "dashboard-reset-user"
+    assert refreshed_session_payload["session"]["evidence"]["documents"] == []
+    assert refreshed_session_payload["session"]["evidence"]["testimony"] == []
+
+
 def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
     runner = CliRunner()
     service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-import-cli-sessions")

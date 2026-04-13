@@ -857,6 +857,11 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "Heads-Up Display Dashboard" in dashboard_hub_response.text
     assert "Case Calendar Preview" in dashboard_hub_response.text
     assert "Operator Queue" in dashboard_hub_response.text
+    assert "Reset Workspace" in dashboard_hub_response.text
+    assert "Unload Workspace" in dashboard_hub_response.text
+    assert "Unload Docket" in dashboard_hub_response.text
+    assert "/static/complaint_mcp_sdk.js" in dashboard_hub_response.text
+    assert "complaint-mcp-sync" in dashboard_hub_response.text
     assert "IPFS Datasets MCP Dashboard" in mcp_response.text
     assert analytics_history_response.json()["history"]
     assert workspace_tools_response.json()["tools"]

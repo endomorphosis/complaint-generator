@@ -523,7 +523,11 @@ def _render_dashboard_hub(
                         <label class="field-label" for="dashboard-workspace-user-id">Workspace User ID</label>
                         <input id="dashboard-workspace-user-id" type="text" value="{escape(default_user_id)}" placeholder="demo-user">
                     </div>
+                </div>
+                <div class="button-row" style="margin-top: 12px;">
                     <button id="dashboard-load-workspace" type="button">Refresh Workspace</button>
+                    <button id="dashboard-reset-workspace" type="button" class="secondary">Reset Workspace</button>
+                    <button id="dashboard-unload-workspace" type="button" class="secondary">Unload Workspace</button>
                 </div>
                 <div class="stat-grid">
                     <div class="stat-card"><strong id="dashboard-workspace-answered">0</strong><span>Answered intake prompts</span></div>
@@ -548,6 +552,7 @@ def _render_dashboard_hub(
                 <div class="button-row" style="margin-top: 12px;">
                     <button id="dashboard-load-docket" type="button">Load Docket Dashboard</button>
                     <button id="dashboard-load-docket-report" type="button" class="secondary">Load Parsed Report</button>
+                    <button id="dashboard-unload-docket" type="button" class="secondary">Unload Docket</button>
                 </div>
                 <div class="stat-grid">
                     <div class="stat-card"><strong id="dashboard-docket-queue">0</strong><span>Queue items</span></div>
@@ -627,7 +632,7 @@ def _render_dashboard_hub(
                 {ipfs_markup}
             </section>
         </section>
-    </main>
+</main>
 
     <div class="modal" id="dashboard-chat-upload-modal" hidden>
         <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="dashboard-chat-upload-title">
@@ -684,8 +689,11 @@ def _render_dashboard_hub(
         </div>
     </div>
 
+    <script src="/static/complaint_mcp_sdk.js"></script>
     <script>
         (function() {{
+            const syncEventName = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.SYNC_EVENT_NAME) || 'complaint-mcp-sync';
+            const syncEventStorageKey = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.DEFAULT_SYNC_EVENT_STORAGE_KEY) || 'complaintGenerator.sdkSyncEvent';
             const dashboardState = {{
                 workspacePayload: null,
                 docketPayload: null,
@@ -728,6 +736,26 @@ def _render_dashboard_hub(
                 const items = Array.isArray(values) ? values.filter(Boolean) : [];
                 const chips = items.length ? items : [fallback];
                 node.innerHTML = chips.map((item) => `<span class="chip">${{String(item)}}</span>`).join('');
+            }}
+
+            function publishSharedSyncEvent(detail) {{
+                if (window.ComplaintMcpSdk && typeof window.ComplaintMcpSdk.publishSyncEvent === 'function') {{
+                    return window.ComplaintMcpSdk.publishSyncEvent(detail);
+                }}
+                const payload = Object.assign({{
+                    emitted_at: new Date().toISOString(),
+                }}, detail || {{}});
+                if (typeof window.localStorage !== 'undefined') {{
+                    try {{
+                        window.localStorage.setItem(syncEventStorageKey, JSON.stringify(payload));
+                    }} catch (error) {{
+                        // Ignore storage failures and still dispatch the event locally.
+                    }}
+                }}
+                if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {{
+                    window.dispatchEvent(new CustomEvent(syncEventName, {{ detail: payload }}));
+                }}
+                return payload;
             }}
 
             function buildSurfaceUrl(path, params) {{
@@ -938,6 +966,19 @@ def _render_dashboard_hub(
                 renderHeadsUpCard();
             }}
 
+            function clearWorkspaceCard(reason) {{
+                dashboardState.workspacePayload = null;
+                setText('dashboard-workspace-answered', '0');
+                setText('dashboard-workspace-evidence', '0');
+                setText('dashboard-workspace-missing', '0');
+                setText('dashboard-workspace-draft', 'No');
+                setText('dashboard-workspace-session-chip', 'session: not loaded');
+                setText('dashboard-workspace-route-chip', 'next route: waiting');
+                setText('dashboard-workspace-status', reason || 'Workspace session unloaded.');
+                setText('dashboard-workspace-preview', 'Workspace session details will appear here.');
+                renderHeadsUpCard();
+            }}
+
             function deriveDocketStats(payload) {{
                 const queue = payload && (payload.queue || payload.revalidation_queue || payload.items || []);
                 const priorityCounts = payload && (payload.priority_counts || payload.queue_priority_counts || {{}});
@@ -985,6 +1026,26 @@ def _render_dashboard_hub(
                     }}), null, 2)
                 );
                 dashboardState.docketPayload = payload || null;
+                renderHeadsUpCard();
+            }}
+
+            function clearDocketCard(reason) {{
+                dashboardState.docketPayload = null;
+                dashboardState.docketViewPayload = null;
+                setText('dashboard-docket-queue', '0');
+                setText('dashboard-docket-high', '0');
+                setText('dashboard-docket-runs', '0');
+                setText('dashboard-docket-calendar-count', '0');
+                setText('dashboard-docket-source-chip', 'source: not loaded');
+                setText('dashboard-docket-manifest-chip', 'manifest: not set');
+                setText('dashboard-docket-calendar-chip', 'calendar: waiting');
+                setText('dashboard-docket-status', reason || 'Packaged docket unloaded.');
+                renderChipList(
+                    'dashboard-docket-calendar-list',
+                    [],
+                    'Load a docket to preview hearings, deadlines, and conferences.'
+                );
+                setText('dashboard-docket-preview', 'Packaged docket details will appear here.');
                 renderHeadsUpCard();
             }}
 
@@ -1062,11 +1123,14 @@ def _render_dashboard_hub(
                     operatorQueue.push('Re-open the draft and prepare the next filing or export step.');
                 }}
                 const routeHint = String(readiness.recommended_route || '/workspace');
+                const workflowState = userId
+                    ? (hasDraft ? 'Draft active' : (missingCount > 0 ? 'Support building' : 'Workspace loaded'))
+                    : 'No workspace loaded';
                 setText('dashboard-heads-up-action', nextAction);
                 setText('dashboard-heads-up-calendar-count', String(calendarEvents.length));
                 setText('dashboard-heads-up-readiness', titleCase(hasDraft ? 'draft_ready' : (missingCount > 0 ? 'support_building' : (userId ? 'intake_or_review' : 'not_loaded')), 'Waiting'));
                 setText('dashboard-heads-up-claim-chip', `claim: ${{titleCase(claimType, 'Retaliation')}}`);
-                setText('dashboard-heads-up-focus-chip', `focus: ${{focus}}`);
+                setText('dashboard-heads-up-focus-chip', `focus: ${{focus}} | state: ${{workflowState}}`);
                 setText(
                     'dashboard-heads-up-status',
                     userId
@@ -1142,6 +1206,31 @@ def _render_dashboard_hub(
                 }}
             }}
 
+            async function resetWorkspaceDashboard() {{
+                const input = document.getElementById('dashboard-workspace-user-id');
+                const userId = String((input && input.value) || '').trim();
+                setText('dashboard-workspace-status', 'Resetting workspace session...');
+                try {{
+                    const payload = await fetchJson('/api/complaint-workspace/reset', {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/json',
+                        }},
+                        body: JSON.stringify({{ user_id: userId || undefined }}),
+                    }});
+                    publishSharedSyncEvent({{
+                        event_type: 'workspace.reset',
+                        source: 'dashboard-reset-workspace',
+                        user_id: userId,
+                        payload: payload || null,
+                    }});
+                    await loadWorkspaceDashboard();
+                    setText('dashboard-chat-upload-status', 'Workspace reset completed. Upload state now reflects the clean session.');
+                }} catch (error) {{
+                    setText('dashboard-workspace-status', `Workspace reset failed: ${{error.message}}`);
+                }}
+            }}
+
             async function loadDocketDashboard(reportOnly) {{
                 const input = document.getElementById('dashboard-docket-manifest-path');
                 const manifestPath = String((input && input.value) || '').trim();
@@ -1200,6 +1289,12 @@ def _render_dashboard_hub(
                     }});
                     setText('dashboard-chat-upload-status', `Uploaded ${{String(payload.imported_count || files.length)}} file(s) into the complaint workspace.`);
                     setText('dashboard-chat-upload-preview', JSON.stringify(payload, null, 2));
+                    publishSharedSyncEvent({{
+                        event_type: 'workspace.updated',
+                        source: 'dashboard-chat-upload',
+                        user_id: String((payload && payload.session && payload.session.user_id) || formData.get('user_id') || ''),
+                        payload: payload || null,
+                    }});
                     if (payload && payload.session) {{
                         renderWorkspaceCard(payload);
                     }} else {{
@@ -1212,9 +1307,45 @@ def _render_dashboard_hub(
                 }}
             }}
 
+            async function handleSharedSyncEvent(detail) {{
+                const syncDetail = detail && typeof detail === 'object' ? detail : {{}};
+                const eventType = String(syncDetail.event_type || '').trim();
+                if (!eventType) {{
+                    return;
+                }}
+                if (eventType === 'workspace.updated' || eventType === 'workspace.reset') {{
+                    const incomingUserId = String(syncDetail.user_id || (((syncDetail.payload || {{}}).session || {{}}).user_id) || '').trim();
+                    const currentUserId = String((document.getElementById('dashboard-workspace-user-id').value || '')).trim();
+                    if (!currentUserId || !incomingUserId || incomingUserId === currentUserId) {{
+                        if (syncDetail.payload && syncDetail.payload.session) {{
+                            renderWorkspaceCard(syncDetail.payload);
+                        }} else {{
+                            await loadWorkspaceDashboard();
+                        }}
+                    }}
+                }}
+                if (eventType === 'docket.updated' || eventType === 'docket.persisted') {{
+                    const incomingManifestPath = String(syncDetail.manifest_path || ((syncDetail.payload || {{}}).manifest_path) || ((syncDetail.payload || {{}}).manifest_json_path) || '').trim();
+                    const currentManifestPath = String((document.getElementById('dashboard-docket-manifest-path').value || '')).trim();
+                    if (!currentManifestPath || !incomingManifestPath || incomingManifestPath === currentManifestPath) {{
+                        if (incomingManifestPath && currentManifestPath !== incomingManifestPath) {{
+                            document.getElementById('dashboard-docket-manifest-path').value = incomingManifestPath;
+                        }}
+                        await loadDocketDashboard(false);
+                    }}
+                }}
+            }}
+
             document.getElementById('dashboard-load-workspace').addEventListener('click', loadWorkspaceDashboard);
+            document.getElementById('dashboard-reset-workspace').addEventListener('click', resetWorkspaceDashboard);
+            document.getElementById('dashboard-unload-workspace').addEventListener('click', function() {{
+                clearWorkspaceCard('Workspace session unloaded from the dashboard.');
+            }});
             document.getElementById('dashboard-load-docket').addEventListener('click', function() {{ loadDocketDashboard(false); }});
             document.getElementById('dashboard-load-docket-report').addEventListener('click', function() {{ loadDocketDashboard(true); }});
+            document.getElementById('dashboard-unload-docket').addEventListener('click', function() {{
+                clearDocketCard('Packaged docket unloaded from the dashboard.');
+            }});
             document.getElementById('dashboard-open-upload-modal').addEventListener('click', function() {{ toggleUploadModal(true); }});
             document.getElementById('dashboard-close-upload-modal').addEventListener('click', function() {{ toggleUploadModal(false); }});
             document.getElementById('dashboard-cancel-upload-modal').addEventListener('click', function() {{ toggleUploadModal(false); }});
@@ -1222,6 +1353,19 @@ def _render_dashboard_hub(
             document.getElementById('dashboard-chat-upload-modal').addEventListener('click', function(event) {{
                 if (event.target === event.currentTarget) {{
                     toggleUploadModal(false);
+                }}
+            }});
+            window.addEventListener(syncEventName, function(event) {{
+                handleSharedSyncEvent(event && event.detail ? event.detail : null);
+            }});
+            window.addEventListener('storage', function(event) {{
+                if (!event || event.key !== syncEventStorageKey || !event.newValue) {{
+                    return;
+                }}
+                try {{
+                    handleSharedSyncEvent(JSON.parse(event.newValue));
+                }} catch (error) {{
+                    // Ignore malformed cross-tab sync payloads.
                 }}
             }});
 

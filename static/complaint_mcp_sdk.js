@@ -1,4 +1,24 @@
 (function (globalScope) {
+const SYNC_EVENT_NAME = 'complaint-mcp-sync';
+const DEFAULT_SYNC_EVENT_STORAGE_KEY = 'complaintGenerator.sdkSyncEvent';
+
+function dispatchSharedSyncEvent(detail, storageKey) {
+    const normalizedDetail = Object.assign({
+        emitted_at: new Date().toISOString(),
+    }, detail || {});
+    if (typeof localStorage !== 'undefined') {
+        try {
+            localStorage.setItem(storageKey || DEFAULT_SYNC_EVENT_STORAGE_KEY, JSON.stringify(normalizedDetail));
+        } catch (error) {
+            // Ignore localStorage write failures and still dispatch the in-page event.
+        }
+    }
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+        window.dispatchEvent(new CustomEvent(SYNC_EVENT_NAME, { detail: normalizedDetail }));
+    }
+    return normalizedDetail;
+}
+
 class ComplaintMcpClient {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || '/api/complaint-workspace';
@@ -9,6 +29,7 @@ class ComplaintMcpClient {
         this.didStorageKey = options.didStorageKey || 'complaintGenerator.did';
         this.lastToolCallStorageKey = options.lastToolCallStorageKey || 'complaintGenerator.sdkLastToolCall';
         this.toolCallLedgerStorageKey = options.toolCallLedgerStorageKey || 'complaintGenerator.sdkToolLedger';
+        this.syncEventStorageKey = options.syncEventStorageKey || DEFAULT_SYNC_EVENT_STORAGE_KEY;
         this.maxToolLedgerEntries = Number(options.maxToolLedgerEntries || 8);
     }
 
@@ -79,6 +100,71 @@ class ComplaintMcpClient {
             window.dispatchEvent(new CustomEvent('complaint-mcp-sdk-call', { detail }));
         }
         return detail;
+    }
+
+    _publishSyncEvent(detail) {
+        return dispatchSharedSyncEvent(detail, this.syncEventStorageKey);
+    }
+
+    _publishDerivedSyncEvents(toolName, argumentsPayload, structuredContent, status) {
+        if (String(status || '').toLowerCase() !== 'success') {
+            return [];
+        }
+        const normalizedToolName = String(toolName || '').trim();
+        const args = argumentsPayload && typeof argumentsPayload === 'object' ? argumentsPayload : {};
+        const payload = structuredContent && typeof structuredContent === 'object' ? structuredContent : {};
+        const userId = String(
+            (payload.session && payload.session.user_id)
+            || payload.user_id
+            || args.user_id
+            || ''
+        ).trim();
+        const manifestPath = String(
+            payload.manifest_path
+            || payload.manifest_json_path
+            || args.manifest_path
+            || ''
+        ).trim();
+        const events = [];
+        const workspaceMutationTools = new Set([
+            'complaint.start_session',
+            'complaint.submit_intake',
+            'complaint.run_intake_chat_turn',
+            'complaint.save_evidence',
+            'complaint.import_gmail_evidence',
+            'complaint.import_local_evidence',
+            'complaint.review_case',
+            'complaint.generate_complaint',
+            'complaint.update_draft',
+            'complaint.update_claim_type',
+            'complaint.update_case_synopsis',
+            'complaint.reset_session',
+        ]);
+        const docketTools = new Set([
+            'complaint.get_packaged_docket_operator_dashboard',
+            'complaint.load_packaged_docket_operator_dashboard_report',
+            'complaint.execute_packaged_docket_proof_revalidation_queue',
+            'complaint.persist_packaged_docket_proof_revalidation_queue',
+            'complaint.view_docket_dataset',
+        ]);
+
+        if (workspaceMutationTools.has(normalizedToolName)) {
+            events.push(this._publishSyncEvent({
+                event_type: normalizedToolName === 'complaint.reset_session' ? 'workspace.reset' : 'workspace.updated',
+                tool_name: normalizedToolName,
+                user_id: userId,
+                payload: payload,
+            }));
+        }
+        if (docketTools.has(normalizedToolName)) {
+            events.push(this._publishSyncEvent({
+                event_type: normalizedToolName === 'complaint.persist_packaged_docket_proof_revalidation_queue' ? 'docket.persisted' : 'docket.updated',
+                tool_name: normalizedToolName,
+                manifest_path: manifestPath,
+                payload: payload,
+            }));
+        }
+        return events;
     }
 
     getLastToolCall() {
@@ -217,6 +303,7 @@ class ComplaintMcpClient {
                 finished_at: new Date().toISOString(),
                 diagnostic_summary: diagnosticSummary,
             });
+            this._publishDerivedSyncEvents(toolName, argumentsPayload, structuredContent, 'success');
             if (result && result.structuredContent) {
                 return result.structuredContent;
             }
@@ -604,7 +691,13 @@ class ComplaintMcpClient {
 }
 
 
-const ComplaintMcpSdk = { ComplaintMcpClient, default: ComplaintMcpClient };
+const ComplaintMcpSdk = {
+    ComplaintMcpClient,
+    default: ComplaintMcpClient,
+    SYNC_EVENT_NAME,
+    DEFAULT_SYNC_EVENT_STORAGE_KEY,
+    publishSyncEvent: dispatchSharedSyncEvent,
+};
 
   if (globalScope) {
     globalScope.ComplaintMcpSdk = Object.assign({}, globalScope.ComplaintMcpSdk || {}, ComplaintMcpSdk);
