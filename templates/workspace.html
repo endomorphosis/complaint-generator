@@ -3116,6 +3116,32 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 <label>Schema-Driven Filter Dimensions</label>
                                 <div class="chip-row" id="workspace-data-filter-dimensions"><span class="chip">Refresh the workspace schema to derive filter dimensions.</span></div>
                             </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="workspace-data-search-query">Workspace Dataset Query</label>
+                                    <input id="workspace-data-search-query" type="text" placeholder="reasonable accommodation eviction notice">
+                                </div>
+                                <div>
+                                    <label for="workspace-data-search-backend">Search Backend</label>
+                                    <select id="workspace-data-search-backend">
+                                        <option value="bm25">bm25</option>
+                                        <option value="vector">vector</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="workspace-data-search-top-k">Top K</label>
+                                    <input id="workspace-data-search-top-k" type="number" min="1" step="1" value="8">
+                                </div>
+                            </div>
+                            <div>
+                                <label>Schema-Driven Filter Inputs</label>
+                                <div class="field-grid" id="workspace-data-filter-controls">
+                                    <div class="muted">Refresh the workspace schema to derive filter inputs.</div>
+                                </div>
+                            </div>
+                            <div class="button-row">
+                                <button class="secondary" id="search-workspace-data-button" type="button">Search Workspace Dataset</button>
+                            </div>
                             <div>
                                 <label>Schema Piece Explorer</label>
                                 <div class="list" id="workspace-data-piece-schema-list"></div>
@@ -3123,6 +3149,10 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                             <div>
                                 <label>Schema-Driven MCP / UI Query Plan</label>
                                 <div class="status draft-preview-shell"><pre id="workspace-data-query-plan-preview">No schema-driven query plan generated yet.</pre></div>
+                            </div>
+                            <div>
+                                <label>Workspace Dataset Search Results</label>
+                                <div class="status draft-preview-shell"><pre id="workspace-data-search-results-preview">No workspace dataset search has been run yet.</pre></div>
                             </div>
                         </div>
                         <div class="tool-card" id="packaged-docket-operator-card">
@@ -3396,6 +3426,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let workspaceProviderDiagnostics = null;
         let workspaceDataSchema = null;
         let latestWorkspaceDataMigration = null;
+        let latestWorkspaceDatasetSearch = null;
         let latestPackagedDocketOperatorDashboard = null;
         let latestPackagedDocketOperatorDashboardReport = null;
         let latestPackagedDocketRevalidationExecution = null;
@@ -6406,6 +6437,41 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             return lines.join('\n');
         }
 
+        function renderWorkspaceDataFilterControls(filterDimensions) {
+            const container = document.getElementById('workspace-data-filter-controls');
+            if (!container) {
+                return;
+            }
+            const dimensions = Array.isArray(filterDimensions) ? filterDimensions : [];
+            if (!dimensions.length) {
+                container.innerHTML = '<div class="muted">Refresh the workspace schema to derive filter inputs.</div>';
+                return;
+            }
+            container.innerHTML = dimensions.map((dimension) => `
+                <div>
+                    <label for="workspace-data-filter-${escapeHtml(String(dimension))}">${escapeHtml(String(dimension))}</label>
+                    <input
+                        id="workspace-data-filter-${escapeHtml(String(dimension))}"
+                        data-workspace-filter-dimension="${escapeHtml(String(dimension))}"
+                        type="text"
+                        placeholder="Optional ${escapeHtml(String(dimension))} filter"
+                    >
+                </div>
+            `).join('');
+        }
+
+        function buildWorkspaceDataSearchFilters() {
+            const filters = {};
+            document.querySelectorAll('[data-workspace-filter-dimension]').forEach((node) => {
+                const key = String(node.getAttribute('data-workspace-filter-dimension') || '').trim();
+                const value = String(node.value || '').trim();
+                if (key && value) {
+                    filters[key] = value;
+                }
+            });
+            return filters;
+        }
+
         function classifyToolFamily(toolName) {
             const name = String(toolName || '');
             const recommendationToolNames = new Set(getSchemaGuidedRecommendations().map((item) => String((item && item.tool_name) || '').trim()).filter(Boolean));
@@ -6634,6 +6700,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const workspaceDataFilterDimensionsNode = document.getElementById('workspace-data-filter-dimensions');
             const workspaceDataPieceSchemaListNode = document.getElementById('workspace-data-piece-schema-list');
             const workspaceDataQueryPlanNode = document.getElementById('workspace-data-query-plan-preview');
+            const workspaceDataSearchResultsNode = document.getElementById('workspace-data-search-results-preview');
             const packetSummaryNode = document.getElementById('packet-export-summary');
             const releaseGateNode = document.getElementById('formal-complaint-release-gate');
             const formalDefectsNode = document.getElementById('formal-complaint-defects');
@@ -6946,6 +7013,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             workspaceDataFilterDimensionsNode.innerHTML = filterDimensions.length
                 ? filterDimensions.map((item) => `<span class="chip good">${escapeHtml(String(item))}</span>`).join('')
                 : '<span class="chip">Refresh the workspace schema to derive filter dimensions.</span>';
+            renderWorkspaceDataFilterControls(filterDimensions);
             workspaceDataPieceSchemaListNode.innerHTML = schemaPieces.length
                 ? schemaPieces.map((item) => `
                     <div class="item">
@@ -6962,6 +7030,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             workspaceDataQueryPlanNode.textContent = workspaceSchema
                 ? buildSchemaDrivenQueryPlan(workspaceSchema, { userId: workspaceUserId })
                 : 'No schema-driven query plan generated yet.';
+            workspaceDataSearchResultsNode.textContent = latestWorkspaceDatasetSearch
+                ? JSON.stringify(latestWorkspaceDatasetSearch, null, 2)
+                : 'No workspace dataset search has been run yet.';
             if (latestWorkspaceDataMigration) {
                 workspaceDataMigrationNode.textContent = [
                     `Status: ${String(latestWorkspaceDataMigration.status || 'unknown')}`,

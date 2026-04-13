@@ -381,6 +381,37 @@ def migrate_legacy_workspace_data(
     )
 
 
+def search_workspace_dataset(
+    input_path: str | Path,
+    *,
+    query: str,
+    input_type: str = "packaged",
+    search_backend: str = "bm25",
+    top_k: int = 10,
+    vector_dimension: int = 32,
+    collection_id: Optional[str] = None,
+    document_type: Optional[str] = None,
+    claim_type: Optional[str] = None,
+    claim_element_id: Optional[str] = None,
+    source_type: Optional[str] = None,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).search_workspace_dataset(
+        str(input_path),
+        input_type=input_type,
+        query=query,
+        search_backend=search_backend,
+        top_k=top_k,
+        vector_dimension=vector_dimension,
+        collection_id=collection_id,
+        document_type=document_type,
+        claim_type=claim_type,
+        claim_element_id=claim_element_id,
+        source_type=source_type,
+    )
+
+
 def generate_complaint(
     user_id: Optional[str],
     *,
@@ -835,6 +866,7 @@ __all__ = [
     "generate_complaint",
     "get_workflow_capabilities",
     "migrate_legacy_workspace_data",
+    "search_workspace_dataset",
     "import_gmail_evidence",
     "list_claim_elements",
     "list_intake_questions",

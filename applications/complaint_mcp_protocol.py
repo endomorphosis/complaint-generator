@@ -204,6 +204,24 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "include_car": {"type": "boolean"},
         },
     },
+    "complaint.search_workspace_dataset": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "manifest_path": {"type": "string"},
+            "input_type": {"type": "string"},
+            "query": {"type": "string"},
+            "search_backend": {"type": "string"},
+            "top_k": {"type": "integer"},
+            "vector_dimension": {"type": "integer"},
+            "collection_id": {"type": "string"},
+            "document_type": {"type": "string"},
+            "claim_type": {"type": "string"},
+            "claim_element_id": {"type": "string"},
+            "source_type": {"type": "string"},
+        },
+        "required": ["query"],
+    },
     "complaint.generate_complaint": {
         "type": "object",
         "properties": {

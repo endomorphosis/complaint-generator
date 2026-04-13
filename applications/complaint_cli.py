@@ -551,6 +551,37 @@ def migrate_legacy_workspace_data_command(
     )
 
 
+@app.command("search-workspace-data")
+def search_workspace_data(
+    input_path: str,
+    query: str,
+    input_type: str = "packaged",
+    search_backend: str = "bm25",
+    top_k: int = 10,
+    vector_dimension: int = 32,
+    collection_id: Optional[str] = None,
+    document_type: Optional[str] = None,
+    claim_type: Optional[str] = None,
+    claim_element_id: Optional[str] = None,
+    source_type: Optional[str] = None,
+) -> None:
+    _print(
+        service.search_workspace_dataset(
+            input_path,
+            input_type=input_type,
+            query=query,
+            search_backend=search_backend,
+            top_k=top_k,
+            vector_dimension=vector_dimension,
+            collection_id=collection_id,
+            document_type=document_type,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            source_type=source_type,
+        )
+    )
+
+
 @app.command("generate")
 def generate(
     user_id: str = "demo-user",

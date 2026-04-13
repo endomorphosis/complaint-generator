@@ -448,6 +448,13 @@ class ComplaintMcpClient {
         }, options || {}));
     }
 
+    searchWorkspaceDataset(inputPath, query, options = {}) {
+        return this.callTool('complaint.search_workspace_dataset', Object.assign({
+            input_path: inputPath,
+            query: query,
+        }, options || {}));
+    }
+
     getPackagedDocketOperatorDashboard(manifestPath) {
         return this.callTool('complaint.get_packaged_docket_operator_dashboard', {
             manifest_path: manifestPath,
