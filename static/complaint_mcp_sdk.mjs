@@ -454,6 +454,12 @@ class ComplaintMcpClient {
         }, options || {}));
     }
 
+    viewWorkspaceDataset(inputPath, options = {}) {
+        return this.callTool('complaint.view_workspace_dataset', Object.assign({
+            input_path: inputPath,
+        }, options || {}));
+    }
+
     getPackagedDocketOperatorDashboard(manifestPath) {
         return this.callTool('complaint.get_packaged_docket_operator_dashboard', {
             manifest_path: manifestPath,

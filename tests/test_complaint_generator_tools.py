@@ -1585,6 +1585,7 @@ def test_filing_provenance_is_exposed_across_package_cli_and_mcp(monkeypatch, tm
     assert package_payload["ui_workflow_type"] == "ui_ux_closed_loop"
 
 
+@pytest.mark.no_auto_llm
 def test_packaged_docket_operator_dashboard_is_exposed_across_package_mcp_and_api(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-packaged-docket-tools")
     manifest_path = _build_packaged_docket_manifest(

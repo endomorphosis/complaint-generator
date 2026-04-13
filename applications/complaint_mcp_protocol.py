@@ -222,6 +222,21 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         },
         "required": ["query"],
     },
+    "complaint.view_workspace_dataset": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "manifest_path": {"type": "string"},
+            "input_type": {"type": "string"},
+            "include_document_text": {"type": "boolean"},
+            "document_limit": {"type": "integer"},
+            "collection_id": {"type": "string"},
+            "document_type": {"type": "string"},
+            "claim_type": {"type": "string"},
+            "claim_element_id": {"type": "string"},
+            "source_type": {"type": "string"},
+        },
+    },
     "complaint.generate_complaint": {
         "type": "object",
         "properties": {

@@ -160,6 +160,7 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "get_workspace_data_schema",
     "migrate_legacy_workspace_data",
     "search_workspace_dataset",
+    "view_workspace_dataset",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -200,6 +201,7 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "workspace-data-schema",
     "migrate-legacy-workspace-data",
     "search-workspace-data",
+    "view-workspace-data",
     "generate",
     "export-packet",
     "export-markdown",
@@ -241,6 +243,7 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "getWorkspaceDataSchema",
     "migrateLegacyWorkspaceData",
     "searchWorkspaceDataset",
+    "viewWorkspaceDataset",
     "generateComplaint",
     "exportComplaintPacket",
     "exportComplaintMarkdown",
@@ -406,6 +409,12 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "search-workspace-data",
         "mcp_tool": "complaint.search_workspace_dataset",
         "browser_sdk_method": "searchWorkspaceDataset",
+    },
+    "workspace_data_view": {
+        "package_export": "view_workspace_dataset",
+        "cli_command": "view-workspace-data",
+        "mcp_tool": "complaint.view_workspace_dataset",
+        "browser_sdk_method": "viewWorkspaceDataset",
     },
     "export_critic": {
         "package_export": "review_generated_exports",
@@ -4953,6 +4962,79 @@ class ComplaintWorkspaceService:
             "source": "complaint_workspace_docket_view",
         }
 
+    @staticmethod
+    def _build_workspace_document_view(
+        dataset_payload: Dict[str, Any],
+        *,
+        include_document_text: bool,
+        document_limit: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        documents = list(dataset_payload.get("documents") or [])
+        if document_limit is not None:
+            documents = documents[: max(0, int(document_limit))]
+        view: List[Dict[str, Any]] = []
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            metadata = dict(document.get("metadata") or {})
+            item = {
+                "document_id": str(document.get("document_id") or ""),
+                "title": str(document.get("title") or ""),
+                "captured_at": str(document.get("captured_at") or ""),
+                "document_number": str(document.get("document_number") or ""),
+                "source_url": str(document.get("source_url") or ""),
+                "collection_id": str(document.get("collection_id") or metadata.get("collection_id") or ""),
+                "document_type": str(document.get("document_type") or metadata.get("document_type") or ""),
+                "claim_type": str(document.get("claim_type") or metadata.get("claim_type") or ""),
+                "claim_element_id": str(document.get("claim_element_id") or metadata.get("claim_element_id") or ""),
+                "source_type": str(document.get("source_type") or metadata.get("source_type") or metadata.get("source_family") or ""),
+                "metadata": metadata,
+            }
+            if include_document_text:
+                item["text"] = str(document.get("text") or "")
+            view.append(item)
+        return view
+
+    def view_workspace_dataset(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+        include_document_text: bool = False,
+        document_limit: Optional[int] = 25,
+        collection_id: Optional[str] = None,
+        document_type: Optional[str] = None,
+        claim_type: Optional[str] = None,
+        claim_element_id: Optional[str] = None,
+        source_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+
+        resolved_path = self._resolve_workspace_dataset_path(input_path)
+        dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
+        filtered_payload = self._apply_workspace_dataset_filters(
+            dataset_payload,
+            collection_id=collection_id,
+            document_type=document_type,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            source_type=source_type,
+        )
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "summary": dict(summarize_workspace_dataset(filtered_payload)),
+            "documents": self._build_workspace_document_view(
+                filtered_payload,
+                include_document_text=bool(include_document_text),
+                document_limit=document_limit,
+            ),
+            "collections": [dict(item) for item in list(filtered_payload.get("collections") or []) if isinstance(item, dict)],
+            "metadata": dict(filtered_payload.get("metadata") or {}),
+            "applied_filters": dict(filtered_payload.get("applied_filters") or {}),
+            "source": "complaint_workspace_dataset_view",
+        }
+
     def search_workspace_dataset(
         self,
         input_path: str | Path,
@@ -5213,6 +5295,7 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.get_tooling_contract", "description": "Show how the core complaint workflow is exposed across package exports, CLI commands, MCP tools, and browser SDK methods."},
                 {"name": "complaint.get_workspace_data_schema", "description": "Inspect the current or packaged workspace dataset schema so MCP and UI surfaces can follow the actual parquet data model."},
                 {"name": "complaint.migrate_legacy_workspace_data", "description": "Project legacy complaint session and mediator DuckDB state into a packaged workspace dataset stored as parquet pieces."},
+                {"name": "complaint.view_workspace_dataset", "description": "Browse a packaged or single-file workspace dataset with schema-aligned filters and filtered document previews."},
                 {"name": "complaint.search_workspace_dataset", "description": "Search a packaged or single-file workspace dataset using BM25 or vector retrieval plus schema-aligned filters."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
@@ -5392,6 +5475,21 @@ class ComplaintWorkspaceService:
                 search_backend=args.get("search_backend", "bm25"),
                 top_k=int(args.get("top_k") or 10),
                 vector_dimension=int(args.get("vector_dimension") or 32),
+                collection_id=args.get("collection_id"),
+                document_type=args.get("document_type"),
+                claim_type=args.get("claim_type"),
+                claim_element_id=args.get("claim_element_id"),
+                source_type=args.get("source_type"),
+            )
+        if tool_name == "complaint.view_workspace_dataset":
+            input_path = args.get("input_path") or args.get("manifest_path")
+            if not input_path:
+                raise ValueError("complaint.view_workspace_dataset requires input_path or manifest_path.")
+            return self.view_workspace_dataset(
+                input_path,
+                input_type=args.get("input_type", "packaged"),
+                include_document_text=bool(args.get("include_document_text")),
+                document_limit=int(args.get("document_limit") or 25),
                 collection_id=args.get("collection_id"),
                 document_type=args.get("document_type"),
                 claim_type=args.get("claim_type"),

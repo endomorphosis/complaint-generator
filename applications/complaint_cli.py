@@ -582,6 +582,33 @@ def search_workspace_data(
     )
 
 
+@app.command("view-workspace-data")
+def view_workspace_data(
+    input_path: str,
+    input_type: str = "packaged",
+    include_document_text: bool = False,
+    document_limit: int = 25,
+    collection_id: Optional[str] = None,
+    document_type: Optional[str] = None,
+    claim_type: Optional[str] = None,
+    claim_element_id: Optional[str] = None,
+    source_type: Optional[str] = None,
+) -> None:
+    _print(
+        service.view_workspace_dataset(
+            input_path,
+            input_type=input_type,
+            include_document_text=include_document_text,
+            document_limit=document_limit,
+            collection_id=collection_id,
+            document_type=document_type,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            source_type=source_type,
+        )
+    )
+
+
 @app.command("generate")
 def generate(
     user_id: str = "demo-user",

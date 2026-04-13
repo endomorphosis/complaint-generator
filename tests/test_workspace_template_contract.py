@@ -242,8 +242,10 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "workspace-data-search-query" in content
     assert "workspace-data-search-backend" in content
     assert "workspace-data-search-top-k" in content
+    assert "browse-workspace-data-button" in content
     assert "search-workspace-data-button" in content
     assert "workspace-data-search-results-preview" in content
+    assert "workspace-data-view-results-preview" in content
     assert "Workspace Data Ops" in content
     assert "Inspect and Migrate Workspace Dataset Primitives" in content
     assert "packaged-docket-manifest-path" in content
@@ -316,6 +318,7 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "client.getWorkspaceDataSchema(workspaceUserId, payload)" in content
     assert "client.migrateLegacyWorkspaceData(workspaceUserId, outputDir, Object.assign({}, payload, {" in content
     assert "client.searchWorkspaceDataset(inputPath, query, Object.assign({" in content
+    assert "client.viewWorkspaceDataset(inputPath, Object.assign({" in content
     assert "Schema-guided recommendation:" in content
     assert "Recommended schema-first workflow:" in content
     assert "These tools inspect the parquet-backed workspace schema" in content
@@ -325,6 +328,10 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Searching the packaged workspace dataset through the shared MCP tools…" in content
     assert "Workspace dataset search completed with ${String(((latestWorkspaceDatasetSearch.search_results || {}).result_count) || 0)} hit(s)." in content
     assert "Add a workspace manifest path before searching the packaged workspace dataset." in content
+    assert "Add a workspace manifest path before browsing the packaged workspace dataset." in content
+    assert "Loading a filtered workspace dataset preview through the shared MCP tools…" in content
+    assert "Workspace dataset browse preview loaded with ${String((latestWorkspaceDatasetView.documents || []).length)} document preview(s)." in content
+    assert "document.getElementById('browse-workspace-data-button').addEventListener('click', browseWorkspaceDataPanel);" in content
     assert "Enter a workspace dataset query before searching." in content
     assert "document.getElementById('search-workspace-data-button').addEventListener('click', searchWorkspaceDataPanel);" in content
     assert "client.getPackagedDocketOperatorDashboard(manifestPath)" in content

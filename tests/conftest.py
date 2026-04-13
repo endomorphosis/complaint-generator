@@ -204,6 +204,7 @@ def pytest_collection_modifyitems(config, items):
         marked_llm = item.get_closest_marker("llm") is not None
         marked_network = item.get_closest_marker("network") is not None
         marked_heavy = item.get_closest_marker("heavy") is not None
+        marked_no_auto_llm = item.get_closest_marker("no_auto_llm") is not None
         marked_no_auto_network = item.get_closest_marker("no_auto_network") is not None
         marked_no_auto_heavy = item.get_closest_marker("no_auto_heavy") is not None
 
@@ -213,6 +214,8 @@ def pytest_collection_modifyitems(config, items):
         auto_heavy = False
         if path:
             auto_llm, auto_network, auto_heavy = _classify_file(path)
+        if marked_no_auto_llm:
+            auto_llm = False
         if marked_no_auto_network:
             auto_network = False
         if marked_no_auto_heavy:
