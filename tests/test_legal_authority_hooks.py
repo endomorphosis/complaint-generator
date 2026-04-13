@@ -112,7 +112,9 @@ class TestLegalAuthoritySearchHook:
             
             hook = LegalAuthoritySearchHook(mock_mediator)
             hook.search_us_code = Mock(return_value=[])
+            hook.search_state_laws = Mock(return_value=[])
             hook.search_federal_register = Mock(return_value=[])
+            hook.search_administrative_law = Mock(return_value=[])
             hook.search_case_law = Mock(return_value=[])
             hook.search_web_archives = Mock(return_value=[])
             
@@ -120,9 +122,13 @@ class TestLegalAuthoritySearchHook:
             
             assert isinstance(results, dict)
             assert 'statutes' in results
+            assert 'state_statutes' in results
             assert 'regulations' in results
+            assert 'administrative_rules' in results
             assert 'case_law' in results
             assert 'web_archives' in results
+            assert 'search_diagnostics' in results
+            assert 'source_availability' in results['search_diagnostics']
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
@@ -137,7 +143,9 @@ class TestLegalAuthoritySearchHook:
 
             hook = LegalAuthoritySearchHook(mock_mediator)
             hook.search_us_code = Mock(return_value=[{'citation': '42 U.S.C. § 1983'}])
+            hook.search_state_laws = Mock(return_value=[{'citation': 'ORS 90.385'}])
             hook.search_federal_register = Mock(return_value=[{'title': 'EEOC rule'}])
+            hook.search_administrative_law = Mock(return_value=[{'citation': 'OAR 839-003-0001'}])
             hook.search_case_law = Mock(return_value=[{'citation': 'Smith v. Example'}])
             hook.search_web_archives = Mock(return_value=[{'url': 'https://law.cornell.edu/example'}])
 
@@ -147,13 +155,243 @@ class TestLegalAuthoritySearchHook:
             )
 
             hook.search_us_code.assert_called_once_with('test query', max_results=5)
+            hook.search_state_laws.assert_called_once_with(
+                'test query',
+                state=None,
+                max_results=5,
+                allow_live_scrape_fallback=False,
+            )
             hook.search_federal_register.assert_called_once_with('test query', max_results=5)
+            hook.search_administrative_law.assert_called_once_with(
+                'test query',
+                state=None,
+                max_results=5,
+                allow_live_scrape_fallback=False,
+            )
             hook.search_case_law.assert_not_called()
             hook.search_web_archives.assert_not_called()
             assert results['statutes'] == [{'citation': '42 U.S.C. § 1983'}]
+            assert results['state_statutes'] == [{'citation': 'ORS 90.385'}]
             assert results['regulations'] == [{'title': 'EEOC rule'}]
+            assert results['administrative_rules'] == [{'citation': 'OAR 839-003-0001'}]
             assert results['case_law'] == []
             assert results['web_archives'] == []
+            assert 'search_diagnostics' in results
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_search_state_laws_logs_hf_coverage_warning_when_dataset_has_no_state_rows(self):
+        try:
+            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value='test query')
+
+            hook = LegalAuthoritySearchHook(mock_mediator)
+            mock_mediator.log.reset_mock()
+
+            diagnostic = {
+                'warning_code': 'hf_state_rows_missing',
+                'warning_message': 'Hugging Face dataset justicedao/ipfs_state_laws does not currently expose rows for requested state OR.',
+                'state_code': 'OR',
+                'hf_dataset_id': 'justicedao/ipfs_state_laws',
+            }
+
+            with patch('mediator.legal_authority_hooks.search_state_laws', return_value=[]):
+                with patch('mediator.legal_authority_hooks.get_last_legal_search_diagnostic', return_value=diagnostic):
+                    results = hook.search_state_laws(
+                        'tenant retaliation',
+                        state='OR',
+                        max_results=5,
+                        allow_live_scrape_fallback=False,
+                    )
+
+            assert results == []
+            assert any(
+                call.args and call.args[0] == 'legal_authority_warning'
+                and call.kwargs.get('warning_code') == 'hf_state_rows_missing'
+                and call.kwargs.get('state') == 'OR'
+                for call in mock_mediator.log.call_args_list
+            )
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_search_federal_register_uses_ecfr_fallback(self):
+        """Regulation search should fall back to eCFR when scraper results are unavailable."""
+        try:
+            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value="test query")
+
+            hook = LegalAuthoritySearchHook(mock_mediator)
+            ecfr_payload = {
+                'results': [
+                    {
+                        'hierarchy': {
+                            'title': '24',
+                            'part': '982',
+                            'subpart': 'L',
+                            'section': '982.555',
+                        },
+                        'headings': {
+                            'part': 'Section 8 Tenant-Based Assistance: Housing Choice Voucher Program',
+                            'section': 'Informal hearing for participant.',
+                        },
+                        'full_text_excerpt': '<strong>24</strong> CFR 982.555 governs informal hearing procedures for participants.',
+                        'score': 0.98,
+                    }
+                ]
+            }
+            mock_response = Mock()
+            mock_response.raise_for_status = Mock()
+            mock_response.json = Mock(return_value=ecfr_payload)
+
+            with patch('mediator.legal_authority_hooks.search_federal_register', new=None):
+                with patch('mediator.legal_authority_hooks.requests.get', return_value=mock_response):
+                    results = hook.search_federal_register('24 CFR 982.555 housing voucher hearing', max_results=5)
+
+            assert results
+            assert results[0]['source'] == 'ecfr'
+            assert results[0]['citation'] == '24 C.F.R. § 982.555'
+            assert 'Informal hearing' in results[0]['title']
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_search_case_law_uses_courtlistener_fallback(self):
+        """Case-law search should fall back to CourtListener when RECAP is unavailable."""
+        try:
+            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value="test query")
+
+            hook = LegalAuthoritySearchHook(mock_mediator)
+            courtlistener_payload = {
+                'results': [
+                    {
+                        'absolute_url': '/opinion/12345/johnson-v-philadelphia-housing-authority/',
+                        'caseName': 'Johnson v. Philadelphia Housing Authority',
+                        'court': 'District Court, E.D. Pennsylvania',
+                        'court_citation_string': 'E.D. Pa.',
+                        'dateFiled': '2024-01-10',
+                        'meta': {'score': {'bm25': 42.5}},
+                    }
+                ]
+            }
+            mock_response = Mock()
+            mock_response.raise_for_status = Mock()
+            mock_response.json = Mock(return_value=courtlistener_payload)
+
+            with patch('mediator.legal_authority_hooks.search_recap_documents', new=None):
+                with patch('mediator.legal_authority_hooks.requests.get', return_value=mock_response):
+                    results = hook.search_case_law('housing authority informal hearing', jurisdiction='pa', max_results=5)
+
+            assert results
+            assert results[0]['source'] == 'courtlistener'
+            assert results[0]['title'] == 'Johnson v. Philadelphia Housing Authority'
+            assert results[0]['url'].startswith('https://www.courtlistener.com/opinion/12345/')
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_search_all_sources_adds_oregon_statute_fallback(self):
+        """Broad source search should add Oregon state statutes when federal statutes are empty."""
+        try:
+            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value="test query")
+
+            hook = LegalAuthoritySearchHook(mock_mediator)
+            hook.search_us_code = Mock(return_value=[])
+            hook.search_federal_register = Mock(return_value=[])
+            hook.search_case_law = Mock(return_value=[])
+            hook.search_web_archives = Mock(return_value=[])
+            hook._search_oregon_statutes_fallback = Mock(return_value=[{'citation': 'ORS 659A.145', 'source': 'oregon_public_law'}])
+
+            results = hook.search_all_sources('Oregon housing authority reasonable accommodation', jurisdiction='or')
+
+            assert results['statutes'] == [{'citation': 'ORS 659A.145', 'source': 'oregon_public_law'}]
+            hook._search_oregon_statutes_fallback.assert_called_once_with(
+                'Oregon housing authority reasonable accommodation',
+                max_results=5,
+            )
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_search_us_code_uses_federal_statute_fallback(self):
+        """Statute search should return official U.S. Code fallbacks for housing queries."""
+        try:
+            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value="test query")
+
+            hook = LegalAuthoritySearchHook(mock_mediator)
+            mock_response = Mock()
+            mock_response.raise_for_status = Mock()
+            mock_response.text = '<html><head><title>42 U.S.C. § 3604 - Discrimination in the sale or rental of housing</title></head></html>'
+
+            with patch('mediator.legal_authority_hooks.search_us_code', new=None):
+                with patch('mediator.legal_authority_hooks.requests.get', return_value=mock_response):
+                    results = hook.search_us_code('fair housing reasonable accommodation voucher', max_results=5)
+
+            assert results
+            assert results[0]['source'] == 'uscode_house'
+            assert any(row['citation'] == '42 U.S.C. § 3604(f)(3)(B)' for row in results)
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_search_web_archives_uses_agency_guidance_fallback(self):
+        """Web-archive search should fall back to curated HUD guidance when archive search is unavailable."""
+        try:
+            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value="test query")
+
+            hook = LegalAuthoritySearchHook(mock_mediator)
+            hook.web_search = None
+
+            results = hook.search_web_archives(
+                'hud.gov',
+                query='housing choice voucher reasonable accommodation informal hearing',
+                max_results=5,
+            )
+
+            assert results
+            assert results[0]['source'] == 'hud_guidance_fallback'
+            assert any('Guidebook' in row['title'] or 'Reasonable Accommodations' in row['title'] for row in results)
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_search_web_archives_returns_clackamas_guidance_fallback(self):
+        """State/local authority enrichment should be able to return Clackamas guidance pages."""
+        try:
+            from mediator.legal_authority_hooks import LegalAuthoritySearchHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+            mock_mediator.query_backend = Mock(return_value="test query")
+
+            hook = LegalAuthoritySearchHook(mock_mediator)
+            hook.web_search = None
+
+            results = hook.search_web_archives(
+                'clackamas.us',
+                query='Clackamas housing authority administrative plan reasonable accommodation voucher',
+                max_results=5,
+            )
+
+            assert results
+            assert results[0]['source'] == 'clackamas_guidance_fallback'
+            assert any('Clackamas' in row['title'] for row in results)
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
 
@@ -1474,45 +1712,99 @@ class TestMediatorLegalAuthorityIntegration:
                         {
                             'citation': '42 U.S.C. § 1983',
                             'title': 'Protected activity under the Civil Rights Act',
-                            'content': 'Test content about protected activity'
+                            'content': 'Test content about protected activity',
+                            'source': 'us_code',
+                            'claim_element': 'Protected activity',
+                        }
+                    ],
+                    'state_statutes': [
+                        {
+                            'citation': 'ORS 90.385',
+                            'title': 'Retaliatory conduct by landlord',
+                            'content': 'A landlord may not retaliate against a tenant.',
+                            'source': 'state_law',
+                            'claim_element': 'Protected activity',
                         }
                     ],
                     'regulations': [],
+                    'administrative_rules': [
+                        {
+                            'citation': 'OAR 839-003-0001',
+                            'title': 'Civil rights administrative enforcement',
+                            'content': 'Administrative enforcement guidance for civil rights claims.',
+                            'source': 'state_admin_rules',
+                            'claim_element': 'Protected activity',
+                        }
+                    ],
                     'case_law': [],
-                    'web_archives': []
+                    'web_archives': [],
+                    'search_diagnostics': {
+                        'source_availability': {
+                            'federal_statutes': True,
+                            'federal_regulations': True,
+                            'case_law': True,
+                            'state_statutes': True,
+                            'administrative_rules': True,
+                        }
+                    },
                 })
                 
                 # Search
                 results = mediator.search_legal_authorities('civil rights', search_all=True)
                 assert 'statutes' in results
+                assert 'state_statutes' in results
+                assert 'administrative_rules' in results
+                assert 'search_diagnostics' in results
+                assert 'search_warning_summary' in results
+                assert results['search_warning_summary'] == []
                 
                 # Store
                 stored = mediator.store_legal_authorities(results, claim_type='civil rights')
                 assert 'statutes' in stored
-                assert stored['total_records'] == 1
-                assert stored['total_new'] == 1
+                assert 'state_statutes' in stored
+                assert 'administrative_rules' in stored
+                assert stored['total_records'] == 3
+                assert stored['total_new'] == 3
                 assert stored['total_reused'] == 0
-                assert stored['total_support_links_added'] == 1
+                assert stored['total_support_links_added'] == 3
                 assert stored['total_support_links_reused'] == 0
 
                 stored_duplicate = mediator.store_legal_authorities(results, claim_type='civil rights')
                 assert stored_duplicate['statutes'] == 1
+                assert stored_duplicate['state_statutes'] == 1
+                assert stored_duplicate['administrative_rules'] == 1
                 assert stored_duplicate['statutes_new'] == 0
+                assert stored_duplicate['state_statutes_new'] == 0
+                assert stored_duplicate['administrative_rules_new'] == 0
                 assert stored_duplicate['statutes_reused'] == 1
+                assert stored_duplicate['state_statutes_reused'] == 1
+                assert stored_duplicate['administrative_rules_reused'] == 1
                 assert stored_duplicate['statutes_support_links_added'] == 0
+                assert stored_duplicate['state_statutes_support_links_added'] == 0
+                assert stored_duplicate['administrative_rules_support_links_added'] == 0
                 assert stored_duplicate['statutes_support_links_reused'] == 1
-                assert stored_duplicate['total_records'] == 1
+                assert stored_duplicate['state_statutes_support_links_reused'] == 1
+                assert stored_duplicate['administrative_rules_support_links_reused'] == 1
+                assert stored_duplicate['total_records'] == 3
                 assert stored_duplicate['total_new'] == 0
-                assert stored_duplicate['total_reused'] == 1
+                assert stored_duplicate['total_reused'] == 3
 
                 support_links = mediator.get_claim_support(claim_type='civil rights')
                 assert len(support_links) > 0
-                assert support_links[0]['claim_element_id'] == 'civil_rights:1'
+                assert any(link['claim_element_id'] == 'civil_rights:1' for link in support_links)
 
                 support_summary = mediator.summarize_claim_support(claim_type='civil rights')
                 assert support_summary['claims']['civil rights']['support_by_kind']['authority'] > 0
                 assert support_summary['claims']['civil rights']['covered_elements'] == 1
                 assert support_summary['claims']['civil rights']['total_facts'] >= 1
+                authority_citations = {
+                    link['record_summary']['citation']
+                    for link in support_summary['claims']['civil rights']['elements'][0]['links']
+                    if link.get('record_summary')
+                }
+                assert '42 U.S.C. § 1983' in authority_citations
+                assert 'ORS 90.385' in authority_citations
+                assert 'OAR 839-003-0001' in authority_citations
                 authority_link = support_summary['claims']['civil rights']['elements'][0]['links'][0]
                 assert authority_link['authority_record_id'] >= 1
                 assert authority_link['fact_count'] >= 1
@@ -1528,7 +1820,14 @@ class TestMediatorLegalAuthorityIntegration:
                 coverage_element = coverage_matrix['claims']['civil rights']['elements'][0]
                 assert coverage_element['status'] == 'partially_supported'
                 assert coverage_element['missing_support_kinds'] == ['evidence']
-                assert coverage_element['links_by_kind']['authority'][0]['record_summary']['citation'] == '42 U.S.C. § 1983'
+                coverage_citations = {
+                    link['record_summary']['citation']
+                    for link in coverage_element['links_by_kind']['authority']
+                    if link.get('record_summary')
+                }
+                assert '42 U.S.C. § 1983' in coverage_citations
+                assert 'ORS 90.385' in coverage_citations
+                assert 'OAR 839-003-0001' in coverage_citations
                 assert coverage_element['links_by_kind']['authority'][0]['graph_summary']['entity_count'] >= 0
 
                 follow_up_plan = mediator.get_claim_follow_up_plan(claim_type='civil rights')
@@ -1615,11 +1914,14 @@ class TestMediatorLegalAuthorityIntegration:
                 assert auto_results['intake_summary_handoff']['current_phase'] == ComplaintPhase.INTAKE.value
                 assert auto_results['intake_summary_handoff']['ready_to_advance'] == mediator.get_three_phase_status()['intake_readiness']['ready_to_advance']
                 assert auto_results['intake_summary_handoff']['complainant_summary_confirmation']['confirmed'] is True
-                assert auto_results['authorities_stored']['civil rights']['total_records'] == 1
+                assert 'civil rights' in auto_results['authorities_diagnostics']
+                assert 'civil rights' in auto_results['authorities_warning_summary']
+                assert auto_results['authorities_warning_summary']['civil rights'] == []
+                assert auto_results['authorities_stored']['civil rights']['total_records'] == 3
                 assert auto_results['authorities_stored']['civil rights']['total_new'] == 0
-                assert auto_results['authorities_stored']['civil rights']['total_reused'] == 1
+                assert auto_results['authorities_stored']['civil rights']['total_reused'] == 3
                 assert auto_results['authorities_stored']['civil rights']['total_support_links_added'] == 0
-                assert auto_results['authorities_stored']['civil rights']['total_support_links_reused'] == 1
+                assert auto_results['authorities_stored']['civil rights']['total_support_links_reused'] == 3
                 assert auto_results['claim_coverage_matrix']['civil rights']['status_counts']['partially_supported'] == 1
                 assert auto_results['claim_coverage_matrix']['civil rights']['status_counts']['missing'] == 1
                 assert auto_results['claim_coverage_summary']['civil rights']['status_counts']['partially_supported'] == 1

@@ -1,6 +1,8 @@
 import json
 import os
 import runpy
+import shutil
+import site
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +25,11 @@ from complaint_generator import (
     run_closed_loop_ui_ux_improvement,
     run_end_to_end_complaint_browser_audit,
     run_browser_audit,
+    ui_optimizer_daemon_build_parser,
+    ui_optimizer_daemon_main,
+    ui_optimizer_daemon_start,
+    ui_optimizer_daemon_status,
+    ui_optimizer_daemon_stop,
     create_review_dashboard_app,
     create_ui_review_report,
     create_review_surface_app,
@@ -30,8 +37,10 @@ from complaint_generator import (
     get_client_release_gate,
     get_filing_provenance,
     get_formal_diagnostics,
+    get_packaged_docket_operator_dashboard,
     get_provider_diagnostics,
     get_tooling_contract,
+    load_packaged_docket_operator_dashboard_report,
     review_generated_exports,
     export_complaint_packet,
     export_complaint_markdown,
@@ -40,15 +49,19 @@ from complaint_generator import (
     generate_complaint,
     get_workflow_capabilities,
     handle_jsonrpc_message,
+    import_local_evidence,
     list_claim_elements,
     list_intake_questions,
     list_mcp_tools,
     optimize_ui,
     reset_session,
     review_case,
+    run_intake_chat_turn,
+    run_gmail_duckdb_pipeline,
     run_iterative_ui_ux_workflow,
     run_playwright_screenshot_audit,
     save_evidence,
+    search_email_duckdb_corpus,
     start_session,
     submit_intake_answers,
     tool_list_payload,
@@ -64,16 +77,30 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _script_path(script_name: str) -> Path:
-    scripts_dir = Path(sys.executable).parent
     suffix = ".exe" if sys.platform.startswith("win") else ""
-    return scripts_dir / f"{script_name}{suffix}"
+    script_filename = f"{script_name}{suffix}"
+    candidates = [
+        Path(sys.executable).parent / script_filename,
+        Path(site.USER_BASE) / ("Scripts" if sys.platform.startswith("win") else "bin") / script_filename,
+        Path.home() / (".local/Scripts" if sys.platform.startswith("win") else ".local/bin") / script_filename,
+    ]
+    located = shutil.which(script_name)
+    if located:
+        candidates.insert(0, Path(located))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
 
 
 def _ensure_editable_console_scripts() -> None:
+    install_env = dict(os.environ)
+    install_env["PIP_BREAK_SYSTEM_PACKAGES"] = "1"
     subprocess.run(
         [sys.executable, "-m", "pip", "install", "-e", ".", "--no-deps"],
         cwd=REPO_ROOT,
         check=True,
+        env=install_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -104,6 +131,8 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert any(tool["name"] == "complaint.review_ui" for tool in tool_payload["tools"])
     assert any(tool["name"] == "complaint.optimize_ui" for tool in tool_payload["tools"])
     assert any(tool["name"] == "complaint.run_browser_audit" for tool in tool_payload["tools"])
+    assert any(tool["name"] == "complaint.run_gmail_duckdb_pipeline" for tool in tool_payload["tools"])
+    assert any(tool["name"] == "complaint.search_email_duckdb_corpus" for tool in tool_payload["tools"])
     assert initialize_payload["result"]["serverInfo"]["name"] == "complaint-workspace-mcp"
     assert callable(generate_decentralized_id)
     assert callable(build_ui_ux_review_prompt)
@@ -113,7 +142,9 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(get_tooling_contract)
     assert callable(get_filing_provenance)
     assert callable(get_formal_diagnostics)
+    assert callable(get_packaged_docket_operator_dashboard)
     assert callable(get_provider_diagnostics)
+    assert callable(load_packaged_docket_operator_dashboard_report)
     assert callable(review_generated_exports)
     assert callable(create_review_dashboard_app)
     assert callable(review_ui)
@@ -123,13 +154,20 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(run_end_to_end_complaint_browser_audit)
     assert callable(run_iterative_ui_ux_workflow)
     assert callable(run_playwright_screenshot_audit)
+    assert callable(ui_optimizer_daemon_build_parser)
+    assert callable(ui_optimizer_daemon_main)
+    assert callable(ui_optimizer_daemon_start)
+    assert callable(ui_optimizer_daemon_status)
+    assert callable(ui_optimizer_daemon_stop)
     assert callable(create_identity)
     assert callable(start_session)
     assert callable(list_intake_questions)
     assert callable(list_claim_elements)
     assert callable(submit_intake_answers)
+    assert callable(run_intake_chat_turn)
     assert callable(save_evidence)
     assert callable(review_case)
+    assert callable(run_gmail_duckdb_pipeline)
     assert callable(build_mediator_prompt)
     assert callable(get_workflow_capabilities)
     assert callable(generate_complaint)
@@ -142,6 +180,7 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(update_case_synopsis)
     assert callable(reset_session)
     assert callable(list_mcp_tools)
+    assert callable(search_email_duckdb_corpus)
     if HAS_MULTIPART:
         app = create_review_surface_app(mediator=object())
         assert any(
@@ -185,6 +224,10 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
     )
     assert intake_payload["session"]["intake_answers"]["party_name"] == "Jordan Example"
 
+    chat_turn_payload = run_intake_chat_turn("package-wrapper-user", service=service)
+    assert chat_turn_payload["inquiry"]["question_id"] == "court_header"
+    assert chat_turn_payload["conversation_state"]["is_complete"] is False
+
     evidence_payload = save_evidence(
         "package-wrapper-user",
         kind="document",
@@ -196,6 +239,16 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
         service=service,
     )
     assert evidence_payload["saved"]["title"] == "Termination email"
+
+    local_artifact = tmp_path / "timeline.txt"
+    local_artifact.write_text("Timeline notes for the retaliation case.", encoding="utf-8")
+    local_import_payload = import_local_evidence(
+        "package-wrapper-user",
+        paths=[str(local_artifact)],
+        claim_element_id="causation",
+        service=service,
+    )
+    assert local_import_payload["imported_count"] == 1
 
     synopsis_payload = update_case_synopsis(
         "package-wrapper-user",
@@ -218,9 +271,19 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
     assert capabilities_payload["draft_strategy"] == "template"
     assert release_gate_payload["verdict"] in {"client_safe", "warning", "blocked"}
     assert tooling_contract_payload["all_core_flow_steps_exposed"] is True
+    assert "workspace-data-schema" in tooling_contract_payload["cli_commands"]
+    assert "migrate-legacy-workspace-data" in tooling_contract_payload["cli_commands"]
+    assert "getWorkspaceDataSchema" in tooling_contract_payload["browser_sdk_methods"]
+    assert "migrateLegacyWorkspaceData" in tooling_contract_payload["browser_sdk_methods"]
+    assert any(item["id"] == "workspace_schema_refresh" for item in tooling_contract_payload["schema_guided_recommendations"])
     assert filing_provenance_payload["draft_strategy"] == "template"
     assert "draft_backend" in filing_provenance_payload
     assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["effective_complaint_draft_provider"] == "codex_cli"
+    assert provider_diagnostics_payload["ui_review_default_provider"] == "codex_cli"
+    assert provider_diagnostics_payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
+    assert provider_diagnostics_payload["ui_review_multimodal_rate_limit_fallbacks"]["codex_cli"] == ["copilot_cli", "hf_inference_api"]
     assert any(item["name"] == "copilot_cli" for item in provider_diagnostics_payload["providers"])
 
     claim_type_payload = update_claim_type(
@@ -519,6 +582,53 @@ def test_package_workspace_generate_complaint_can_optionally_use_llm_router(tmp_
         and "llm_router-backed formal complaint generation" in item["detail"]
         for item in capabilities_payload["capabilities"]
     )
+
+
+def test_package_generate_complaint_defaults_to_verified_llm_profile(tmp_path, monkeypatch):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "package-default-llm-profile-sessions")
+    submit_intake_answers(
+        "package-default-llm-user",
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10.",
+            "harm": "Lost wages and emotional distress.",
+        },
+        service=service,
+    )
+
+    observed_kwargs = {}
+
+    def fake_refine(self, state, base_draft, **kwargs):
+        observed_kwargs.update(kwargs)
+        return {
+            **base_draft,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "package-default-backend",
+                "provider": kwargs.get("provider"),
+                "model": kwargs.get("model"),
+            },
+        }
+
+    monkeypatch.setattr(ComplaintWorkspaceService, "_refine_draft_with_llm_router", fake_refine)
+
+    payload = generate_complaint(
+        "package-default-llm-user",
+        requested_relief=["Back pay"],
+        use_llm=True,
+        service=service,
+    )
+
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert observed_kwargs["provider"] == "codex_cli"
+    assert observed_kwargs["model"] == "gpt-5.3-codex"
+    assert observed_kwargs["requested_provider"] is None
+    assert observed_kwargs["requested_model"] is None
+    assert payload["draft"]["draft_backend"]["provider"] == "codex_cli"
+    assert payload["draft"]["draft_backend"]["model"] == "gpt-5.3-codex"
 
 
 def test_complaint_generator_cli_wrapper_exposes_workspace_commands(tmp_path, monkeypatch):

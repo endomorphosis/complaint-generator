@@ -353,17 +353,22 @@ def _run_ui_review_lane(
     for task in ui_tasks:
         task_result = patch_optimizer.optimize(task)
         phase_payload = _serialize_autopatch_result(task_result)
+        report_summary = dict(task.metadata.get("report_summary") or {})
         phase_payload.update(
             {
                 "phase": str(task.metadata.get("workflow_phase") or "ui_ux_review"),
                 "phase_status": str(task.metadata.get("workflow_phase_status") or "warning"),
                 "phase_priority": int(task.metadata.get("workflow_phase_priority") or 1),
                 "target_files": [str(path) for path in list(getattr(task, "target_files", []) or [])],
+                "patch_briefs_path": str(report_summary.get("patch_briefs_path") or ""),
+                "prioritized_patch_briefs": list(report_summary.get("prioritized_patch_briefs") or []),
+                "top_patch_brief": dict(report_summary.get("top_patch_brief") or {}),
             }
         )
         ui_phase_payloads.append(phase_payload)
     ui_ux_result = patch_optimizer.optimize(ui_ux_task)
     ui_ux_phase_payload = _serialize_autopatch_result(ui_ux_result)
+    ui_ux_report_summary = dict((getattr(ui_ux_task, "metadata", {}) or {}).get("report_summary") or {})
     ui_ux_phase_payload.update(
         {
             "phase": "ui_ux_review",
@@ -371,6 +376,9 @@ def _run_ui_review_lane(
             "phase_priority": 1,
             "target_files": [str(path) for path in list(getattr(ui_ux_task, "target_files", []) or [])],
             "workflow_type": "ui_ux_autopatch",
+            "patch_briefs_path": str(ui_ux_report_summary.get("patch_briefs_path") or ""),
+            "prioritized_patch_briefs": list(ui_ux_report_summary.get("prioritized_patch_briefs") or []),
+            "top_patch_brief": dict(ui_ux_report_summary.get("top_patch_brief") or {}),
         }
     )
 

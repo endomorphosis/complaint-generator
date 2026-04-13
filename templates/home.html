@@ -388,9 +388,6 @@
     </style>
 </head>
 <script>
-    hostname = "localhost:19000";
-
-
     function create_profile(username, password, email) {
 
         $.ajaxSetup({
@@ -420,7 +417,6 @@
                 show_error(returnData);
                 return returnData;
             } else {
-                // window.location(hostname + "/chat");
                 return returnData;
             }
         }

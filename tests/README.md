@@ -60,6 +60,19 @@ pytest tests/test_log.py
 pytest tests/test_mediator.py
 ```
 
+### Workspace Bundle Tooling (ipfs_datasets_py)
+
+Workspace dataset bundle helpers live in the `ipfs_datasets_py` submodule and include indexing, search, and chain-loadable packaging. These tests run inside the submodule workspace:
+
+```bash
+cd ipfs_datasets_py
+.venv/bin/python -m pytest -q \
+  tests/unit/processors/test_workspace_dataset.py \
+  tests/unit/processors/test_workspace_packaging.py \
+  tests/unit/test_workspace_cli.py \
+  tests/unit/test_workspace_bundle_export_script.py
+```
+
 For the claim-support review workflow, the focused regression slice is:
 
 ```bash

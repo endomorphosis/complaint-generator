@@ -1,20 +1,32 @@
-
-from workflow_phase_guidance import build_workflow_phase_plan
 """
 Optimizer Module
 
 Analyzes critic feedback and provides optimization recommendations.
 """
 
+import difflib
 import json
 import logging
+import os
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from collections import Counter
+
+try:
+    from workflow_phase_guidance import build_workflow_phase_plan
+except ModuleNotFoundError:
+    _REPO_ROOT = Path(__file__).resolve().parent.parent
+    _REPO_ROOT_TEXT = str(_REPO_ROOT)
+    if _REPO_ROOT_TEXT not in sys.path:
+        sys.path.insert(0, _REPO_ROOT_TEXT)
+    from workflow_phase_guidance import build_workflow_phase_plan
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +209,7 @@ class UIUXOptimizationBundle:
     target_files: List[str]
     review_runs: List[Dict[str, Any]]
     complaint_output_feedback: Dict[str, Any]
+    patch_briefs: List[Dict[str, Any]]
     latest_review_markdown_path: Optional[str] = None
     latest_review_json_path: Optional[str] = None
     task: Optional[Dict[str, Any]] = None
@@ -211,6 +224,7 @@ class UIUXOptimizationBundle:
             "target_files": list(self.target_files or []),
             "review_runs": list(self.review_runs or []),
             "complaint_output_feedback": dict(self.complaint_output_feedback or {}),
+            "patch_briefs": list(self.patch_briefs or []),
             "latest_review_markdown_path": self.latest_review_markdown_path,
             "latest_review_json_path": self.latest_review_json_path,
             "task": dict(self.task or {}),
@@ -235,6 +249,7 @@ class UIOptimizationBundle:
     playwright_followups: List[str]
     complaint_output_feedback: Dict[str, Any]
     target_files: List[str]
+    patch_briefs: List[Dict[str, Any]]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -252,6 +267,7 @@ class UIOptimizationBundle:
             "playwright_followups": list(self.playwright_followups or []),
             "complaint_output_feedback": dict(self.complaint_output_feedback or {}),
             "target_files": list(self.target_files or []),
+            "patch_briefs": list(self.patch_briefs or []),
         }
 
 
@@ -396,6 +412,765 @@ class Optimizer:
                 self.constraints = constraints
                 self.metadata = metadata
 
+        class FallbackOptimizerResult:
+            def __init__(self, *, success: bool, status: str, patch_path: str, metadata: Dict[str, Any]) -> None:
+                self.success = success
+                self.status = status
+                self.patch_path = patch_path
+                self.patch_cid = ""
+                self.metadata = metadata
+
+        class FallbackLocalOptimizer:
+            def __init__(self, agent_id: str, llm_router: Any = None) -> None:
+                self.agent_id = agent_id
+                self.llm_router = llm_router
+                self._last_generation_diagnostics: List[Dict[str, Any]] = []
+
+            def optimize(self, task: Any) -> Any:
+                constraints = dict(getattr(task, "constraints", {}) or {})
+                metadata = dict(getattr(task, "metadata", {}) or {})
+                output_dir = Path(str(constraints.get("review_output_dir") or constraints.get("output_dir") or "."))
+                output_dir.mkdir(parents=True, exist_ok=True)
+                patch_path = output_dir / "fallback-optimizer-plan.md"
+                project_root = Path.cwd().resolve()
+
+                actor_critic_review = dict(metadata.get("actor_critic_review") or {})
+                complaint_output_feedback = dict(metadata.get("complaint_output_feedback") or {})
+                release_gate = dict(metadata.get("complaint_output_release_gate") or {})
+                target_files = [Path(path) for path in list(getattr(task, "target_files", []) or [])[:5]]
+                changed_files = [str(path) for path in target_files]
+
+                recommendations = [
+                    str(item).strip()
+                    for item in (
+                        list(actor_critic_review.get("top_risks") or [])
+                        + list(actor_critic_review.get("high_impact_fixes") or [])
+                        + list(actor_critic_review.get("playwright_followups") or [])
+                    )
+                    if str(item).strip()
+                ][:10]
+                if not recommendations:
+                    recommendations = [
+                        "Promote the highest-value primary action for the current complaint stage.",
+                        "Keep complaint generation, export, and next-step guidance visible together.",
+                        "Add or strengthen Playwright assertions for the unresolved screenshot findings.",
+                    ]
+
+                report_summary = dict(metadata.get("report_summary") or {})
+                prioritized_patch_briefs = list(report_summary.get("prioritized_patch_briefs") or [])
+                selected_patch_briefs = [
+                    dict(item)
+                    for item in list(report_summary.get("selected_patch_briefs") or [])
+                    if isinstance(item, dict)
+                ] or [dict(item) for item in prioritized_patch_briefs[:3] if isinstance(item, dict)]
+                top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
+                recommendation_coverage = dict(report_summary.get("recommendation_coverage") or {})
+                if not recommendation_coverage:
+                    recommendation_coverage = {
+                        "total_patch_briefs": len(prioritized_patch_briefs),
+                        "selected_patch_briefs_count": len(selected_patch_briefs),
+                        "uncovered_patch_briefs_count": max(0, len(prioritized_patch_briefs) - len(selected_patch_briefs)),
+                        "selected_patch_brief_titles": [
+                            str((item or {}).get("title") or "").strip()
+                            for item in selected_patch_briefs
+                            if str((item or {}).get("title") or "").strip()
+                        ],
+                        "selected_target_files": [str(path) for path in changed_files],
+                    }
+                for brief in selected_patch_briefs:
+                    title = str(brief.get("title") or "").strip()
+                    problem = str(brief.get("problem") or "").strip()
+                    recommended_action = str(brief.get("recommended_action") or "").strip()
+                    for candidate in (title, problem, recommended_action):
+                        if candidate and candidate not in recommendations:
+                            recommendations.append(candidate)
+                recommendations = recommendations[:12]
+
+                def _absolute_path(path: Path) -> Path:
+                    return path if path.is_absolute() else (project_root / path).resolve()
+
+                tracked_files = {
+                    str(path): _absolute_path(path)
+                    for path in target_files
+                    if _absolute_path(path).is_file()
+                }
+                original_text_by_file = {
+                    rel_path: absolute_path.read_text(encoding="utf-8")
+                    for rel_path, absolute_path in tracked_files.items()
+                }
+
+                def _build_patch_text(updated_files: List[str]) -> str:
+                    chunks: List[str] = []
+                    for rel_path in updated_files:
+                        absolute_path = tracked_files.get(rel_path)
+                        if absolute_path is None:
+                            continue
+                        before_text = original_text_by_file.get(rel_path, "")
+                        after_text = absolute_path.read_text(encoding="utf-8")
+                        if before_text == after_text:
+                            continue
+                        chunks.append(
+                            "".join(
+                                difflib.unified_diff(
+                                    before_text.splitlines(keepends=True),
+                                    after_text.splitlines(keepends=True),
+                                    fromfile=f"a/{rel_path}",
+                                    tofile=f"b/{rel_path}",
+                                )
+                            )
+                        )
+                    return "".join(chunks)
+
+                def _summarize_selected_patch_brief_coverage(updated_files: List[str]) -> Dict[str, Any]:
+                    normalized_updated_files = {str(path).strip() for path in list(updated_files or []) if str(path).strip()}
+                    selected_titles = [
+                        str((item or {}).get("title") or "").strip()
+                        for item in selected_patch_briefs
+                        if str((item or {}).get("title") or "").strip()
+                    ]
+                    covered_titles: List[str] = []
+                    uncovered_titles: List[str] = []
+                    for brief in selected_patch_briefs:
+                        title = str((brief or {}).get("title") or "").strip()
+                        if not title:
+                            continue
+                        brief_targets = {
+                            str(path).strip()
+                            for path in list((brief or {}).get("target_files") or [])
+                            if str(path).strip()
+                        }
+                        if brief_targets:
+                            matched = bool(brief_targets & normalized_updated_files)
+                        else:
+                            matched = bool(normalized_updated_files) and title == str((top_patch_brief or {}).get("title") or "").strip()
+                        if matched:
+                            covered_titles.append(title)
+                        else:
+                            uncovered_titles.append(title)
+                    total_selected = len(selected_titles)
+                    return {
+                        "selected_patch_brief_titles": selected_titles,
+                        "covered_patch_brief_titles": covered_titles,
+                        "uncovered_selected_patch_brief_titles": uncovered_titles,
+                        "selected_patch_brief_coverage_ratio": (
+                            float(len(covered_titles)) / float(total_selected)
+                            if total_selected
+                            else 0.0
+                        ),
+                    }
+
+                def _restore_suspicious_file_outputs(command_status: str) -> List[Dict[str, Any]]:
+                    rollback_diagnostics: List[Dict[str, Any]] = []
+                    for rel_path, absolute_path in tracked_files.items():
+                        before_text = original_text_by_file.get(rel_path, "")
+                        after_text = absolute_path.read_text(encoding="utf-8")
+                        if before_text == after_text:
+                            continue
+                        suspicious_empty = bool(before_text.strip()) and not bool(after_text.strip())
+                        suspicious_truncation = (
+                            len(before_text.strip()) >= 1000
+                            and len(after_text.strip()) > 0
+                            and len(after_text.strip()) < max(200, int(len(before_text.strip()) * 0.1))
+                        )
+                        if not suspicious_empty and not suspicious_truncation:
+                            continue
+                        absolute_path.write_text(before_text, encoding="utf-8")
+                        rollback_diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "rolled_back_suspicious_output",
+                                "reason": (
+                                    "Codex fallback edit left a tracked file empty."
+                                    if suspicious_empty
+                                    else "Codex fallback edit truncated a tracked file implausibly."
+                                ),
+                                "command_status": command_status,
+                                "file": rel_path,
+                            }
+                        )
+                    return rollback_diagnostics
+
+                def _attempt_codex_autopatch() -> tuple[List[str], str | None, List[Dict[str, Any]]]:
+                    diagnostics: List[Dict[str, Any]] = []
+                    if not tracked_files:
+                        diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "skipped",
+                                "reason": "No existing target files were available for bounded Codex edits.",
+                            }
+                        )
+                        return [], None, diagnostics
+                    codex_bin = shutil.which("codex")
+                    if not codex_bin:
+                        diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "skipped",
+                                "reason": "codex CLI is not installed.",
+                            }
+                        )
+                        return [], None, diagnostics
+
+                    prompt_lines = [
+                        "You are repairing the complaint-generator UI/UX workflow.",
+                        "Make minimal, concrete edits in the listed target files only.",
+                        "Do not modify files outside this set.",
+                        "Prefer the smallest safe change that improves gating clarity, complaint formality, or end-to-end dashboard flow.",
+                        "",
+                        f"Task ID: {getattr(task, 'task_id', '')}",
+                        "Target files:",
+                        *[f"- {path}" for path in tracked_files.keys()],
+                        "",
+                        "Top recommendations:",
+                        *[f"- {item}" for item in recommendations[:6]],
+                    ]
+                    if selected_patch_briefs:
+                        prompt_lines.extend(
+                            [
+                                "",
+                                "Selected patch briefs:",
+                            ]
+                        )
+                        for index, brief in enumerate(selected_patch_briefs, start=1):
+                            validation_checks = [
+                                str(item).strip()
+                                for item in list(brief.get("validation_checks") or [])
+                                if str(item).strip()
+                            ][:3]
+                            prompt_lines.extend(
+                                [
+                                    f"- Brief {index}: {str(brief.get('title') or '').strip()}",
+                                    f"  Surface: {str(brief.get('surface') or '').strip()}",
+                                    f"  Problem: {str(brief.get('problem') or '').strip()}",
+                                    f"  Recommended action: {str(brief.get('recommended_action') or '').strip()}",
+                                ]
+                            )
+                            if validation_checks:
+                                prompt_lines.append(f"  Validation: {' | '.join(validation_checks)}")
+                    elif top_patch_brief:
+                        prompt_lines.extend(
+                            [
+                                "",
+                                "Top patch brief:",
+                                f"- Title: {str(top_patch_brief.get('title') or '').strip()}",
+                                f"- Surface: {str(top_patch_brief.get('surface') or '').strip()}",
+                                f"- Problem: {str(top_patch_brief.get('problem') or '').strip()}",
+                                f"- Recommended action: {str(top_patch_brief.get('recommended_action') or '').strip()}",
+                            ]
+                        )
+                    if recommendation_coverage:
+                        prompt_lines.extend(
+                            [
+                                "",
+                                "Recommendation coverage target:",
+                                f"- Total briefs identified: {int(recommendation_coverage.get('total_patch_briefs') or 0)}",
+                                f"- Briefs selected for this pass: {int(recommendation_coverage.get('selected_patch_briefs_count') or 0)}",
+                                f"- Briefs still uncovered after this pass: {int(recommendation_coverage.get('uncovered_patch_briefs_count') or 0)}",
+                            ]
+                        )
+                    prompt_lines.extend(
+                        [
+                            "",
+                            "Important constraints:",
+                            "- Preserve package, CLI, MCP, and browser SDK parity.",
+                            "- Cover as many selected patch briefs as safely possible in this pass, starting from Brief 1.",
+                            "- Keep release-gate and complaint-output warnings visible when drafting/export remains unsafe.",
+                            "- If you touch tests, keep them focused on the workflow you changed.",
+                            "- End by summarizing the concrete edits you made.",
+                        ]
+                    )
+                    prompt = "\n".join(prompt_lines)
+                    last_message_path = output_dir / "fallback-codex-last-message.txt"
+                    command = [
+                        codex_bin,
+                        "exec",
+                        "--ephemeral",
+                        "--dangerously-bypass-approvals-and-sandbox",
+                        "--skip-git-repo-check",
+                        "-C",
+                        str(project_root),
+                        "-m",
+                        "gpt-5.3-codex",
+                        "-o",
+                        str(last_message_path),
+                        prompt,
+                    ]
+                    timeout_seconds = 90
+                    timeout_override = str(os.getenv("COMPLAINT_GENERATOR_UI_UX_FALLBACK_CODEX_TIMEOUT_SECONDS", "") or "").strip()
+                    if timeout_override:
+                        try:
+                            timeout_seconds = max(15, int(float(timeout_override)))
+                        except Exception:
+                            timeout_seconds = 90
+                    try:
+                        completed = subprocess.run(
+                            command,
+                            cwd=str(project_root),
+                            capture_output=True,
+                            text=True,
+                            timeout=timeout_seconds,
+                            check=False,
+                        )
+                    except subprocess.TimeoutExpired as exc:
+                        diagnostics.extend(_restore_suspicious_file_outputs("timed_out"))
+                        diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "timed_out",
+                                "reason": f"codex exec timed out after {timeout_seconds}s",
+                                "timeout_seconds": timeout_seconds,
+                                "stdout_excerpt": str(exc.stdout or "").strip()[:500],
+                                "stderr_excerpt": str(exc.stderr or "").strip()[:500],
+                            }
+                        )
+                        return [], None, diagnostics
+                    except Exception as exc:
+                        diagnostics.extend(_restore_suspicious_file_outputs("failed"))
+                        diagnostics.append(
+                            {
+                                "backend": "codex_cli_fallback_optimizer",
+                                "status": "failed",
+                                "reason": str(exc),
+                            }
+                        )
+                        return [], None, diagnostics
+
+                    diagnostics.append(
+                        {
+                            "backend": "codex_cli_fallback_optimizer",
+                            "status": "ok" if completed.returncode == 0 else "nonzero_exit",
+                            "returncode": int(completed.returncode),
+                            "stdout_excerpt": str(completed.stdout or "").strip()[:500],
+                            "stderr_excerpt": str(completed.stderr or "").strip()[:500],
+                            "last_message_path": str(last_message_path),
+                        }
+                    )
+                    diagnostics.extend(_restore_suspicious_file_outputs(
+                        "ok" if completed.returncode == 0 else "nonzero_exit"
+                    ))
+
+                    updated_files = [
+                        rel_path
+                        for rel_path, absolute_path in tracked_files.items()
+                        if absolute_path.read_text(encoding="utf-8") != original_text_by_file.get(rel_path, "")
+                    ]
+                    if not updated_files:
+                        return [], None, diagnostics
+
+                    codex_patch_path = output_dir / "fallback-codex-autopatch.patch"
+                    patch_text = _build_patch_text(updated_files)
+                    codex_patch_path.write_text(patch_text, encoding="utf-8")
+                    return updated_files, str(codex_patch_path), diagnostics
+
+                def _attempt_deterministic_surface_autopatch() -> tuple[List[str], str | None, List[Dict[str, Any]]]:
+                    diagnostics: List[Dict[str, Any]] = []
+                    def _selected_briefs_for(rel_path: str) -> List[Dict[str, Any]]:
+                        return [
+                            dict(brief)
+                            for brief in selected_patch_briefs
+                            if rel_path in [str(path).strip() for path in list((brief or {}).get("target_files") or []) if str(path).strip()]
+                        ]
+
+                    updated_files: List[str] = []
+
+                    def _apply_workspace_patch() -> None:
+                        workspace_rel_path = "templates/workspace.html"
+                        workspace_path = tracked_files.get(workspace_rel_path)
+                        if workspace_path is None:
+                            return
+                        selected_workspace_briefs = _selected_briefs_for(workspace_rel_path)
+                        if not selected_workspace_briefs:
+                            return
+
+                        updated_text = workspace_path.read_text(encoding="utf-8")
+                        original_text = updated_text
+                        replacements = [
+                        (
+                            "<h3>Canonical filing verdict</h3>",
+                            "<h3>Canonical filing verdict bar</h3>",
+                        ),
+                        (
+                            "<p class=\"muted\">Pinned filing verdict for Review and Draft. One reason source drives both tabs.</p>",
+                            "<p class=\"muted\">Pinned filing verdict for Review, Draft, and Export. One reason source keeps BLOCKED, NEEDS CORROBORATION, and READY aligned across the workflow.</p>",
+                        ),
+                        (
+                            "<p class=\"muted\" id=\"unsupported-thin-blocker-summary\">Generate, export, and download stay blocked until the confidence gate is grounded.</p>",
+                            "<p class=\"muted\" id=\"unsupported-thin-blocker-summary\">Generate, export, and download stay blocked until grounded evidence outweighs thin and unsupported elements.</p>",
+                        ),
+                        (
+                            "<span class=\"chip\">grounded: 0</span>",
+                            "<span class=\"chip\">grounded evidence: 0</span>",
+                        ),
+                        (
+                            "<span class=\"chip\">thin: 0</span>",
+                            "<span class=\"chip\">thin evidence: 0</span>",
+                        ),
+                        (
+                            "<span class=\"chip\">unsupported: 0</span>",
+                            "<span class=\"chip\">unsupported elements: 0</span>",
+                        ),
+                        (
+                            "<strong>Current goal</strong>",
+                            "<strong>Coverage</strong>",
+                        ),
+                        (
+                            "<strong>Biggest blocker</strong>",
+                            "<strong>Corroboration</strong>",
+                        ),
+                        (
+                            "<strong>Safest next move</strong>",
+                            "<strong>Filing Gate</strong>",
+                        ),
+                        (
+                            "<strong>Grounded elements</strong>",
+                            "<strong>Coverage</strong>",
+                        ),
+                        (
+                            "<strong>Thin elements</strong>",
+                            "<strong>Corroboration</strong>",
+                        ),
+                        (
+                            "<strong>Unsupported elements</strong>",
+                            "<strong>Filing Gate</strong>",
+                        ),
+                        (
+                            "Fix Intake Names",
+                            "Fix Intake",
+                        ),
+                        (
+                            "Fix Caption",
+                            "Fix Draft",
+                        ),
+                        ]
+                        for before_text, after_text in replacements:
+                            if before_text in updated_text and after_text not in updated_text:
+                                updated_text = updated_text.replace(before_text, after_text, 1)
+
+                        blocker_anchor = "<div class=\"list\" id=\"unsupported-thin-blocker-reasons\">"
+                        blocker_note = (
+                        "                                <div class=\"soft-note\" id=\"unsupported-thin-blocker-coverage-note\">"
+                        "Confidence stays blocked until unsupported elements are routed back to Review or Evidence instead of being hidden behind export or download actions."
+                        "</div>\n"
+                        )
+                        if "id=\"unsupported-thin-blocker-coverage-note\"" not in updated_text and blocker_anchor in updated_text:
+                            updated_text = updated_text.replace(blocker_anchor, blocker_note + "                                " + blocker_anchor, 1)
+
+                        repair_focus_anchor = "id=\"optimizer-repair-focus-note\">"
+                        repair_focus_summary = " | ".join(
+                            [
+                                str((brief or {}).get("title") or "").strip()
+                                + (
+                                    f": {str((brief or {}).get('recommended_action') or '').strip()}"
+                                    if str((brief or {}).get("recommended_action") or "").strip()
+                                    else ""
+                                )
+                                for brief in selected_workspace_briefs[:3]
+                                if str((brief or {}).get("title") or "").strip()
+                            ]
+                        ).strip()
+                        if repair_focus_summary:
+                            updated_focus_note = (
+                                "Adversarial optimizer repair focus: " + repair_focus_summary
+                            )
+                            if repair_focus_anchor in updated_text:
+                                updated_text = re.sub(
+                                    r'(id="optimizer-repair-focus-note">)(.*?)(</div>)',
+                                    lambda match: match.group(1) + updated_focus_note + match.group(3),
+                                    updated_text,
+                                    count=1,
+                                    flags=re.DOTALL,
+                                )
+                            else:
+                                repair_focus_insert_anchor = (
+                                    "                            <div class=\"tool-card canonical-release-gate\" id=\"unsupported-thin-blocker-panel\">"
+                                )
+                                repair_focus_block = (
+                                    "                            <div class=\"soft-note\" id=\"optimizer-repair-focus-note\">"
+                                    + updated_focus_note
+                                    + "</div>\n"
+                                )
+                                if repair_focus_insert_anchor in updated_text:
+                                    updated_text = updated_text.replace(
+                                        repair_focus_insert_anchor,
+                                        repair_focus_block + repair_focus_insert_anchor,
+                                        1,
+                                    )
+
+                        confidence_anchor = "<div class=\"status draft-preview-shell\"><pre id=\"draft-release-gate-summary\">Verdict: BLOCKED"
+                        confidence_block = (
+                        "                                <div class=\"confidence-strip\" id=\"draft-confidence-card\">\n"
+                        "                                    <div class=\"confidence-card\">\n"
+                        "                                        <strong>Grounded</strong>\n"
+                        "                                        <span id=\"draft-confidence-grounded\">0 elements are backed by mixed or documentary proof.</span>\n"
+                        "                                    </div>\n"
+                        "                                    <div class=\"confidence-card\">\n"
+                        "                                        <strong>Thin</strong>\n"
+                        "                                        <span id=\"draft-confidence-thin\">0 elements still need corroboration before export confidence should rise.</span>\n"
+                        "                                    </div>\n"
+                        "                                    <div class=\"confidence-card\">\n"
+                        "                                        <strong>Unsupported</strong>\n"
+                        "                                        <span id=\"draft-confidence-unsupported\">0 elements still need direct targeted proof before filing confidence should rise.</span>\n"
+                        "                                    </div>\n"
+                        "                                </div>\n"
+                        )
+                        if "id=\"draft-confidence-card\"" not in updated_text and confidence_anchor in updated_text:
+                            updated_text = updated_text.replace(confidence_anchor, confidence_block + confidence_anchor, 1)
+
+                        event_anchor = (
+                        "        document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));\n"
+                        "        document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));\n"
+                        )
+                        event_block = (
+                        event_anchor
+                        + "        document.getElementById('unsupported-thin-go-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the unsupported-elements blocker so the record can be strengthened before export or download.'));\n"
+                        + "        document.getElementById('unsupported-thin-go-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the unsupported-elements blocker so the filing verdict can be checked before export or download.'));\n"
+                        + "        document.getElementById('draft-fix-intake-names-button').addEventListener('click', () => jumpToStage('intake', '#intake-party_name', 'Opened Intake so placeholder party names can be fixed before export.'));\n"
+                        + "        document.getElementById('draft-fix-caption-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Focused the draft caption so the filing title can be fixed before export.'));\n"
+                        )
+                        if "unsupported-thin-go-evidence-button" not in updated_text and event_anchor in updated_text:
+                            updated_text = updated_text.replace(event_anchor, event_block, 1)
+
+                        if updated_text != original_text:
+                            workspace_path.write_text(updated_text, encoding="utf-8")
+                            updated_files.append(workspace_rel_path)
+
+                    def _apply_app_shell_patch() -> None:
+                        shell_rel_path = "static/complaint_app_shell.js"
+                        shell_path = tracked_files.get(shell_rel_path)
+                        if shell_path is None:
+                            return
+                        if not _selected_briefs_for(shell_rel_path):
+                            return
+                        updated_text = shell_path.read_text(encoding="utf-8")
+                        original_text = updated_text
+                        if "Use the shared release gate in Workspace before trusting packet exports or downloads." not in updated_text:
+                            anchor = (
+                                "'<div class=\"cg-app-shell__phase-note\">Keep draft generation, packet export, and release-gate next-step guidance visible together before downloading complaint files.</div>',\n"
+                            )
+                            addition = (
+                                anchor
+                                + "            '<div class=\"cg-app-shell__phase-note\">Use the shared release gate in Workspace before trusting packet exports or downloads.</div>',\n"
+                            )
+                            if anchor in updated_text:
+                                updated_text = updated_text.replace(anchor, addition, 1)
+                        if "Open Workspace Draft Gate" not in updated_text:
+                            updated_text = updated_text.replace(
+                                "buildGatedLink('cg-app-shell__draft-step', '2. Export + review packet', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),",
+                                "buildGatedLink('cg-app-shell__draft-step', '2. Open Workspace Draft Gate', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),",
+                                1,
+                            )
+                        if updated_text != original_text:
+                            shell_path.write_text(updated_text, encoding="utf-8")
+                            updated_files.append(shell_rel_path)
+
+                    def _apply_sdk_patch() -> None:
+                        sdk_rel_path = "static/complaint_mcp_sdk.js"
+                        sdk_path = tracked_files.get(sdk_rel_path)
+                        if sdk_path is None:
+                            return
+                        if not _selected_briefs_for(sdk_rel_path):
+                            return
+                        updated_text = sdk_path.read_text(encoding="utf-8")
+                        original_text = updated_text
+                        ledger_anchor = (
+                            "    getToolCallLedger() {\n"
+                            "        if (typeof localStorage === 'undefined') {\n"
+                            "            return [];\n"
+                            "        }\n"
+                            "        try {\n"
+                            "            const raw = localStorage.getItem(this.toolCallLedgerStorageKey);\n"
+                            "            const parsed = raw ? JSON.parse(raw) : [];\n"
+                            "            return Array.isArray(parsed) ? parsed : [];\n"
+                            "        } catch (error) {\n"
+                            "            return [];\n"
+                            "        }\n"
+                            "    }\n"
+                        )
+                        ledger_block = (
+                            ledger_anchor
+                            + "\n"
+                            + "    getToolImpactSummary() {\n"
+                            + "        const ledger = this.getToolCallLedger();\n"
+                            + "        const latest = ledger[0] || null;\n"
+                            + "        const successCount = ledger.filter((item) => String((item && item.status) || '').toLowerCase() === 'success').length;\n"
+                            + "        const errorCount = ledger.filter((item) => String((item && item.status) || '').toLowerCase() === 'error').length;\n"
+                            + "        return {\n"
+                            + "            total_calls: ledger.length,\n"
+                            + "            success_count: successCount,\n"
+                            + "            error_count: errorCount,\n"
+                            + "            latest_tool_name: latest ? String(latest.tool_name || '').trim() : '',\n"
+                            + "            latest_status: latest ? String(latest.status || '').trim() : '',\n"
+                            + "            latest_finished_at: latest ? String(latest.finished_at || '').trim() : '',\n"
+                            + "        };\n"
+                            + "    }\n"
+                            + "\n"
+                            + "    async getWorkflowOperationSnapshot(userId) {\n"
+                            + "        const [releaseGate, workflowCapabilities, toolingContract] = await Promise.all([\n"
+                            + "            this.getCanonicalReleaseGate(userId),\n"
+                            + "            this.getWorkflowCapabilities(userId),\n"
+                            + "            this.getToolingContract(userId),\n"
+                            + "        ]);\n"
+                            + "        return {\n"
+                            + "            tool_impact_summary: this.getToolImpactSummary(),\n"
+                            + "            canonical_release_gate: releaseGate,\n"
+                            + "            workflow_capabilities: workflowCapabilities,\n"
+                            + "            tooling_contract: toolingContract,\n"
+                            + "        };\n"
+                            + "    }\n"
+                        )
+                        if "getToolImpactSummary()" not in updated_text and ledger_anchor in updated_text:
+                            updated_text = updated_text.replace(ledger_anchor, ledger_block, 1)
+                        if updated_text != original_text:
+                            sdk_path.write_text(updated_text, encoding="utf-8")
+                            updated_files.append(sdk_rel_path)
+
+                    def _apply_playwright_spec_patch() -> None:
+                        spec_rel_path = "playwright/tests/complaint-flow.spec.js"
+                        spec_path = tracked_files.get(spec_rel_path)
+                        if spec_path is None:
+                            return
+                        if not _selected_briefs_for(spec_rel_path):
+                            return
+                        updated_text = spec_path.read_text(encoding="utf-8")
+                        original_text = updated_text
+                        anchor = "    await expect(page.locator('#ux-review-stage-findings')).toContainText(/Complaint-output suggestion carried into optimization/i);\n"
+                        assertion_block = (
+                            anchor
+                            + "    await expect(page.locator('#ux-review-scorecard')).toContainText(/3\\/3 selected repairs/i);\n"
+                            + "    await expect(page.locator('#ux-review-scorecard')).toContainText(/coverage 100%/i);\n"
+                            + "    await expect(page.locator('#ux-review-runs')).toContainText(/UX repair 1/i);\n"
+                        )
+                        if anchor in updated_text and "3\\/3 selected repairs" not in updated_text:
+                            updated_text = updated_text.replace(anchor, assertion_block, 1)
+                        if updated_text != original_text:
+                            spec_path.write_text(updated_text, encoding="utf-8")
+                            updated_files.append(spec_rel_path)
+
+                    _apply_workspace_patch()
+                    _apply_app_shell_patch()
+                    _apply_sdk_patch()
+                    _apply_playwright_spec_patch()
+
+                    if not updated_files:
+                        diagnostics.append(
+                            {
+                                "backend": "deterministic_surface_fallback_optimizer",
+                                "status": "no_changes",
+                                "reason": "The bounded deterministic surface repairs were already present or no selected target files matched known deterministic patchers.",
+                            }
+                        )
+                        return [], None, diagnostics
+
+                    patch_path = output_dir / "fallback-deterministic-surfaces.patch"
+                    patch_path.write_text(_build_patch_text(updated_files), encoding="utf-8")
+                    diagnostics.append(
+                        {
+                            "backend": "deterministic_surface_fallback_optimizer",
+                            "status": "applied",
+                            "changed_files": list(updated_files),
+                            "patch_path": str(patch_path),
+                        }
+                    )
+                    return list(updated_files), str(patch_path), diagnostics
+
+                updated_files, codex_patch_path, codex_diagnostics = _attempt_codex_autopatch()
+                if updated_files:
+                    patch_brief_coverage = _summarize_selected_patch_brief_coverage(updated_files)
+                    self._last_generation_diagnostics = codex_diagnostics
+                    return FallbackOptimizerResult(
+                        success=True,
+                        status="applied",
+                        patch_path=str(codex_patch_path or ""),
+                        metadata={
+                            "changed_files": updated_files,
+                            "recommendations": recommendations,
+                            "optimizer_backend": "codex_cli_fallback_optimizer",
+                            "selected_patch_briefs": selected_patch_briefs,
+                            "recommendation_coverage": recommendation_coverage,
+                            **patch_brief_coverage,
+                        },
+                    )
+
+                deterministic_files, deterministic_patch_path, deterministic_diagnostics = _attempt_deterministic_surface_autopatch()
+                if deterministic_files:
+                    patch_brief_coverage = _summarize_selected_patch_brief_coverage(deterministic_files)
+                    self._last_generation_diagnostics = codex_diagnostics + deterministic_diagnostics
+                    return FallbackOptimizerResult(
+                        success=True,
+                        status="applied",
+                        patch_path=str(deterministic_patch_path or ""),
+                        metadata={
+                            "changed_files": deterministic_files,
+                            "recommendations": recommendations,
+                            "optimizer_backend": "deterministic_surface_fallback_optimizer",
+                            "selected_patch_briefs": selected_patch_briefs,
+                            "recommendation_coverage": recommendation_coverage,
+                            **patch_brief_coverage,
+                        },
+                    )
+
+                lines = [
+                    "# Fallback UI/UX Optimizer Plan",
+                    "",
+                    f"Task ID: {getattr(task, 'task_id', '')}",
+                    f"Agent ID: {self.agent_id}",
+                    f"Status: fallback_recommendations_generated",
+                    "",
+                    "## Target Files",
+                    *[f"- {item}" for item in changed_files],
+                    "",
+                    "## Actor/Critic Summary",
+                    f"- Actor summary: {str(actor_critic_review.get('actor_summary') or 'No actor summary captured.').strip()}",
+                    f"- Critic summary: {str(actor_critic_review.get('critic_summary') or 'No critic summary captured.').strip()}",
+                    "",
+                    "## Recommended Changes",
+                    *[f"- {item}" for item in recommendations],
+                ]
+                release_verdict = str(release_gate.get("verdict") or "").strip()
+                if release_verdict:
+                    lines.extend(
+                        [
+                            "",
+                            "## Complaint Output Release Gate",
+                            f"- Verdict: {release_verdict}",
+                            f"- Reason: {str(release_gate.get('reason') or 'No reason captured.').strip()}",
+                        ]
+                    )
+                filing_shape_score = complaint_output_feedback.get("filing_shape_score")
+                if filing_shape_score is not None:
+                    lines.extend(
+                        [
+                            "",
+                            "## Complaint Output Signals",
+                            f"- Filing shape score: {filing_shape_score}",
+                            f"- Claim type alignment score: {complaint_output_feedback.get('claim_type_alignment_score')}",
+                        ]
+                    )
+
+                patch_path.write_text("\n".join(lines).strip() + "\n")
+                self._last_generation_diagnostics = codex_diagnostics + deterministic_diagnostics + [
+                    {
+                        "backend": "local_fallback_optimizer",
+                        "reason": "ipfs_datasets_py agentic optimizer classes were unavailable, so a deterministic optimizer plan was generated.",
+                        "patch_path": str(patch_path),
+                    }
+                ]
+                return FallbackOptimizerResult(
+                    success=True,
+                    status="fallback_recommendations_generated",
+                    patch_path=str(patch_path),
+                    metadata={
+                        "changed_files": [],
+                        "target_files": changed_files,
+                        "recommendations": recommendations,
+                        "optimizer_backend": "local_fallback_optimizer",
+                        "selected_patch_briefs": selected_patch_briefs,
+                        "recommendation_coverage": recommendation_coverage,
+                        **_summarize_selected_patch_brief_coverage([]),
+                    },
+                )
+
         fallback_method = SimpleNamespace(
             ACTOR_CRITIC="ACTOR_CRITIC",
             ADVERSARIAL="ADVERSARIAL",
@@ -406,7 +1181,12 @@ class Optimizer:
             "OptimizationTask": FallbackOptimizationTask,
             "OptimizationMethod": fallback_method,
             "OptimizerLLMRouter": None,
-            "optimizer_classes": {},
+            "optimizer_classes": {
+                "actor_critic": FallbackLocalOptimizer,
+                "adversarial": FallbackLocalOptimizer,
+                "test_driven": FallbackLocalOptimizer,
+                "chaos": FallbackLocalOptimizer,
+            },
         }
 
     def _resolve_agentic_optimizer_components(self) -> Dict[str, Any]:
@@ -526,9 +1306,10 @@ class Optimizer:
     @staticmethod
     def _ui_target_files_from_review(review_report: Dict[str, Any] | None) -> List[Path]:
         report = review_report if isinstance(review_report, dict) else {}
-        review = dict(report.get("review") or {})
-        recommended_changes = list(review.get("recommended_changes") or [])
-        issues = list(review.get("issues") or [])
+        review_payload = report.get("review")
+        review = dict(review_payload) if isinstance(review_payload, dict) else {}
+        recommended_changes = list((review.get("recommended_changes") if review else report.get("recommended_changes")) or [])
+        issues = list((review.get("issues") if review else report.get("issues")) or [])
 
         targets: List[Path] = []
 
@@ -2673,6 +3454,59 @@ class Optimizer:
         latest_markdown_path = str(latest_run.get("review_markdown_path") or "")
         latest_json_path = str(latest_run.get("review_json_path") or "")
         latest_review_payload = self._read_ui_ux_review_json(Path(latest_json_path)) if latest_json_path else {}
+        ui_review_bundle = self.build_ui_optimization_bundle(ui_review_report=latest_review_payload)
+        patch_briefs = list(ui_review_bundle.patch_briefs or [])
+        prioritized_patch_briefs = self._prioritize_ui_patch_briefs(patch_briefs)
+        carry_forward_patch_briefs = [
+            dict(item)
+            for item in list((metadata or {}).get("carry_forward_patch_briefs") or [])
+            if isinstance(item, dict)
+        ]
+        if carry_forward_patch_briefs:
+            prioritized_with_carry_forward: List[Dict[str, Any]] = []
+            seen_patch_brief_keys: set[tuple[str, str, str]] = set()
+
+            def _patch_brief_key(brief: Dict[str, Any]) -> tuple[str, str, str]:
+                return (
+                    str((brief or {}).get("title") or "").strip().lower(),
+                    str((brief or {}).get("surface") or "").strip().lower(),
+                    str((brief or {}).get("recommended_action") or "").strip().lower(),
+                )
+
+            for brief in carry_forward_patch_briefs + prioritized_patch_briefs:
+                key = _patch_brief_key(brief)
+                if key in seen_patch_brief_keys:
+                    continue
+                seen_patch_brief_keys.add(key)
+                prioritized_with_carry_forward.append(dict(brief))
+            prioritized_patch_briefs = prioritized_with_carry_forward
+        selected_patch_briefs = self._select_ui_patch_briefs(
+            prioritized_patch_briefs,
+            max_items=self._ui_patch_brief_batch_limit(prioritized_patch_briefs),
+        )
+        top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
+        selected_target_paths: List[Path] = []
+        for brief in selected_patch_briefs:
+            for raw_path in list(brief.get("target_files") or []):
+                text = str(raw_path).strip()
+                if not text:
+                    continue
+                candidate = Path(text)
+                if candidate not in selected_target_paths:
+                    selected_target_paths.append(candidate)
+        if selected_target_paths:
+            resolved_target_files = selected_target_paths
+        recommendation_coverage = {
+            "total_patch_briefs": len(patch_briefs),
+            "selected_patch_briefs_count": len(selected_patch_briefs),
+            "uncovered_patch_briefs_count": max(0, len(patch_briefs) - len(selected_patch_briefs)),
+            "selected_patch_brief_titles": [
+                str((item or {}).get("title") or "").strip()
+                for item in selected_patch_briefs
+                if str((item or {}).get("title") or "").strip()
+            ],
+            "selected_target_files": [str(path) for path in selected_target_paths] if selected_target_paths else [],
+        }
         latest_review_excerpt = str(
             latest_review_payload.get("review")
             or latest_review_payload.get("summary")
@@ -2724,6 +3558,26 @@ class Optimizer:
                 "complaint_output_release_gate": self._build_complaint_output_release_gate(
                     self._extract_complaint_output_feedback(latest_review_payload)
                 ),
+                "report_summary": {
+                    "summary": str(ui_review_bundle.summary or latest_review_excerpt).strip(),
+                    "recommendations": [
+                        str((item or {}).get("implementation_notes") or "").strip()
+                        for item in list(ui_review_bundle.recommended_changes or [])
+                        if isinstance(item, dict) and str((item or {}).get("implementation_notes") or "").strip()
+                    ][:6],
+                    "issues": [
+                        str((item or {}).get("problem") or "").strip()
+                        for item in list(ui_review_bundle.issues or [])
+                        if isinstance(item, dict) and str((item or {}).get("problem") or "").strip()
+                    ][:6],
+                    "patch_briefs": patch_briefs,
+                    "prioritized_patch_briefs": prioritized_patch_briefs,
+                    "carry_forward_patch_briefs": carry_forward_patch_briefs,
+                    "selected_patch_briefs": selected_patch_briefs,
+                    "top_patch_brief": top_patch_brief,
+                    "recommendation_coverage": recommendation_coverage,
+                    "active_target_files": [str(path) for path in list(resolved_target_files or [])],
+                },
                 **dict(metadata or {}),
             },
         )
@@ -2869,6 +3723,7 @@ class Optimizer:
         review_runs = list(workflow_result.get("runs") or [])
         latest_review_json_path = str((review_runs[-1] or {}).get("review_json_path") or "") if review_runs else ""
         latest_review_payload = self._read_ui_ux_review_json(Path(latest_review_json_path)) if latest_review_json_path else {}
+        ui_review_bundle = self.build_ui_optimization_bundle(ui_review_report=latest_review_payload)
         task = self.build_ui_ux_optimization_task(
             screenshot_dir=screenshot_dir,
             output_dir=output_dir,
@@ -2890,12 +3745,13 @@ class Optimizer:
             output_dir=str(output_dir),
             iterations=int(workflow_result.get("iterations") or iterations),
             pytest_target=str(pytest_target),
-            target_files=[str(path) for path in self._default_ui_ux_target_files()],
+            target_files=[str(path) for path in list(getattr(task, "target_files", []) or [])],
             review_runs=review_runs,
             complaint_output_feedback={
                 **complaint_output_feedback,
                 "release_gate": self._build_complaint_output_release_gate(complaint_output_feedback),
             },
+            patch_briefs=list(ui_review_bundle.patch_briefs or []),
             latest_review_markdown_path=str((review_runs[-1] or {}).get("review_markdown_path") or "") or None,
             latest_review_json_path=latest_review_json_path or None,
             task={
@@ -3009,6 +3865,7 @@ class Optimizer:
         components: Optional[Dict[str, Any]] = None,
         stop_when_review_stable: bool = True,
         break_on_no_changes: bool = True,
+        reuse_existing_screenshots: bool = False,
     ) -> Dict[str, Any]:
         from complaint_generator.ui_ux_workflow import run_iterative_ui_ux_workflow
 
@@ -3021,6 +3878,17 @@ class Optimizer:
                 payload = self._read_ui_ux_review_json(Path(latest_json_path))
                 return str(payload.get("review") or payload.get("summary") or "").strip()
             return ""
+
+        def _unique_nonempty(values: List[Any]) -> List[str]:
+            seen: set[str] = set()
+            ordered: List[str] = []
+            for value in values:
+                text = str(value or "").strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                ordered.append(text)
+            return ordered
 
         def _serialize_optimizer_result(result: Any) -> Dict[str, Any]:
             metadata_payload = dict(getattr(result, "metadata", {}) or {})
@@ -3056,11 +3924,31 @@ class Optimizer:
         cycles: List[Dict[str, Any]] = []
         previous_validation_review = ""
         stop_reason = "max_rounds_reached"
-        supplemental_artifacts = list((metadata or {}).get("supplemental_artifacts") or [])
+        base_metadata = dict(metadata or {})
+        supplemental_artifacts = list(base_metadata.get("supplemental_artifacts") or [])
+        base_goals = [str(item).strip() for item in list(goals or []) if str(item).strip()]
+        carry_forward_patch_briefs: List[Dict[str, Any]] = []
+        carry_forward_goals: List[str] = []
+        coverage_retry_budget = 1
+        planned_rounds = max(1, int(max_rounds))
+        round_index = 1
 
-        for round_index in range(1, max(1, int(max_rounds)) + 1):
+        while round_index <= planned_rounds:
             round_dir = root_output_dir / f"round-{round_index:02d}"
             round_dir.mkdir(parents=True, exist_ok=True)
+            round_metadata = dict(base_metadata)
+            if supplemental_artifacts:
+                round_metadata["supplemental_artifacts"] = list(supplemental_artifacts)
+            if carry_forward_patch_briefs:
+                round_metadata["carry_forward_patch_briefs"] = [dict(item) for item in carry_forward_patch_briefs]
+            round_goals = _unique_nonempty(base_goals + carry_forward_goals)
+            round_notes = str(notes or "").strip()
+            if carry_forward_goals:
+                carry_forward_note = (
+                    "Carry forward uncovered selected recommendations from the prior round:\n- "
+                    + "\n- ".join(carry_forward_goals[:6])
+                )
+                round_notes = f"{round_notes}\n\n{carry_forward_note}".strip() if round_notes else carry_forward_note
 
             pre_workflow = run_iterative_ui_ux_workflow(
                 screenshot_dir=screenshot_dir,
@@ -3069,10 +3957,11 @@ class Optimizer:
                 provider=provider,
                 model=model,
                 pytest_target=pytest_target,
-                notes=notes,
-                goals=goals,
+                notes=round_notes or None,
+                goals=round_goals,
                 initial_previous_review=previous_validation_review or None,
                 supplemental_artifacts=supplemental_artifacts,
+                reuse_existing_screenshots=reuse_existing_screenshots,
             )
             pre_review_payload = (
                 self._read_ui_ux_review_json(Path(str(pre_workflow.get("latest_review_json_path") or "")))
@@ -3091,7 +3980,7 @@ class Optimizer:
                 method=method,
                 priority=priority,
                 constraints=constraints,
-                metadata=metadata,
+                metadata=round_metadata,
                 components=components,
                 workflow_result=pre_workflow,
             )
@@ -3103,7 +3992,7 @@ class Optimizer:
                 method=method,
                 priority=priority,
                 constraints=constraints,
-                metadata=metadata,
+                metadata=round_metadata,
                 components=components,
                 review_runs=list(bundle.review_runs or []),
                 target_files=list(bundle.target_files or []),
@@ -3123,10 +4012,11 @@ class Optimizer:
                 provider=provider,
                 model=model,
                 pytest_target=pytest_target,
-                notes=notes,
-                goals=goals,
+                notes=round_notes or None,
+                goals=round_goals,
                 initial_previous_review=_latest_review_text(pre_workflow) or previous_validation_review or None,
                 supplemental_artifacts=supplemental_artifacts,
+                reuse_existing_screenshots=reuse_existing_screenshots,
             )
             validation_review = _latest_review_text(validation_workflow)
             validation_review_payload = (
@@ -3139,10 +4029,108 @@ class Optimizer:
                 validation_review,
             )
             serialized_result = _serialize_optimizer_result(optimize_result)
+            report_summary = dict((getattr(task, "metadata", {}) or {}).get("report_summary") or {})
+            selected_patch_briefs = [
+                dict(item)
+                for item in list(report_summary.get("selected_patch_briefs") or [])
+                if isinstance(item, dict)
+            ]
+            selected_patch_brief = dict(report_summary.get("top_patch_brief") or {})
+            recommendation_coverage = dict(report_summary.get("recommendation_coverage") or {})
+            selected_target_files = [
+                str(path).strip()
+                for path in list(report_summary.get("active_target_files") or getattr(task, "target_files", []) or [])
+                if str(path).strip()
+            ]
+            optimizer_metadata = dict(serialized_result.get("metadata") or {})
+            covered_patch_brief_titles = [
+                str(item).strip()
+                for item in list(optimizer_metadata.get("covered_patch_brief_titles") or [])
+                if str(item).strip()
+            ]
+            uncovered_selected_patch_brief_titles = [
+                str(item).strip()
+                for item in list(optimizer_metadata.get("uncovered_selected_patch_brief_titles") or [])
+                if str(item).strip()
+            ]
+            selected_patch_brief_coverage_ratio = float(
+                optimizer_metadata.get("selected_patch_brief_coverage_ratio") or 0.0
+            )
+            requires_coverage_follow_up = bool(
+                selected_patch_briefs
+                and not covered_patch_brief_titles
+                and not list(serialized_result.get("changed_files") or [])
+                and selected_patch_brief_coverage_ratio <= 0.0
+            )
+            patch_briefs_payload = {
+                "round": round_index,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "patch_briefs": list(getattr(bundle, "patch_briefs", []) or []),
+                "target_files": list(bundle.target_files or []),
+                "selected_patch_briefs": selected_patch_briefs,
+                "selected_patch_brief": selected_patch_brief,
+                "recommendation_coverage": recommendation_coverage,
+                "selected_target_files": selected_target_files,
+                "task_id": str(getattr(task, "task_id", "")),
+                "pytest_target": str(pytest_target),
+            }
+            patch_briefs_path = self._write_json_artifact(
+                round_dir / "patch-briefs.json",
+                patch_briefs_payload,
+            )
+            coverage_gap_payload = {
+                "round": round_index,
+                "generated_at": datetime.now(UTC).isoformat(),
+                "selected_patch_brief_titles": [
+                    str((item or {}).get("title") or "").strip()
+                    for item in selected_patch_briefs
+                    if str((item or {}).get("title") or "").strip()
+                ],
+                "covered_patch_brief_titles": covered_patch_brief_titles,
+                "uncovered_selected_patch_brief_titles": uncovered_selected_patch_brief_titles,
+                "selected_patch_brief_coverage_ratio": selected_patch_brief_coverage_ratio,
+                "changed_files": list(serialized_result.get("changed_files") or []),
+                "requires_follow_up": requires_coverage_follow_up,
+            }
+            coverage_gap_path = self._write_json_artifact(
+                round_dir / "coverage-gap.json",
+                coverage_gap_payload,
+            )
+            complaint_output_validation_review = {
+                **self._extract_complaint_output_feedback(validation_review_payload),
+                "release_gate": self._build_complaint_output_release_gate(
+                    self._extract_complaint_output_feedback(validation_review_payload)
+                ),
+            }
+            round_summary_path = self._write_json_artifact(
+                round_dir / "round-summary.json",
+                {
+                    "round": round_index,
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "task_id": str(getattr(task, "task_id", "")),
+                    "patch_briefs_path": patch_briefs_path,
+                    "coverage_gap_path": coverage_gap_path,
+                    "selected_patch_briefs": selected_patch_briefs,
+                    "selected_patch_brief": selected_patch_brief,
+                    "recommendation_coverage": recommendation_coverage,
+                    "selected_target_files": selected_target_files,
+                    "pre_review_json_path": str(pre_workflow.get("latest_review_json_path") or ""),
+                    "validation_review_json_path": str(validation_workflow.get("latest_review_json_path") or ""),
+                    "complaint_output_validation_review": complaint_output_validation_review,
+                    "optimizer_result": serialized_result,
+                },
+            )
             cycles.append(
                 {
                     "round": round_index,
                     "bundle": bundle.to_dict(),
+                    "patch_briefs_path": patch_briefs_path,
+                    "coverage_gap_path": coverage_gap_path,
+                    "round_summary_path": round_summary_path,
+                    "selected_patch_briefs": selected_patch_briefs,
+                    "selected_patch_brief": selected_patch_brief,
+                    "recommendation_coverage": recommendation_coverage,
+                    "selected_target_files": selected_target_files,
                     "task": {
                         "task_id": str(getattr(task, "task_id", "")),
                         "description": str(getattr(task, "description", "")),
@@ -3160,28 +4148,66 @@ class Optimizer:
                             self._extract_complaint_output_feedback(pre_review_payload)
                         ),
                     },
-                    "complaint_output_validation_review": {
-                        **self._extract_complaint_output_feedback(validation_review_payload),
-                        "release_gate": self._build_complaint_output_release_gate(
-                            self._extract_complaint_output_feedback(validation_review_payload)
-                        ),
-                    },
+                    "complaint_output_validation_review": complaint_output_validation_review,
                     "pre_review": pre_workflow,
                     "validation_review": validation_workflow,
                 }
             )
 
+            if requires_coverage_follow_up:
+                carry_forward_patch_briefs = [
+                    dict(brief)
+                    for brief in selected_patch_briefs
+                    if str((brief or {}).get("title") or "").strip() in set(uncovered_selected_patch_brief_titles)
+                    or not uncovered_selected_patch_brief_titles
+                ]
+                carry_forward_goals = _unique_nonempty(
+                    [
+                        (
+                            "Implement the previously selected optimizer repair: "
+                            + str((brief or {}).get("title") or "").strip()
+                            + (
+                                f". {str((brief or {}).get('recommended_action') or '').strip()}"
+                                if str((brief or {}).get("recommended_action") or "").strip()
+                                else ""
+                            )
+                        ).strip()
+                        for brief in carry_forward_patch_briefs
+                        if str((brief or {}).get("title") or "").strip()
+                    ]
+                )
+                supplemental_artifacts = _unique_nonempty(
+                    list(supplemental_artifacts)
+                    + [patch_briefs_path, coverage_gap_path, round_summary_path]
+                )
+                if coverage_retry_budget > 0 and round_index >= planned_rounds:
+                    planned_rounds += 1
+                    coverage_retry_budget -= 1
+                    stop_reason = "extending_for_uncovered_selected_patch_briefs"
+            else:
+                carry_forward_patch_briefs = []
+                carry_forward_goals = []
+
             if break_on_no_changes and not serialized_result["changed_files"] and not serialized_result["patch_path"]:
                 stop_reason = "no_changes_reported"
                 break
             if stop_when_review_stable and previous_validation_review and validation_review == previous_validation_review:
+                if requires_coverage_follow_up and coverage_retry_budget > 0:
+                    planned_rounds = max(planned_rounds, round_index + 1)
+                    coverage_retry_budget -= 1
+                    stop_reason = "extending_for_uncovered_selected_patch_briefs"
+                    previous_validation_review = validation_review
+                    round_index += 1
+                    continue
                 stop_reason = "validation_review_stable"
                 break
             previous_validation_review = validation_review
+            round_index += 1
 
         return {
             "workflow_type": "ui_ux_closed_loop",
             "max_rounds": max(1, int(max_rounds)),
+            "planned_rounds": planned_rounds,
             "rounds_executed": len(cycles),
             "stop_reason": stop_reason,
             "cycles": cycles,
@@ -3610,12 +4636,16 @@ class Optimizer:
         ui_review_report: Dict[str, Any],
     ) -> UIOptimizationBundle:
         report = dict(ui_review_report or {})
-        review = dict(report.get("review") or {})
+        review_payload = report.get("review")
+        review = dict(review_payload) if isinstance(review_payload, dict) else {}
+        review_markdown = str(review_payload or "") if not isinstance(review_payload, dict) else ""
         complaint_output_feedback = dict(report.get("complaint_output_feedback") or review.get("complaint_output_feedback") or {})
         formal_diagnostics = dict(complaint_output_feedback.get("formal_diagnostics") or {})
         target_files = [str(path) for path in self._ui_target_files_from_review(report)]
         recommended_changes = [
-            dict(item) for item in list(review.get("recommended_changes") or []) if isinstance(item, dict)
+            dict(item)
+            for item in list((review.get("recommended_changes") if review else report.get("recommended_changes")) or [])
+            if isinstance(item, dict)
         ]
         for suggestion in [str(item).strip() for item in list(complaint_output_feedback.get("ui_suggestions") or []) if str(item).strip()]:
             recommended_changes.append(
@@ -3686,8 +4716,14 @@ class Optimizer:
                     "sdk_considerations": "Keep MCP SDK export and analysis controls visible while highlighting the top complaint defects before download.",
                 }
             )
-        alignment_score = int(complaint_output_feedback.get("claim_type_alignment_score") or 0)
-        if 0 <= alignment_score < 80:
+        alignment_score_raw = complaint_output_feedback.get("claim_type_alignment_score")
+        alignment_score = None
+        if alignment_score_raw is not None and str(alignment_score_raw).strip():
+            try:
+                alignment_score = int(alignment_score_raw)
+            except Exception:
+                alignment_score = None
+        if alignment_score is not None and 0 <= alignment_score < 80:
             recommended_changes.append(
                 {
                     "title": "Claim type alignment warning",
@@ -3698,6 +4734,12 @@ class Optimizer:
                     "sdk_considerations": "Preserve MCP SDK draft generation while exposing claim-type alignment warnings before export.",
                 }
             )
+        patch_briefs = self._build_ui_patch_briefs(
+            review=review,
+            recommended_changes=recommended_changes,
+            complaint_output_feedback=complaint_output_feedback,
+            target_files=target_files,
+        )
         return UIOptimizationBundle(
             timestamp=datetime.now(UTC).isoformat(),
             screenshot_dir=str(report.get("screenshot_dir") or ""),
@@ -3707,19 +4749,257 @@ class Optimizer:
                 if isinstance(item, dict) and str((item or {}).get("path") or "").strip()
             ],
             artifact_count=int(len(list(report.get("screenshots") or []))),
-            summary=str(review.get("summary") or ""),
-            issues=[dict(item) for item in list(review.get("issues") or []) if isinstance(item, dict)],
+            summary=str(review.get("summary") or report.get("summary") or review_markdown).strip(),
+            issues=[
+                dict(item)
+                for item in list((review.get("issues") if review else report.get("issues")) or [])
+                if isinstance(item, dict)
+            ],
             recommended_changes=recommended_changes,
             broken_controls=[
-                dict(item) for item in list(review.get("broken_controls") or []) if isinstance(item, dict)
+                dict(item)
+                for item in list((review.get("broken_controls") if review else report.get("broken_controls")) or [])
+                if isinstance(item, dict)
             ],
             complaint_journey=dict(review.get("complaint_journey") or {}),
             actor_plan=dict(review.get("actor_plan") or {}),
             critic_review=dict(review.get("critic_review") or {}),
-            playwright_followups=[str(item) for item in list(review.get("playwright_followups") or []) if str(item)],
+            playwright_followups=[
+                str(item)
+                for item in list((review.get("playwright_followups") if review else report.get("playwright_followups")) or [])
+                if str(item)
+            ],
             complaint_output_feedback=complaint_output_feedback,
             target_files=target_files,
+            patch_briefs=patch_briefs,
         )
+
+    @staticmethod
+    def _build_ui_patch_briefs(
+        *,
+        review: Dict[str, Any],
+        recommended_changes: List[Dict[str, Any]],
+        complaint_output_feedback: Dict[str, Any],
+        target_files: List[str],
+    ) -> List[Dict[str, Any]]:
+        briefs: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def add_brief(
+            *,
+            brief_id: str,
+            title: str,
+            surface: str,
+            problem: str,
+            recommended_action: str,
+            validation_checks: List[str],
+            files: List[str],
+            severity: str = "warning",
+            related_controls: List[str] | None = None,
+        ) -> None:
+            normalized = brief_id.strip().lower()
+            if not normalized or normalized in seen:
+                return
+            seen.add(normalized)
+            briefs.append(
+                {
+                    "id": brief_id,
+                    "title": title,
+                    "surface": surface,
+                    "severity": severity,
+                    "problem": problem,
+                    "recommended_action": recommended_action,
+                    "validation_checks": [str(item).strip() for item in validation_checks if str(item).strip()],
+                    "target_files": [str(item).strip() for item in files if str(item).strip()],
+                    "related_controls": [str(item).strip() for item in list(related_controls or []) if str(item).strip()],
+                }
+            )
+
+        for index, item in enumerate(list(review.get("broken_controls") or []), start=1):
+            if not isinstance(item, dict):
+                continue
+            control = str(item.get("control") or f"control-{index}").strip()
+            surface = str(item.get("surface") or "/workspace").strip()
+            add_brief(
+                brief_id=f"broken-control-{index}-{control.lower().replace(' ', '-')}",
+                title=f"Repair {control}",
+                surface=surface,
+                severity="critical",
+                problem=str(item.get("failure_mode") or item.get("problem") or "Broken or misleading UI control.").strip(),
+                recommended_action=str(item.get("repair") or "Repair the broken control and clarify the next state transition.").strip(),
+                validation_checks=[
+                    f"Click `{control}` on `{surface}` and confirm the next complaint step is visibly obvious.",
+                    "Ensure the actor journey can proceed without losing shared complaint state.",
+                ],
+                files=target_files,
+                related_controls=[control],
+            )
+
+        for index, item in enumerate(recommended_changes, start=1):
+            if not isinstance(item, dict):
+                continue
+            shared_code_path = str(item.get("shared_code_path") or "").strip()
+            validation_checks = [
+                str(item.get("sdk_considerations") or "").strip(),
+                "Re-run the Playwright complaint flow and verify complaint generation and exports still succeed.",
+            ]
+            files = [shared_code_path] if shared_code_path else list(target_files)
+            add_brief(
+                brief_id=f"recommended-change-{index}",
+                title=str(item.get("title") or f"Recommended change {index}").strip(),
+                surface="/workspace",
+                severity="warning",
+                problem=str(item.get("implementation_notes") or "Recommended UI/UX improvement from actor/critic review.").strip(),
+                recommended_action=str(item.get("implementation_notes") or "Apply the recommended UI/UX repair.").strip(),
+                validation_checks=validation_checks,
+                files=files,
+            )
+
+        formal_diagnostics = dict(complaint_output_feedback.get("formal_diagnostics") or {})
+        top_formal_findings = [
+            str(item).strip()
+            for item in list(formal_diagnostics.get("top_formal_findings") or [])
+            if str(item).strip()
+        ]
+        if top_formal_findings:
+            add_brief(
+                brief_id="complaint-output-formality",
+                title="Restore filing-ready complaint shape",
+                surface="/workspace?tab=draft",
+                severity="critical",
+                problem="The generated complaint output still has filing-quality defects.",
+                recommended_action="Adjust draft-stage guidance, release gating, and export warnings until the generated complaint consistently preserves formal pleading structure.",
+                validation_checks=[
+                    "Generate a complaint and confirm the preview and exported markdown/PDF include caption, jurisdiction or venue, counts, prayer for relief, and signature block.",
+                    *top_formal_findings[:3],
+                ],
+                files=["templates/workspace.html", "applications/complaint_workspace.py"],
+                related_controls=["Generate Draft", "Export Markdown", "Export PDF", "Analyze Output"],
+            )
+
+        alignment_score_raw = complaint_output_feedback.get("claim_type_alignment_score")
+        alignment_score = None
+        if alignment_score_raw is not None and str(alignment_score_raw).strip():
+            try:
+                alignment_score = int(alignment_score_raw)
+            except Exception:
+                alignment_score = None
+        if alignment_score is not None and 0 <= alignment_score < 80:
+            add_brief(
+                brief_id="claim-type-alignment",
+                title="Prevent claim-type drift before export",
+                surface="/workspace?tab=draft",
+                severity="critical",
+                problem="The UI allowed the selected claim type and the final pleading shape to drift apart.",
+                recommended_action="Keep claim type, complaint heading, and expected count heading visible during draft and export, and block release when alignment drops.",
+                validation_checks=[
+                    "Switch claim types in the workspace and confirm the draft title, complaint heading, and count heading all update together.",
+                    "Verify exported markdown/PDF match the selected claim type.",
+                ],
+                files=["templates/workspace.html", "applications/complaint_workspace.py", "playwright/tests/complaint-flow.spec.js"],
+                related_controls=["Claim Type", "Generate Draft", "Export Packet"],
+            )
+
+        return briefs
+
+    @staticmethod
+    def _write_json_artifact(path: Path, payload: Dict[str, Any]) -> str:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        return str(path)
+
+    @staticmethod
+    def _load_patch_briefs_from_artifact(path: str | Path | None) -> List[Dict[str, Any]]:
+        candidate = Path(str(path or "").strip())
+        if not str(candidate):
+            return []
+        try:
+            payload = json.loads(candidate.read_text())
+        except Exception:
+            return []
+        briefs = payload.get("patch_briefs")
+        if not isinstance(briefs, list):
+            return []
+        return [dict(item) for item in briefs if isinstance(item, dict)]
+
+    @staticmethod
+    def _prioritize_ui_patch_briefs(briefs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        severity_rank = {"critical": 0, "warning": 1, "ready": 2}
+        normalized = [dict(item) for item in briefs if isinstance(item, dict)]
+
+        def _sort_key(item: Dict[str, Any]) -> tuple[Any, ...]:
+            severity = str(item.get("severity") or "warning").strip().lower()
+            controls = list(item.get("related_controls") or [])
+            checks = list(item.get("validation_checks") or [])
+            return (
+                severity_rank.get(severity, 9),
+                -len(controls),
+                -len(checks),
+                str(item.get("surface") or ""),
+                str(item.get("title") or ""),
+            )
+
+        return sorted(normalized, key=_sort_key)
+
+    @staticmethod
+    def _select_ui_patch_briefs(
+        prioritized_patch_briefs: List[Dict[str, Any]],
+        *,
+        max_items: int = 3,
+    ) -> List[Dict[str, Any]]:
+        prioritized = [dict(item) for item in prioritized_patch_briefs if isinstance(item, dict)]
+        if max_items <= 0 or not prioritized:
+            return []
+
+        selected: List[Dict[str, Any]] = []
+        selected_keys: set[tuple[str, str, str]] = set()
+        covered_target_files: set[str] = set()
+
+        def _brief_key(brief: Dict[str, Any]) -> tuple[str, str, str]:
+            return (
+                str((brief or {}).get("title") or "").strip().lower(),
+                str((brief or {}).get("surface") or "").strip().lower(),
+                str((brief or {}).get("recommended_action") or "").strip().lower(),
+            )
+
+        def _target_files(brief: Dict[str, Any]) -> List[str]:
+            return [
+                str(path).strip()
+                for path in list((brief or {}).get("target_files") or [])
+                if str(path).strip()
+            ]
+
+        for brief in prioritized:
+            key = _brief_key(brief)
+            if key in selected_keys:
+                continue
+            target_files = _target_files(brief)
+            if not target_files:
+                continue
+            if any(path not in covered_target_files for path in target_files):
+                selected.append(dict(brief))
+                selected_keys.add(key)
+                covered_target_files.update(target_files)
+            if len(selected) >= max_items:
+                return selected[:max_items]
+
+        for brief in prioritized:
+            key = _brief_key(brief)
+            if key in selected_keys:
+                continue
+            selected.append(dict(brief))
+            selected_keys.add(key)
+            if len(selected) >= max_items:
+                break
+
+        return selected[:max_items]
+
+    @staticmethod
+    def _ui_patch_brief_batch_limit(prioritized_patch_briefs: List[Dict[str, Any]]) -> int:
+        prioritized = [dict(item) for item in prioritized_patch_briefs if isinstance(item, dict)]
+        if not prioritized:
+            return 0
+        return len(prioritized)
 
     def build_ui_patch_tasks(
         self,
@@ -3749,14 +5029,61 @@ class Optimizer:
             if isinstance(item, dict)
         ]
         recommendations = [item for item in recommendations if item]
+        report_patch_briefs_path = str(
+            (ui_review_report or {}).get("patch_briefs_path")
+            or (metadata or {}).get("patch_briefs_path")
+            or ""
+        ).strip()
+        artifact_patch_briefs = self._load_patch_briefs_from_artifact(report_patch_briefs_path)
+        prioritized_patch_briefs = self._prioritize_ui_patch_briefs(
+            artifact_patch_briefs or list(bundle.patch_briefs or [])
+        )
+        selected_patch_briefs = self._select_ui_patch_briefs(
+            prioritized_patch_briefs,
+            max_items=self._ui_patch_brief_batch_limit(prioritized_patch_briefs),
+        )
+        top_patch_brief = dict(selected_patch_briefs[0]) if selected_patch_briefs else {}
+        selected_target_files: List[Path] = []
+        for brief in selected_patch_briefs:
+            for raw_path in list(brief.get("target_files") or []):
+                text = str(raw_path).strip()
+                if not text:
+                    continue
+                candidate = Path(text)
+                if candidate not in selected_target_files:
+                    selected_target_files.append(candidate)
+        narrowed_target_files = selected_target_files or [Path(path) for path in bundle.target_files]
+        recommendation_coverage = {
+            "total_patch_briefs": len(prioritized_patch_briefs),
+            "selected_patch_briefs_count": len(selected_patch_briefs),
+            "uncovered_patch_briefs_count": max(0, len(prioritized_patch_briefs) - len(selected_patch_briefs)),
+            "selected_patch_brief_titles": [
+                str((item or {}).get("title") or "").strip()
+                for item in selected_patch_briefs
+                if str((item or {}).get("title") or "").strip()
+            ],
+            "selected_target_files": [str(path) for path in selected_target_files] if selected_target_files else [],
+        }
+        if selected_patch_briefs:
+            selected_brief_summary = "Selected patch briefs: " + " ".join(
+                (
+                    f"[{index}] {str(brief.get('title') or '').strip()} "
+                    f"(surface: {str(brief.get('surface') or '').strip()}; "
+                    f"problem: {str(brief.get('problem') or '').strip()}; "
+                    f"action: {str(brief.get('recommended_action') or '').strip()})."
+                )
+                for index, brief in enumerate(selected_patch_briefs, start=1)
+            )
+        else:
+            selected_brief_summary = "No single patch brief outranked the others; use the overall report summary."
         task = task_cls(
             task_id=f"ui_ux_autopatch_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}",
             description=(
                 "Use the screenshot-driven UI optimization lane to improve the complaint MCP workspace, "
                 "preserve JavaScript MCP SDK usage, and keep the package/CLI/MCP contract coherent. "
-                f"Current review summary: {summary}"
+                f"Current review summary: {summary} {selected_brief_summary}"
             ),
-            target_files=[Path(path) for path in bundle.target_files],
+            target_files=narrowed_target_files,
             method=getattr(method_enum, normalized_method.upper()),
             priority=int(priority),
             constraints=dict(constraints or {}),
@@ -3782,6 +5109,13 @@ class Optimizer:
                     "draft_fallback_reason": str((bundle.complaint_output_feedback or {}).get("draft_fallback_reason") or ""),
                     "draft_normalizations": list((bundle.complaint_output_feedback or {}).get("draft_normalizations") or []),
                     "recommended_target_files": list(bundle.target_files or []),
+                    "patch_briefs": list(bundle.patch_briefs or []),
+                    "patch_briefs_path": report_patch_briefs_path,
+                    "prioritized_patch_briefs": prioritized_patch_briefs,
+                    "selected_patch_briefs": selected_patch_briefs,
+                    "top_patch_brief": top_patch_brief,
+                    "recommendation_coverage": recommendation_coverage,
+                    "active_target_files": [str(path) for path in narrowed_target_files],
                 },
                 "ui_review_report": dict(ui_review_report or {}),
                 **dict(metadata or {}),

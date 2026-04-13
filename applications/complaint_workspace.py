@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import anyio
+import inspect
 import json
 import os
 import re
 import shutil
+import sys
 import threading
 import uuid
 import zipfile
@@ -13,17 +14,54 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from xml.sax.saxutils import escape
+
+from complaint_phases.legal_document import parse_legal_document
+
+try:
+    import anyio
+except ModuleNotFoundError:
+    class _AnyioFallback:
+        @staticmethod
+        def run(func: Any, *args: Any, **kwargs: Any) -> Any:
+            result = func(*args, **kwargs)
+            if inspect.isawaitable(result):
+                raise RuntimeError("anyio is required for async complaint workspace operations in this environment.")
+            return result
+
+    anyio = _AnyioFallback()
+
+
+def _ensure_local_ipfs_datasets_path() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    candidate = repo_root / "ipfs_datasets_py"
+    candidate_text = str(candidate)
+    if candidate.is_dir() and candidate_text not in sys.path:
+        sys.path.insert(0, candidate_text)
+
+
+_ensure_local_ipfs_datasets_path()
 
 
 DEFAULT_USER_ID = "did:key:anonymous"
 DEFAULT_UI_UX_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
+DEFAULT_LLM_DRAFT_PROVIDER = "codex_cli"
+DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN: List[str] = [
+    "codex_cli",
+    "copilot_cli",
+    "hf_inference_api",
+]
+DEFAULT_LLM_DRAFT_MODELS_BY_PROVIDER: Dict[str, str] = {
+    "codex": "gpt-5.3-codex",
+    "codex_cli": "gpt-5.3-codex",
+    "copilot_cli": "gpt-5-mini",
+}
 DEFAULT_LLM_DRAFT_TIMEOUT_SECONDS = 20
 DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER: Dict[str, int] = {
-    "codex": 60,
-    "codex_cli": 60,
+    "codex": 90,
+    "codex_cli": 90,
     "copilot_cli": 45,
     "copilot_sdk": 45,
     "openai": 30,
@@ -106,13 +144,22 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "create_identity",
     "start_session",
     "submit_intake_answers",
+    "run_intake_chat_turn",
     "save_evidence",
+    "import_gmail_evidence",
+    "run_gmail_duckdb_pipeline",
+    "import_local_evidence",
+    "search_email_duckdb_corpus",
     "review_case",
     "build_mediator_prompt",
     "get_complaint_readiness",
     "get_ui_readiness",
     "get_client_release_gate",
     "get_workflow_capabilities",
+    "get_tooling_contract",
+    "get_workspace_data_schema",
+    "migrate_legacy_workspace_data",
+    "search_workspace_dataset",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -122,7 +169,13 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "get_formal_diagnostics",
     "get_filing_provenance",
     "get_provider_diagnostics",
+    "view_docket_dataset",
+    "search_docket_dataset",
+    "get_docket_dataset_metadata",
+    "get_docket_dataset_graph",
     "review_generated_exports",
+    "update_claim_type",
+    "update_case_synopsis",
     "review_ui",
     "optimize_ui",
     "run_browser_audit",
@@ -131,13 +184,22 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "identity",
     "session",
     "answer",
+    "chat-turn",
     "add-evidence",
+    "import-gmail-evidence",
+    "run-gmail-duckdb-pipeline",
+    "import-local-evidence",
+    "search-email-duckdb",
     "review",
     "mediator-prompt",
     "complaint-readiness",
     "ui-readiness",
     "client-release-gate",
     "capabilities",
+    "tooling-contract",
+    "workspace-data-schema",
+    "migrate-legacy-workspace-data",
+    "search-workspace-data",
     "generate",
     "export-packet",
     "export-markdown",
@@ -147,7 +209,13 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "formal-diagnostics",
     "filing-provenance",
     "provider-diagnostics",
+    "docket-view",
+    "docket-search",
+    "docket-metadata",
+    "docket-graph",
     "review-exports",
+    "set-claim-type",
+    "update-synopsis",
     "review-ui",
     "optimize-ui",
     "browser-audit",
@@ -157,13 +225,22 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "bootstrapWorkspace",
     "getSession",
     "submitIntake",
+    "runIntakeChatTurn",
     "saveEvidence",
+    "importGmailEvidence",
+    "importLocalEvidence",
+    "runGmailDuckdbPipeline",
+    "searchEmailDuckdb",
     "reviewCase",
     "buildMediatorPrompt",
     "getComplaintReadiness",
     "getUiReadiness",
     "getClientReleaseGate",
     "getWorkflowCapabilities",
+    "getToolingContract",
+    "getWorkspaceDataSchema",
+    "migrateLegacyWorkspaceData",
+    "searchWorkspaceDataset",
     "generateComplaint",
     "exportComplaintPacket",
     "exportComplaintMarkdown",
@@ -174,10 +251,23 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "getFilingProvenance",
     "getProviderDiagnostics",
     "reviewGeneratedExports",
+    "updateClaimType",
+    "updateCaseSynopsis",
     "reviewUiArtifacts",
     "optimizeUiArtifacts",
     "runBrowserAudit",
 ]
+
+_DOCKET_ISSUE_ENTITY_KEYWORDS = (
+    "issue",
+    "legal_issue",
+    "claim",
+    "cause_of_action",
+    "violation",
+    "defense",
+    "right",
+    "duty",
+)
 _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
     "intake": {
         "package_export": "submit_intake_answers",
@@ -185,11 +275,41 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "mcp_tool": "complaint.submit_intake",
         "browser_sdk_method": "submitIntake",
     },
+    "intake_chat": {
+        "package_export": "run_intake_chat_turn",
+        "cli_command": "chat-turn",
+        "mcp_tool": "complaint.run_intake_chat_turn",
+        "browser_sdk_method": "runIntakeChatTurn",
+    },
     "evidence_capture": {
         "package_export": "save_evidence",
         "cli_command": "add-evidence",
         "mcp_tool": "complaint.save_evidence",
         "browser_sdk_method": "saveEvidence",
+    },
+    "gmail_evidence_import": {
+        "package_export": "import_gmail_evidence",
+        "cli_command": "import-gmail-evidence",
+        "mcp_tool": "complaint.import_gmail_evidence",
+        "browser_sdk_method": "importGmailEvidence",
+    },
+    "gmail_duckdb_pipeline": {
+        "package_export": "run_gmail_duckdb_pipeline",
+        "cli_command": "run-gmail-duckdb-pipeline",
+        "mcp_tool": "complaint.run_gmail_duckdb_pipeline",
+        "browser_sdk_method": "runGmailDuckdbPipeline",
+    },
+    "local_evidence_import": {
+        "package_export": "import_local_evidence",
+        "cli_command": "import-local-evidence",
+        "mcp_tool": "complaint.import_local_evidence",
+        "browser_sdk_method": "importLocalEvidence",
+    },
+    "email_duckdb_search": {
+        "package_export": "search_email_duckdb_corpus",
+        "cli_command": "search-email-duckdb",
+        "mcp_tool": "complaint.search_email_duckdb_corpus",
+        "browser_sdk_method": "searchEmailDuckdb",
     },
     "support_review": {
         "package_export": "review_case",
@@ -202,6 +322,18 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "mediator-prompt",
         "mcp_tool": "complaint.build_mediator_prompt",
         "browser_sdk_method": "buildMediatorPrompt",
+    },
+    "claim_type_alignment": {
+        "package_export": "update_claim_type",
+        "cli_command": "set-claim-type",
+        "mcp_tool": "complaint.update_claim_type",
+        "browser_sdk_method": "updateClaimType",
+    },
+    "case_synopsis_sync": {
+        "package_export": "update_case_synopsis",
+        "cli_command": "update-synopsis",
+        "mcp_tool": "complaint.update_case_synopsis",
+        "browser_sdk_method": "updateCaseSynopsis",
     },
     "draft_generation": {
         "package_export": "generate_complaint",
@@ -251,6 +383,30 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "mcp_tool": "complaint.get_provider_diagnostics",
         "browser_sdk_method": "getProviderDiagnostics",
     },
+    "tooling_contract": {
+        "package_export": "get_tooling_contract",
+        "cli_command": "tooling-contract",
+        "mcp_tool": "complaint.get_tooling_contract",
+        "browser_sdk_method": "getToolingContract",
+    },
+    "workspace_data_schema": {
+        "package_export": "get_workspace_data_schema",
+        "cli_command": "workspace-data-schema",
+        "mcp_tool": "complaint.get_workspace_data_schema",
+        "browser_sdk_method": "getWorkspaceDataSchema",
+    },
+    "workspace_data_migration": {
+        "package_export": "migrate_legacy_workspace_data",
+        "cli_command": "migrate-legacy-workspace-data",
+        "mcp_tool": "complaint.migrate_legacy_workspace_data",
+        "browser_sdk_method": "migrateLegacyWorkspaceData",
+    },
+    "workspace_data_search": {
+        "package_export": "search_workspace_dataset",
+        "cli_command": "search-workspace-data",
+        "mcp_tool": "complaint.search_workspace_dataset",
+        "browser_sdk_method": "searchWorkspaceDataset",
+    },
     "export_critic": {
         "package_export": "review_generated_exports",
         "cli_command": "review-exports",
@@ -297,10 +453,171 @@ def _unique_preserve_order(values: List[str]) -> List[str]:
     return ordered
 
 
+def _build_schema_guided_tooling_recommendations(schema_snapshot: Optional[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    snapshot = dict(schema_snapshot or {})
+    if not snapshot:
+        return []
+
+    recommendations: List[Dict[str, Any]] = []
+    hint_index = {
+        str((item or {}).get("id") or "").strip(): str((item or {}).get("reason") or "").strip()
+        for item in list(snapshot.get("ui_design_hints") or []) + list(snapshot.get("mcp_design_hints") or [])
+        if isinstance(item, Mapping)
+    }
+    filter_dimensions = [str(item).strip() for item in list(snapshot.get("filter_dimensions") or []) if str(item).strip()]
+    piece_ids = {
+        str((piece or {}).get("piece_id") or "").strip()
+        for piece in list(snapshot.get("piece_schemas") or [])
+        if isinstance(piece, Mapping)
+    }
+
+    def add_recommendation(
+        rec_id: str,
+        *,
+        tool_name: str,
+        ui_surface: str,
+        reason: str,
+        priority: str = "medium",
+    ) -> None:
+        recommendations.append({
+            "id": rec_id,
+            "tool_name": tool_name,
+            "ui_surface": ui_surface,
+            "reason": reason,
+            "priority": priority,
+        })
+
+    add_recommendation(
+        "workspace_schema_refresh",
+        tool_name="complaint.get_workspace_data_schema",
+        ui_surface="workspace-data-operator-card",
+        reason="Refresh the workspace parquet schema before designing MCP filters or navigation so the UI follows the stored dataset pieces.",
+        priority="high",
+    )
+    add_recommendation(
+        "workspace_migration_path",
+        tool_name="complaint.migrate_legacy_workspace_data",
+        ui_surface="workspace-data-operator-card",
+        reason="Use the legacy migration flow to consolidate old complaint session and mediator stores into the packaged parquet workspace bundle.",
+        priority="high",
+    )
+    if "schema_guided_filters" in hint_index and filter_dimensions:
+        add_recommendation(
+            "workspace_filter_design",
+            tool_name="complaint.get_workspace_data_schema",
+            ui_surface="workspace-data-schema-preview",
+            reason=f"Prioritize MCP filters and browser chips for {', '.join(filter_dimensions)} because the dataset exposes those as useful selection dimensions.",
+            priority="high",
+        )
+    if "dual_search_modes" in hint_index:
+        add_recommendation(
+            "dual_search_affordances",
+            tool_name="complaint.search_docket_dataset",
+            ui_surface="workspace-data-schema-hints-preview",
+            reason=hint_index["dual_search_modes"],
+            priority="medium",
+        )
+    if "claim_alignment_filters" in hint_index:
+        add_recommendation(
+            "claim_alignment_navigation",
+            tool_name="complaint.review_case",
+            ui_surface="review",
+            reason=hint_index["claim_alignment_filters"],
+            priority="medium",
+        )
+    if "knowledge_graph_presence" in hint_index or any(piece_id.startswith("knowledge_graph") for piece_id in piece_ids):
+        add_recommendation(
+            "graph_navigation",
+            tool_name="complaint.get_docket_dataset_graph",
+            ui_surface="packaged-docket-operator-card",
+            reason=hint_index.get("knowledge_graph_presence") or "Graph entities are present in the packaged workspace and should inform related-issue exploration.",
+            priority="medium",
+        )
+    return recommendations
+
+
 def _normalize_fragment(value: Optional[str], fallback: str) -> str:
     text = re.sub(r"\s+", " ", str(value or "").strip())
     text = re.sub(r"[.?!,;:]+$", "", text)
     return text or fallback
+
+
+def _extract_person_name(value: Optional[str], fallback: str = "Plaintiff") -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return fallback
+    text = re.sub(r"(?i)\bi am\s+", "", text)
+    text = re.sub(r"(?i)\bmy address is\b.*$", "", text).strip(" ,.;:")
+    text = re.sub(r"[^A-Za-z '\-]+", " ", text)
+    candidates = []
+    for segment in re.split(r"\s+and\s+|,|/|;", text):
+        tokenized = [part.strip() for part in segment.split() if part.strip()]
+        if len(tokenized) < 2:
+            continue
+        filtered = []
+        for token in tokenized:
+            lowered = token.lower()
+            if lowered in {"plaintiff", "defendant", "vs", "v", "address"}:
+                continue
+            if token[:1].isalpha():
+                filtered.append(token.strip(" .,:;"))
+            if len(filtered) >= 4:
+                break
+        if len(filtered) >= 2:
+            candidates.append(" ".join(filtered))
+    if candidates:
+        return candidates[0]
+    compact = " ".join(text.split()[:4]).strip(" ,.;:")
+    return compact or fallback
+
+
+def _extract_defendant_name(value: Optional[str], fallback: str = "Defendant") -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return fallback
+    if re.search(r"\bvs\b", text, flags=re.IGNORECASE):
+        text = re.split(r"\bvs\b", text, flags=re.IGNORECASE, maxsplit=1)[-1].strip()
+    text = re.sub(r"(?i)\b(defendant|plaintiff)s?\b", "", text).strip(" ,.;:")
+    segments = [segment.strip(" ,.;:") for segment in re.split(r"\s+and\s+|;|/", text) if segment.strip()]
+    normalized_segments: List[str] = []
+    seen: set[str] = set()
+    for segment in segments:
+        cleaned = re.sub(r"[^A-Za-z0-9 '&().-]+", " ", segment)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if not cleaned:
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        normalized_segments.append(cleaned)
+    if not normalized_segments:
+        return fallback
+    if len(normalized_segments) == 1:
+        return normalized_segments[0]
+    if len(normalized_segments) == 2:
+        return f"{normalized_segments[0]} and {normalized_segments[1]}"
+    return ", ".join(normalized_segments[:-1]) + f", and {normalized_segments[-1]}"
+
+
+def _condense_timeline_text(value: Optional[str], fallback: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text:
+        return fallback
+    if len(text) <= 360:
+        return text
+    sentence_parts = re.split(r"(?<=[.!?])\s+", text)
+    date_pattern = re.compile(
+        r"\b("
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+        r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+        r")\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b|\b\d{4}\b",
+        flags=re.IGNORECASE,
+    )
+    focused = [part.strip() for part in sentence_parts if date_pattern.search(part or "")]
+    if len(focused) >= 2:
+        return " ".join(focused[:6]).strip()
+    return " ".join(sentence_parts[:3]).strip()[:520]
 
 
 def _sentence_fragment(value: Optional[str], fallback: str) -> str:
@@ -426,10 +743,85 @@ def _llm_draft_timeout_for_provider(provider: Optional[str]) -> int:
     return int(DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER.get(provider_key, DEFAULT_LLM_DRAFT_TIMEOUT_SECONDS))
 
 
+def _resolve_llm_draft_backend(
+    provider: Optional[str],
+    model: Optional[str],
+) -> Dict[str, Optional[str]]:
+    requested_provider = str(provider or "").strip()
+    requested_model = str(model or "").strip()
+
+    env_default_provider = str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "") or "").strip()
+    effective_provider = requested_provider or env_default_provider or DEFAULT_LLM_DRAFT_PROVIDER
+    provider_key = effective_provider.lower()
+
+    env_provider_model = str(
+        os.getenv(f"COMPLAINT_GENERATOR_LLM_DRAFT_MODEL_{provider_key.upper()}", "") or ""
+    ).strip()
+    env_default_model = str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_MODEL", "") or "").strip()
+    effective_model = (
+        requested_model
+        or env_provider_model
+        or env_default_model
+        or DEFAULT_LLM_DRAFT_MODELS_BY_PROVIDER.get(provider_key)
+        or None
+    )
+
+    return {
+        "provider": effective_provider,
+        "model": effective_model,
+        "requested_provider": requested_provider or None,
+        "requested_model": requested_model or None,
+    }
+
+
+def _resolve_llm_draft_backend_candidates(
+    provider: Optional[str],
+    model: Optional[str],
+) -> List[Dict[str, Optional[str]]]:
+    requested_provider = str(provider or "").strip()
+    requested_model = str(model or "").strip()
+    env_default_provider = str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "") or "").strip()
+
+    if requested_provider or env_default_provider:
+        return [_resolve_llm_draft_backend(provider, model)]
+
+    candidates: List[Dict[str, Optional[str]]] = []
+    seen: set[str] = set()
+    for fallback_provider in DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN:
+        provider_key = str(fallback_provider or "").strip().lower()
+        if not provider_key or provider_key in seen:
+            continue
+        seen.add(provider_key)
+        candidates.append(
+            _resolve_llm_draft_backend(
+                fallback_provider,
+                requested_model or None,
+            )
+        )
+    return candidates or [_resolve_llm_draft_backend(provider, model)]
+
+
 def _pleading_timeline_sentence(value: Optional[str], fallback: str) -> str:
     text = _normalize_fragment(value, fallback)
     if not text:
         return _pleading_sentence(fallback, fallback)
+    sentence_parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+    if len(sentence_parts) >= 2:
+        fragments = []
+        for part in sentence_parts[:6]:
+            cleaned = re.sub(r"[.?!]+$", "", part).strip()
+            if cleaned:
+                fragments.append(_timeline_clause_fragment(cleaned))
+        if not fragments:
+            return _pleading_sentence(text, fallback)
+        sentence = " ".join(
+            f"{fragment.rstrip('.') }." if not str(fragment).rstrip().endswith(".") else str(fragment).rstrip()
+            for fragment in fragments
+        )
+        sentence = re.sub(r"\s+", " ", sentence).strip()
+        if sentence[:1].isalpha():
+            sentence = sentence[0].upper() + sentence[1:]
+        return sentence
     parts = [part.strip() for part in re.split(r",|\band\b", text) if part.strip()]
     if not parts:
         return _pleading_sentence(text, fallback)
@@ -478,6 +870,27 @@ def _court_header_line(value: Optional[str]) -> str:
     return "FOR THE APPROPRIATE JUDICIAL DISTRICT"
 
 
+def _build_export_structure_summary(markdown_text: str) -> Dict[str, Any]:
+    parsed = parse_legal_document(str(markdown_text or ""))
+    payload = parsed.to_dict()
+    header = payload.get("header") if isinstance(payload.get("header"), dict) else {}
+    sections = payload.get("sections") if isinstance(payload.get("sections"), list) else []
+    payload["summary"] = {
+        "has_header": bool(header),
+        "court_line_count": len(header.get("court_lines") or []),
+        "party_line_count": len(header.get("party_lines") or []),
+        "title_line_count": len(header.get("title_lines") or []),
+        "section_count": len(sections),
+        "section_kinds": [str(section.get("kind") or "") for section in sections[:20] if isinstance(section, dict)],
+        "numbered_paragraph_count": int(payload.get("numbered_paragraph_count") or 0),
+        "bullet_count": int(payload.get("bullet_count") or 0),
+        "code_block_count": int(payload.get("code_block_count") or 0),
+        "all_caps_heading_count": int(payload.get("all_caps_heading_count") or 0),
+        "title": str(payload.get("title") or ""),
+    }
+    return payload
+
+
 def _slugify_filename(value: str) -> str:
     normalized = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(value or "").strip().lower())
     return normalized.strip("-") or "complaint-packet"
@@ -502,11 +915,110 @@ def _claim_element_label(value: Optional[str]) -> str:
 
 
 def _formal_evidence_summary_item(item: Dict[str, Any], *, kind: str) -> str:
-    title = str(item.get("title") or f"Untitled {kind}").strip()
+    title = _evidence_display_title(item, kind=kind)
     element_label = _claim_element_label(item.get("claim_element_id")).lower()
     if kind == "testimony":
         return f"testimony presently identified as '{title}' on the {element_label} element"
     return f"documentary exhibit presently identified as '{title}' on the {element_label} element"
+
+
+def _compact_evidence_reference_item(item: Dict[str, Any]) -> str:
+    title = _evidence_display_title(item, kind=str(item.get("kind") or "evidence"))
+    element_label = _claim_element_label(item.get("claim_element_id")).strip() or "Claim element"
+    return f"{title} ({element_label})"
+
+
+def _exhibit_label(index: int) -> str:
+    if index < 0:
+        return "Exhibit ?"
+    value = index
+    letters = ""
+    while True:
+        value, remainder = divmod(value, 26)
+        letters = chr(ord("A") + remainder) + letters
+        if value == 0:
+            break
+        value -= 1
+    return f"Exhibit {letters}"
+
+
+def _evidence_display_title(item: Dict[str, Any], *, kind: str) -> str:
+    raw_title = str(item.get("title") or f"Untitled {kind}").strip()
+    if not raw_title.lower().startswith("local import:"):
+        return raw_title
+
+    source = str(item.get("source") or "")
+    filename = raw_title.split(":", 1)[-1].strip()
+    path_tail = source.split("local_artifact_import:", 1)[-1].strip() if "local_artifact_import:" in source else ""
+    lowered_filename = filename.lower()
+    lowered_path = path_tail.lower()
+
+    explicit_mappings = {
+        "a38c7914-ea37-4c2f-a815-711d4a97c92b.txt": "HACC ACOP policy",
+        "8ee6f7d1-0c36-48e4-9677-336b95fb9858.txt": "HACC HCV Administrative Plan",
+        "hud_fair_housing_act.html": "HUD Fair Housing Act materials",
+        "ors_chapter_659a_discrimination_definitions_and_procedures.html": "ORS chapter 659A discrimination provisions",
+        "ors_chapter_456_housing_authorities.html": "ORS chapter 456 housing-authority provisions",
+        "945af141-c7d1-4973-88c0-b57024243114.txt": "HACC grievance and hearing policy text",
+        "b53a0523-fa60-4df6-bba3-6ae34a47cb02.txt": "HACC reasonable-accommodation policy text",
+        "exhibit_index.md": "Temporary CLI session exhibit index",
+        "email_evidence_memo.md": "Temporary CLI session email evidence memo",
+        "reasonable_accommodation_ocr_memo.md": "Reasonable accommodation OCR memo",
+        "chronology_evidence_matrix.json": "Chronology evidence matrix",
+        "summary.json": "HACC knowledge-graph summary",
+        "engine.py": "HACC research engine source",
+        "hacc_corpus.summary.json": "HACC corpus index summary",
+        "hacc_enhanced_index_20260314_055513.summary.json": "HACC enhanced index summary",
+        "evidence_review.md": "Prior evidence review memorandum",
+        "evidence_review.json": "Prior evidence review data",
+        "p1_critical_civil_rights_fair-housing.aspx": "Oregon fair-housing guidance",
+        "p1_critical_civil_rights_racial-discrimination.aspx": "Oregon racial-discrimination guidance",
+        "p2_procurement_&_rules_fair_housing_equal_opp": "Oregon fair-housing equal-opportunity rules",
+        "p3_regulatory_find-affordable-housing.aspx": "Oregon affordable-housing guidance",
+        "p3_regulatory_housing-counseling.aspx": "Oregon housing-counseling guidance",
+        "p3_regulatory_housing-for-veterans.aspx": "Oregon housing-for-veterans guidance",
+    }
+    if lowered_filename in explicit_mappings:
+        return explicit_mappings[lowered_filename]
+
+    if "evidence_review_" in lowered_path and lowered_filename.endswith(".md"):
+        return "Prior evidence review memorandum"
+    if "evidence_review_" in lowered_path and lowered_filename.endswith(".json"):
+        return "Prior evidence review data"
+    if lowered_filename.endswith(".html") or lowered_filename.endswith(".aspx"):
+        cleaned = re.sub(r"\.(html|aspx)$", "", filename, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("_", " ").replace("-", " ").strip()
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        return cleaned[:1].upper() + cleaned[1:] if cleaned else raw_title
+    cleaned = re.sub(r"\.[A-Za-z0-9]+$", "", filename)
+    cleaned = cleaned.replace("_", " ").replace("-", " ").strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned[:1].upper() + cleaned[1:] if cleaned else raw_title
+
+
+def _evidence_priority(item: Dict[str, Any]) -> int:
+    title = _evidence_display_title(item, kind=str(item.get("kind") or "evidence")).lower()
+    source = str(item.get("source") or "").lower()
+    score = 0
+    if "chronology evidence matrix" in title:
+        score += 100
+    if "email evidence memo" in title:
+        score += 95
+    if "reasonable accommodation ocr memo" in title:
+        score += 90
+    if "exhibit index" in title:
+        score += 85
+    if "evidence review" in title:
+        score += 70
+    if "acop" in title or "administrative plan" in title:
+        score += 60
+    if "fair housing act" in title or "659a" in title or "456" in title:
+        score += 55
+    if "temporary-cli-session-migration" in source or "workspace-generated" in source:
+        score += 40
+    if "migrated_sources/research_results/evidence_review_" in source:
+        score += 20
+    return score
 
 
 def _claim_type_filing_guidance(value: Optional[str]) -> str:
@@ -1036,7 +1548,10 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "intake_answers": {},
         "intake_history": [],
         "evidence": {"testimony": [], "documents": []},
+        "filing_metadata": {},
         "draft": None,
+        "latest_packet_export": None,
+        "latest_export_critic": None,
         "ui_readiness": None,
     }
 
@@ -1055,7 +1570,10 @@ class ComplaintWorkspaceService:
         path = self._session_path(user_id)
         if not path.exists():
             return _default_state(user_id)
-        payload = json.loads(path.read_text())
+        try:
+            payload = json.loads(path.read_text())
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            return _default_state(user_id)
         if not isinstance(payload, dict):
             return _default_state(user_id)
         payload.setdefault("user_id", user_id)
@@ -1064,14 +1582,23 @@ class ComplaintWorkspaceService:
         payload.setdefault("intake_answers", {})
         payload.setdefault("intake_history", [])
         payload.setdefault("evidence", {"testimony": [], "documents": []})
+        payload.setdefault("filing_metadata", {})
         payload.setdefault("draft", None)
+        payload.setdefault("latest_packet_export", None)
+        payload.setdefault("latest_export_critic", None)
         payload.setdefault("ui_readiness", None)
         return payload
 
     def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
         state["updated_at"] = _utc_now()
         path = self._session_path(str(state.get("user_id") or DEFAULT_USER_ID))
-        path.write_text(json.dumps(state, indent=2, sort_keys=True))
+        temp_path = path.with_name(f"{path.name}.tmp")
+        try:
+            temp_path.write_text(json.dumps(state, indent=2, sort_keys=True))
+            os.replace(temp_path, path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
         return state
 
     def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -1092,6 +1619,115 @@ class ComplaintWorkspaceService:
             if not str(answers.get(question["id"]) or "").strip():
                 return question
         return None
+
+    def _question_by_id(self, question_id: Optional[str]) -> Optional[Dict[str, str]]:
+        normalized_question_id = str(question_id or "").strip()
+        if not normalized_question_id:
+            return None
+        for question in _INTAKE_QUESTIONS:
+            if question["id"] == normalized_question_id:
+                return question
+        return None
+
+    def _build_intake_chat_explanation(self, question: Dict[str, str], state: Dict[str, Any]) -> Dict[str, Any]:
+        review = self._build_review(state)
+        support_matrix = list(review.get("support_matrix") or [])
+        first_gap = next((item for item in support_matrix if not item.get("supported")), None)
+        focus_gap = (
+            f"Current biggest support gap: {str(first_gap.get('label') or '').lower()}."
+            if first_gap
+            else "Core claim elements already have at least some recorded support."
+        )
+        guidance = {
+            "party_name": {
+                "why_this_matters": "This anchors who the complaint belongs to across the CLI, web workspace, and later evidence collection.",
+                "how_to_answer": "Use the name that should appear in the complaint caption or intake record.",
+            },
+            "opposing_party": {
+                "why_this_matters": "This identifies the target organization or person so the record, draft, and evidence search stay pointed at the right defendant.",
+                "how_to_answer": "Name the employer, housing provider, agency, or other party you are complaining about.",
+            },
+            "protected_activity": {
+                "why_this_matters": "This is usually the first element that explains why the later adverse action may have been unlawful retaliation or interference.",
+                "how_to_answer": "Describe what you reported, opposed, requested, or disclosed before things got worse.",
+            },
+            "adverse_action": {
+                "why_this_matters": "This captures what happened to you after the protected activity and helps define damages and liability.",
+                "how_to_answer": "Describe the concrete action taken against you, such as termination, denial, discipline, or eviction threat.",
+            },
+            "timeline": {
+                "why_this_matters": "Timing is often what connects the protected activity to the adverse action and exposes causation gaps.",
+                "how_to_answer": "Give the key dates or sequence in plain language, even if you only know approximate timing.",
+            },
+            "harm": {
+                "why_this_matters": "This clarifies damages and what relief the complaint should eventually request.",
+                "how_to_answer": "List the practical harm you suffered, such as lost wages, housing instability, denied benefits, or emotional distress.",
+            },
+            "court_header": {
+                "why_this_matters": "This helps format the eventual complaint draft correctly when you already know the court or forum.",
+                "how_to_answer": "If you know the court caption, provide it. If not, you can say that you are unsure.",
+            },
+        }.get(question["id"], {})
+        return {
+            "question_id": question["id"],
+            "why_this_matters": guidance.get("why_this_matters") or "This helps tighten the intake record before evidence and legal research begin.",
+            "how_to_answer": guidance.get("how_to_answer") or "Answer in plain language with the most concrete facts you know right now.",
+            "review_focus": focus_gap,
+        }
+
+    def _build_intake_chat_payload(
+        self,
+        state: Dict[str, Any],
+        *,
+        accepted_answer: Optional[Dict[str, Any]] = None,
+        requested_question_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        answers = state.get("intake_answers") or {}
+        review = self._build_review(state)
+        questions = self._build_question_status(answers)
+        active_question = self._question_by_id(requested_question_id) if requested_question_id else self._next_question(answers)
+        answered_count = len([item for item in questions if item.get("is_answered")])
+        total_questions = len(questions)
+        if active_question:
+            lead_in = "Let's start with the basics." if answered_count == 0 else "I have that. Next:" if accepted_answer else "Next question:"
+            message = f"{lead_in} {active_question['prompt']}"
+            explanation = self._build_intake_chat_explanation(active_question, state)
+        else:
+            message = (
+                "Intake complete. I have the core complaint facts. Next, review the synopsis, add corroborating evidence, "
+                "and use the mediator follow-up flow to tighten proof gaps."
+            )
+            explanation = {
+                "question_id": None,
+                "why_this_matters": "The intake record is complete enough to hand off into evidence collection and complaint drafting.",
+                "how_to_answer": "No further intake answer is required right now.",
+                "review_focus": "Shift attention to corroborating documents, witness testimony, and legal support.",
+            }
+        return {
+            "user_id": str(state.get("user_id") or DEFAULT_USER_ID),
+            "message": message,
+            "inquiry": {
+                "question_id": active_question["id"],
+                "label": active_question["label"],
+                "prompt": active_question["prompt"],
+                "placeholder": active_question.get("placeholder") or "",
+            }
+            if active_question
+            else None,
+            "explanation": explanation,
+            "accepted_answer": deepcopy(accepted_answer) if accepted_answer else None,
+            "questions": questions,
+            "next_question": self._next_question(answers),
+            "review": review,
+            "case_synopsis": self._build_case_synopsis(state),
+            "session": deepcopy(state),
+            "conversation_state": {
+                "answered_question_count": answered_count,
+                "total_question_count": total_questions,
+                "is_complete": active_question is None,
+                "remaining_question_ids": [item["id"] for item in _INTAKE_QUESTIONS if not str(answers.get(item["id"]) or "").strip()],
+            },
+        }
 
     def _support_matrix(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
         answers = state.get("intake_answers") or {}
@@ -1177,12 +1813,51 @@ class ComplaintWorkspaceService:
         review_snapshot = self._build_review(state)
         overview = dict(review_snapshot.get("overview") or {})
         evidence = dict(state.get("evidence") or {})
+        filing_metadata = dict(state.get("filing_metadata") or {})
         testimony_items = list(evidence.get("testimony") or [])
         document_items = list(evidence.get("documents") or [])
+        prioritized_document_items = sorted(
+            document_items,
+            key=lambda item: (-_evidence_priority(item), str(item.get("saved_at") or ""), str(item.get("title") or "")),
+        )
         claim_type = _normalize_claim_type(state.get("claim_type"))
         claim_label = _claim_type_display_name(claim_type)
-        plaintiff = answers.get("party_name") or "Plaintiff"
-        defendant = answers.get("opposing_party") or "Defendant"
+        plaintiff = _extract_person_name(
+            filing_metadata.get("signature_plaintiff") or answers.get("party_name"),
+            fallback="Plaintiff",
+        )
+        defendant = _extract_defendant_name(answers.get("opposing_party"), fallback="Defendant")
+        caption_plaintiffs = str(filing_metadata.get("caption_plaintiffs") or "").strip() or plaintiff
+        caption_defendants = str(filing_metadata.get("caption_defendants") or "").strip() or defendant
+        mailing_address = str(filing_metadata.get("mailing_address") or "").strip() or "____________________"
+        signature_role = str(filing_metadata.get("signature_role") or "").strip() or "Plaintiff, Pro Se"
+        plaintiff_caption_label = (
+            "Plaintiffs"
+            if any(token in caption_plaintiffs for token in [",", " and "]) and caption_plaintiffs != plaintiff
+            else "Plaintiff"
+        )
+        defendant_caption_label = (
+            "Defendants"
+            if any(token in caption_defendants for token in [",", " and "])
+            else "Defendant"
+        )
+        is_plural_plaintiffs = plaintiff_caption_label == "Plaintiffs"
+        is_plural_defendants = defendant_caption_label == "Defendants"
+        plaintiff_party_label = "Plaintiffs" if is_plural_plaintiffs else "Plaintiff"
+        defendant_party_label = "Defendants" if is_plural_defendants else "Defendant"
+        plaintiff_party_object = "Plaintiffs" if is_plural_plaintiffs else "Plaintiff"
+        plaintiff_party_have = "have" if is_plural_plaintiffs else "has"
+        plaintiff_party_seek = "seek" if is_plural_plaintiffs else "seeks"
+        plaintiff_party_repeat = "repeat and reallege" if is_plural_plaintiffs else "repeats and realleges"
+        plaintiff_party_demand = "demand" if is_plural_plaintiffs else "demands"
+        plaintiff_party_contend = "contend" if is_plural_plaintiffs else "contends"
+        plaintiff_party_give = "give" if is_plural_plaintiffs else "gives"
+        plaintiff_intro_name = caption_plaintiffs if is_plural_plaintiffs else plaintiff
+        defendant_intro_name = caption_defendants if is_plural_defendants else defendant
+        intro_alleges = "allege" if is_plural_plaintiffs else "alleges"
+        intro_their = "their" if is_plural_plaintiffs else "their"
+        defendant_be = "are" if is_plural_defendants else "is"
+        timeline_input = _condense_timeline_text(answers.get("timeline"), "the events occurred close in time")
         protected_activity = _sentence_fragment(
             answers.get("protected_activity"),
             "engaged in protected activity",
@@ -1196,7 +1871,7 @@ class ComplaintWorkspaceService:
             "suffered an adverse action",
         )
         timeline = _sentence_fragment(
-            answers.get("timeline"),
+            timeline_input,
             "the events occurred close in time",
         )
         harm = _sentence_fragment(
@@ -1214,98 +1889,130 @@ class ComplaintWorkspaceService:
         missing_count = int(overview.get("missing_elements") or 0)
         evidence_count = len(testimony_items) + len(document_items)
         court_header = _court_header_line(answers.get("court_header"))
+        document_exhibits = [
+            {
+                "label": _exhibit_label(index),
+                "title": _evidence_display_title(item, kind="document"),
+                "item": item,
+            }
+            for index, item in enumerate(prioritized_document_items[:3])
+        ]
         testimony_reference_lines = _unique_preserve_order([
-            f"Plaintiff expects to offer testimony presently identified as '{item.get('title') or 'Untitled testimony'}' in support of the {_claim_element_label(item.get('claim_element_id')).lower()} element."
+            f"{plaintiff_party_label} expect{'s' if not is_plural_plaintiffs else ''} to offer testimony presently identified as '{_evidence_display_title(item, kind='testimony')}' in support of the {_claim_element_label(item.get('claim_element_id')).lower()} element."
             for item in testimony_items[:3]
         ])
         document_reference_lines = _unique_preserve_order([
-            f"Plaintiff expects to offer documentary exhibit '{item.get('title') or 'Untitled document'}' in support of the {_claim_element_label(item.get('claim_element_id')).lower()} element."
-            for item in document_items[:3]
+            (
+                f"{exhibit['label']} ('{exhibit['title']}') presently supports the "
+                f"{_claim_element_label(exhibit['item'].get('claim_element_id')).lower()} element. "
+                f"{plaintiff_party_label} expect{'s' if not is_plural_plaintiffs else ''} to offer {exhibit['label'].lower()} in support of the "
+                f"{_claim_element_label(exhibit['item'].get('claim_element_id')).lower()} element."
+            )
+            for exhibit in document_exhibits
         ])
         testimony_summary = "; ".join(_unique_preserve_order([
             _formal_evidence_summary_item(item, kind="testimony")
             for item in testimony_items[:3]
         ])) or "No witness or complainant testimony is presently identified"
-        document_summary = "; ".join(_unique_preserve_order([
-            _formal_evidence_summary_item(item, kind="document")
-            for item in document_items[:3]
-        ])) or "No documentary exhibits are presently identified"
+        document_summary_items = _unique_preserve_order([
+            (
+                f"{exhibit['label']} - {exhibit['title']} ({_claim_element_label(exhibit['item'].get('claim_element_id')).strip() or 'Claim element'})"
+                f"; {_formal_evidence_summary_item(exhibit['item'], kind='document')}"
+            )
+            for exhibit in document_exhibits
+        ])
+        document_summary = "; ".join(document_summary_items) or "No documentary exhibits are presently identified"
+        exhibit_titles_lower = {
+            _evidence_display_title(item, kind="document").lower()
+            for item in prioritized_document_items
+        }
+        case_specific_evidence_notice: Optional[str] = None
+        if {
+            "chronology evidence matrix",
+            "temporary cli session email evidence memo",
+            "reasonable accommodation ocr memo",
+        }.issubset(exhibit_titles_lower):
+            case_specific_evidence_notice = (
+                f"16. The current exhibit set specifically identifies a February 25 to February 26, 2026 written complaint and documentation-escalation thread, "
+                "a March 19, 2026 voucher-reversal email, a March 20, 2026 accommodation-conditioned reissuance email, "
+                "and a March 24, 2026 provider-supported accommodation-verification record."
+            )
         complaint_heading = f"COMPLAINT FOR {claim_label.upper()}"
         nature_of_action = {
             "retaliation": (
-                f"1. {plaintiff} brings this retaliation complaint against {defendant}. "
-                f"This civil action arises from {defendant}'s retaliatory response after {plaintiff} engaged in protected activity, including {pleading_activity}."
+                f"1. {plaintiff_intro_name} {'bring' if is_plural_plaintiffs else 'brings'} this retaliation complaint against {defendant_intro_name}. "
+                f"This civil action arises from {defendant_intro_name}'s retaliatory response after {plaintiff_intro_name} {'engaged' if not is_plural_plaintiffs else 'engaged'} in protected activity, including {pleading_activity}."
             ),
             "employment_discrimination": (
-                f"1. {plaintiff} brings this employment discrimination complaint against {defendant}. "
+                f"1. {plaintiff_intro_name} {'bring' if is_plural_plaintiffs else 'brings'} this employment discrimination complaint against {defendant_intro_name}. "
                 f"This civil action arises from discriminatory workplace treatment, unequal terms or conditions, and resulting harm."
             ),
             "housing_discrimination": (
-                f"1. {plaintiff} brings this housing discrimination complaint against {defendant}. "
+                f"1. {plaintiff_intro_name} {'bring' if is_plural_plaintiffs else 'brings'} this housing discrimination complaint against {defendant_intro_name}. "
                 f"This civil action arises from discriminatory denial, limitation, interference, or retaliation affecting housing rights or benefits."
             ),
             "due_process_failure": (
-                f"1. {plaintiff} brings this due process complaint against {defendant}. "
+                f"1. {plaintiff_intro_name} {'bring' if is_plural_plaintiffs else 'brings'} this due process complaint against {defendant_intro_name}. "
                 f"This civil action arises from adverse action imposed without the notice, hearing, review, or procedural protections required by law."
             ),
             "consumer_protection": (
-                f"1. {plaintiff} brings this consumer protection complaint against {defendant}. "
+                f"1. {plaintiff_intro_name} {'bring' if is_plural_plaintiffs else 'brings'} this consumer protection complaint against {defendant_intro_name}. "
                 f"This civil action arises from unfair, deceptive, fraudulent, or otherwise unlawful business practices that caused injury."
             ),
         }.get(
             claim_type,
-            f"1. {plaintiff} brings this {claim_label.lower()} complaint against {defendant}. "
-            f"This civil action arises from unlawful conduct that injured {plaintiff}.",
+            f"1. {plaintiff_intro_name} {'bring' if is_plural_plaintiffs else 'brings'} this {claim_label.lower()} complaint against {defendant_intro_name}. "
+            f"This civil action arises from unlawful conduct that injured {plaintiff_intro_name}.",
         )
         relief_paragraph = {
             "retaliation": (
-                "2. Plaintiff seeks back pay, front pay or reinstatement, compensatory damages, attorney's fees and costs, "
+                f"2. {plaintiff_party_label} {plaintiff_party_seek} back pay, front pay or reinstatement, compensatory damages, attorney's fees and costs, "
                 "equitable relief, and such further relief as may be just to remedy Defendant's retaliatory acts and the losses flowing from them."
             ),
             "employment_discrimination": (
-                f"2. Plaintiff seeks damages, equitable relief, and such further relief as may be just to remedy discriminatory employment practices, "
-                f"restore lost opportunities, and address the harm caused when Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered an adverse employment action')}."
+                f"2. {plaintiff_party_label} {plaintiff_party_seek} damages, equitable relief, and such further relief as may be just to remedy discriminatory employment practices, "
+                f"restore lost opportunities, and address the harm caused when {plaintiff_party_label} {_sentence_fragment(answers.get('adverse_action'), 'suffered an adverse employment action')}."
             ),
             "housing_discrimination": (
-                f"2. Plaintiff seeks damages, equitable relief, and such further relief as may be just to remedy discriminatory housing practices, "
-                f"preserve housing stability, and address the harm caused when Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered a housing-related deprivation')}."
+                f"2. {plaintiff_party_label} {plaintiff_party_seek} damages, equitable relief, and such further relief as may be just to remedy discriminatory housing practices, "
+                "preserve housing stability, and address the housing-related harms caused by the challenged conduct."
             ),
             "due_process_failure": (
-                f"2. Plaintiff seeks declaratory relief, equitable relief, damages, and such further relief as may be just to remedy the procedural deprivation "
-                f"and the harm caused by the challenged action through which Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered a deprivation without adequate process')}."
+                f"2. {plaintiff_party_label} {plaintiff_party_seek} declaratory relief, equitable relief, damages, and such further relief as may be just to remedy the procedural deprivation "
+                f"and the harm caused by the challenged action through which {plaintiff_party_label} {_sentence_fragment(answers.get('adverse_action'), 'suffered a deprivation without adequate process')}."
             ),
             "consumer_protection": (
-                f"2. Plaintiff seeks damages, restitution, equitable relief, and such further relief as may be just to remedy deceptive or unfair consumer practices "
-                f"and the harm caused when Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered a consumer-facing injury')}."
+                f"2. {plaintiff_party_label} {plaintiff_party_seek} damages, restitution, equitable relief, and such further relief as may be just to remedy deceptive or unfair consumer practices "
+                f"and the harm caused when {plaintiff_party_label} {_sentence_fragment(answers.get('adverse_action'), 'suffered a consumer-facing injury')}."
             ),
         }.get(
             claim_type,
-            f"2. Plaintiff seeks damages, equitable relief, and such further relief as may be just to remedy unlawful conduct and the harm caused when Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered an adverse action')}.",
+            f"2. {plaintiff_party_label} {plaintiff_party_seek} damages, equitable relief, and such further relief as may be just to remedy unlawful conduct and the harm caused when {plaintiff_party_label} {_sentence_fragment(answers.get('adverse_action'), 'suffered an adverse action')}.",
         )
         jurisdiction_paragraph = {
             "retaliation": (
-                "3. This Court has subject-matter jurisdiction over this action because Plaintiff alleges retaliation for protected activity "
+                f"3. This Court has subject-matter jurisdiction over this action because {plaintiff_party_label} {intro_alleges} retaliation for protected activity "
                 "and seeks relief for materially adverse acts taken in response to that activity."
             ),
             "employment_discrimination": (
-                "3. This Court has subject-matter jurisdiction over this action because Plaintiff alleges discriminatory employment practices, "
+                f"3. This Court has subject-matter jurisdiction over this action because {plaintiff_party_label} {intro_alleges} discriminatory employment practices, "
                 "workplace bias, and related unlawful employment actions for which judicial relief is available."
             ),
             "housing_discrimination": (
-                "3. This Court has subject-matter jurisdiction over this action because Plaintiff alleges discriminatory housing practices, "
+                f"3. This Court has subject-matter jurisdiction over this action because {plaintiff_party_label} {intro_alleges} discriminatory housing practices, "
                 "interference with housing rights or benefits, and related misconduct for which judicial relief is available."
             ),
             "due_process_failure": (
-                "3. This Court has subject-matter jurisdiction over this action because Plaintiff alleges deprivation without constitutionally "
+                f"3. This Court has subject-matter jurisdiction over this action because {plaintiff_party_label} {intro_alleges} deprivation without constitutionally "
                 "or statutorily required notice, hearing, review, or other procedural protections."
             ),
             "consumer_protection": (
-                "3. This Court has subject-matter jurisdiction over this action because Plaintiff alleges unfair, deceptive, or unlawful consumer-facing conduct "
+                f"3. This Court has subject-matter jurisdiction over this action because {plaintiff_party_label} {intro_alleges} unfair, deceptive, or unlawful consumer-facing conduct "
                 "for which damages, equitable relief, restitution, or related remedies may be awarded."
             ),
         }.get(
             claim_type,
-            "3. This Court has subject-matter jurisdiction over this action because Plaintiff alleges unlawful conduct for which judicial relief is available.",
+            f"3. This Court has subject-matter jurisdiction over this action because {plaintiff_party_label} {intro_alleges} unlawful conduct for which judicial relief is available.",
         )
         venue_paragraph = {
             "housing_discrimination": (
@@ -1323,76 +2030,84 @@ class ComplaintWorkspaceService:
         )
         party_paragraphs = {
             "retaliation": (
-                f"5. Plaintiff {plaintiff} is an individual who engaged in protected activity and was thereafter harmed by the retaliatory conduct described below.",
-                f"6. Defendant {defendant} is the party from whom relief is sought and is responsible for the retaliatory actions alleged in this pleading.",
+                f"5. {plaintiff_party_label} {plaintiff_intro_name} {'are' if is_plural_plaintiffs else 'is'} individual complainants who engaged in protected activity and {'were' if is_plural_plaintiffs else 'was'} thereafter harmed by the retaliatory conduct described below.",
+                f"6. {defendant_party_label} {defendant_intro_name} {defendant_be} the party or parties from whom relief is sought and {defendant_be} responsible for the retaliatory actions alleged in this pleading.",
             ),
             "employment_discrimination": (
-                f"5. Plaintiff {plaintiff} is the employee, applicant, or worker harmed by the discriminatory employment conduct described below.",
-                f"6. Defendant {defendant} is the employer or responsible actor from whom relief is sought for the discriminatory employment actions alleged in this pleading.",
+                f"5. {plaintiff_party_label} {plaintiff_intro_name} {'are' if is_plural_plaintiffs else 'is'} the employee, applicant, or worker harmed by the discriminatory employment conduct described below.",
+                f"6. {defendant_party_label} {defendant_intro_name} {defendant_be} the employer or responsible actor from whom relief is sought for the discriminatory employment actions alleged in this pleading.",
             ),
             "housing_discrimination": (
-                f"5. Plaintiff {plaintiff} is the housing applicant, tenant, resident, or person seeking housing-related rights or benefits who was harmed by the discriminatory conduct described below.",
-                f"6. Defendant {defendant} is the housing provider, landlord, authority, manager, or responsible actor from whom relief is sought for the housing discrimination alleged in this pleading.",
+                (
+                    f"5. {plaintiff_party_label} {plaintiff_intro_name} are housing applicants, tenants, residents, or persons seeking housing-related rights or benefits who were harmed by the discriminatory conduct described below."
+                    if is_plural_plaintiffs
+                    else f"5. {plaintiff_party_label} {plaintiff_intro_name} is the housing applicant, tenant, resident, or person seeking housing-related rights or benefits who was harmed by the discriminatory conduct described below."
+                ),
+                (
+                    f"6. {defendant_party_label} {defendant_intro_name} are housing providers, landlords, authorities, managers, or responsible actors from whom relief is sought for the housing discrimination alleged in this pleading."
+                    if is_plural_defendants
+                    else f"6. {defendant_party_label} {defendant_intro_name} is the housing provider, landlord, authority, manager, or responsible actor from whom relief is sought for the housing discrimination alleged in this pleading."
+                ),
             ),
             "due_process_failure": (
-                f"5. Plaintiff {plaintiff} is the person deprived of rights, benefits, or protected interests without adequate process.",
-                f"6. Defendant {defendant} is the person or entity responsible for the challenged deprivation and the missing procedural safeguards alleged in this pleading.",
+                f"5. {plaintiff_party_label} {plaintiff_intro_name} {'are' if is_plural_plaintiffs else 'is'} the person or persons deprived of rights, benefits, or protected interests without adequate process.",
+                f"6. {defendant_party_label} {defendant_intro_name} {defendant_be} the person or entity responsible for the challenged deprivation and the missing procedural safeguards alleged in this pleading.",
             ),
             "consumer_protection": (
-                f"5. Plaintiff {plaintiff} is the consumer or injured person harmed by the deceptive, unfair, or unlawful conduct described below.",
-                f"6. Defendant {defendant} is the seller, business, servicer, or responsible actor from whom relief is sought for the consumer-facing conduct alleged in this pleading.",
+                f"5. {plaintiff_party_label} {plaintiff_intro_name} {'are' if is_plural_plaintiffs else 'is'} the consumer or injured person harmed by the deceptive, unfair, or unlawful conduct described below.",
+                f"6. {defendant_party_label} {defendant_intro_name} {defendant_be} the seller, business, servicer, or responsible actor from whom relief is sought for the consumer-facing conduct alleged in this pleading.",
             ),
         }.get(
             claim_type,
             (
-                f"5. Plaintiff {plaintiff} is the person harmed by the conduct described below.",
-                f"6. Defendant {defendant} is the party from whom relief is sought and is responsible for the conduct alleged in this pleading.",
+                f"5. {plaintiff_party_label} {plaintiff_intro_name} {'are' if is_plural_plaintiffs else 'is'} the person or persons harmed by the conduct described below.",
+                f"6. {defendant_party_label} {defendant_intro_name} {defendant_be} the party or parties from whom relief is sought and {defendant_be} responsible for the conduct alleged in this pleading.",
             ),
         )
         factual_allegation_lines = {
             "retaliation": [
-                f"7. Plaintiff engaged in protected activity by {pleading_activity}.",
+                f"7. {plaintiff_party_label} {'engaged' if not is_plural_plaintiffs else 'engaged'} in protected activity by {pleading_activity}.",
                 "8. That protected activity constituted protected opposition, reporting, or participation activity under the governing anti-retaliation framework.",
-                f"9. Within days of that protected activity, Defendant took materially adverse action against Plaintiff by {_adverse_action_clause(answers.get('adverse_action'), 'taking materially adverse action against Plaintiff')}.",
-                f"10. The relevant chronology is as follows: {_pleading_timeline_sentence(answers.get('timeline'), 'The events occurred in close temporal proximity')}",
-                f"11. As a direct and proximate result of Defendant's conduct, Plaintiff {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
+                f"9. Within days of that protected activity, {defendant_party_label} took materially adverse action against {plaintiff_party_object} by {_adverse_action_clause(answers.get('adverse_action'), 'taking materially adverse action against Plaintiff')}.",
+                f"10. The relevant chronology is as follows: {_pleading_timeline_sentence(timeline_input, 'The events occurred in close temporal proximity')}",
+                f"11. As a direct and proximate result of {defendant_party_label}' conduct, {plaintiff_party_label} {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
             ],
             "employment_discrimination": [
-                f"7. Plaintiff alleges facts showing discriminatory employment treatment, including protected conduct or circumstances such as {pleading_activity}.",
-                f"8. Defendant thereafter took or maintained adverse employment action by which Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered an adverse employment action')}.",
-                f"9. The employment chronology is as follows: {_pleading_timeline_sentence(answers.get('timeline'), 'The relevant employment events occurred in close succession')}",
+                f"7. {plaintiff_party_label} {intro_alleges} facts showing discriminatory employment treatment, including protected conduct or circumstances such as {pleading_activity}.",
+                f"8. {defendant_party_label} thereafter took or maintained adverse employment action by which {plaintiff_party_label} {_sentence_fragment(answers.get('adverse_action'), 'suffered an adverse employment action')}.",
+                f"9. The employment chronology is as follows: {_pleading_timeline_sentence(timeline_input, 'The relevant employment events occurred in close succession')}",
                 "10. The present record supports an inference of discriminatory motive, disparate treatment, prohibited bias, retaliation, or other unlawful employment decision-making.",
-                f"11. As a direct and proximate result of Defendant's conduct, Plaintiff {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
+                f"11. As a direct and proximate result of {defendant_party_label}' conduct, {plaintiff_party_label} {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
             ],
             "housing_discrimination": [
-                f"7. Plaintiff alleges that they sought, used, requested, or protected housing-related rights, accommodations, benefits, tenancy rights, or fair treatment, including {pleading_activity}.",
-                f"8. Defendant thereafter denied, burdened, interfered with, or threatened housing-related rights or benefits when Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered a housing-related deprivation')}.",
-                f"9. The housing-related chronology is as follows: {_pleading_timeline_sentence(answers.get('timeline'), 'The housing-related events occurred in close succession')}",
-                "10. The present record supports an inference that Defendant acted in a discriminatory manner, interfered with protected housing rights, or retaliated in connection with protected housing activity.",
-                f"11. As a direct and proximate result of Defendant's conduct, Plaintiff {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
+                f"7. {plaintiff_party_label} {intro_alleges} that {'they' if is_plural_plaintiffs else 'they'} sought, used, requested, or protected housing-related rights, accommodations, benefits, tenancy rights, or fair treatment, including {pleading_activity}.",
+                f"8. {defendant_party_label} thereafter denied, burdened, interfered with, or threatened housing-related rights or benefits through conduct including {_sentence_fragment(answers.get('adverse_action'), 'a housing-related deprivation')}.",
+                f"9. The housing-related chronology is as follows: {_pleading_timeline_sentence(timeline_input, 'The housing-related events occurred in close succession')}",
+                f"10. The present record supports an inference that {defendant_party_label} acted in a discriminatory manner, interfered with protected housing rights, or retaliated in connection with protected housing activity.",
+                f"11. As a direct and proximate result of {defendant_party_label}' conduct, {plaintiff_party_label} {'suffered' if not is_plural_plaintiffs else 'suffered'} harm including {_sentence_fragment(answers.get('harm'), 'compensable harm')}.",
             ],
             "due_process_failure": [
-                "7. Plaintiff alleges that Defendant imposed or maintained a deprivation affecting protected rights, interests, status, benefits, or property.",
-                f"8. The challenged action is that Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered a deprivation without adequate process')}.",
-                f"9. The chronology is as follows: {_pleading_timeline_sentence(answers.get('timeline'), 'The challenged events occurred in close succession')}",
-                "10. Plaintiff alleges that the deprivation occurred without adequate notice, hearing, review, appeal, or other required procedural protection.",
-                f"11. As a direct and proximate result of Defendant's conduct, Plaintiff {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
+                f"7. {plaintiff_party_label} {intro_alleges} that {defendant_party_label} imposed or maintained a deprivation affecting protected rights, interests, status, benefits, or property.",
+                f"8. The challenged action is that {plaintiff_party_label} {_sentence_fragment(answers.get('adverse_action'), 'suffered a deprivation without adequate process')}.",
+                f"9. The chronology is as follows: {_pleading_timeline_sentence(timeline_input, 'The challenged events occurred in close succession')}",
+                f"10. {plaintiff_party_label} {intro_alleges} that the deprivation occurred without adequate notice, hearing, review, appeal, or other required procedural protection.",
+                f"11. As a direct and proximate result of {defendant_party_label}' conduct, {plaintiff_party_label} {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
             ],
             "consumer_protection": [
-                "7. Plaintiff alleges that Defendant engaged in deceptive, misleading, unfair, or otherwise unlawful consumer-facing conduct.",
-                f"8. That conduct included or resulted in adverse action or consequences when Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered a consumer-facing injury')}.",
-                f"9. The chronology is as follows: {_pleading_timeline_sentence(answers.get('timeline'), 'The relevant consumer-facing events occurred in close succession')}",
-                "10. Plaintiff alleges that the challenged conduct caused consumer harm, financial loss, or other compensable injury in a transactional or service context.",
-                f"11. As a direct and proximate result of Defendant's conduct, Plaintiff {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
+                f"7. {plaintiff_party_label} {intro_alleges} that {defendant_party_label} engaged in deceptive, misleading, unfair, or otherwise unlawful consumer-facing conduct.",
+                f"8. That conduct included or resulted in adverse action or consequences when {plaintiff_party_label} {_sentence_fragment(answers.get('adverse_action'), 'suffered a consumer-facing injury')}.",
+                f"9. The chronology is as follows: {_pleading_timeline_sentence(timeline_input, 'The relevant consumer-facing events occurred in close succession')}",
+                f"10. {plaintiff_party_label} {intro_alleges} that the challenged conduct caused consumer harm, financial loss, or other compensable injury in a transactional or service context.",
+                f"11. As a direct and proximate result of {defendant_party_label}' conduct, {plaintiff_party_label} {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
             ],
         }.get(
             claim_type,
             [
-                f"7. Plaintiff alleges conduct or circumstances including {pleading_activity}.",
-                f"8. Defendant engaged in conduct through which Plaintiff {_sentence_fragment(answers.get('adverse_action'), 'suffered an adverse action')}.",
-                f"9. The chronology is as follows: {_pleading_timeline_sentence(answers.get('timeline'), 'The relevant events occurred in close succession')}",
-                "10. Plaintiff alleges facts supporting a plausible claim for relief.",
-                f"11. As a direct and proximate result of Defendant's conduct, Plaintiff {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
+                f"7. {plaintiff_party_label} {intro_alleges} conduct or circumstances including {pleading_activity}.",
+                f"8. {defendant_party_label} engaged in conduct through which {plaintiff_party_label} {_sentence_fragment(answers.get('adverse_action'), 'suffered an adverse action')}.",
+                f"9. The chronology is as follows: {_pleading_timeline_sentence(timeline_input, 'The relevant events occurred in close succession')}",
+                f"10. {plaintiff_party_label} {intro_alleges} facts supporting a plausible claim for relief.",
+                f"11. As a direct and proximate result of {defendant_party_label}' conduct, {plaintiff_party_label} {_sentence_fragment(answers.get('harm'), 'suffered compensable harm')}.",
             ],
         )
         count_heading = {
@@ -1404,18 +2119,18 @@ class ComplaintWorkspaceService:
         }.get(claim_type, f"COUNT I - {claim_label.upper()}")
         claim_paragraphs = {
             "retaliation": [
-                f"Plaintiff engaged in protected activity by {pleading_activity}, and Defendant knew or should have known of that protected conduct.",
-                f"Defendant thereafter subjected Plaintiff to materially adverse action by {_adverse_action_clause(answers.get('adverse_action'), 'taking materially adverse action against Plaintiff')}, under circumstances supporting a causal inference of retaliation.",
-                "The close temporal proximity, Defendant's knowledge of the protected activity, the evidentiary record, and the resulting harm plausibly support a retaliation claim and entitle Plaintiff to relief.",
+                f"{plaintiff_party_label} engaged in protected activity by {pleading_activity}, and {defendant_party_label} knew or should have known of that protected conduct.",
+                f"{defendant_party_label} thereafter subjected {plaintiff_party_object} to materially adverse action by {_adverse_action_clause(answers.get('adverse_action'), 'taking materially adverse action against Plaintiff')}, under circumstances supporting a causal inference of retaliation.",
+                f"The close temporal proximity, {defendant_party_label}' knowledge of the protected activity, the evidentiary record, and the resulting harm plausibly support a retaliation claim and entitle {plaintiff_party_object} to relief.",
             ],
             "employment_discrimination": [
-                f"Plaintiff was subjected to adverse employment treatment described as {adverse_action}, in a manner that was discriminatory, disparate, or otherwise unlawful.",
+                f"{plaintiff_party_label} {'were' if is_plural_plaintiffs else 'was'} subjected to adverse employment treatment described as {adverse_action}, in a manner that was discriminatory, disparate, or otherwise unlawful.",
                 "The pleaded facts support an inference that Defendant's conduct was motivated by unlawful bias, protected status, protected conduct, or a prohibited employment practice.",
                 "The evidentiary record and resulting harm support a plausible employment discrimination claim.",
             ],
             "housing_discrimination": [
-                f"Defendant denied, limited, burdened, or interfered with housing-related rights, opportunities, services, or benefits through conduct described as {adverse_action}.",
-                "The pleaded facts support an inference that Defendant acted in a discriminatory manner or retaliated in connection with protected housing activity, status, or rights.",
+                f"{defendant_party_label} denied, limited, burdened, or interfered with housing-related rights, opportunities, services, or benefits through conduct described as {adverse_action}.",
+                f"The pleaded facts support an inference that {defendant_party_label} acted in a discriminatory manner or retaliated in connection with protected housing activity, status, or rights.",
                 "The evidentiary record and resulting harm support a plausible housing discrimination claim.",
             ],
             "due_process_failure": [
@@ -1438,47 +2153,50 @@ class ComplaintWorkspaceService:
         )
         evidentiary_lines: List[str] = [
             (
-                f"12. Plaintiff presently relies on {evidence_count} identified evidentiary items. The witness proof currently identified includes: {testimony_summary}."
+                f"12. {plaintiff_party_label} presently {'rely' if is_plural_plaintiffs else 'relies'} on {evidence_count} identified evidentiary items. The witness proof currently identified includes: {testimony_summary}."
                 if testimony_items
-                else "12. Plaintiff presently relies on the evidentiary materials identified below and anticipates that testimonial proof may be supplemented through discovery, amendment, or sworn declarations."
+                else f"12. {plaintiff_party_label} presently {'rely' if is_plural_plaintiffs else 'relies'} on the evidentiary materials identified below and anticipate{'' if is_plural_plaintiffs else 's'} that testimonial proof may be supplemented through discovery, amendment, or sworn declarations."
             ),
             (
-                f"13. Plaintiff presently identifies the following documents, exhibits, or records in support of this pleading: {document_summary}."
+                f"13. {plaintiff_party_label} presently {'identify' if is_plural_plaintiffs else 'identifies'} the following documents, exhibits, or records in support of this pleading: {document_summary}."
                 if document_items
-                else "13. Plaintiff has not yet attached documentary exhibits to this export, but preserves the right to supplement the pleading with records, correspondence, or other supporting materials."
+                else f"13. {plaintiff_party_label} {plaintiff_party_have} not yet attached documentary exhibits to this export, but preserve{'' if is_plural_plaintiffs else 's'} the right to supplement the pleading with records, correspondence, or other supporting materials."
             ),
             (
-                f"14. Based on the information presently available, Plaintiff contends that the evidentiary record presently supports {support_count} core claim elements "
+                f"14. Based on the information presently available, {plaintiff_party_label} {plaintiff_party_contend} that the evidentiary record presently supports {support_count} core claim elements "
                 f"and that {missing_count} areas, if any, may be further corroborated through discovery, amendment, or additional evidentiary development."
             ),
             (
-                "15. Plaintiff gives notice that the identified testimony, documentary exhibits, and chronology materials constitute part of the evidentiary basis for this pleading "
+                f"15. {plaintiff_party_label} {plaintiff_party_give} notice that the identified testimony, documentary exhibits, and chronology materials constitute part of the evidentiary basis for this pleading "
                 "and may be supplemented, authenticated, or amended as discovery proceeds."
             ),
         ]
+        if case_specific_evidence_notice:
+            evidentiary_lines.append(case_specific_evidence_notice)
+        extra_evidence_start = 16 + (1 if case_specific_evidence_notice else 0)
         extra_evidence_lines = (testimony_reference_lines + document_reference_lines)[:2]
         evidentiary_lines.extend(
-            f"{16 + index}. {line}"
+            f"{extra_evidence_start + index}. {line}"
             for index, line in enumerate(extra_evidence_lines)
         )
-        claim_intro_paragraph = 16 + len(extra_evidence_lines)
+        claim_intro_paragraph = extra_evidence_start + len(extra_evidence_lines)
         claim_detail_start = claim_intro_paragraph + 1
         body = "\n\n".join(
             [
                 "IN THE UNITED STATES DISTRICT COURT",
                 court_header,
                 "",
-                f"{plaintiff}, Plaintiff,",
+                f"{caption_plaintiffs}, {plaintiff_caption_label},",
                 "v.",
-                f"{defendant}, Defendant.",
+                f"{caption_defendants}, {defendant_caption_label}.",
                 "",
                 "Civil Action No. ________________",
                 complaint_heading,
                 "JURY TRIAL DEMANDED",
                 "",
                 (
-                    f"Plaintiff {plaintiff}, proceeding pro se, alleges upon personal knowledge as to "
-                    "their own acts and upon information and belief as to all other matters as follows:"
+                    f"{plaintiff_party_label} {plaintiff_intro_name}, proceeding pro se, {intro_alleges} upon personal knowledge as to "
+                    f"{intro_their} own acts and upon information and belief as to all other matters as follows:"
                 ),
                 "",
                 "NATURE OF THE ACTION",
@@ -1501,25 +2219,25 @@ class ComplaintWorkspaceService:
                 "",
                 "CLAIM FOR RELIEF",
                 count_heading,
-                f"{claim_intro_paragraph}. {plaintiff} repeats and realleges the preceding paragraphs as if fully set forth herein.",
+                f"{claim_intro_paragraph}. {plaintiff_intro_name} {plaintiff_party_repeat} the preceding paragraphs as if fully set forth herein.",
                 *[f"{claim_detail_start + index}. {line}" for index, line in enumerate(claim_paragraphs)],
-                f"{claim_detail_start + 3}. Plaintiff has sustained damages and losses including {_sentence_fragment(answers.get('harm'), 'compensable harm')}.",
+                f"{claim_detail_start + 3}. {plaintiff_party_label} {plaintiff_party_have} sustained damages and losses including {_sentence_fragment(answers.get('harm'), 'compensable harm')}.",
                 (
-                    f"{claim_detail_start + 4}. As a direct and proximate result of Defendant's retaliatory conduct, Plaintiff is entitled to recover damages, equitable relief, fees and costs where available, and such further relief as the Court deems just and proper."
+                    f"{claim_detail_start + 4}. As a direct and proximate result of Defendant's retaliatory conduct, {plaintiff_party_label} {'are' if is_plural_plaintiffs else 'is'} entitled to recover damages, equitable relief, fees and costs where available, and such further relief as the Court deems just and proper."
                     if claim_type == "retaliation"
-                    else f"{claim_detail_start + 4}. Defendant's acts were intentional, knowing, reckless, retaliatory, discriminatory, deceptive, or otherwise unlawful under the governing claim theory."
+                    else f"{claim_detail_start + 4}. {defendant_party_label}' acts were intentional, knowing, reckless, retaliatory, discriminatory, deceptive, or otherwise unlawful under the governing claim theory."
                 ),
                 "",
                 "PRAYER FOR RELIEF",
                 (
-                    "Wherefore, Plaintiff respectfully requests judgment against Defendant on the retaliation claim alleged herein and seeks the following relief:"
+                    f"Wherefore, {plaintiff_party_label} respectfully {'request' if is_plural_plaintiffs else 'requests'} judgment against {defendant_party_label} on the retaliation claim alleged herein and {'seek' if is_plural_plaintiffs else 'seeks'} the following relief:"
                     if claim_type == "retaliation"
-                    else "Wherefore, Plaintiff requests judgment against Defendant and the following relief:"
+                    else f"Wherefore, {plaintiff_party_label} {'request' if is_plural_plaintiffs else 'requests'} judgment against {defendant_party_label} and the following relief:"
                 ),
                 "\n".join(relief_lines),
                 "",
                 "JURY DEMAND",
-                "Plaintiff demands a trial by jury on all issues so triable.",
+                f"{plaintiff_party_label} {plaintiff_party_demand} a trial by jury on all issues so triable.",
                 "",
                 "SIGNATURE BLOCK",
                 f"Dated: ____________________",
@@ -1527,14 +2245,14 @@ class ComplaintWorkspaceService:
                 "Respectfully submitted,",
                 "",
                 f"{plaintiff}",
-                "Plaintiff, Pro Se",
-                "Address: ____________________",
+                signature_role,
+                f"Address: {mailing_address}",
                 "Telephone: ____________________",
                 "Email: ____________________",
             ]
         )
         draft = {
-            "title": f"{plaintiff} v. {defendant} {claim_label} Complaint",
+            "title": f"{caption_plaintiffs} v. {caption_defendants} {claim_label} Complaint",
             "requested_relief": relief,
             "case_synopsis": case_synopsis,
             "claim_type": claim_type,
@@ -1545,17 +2263,29 @@ class ComplaintWorkspaceService:
         }
         if use_llm:
             self._last_draft_refinement_error = None
-            refined_draft = self._refine_draft_with_llm_router(
-                state,
-                draft,
-                provider=provider,
-                model=model,
-                config_path=config_path,
-                backend_id=backend_id,
-            )
-            if refined_draft:
-                return refined_draft
+            resolved_backends = _resolve_llm_draft_backend_candidates(provider, model)
+            attempted_providers: List[str] = []
+            for resolved_backend in resolved_backends:
+                provider_name = str(resolved_backend["provider"] or "").strip()
+                if provider_name:
+                    attempted_providers.append(provider_name)
+                refined_draft = self._refine_draft_with_llm_router(
+                    state,
+                    draft,
+                    provider=resolved_backend["provider"],
+                    model=resolved_backend["model"],
+                    requested_provider=resolved_backend["requested_provider"],
+                    requested_model=resolved_backend["requested_model"],
+                    config_path=config_path,
+                    backend_id=backend_id,
+                )
+                if refined_draft:
+                    if len(attempted_providers) > 1:
+                        refined_draft["draft_backend_fallback_chain"] = attempted_providers
+                    return refined_draft
             if self._last_draft_refinement_error:
+                if attempted_providers:
+                    draft["draft_backend_fallback_chain"] = attempted_providers
                 draft["draft_fallback_reason"] = self._last_draft_refinement_error
         return draft
 
@@ -1569,12 +2299,12 @@ class ComplaintWorkspaceService:
         missing_elements = len([item for item in matrix if not item.get("supported")])
         evidence = state.get("evidence") or {}
         claim_type = str(state.get("claim_type") or "retaliation").replace("_", " ")
-        party_name = answers.get("party_name") or "The complainant"
-        opposing_party = answers.get("opposing_party") or "the opposing party"
+        party_name = _extract_person_name(answers.get("party_name"), fallback="The complainant")
+        opposing_party = _extract_defendant_name(answers.get("opposing_party"), fallback="the opposing party")
         protected_activity = answers.get("protected_activity") or "an identified protected activity"
         adverse_action = answers.get("adverse_action") or "an adverse action"
         harm = answers.get("harm") or "described harm"
-        timeline = answers.get("timeline") or "a still-developing timeline"
+        timeline = _condense_timeline_text(answers.get("timeline"), "a still-developing timeline")
         evidence_count = len(evidence.get("testimony") or []) + len(evidence.get("documents") or [])
         return (
             f"{party_name} is pursuing a {claim_type} complaint against {opposing_party}. "
@@ -1669,6 +2399,8 @@ class ComplaintWorkspaceService:
         *,
         provider: Optional[str] = None,
         model: Optional[str] = None,
+        requested_provider: Optional[str] = None,
+        requested_model: Optional[str] = None,
         config_path: Optional[str] = None,
         backend_id: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
@@ -1735,8 +2467,8 @@ class ComplaintWorkspaceService:
                 "id": getattr(backend, "id", backend_id or "complaint-draft"),
                 "provider": effective_provider,
                 "model": effective_model,
-                "requested_provider": str(provider or "").strip() or None,
-                "requested_model": str(model or "").strip() or None,
+                "requested_provider": str(requested_provider or "").strip() or None,
+                "requested_model": str(requested_model or "").strip() or None,
             },
             "draft_normalizations": normalization_notes,
         }
@@ -2065,6 +2797,14 @@ class ComplaintWorkspaceService:
         actor_path_breaks = list(review.get("actor_path_breaks") or (result or {}).get("actor_path_breaks") or [])
         broken_controls = list(review.get("broken_controls") or (result or {}).get("broken_controls") or [])
         issues = list(review.get("issues") or (result or {}).get("issues") or [])
+        recommended_changes = list(review.get("recommended_changes") or (result or {}).get("recommended_changes") or [])
+        playwright_followups = list(review.get("playwright_followups") or (result or {}).get("playwright_followups") or [])
+        screenshot_findings = list(review.get("screenshot_findings") or (result or {}).get("screenshot_findings") or [])
+        optimization_targets = list(review.get("optimization_targets") or (result or {}).get("optimization_targets") or [])
+        stage_findings = dict(review.get("stage_findings") or (result or {}).get("stage_findings") or {})
+        carry_forward_assessment = dict(
+            review.get("carry_forward_assessment") or (result or {}).get("carry_forward_assessment") or {}
+        )
         release_blockers = list(complaint_journey.get("release_blockers") or [])
         acceptance_checks = list(critic_review.get("acceptance_checks") or [])
         tested_stages = list(complaint_journey.get("tested_stages") or [])
@@ -2119,10 +2859,20 @@ class ComplaintWorkspaceService:
             "sdk_invocations": sdk_invocations,
             "actor_path_breaks": actor_path_breaks,
             "broken_controls": broken_controls,
+            "issues": issues,
+            "recommended_changes": recommended_changes,
+            "playwright_followups": playwright_followups,
+            "stage_findings": stage_findings,
+            "screenshot_findings": screenshot_findings,
+            "optimization_targets": optimization_targets,
+            "carry_forward_assessment": carry_forward_assessment,
             "issue_counts": severity_counts,
             "summary": summary_text,
             "workflow_type": str((result or {}).get("workflow_type") or (result or {}).get("backend", {}).get("strategy") or "review"),
             "review_backend": deepcopy((result or {}).get("backend") or {}),
+            "latest_review_markdown_path": (result or {}).get("latest_review_markdown_path"),
+            "latest_review_json_path": (result or {}).get("latest_review_json_path"),
+            "runs": deepcopy((result or {}).get("runs") or []),
             "updated_at": _utc_now(),
         }
 
@@ -2152,9 +2902,19 @@ class ComplaintWorkspaceService:
             "sdk_invocations": [],
             "actor_path_breaks": [],
             "broken_controls": [],
+            "issues": [],
+            "recommended_changes": [],
+            "playwright_followups": [],
+            "stage_findings": {},
+            "screenshot_findings": [],
+            "optimization_targets": [],
+            "carry_forward_assessment": {},
             "issue_counts": {"high": 0, "medium": 0, "low": 0},
             "workflow_type": None,
             "review_backend": {},
+            "latest_review_markdown_path": None,
+            "latest_review_json_path": None,
+            "runs": [],
             "updated_at": None,
         }
 
@@ -2313,7 +3073,7 @@ class ComplaintWorkspaceService:
                 "browser_sdk_method": mapping["browser_sdk_method"],
                 "exposed_everywhere": exposed_everywhere,
             })
-        return {
+        payload = {
             "user_id": str(user_id or DEFAULT_USER_ID),
             "package_exports": package_exports,
             "cli_commands": cli_commands,
@@ -2323,6 +3083,83 @@ class ComplaintWorkspaceService:
             "missing_exposures": missing_exposures,
             "all_core_flow_steps_exposed": not missing_exposures,
         }
+        if user_id:
+            try:
+                payload["workspace_data_schema"] = self.get_workspace_data_schema(user_id)
+                payload["schema_guided_recommendations"] = _build_schema_guided_tooling_recommendations(
+                    payload["workspace_data_schema"]
+                )
+            except Exception as exc:
+                payload["workspace_data_schema_error"] = str(exc)
+                payload["schema_guided_recommendations"] = []
+        else:
+            payload["schema_guided_recommendations"] = []
+        return payload
+
+    def get_workspace_data_schema(
+        self,
+        user_id: Optional[str] = None,
+        *,
+        manifest_path: Optional[str | Path] = None,
+        statefile_path: Optional[str | Path] = None,
+        evidence_db_path: Optional[str | Path] = None,
+        legal_authority_db_path: Optional[str | Path] = None,
+        claim_support_db_path: Optional[str | Path] = None,
+    ) -> Dict[str, Any]:
+        from complaint_generator.data_migration import inspect_workspace_data_schema
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        if manifest_path is not None:
+            snapshot = inspect_workspace_data_schema(manifest_path=manifest_path)
+        else:
+            state = self._load_state(resolved_user_id)
+            snapshot = inspect_workspace_data_schema(
+                state=state,
+                statefile_path=statefile_path,
+                evidence_db_path=evidence_db_path,
+                legal_authority_db_path=legal_authority_db_path,
+                claim_support_db_path=claim_support_db_path,
+                user_id=resolved_user_id,
+            )
+        snapshot["user_id"] = resolved_user_id
+        snapshot["source"] = str(snapshot.get("source") or "workspace_data_schema")
+        return snapshot
+
+    def migrate_legacy_workspace_data(
+        self,
+        user_id: Optional[str] = None,
+        *,
+        output_dir: Optional[str | Path] = None,
+        statefile_path: Optional[str | Path] = None,
+        evidence_db_path: Optional[str | Path] = None,
+        legal_authority_db_path: Optional[str | Path] = None,
+        claim_support_db_path: Optional[str | Path] = None,
+        package_name: Optional[str] = None,
+        include_car: bool = True,
+    ) -> Dict[str, Any]:
+        from complaint_generator.data_migration import migrate_legacy_workspace_data
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        target_output_dir = (
+            Path(output_dir).expanduser().resolve()
+            if output_dir is not None
+            else (self._session_dir / "dataset_migrations" / _slugify_user_id(resolved_user_id)).resolve()
+        )
+        state = self._load_state(resolved_user_id)
+        result = migrate_legacy_workspace_data(
+            output_dir=target_output_dir,
+            state=state,
+            statefile_path=statefile_path,
+            evidence_db_path=evidence_db_path,
+            legal_authority_db_path=legal_authority_db_path,
+            claim_support_db_path=claim_support_db_path,
+            user_id=resolved_user_id,
+            package_name=package_name,
+            include_car=include_car,
+        )
+        result["user_id"] = resolved_user_id
+        result["output_dir"] = str(target_output_dir)
+        return result
 
     def get_workflow_capabilities(self, user_id: Optional[str]) -> Dict[str, Any]:
         session = self.get_session(user_id)
@@ -2389,6 +3226,7 @@ class ComplaintWorkspaceService:
                 "detail": "The lawsuit packet can be exported as a structured browser, CLI, or MCP artifact.",
             },
         ]
+        workspace_data_schema = self.get_workspace_data_schema(session["session"]["user_id"])
         return {
             "user_id": session["session"]["user_id"],
             "case_synopsis": session["case_synopsis"],
@@ -2400,6 +3238,8 @@ class ComplaintWorkspaceService:
             "ui_readiness": self.get_ui_readiness(user_id),
             "client_release_gate": self.get_client_release_gate(user_id),
             "tooling_contract": self.get_tooling_contract(user_id),
+            "workspace_data_schema": workspace_data_schema,
+            "schema_guided_recommendations": _build_schema_guided_tooling_recommendations(workspace_data_schema),
             "capabilities": capabilities,
         }
 
@@ -2420,7 +3260,7 @@ class ComplaintWorkspaceService:
         ui_feedback = self._analyze_complaint_output(packet, artifact_analysis)
         draft_fallback_reason = str(draft.get("draft_fallback_reason") or "").strip()
         complaint_issues = list(ui_feedback.get("issues") or [])
-        return {
+        payload = {
             "packet": packet,
             "artifacts": artifacts,
             "artifact_analysis": artifact_analysis,
@@ -2441,6 +3281,25 @@ class ComplaintWorkspaceService:
                 "complaint_output_router_backend": deepcopy(((ui_feedback.get("router_review") or {}).get("backend") or {})),
             },
         }
+        persisted_state = self._load_state(str((session.get("session") or {}).get("user_id") or user_id or DEFAULT_USER_ID))
+        persisted_state["latest_packet_export"] = {
+            "packet": {
+                "title": str(packet.get("title") or "").strip(),
+                "claim_type": str(packet.get("claim_type") or "retaliation").strip() or "retaliation",
+                "exported_at": str(packet.get("exported_at") or _utc_now()),
+                "draft": {
+                    "title": str(draft.get("title") or "").strip(),
+                    "body": str(draft.get("body") or ""),
+                    "draft_strategy": str(draft.get("draft_strategy") or "template"),
+                    "draft_fallback_reason": draft_fallback_reason,
+                    "draft_normalizations": list(draft.get("draft_normalizations") or []),
+                },
+            },
+            "packet_summary": deepcopy(payload.get("packet_summary") or {}),
+            "ui_feedback": deepcopy(ui_feedback),
+        }
+        self._save_state(persisted_state)
+        return payload
 
     def _build_packet_snapshot(self, user_id: Optional[str]) -> Dict[str, Any]:
         session = self.get_session(user_id)
@@ -2928,12 +3787,34 @@ class ComplaintWorkspaceService:
         ui_feedback = dict(analysis.get("ui_feedback") or {})
         diagnostics = dict(ui_feedback.get("formal_diagnostics") or {})
         packet_summary = dict(analysis.get("packet_summary") or {})
+        try:
+            markdown_artifact = self.build_export_artifact(user_id, "markdown")
+            markdown_text = markdown_artifact.get("body", b"").decode("utf-8", errors="replace")
+            export_structure = _build_export_structure_summary(markdown_text)
+        except Exception as exc:
+            export_structure = {
+                "error": str(exc),
+                "summary": {
+                    "has_header": False,
+                    "court_line_count": 0,
+                    "party_line_count": 0,
+                    "title_line_count": 0,
+                    "section_count": 0,
+                    "section_kinds": [],
+                    "numbered_paragraph_count": 0,
+                    "bullet_count": 0,
+                    "code_block_count": 0,
+                    "all_caps_heading_count": 0,
+                    "title": "",
+                },
+            }
         return {
             "user_id": str(analysis.get("user_id") or user_id or DEFAULT_USER_ID),
             "claim_type_alignment_score": int(ui_feedback.get("claim_type_alignment_score") or 0),
             "filing_shape_score": int(ui_feedback.get("filing_shape_score") or 0),
             "release_gate": deepcopy(ui_feedback.get("release_gate") or {}),
             "formal_diagnostics": diagnostics,
+            "export_structure": export_structure,
             "router_backend": deepcopy(((ui_feedback.get("router_review") or {}).get("backend") or {})),
             "packet_summary": {
                 "has_draft": bool(packet_summary.get("has_draft")),
@@ -2945,6 +3826,7 @@ class ComplaintWorkspaceService:
         }
 
     def get_provider_diagnostics(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        from applications import ui_review as ui_review_module
         from ipfs_datasets_py import llm_router
 
         def _vault_value(*names: str) -> str:
@@ -2995,6 +3877,35 @@ class ComplaintWorkspaceService:
                 pass
             return "unavailable"
 
+        def _resolve_openai_key() -> str:
+            resolver = getattr(llm_router, "_resolve_openai_api_key", None)
+            if callable(resolver):
+                try:
+                    resolved = str(resolver() or "").strip()
+                    if resolved:
+                        return resolved
+                except Exception:
+                    pass
+
+            resolved = _first_env("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
+            if resolved:
+                return resolved
+
+            resolved = _vault_value("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
+            if resolved:
+                return resolved
+
+            resolved = _keyring_value("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
+            if resolved:
+                return resolved
+
+            try:
+                from ipfs_datasets_py.utils.engine_env import _openai_key_from_common_files
+
+                return str(_openai_key_from_common_files() or "").strip()
+            except Exception:
+                return ""
+
         def _source_for_hf() -> str:
             if _first_env(
                 "IPFS_DATASETS_PY_HF_API_TOKEN",
@@ -3034,9 +3945,13 @@ class ComplaintWorkspaceService:
         forced_provider = str(os.getenv("IPFS_DATASETS_PY_LLM_PROVIDER", "") or "").strip()
         codex_path = shutil.which("codex") or ""
         copilot_path = shutil.which("copilot") or ""
-        openai_key = str(llm_router._resolve_openai_api_key() or "").strip()
+        openai_key = _resolve_openai_key()
         hf_token = str(llm_router._resolve_hf_api_token() or "").strip()
         copilot_provider = llm_router._builtin_provider_by_name("copilot_cli")
+        copilot_command = os.getenv("IPFS_DATASETS_PY_COPILOT_CLI_CMD", "npx --yes @github/copilot -p {prompt}")
+        copilot_supports_image_inputs = bool(
+            getattr(llm_router, "_copilot_cli_supports_image_inputs", lambda _command: False)(copilot_command)
+        )
 
         providers = [
             {
@@ -3068,6 +3983,7 @@ class ComplaintWorkspaceService:
                 ),
                 "binary_path": copilot_path or None,
                 "supports_multimodal": bool(copilot_path),
+                "supports_multimodal_ui_review": copilot_supports_image_inputs,
                 "credential_source": (
                     "github_copilot_cli"
                     if copilot_provider is not None and copilot_path
@@ -3084,6 +4000,8 @@ class ComplaintWorkspaceService:
                 "credential_source": _source_for_hf(),
                 "base_url": str(os.getenv("IPFS_DATASETS_PY_HF_INFERENCE_BASE_URL", "https://router.huggingface.co/hf-inference/models")).rstrip("/"),
                 "draft_timeout_seconds": _llm_draft_timeout_for_provider("hf_inference_api"),
+                "ui_review_model": ui_review_module._ui_review_model_for_provider("hf_inference_api"),
+                "ui_review_timeout_seconds": ui_review_module._ui_review_timeout_for_provider("hf_inference_api"),
             },
         ]
 
@@ -3093,6 +4011,20 @@ class ComplaintWorkspaceService:
             "forced_provider": forced_provider or None,
             "default_order": default_order,
             "effective_default_provider": forced_provider or effective_default,
+            "complaint_draft_default_order": list(DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN),
+            "effective_complaint_draft_provider": (
+                str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "") or "").strip()
+                or DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN[0]
+            ),
+            "ui_review_default_provider": ui_review_module.DEFAULT_UI_REVIEW_PROVIDER,
+            "ui_review_default_model": ui_review_module._ui_review_model_for_provider(
+                ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
+            ),
+            "ui_review_multimodal_rate_limit_fallbacks": {
+                "codex_cli": list(ui_review_module._multimodal_rate_limit_fallback_chain("codex_cli")),
+                "copilot_cli": list(ui_review_module._multimodal_rate_limit_fallback_chain("copilot_cli")),
+            },
+            "ui_review_hf_fallback_model": ui_review_module._ui_review_model_for_provider("hf_inference_api"),
             "providers": providers,
             "summary": {
                 "codex_available": bool(codex_path),
@@ -3227,6 +4159,87 @@ class ComplaintWorkspaceService:
             }
         ]
 
+    def _build_cached_ui_readiness_artifacts(self, user_id: Optional[str]) -> List[Dict[str, Any]]:
+        if not user_id:
+            return []
+        ui_readiness = self.get_ui_readiness(user_id)
+        if str(ui_readiness.get("status") or "").strip().lower() != "cached":
+            return []
+        screenshot_findings = [
+            dict(item)
+            for item in list(ui_readiness.get("screenshot_findings") or [])
+            if isinstance(item, dict) and item
+        ]
+        optimization_targets = [
+            dict(item)
+            for item in list(ui_readiness.get("optimization_targets") or [])
+            if isinstance(item, dict) and item
+        ]
+        playwright_followups = [str(item).strip() for item in list(ui_readiness.get("playwright_followups") or []) if str(item).strip()]
+        recommended_changes = [str(item).strip() for item in list(ui_readiness.get("recommended_changes") or []) if str(item).strip()]
+        if not (screenshot_findings or optimization_targets or playwright_followups or recommended_changes):
+            return []
+
+        finding_lines: List[str] = []
+        for item in screenshot_findings[:4]:
+            stage = str(item.get("stage") or item.get("name") or "unknown stage").strip()
+            summary = str(item.get("summary") or item.get("stage_finding") or item.get("visible_text_excerpt") or "").strip()
+            criticism_items = list(item.get("criticisms") or [])
+            criticism_text: List[str] = []
+            for criticism in criticism_items[:2]:
+                if isinstance(criticism, dict):
+                    text = str(criticism.get("problem") or criticism.get("recommended_fix") or "").strip()
+                else:
+                    text = str(criticism or "").strip()
+                if text:
+                    criticism_text.append(text)
+            line = f"- {stage}: {summary or 'No summary returned.'}"
+            if criticism_text:
+                line += f" Criticisms: {'; '.join(criticism_text)}"
+            finding_lines.append(line)
+
+        target_lines = [
+            f"- {str(item.get('title') or item.get('target') or item.get('target_surface') or 'optimization target').strip()}"
+            + (
+                f": {str(item.get('reason') or '').strip()}"
+                if str(item.get("reason") or "").strip()
+                else ""
+            )
+            for item in optimization_targets[:4]
+        ]
+        followup_lines = [f"- {item}" for item in playwright_followups[:4]]
+        change_lines = [f"- {item}" for item in recommended_changes[:4]]
+        excerpt_sections = [
+            str(ui_readiness.get("summary") or "").strip(),
+            "Screenshot findings:\n" + "\n".join(finding_lines) if finding_lines else "",
+            "Optimization targets:\n" + "\n".join(target_lines) if target_lines else "",
+            "Playwright follow-ups:\n" + "\n".join(followup_lines) if followup_lines else "",
+            "Recommended changes:\n" + "\n".join(change_lines) if change_lines else "",
+        ]
+
+        return [
+            {
+                "name": "workspace-cached-ui-readiness",
+                "url": "/workspace?target_tab=ux-review",
+                "title": "Cached UX Audit Review",
+                "artifact_type": "ui_readiness_review",
+                "verdict": str(ui_readiness.get("verdict") or ""),
+                "score": ui_readiness.get("score"),
+                "critic_verdict": str(ui_readiness.get("critic_verdict") or ""),
+                "workflow_type": str(ui_readiness.get("workflow_type") or ""),
+                "review_backend": deepcopy(ui_readiness.get("review_backend") or {}),
+                "tested_stages": list(ui_readiness.get("tested_stages") or []),
+                "release_blockers": list(ui_readiness.get("release_blockers") or []),
+                "screenshot_findings": screenshot_findings,
+                "optimization_targets": optimization_targets,
+                "playwright_followups": playwright_followups,
+                "recommended_changes": recommended_changes,
+                "review_excerpt": "\n\n".join(section for section in excerpt_sections if section).strip()[:3000],
+                "latest_review_markdown_path": ui_readiness.get("latest_review_markdown_path"),
+                "latest_review_json_path": ui_readiness.get("latest_review_json_path"),
+            }
+        ]
+
     def export_complaint_markdown(self, user_id: Optional[str]) -> Dict[str, Any]:
         artifact = self.build_export_artifact(user_id, "markdown")
         packet_payload = self._build_packet_snapshot(user_id)
@@ -3322,6 +4335,40 @@ class ComplaintWorkspaceService:
         self._save_state(state)
         return self.get_session(str(state.get("user_id")))
 
+    def run_intake_chat_turn(
+        self,
+        user_id: Optional[str],
+        *,
+        message: Optional[str] = None,
+        question_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        target_question = self._question_by_id(question_id) if question_id else self._next_question(state.get("intake_answers") or {})
+        if question_id and target_question is None:
+            raise ValueError(f"Unknown intake question_id: {question_id}")
+
+        accepted_answer: Optional[Dict[str, Any]] = None
+        normalized_message = str(message or "").strip()
+        if normalized_message:
+            if target_question is None:
+                raise ValueError("The intake flow is already complete for this session.")
+            answer_map = state.setdefault("intake_answers", {})
+            history = state.setdefault("intake_history", [])
+            answer_map[target_question["id"]] = normalized_message
+            accepted_answer = {
+                "question_id": target_question["id"],
+                "answer": normalized_message,
+                "captured_at": _utc_now(),
+            }
+            history.append(deepcopy(accepted_answer))
+
+        self._save_state(state)
+        return self._build_intake_chat_payload(
+            state,
+            accepted_answer=accepted_answer,
+            requested_question_id=question_id if accepted_answer is None else None,
+        )
+
     def save_evidence(
         self,
         user_id: Optional[str],
@@ -3360,34 +4407,169 @@ class ComplaintWorkspaceService:
         user_id: Optional[str],
         *,
         addresses: List[str],
+        collect_all_messages: bool = False,
         claim_element_id: str = "causation",
         folder: str = "INBOX",
+        folders: Optional[List[str]] = None,
         limit: Optional[int] = None,
         date_after: Optional[str] = None,
         date_before: Optional[str] = None,
+        years_back: Optional[int] = None,
         evidence_root: Optional[str] = None,
         gmail_user: Optional[str] = None,
         gmail_app_password: Optional[str] = None,
+        use_gmail_oauth: bool = False,
+        gmail_oauth_client_secrets: Optional[str] = None,
+        gmail_oauth_token_cache: Optional[str] = None,
+        gmail_oauth_open_browser: bool = True,
+        complaint_query: Optional[str] = None,
+        complaint_keywords: Optional[List[str]] = None,
+        min_relevance_score: float = 0.0,
+        use_uid_checkpoint: bool = False,
+        checkpoint_name: Optional[str] = None,
+        uid_window_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         async def _run_import() -> Dict[str, Any]:
-            from complaint_generator.email_import import import_gmail_evidence
+            from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
 
             return await import_gmail_evidence(
                 addresses=addresses,
+                collect_all_messages=collect_all_messages,
                 user_id=str(user_id or DEFAULT_USER_ID),
                 claim_element_id=claim_element_id,
                 workspace_root=self._session_dir,
                 evidence_root=Path(evidence_root) if evidence_root else None,
                 folder=folder,
+                folders=folders or [],
                 limit=limit,
                 date_after=date_after,
                 date_before=date_before,
+                years_back=years_back,
                 gmail_user=gmail_user,
                 gmail_app_password=gmail_app_password,
+                use_gmail_oauth=use_gmail_oauth,
+                gmail_oauth_client_secrets=gmail_oauth_client_secrets,
+                gmail_oauth_token_cache=gmail_oauth_token_cache,
+                gmail_oauth_open_browser=gmail_oauth_open_browser,
+                complaint_query=complaint_query,
+                complaint_keywords=complaint_keywords or [],
+                min_relevance_score=min_relevance_score,
+                use_uid_checkpoint=use_uid_checkpoint,
+                checkpoint_name=checkpoint_name,
+                uid_window_size=uid_window_size,
                 service=self,
             )
 
         return anyio.run(_run_import)
+
+    def run_gmail_duckdb_pipeline(
+        self,
+        user_id: Optional[str],
+        *,
+        addresses: List[str],
+        collect_all_messages: bool = False,
+        claim_element_id: str = "causation",
+        folder: str = "INBOX",
+        folders: Optional[List[str]] = None,
+        years_back: Optional[int] = 2,
+        date_after: Optional[str] = None,
+        date_before: Optional[str] = None,
+        complaint_query: Optional[str] = None,
+        complaint_keywords: Optional[List[str]] = None,
+        min_relevance_score: float = 0.0,
+        evidence_root: Optional[str] = None,
+        gmail_user: Optional[str] = None,
+        gmail_app_password: Optional[str] = None,
+        use_gmail_oauth: bool = False,
+        gmail_oauth_client_secrets: Optional[str] = None,
+        gmail_oauth_token_cache: Optional[str] = None,
+        gmail_oauth_open_browser: bool = True,
+        checkpoint_name: str = "gmail-duckdb-pipeline",
+        uid_window_size: int = 500,
+        duckdb_build_every_batches: int = 10,
+        max_batches: int = 20,
+        duckdb_output_dir: Optional[str] = None,
+        append_to_existing_corpus: bool = False,
+        bm25_search_query: Optional[str] = None,
+        bm25_search_limit: int = 20,
+    ) -> Dict[str, Any]:
+        async def _run_pipeline() -> Dict[str, Any]:
+            from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
+
+            return await run_gmail_duckdb_pipeline(
+                user_id=str(user_id or DEFAULT_USER_ID),
+                addresses=addresses,
+                collect_all_messages=collect_all_messages,
+                claim_element_id=claim_element_id,
+                folder=folder,
+                folders=folders or [],
+                years_back=years_back,
+                date_after=date_after,
+                date_before=date_before,
+                complaint_query=complaint_query,
+                complaint_keywords=complaint_keywords or [],
+                min_relevance_score=min_relevance_score,
+                workspace_root=self._session_dir,
+                evidence_root=Path(evidence_root) if evidence_root else None,
+                gmail_user=gmail_user,
+                gmail_app_password=gmail_app_password,
+                use_gmail_oauth=use_gmail_oauth,
+                gmail_oauth_client_secrets=gmail_oauth_client_secrets,
+                gmail_oauth_token_cache=gmail_oauth_token_cache,
+                gmail_oauth_open_browser=gmail_oauth_open_browser,
+                checkpoint_name=checkpoint_name,
+                uid_window_size=uid_window_size,
+                duckdb_build_every_batches=duckdb_build_every_batches,
+                max_batches=max_batches,
+                duckdb_output_dir=duckdb_output_dir,
+                append_to_existing_corpus=append_to_existing_corpus,
+                bm25_search_query=bm25_search_query,
+                bm25_search_limit=bm25_search_limit,
+            )
+
+        return anyio.run(_run_pipeline)
+
+    def search_email_duckdb_corpus(
+        self,
+        *,
+        index_path: str,
+        query: str,
+        limit: int = 20,
+        ranking: str = "bm25",
+        bm25_k1: float = 1.2,
+        bm25_b: float = 0.75,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
+
+        return search_email_duckdb_corpus(
+            index_path=index_path,
+            query=query,
+            limit=limit,
+            ranking=ranking,
+            bm25_k1=bm25_k1,
+            bm25_b=bm25_b,
+        )
+
+    def import_local_evidence(
+        self,
+        user_id: Optional[str],
+        *,
+        paths: List[str],
+        claim_element_id: str = "causation",
+        kind: str = "document",
+        evidence_root: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from complaint_generator.local_evidence_import import import_local_evidence
+
+        return import_local_evidence(
+            paths=paths,
+            user_id=str(user_id or DEFAULT_USER_ID),
+            claim_element_id=claim_element_id,
+            kind=kind,
+            workspace_root=self._session_dir,
+            evidence_root=Path(evidence_root) if evidence_root else None,
+            service=self,
+        )
 
     def generate_complaint(
         self,
@@ -3461,10 +4643,552 @@ class ComplaintWorkspaceService:
             "case_synopsis": session["case_synopsis"],
         }
 
+    def update_filing_metadata(
+        self,
+        user_id: Optional[str],
+        metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        filing_metadata = dict(state.get("filing_metadata") or {})
+        for key in (
+            "caption_plaintiffs",
+            "caption_defendants",
+            "signature_plaintiff",
+            "signature_role",
+            "mailing_address",
+        ):
+            value = str((metadata or {}).get(key) or "").strip()
+            if value:
+                filing_metadata[key] = value
+        state["filing_metadata"] = filing_metadata
+        state["draft"] = None
+        self._save_state(state)
+        session = self.get_session(str(state.get("user_id")))
+        return {
+            "session": session["session"],
+            "review": session["review"],
+            "questions": session["questions"],
+            "next_question": session["next_question"],
+            "case_synopsis": session["case_synopsis"],
+            "filing_metadata": deepcopy(session["session"].get("filing_metadata") or {}),
+        }
+
     def reset_session(self, user_id: Optional[str]) -> Dict[str, Any]:
         state = _default_state(str(user_id or DEFAULT_USER_ID))
         self._save_state(state)
         return self.get_session(str(state["user_id"]))
+
+    @staticmethod
+    def _resolve_docket_path(path_value: str | Path) -> str:
+        return str(Path(str(path_value)).expanduser().resolve())
+
+    @staticmethod
+    def _resolve_workspace_dataset_path(path_value: str | Path) -> str:
+        return str(Path(str(path_value)).expanduser().resolve())
+
+    def _load_workspace_dataset_payload(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import (
+            WorkspaceDatasetBuilder,
+            load_packaged_workspace_dataset,
+            load_workspace_dataset_single_parquet,
+        )
+
+        resolved_path = self._resolve_workspace_dataset_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
+        if normalized_type == "packaged":
+            dataset = load_packaged_workspace_dataset(resolved_path)
+        elif normalized_type == "json":
+            dataset = WorkspaceDatasetBuilder().build_from_json_file(resolved_path)
+        elif normalized_type == "single":
+            dataset = load_workspace_dataset_single_parquet(resolved_path)
+        else:
+            raise ValueError(f"Unsupported workspace dataset input_type: {input_type}")
+        return dict(dataset.to_dict() if hasattr(dataset, "to_dict") else dataset)
+
+    @staticmethod
+    def _apply_workspace_dataset_filters(
+        dataset_payload: Dict[str, Any],
+        *,
+        collection_id: Optional[str] = None,
+        document_type: Optional[str] = None,
+        claim_type: Optional[str] = None,
+        claim_element_id: Optional[str] = None,
+        source_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        normalized_filters = {
+            "collection_id": str(collection_id or "").strip(),
+            "document_type": str(document_type or "").strip(),
+            "claim_type": str(claim_type or "").strip(),
+            "claim_element_id": str(claim_element_id or "").strip(),
+            "source_type": str(source_type or "").strip(),
+        }
+
+        def _matches_document(document: Mapping[str, Any]) -> bool:
+            metadata = dict(document.get("metadata") or {})
+            for key, expected in normalized_filters.items():
+                if not expected:
+                    continue
+                candidates = [
+                    document.get(key),
+                    metadata.get(key),
+                    metadata.get(key.replace("_id", "")),
+                ]
+                if key == "source_type":
+                    candidates.extend(
+                        [
+                            dataset_payload.get("source_type"),
+                            metadata.get("source_family"),
+                            metadata.get("source"),
+                        ]
+                    )
+                values = {str(value).strip().lower() for value in candidates if str(value or "").strip()}
+                expected_lower = expected.lower()
+                if key == "source_type":
+                    matched = any(
+                        expected_lower == value
+                        or expected_lower in value
+                        or value in expected_lower
+                        for value in values
+                    )
+                else:
+                    matched = expected_lower in values
+                if not matched:
+                    return False
+            return True
+
+        documents = [dict(item) for item in list(dataset_payload.get("documents") or []) if isinstance(item, dict)]
+        filtered_documents = [item for item in documents if _matches_document(item)]
+        allowed_document_ids = {
+            str(item.get("document_id") or "").strip()
+            for item in filtered_documents
+            if str(item.get("document_id") or "").strip()
+        }
+
+        def _filter_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            filtered: List[Dict[str, Any]] = []
+            for row in rows:
+                document_id = str(row.get("document_id") or "").strip()
+                if not document_id or document_id in allowed_document_ids:
+                    filtered.append(dict(row))
+            return filtered
+
+        collections = [dict(item) for item in list(dataset_payload.get("collections") or []) if isinstance(item, dict)]
+        filtered_collections: List[Dict[str, Any]] = []
+        for collection in collections:
+            if normalized_filters["collection_id"]:
+                candidate_id = str(collection.get("id") or collection.get("collection_id") or "").strip()
+                if candidate_id.lower() != normalized_filters["collection_id"].lower():
+                    continue
+            document_ids = [str(item).strip() for item in list(collection.get("document_ids") or []) if str(item).strip()]
+            if allowed_document_ids and document_ids and not any(item in allowed_document_ids for item in document_ids):
+                continue
+            filtered_collections.append(collection)
+
+        return {
+            **dict(dataset_payload),
+            "documents": filtered_documents,
+            "collections": filtered_collections,
+            "bm25_index": {
+                **dict(dataset_payload.get("bm25_index") or {}),
+                "documents": _filter_rows([dict(item) for item in list((dataset_payload.get("bm25_index") or {}).get("documents") or []) if isinstance(item, dict)]),
+            },
+            "vector_index": {
+                **dict(dataset_payload.get("vector_index") or {}),
+                "items": _filter_rows([dict(item) for item in list((dataset_payload.get("vector_index") or {}).get("items") or []) if isinstance(item, dict)]),
+            },
+            "applied_filters": {key: value for key, value in normalized_filters.items() if value},
+        }
+
+    def _load_docket_dataset_payload(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import DocketDatasetBuilder, load_packaged_docket_dataset
+
+        resolved_path = self._resolve_docket_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
+        if normalized_type == "packaged":
+            dataset = load_packaged_docket_dataset(resolved_path)
+        elif normalized_type == "json":
+            dataset = DocketDatasetBuilder().build_from_json_file(resolved_path)
+        else:
+            raise ValueError(f"Unsupported docket input_type: {input_type}")
+        return dict(dataset.to_dict() if hasattr(dataset, "to_dict") else dataset)
+
+    @staticmethod
+    def _build_docket_document_view(
+        dataset_payload: Dict[str, Any],
+        *,
+        include_document_text: bool,
+        document_limit: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        documents = list(dataset_payload.get("documents") or [])
+        if document_limit is not None:
+            documents = documents[: max(0, int(document_limit))]
+        view: List[Dict[str, Any]] = []
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            row = {
+                "id": document.get("id"),
+                "title": document.get("title"),
+                "date_filed": document.get("date_filed"),
+                "document_number": document.get("document_number"),
+                "source_url": document.get("source_url"),
+                "metadata": dict(document.get("metadata") or {}),
+            }
+            if include_document_text:
+                row["text"] = document.get("text")
+            view.append(row)
+        return view
+
+    @staticmethod
+    def _issue_links_from_knowledge_graph(knowledge_graph: Dict[str, Any]) -> Dict[str, Any]:
+        entities = [
+            dict(entity)
+            for entity in list((knowledge_graph or {}).get("entities") or [])
+            if isinstance(entity, dict)
+        ]
+        relationships = [
+            dict(relationship)
+            for relationship in list((knowledge_graph or {}).get("relationships") or [])
+            if isinstance(relationship, dict)
+        ]
+        entity_by_id = {
+            str(entity.get("id") or ""): entity
+            for entity in entities
+            if str(entity.get("id") or "").strip()
+        }
+
+        def _entity_matches_issue(entity: Dict[str, Any]) -> bool:
+            haystacks = [
+                str(entity.get("type") or ""),
+                str(entity.get("label") or ""),
+                str(entity.get("name") or ""),
+                str(entity.get("category") or ""),
+                str((entity.get("metadata") or {}).get("type") or ""),
+                str((entity.get("metadata") or {}).get("category") or ""),
+            ]
+            lowered = " ".join(haystacks).lower()
+            return any(keyword in lowered for keyword in _DOCKET_ISSUE_ENTITY_KEYWORDS)
+
+        issue_entities = [entity for entity in entities if _entity_matches_issue(entity)]
+        issue_entity_ids = {
+            str(entity.get("id") or "")
+            for entity in issue_entities
+            if str(entity.get("id") or "").strip()
+        }
+        issue_links: List[Dict[str, Any]] = []
+        for relationship in relationships:
+            source_id = str(
+                relationship.get("source")
+                or relationship.get("source_id")
+                or relationship.get("from")
+                or relationship.get("head")
+                or ""
+            ).strip()
+            target_id = str(
+                relationship.get("target")
+                or relationship.get("target_id")
+                or relationship.get("to")
+                or relationship.get("tail")
+                or ""
+            ).strip()
+            if not source_id or not target_id:
+                continue
+            if source_id not in issue_entity_ids and target_id not in issue_entity_ids:
+                continue
+            issue_links.append(
+                {
+                    "id": relationship.get("id"),
+                    "type": relationship.get("type") or relationship.get("label"),
+                    "source_id": source_id,
+                    "target_id": target_id,
+                    "source_entity": entity_by_id.get(source_id),
+                    "target_entity": entity_by_id.get(target_id),
+                    "metadata": dict(relationship.get("metadata") or {}),
+                }
+            )
+        return {
+            "entities": entities,
+            "relationships": relationships,
+            "issue_entities": issue_entities,
+            "issue_links": issue_links,
+            "entity_count": len(entities),
+            "relationship_count": len(relationships),
+            "issue_entity_count": len(issue_entities),
+            "issue_link_count": len(issue_links),
+        }
+
+    def view_docket_dataset(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+        include_document_text: bool = False,
+        document_limit: Optional[int] = 25,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import summarize_docket_dataset
+
+        resolved_path = self._resolve_docket_path(input_path)
+        dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
+        summary = summarize_docket_dataset(dataset_payload)
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "summary": dict(summary),
+            "documents": self._build_docket_document_view(
+                dataset_payload,
+                include_document_text=bool(include_document_text),
+                document_limit=document_limit,
+            ),
+            "metadata": dict(dataset_payload.get("metadata") or {}),
+            "source": "complaint_workspace_docket_view",
+        }
+
+    def search_workspace_dataset(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+        query: str,
+        search_backend: str = "bm25",
+        top_k: int = 10,
+        vector_dimension: int = 32,
+        collection_id: Optional[str] = None,
+        document_type: Optional[str] = None,
+        claim_type: Optional[str] = None,
+        claim_element_id: Optional[str] = None,
+        source_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import (
+            search_workspace_dataset_bm25,
+            search_workspace_dataset_vector,
+            summarize_workspace_dataset,
+        )
+
+        resolved_path = self._resolve_workspace_dataset_path(input_path)
+        normalized_backend = str(search_backend or "bm25").strip().lower()
+        dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
+        filtered_payload = self._apply_workspace_dataset_filters(
+            dataset_payload,
+            collection_id=collection_id,
+            document_type=document_type,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            source_type=source_type,
+        )
+        if normalized_backend == "bm25":
+            results = search_workspace_dataset_bm25(filtered_payload, query, top_k=int(top_k or 10))
+        elif normalized_backend == "vector":
+            results = search_workspace_dataset_vector(
+                filtered_payload,
+                query,
+                top_k=int(top_k or 10),
+                vector_dimension=int(vector_dimension or 32),
+            )
+        else:
+            raise ValueError(f"Unsupported workspace search backend: {search_backend}")
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "query": str(query or ""),
+            "search_backend": normalized_backend,
+            "summary": dict(summarize_workspace_dataset(filtered_payload)),
+            "search_results": dict(results),
+            "applied_filters": dict(filtered_payload.get("applied_filters") or {}),
+            "source": "complaint_workspace_dataset_search",
+        }
+
+    def search_docket_dataset(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+        query: str,
+        search_backend: str = "bm25",
+        top_k: int = 10,
+        vector_dimension: int = 32,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import (
+            search_docket_dataset_bm25,
+            search_docket_dataset_vector,
+            summarize_docket_dataset,
+        )
+
+        resolved_path = self._resolve_docket_path(input_path)
+        normalized_backend = str(search_backend or "bm25").strip().lower()
+        dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
+        if normalized_backend == "bm25":
+            results = search_docket_dataset_bm25(dataset_payload, query, top_k=int(top_k or 10))
+        elif normalized_backend == "vector":
+            results = search_docket_dataset_vector(
+                dataset_payload,
+                query,
+                top_k=int(top_k or 10),
+                vector_dimension=int(vector_dimension or 32),
+            )
+        else:
+            raise ValueError(f"Unsupported docket search backend: {search_backend}")
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "query": str(query or ""),
+            "search_backend": normalized_backend,
+            "summary": dict(summarize_docket_dataset(dataset_payload)),
+            "search_results": dict(results),
+            "source": "complaint_workspace_docket_search",
+        }
+
+    def get_docket_dataset_metadata(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import summarize_docket_dataset
+
+        resolved_path = self._resolve_docket_path(input_path)
+        dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
+        summary = dict(summarize_docket_dataset(dataset_payload))
+        metadata = dict(dataset_payload.get("metadata") or {})
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "dataset_id": dataset_payload.get("dataset_id"),
+            "docket_id": dataset_payload.get("docket_id"),
+            "case_name": dataset_payload.get("case_name"),
+            "court": dataset_payload.get("court"),
+            "summary": summary,
+            "metadata": metadata,
+            "document_count": len(list(dataset_payload.get("documents") or [])),
+            "source": "complaint_workspace_docket_metadata",
+        }
+
+    def get_docket_dataset_graph(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+    ) -> Dict[str, Any]:
+        resolved_path = self._resolve_docket_path(input_path)
+        dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
+        knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
+        graph_projection = self._issue_links_from_knowledge_graph(knowledge_graph)
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "dataset_id": dataset_payload.get("dataset_id"),
+            "docket_id": dataset_payload.get("docket_id"),
+            "case_name": dataset_payload.get("case_name"),
+            "court": dataset_payload.get("court"),
+            "metadata": dict(dataset_payload.get("metadata") or {}),
+            "knowledge_graph": graph_projection,
+            "source": "complaint_workspace_docket_graph",
+        }
+
+    def get_packaged_docket_operator_dashboard(self, manifest_path: str | Path) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import get_packaged_docket_operator_dashboard
+
+        resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
+        dashboard = get_packaged_docket_operator_dashboard(resolved_manifest)
+        return {
+            **dict(dashboard),
+            "manifest_path": resolved_manifest,
+            "source": "complaint_workspace_packaged_operator_dashboard",
+        }
+
+    def load_packaged_docket_operator_dashboard_report(
+        self,
+        manifest_path: str | Path,
+        *,
+        report_format: str = "parsed",
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import load_packaged_docket_operator_dashboard_report
+
+        resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
+        normalized_format = str(report_format or "parsed").strip().lower()
+        report = load_packaged_docket_operator_dashboard_report(
+            resolved_manifest,
+            report_format=normalized_format,
+        )
+        return {
+            "manifest_path": resolved_manifest,
+            "report_format": normalized_format,
+            "report": report,
+            "source": "complaint_workspace_packaged_operator_dashboard_report",
+        }
+
+    def execute_packaged_docket_proof_revalidation_queue(
+        self,
+        manifest_path: str | Path,
+        *,
+        top_k: int = 10,
+        min_priority: str = "low",
+        queue_limit: Optional[int] = None,
+        execution_top_k: int = 10,
+        chain_until_satisfied: bool = True,
+        attach_refreshed_packets: bool = False,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import execute_packaged_docket_proof_revalidation_queue
+
+        resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
+        execution = execute_packaged_docket_proof_revalidation_queue(
+            resolved_manifest,
+            top_k=int(top_k or 10),
+            min_priority=str(min_priority or "low"),
+            queue_limit=int(queue_limit) if queue_limit is not None else None,
+            execution_top_k=int(execution_top_k or 10),
+            chain_until_satisfied=bool(chain_until_satisfied),
+            attach_refreshed_packets=bool(attach_refreshed_packets),
+        )
+        return {
+            **dict(execution),
+            "manifest_path": resolved_manifest,
+            "source": "complaint_workspace_packaged_proof_revalidation_queue_execution",
+        }
+
+    def persist_packaged_docket_proof_revalidation_queue(
+        self,
+        manifest_path: str | Path,
+        output_dir: str | Path,
+        *,
+        package_name: Optional[str] = None,
+        include_car: bool = True,
+        top_k: int = 10,
+        min_priority: str = "low",
+        queue_limit: Optional[int] = None,
+        execution_top_k: int = 10,
+        chain_until_satisfied: bool = True,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import persist_packaged_docket_proof_revalidation_queue
+
+        resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
+        resolved_output_dir = str(Path(str(output_dir)).expanduser().resolve())
+        persisted = persist_packaged_docket_proof_revalidation_queue(
+            resolved_manifest,
+            resolved_output_dir,
+            package_name=str(package_name).strip() if package_name is not None and str(package_name).strip() else None,
+            include_car=bool(include_car),
+            top_k=int(top_k or 10),
+            min_priority=str(min_priority or "low"),
+            queue_limit=int(queue_limit) if queue_limit is not None else None,
+            execution_top_k=int(execution_top_k or 10),
+            chain_until_satisfied=bool(chain_until_satisfied),
+        )
+        return {
+            **dict(persisted),
+            "manifest_path": resolved_manifest,
+            "output_dir": resolved_output_dir,
+            "source": "complaint_workspace_packaged_proof_revalidation_queue_persist",
+        }
 
     def list_mcp_tools(self) -> Dict[str, Any]:
         return {
@@ -3474,8 +5198,12 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.list_claim_elements", "description": "List the tracked claim elements used for evidence and review."},
                 {"name": "complaint.start_session", "description": "Load or initialize a complaint workspace session."},
                 {"name": "complaint.submit_intake", "description": "Save complaint intake answers."},
+                {"name": "complaint.run_intake_chat_turn", "description": "Advance the shared mediator-style intake chat one turn and persist the captured answer."},
                 {"name": "complaint.save_evidence", "description": "Save testimony or document evidence to the workspace."},
                 {"name": "complaint.import_gmail_evidence", "description": "Import matching Gmail messages and attachments into the complaint evidence workspace."},
+                {"name": "complaint.run_gmail_duckdb_pipeline", "description": "Run a checkpointed Gmail-to-DuckDB pipeline across many mailbox windows and optional BM25 search."},
+                {"name": "complaint.import_local_evidence", "description": "Import local files or directories into the complaint evidence workspace."},
+                {"name": "complaint.search_email_duckdb_corpus", "description": "Search an existing Gmail DuckDB corpus with BM25 or weighted keyword ranking."},
                 {"name": "complaint.review_case", "description": "Return the current support matrix and evidence review."},
                 {"name": "complaint.build_mediator_prompt", "description": "Build a testimony-ready chat mediator prompt from the shared case synopsis and support gaps."},
                 {"name": "complaint.get_complaint_readiness", "description": "Estimate whether the current complaint record is ready for drafting, still building, or already in draft refinement."},
@@ -3483,6 +5211,9 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.get_client_release_gate", "description": "Combine complaint readiness, UI readiness, and complaint-output quality into one client-safety release gate."},
                 {"name": "complaint.get_workflow_capabilities", "description": "Summarize which complaint-workflow abilities are currently available for the session."},
                 {"name": "complaint.get_tooling_contract", "description": "Show how the core complaint workflow is exposed across package exports, CLI commands, MCP tools, and browser SDK methods."},
+                {"name": "complaint.get_workspace_data_schema", "description": "Inspect the current or packaged workspace dataset schema so MCP and UI surfaces can follow the actual parquet data model."},
+                {"name": "complaint.migrate_legacy_workspace_data", "description": "Project legacy complaint session and mediator DuckDB state into a packaged workspace dataset stored as parquet pieces."},
+                {"name": "complaint.search_workspace_dataset", "description": "Search a packaged or single-file workspace dataset using BM25 or vector retrieval plus schema-aligned filters."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
                 {"name": "complaint.export_complaint_packet", "description": "Export the current lawsuit complaint packet with intake, evidence, review, and draft content."},
@@ -3493,7 +5224,15 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.get_formal_diagnostics", "description": "Return the compact formal-complaint diagnostics summary for the current complaint draft and export state."},
                 {"name": "complaint.get_filing_provenance", "description": "Return the shared routing provenance for complaint generation, filing critique, export critique, and cached UI review workflows."},
                 {"name": "complaint.get_provider_diagnostics", "description": "Report which llm_router providers are actually usable on this machine, in the same order the router will prefer them."},
+                {"name": "complaint.view_docket_dataset", "description": "Load a docket dataset from packaged or source JSON input and return docket documents, summary, and metadata for dashboard viewing."},
+                {"name": "complaint.search_docket_dataset", "description": "Search a docket dataset with bm25 or vector retrieval and return matching docket entries for dashboard exploration."},
+                {"name": "complaint.get_docket_dataset_metadata", "description": "Return the docket dataset summary and metadata used by the complaint MCP dashboard."},
+                {"name": "complaint.get_docket_dataset_graph", "description": "Return knowledge-graph entities, relationships, and extracted legal-issue links for a docket dataset."},
                 {"name": "complaint.review_generated_exports", "description": "Review generated complaint export artifacts through llm_router and turn filing-output weaknesses into UI/UX repair suggestions."},
+                {"name": "complaint.get_packaged_docket_operator_dashboard", "description": "Load the combined packaged docket operator dashboard for a docket bundle manifest."},
+                {"name": "complaint.load_packaged_docket_operator_dashboard_report", "description": "Load the archived packaged docket operator dashboard report artifact for a docket bundle manifest."},
+                {"name": "complaint.execute_packaged_docket_proof_revalidation_queue", "description": "Execute the packaged docket proof revalidation queue for a docket bundle manifest and return execution summaries."},
+                {"name": "complaint.persist_packaged_docket_proof_revalidation_queue", "description": "Execute packaged docket proof revalidation and write a refreshed parquet/CAR bundle to an output directory."},
                 {"name": "complaint.update_claim_type", "description": "Set the current complaint type so drafting and review stay aligned to the right legal claim shape."},
                 {"name": "complaint.update_case_synopsis", "description": "Persist a shared case synopsis that stays visible across workspace, CLI, and MCP flows."},
                 {"name": "complaint.reset_session", "description": "Clear the complaint workspace session."},
@@ -3515,6 +5254,12 @@ class ComplaintWorkspaceService:
             return self.get_session(args.get("user_id"))
         if tool_name == "complaint.submit_intake":
             return self.submit_intake_answers(args.get("user_id"), args.get("answers") or {})
+        if tool_name == "complaint.run_intake_chat_turn":
+            return self.run_intake_chat_turn(
+                args.get("user_id"),
+                message=args.get("message"),
+                question_id=args.get("question_id"),
+            )
         if tool_name == "complaint.save_evidence":
             return self.save_evidence(
                 args.get("user_id"),
@@ -3531,12 +5276,69 @@ class ComplaintWorkspaceService:
                 addresses=[str(item).strip() for item in list(args.get("addresses") or []) if str(item).strip()],
                 claim_element_id=str(args.get("claim_element_id") or "causation"),
                 folder=str(args.get("folder") or "INBOX"),
+                folders=[str(item).strip() for item in list(args.get("folders") or []) if str(item).strip()],
                 limit=int(args["limit"]) if args.get("limit") is not None else None,
                 date_after=str(args.get("date_after") or "") or None,
                 date_before=str(args.get("date_before") or "") or None,
+                years_back=int(args["years_back"]) if args.get("years_back") is not None else None,
                 evidence_root=str(args.get("evidence_root") or "") or None,
                 gmail_user=str(args.get("gmail_user") or "") or None,
                 gmail_app_password=str(args.get("gmail_app_password") or "") or None,
+                use_gmail_oauth=bool(args.get("use_gmail_oauth") or False),
+                gmail_oauth_client_secrets=str(args.get("gmail_oauth_client_secrets") or "") or None,
+                gmail_oauth_token_cache=str(args.get("gmail_oauth_token_cache") or "") or None,
+                gmail_oauth_open_browser=bool(True if args.get("gmail_oauth_open_browser") is None else args.get("gmail_oauth_open_browser")),
+                complaint_query=str(args.get("complaint_query") or "") or None,
+                complaint_keywords=[str(item).strip() for item in list(args.get("complaint_keywords") or []) if str(item).strip()],
+                min_relevance_score=float(args.get("min_relevance_score") or 0.0),
+                use_uid_checkpoint=bool(args.get("use_uid_checkpoint") or False),
+                checkpoint_name=str(args.get("checkpoint_name") or "") or None,
+                uid_window_size=int(args["uid_window_size"]) if args.get("uid_window_size") is not None else None,
+            )
+        if tool_name == "complaint.run_gmail_duckdb_pipeline":
+            return self.run_gmail_duckdb_pipeline(
+                args.get("user_id"),
+                addresses=[str(item).strip() for item in list(args.get("addresses") or []) if str(item).strip()],
+                claim_element_id=str(args.get("claim_element_id") or "causation"),
+                folder=str(args.get("folder") or "INBOX"),
+                folders=[str(item).strip() for item in list(args.get("folders") or []) if str(item).strip()],
+                years_back=int(args["years_back"]) if args.get("years_back") is not None else 2,
+                date_after=str(args.get("date_after") or "") or None,
+                date_before=str(args.get("date_before") or "") or None,
+                complaint_query=str(args.get("complaint_query") or "") or None,
+                complaint_keywords=[str(item).strip() for item in list(args.get("complaint_keywords") or []) if str(item).strip()],
+                min_relevance_score=float(args.get("min_relevance_score") or 0.0),
+                evidence_root=str(args.get("evidence_root") or "") or None,
+                gmail_user=str(args.get("gmail_user") or "") or None,
+                gmail_app_password=str(args.get("gmail_app_password") or "") or None,
+                use_gmail_oauth=bool(args.get("use_gmail_oauth") or False),
+                gmail_oauth_client_secrets=str(args.get("gmail_oauth_client_secrets") or "") or None,
+                gmail_oauth_token_cache=str(args.get("gmail_oauth_token_cache") or "") or None,
+                gmail_oauth_open_browser=bool(True if args.get("gmail_oauth_open_browser") is None else args.get("gmail_oauth_open_browser")),
+                checkpoint_name=str(args.get("checkpoint_name") or "gmail-duckdb-pipeline"),
+                uid_window_size=int(args["uid_window_size"]) if args.get("uid_window_size") is not None else 500,
+                max_batches=int(args["max_batches"]) if args.get("max_batches") is not None else 20,
+                duckdb_output_dir=str(args.get("duckdb_output_dir") or "") or None,
+                append_to_existing_corpus=bool(args.get("append_to_existing_corpus") or False),
+                bm25_search_query=str(args.get("bm25_search_query") or "") or None,
+                bm25_search_limit=int(args["bm25_search_limit"]) if args.get("bm25_search_limit") is not None else 20,
+            )
+        if tool_name == "complaint.import_local_evidence":
+            return self.import_local_evidence(
+                args.get("user_id"),
+                paths=[str(item).strip() for item in list(args.get("paths") or []) if str(item).strip()],
+                claim_element_id=str(args.get("claim_element_id") or "causation"),
+                kind=str(args.get("kind") or "document"),
+                evidence_root=str(args.get("evidence_root") or "") or None,
+            )
+        if tool_name == "complaint.search_email_duckdb_corpus":
+            return self.search_email_duckdb_corpus(
+                index_path=str(args.get("index_path") or ""),
+                query=str(args.get("query") or ""),
+                limit=int(args["limit"]) if args.get("limit") is not None else 20,
+                ranking=str(args.get("ranking") or "bm25"),
+                bm25_k1=float(args.get("bm25_k1") or 1.2),
+                bm25_b=float(args.get("bm25_b") or 0.75),
             )
         if tool_name == "complaint.review_case":
             session = self.get_session(args.get("user_id"))
@@ -3559,6 +5361,43 @@ class ComplaintWorkspaceService:
             return self.get_workflow_capabilities(args.get("user_id"))
         if tool_name == "complaint.get_tooling_contract":
             return self.get_tooling_contract(args.get("user_id"))
+        if tool_name == "complaint.get_workspace_data_schema":
+            return self.get_workspace_data_schema(
+                args.get("user_id"),
+                manifest_path=args.get("manifest_path"),
+                statefile_path=args.get("statefile_path"),
+                evidence_db_path=args.get("evidence_db_path"),
+                legal_authority_db_path=args.get("legal_authority_db_path"),
+                claim_support_db_path=args.get("claim_support_db_path"),
+            )
+        if tool_name == "complaint.migrate_legacy_workspace_data":
+            return self.migrate_legacy_workspace_data(
+                args.get("user_id"),
+                output_dir=args.get("output_dir"),
+                statefile_path=args.get("statefile_path"),
+                evidence_db_path=args.get("evidence_db_path"),
+                legal_authority_db_path=args.get("legal_authority_db_path"),
+                claim_support_db_path=args.get("claim_support_db_path"),
+                package_name=args.get("package_name"),
+                include_car=bool(args.get("include_car", True)),
+            )
+        if tool_name == "complaint.search_workspace_dataset":
+            input_path = args.get("input_path") or args.get("manifest_path")
+            if not input_path:
+                raise ValueError("complaint.search_workspace_dataset requires input_path or manifest_path.")
+            return self.search_workspace_dataset(
+                input_path,
+                input_type=args.get("input_type", "packaged"),
+                query=str(args.get("query") or ""),
+                search_backend=args.get("search_backend", "bm25"),
+                top_k=int(args.get("top_k") or 10),
+                vector_dimension=int(args.get("vector_dimension") or 32),
+                collection_id=args.get("collection_id"),
+                document_type=args.get("document_type"),
+                claim_type=args.get("claim_type"),
+                claim_element_id=args.get("claim_element_id"),
+                source_type=args.get("source_type"),
+            )
         if tool_name == "complaint.generate_complaint":
             return self.generate_complaint(
                 args.get("user_id"),
@@ -3598,6 +5437,47 @@ class ComplaintWorkspaceService:
             return self.get_filing_provenance(args.get("user_id"))
         if tool_name == "complaint.get_provider_diagnostics":
             return self.get_provider_diagnostics(args.get("user_id"))
+        if tool_name == "complaint.view_docket_dataset":
+            input_path = str(args.get("input_path") or "").strip()
+            if not input_path:
+                raise ValueError("complaint.view_docket_dataset requires input_path.")
+            return self.view_docket_dataset(
+                input_path,
+                input_type=str(args.get("input_type") or "packaged"),
+                include_document_text=bool(args.get("include_document_text") or False),
+                document_limit=int(args["document_limit"]) if args.get("document_limit") is not None else 25,
+            )
+        if tool_name == "complaint.search_docket_dataset":
+            input_path = str(args.get("input_path") or "").strip()
+            query = str(args.get("query") or "").strip()
+            if not input_path:
+                raise ValueError("complaint.search_docket_dataset requires input_path.")
+            if not query:
+                raise ValueError("complaint.search_docket_dataset requires query.")
+            return self.search_docket_dataset(
+                input_path,
+                input_type=str(args.get("input_type") or "packaged"),
+                query=query,
+                search_backend=str(args.get("search_backend") or "bm25"),
+                top_k=int(args.get("top_k") or 10),
+                vector_dimension=int(args.get("vector_dimension") or 32),
+            )
+        if tool_name == "complaint.get_docket_dataset_metadata":
+            input_path = str(args.get("input_path") or "").strip()
+            if not input_path:
+                raise ValueError("complaint.get_docket_dataset_metadata requires input_path.")
+            return self.get_docket_dataset_metadata(
+                input_path,
+                input_type=str(args.get("input_type") or "packaged"),
+            )
+        if tool_name == "complaint.get_docket_dataset_graph":
+            input_path = str(args.get("input_path") or "").strip()
+            if not input_path:
+                raise ValueError("complaint.get_docket_dataset_graph requires input_path.")
+            return self.get_docket_dataset_graph(
+                input_path,
+                input_type=str(args.get("input_type") or "packaged"),
+            )
         if tool_name == "complaint.review_generated_exports":
             return self.review_generated_exports(
                 args.get("user_id"),
@@ -3608,6 +5488,50 @@ class ComplaintWorkspaceService:
                 config_path=args.get("config_path"),
                 backend_id=args.get("backend_id"),
                 notes=args.get("notes"),
+            )
+        if tool_name == "complaint.get_packaged_docket_operator_dashboard":
+            manifest_path = str(args.get("manifest_path") or "").strip()
+            if not manifest_path:
+                raise ValueError("complaint.get_packaged_docket_operator_dashboard requires manifest_path.")
+            return self.get_packaged_docket_operator_dashboard(manifest_path)
+        if tool_name == "complaint.load_packaged_docket_operator_dashboard_report":
+            manifest_path = str(args.get("manifest_path") or "").strip()
+            if not manifest_path:
+                raise ValueError("complaint.load_packaged_docket_operator_dashboard_report requires manifest_path.")
+            return self.load_packaged_docket_operator_dashboard_report(
+                manifest_path,
+                report_format=str(args.get("report_format") or "parsed"),
+            )
+        if tool_name == "complaint.execute_packaged_docket_proof_revalidation_queue":
+            manifest_path = str(args.get("manifest_path") or "").strip()
+            if not manifest_path:
+                raise ValueError("complaint.execute_packaged_docket_proof_revalidation_queue requires manifest_path.")
+            return self.execute_packaged_docket_proof_revalidation_queue(
+                manifest_path,
+                top_k=int(args.get("top_k") or 10),
+                min_priority=str(args.get("min_priority") or "low"),
+                queue_limit=int(args["queue_limit"]) if args.get("queue_limit") is not None else None,
+                execution_top_k=int(args.get("execution_top_k") or 10),
+                chain_until_satisfied=bool(True if args.get("chain_until_satisfied") is None else args.get("chain_until_satisfied")),
+                attach_refreshed_packets=bool(args.get("attach_refreshed_packets") or False),
+            )
+        if tool_name == "complaint.persist_packaged_docket_proof_revalidation_queue":
+            manifest_path = str(args.get("manifest_path") or "").strip()
+            output_dir = str(args.get("output_dir") or "").strip()
+            if not manifest_path:
+                raise ValueError("complaint.persist_packaged_docket_proof_revalidation_queue requires manifest_path.")
+            if not output_dir:
+                raise ValueError("complaint.persist_packaged_docket_proof_revalidation_queue requires output_dir.")
+            return self.persist_packaged_docket_proof_revalidation_queue(
+                manifest_path,
+                output_dir,
+                package_name=str(args.get("package_name") or "").strip() or None,
+                include_car=bool(True if args.get("include_car") is None else args.get("include_car")),
+                top_k=int(args.get("top_k") or 10),
+                min_priority=str(args.get("min_priority") or "low"),
+                queue_limit=int(args["queue_limit"]) if args.get("queue_limit") is not None else None,
+                execution_top_k=int(args.get("execution_top_k") or 10),
+                chain_until_satisfied=bool(True if args.get("chain_until_satisfied") is None else args.get("chain_until_satisfied")),
             )
         if tool_name == "complaint.update_claim_type":
             return self.update_claim_type(args.get("user_id"), args.get("claim_type"))
@@ -3626,7 +5550,11 @@ class ComplaintWorkspaceService:
             screenshot_dir = args.get("screenshot_dir")
             iterations = int(args.get("iterations") or 0)
             pytest_target = args.get("pytest_target")
-            supplemental_artifacts = self._build_complaint_output_review_artifacts(args.get("user_id"))
+            reuse_existing_screenshots = bool(args.get("reuse_existing_screenshots"))
+            supplemental_artifacts = (
+                self._build_complaint_output_review_artifacts(args.get("user_id"))
+                + self._build_cached_ui_readiness_artifacts(args.get("user_id"))
+            )
             if isinstance(screenshot_paths, list):
                 return create_ui_review_report(
                     [str(item) for item in screenshot_paths],
@@ -3652,6 +5580,7 @@ class ComplaintWorkspaceService:
                         pytest_target=str(pytest_target)
                         if pytest_target
                         else DEFAULT_UI_UX_SCREENSHOT_TARGET,
+                        reuse_existing_screenshots=reuse_existing_screenshots,
                     )
                     self._persist_ui_readiness(args.get("user_id"), result)
                     return result
@@ -3674,7 +5603,10 @@ class ComplaintWorkspaceService:
             screenshot_dir = args.get("screenshot_dir")
             if not screenshot_dir:
                 raise ValueError("complaint.optimize_ui requires screenshot_dir.")
-            supplemental_artifacts = self._build_complaint_output_review_artifacts(args.get("user_id"))
+            supplemental_artifacts = (
+                self._build_complaint_output_review_artifacts(args.get("user_id"))
+                + self._build_cached_ui_readiness_artifacts(args.get("user_id"))
+            )
             result = run_closed_loop_ui_ux_improvement(
                 screenshot_dir=str(screenshot_dir),
                 output_dir=str(args.get("output_path") or Path(str(screenshot_dir)).expanduser().resolve() / "closed-loop"),
@@ -3688,6 +5620,7 @@ class ComplaintWorkspaceService:
                 notes=args.get("notes"),
                 goals=args.get("goals"),
                 supplemental_artifacts=supplemental_artifacts,
+                reuse_existing_screenshots=bool(args.get("reuse_existing_screenshots")),
             )
             self._persist_ui_readiness(args.get("user_id"), result)
             return result

@@ -2195,7 +2195,8 @@ def summarize_follow_up_history_claim(
                 reason=adaptive_retry_reason,
             )
 
-    return {
+    warning_metrics = _aggregate_search_warning_metrics(entries)
+    summary = {
         "total_entry_count": len([entry for entry in entries if isinstance(entry, dict)]),
         "status_counts": status_counts,
         "support_kind_counts": support_kind_counts,
@@ -2275,6 +2276,9 @@ def summarize_follow_up_history_claim(
             else None
         ),
     }
+    if warning_metrics["search_warning_summary"]:
+        summary.update(warning_metrics)
+    return summary
 
 
 def summarize_claim_testimony_claim(
@@ -3449,6 +3453,86 @@ def _aggregate_authority_search_program_metrics(
     }
 
 
+def _normalize_search_warning_entries(value: Any) -> List[Dict[str, str]]:
+    entries = value if isinstance(value, list) else []
+    normalized_entries: List[Dict[str, str]] = []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        normalized_entry = {
+            "family": str(entry.get("family") or "").strip(),
+            "warning_code": str(entry.get("warning_code") or "").strip(),
+            "warning_message": str(entry.get("warning_message") or "").strip(),
+            "state_code": str(entry.get("state_code") or "").strip(),
+            "hf_dataset_id": str(entry.get("hf_dataset_id") or "").strip(),
+        }
+        if not normalized_entry["warning_code"] or not normalized_entry["warning_message"]:
+            continue
+        dedupe_key = (
+            normalized_entry["family"],
+            normalized_entry["warning_code"],
+            normalized_entry["warning_message"],
+            normalized_entry["state_code"],
+            normalized_entry["hf_dataset_id"],
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        normalized_entries.append(normalized_entry)
+    return normalized_entries
+
+
+def _extract_search_warning_entries(entry: Dict[str, Any]) -> List[Dict[str, str]]:
+    if not isinstance(entry, dict):
+        return []
+    direct_entries = _normalize_search_warning_entries(entry.get("search_warning_summary"))
+    if direct_entries:
+        return direct_entries
+    executed = entry.get("executed") if isinstance(entry.get("executed"), dict) else {}
+    authority_payload = executed.get("authority") if isinstance(executed.get("authority"), dict) else {}
+    return _normalize_search_warning_entries(authority_payload.get("search_warning_summary"))
+
+
+def _aggregate_search_warning_metrics(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    warning_family_counts: Dict[str, int] = {}
+    warning_code_counts: Dict[str, int] = {}
+    hf_dataset_id_counts: Dict[str, int] = {}
+    search_warning_summary: List[Dict[str, str]] = []
+    seen = set()
+
+    for entry in entries:
+        for warning in _extract_search_warning_entries(entry):
+            family = warning["family"]
+            warning_code = warning["warning_code"]
+            hf_dataset_id = warning["hf_dataset_id"]
+            if family:
+                warning_family_counts[family] = warning_family_counts.get(family, 0) + 1
+            if warning_code:
+                warning_code_counts[warning_code] = warning_code_counts.get(warning_code, 0) + 1
+            if hf_dataset_id:
+                hf_dataset_id_counts[hf_dataset_id] = hf_dataset_id_counts.get(hf_dataset_id, 0) + 1
+            dedupe_key = (
+                family,
+                warning_code,
+                warning["warning_message"],
+                warning["state_code"],
+                hf_dataset_id,
+            )
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            search_warning_summary.append(dict(warning))
+
+    return {
+        "search_warning_count": len(search_warning_summary),
+        "warning_family_counts": warning_family_counts,
+        "warning_code_counts": warning_code_counts,
+        "hf_dataset_id_counts": hf_dataset_id_counts,
+        "search_warning_summary": search_warning_summary,
+    }
+
+
 def _aggregate_rule_candidate_metrics(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
     rule_candidate_backed_task_count = 0
     total_rule_candidate_count = 0
@@ -3537,7 +3621,8 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
     authority_search_program_metrics = _aggregate_authority_search_program_metrics(tasks)
     rule_candidate_metrics = _aggregate_rule_candidate_metrics(tasks)
     fact_targeting_metrics = _aggregate_fact_targeting_metrics(tasks)
-    return {
+    warning_metrics = _aggregate_search_warning_metrics(tasks)
+    summary = {
         "task_count": len(tasks),
         "blocked_task_count": claim_plan.get("blocked_task_count", 0),
         "graph_supported_task_count": len(
@@ -3667,6 +3752,9 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
         ],
         "recommended_actions": recommended_actions,
     }
+    if warning_metrics["search_warning_summary"]:
+        summary.update(warning_metrics)
+    return summary
 
 
 def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dict[str, Any]:
@@ -3736,7 +3824,8 @@ def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dic
     authority_search_program_metrics = _aggregate_authority_search_program_metrics(all_tasks)
     rule_candidate_metrics = _aggregate_rule_candidate_metrics(all_tasks)
     fact_targeting_metrics = _aggregate_fact_targeting_metrics(all_tasks)
-    return {
+    warning_metrics = _aggregate_search_warning_metrics(all_tasks)
+    summary = {
         "executed_task_count": len(executed_tasks),
         "skipped_task_count": len(skipped_tasks),
         "suppressed_task_count": len(suppressed),
@@ -3835,6 +3924,9 @@ def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dic
             "rule_candidate_type_counts"
         ],
     }
+    if warning_metrics["search_warning_summary"]:
+        summary.update(warning_metrics)
+    return summary
 
 
 def _aggregate_fact_targeting_metrics(entries: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:

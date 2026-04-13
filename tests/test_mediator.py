@@ -2107,6 +2107,8 @@ class TestMediatorWithMocks:
                 'regulations': [],
                 'case_law': [],
                 'web_archives': [],
+                'search_diagnostics': {'source_availability': {}},
+                'search_warning_summary': [],
             })
             mediator.store_legal_authorities = Mock(return_value={'total_records': 1})
             mediator.get_claim_overview = Mock(return_value={'claims': {'employment': {}}})

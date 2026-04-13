@@ -19,6 +19,10 @@ HACC_REPO_ROOT = WORKSPACE_ROOT / "HACC"
 DEFAULT_PROVIDER = "codex"
 DEFAULT_MODEL = "gpt-5.3-codex"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output" / "hacc_grounded" / datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+MASTER_EMAIL_IMPORT_DIR = WORKSPACE_ROOT / "evidence" / "email_imports" / "starworks5-master-case-email-import"
+MASTER_EMAIL_MANIFEST_PATH = MASTER_EMAIL_IMPORT_DIR / "email_import_manifest.json"
+MASTER_EMAIL_GRAPHRAG_SUMMARY_PATH = MASTER_EMAIL_IMPORT_DIR / "graphrag" / "email_graphrag_summary.json"
+MASTER_EMAIL_DUCKDB_PATH = MASTER_EMAIL_IMPORT_DIR / "graphrag" / "duckdb" / "email_search.duckdb"
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -90,6 +94,17 @@ def _grounding_overview(grounding_bundle: Dict[str, Any], upload_report: Dict[st
 
 def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(_json_safe(payload), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _canonical_master_email_artifacts() -> Dict[str, Any]:
+    return {
+        "manifest_path": str(MASTER_EMAIL_MANIFEST_PATH),
+        "graphrag_summary_path": str(MASTER_EMAIL_GRAPHRAG_SUMMARY_PATH),
+        "duckdb_index_path": str(MASTER_EMAIL_DUCKDB_PATH),
+        "manifest_exists": MASTER_EMAIL_MANIFEST_PATH.is_file(),
+        "graphrag_summary_exists": MASTER_EMAIL_GRAPHRAG_SUMMARY_PATH.is_file(),
+        "duckdb_index_exists": MASTER_EMAIL_DUCKDB_PATH.is_file(),
+    }
 
 
 def _run_adversarial_report(
@@ -420,6 +435,7 @@ def _build_grounded_workflow_status(
         "refreshed_grounding_status": str(refreshed_grounding_state.get("status") or ""),
         "has_persisted_completed_grounded_worksheet": bool(str(completed_grounded_intake_worksheet_path or "").strip()),
         "persisted_completed_grounded_worksheet_path": str(completed_grounded_intake_worksheet_path or ""),
+        "canonical_master_email_corpus": _canonical_master_email_artifacts(),
         "recommended_commands": {
             "inspect_command": inspect_command,
             "rerun_command": rerun_command,
@@ -562,6 +578,7 @@ def _update_grounded_workflow_history(output_root: Path, status: Dict[str, Any])
 def _load_grounded_workflow_inspection(output_root: Path) -> Dict[str, Any]:
     status = _load_json_file(output_root / "grounded_workflow_status.json")
     history = _load_json_file(output_root / "grounded_workflow_history.json")
+    run_summary = _load_json_file(output_root / "run_summary.json")
     worksheet = _load_json_file(output_root / "completed_grounded_intake_follow_up_worksheet.json")
     refreshed_grounding_state = _load_json_file(output_root / "refreshed_grounding_state.json")
     grounded_follow_up_answer_summary = _load_json_file(output_root / "grounded_follow_up_answer_summary.json")
@@ -569,6 +586,8 @@ def _load_grounded_workflow_inspection(output_root: Path) -> Dict[str, Any]:
         status = {}
     if not isinstance(history, list):
         history = []
+    if not isinstance(run_summary, dict):
+        run_summary = {}
     if not isinstance(worksheet, dict):
         worksheet = {}
     if not isinstance(refreshed_grounding_state, dict):
@@ -576,9 +595,13 @@ def _load_grounded_workflow_inspection(output_root: Path) -> Dict[str, Any]:
     if not isinstance(grounded_follow_up_answer_summary, dict):
         grounded_follow_up_answer_summary = {}
     recent_history = [dict(item) for item in history if isinstance(item, dict)][-5:]
+    source_artifacts = dict(run_summary.get("source_artifacts") or {})
+    canonical_master_email_corpus = dict(source_artifacts.get("canonical_master_email_corpus") or {}) or _canonical_master_email_artifacts()
+    run_artifacts = dict(run_summary.get("artifacts") or {})
     return {
         "output_dir": str(output_root),
         "workflow_status": status,
+        "run_summary": run_summary,
         "workflow_history_count": len(history),
         "recent_workflow_history": recent_history,
         "completed_grounded_intake_worksheet": worksheet,
@@ -587,6 +610,7 @@ def _load_grounded_workflow_inspection(output_root: Path) -> Dict[str, Any]:
         "refreshed_grounding_state": refreshed_grounding_state,
         "has_refreshed_grounding_state_artifact": bool(refreshed_grounding_state),
         "grounded_follow_up_answer_summary": grounded_follow_up_answer_summary,
+        "canonical_master_email_corpus": canonical_master_email_corpus,
         "artifacts": {
             "grounded_workflow_status_json": str(output_root / "grounded_workflow_status.json"),
             "grounded_workflow_status_md": str(output_root / "grounded_workflow_status.md"),
@@ -594,6 +618,15 @@ def _load_grounded_workflow_inspection(output_root: Path) -> Dict[str, Any]:
             "completed_grounded_intake_worksheet_json": str(output_root / "completed_grounded_intake_follow_up_worksheet.json"),
             "refreshed_grounding_state_json": str(output_root / "refreshed_grounding_state.json"),
             "grounded_follow_up_answer_summary_json": str(output_root / "grounded_follow_up_answer_summary.json"),
+            "canonical_master_email_manifest_json": str(
+                run_artifacts.get("canonical_master_email_manifest_json") or canonical_master_email_corpus.get("manifest_path") or ""
+            ),
+            "canonical_master_email_graphrag_summary_json": str(
+                run_artifacts.get("canonical_master_email_graphrag_summary_json") or canonical_master_email_corpus.get("graphrag_summary_path") or ""
+            ),
+            "canonical_master_email_duckdb": str(
+                run_artifacts.get("canonical_master_email_duckdb") or canonical_master_email_corpus.get("duckdb_index_path") or ""
+            ),
         },
     }
 
@@ -605,6 +638,7 @@ def _render_grounded_workflow_history_inspection(inspection: Dict[str, Any]) -> 
     recommended_commands = dict(status.get("recommended_commands") or {})
     refreshed_grounding_state = dict(inspection.get("refreshed_grounding_state") or {})
     grounded_follow_up_answer_summary = dict(inspection.get("grounded_follow_up_answer_summary") or {})
+    canonical_master_email_corpus = dict(inspection.get("canonical_master_email_corpus") or {})
     lines = [
         f"Output directory: {inspection.get('output_dir', '')}",
         f"Workflow stage: {status.get('workflow_stage', '')}",
@@ -626,6 +660,11 @@ def _render_grounded_workflow_history_inspection(inspection: Dict[str, Any]) -> 
     answered_item_count = int(grounded_follow_up_answer_summary.get("answered_item_count", 0) or 0)
     if answered_item_count:
         lines.append(f"Grounded follow-up answers: {answered_item_count}")
+    if canonical_master_email_corpus:
+        lines.append("Canonical master email corpus:")
+        lines.append(f"- Manifest: {inspection.get('artifacts', {}).get('canonical_master_email_manifest_json', '')}")
+        lines.append(f"- GraphRAG summary: {inspection.get('artifacts', {}).get('canonical_master_email_graphrag_summary_json', '')}")
+        lines.append(f"- DuckDB index: {inspection.get('artifacts', {}).get('canonical_master_email_duckdb', '')}")
     if recommended_commands:
         inspect_command = str(recommended_commands.get("inspect_command") or "").strip()
         recommended_command = str(recommended_commands.get("recommended_command") or "").strip()
@@ -893,6 +932,9 @@ def run_hacc_grounded_pipeline(
         "synthesis_roundtrip_artifacts": synthesis_roundtrip_artifacts,
         "grounded_workflow_status": grounded_workflow_status,
         "grounded_workflow_history": grounded_workflow_history,
+        "source_artifacts": {
+            "canonical_master_email_corpus": _canonical_master_email_artifacts(),
+        },
         "artifacts": {
             "output_dir": str(output_root),
             "grounding_bundle_json": str(output_root / "grounding_bundle.json"),
@@ -932,6 +974,9 @@ def run_hacc_grounded_pipeline(
             "grounded_workflow_status_md": str(output_root / "grounded_workflow_status.md"),
             "grounded_workflow_history_json": str(output_root / "grounded_workflow_history.json"),
             "completed_grounded_intake_worksheet_json": completed_grounded_intake_worksheet_copy,
+            "canonical_master_email_manifest_json": str(MASTER_EMAIL_MANIFEST_PATH),
+            "canonical_master_email_graphrag_summary_json": str(MASTER_EMAIL_GRAPHRAG_SUMMARY_PATH),
+            "canonical_master_email_duckdb": str(MASTER_EMAIL_DUCKDB_PATH),
         },
     }
     _write_json(output_root / "run_summary.json", summary)

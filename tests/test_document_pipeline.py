@@ -1811,6 +1811,368 @@ def test_formal_complaint_document_builder_generates_filing_packet_json(tmp_path
     assert packet["artifacts"]["txt"]["filename"].endswith(".txt")
 
 
+def test_formal_complaint_document_builder_merges_email_timeline_handoff_into_temporal_packet(tmp_path: Path):
+    mediator = _build_mediator()
+    builder = FormalComplaintDocumentBuilder(mediator)
+    email_timeline_handoff = {
+        "status": "success",
+        "canonical_facts": [
+            {
+                "fact_id": "email_fact_001",
+                "text": "Kati sent HCV orientation response.",
+                "predicate_family": "hcv_orientation",
+                "event_date_or_range": "2025-03-26",
+                "temporal_context": {
+                    "start_date": "2025-03-26",
+                    "end_date": "2025-03-26",
+                    "granularity": "day",
+                },
+            }
+        ],
+        "timeline_anchors": [{"anchor_id": "timeline_anchor_001", "fact_id": "email_fact_001"}],
+        "claim_support_temporal_handoff": {
+            "contract_version": "claim_support_temporal_handoff_v1",
+            "chronology_blocked": False,
+            "chronology_task_count": 0,
+            "unresolved_temporal_issue_count": 0,
+            "unresolved_temporal_issue_ids": [],
+            "event_ids": ["email_fact_001"],
+            "temporal_fact_ids": ["email_fact_001"],
+            "temporal_relation_ids": ["timeline_relation_001"],
+            "timeline_anchor_ids": ["timeline_anchor_001"],
+            "timeline_issue_ids": [],
+            "temporal_issue_ids": [],
+            "temporal_proof_bundle_ids": ["email-timeline:retaliation:causation:bundle_001"],
+            "temporal_proof_objectives": ["establish_clackamas_email_sequence"],
+            "timeline_anchor_count": 1,
+            "event_count": 1,
+            "topic_summary": {"hcv_orientation": {"count": 1}},
+        },
+    }
+
+    original_build_draft = builder.build_draft
+
+    def _build_draft_with_email_handoff(**kwargs):
+        draft = original_build_draft(**kwargs)
+        source_context = dict(draft.get("source_context") or {})
+        source_context["email_timeline_handoff"] = email_timeline_handoff
+        draft["source_context"] = source_context
+        return draft
+
+    builder.build_draft = _build_draft_with_email_handoff  # type: ignore[assignment]
+
+    result = builder.build_package(
+        district="Northern District of California",
+        county="San Francisco County",
+        plaintiff_names=["Jane Doe"],
+        defendant_names=["Acme Corporation"],
+        output_dir=str(tmp_path),
+        output_formats=["txt", "packet"],
+    )
+
+    assert result["email_timeline_handoff"] == email_timeline_handoff
+    assert result["draft"]["source_context"]["email_timeline_handoff"] == email_timeline_handoff
+    assert "email_fact_001" in result["claim_support_temporal_handoff"]["event_ids"]
+    assert "email_fact_001" in result["claim_support_temporal_handoff"]["temporal_fact_ids"]
+    assert "timeline_anchor_001" in result["claim_support_temporal_handoff"]["timeline_anchor_ids"]
+    assert result["claim_support_temporal_handoff"]["email_topic_summary"] == {"hcv_orientation": {"count": 1}}
+    assert "establish_clackamas_email_sequence" in result["claim_support_temporal_handoff"]["temporal_proof_objectives"]
+    assert result["draft"]["summary_of_fact_entries"][0]["fact_ids"] == ["email_fact_001"]
+    assert result["draft"]["summary_of_facts"][0].startswith("On March 26, 2025, Clackamas housing staff emailed Plaintiff in the 'HCV Orientation' thread")
+    assert result["draft"]["anchored_chronology_summary"][0] == "On March 26, 2025, Kati sent HCV orientation response."
+    assert "On March 26, 2025, Kati sent HCV orientation response." in result["draft"]["draft_text"]
+
+    packet_path = Path(result["artifacts"]["packet"]["path"])
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    assert packet["email_timeline_handoff"] == email_timeline_handoff
+    assert packet["source_context"]["email_timeline_handoff"] == email_timeline_handoff
+    assert "email_fact_001" in packet["claim_support_temporal_handoff"]["event_ids"]
+
+
+def test_formal_complaint_document_builder_loads_email_timeline_handoff_from_path(tmp_path: Path):
+    mediator = _build_mediator()
+    builder = FormalComplaintDocumentBuilder(mediator)
+    email_timeline_handoff = {
+        "status": "success",
+        "claim_type": "retaliation",
+        "claim_element_id": "causation",
+        "canonical_facts": [
+            {
+                "fact_id": "email_fact_002",
+                "text": "Ashley Ferron responded to the Clackamas fraud thread.",
+                "predicate_family": "fraud_household",
+                "temporal_context": {
+                    "start_date": "2025-12-02",
+                    "end_date": "2025-12-02",
+                    "granularity": "day",
+                },
+            }
+        ],
+        "claim_support_temporal_handoff": {
+            "contract_version": "claim_support_temporal_handoff_v1",
+            "event_ids": ["email_fact_002"],
+            "temporal_fact_ids": ["email_fact_002"],
+            "timeline_anchor_ids": ["timeline_anchor_002"],
+            "temporal_relation_ids": [],
+            "temporal_proof_objectives": ["establish_clackamas_email_sequence"],
+            "timeline_anchor_count": 1,
+            "event_count": 1,
+            "topic_summary": {"fraud_household": {"count": 1}},
+        },
+    }
+    handoff_path = tmp_path / "email_timeline_handoff.json"
+    handoff_path.write_text(json.dumps(email_timeline_handoff), encoding="utf-8")
+
+    result = builder.build_package(
+        district="Northern District of California",
+        county="San Francisco County",
+        plaintiff_names=["Jane Doe"],
+        defendant_names=["Acme Corporation"],
+        email_timeline_handoff_path=str(handoff_path),
+        output_dir=str(tmp_path),
+        output_formats=["txt", "packet"],
+    )
+
+    assert result["email_timeline_handoff"] == email_timeline_handoff
+    assert result["draft"]["source_context"]["email_timeline_handoff"] == email_timeline_handoff
+    assert result["draft"]["summary_of_fact_entries"][0]["fact_ids"] == ["email_fact_002"]
+    assert result["draft"]["anchored_chronology_summary"][0] == (
+        "On December 2, 2025, Ashley Ferron responded to the Clackamas fraud thread."
+    )
+    assert result["claim_support_temporal_handoff"]["email_topic_summary"] == {"fraud_household": {"count": 1}}
+
+
+def test_formal_complaint_document_builder_adds_hcv_orientation_email_narrative(tmp_path: Path):
+    mediator = _build_mediator()
+    builder = FormalComplaintDocumentBuilder(mediator)
+
+    email_dir = tmp_path / "email_bundle"
+    email_dir.mkdir(parents=True, exist_ok=True)
+    eml_path = email_dir / "message.eml"
+    eml_path.write_text("stub email", encoding="utf-8")
+    (email_dir / "message.json").write_text(
+        json.dumps(
+            {
+                "subject": "RE: HCV Orientation",
+                "attachments": [
+                    {"filename": "Cortez-J-RA-Denial-3.26.26.pdf"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    email_timeline_handoff = {
+        "claim_type": "retaliation",
+        "claim_support_temporal_handoff": {
+            "topic_summary": {
+                "hcv_orientation": {"count": 2},
+            }
+        },
+        "canonical_facts": [
+            {
+                "fact_id": "email_fact_077",
+                "text": "\"Tilton, Kati\" <KTilton@clackamas.us> sent 'RE: HCV Orientation' to benjamin barber <starworks5@gmail.com>.",
+                "event_label": "HCV Orientation",
+                "event_date_or_range": "2026-03-26",
+                "predicate_family": "hcv_orientation",
+                "claim_types": ["retaliation"],
+                "element_tags": ["causation"],
+                "participants": ["ktilton@clackamas.us", "starworks5@gmail.com"],
+                "source_ref": str(eml_path),
+                "temporal_context": {"start_date": "2026-03-26", "sortable_date": "2026-03-26"},
+            },
+            {
+                "fact_id": "email_fact_078",
+                "text": "benjamin barber <starworks5@gmail.com> sent 'Re: HCV Orientation' to \"Tilton, Kati\" <KTilton@clackamas.us>, bwilliams@clackamas.us.",
+                "event_label": "HCV Orientation",
+                "event_date_or_range": "2026-03-26",
+                "predicate_family": "hcv_orientation",
+                "claim_types": ["retaliation"],
+                "element_tags": ["causation"],
+                "participants": ["bwilliams@clackamas.us", "ktilton@clackamas.us", "starworks5@gmail.com"],
+                "source_ref": str(eml_path),
+                "temporal_context": {"start_date": "2026-03-26", "sortable_date": "2026-03-26"},
+            },
+        ],
+        "timeline_anchors": [
+            {
+                "event_id": "email_event_077",
+                "anchor_text": "On March 26, 2026, HCV Orientation emails were exchanged.",
+            }
+        ],
+    }
+    handoff_path = tmp_path / "email_timeline_handoff.json"
+    handoff_path.write_text(json.dumps(email_timeline_handoff), encoding="utf-8")
+
+    result = builder.build_package(
+        district="District of Oregon",
+        county="Clackamas County",
+        plaintiff_names=["Benjamin Barber"],
+        defendant_names=["Clackamas County Housing Authority"],
+        email_timeline_handoff_path=str(handoff_path),
+        output_dir=str(tmp_path),
+        output_formats=["txt", "packet"],
+    )
+
+    assert any(
+        "Cortez-J-RA-Denial-3.26.26.pdf" in str(entry.get("text") or "")
+        for entry in result["draft"]["summary_of_fact_entries"]
+    )
+    assert any(
+        "Cortez-J-RA-Denial-3.26.26.pdf" in str(item or "")
+        for item in result["draft"]["summary_of_facts"]
+    )
+    assert "HCV Orientation" in str(result["draft"]["summary_of_facts"][0] or "")
+    assert "HCV Orientation" in str(result["draft"]["factual_allegations"][0] or "")
+    assert "Cortez-J-RA-Denial-3.26.26.pdf" in str(result["draft"]["factual_allegations"][0] or "")
+    assert result["draft"]["factual_allegation_groups"][0]["title"] == "Clackamas Email Chronology"
+    assert "HCV Orientation" in str(result["draft"]["factual_allegation_groups"][0]["paragraphs"][0]["text"] or "")
+    assert not any(
+        "sent 'RE: HCV Orientation'" in str(item or "")
+        for item in result["draft"]["summary_of_facts"]
+    )
+    assert not any(
+        "sent 'Re: HCV Orientation'" in str(item or "")
+        for item in result["draft"]["summary_of_facts"]
+    )
+    assert any(
+        "RA-denial attachment" in str(item or "") or "denied housing-related benefits or accommodations" in str(item or "")
+        for item in result["draft"]["factual_allegations"]
+    )
+
+
+def test_formal_complaint_document_builder_loads_email_authority_enrichment_from_path(tmp_path: Path):
+    mediator = _build_mediator()
+    builder = FormalComplaintDocumentBuilder(mediator)
+    email_authority_enrichment = {
+        "status": "success",
+        "summary": {
+            "query_count": 4,
+            "queries_with_hits": 4,
+            "total_counts": {"statutes": 8, "regulations": 3, "case_law": 20},
+        },
+        "recommended_authorities": [
+            {
+                "citation": "ORS 659A.145",
+                "title": "Oregon disability discrimination in real property transactions",
+                "authority_type": "state_statute",
+            },
+            {
+                "citation": "24 C.F.R. § 982.555",
+                "title": "Informal hearing for participant",
+                "authority_type": "regulation",
+            },
+        ],
+    }
+    enrichment_path = tmp_path / "email_authority_enrichment.json"
+    enrichment_path.write_text(json.dumps(email_authority_enrichment), encoding="utf-8")
+
+    result = builder.build_package(
+        district="Northern District of California",
+        county="San Francisco County",
+        plaintiff_names=["Jane Doe"],
+        defendant_names=["Acme Corporation"],
+        email_authority_enrichment_path=str(enrichment_path),
+        output_dir=str(tmp_path),
+        output_formats=["txt", "packet"],
+    )
+
+    assert result["email_authority_enrichment"] == email_authority_enrichment
+    assert result["draft"]["source_context"]["email_authority_enrichment"] == email_authority_enrichment
+    assert result["draft"]["email_authority_summary_lines"]
+    assert "Email-aligned authority review identified" in result["draft"]["email_authority_summary_lines"][0]
+    assert "EMAIL-ALIGNED AUTHORITY SUPPORT" in result["draft"]["draft_text"]
+    assert "ORS 659A.145" in result["draft"]["draft_text"]
+
+    packet_path = Path(result["artifacts"]["packet"]["path"])
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    assert packet["email_authority_enrichment"] == email_authority_enrichment
+    assert packet["source_context"]["email_authority_enrichment"] == email_authority_enrichment
+    assert packet["sections"]["email_authority_summary_lines"] == result["draft"]["email_authority_summary_lines"]
+
+
+def test_formal_complaint_document_builder_specializes_generic_claims_from_email_support(tmp_path: Path):
+    mediator = _build_mediator()
+    mediator.state.legal_classification = {}
+    mediator.state.applicable_statutes = []
+    mediator.state.summary_judgment_requirements = {}
+    mediator.summarize_claim_support.return_value = {"claims": {}}
+    mediator.get_user_evidence.return_value = []
+    mediator.get_claim_support_facts.return_value = []
+    mediator.get_claim_overview.return_value = {"claims": {}}
+
+    builder = FormalComplaintDocumentBuilder(mediator)
+    email_timeline_handoff = {
+        "claim_type": "",
+        "claim_support_temporal_handoff": {
+            "topic_summary": {
+                "fraud_household": {"count": 2},
+                "hcv_orientation": {"count": 1},
+            }
+        },
+        "canonical_facts": [
+            {
+                "fact_id": "email_fact_001",
+                "text": (
+                    "On March 26, 2026, Plaintiff received a housing denial notice and reasonable "
+                    "accommodation denial without the informal review process required by HACC."
+                ),
+                "claim_types": ["due_process_failure", "housing_discrimination"],
+                "source_artifact_ids": ["email_artifact_001"],
+                "claim_element_ids": ["notice_and_review"],
+                "source_ref": "email://message/1",
+            }
+        ],
+        "timeline_anchors": [
+            {
+                "event_id": "email_event_001",
+                "anchor_text": (
+                    "On March 26, 2026, Plaintiff received a housing denial notice and reasonable "
+                    "accommodation denial without the informal review process required by HACC."
+                ),
+            }
+        ],
+    }
+    email_authority_enrichment = {
+        "status": "success",
+        "summary": {
+            "query_count": 4,
+            "queries_with_hits": 4,
+            "total_counts": {"statutes": 4, "regulations": 3, "case_law": 4},
+        },
+        "recommended_authorities": [
+            {"citation": "ORS 659A.145", "authority_type": "state_statute"},
+            {"citation": "42 U.S.C. § 3604(f)(3)(B)", "authority_type": "federal_statute"},
+            {"citation": "24 C.F.R. § 982.555", "authority_type": "regulation"},
+        ],
+    }
+    handoff_path = tmp_path / "email_timeline_handoff.json"
+    enrichment_path = tmp_path / "email_authority_enrichment.json"
+    handoff_path.write_text(json.dumps(email_timeline_handoff), encoding="utf-8")
+    enrichment_path.write_text(json.dumps(email_authority_enrichment), encoding="utf-8")
+
+    result = builder.build_package(
+        district="Northern District of California",
+        county="San Francisco County",
+        plaintiff_names=["Jane Doe"],
+        defendant_names=["Acme Corporation"],
+        email_timeline_handoff_path=str(handoff_path),
+        email_authority_enrichment_path=str(enrichment_path),
+        output_dir=str(tmp_path),
+        output_formats=["txt", "packet"],
+    )
+
+    claim_types = [claim["claim_type"] for claim in result["draft"]["claims_for_relief"]]
+    assert claim_types == ["due_process_failure", "housing_discrimination"]
+    assert result["draft"]["source_context"]["claim_types"] == claim_types
+    assert "General civil action" not in result["draft"]["draft_text"]
+    assert "COUNT I - Denial of Required Notice and Informal Review" in result["draft"]["draft_text"]
+    assert "COUNT II - Housing Discrimination and Wrongful Denial of Assistance" in result["draft"]["draft_text"]
+    assert "24 C.F.R. § 982.555" in result["draft"]["draft_text"]
+    assert "ORS 659A.145" in result["draft"]["draft_text"]
+
+
 def test_review_api_registers_formal_complaint_document_route():
     mediator = Mock()
     DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

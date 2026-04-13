@@ -53,8 +53,8 @@ def _module_available(module_names: Iterable[str]) -> CapabilityStatus:
 def detect_ipfs_datasets_capabilities() -> CapabilityCatalog:
     return CapabilityCatalog(
         legal_datasets=_module_available([
-            "ipfs_datasets_py.legal_scrapers",
-            "ipfs_datasets_py.legal_research",
+            "ipfs_datasets_py.processors.legal_scrapers",
+            "ipfs_datasets_py.processors.legal_scrapers.legal_dataset_api",
         ]),
         search_tools=_module_available([
             "ipfs_datasets_py.web_archiving",

@@ -71,6 +71,10 @@
     margin-top: 16px;
 }
 
+.cg-app-shell__nav--secondary {
+    margin-top: 10px;
+}
+
 .cg-app-shell__stats {
     margin-top: 16px;
     grid-template-columns: 1fr;
@@ -85,12 +89,32 @@
     text-transform: uppercase;
 }
 
+.cg-app-shell__drawer {
+    margin-top: 12px;
+}
+
+.cg-app-shell__drawer-summary {
+    cursor: pointer;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
 .cg-app-shell__chip,
 .cg-app-shell__nav-link,
 .cg-app-shell__action {
     display: block;
     border-radius: 16px;
     text-decoration: none;
+}
+
+.cg-app-shell__nav-link.is-disabled,
+.cg-app-shell__action.is-disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 .cg-app-shell__chip {
@@ -217,9 +241,35 @@
     text-align: center;
 }
 
+.cg-app-shell__action.is-primary {
+    background: #0f172a;
+    border-color: #0f172a;
+    color: #f8fafc;
+}
+
+.cg-app-shell__workflow-rail {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+}
+
+.cg-app-shell__workflow-rail.is-warn {
+    border-color: #fdba74;
+    background: #fff7ed;
+}
+
 .cg-app-shell__meta {
     margin-top: 14px;
     color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.cg-app-shell__phase-note {
+    margin-top: 8px;
+    color: #475569;
     font-size: 12px;
     line-height: 1.5;
 }

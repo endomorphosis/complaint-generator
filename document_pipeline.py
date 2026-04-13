@@ -1157,6 +1157,24 @@ class FormalComplaintDocumentBuilder:
     def __init__(self, mediator: Any):
         self.mediator = mediator
 
+    def _load_email_timeline_handoff(self, value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return deepcopy(value)
+        path_text = str(value or "").strip()
+        if not path_text:
+            return {}
+        payload = json.loads(Path(path_text).read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+
+    def _load_email_authority_enrichment(self, value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return deepcopy(value)
+        path_text = str(value or "").strip()
+        if not path_text:
+            return {}
+        payload = json.loads(Path(path_text).read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+
     def build_package(
         self,
         *,
@@ -1205,6 +1223,8 @@ class FormalComplaintDocumentBuilder:
         optimization_model_name: Optional[str] = None,
         optimization_llm_config: Optional[Dict[str, Any]] = None,
         optimization_persist_artifacts: bool = False,
+        email_timeline_handoff_path: Optional[str] = None,
+        email_authority_enrichment_path: Optional[str] = None,
         output_dir: Optional[str] = None,
         output_formats: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
@@ -1271,6 +1291,16 @@ class FormalComplaintDocumentBuilder:
             affidavit_jurat=affidavit_jurat,
             affidavit_notary_block=affidavit_notary_block,
         )
+        loaded_email_timeline_handoff = self._load_email_timeline_handoff(email_timeline_handoff_path)
+        if loaded_email_timeline_handoff:
+            source_context = dict(draft.get("source_context") or {})
+            source_context["email_timeline_handoff"] = loaded_email_timeline_handoff
+            draft["source_context"] = source_context
+        loaded_email_authority_enrichment = self._load_email_authority_enrichment(email_authority_enrichment_path)
+        if loaded_email_authority_enrichment:
+            source_context = dict(draft.get("source_context") or {})
+            source_context["email_authority_enrichment"] = loaded_email_authority_enrichment
+            draft["source_context"] = source_context
         draft = self._apply_document_drafting_focus(
             draft,
             document_drafting_next_action=document_drafting_next_action,
@@ -1558,6 +1588,101 @@ class FormalComplaintDocumentBuilder:
             else build_intake_case_review_summary(self.mediator)
         )
         claim_support_temporal_handoff = self._build_claim_support_temporal_handoff(document_optimization)
+        email_timeline_handoff = self._resolve_email_timeline_handoff(
+            draft=draft,
+            document_optimization=document_optimization,
+        )
+        email_authority_enrichment = self._resolve_email_authority_enrichment(
+            draft=draft,
+            document_optimization=document_optimization,
+        )
+        if email_timeline_handoff:
+            claim_support_temporal_handoff = self._merge_claim_support_temporal_handoff(
+                claim_support_temporal_handoff,
+                email_timeline_handoff,
+            )
+            draft = self._enrich_draft_with_email_timeline_handoff(
+                draft,
+                email_timeline_handoff=email_timeline_handoff,
+            )
+        if email_authority_enrichment:
+            draft = self._enrich_draft_with_email_authority_enrichment(
+                draft,
+                email_authority_enrichment=email_authority_enrichment,
+            )
+        if email_timeline_handoff or email_authority_enrichment:
+            draft = self._specialize_generic_claims_from_email_support(
+                draft,
+                email_timeline_handoff=email_timeline_handoff or {},
+                email_authority_enrichment=email_authority_enrichment or {},
+            )
+            claims_for_relief = (
+                list(draft.get("claims_for_relief") or [])
+                if isinstance(draft.get("claims_for_relief"), list)
+                else []
+            )
+            if claims_for_relief:
+                summary_fact_entries = [
+                    dict(entry)
+                    for entry in _coerce_list(draft.get("summary_of_fact_entries"))
+                    if isinstance(entry, dict)
+                ]
+                non_generic_entries = [
+                    entry
+                    for entry in summary_fact_entries
+                    if not self._is_generic_claim_support_text(entry.get("text"))
+                ]
+                if non_generic_entries:
+                    summary_fact_entries = non_generic_entries
+                    draft["summary_of_fact_entries"] = summary_fact_entries
+                    draft["summary_of_facts"] = [
+                        str(entry.get("text") or "").strip()
+                        for entry in summary_fact_entries
+                        if str(entry.get("text") or "").strip()
+                    ]
+                summary_of_facts = [
+                    line
+                    for line in self._normalize_text_lines(draft.get("summary_of_facts", []))
+                    if not self._is_generic_claim_support_text(line)
+                ]
+                if summary_of_facts:
+                    draft["summary_of_facts"] = summary_of_facts
+                draft["factual_allegation_entries"] = self._build_factual_allegation_entries(
+                    summary_fact_entries=summary_fact_entries,
+                    claims_for_relief=claims_for_relief,
+                )
+                draft["factual_allegations"] = self._build_factual_allegations(
+                    summary_of_facts=summary_of_facts,
+                    claims_for_relief=claims_for_relief,
+                )
+                source_context = draft.get("source_context") if isinstance(draft.get("source_context"), dict) else {}
+                draft["source_context"] = {
+                    **source_context,
+                    "claim_types": [
+                        str(claim.get("claim_type") or "").strip()
+                        for claim in claims_for_relief
+                        if isinstance(claim, dict) and str(claim.get("claim_type") or "").strip()
+                    ],
+                }
+                self._attach_allegation_references(draft)
+                inferred_jurisdiction = str(source_context.get("jurisdiction") or "").strip().lower()
+                if not inferred_jurisdiction:
+                    inferred_jurisdiction = self._infer_forum_type(
+                        classification={},
+                        court_name=str(draft.get("court_header") or ""),
+                    )
+                draft["nature_of_action"] = self._build_nature_of_action(
+                    claim_types=[
+                        str(claim.get("count_title") or claim.get("claim_type") or "").strip()
+                        for claim in claims_for_relief
+                        if isinstance(claim, dict) and str(claim.get("count_title") or claim.get("claim_type") or "").strip()
+                    ],
+                    classification={
+                        "jurisdiction": inferred_jurisdiction,
+                    },
+                    statutes=[],
+                    court_name=str(draft.get("court_header") or ""),
+                )
         claim_reasoning_review = self._build_claim_reasoning_review(document_optimization)
         chronology_blocker_summary = self._build_chronology_blocker_summary(
             intake_case_summary=intake_case_summary,
@@ -1568,6 +1693,10 @@ class FormalComplaintDocumentBuilder:
         enriched_source_context = dict(source_context)
         if claim_support_temporal_handoff:
             enriched_source_context["claim_support_temporal_handoff"] = claim_support_temporal_handoff
+        if email_timeline_handoff:
+            enriched_source_context["email_timeline_handoff"] = email_timeline_handoff
+        if email_authority_enrichment:
+            enriched_source_context["email_authority_enrichment"] = email_authority_enrichment
         if claim_reasoning_review:
             enriched_source_context["claim_reasoning_review"] = claim_reasoning_review
         if chronology_blocker_summary:
@@ -1585,6 +1714,8 @@ class FormalComplaintDocumentBuilder:
         )
         if drafting_handoff:
             draft["drafting_handoff"] = drafting_handoff
+        draft["affidavit"] = self._build_affidavit(draft)
+        draft["draft_text"] = self._render_draft_text(draft)
         artifacts = self.render_artifacts(
             draft,
             output_dir=output_dir,
@@ -1620,6 +1751,10 @@ class FormalComplaintDocumentBuilder:
             package_payload["drafting_handoff"] = drafting_handoff
         if claim_support_temporal_handoff:
             package_payload["claim_support_temporal_handoff"] = claim_support_temporal_handoff
+        if email_timeline_handoff:
+            package_payload["email_timeline_handoff"] = email_timeline_handoff
+        if email_authority_enrichment:
+            package_payload["email_authority_enrichment"] = email_authority_enrichment
         if claim_reasoning_review:
             package_payload["claim_reasoning_review"] = claim_reasoning_review
         if chronology_blocker_summary:
@@ -2237,6 +2372,681 @@ class FormalComplaintDocumentBuilder:
             return {}
         return temporal_handoff
 
+    def _resolve_email_timeline_handoff(
+        self,
+        *,
+        draft: Dict[str, Any],
+        document_optimization: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        optimization_report = document_optimization if isinstance(document_optimization, dict) else {}
+        for candidate in (
+            optimization_report.get("email_timeline_handoff"),
+            (draft.get("source_context") or {}).get("email_timeline_handoff")
+            if isinstance(draft.get("source_context"), dict)
+            else None,
+        ):
+            if isinstance(candidate, dict) and candidate:
+                return deepcopy(candidate)
+        return {}
+
+    def _resolve_email_authority_enrichment(
+        self,
+        *,
+        draft: Dict[str, Any],
+        document_optimization: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        optimization_report = document_optimization if isinstance(document_optimization, dict) else {}
+        for candidate in (
+            optimization_report.get("email_authority_enrichment"),
+            (draft.get("source_context") or {}).get("email_authority_enrichment")
+            if isinstance(draft.get("source_context"), dict)
+            else None,
+        ):
+            if isinstance(candidate, dict) and candidate:
+                return deepcopy(candidate)
+        return {}
+
+    def _merge_claim_support_temporal_handoff(
+        self,
+        base_handoff: Dict[str, Any],
+        email_timeline_handoff: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        merged = dict(base_handoff or {}) if isinstance(base_handoff, dict) else {}
+        email_packet = (
+            email_timeline_handoff.get("claim_support_temporal_handoff")
+            if isinstance(email_timeline_handoff.get("claim_support_temporal_handoff"), dict)
+            else {}
+        )
+        if not email_packet:
+            return merged
+
+        list_keys = (
+            "unresolved_temporal_issue_ids",
+            "event_ids",
+            "temporal_fact_ids",
+            "temporal_relation_ids",
+            "timeline_anchor_ids",
+            "timeline_issue_ids",
+            "temporal_issue_ids",
+            "temporal_proof_bundle_ids",
+            "temporal_proof_objectives",
+            "missing_temporal_predicates",
+            "required_provenance_kinds",
+        )
+        for key in list_keys:
+            merged_values = _dedupe_text_values(list(merged.get(key) or []) + list(email_packet.get(key) or []))
+            if merged_values:
+                merged[key] = merged_values
+
+        for key in ("unresolved_temporal_issue_count", "chronology_task_count"):
+            merged[key] = max(int(merged.get(key) or 0), int(email_packet.get(key) or 0))
+
+        for key in ("timeline_anchor_count", "event_count"):
+            if email_packet.get(key) not in (None, ""):
+                merged[key] = int(email_packet.get(key) or 0)
+
+        if isinstance(email_packet.get("topic_summary"), dict) and email_packet.get("topic_summary"):
+            merged["email_topic_summary"] = deepcopy(email_packet.get("topic_summary") or {})
+
+        contract_version = str(email_packet.get("contract_version") or "").strip()
+        if contract_version:
+            merged.setdefault("contract_version", contract_version)
+        return merged
+
+    def _build_email_timeline_fact_entries(
+        self,
+        email_timeline_handoff: Dict[str, Any],
+        *,
+        limit: int = 6,
+        exclude_predicate_families: Optional[Iterable[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        canonical_facts = (
+            list(email_timeline_handoff.get("canonical_facts") or [])
+            if isinstance(email_timeline_handoff, dict)
+            else []
+        )
+        default_claim_type = str(email_timeline_handoff.get("claim_type") or "").strip()
+        default_claim_element_id = str(email_timeline_handoff.get("claim_element_id") or "").strip()
+        excluded_predicates = {
+            str(value or "").strip().lower()
+            for value in (exclude_predicate_families or [])
+            if str(value or "").strip()
+        }
+        entries: List[Dict[str, Any]] = []
+        seen = set()
+        for fact in canonical_facts:
+            if not isinstance(fact, dict):
+                continue
+            predicate_family = str(fact.get("predicate_family") or "").strip().lower()
+            if predicate_family and predicate_family in excluded_predicates:
+                continue
+            text = re.sub(r"\s+", " ", str(fact.get("text") or "").strip())
+            if len(text) < 12:
+                continue
+            key = text.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(
+                {
+                    "text": text,
+                    "fact_ids": _normalize_identifier_list(
+                        [fact.get("fact_id")] + list(fact.get("related_fact_ids") or [])
+                    ),
+                    "source_artifact_ids": _normalize_identifier_list(
+                        list(fact.get("source_artifact_ids") or [])
+                    ),
+                    "claim_types": _normalize_identifier_list(
+                        list(fact.get("claim_types") or [])
+                        + ([default_claim_type] if default_claim_type else [])
+                    ),
+                    "claim_element_ids": _normalize_identifier_list(
+                        list(fact.get("element_tags") or [])
+                        + ([default_claim_element_id] if default_claim_element_id else [])
+                        + ([fact.get("predicate_family")] if fact.get("predicate_family") else [])
+                    ),
+                    "source_kind": str(fact.get("source_kind") or "email_timeline_candidate").strip()
+                    or "email_timeline_candidate",
+                    "source_ref": str(fact.get("source_ref") or fact.get("fact_id") or "").strip() or None,
+                }
+            )
+            if len(entries) >= limit:
+                break
+        return entries
+
+    def _load_email_timeline_message_metadata(self, source_ref: Any) -> Dict[str, Any]:
+        source_text = str(source_ref or "").strip()
+        if not source_text:
+            return {}
+        source_path = Path(source_text)
+        candidates: List[Path] = []
+        if source_path.suffix.lower() == ".json":
+            candidates.append(source_path)
+        if source_path.name == "message.eml":
+            candidates.append(source_path.with_name("message.json"))
+        for candidate in candidates:
+            try:
+                if candidate.exists():
+                    payload = json.loads(candidate.read_text(encoding="utf-8"))
+                    if isinstance(payload, dict):
+                        return payload
+            except Exception:
+                continue
+        return {}
+
+    def _build_email_timeline_narrative_text(
+        self,
+        predicate_family: str,
+        facts: List[Dict[str, Any]],
+    ) -> str:
+        ordered_facts = sorted(
+            [fact for fact in facts if isinstance(fact, dict)],
+            key=lambda fact: str(
+                (fact.get("temporal_context") or {}).get("sortable_date")
+                or fact.get("event_date_or_range")
+                or ""
+            ),
+        )
+        if not ordered_facts:
+            return ""
+
+        def _date_text(fact: Dict[str, Any]) -> str:
+            return _format_timeline_date(
+                (fact.get("temporal_context") or {}).get("start_date")
+                or fact.get("event_date_or_range")
+            )
+
+        first_date = _date_text(ordered_facts[0])
+        last_date = _date_text(ordered_facts[-1])
+        clackamas_participants = _unique_preserving_order(
+            [
+                str(email).strip().lower()
+                for fact in ordered_facts
+                for email in list(fact.get("participants") or [])
+                if str(email).strip().lower().endswith("@clackamas.us")
+            ]
+        )
+        participant_phrase = _join_chronology_segments(clackamas_participants[:4]) if clackamas_participants else ""
+
+        if predicate_family == "fraud_household" and first_date and last_date:
+            return (
+                f"Beginning on {first_date} and continuing through {last_date}, Plaintiff emailed "
+                "Clackamas County Housing Authority staff in the "
+                "'Allegations of Fraud - JC Household' chain, "
+                f"including {participant_phrase or 'multiple Clackamas housing staff members'}."
+            )
+        if predicate_family == "additional_information" and first_date and last_date:
+            return (
+                f"From {first_date} through {last_date}, Clackamas housing staff sent "
+                "'Additional Information Needed' emails requesting additional housing-program information from Plaintiff."
+            )
+        if predicate_family == "cortez_case" and first_date:
+            return (
+                f"On {first_date}, Plaintiff emailed Clackamas personnel regarding the "
+                "'Jane Kay Cortez vs Solomon Samuel Barber' matter."
+            )
+        if predicate_family == "hcv_orientation" and first_date:
+            attachment_names = _unique_preserving_order(
+                [
+                    str(attachment.get("filename") or "").strip()
+                    for fact in ordered_facts
+                    for attachment in list(
+                        self._load_email_timeline_message_metadata(fact.get("source_ref")).get("attachments") or []
+                    )
+                    if isinstance(attachment, dict) and str(attachment.get("filename") or "").strip()
+                ]
+            )
+            denial_attachment = next(
+                (name for name in attachment_names if "denial" in name.lower() or "ra-" in name.lower()),
+                "",
+            )
+            attachment_clause = (
+                f" One of those Clackamas emails included the attachment '{denial_attachment}'."
+                if denial_attachment
+                else ""
+            )
+            return (
+                f"On {first_date}, Clackamas housing staff emailed Plaintiff in the 'HCV Orientation' thread "
+                f"involving {participant_phrase or 'Clackamas voucher staff'}."
+                f"{attachment_clause}"
+            )
+        return ""
+
+    def _build_email_timeline_narrative_fact_entries(
+        self,
+        email_timeline_handoff: Dict[str, Any],
+        *,
+        limit: int = 4,
+    ) -> List[Dict[str, Any]]:
+        canonical_facts = (
+            list(email_timeline_handoff.get("canonical_facts") or [])
+            if isinstance(email_timeline_handoff, dict)
+            else []
+        )
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for fact in canonical_facts:
+            if not isinstance(fact, dict):
+                continue
+            predicate_family = str(fact.get("predicate_family") or "").strip().lower()
+            if not predicate_family:
+                continue
+            grouped.setdefault(predicate_family, []).append(fact)
+
+        entries: List[Dict[str, Any]] = []
+        for predicate_family in ("hcv_orientation", "additional_information", "cortez_case", "fraud_household"):
+            facts = grouped.get(predicate_family) or []
+            text = self._build_email_timeline_narrative_text(predicate_family, facts)
+            if not text:
+                continue
+            entries.append(
+                {
+                    "text": text,
+                    "fact_ids": _normalize_identifier_list([fact.get("fact_id") for fact in facts]),
+                    "source_artifact_ids": _normalize_identifier_list(
+                        [fact.get("source_ref") for fact in facts if fact.get("source_ref")]
+                    ),
+                    "claim_types": _normalize_identifier_list(
+                        [claim_type for fact in facts for claim_type in list(fact.get("claim_types") or [])]
+                    ),
+                    "claim_element_ids": _normalize_identifier_list(
+                        [predicate_family]
+                        + [element_id for fact in facts for element_id in list(fact.get("element_tags") or [])]
+                    ),
+                    "source_kind": "email_timeline_narrative",
+                    "source_ref": str(facts[0].get("source_ref") or "").strip() or None,
+                }
+            )
+            if len(entries) >= limit:
+                break
+        return entries
+
+    def _build_email_timeline_chronology_lines(
+        self,
+        email_timeline_handoff: Dict[str, Any],
+        *,
+        limit: int = 6,
+    ) -> List[str]:
+        canonical_facts = (
+            list(email_timeline_handoff.get("canonical_facts") or [])
+            if isinstance(email_timeline_handoff, dict)
+            else []
+        )
+        lines: List[str] = []
+        seen = set()
+        for fact in canonical_facts:
+            if not isinstance(fact, dict):
+                continue
+            temporal_context = fact.get("temporal_context") if isinstance(fact.get("temporal_context"), dict) else {}
+            event_date = _format_timeline_date(
+                temporal_context.get("start_date")
+                or fact.get("event_date_or_range")
+            )
+            text = re.sub(r"\s+", " ", str(fact.get("text") or "").strip())
+            if len(text) < 12 or not event_date:
+                continue
+            line = f"On {event_date}, {text}"
+            if not line.endswith((".", "?", "!")):
+                line = f"{line}."
+            key = line.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(line)
+            if len(lines) >= limit:
+                break
+        return lines
+
+    def _enrich_draft_with_email_timeline_handoff(
+        self,
+        draft: Dict[str, Any],
+        *,
+        email_timeline_handoff: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not isinstance(draft, dict) or not isinstance(email_timeline_handoff, dict) or not email_timeline_handoff:
+            return draft
+
+        narrative_entries = self._build_email_timeline_narrative_fact_entries(email_timeline_handoff)
+        narrative_predicates = _normalize_identifier_list(
+            [
+                element_id
+                for entry in narrative_entries
+                for element_id in _coerce_list(entry.get("claim_element_ids"))
+                if str(element_id or "").strip().lower()
+                in {"hcv_orientation", "additional_information", "cortez_case", "fraud_household"}
+            ]
+        )
+        raw_limit = 0 if narrative_entries else 6
+        email_fact_entries = narrative_entries + self._build_email_timeline_fact_entries(
+            email_timeline_handoff,
+            limit=raw_limit,
+            exclude_predicate_families=narrative_predicates,
+        )
+        email_chronology_lines = self._build_email_timeline_chronology_lines(email_timeline_handoff)
+        if not email_fact_entries and not email_chronology_lines:
+            return draft
+
+        updated = dict(draft)
+        existing_fact_entries = [
+            dict(entry)
+            for entry in _coerce_list(updated.get("summary_of_fact_entries"))
+            if isinstance(entry, dict)
+        ]
+        merged_fact_entries: List[Dict[str, Any]] = []
+        seen_fact_texts = set()
+        for entry in email_fact_entries + existing_fact_entries:
+            text = re.sub(r"\s+", " ", str(entry.get("text") or "").strip())
+            if len(text) < 12:
+                continue
+            key = text.lower()
+            if key in seen_fact_texts:
+                continue
+            seen_fact_texts.add(key)
+            normalized_entry = dict(entry)
+            normalized_entry["text"] = text
+            normalized_entry["fact_ids"] = _normalize_identifier_list(normalized_entry.get("fact_ids") or [])
+            normalized_entry["source_artifact_ids"] = _normalize_identifier_list(
+                normalized_entry.get("source_artifact_ids") or []
+            )
+            normalized_entry["claim_types"] = _normalize_identifier_list(normalized_entry.get("claim_types") or [])
+            normalized_entry["claim_element_ids"] = _normalize_identifier_list(
+                normalized_entry.get("claim_element_ids") or []
+            )
+            if normalized_entry.get("source_ref") is not None:
+                source_ref = str(normalized_entry.get("source_ref") or "").strip()
+                normalized_entry["source_ref"] = source_ref or None
+            merged_fact_entries.append(normalized_entry)
+            if len(merged_fact_entries) >= 14:
+                break
+
+        if narrative_entries:
+            filtered_fact_entries = [
+                entry for entry in merged_fact_entries if not self._is_low_signal_email_summary_entry(entry)
+            ]
+            if filtered_fact_entries:
+                merged_fact_entries = filtered_fact_entries
+
+        if merged_fact_entries:
+            updated["summary_of_fact_entries"] = merged_fact_entries
+            updated["summary_of_facts"] = [
+                str(entry.get("text") or "").strip()
+                for entry in merged_fact_entries
+                if str(entry.get("text") or "").strip()
+            ]
+
+        chronology_lines = _unique_preserving_order(
+            list(self._normalize_text_lines(updated.get("anchored_chronology_summary", [])))
+            + email_chronology_lines
+        )
+        if chronology_lines:
+            updated["anchored_chronology_summary"] = chronology_lines[:8]
+
+        claims_for_relief = (
+            list(updated.get("claims_for_relief") or [])
+            if isinstance(updated.get("claims_for_relief"), list)
+            else []
+        )
+        if merged_fact_entries:
+            updated["factual_allegation_entries"] = self._build_factual_allegation_entries(
+                summary_fact_entries=merged_fact_entries,
+                claims_for_relief=claims_for_relief,
+            )
+            updated["factual_allegations"] = self._build_factual_allegations(
+                summary_of_facts=updated.get("summary_of_facts", []),
+                claims_for_relief=claims_for_relief,
+            )
+        return updated
+
+    def _build_email_authority_summary_lines(
+        self,
+        email_authority_enrichment: Dict[str, Any],
+        *,
+        authority_limit: int = 5,
+        guidance_limit: int = 3,
+    ) -> List[str]:
+        if not isinstance(email_authority_enrichment, dict) or not email_authority_enrichment:
+            return []
+        summary = (
+            dict(email_authority_enrichment.get("summary") or {})
+            if isinstance(email_authority_enrichment.get("summary"), dict)
+            else {}
+        )
+        total_counts = (
+            dict(summary.get("total_counts") or {})
+            if isinstance(summary.get("total_counts"), dict)
+            else {}
+        )
+        statutes = int(total_counts.get("statutes") or 0)
+        regulations = int(total_counts.get("regulations") or 0)
+        case_law = int(total_counts.get("case_law") or 0)
+        guidance = int(total_counts.get("state_web_archives") or 0) + int(total_counts.get("web_archives") or 0)
+        lines: List[str] = []
+        if any(value > 0 for value in (statutes, regulations, case_law, guidance)):
+            count_parts = []
+            if statutes:
+                count_parts.append(f"{statutes} statutes")
+            if regulations:
+                count_parts.append(f"{regulations} regulations")
+            if case_law:
+                count_parts.append(f"{case_law} cases")
+            if guidance:
+                count_parts.append(f"{guidance} agency or local guidance sources")
+            lines.append(
+                "Email-aligned authority review identified "
+                f"{_join_chronology_segments(count_parts)} supporting the Clackamas chronology."
+            )
+
+        def _authority_priority(item: Dict[str, Any]) -> tuple[int, int, str]:
+            authority_type = str(item.get("authority_type") or "").strip().lower()
+            citation = str(item.get("citation") or "").strip()
+            title = str(item.get("title") or "").strip()
+            source_url = str(item.get("source_url") or "").strip().lower()
+            priority = 0
+            if citation.startswith("ORS "):
+                priority = 6
+            elif "clackamas" in title.lower() or "clackamas" in source_url:
+                priority = 5
+            elif citation.startswith("24 C.F.R."):
+                priority = 4
+            elif citation.startswith("42 U.S.C."):
+                priority = 3
+            elif authority_type in {"guidance", "agency_guidance"}:
+                priority = 2
+            return (priority, len(citation or title), citation or title)
+
+        authority_names: List[str] = []
+        recommended_authorities = [
+            dict(item)
+            for item in list(email_authority_enrichment.get("recommended_authorities") or [])
+            if isinstance(item, dict)
+        ]
+        recommended_authorities.sort(key=_authority_priority, reverse=True)
+        for item in recommended_authorities:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("citation") or item.get("title") or "").strip()
+            if label and label not in authority_names:
+                authority_names.append(label)
+            if len(authority_names) >= authority_limit:
+                break
+        if authority_names:
+            lines.append(
+                "Key authorities include "
+                f"{_join_chronology_segments(authority_names)}."
+            )
+
+        guidance_names: List[str] = []
+        seen = set()
+        for query_result in list(email_authority_enrichment.get("query_results") or []):
+            if not isinstance(query_result, dict):
+                continue
+            for row in list(query_result.get("state_web_archives") or []):
+                if not isinstance(row, dict):
+                    continue
+                title = str(row.get("title") or row.get("citation") or "").strip()
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                guidance_names.append(title)
+                if len(guidance_names) >= guidance_limit:
+                    break
+            if len(guidance_names) >= guidance_limit:
+                break
+        if guidance_names:
+            lines.append(
+                "Relevant agency and local guidance includes "
+                f"{_join_chronology_segments(guidance_names)}."
+            )
+        return lines[:4]
+
+    def _enrich_draft_with_email_authority_enrichment(
+        self,
+        draft: Dict[str, Any],
+        *,
+        email_authority_enrichment: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not isinstance(draft, dict) or not isinstance(email_authority_enrichment, dict) or not email_authority_enrichment:
+            return draft
+        summary_lines = self._build_email_authority_summary_lines(email_authority_enrichment)
+        if not summary_lines:
+            return draft
+        updated = dict(draft)
+        updated["email_authority_summary_lines"] = summary_lines
+        return updated
+
+    def _collect_email_authority_citations(self, email_authority_enrichment: Dict[str, Any]) -> List[str]:
+        citations: List[str] = []
+        seen = set()
+        for item in list(email_authority_enrichment.get("recommended_authorities") or []):
+            if not isinstance(item, dict):
+                continue
+            citation = str(item.get("citation") or item.get("title") or "").strip()
+            if citation and citation not in seen:
+                seen.add(citation)
+                citations.append(citation)
+        for query_result in list(email_authority_enrichment.get("query_results") or []):
+            if not isinstance(query_result, dict):
+                continue
+            for bucket in ("statutes", "regulations", "case_law"):
+                for row in list((query_result.get("results") or {}).get(bucket) or []):
+                    if not isinstance(row, dict):
+                        continue
+                    citation = str(row.get("citation") or row.get("title") or "").strip()
+                    if citation and citation not in seen:
+                        seen.add(citation)
+                        citations.append(citation)
+        return citations
+
+    def _build_claim_authority_lines_from_email_enrichment(
+        self,
+        claim_type: str,
+        *,
+        email_authority_enrichment: Dict[str, Any],
+    ) -> List[str]:
+        citations = self._collect_email_authority_citations(email_authority_enrichment)
+        normalized = normalize_claim_type(claim_type or "")
+
+        def _available(preferred: List[str]) -> List[str]:
+            return [citation for citation in preferred if citation in citations]
+
+        if normalized == "due_process_failure":
+            preferred = _available(["24 C.F.R. § 982.555", "24 C.F.R. § 982.552", "24 C.F.R. § 982.551"])
+            if preferred:
+                return [f"Authority support for this count includes {_join_chronology_segments(preferred)}."]
+        if normalized == "housing_discrimination":
+            preferred = _available(["ORS 659A.145", "42 U.S.C. § 3604(f)(3)(B)", "HUD/DOJ Joint Statement (May 17, 2004)"])
+            if preferred:
+                return [f"Authority support for this count includes {_join_chronology_segments(preferred)}."]
+        if normalized == "retaliation":
+            preferred = _available(["ORS 659A.145", "42 U.S.C. § 3604(f)(3)(B)", "24 C.F.R. § 982.555"])
+            if preferred:
+                return [f"Authority support for this count includes {_join_chronology_segments(preferred)}."]
+        return []
+
+    def _infer_claim_types_from_email_support(
+        self,
+        *,
+        email_timeline_handoff: Dict[str, Any],
+        email_authority_enrichment: Dict[str, Any],
+    ) -> List[str]:
+        topic_summary = (
+            dict((email_timeline_handoff.get("claim_support_temporal_handoff") or {}).get("topic_summary") or {})
+            if isinstance((email_timeline_handoff.get("claim_support_temporal_handoff") or {}), dict)
+            else {}
+        )
+        topics = {str(key).strip() for key in topic_summary.keys() if str(key).strip()}
+        citations = set(self._collect_email_authority_citations(email_authority_enrichment))
+        inferred: List[str] = []
+
+        if topics & {"hcv_orientation", "fraud_household", "additional_information"} or citations & {
+            "24 C.F.R. § 982.555",
+            "24 C.F.R. § 982.552",
+            "24 C.F.R. § 982.551",
+        }:
+            inferred.append("due_process_failure")
+        if topics & {"cortez_case", "hcv_orientation"} or citations & {
+            "ORS 659A.145",
+            "42 U.S.C. § 3604(f)(3)(B)",
+        }:
+            inferred.append("housing_discrimination")
+        if str(email_timeline_handoff.get("claim_type") or "").strip().lower() == "retaliation":
+            inferred.append("retaliation")
+
+        return _unique_preserving_order(inferred)
+
+    def _specialize_generic_claims_from_email_support(
+        self,
+        draft: Dict[str, Any],
+        *,
+        email_timeline_handoff: Dict[str, Any],
+        email_authority_enrichment: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not isinstance(draft, dict):
+            return draft
+        claims = [dict(item) for item in list(draft.get("claims_for_relief") or []) if isinstance(item, dict)]
+        if len(claims) != 1:
+            return draft
+        base_claim = claims[0]
+        if normalize_claim_type(base_claim.get("claim_type") or "") != "general_civil_action":
+            return draft
+
+        inferred_claim_types = self._infer_claim_types_from_email_support(
+            email_timeline_handoff=email_timeline_handoff,
+            email_authority_enrichment=email_authority_enrichment,
+        )
+        if not inferred_claim_types:
+            return draft
+
+        specialized_claims: List[Dict[str, Any]] = []
+        base_facts = [
+            str(item or "").strip()
+            for item in list(base_claim.get("supporting_facts") or [])
+            if str(item or "").strip() and not self._is_generic_claim_support_text(item)
+        ]
+        summary_facts = [
+            line
+            for line in self._normalize_text_lines(draft.get("summary_of_facts", []))
+            if not self._is_generic_claim_support_text(line)
+        ]
+        merged_claim_facts = _unique_preserving_order(base_facts + summary_facts)[:8]
+        for claim_type in inferred_claim_types[:3]:
+            specialized = deepcopy(base_claim)
+            specialized["claim_type"] = claim_type
+            specialized["count_title"] = self._humanize_claim_title(claim_type, merged_claim_facts or base_facts)
+            if merged_claim_facts:
+                specialized["supporting_facts"] = merged_claim_facts
+            specialized["legal_standards"] = (
+                self._build_claim_legal_standard_fallbacks(claim_type)
+                + self._build_claim_authority_lines_from_email_enrichment(
+                    claim_type,
+                    email_authority_enrichment=email_authority_enrichment,
+                )
+            )
+            specialized_claims.append(specialized)
+
+        updated = dict(draft)
+        updated["claims_for_relief"] = sorted(specialized_claims, key=self._claim_order_score)
+        return updated
+
     def _build_chronology_blocker_summary(
         self,
         *,
@@ -2752,6 +3562,10 @@ class FormalComplaintDocumentBuilder:
         if chronology_lines:
             lines.extend(["", "ANCHORED CHRONOLOGY"])
             lines.extend(self._numbered_lines(chronology_lines))
+        authority_summary_lines = self._normalize_text_lines(draft.get("email_authority_summary_lines", []))
+        if authority_summary_lines:
+            lines.extend(["", "EMAIL-ALIGNED AUTHORITY SUPPORT"])
+            lines.extend(self._bulletize_lines(authority_summary_lines))
         claims = draft.get("claims_for_relief", []) if isinstance(draft.get("claims_for_relief"), list) else []
         if claims:
             lines.extend(["", "CLAIMS FOR RELIEF"])
@@ -2948,6 +3762,9 @@ class FormalComplaintDocumentBuilder:
                 f"Federal housing regulations, including {citation}, required written notice and an opportunity "
                 "for informal review before a final adverse housing decision was enforced."
             )
+        if len(normalized) == 1 and normalized[0].lower().startswith("authority support for this count includes"):
+            sentence = normalized[0].strip()
+            return sentence if sentence.endswith((".", "?", "!")) else f"{sentence}."
         return self._compose_count_paragraph(normalized, lead_in="Authority for this count includes")
 
     def _compose_housing_standard_paragraph(self, lines: List[str]) -> str:
@@ -3746,7 +4563,7 @@ class FormalComplaintDocumentBuilder:
         if len(text) > 360:
             return False
         if not re.search(
-            r"\b(was|were|is|are|reported|complained|terminated|fired|retaliated|denied|refused|told|informed|notified|requested|sought|experienced|suffered|lost|made|engaged|opposed|filed|submitted|sent|issued|signed|emailed|wrote|received|occurred|happened|subjected|demoted|suspended|disciplined|reduced|requires|required|must|states|describes|shows|reflects|discusses|provides)\b",
+            r"\b(was|were|is|are|reported|complained|terminated|fired|retaliated|denied|refused|told|informed|notified|requested|sought|seek|experienced|suffered|lost|made|engaged|opposed|filed|submitted|sent|issued|signed|emailed|wrote|received|occurred|happened|subjected|demoted|suspended|disciplined|reduced|exchanged|used|included|includes|requires|required|must|states|describes|shows|reflects|discusses|provides)\b",
             lowered,
         ):
             return False
@@ -3758,7 +4575,41 @@ class FormalComplaintDocumentBuilder:
             lowered.startswith(("evidence shows facts supporting", "the intake record describes facts supporting"))
             or "the strongest supporting material is" in lowered
             or lowered.startswith("for this question, the strongest supporting material is")
+            or lowered == "additional factual development is required before filing."
         )
+
+    def _is_priority_email_timeline_allegation(self, value: Any) -> bool:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not text or not _contains_date_anchor(text):
+            return False
+        lowered = text.lower()
+        priority_markers = (
+            "hcv orientation",
+            "additional information needed",
+            "jane kay cortez",
+            "jc household",
+            "clackamas housing staff",
+            "clackamas county housing authority staff",
+            "clackamas personnel",
+            "cortez-j-ra-denial",
+        )
+        return any(marker in lowered for marker in priority_markers)
+
+    def _is_low_signal_email_summary_entry(self, entry: Dict[str, Any]) -> bool:
+        if not isinstance(entry, dict):
+            return False
+        source_kind = str(entry.get("source_kind") or "").strip().lower()
+        if source_kind not in {"email_timeline_candidate", "email_timeline_fact"}:
+            return False
+        text = re.sub(r"\s+", " ", str(entry.get("text") or "")).strip()
+        if not text:
+            return False
+        lowered = text.lower()
+        if self._is_priority_email_timeline_allegation(text):
+            return False
+        if "denial" in lowered or "ra-" in lowered:
+            return False
+        return True
 
     def _expand_allegation_sources(self, values: Any, *, limit: Optional[int] = None) -> List[str]:
         expanded: List[str] = []
@@ -3770,6 +4621,25 @@ class FormalComplaintDocumentBuilder:
                 expanded.append(sentence)
         unique = _unique_preserving_order(expanded)
         return unique[:limit] if limit is not None else unique
+
+    def _merge_email_attachment_follow_on_allegations(self, allegations: List[str]) -> List[str]:
+        merged: List[str] = []
+        for item in allegations:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if (
+                merged
+                and lowered.startswith("one of those clackamas emails included the attachment ")
+                and "hcv orientation" in merged[-1].lower()
+            ):
+                prior = merged[-1].rstrip(".!?")
+                attachment_clause = text[0].lower() + text[1:] if text[:1].isupper() else text
+                merged[-1] = f"{prior}, and {attachment_clause.rstrip('.!?')}."
+                continue
+            merged.append(text)
+        return merged
 
     def _extract_uploaded_evidence_text_candidates(self, value: Any, *, limit: int = 3) -> List[str]:
         text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -4149,6 +5019,10 @@ class FormalComplaintDocumentBuilder:
         source_pool = [str(item or "").strip() for item in (source_allegations or allegations) if str(item or "").strip()]
         if not allegations and not source_pool:
             return []
+        priority_email_count = sum(1 for line in source_pool if self._is_priority_email_timeline_allegation(line))
+        if priority_email_count >= 3:
+            concrete_sequence = self._build_concrete_sequence_allegation(source_pool)
+            return [concrete_sequence] if concrete_sequence else []
         combined = " ".join(source_pool or [str(item or "") for item in allegations])
         lowered = combined.lower()
         references_notice = "notice" in lowered
@@ -4273,6 +5147,56 @@ class FormalComplaintDocumentBuilder:
                 )
         return synthesized
 
+    def _build_email_timeline_issue_allegations(
+        self,
+        allegations: List[str],
+        source_allegations: Optional[List[str]] = None,
+    ) -> List[str]:
+        source_pool = [str(item or "").strip() for item in (source_allegations or allegations) if str(item or "").strip()]
+        if not source_pool:
+            return []
+        priority_lines = [line for line in source_pool if self._is_priority_email_timeline_allegation(line)]
+        if not priority_lines:
+            return []
+
+        combined = " ".join(priority_lines).lower()
+        has_hcv_orientation = "hcv orientation" in combined
+        has_additional_information = "additional information needed" in combined
+        has_cortez_case = "jane kay cortez" in combined
+        has_ra_denial = "cortez-j-ra-denial" in combined or "ra-denial" in combined or "ra denial" in combined
+        has_fraud_chain = "jc household" in combined or "allegations of fraud" in combined
+
+        allegations_out: List[str] = []
+        if has_hcv_orientation and has_ra_denial:
+            allegations_out.append(
+                "Plaintiff alleges that, by March 26, 2026, Clackamas housing staff were circulating an HCV orientation email chain that included the RA-denial attachment, reflecting maintenance of the challenged denial of housing assistance."
+            )
+        elif has_hcv_orientation:
+            allegations_out.append(
+                "Plaintiff alleges that, by March 26, 2026, Clackamas housing staff were still handling Plaintiff's housing matter through the HCV Orientation email chain while maintaining the challenged adverse housing action."
+            )
+
+        if has_additional_information:
+            allegations_out.append(
+                "Plaintiff further alleges that Clackamas housing staff used the 'Additional Information Needed' thread between February 9 and March 10, 2026 to demand additional housing-program information while the challenged denial or loss of assistance remained in place."
+            )
+
+        if has_cortez_case and (has_hcv_orientation or has_additional_information):
+            allegations_out.append(
+                "Plaintiff alleges that the March 10, 2026 Cortez case emails and the March 26, 2026 HCV Orientation emails show Clackamas personnel were actively handling Plaintiff's housing matter without first providing the notice and review protections required before enforcing an adverse housing decision."
+            )
+
+        if has_ra_denial:
+            allegations_out.append(
+                "Plaintiff further alleges that the RA-denial attachment and related HCV communications support Plaintiff's claim that Defendant denied housing-related benefits or accommodations on discriminatory grounds."
+            )
+        elif has_fraud_chain and has_hcv_orientation:
+            allegations_out.append(
+                "Plaintiff alleges that the December 2025 through March 2026 Clackamas email sequence shows a continuing course of adverse housing treatment rather than an isolated communication."
+            )
+
+        return _unique_preserving_order(allegations_out)
+
     def _prune_redundant_policy_rule_allegations(self, allegations: List[str]) -> List[str]:
         if not allegations:
             return []
@@ -4302,8 +5226,16 @@ class FormalComplaintDocumentBuilder:
         summary_of_facts: Any,
         claims_for_relief: List[Dict[str, Any]],
     ) -> List[str]:
-        base_allegations = list(self._expand_allegation_sources(summary_of_facts, limit=14))
-        allegations = list(self._synthesize_narrative_allegations(base_allegations))
+        base_allegations = self._merge_email_attachment_follow_on_allegations(
+            list(self._expand_allegation_sources(summary_of_facts, limit=14))
+        )
+        priority_email_allegations = [
+            item for item in base_allegations if self._is_priority_email_timeline_allegation(item)
+        ]
+        allegations = list(priority_email_allegations)
+        for item in self._synthesize_narrative_allegations(base_allegations):
+            if item.lower() not in {entry.lower() for entry in allegations}:
+                allegations.append(item)
         for item in self._prune_subsumed_narrative_clauses(base_allegations):
             if item.lower() not in {entry.lower() for entry in allegations}:
                 allegations.append(item)
@@ -4315,6 +5247,10 @@ class FormalComplaintDocumentBuilder:
             count_title = str(claim.get("count_title") or claim.get("claim_type") or "Claim").strip()
             for fact in self._expand_allegation_sources(claim.get("supporting_facts", []), limit=10):
                 if not fact:
+                    continue
+                if self._is_priority_email_timeline_allegation(fact):
+                    continue
+                if str(fact or "").strip().lower().startswith("one of those clackamas emails included the attachment "):
                     continue
                 if self._is_near_duplicate_allegation(fact, allegations):
                     continue
@@ -4335,6 +5271,9 @@ class FormalComplaintDocumentBuilder:
                     return self._prune_near_duplicate_allegations(allegations)
 
         pruned = self._prune_near_duplicate_allegations(allegations)
+        for item in self._build_email_timeline_issue_allegations(pruned, base_allegations):
+            if item.lower() not in {entry.lower() for entry in pruned}:
+                pruned.append(item)
         pruned.extend(self._build_policy_process_allegations(pruned, base_allegations))
         pruned.extend(self._build_missing_detail_allegations(pruned, base_allegations))
         pruned = self._prune_near_duplicate_allegations(pruned)
@@ -4643,6 +5582,7 @@ class FormalComplaintDocumentBuilder:
 
     def _build_factual_allegation_groups(self, allegation_paragraphs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         ordered_titles = [
+            "Clackamas Email Chronology",
             "Protected Activity and Complaints",
             "Adverse Action and Retaliatory Conduct",
             "Damages and Resulting Harm",
@@ -4665,6 +5605,8 @@ class FormalComplaintDocumentBuilder:
     def _classify_factual_allegation_group(self, paragraph: Dict[str, Any]) -> str:
         text = str(paragraph.get("text") or "").strip()
         lowered = text.lower()
+        if self._is_priority_email_timeline_allegation(text):
+            return "Clackamas Email Chronology"
         if re.search(
             r"\b(terminated|fired|demoted|suspended|disciplined|retaliated|denied|denial notice|loss of assistance|review decision|adverse action)\b",
             lowered,
@@ -5610,6 +6552,8 @@ class FormalComplaintDocumentBuilder:
             "court_header": draft.get("court_header"),
             "generated_at": source_context.get("generated_at") or _utcnow().isoformat(),
             "claim_support_temporal_handoff": dict(source_context.get("claim_support_temporal_handoff") or {}) if isinstance(source_context.get("claim_support_temporal_handoff"), dict) else {},
+            "email_timeline_handoff": deepcopy(source_context.get("email_timeline_handoff") or {}) if isinstance(source_context.get("email_timeline_handoff"), dict) else {},
+            "email_authority_enrichment": deepcopy(source_context.get("email_authority_enrichment") or {}) if isinstance(source_context.get("email_authority_enrichment"), dict) else {},
             "claim_reasoning_review": deepcopy(source_context.get("claim_reasoning_review") or {}) if isinstance(source_context.get("claim_reasoning_review"), dict) else {},
             "chronology_blocker_summary": deepcopy(source_context.get("chronology_blocker_summary") or {}) if isinstance(source_context.get("chronology_blocker_summary"), dict) else {},
             "source_context": source_context,
@@ -5625,6 +6569,7 @@ class FormalComplaintDocumentBuilder:
                 "summary_of_facts": draft.get("summary_of_facts", []),
                 "factual_allegations": draft.get("factual_allegations", []),
                 "anchored_chronology_summary": draft.get("anchored_chronology_summary", []),
+                "email_authority_summary_lines": draft.get("email_authority_summary_lines", []),
                 "claims_for_relief": draft.get("claims_for_relief", []),
                 "legal_standards": draft.get("legal_standards", []),
                 "requested_relief": draft.get("requested_relief", []),
@@ -5820,8 +6765,15 @@ class FormalComplaintDocumentBuilder:
     ) -> List[str]:
         claim_phrase = ", ".join(claim_types)
         legal_areas = ", ".join(_coerce_list(classification.get("legal_areas")))
-        jurisdiction = str(classification.get("jurisdiction") or "the applicable court")
         forum_type = self._infer_forum_type(classification=classification, court_name=court_name)
+        jurisdiction = str(classification.get("jurisdiction") or "").strip().lower()
+        if not jurisdiction or jurisdiction == "unknown":
+            if forum_type == "federal":
+                jurisdiction = "federal"
+            elif forum_type == "state":
+                jurisdiction = "state"
+            else:
+                jurisdiction = "the applicable court"
         statute_refs = _unique_preserving_order(
             [s.get("citation") for s in statutes if isinstance(s, dict) and s.get("citation")]
         )

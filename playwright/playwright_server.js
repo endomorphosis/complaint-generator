@@ -6,7 +6,7 @@ const { URL } = require('url');
 const root = path.resolve(__dirname, '..');
 const templatesDir = path.join(root, 'templates');
 const staticDir = path.join(root, 'static');
-const port = 19000;
+const port = Number(process.env.PLAYWRIGHT_TEST_PORT || 19030);
 
 const sampleProfile = {
   complaint_summary: {

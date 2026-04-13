@@ -6,13 +6,22 @@ from io import BytesIO
 
 import backends
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 import pytest
 from typer.testing import CliRunner
+from ipfs_datasets_py.processors.legal_data import DocketDatasetBuilder
 
 from applications import complaint_cli as complaint_cli_impl
 from applications.complaint_workspace_api import attach_complaint_workspace_routes
 from applications.complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
-from complaint_generator import ComplaintWorkspaceService, analyze_complaint_output, get_client_release_gate, get_formal_diagnostics, get_provider_diagnostics, get_tooling_contract, optimize_ui, review_generated_exports, review_ui, run_browser_audit
+from complaint_generator import ComplaintWorkspaceService, analyze_complaint_output, get_client_release_gate, get_formal_diagnostics, get_packaged_docket_operator_dashboard, get_provider_diagnostics, get_tooling_contract, load_packaged_docket_operator_dashboard_report, optimize_ui, review_generated_exports, review_ui, run_browser_audit
+
+try:
+    import python_multipart  # type: ignore  # noqa: F401
+
+    HAS_MULTIPART = True
+except ModuleNotFoundError:
+    HAS_MULTIPART = False
 
 
 pytestmark = [pytest.mark.no_auto_network]
@@ -48,9 +57,47 @@ def _call_mcp_tool(service: ComplaintWorkspaceService, request_id: int, tool_nam
     return result["structuredContent"]
 
 
+def _build_packaged_docket_manifest(tmp_path, *, routing_reason: str = "Workspace dashboard routing reason.") -> str:
+    dataset = DocketDatasetBuilder().build_from_docket(
+        {
+            "docket_id": "workspace-docket-1",
+            "case_name": "Workspace Packaged Docket",
+            "court": "D. Example",
+            "documents": [
+                {
+                    "id": "doc_1",
+                    "title": "Complaint",
+                    "text": "Plaintiff seeks relief under 42 U.S.C. § 1983.",
+                },
+                {
+                    "id": "doc_2",
+                    "title": "Notice of Hearing",
+                    "date_filed": "2024-04-18",
+                    "document_number": "12",
+                    "text": "The court sets a hearing for May 1, 2024 at 10:00 a.m.",
+                },
+            ],
+        }
+    )
+    dataset.metadata["latest_proof_packet_routing_explanation"] = {
+        "routing_reason": routing_reason,
+        "routing_evidence": [{"citation_text": "42 U.S.C. § 1983"}],
+        "preferred_corpus_priority": ["us_code"],
+        "preferred_state_codes": [],
+        "authority_backed": True,
+    }
+    package = dataset.write_package(
+        tmp_path / "workspace_packaged_docket_bundle",
+        package_name="workspace_packaged_docket_bundle",
+        include_car=False,
+    )
+    return str(package["manifest_json_path"])
+
+
 def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "tool-list-sessions")
     payload = tool_list_payload(service)
+    tools_by_name = {tool["name"]: tool for tool in payload["tools"]}
     tool_names = [tool["name"] for tool in payload["tools"]]
 
     expected_tool_names = [
@@ -59,8 +106,12 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.list_claim_elements",
         "complaint.start_session",
         "complaint.submit_intake",
+        "complaint.run_intake_chat_turn",
         "complaint.save_evidence",
         "complaint.import_gmail_evidence",
+        "complaint.run_gmail_duckdb_pipeline",
+        "complaint.import_local_evidence",
+        "complaint.search_email_duckdb_corpus",
         "complaint.review_case",
         "complaint.build_mediator_prompt",
         "complaint.get_complaint_readiness",
@@ -78,6 +129,8 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.get_formal_diagnostics",
         "complaint.get_filing_provenance",
         "complaint.get_provider_diagnostics",
+        "complaint.get_packaged_docket_operator_dashboard",
+        "complaint.load_packaged_docket_operator_dashboard_report",
         "complaint.review_generated_exports",
         "complaint.update_claim_type",
         "complaint.update_case_synopsis",
@@ -89,6 +142,10 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     assert tool_names == expected_tool_names or sorted(tool_names) == sorted(expected_tool_names)
     assert len(tool_names) == len(set(tool_names))
     assert all("inputSchema" in tool for tool in payload["tools"])
+    assert tools_by_name["complaint.get_tooling_contract"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.get_filing_provenance"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.get_packaged_docket_operator_dashboard"]["inputSchema"]["required"] == ["manifest_path"]
+    assert tools_by_name["complaint.load_packaged_docket_operator_dashboard_report"]["inputSchema"]["required"] == ["manifest_path"]
 
 
 def test_client_release_gate_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp_path):
@@ -146,22 +203,226 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     cli_payload = _invoke_cli(runner, "tooling-contract", "--user-id", "contract-user")
     assert cli_payload["all_core_flow_steps_exposed"] is True
     assert "generate" in cli_payload["cli_commands"]
+    assert "import-gmail-evidence" in cli_payload["cli_commands"]
+    assert "run-gmail-duckdb-pipeline" in cli_payload["cli_commands"]
+    assert "import-local-evidence" in cli_payload["cli_commands"]
+    assert "search-email-duckdb" in cli_payload["cli_commands"]
+    assert "chat-turn" in cli_payload["cli_commands"]
+    assert "tooling-contract" in cli_payload["cli_commands"]
+    assert "workspace-data-schema" in cli_payload["cli_commands"]
+    assert "migrate-legacy-workspace-data" in cli_payload["cli_commands"]
+    assert "set-claim-type" in cli_payload["cli_commands"]
+    assert "update-synopsis" in cli_payload["cli_commands"]
 
     mcp_payload = _call_mcp_tool(service, 92, "complaint.get_tooling_contract", {"user_id": "contract-user"})
     assert mcp_payload["all_core_flow_steps_exposed"] is True
     assert any(step["id"] == "draft_generation" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "gmail_evidence_import" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "local_evidence_import" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "tooling_contract" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "workspace_data_schema" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "workspace_data_migration" for step in mcp_payload["core_flow_steps"])
 
     package_payload = get_tooling_contract("contract-user", service=service)
     assert package_payload["all_core_flow_steps_exposed"] is True
     assert "complaint.generate_complaint" in package_payload["mcp_tools"]
+    assert "import_gmail_evidence" in package_payload["package_exports"]
+    assert "run_gmail_duckdb_pipeline" in package_payload["package_exports"]
+    assert "import_local_evidence" in package_payload["package_exports"]
+    assert "search_email_duckdb_corpus" in package_payload["package_exports"]
+    assert "run_intake_chat_turn" in package_payload["package_exports"]
+    assert "update_claim_type" in package_payload["package_exports"]
+    assert "update_case_synopsis" in package_payload["package_exports"]
+    assert "get_workspace_data_schema" in package_payload["package_exports"]
+    assert "migrate_legacy_workspace_data" in package_payload["package_exports"]
+    assert "importGmailEvidence" in package_payload["browser_sdk_methods"]
+    assert "importLocalEvidence" in package_payload["browser_sdk_methods"]
+    assert "runGmailDuckdbPipeline" in package_payload["browser_sdk_methods"]
+    assert "searchEmailDuckdb" in package_payload["browser_sdk_methods"]
+    assert "runIntakeChatTurn" in package_payload["browser_sdk_methods"]
+    assert "updateClaimType" in package_payload["browser_sdk_methods"]
+    assert "updateCaseSynopsis" in package_payload["browser_sdk_methods"]
+    assert "getToolingContract" in package_payload["browser_sdk_methods"]
+    assert "getWorkspaceDataSchema" in package_payload["browser_sdk_methods"]
+    assert "migrateLegacyWorkspaceData" in package_payload["browser_sdk_methods"]
+    assert any(step["id"] == "gmail_duckdb_pipeline" for step in package_payload["core_flow_steps"])
+    assert any(step["id"] == "email_duckdb_search" for step in package_payload["core_flow_steps"])
+    assert any(step["id"] == "intake_chat" for step in package_payload["core_flow_steps"])
+    assert any(item["id"] == "workspace_schema_refresh" for item in package_payload["schema_guided_recommendations"])
+
+
+def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_path):
+    runner = CliRunner()
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "intake-chat-sessions")
+    monkeypatch.setattr(complaint_cli_impl, "service", service)
+
+    first_turn = _invoke_cli(runner, "chat-turn", "--user-id", "chat-user")
+    assert first_turn["inquiry"]["question_id"] == "party_name"
+    assert first_turn["accepted_answer"] is None
+
+    cli_turn = _invoke_cli(
+        runner,
+        "chat-turn",
+        "--user-id",
+        "chat-user",
+        "--message",
+        "Jordan Example",
+    )
+    assert cli_turn["accepted_answer"]["question_id"] == "party_name"
+    assert cli_turn["next_question"]["id"] == "opposing_party"
+
+    mcp_turn = _call_mcp_tool(
+        service,
+        19_1,
+        "complaint.run_intake_chat_turn",
+        {
+            "user_id": "chat-user",
+            "message": "Acme Corporation",
+            "question_id": "opposing_party",
+        },
+    )
+    assert mcp_turn["accepted_answer"]["question_id"] == "opposing_party"
+    assert mcp_turn["next_question"]["id"] == "protected_activity"
+
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/complaint-workspace/intake-chat",
+        json={
+            "user_id": "chat-user",
+            "message": "Reported discrimination to HR",
+            "question_id": "protected_activity",
+        },
+    )
+
+    assert response.status_code == 200
+    api_turn = response.json()
+    assert api_turn["accepted_answer"]["question_id"] == "protected_activity"
+    assert api_turn["next_question"]["id"] == "adverse_action"
+
+
+def test_generate_api_route_forwards_llm_router_options(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "generate-api-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    captured = {}
+
+    def fake_generate_complaint(
+        user_id,
+        *,
+        requested_relief=None,
+        title_override=None,
+        use_llm=False,
+        provider=None,
+        model=None,
+        config_path=None,
+        backend_id=None,
+    ):
+        captured.update(
+            {
+                "user_id": user_id,
+                "requested_relief": list(requested_relief or []),
+                "title_override": title_override,
+                "use_llm": use_llm,
+                "provider": provider,
+                "model": model,
+                "config_path": config_path,
+                "backend_id": backend_id,
+            }
+        )
+        return {
+            "draft": {
+                "title": title_override or "LLM complaint",
+                "body": "IN THE UNITED STATES DISTRICT COURT\nCOMPLAINT FOR RETALIATION",
+                "draft_strategy": "llm_router" if use_llm else "template",
+            }
+        }
+
+    monkeypatch.setattr(service, "generate_complaint", fake_generate_complaint)
+
+    response = client.post(
+        "/api/complaint-workspace/generate",
+        json={
+            "user_id": "api-llm-user",
+            "requested_relief": ["Back pay", "Injunctive relief"],
+            "title_override": "API LLM Complaint",
+            "use_llm": True,
+            "provider": "codex_cli",
+            "model": "gpt-5.3-codex",
+            "config_path": "config.llm_router.json",
+            "backend_id": "formal_complaint_reviewer",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert captured == {
+        "user_id": "api-llm-user",
+        "requested_relief": ["Back pay", "Injunctive relief"],
+        "title_override": "API LLM Complaint",
+        "use_llm": True,
+        "provider": "codex_cli",
+        "model": "gpt-5.3-codex",
+        "config_path": "config.llm_router.json",
+        "backend_id": "formal_complaint_reviewer",
+    }
+
+
+def test_upload_local_evidence_api_route_imports_files_and_note(tmp_path):
+    if not HAS_MULTIPART:
+        pytest.skip("python-multipart is not installed")
+
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "upload-local-evidence-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/complaint-workspace/upload-local-evidence",
+        data={
+            "user_id": "upload-user",
+            "claim_element_id": "causation",
+            "kind": "document",
+            "note_title": "Dashboard upload note",
+            "note": "These files were added from the dashboard chat modal.",
+            "source": "dashboard-chat-upload",
+        },
+        files=[
+            (
+                "files",
+                ("timeline.txt", b"Termination email arrived two days after the HR report.", "text/plain"),
+            ),
+        ],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["imported_count"] == 1
+    assert payload["uploaded_files"][0]["filename"] == "timeline.txt"
+    assert payload["note_record"]["title"] == "Dashboard upload note"
+    assert payload["note_record"]["attachment_names"] == ["timeline.txt"]
+    assert payload["session"]["user_id"] == "upload-user"
+    documents = payload["session"]["evidence"]["documents"]
+    testimony = payload["session"]["evidence"]["testimony"]
+    assert any("timeline.txt" in str(record["title"]) for record in documents)
+    assert any(record["title"] == "Dashboard upload note" for record in testimony)
 
 
 def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
     runner = CliRunner()
     service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-import-cli-sessions")
     monkeypatch.setattr(complaint_cli_impl, "service", service)
+    captured = {}
 
     async def fake_import_gmail_evidence(**kwargs):
+        captured.update(kwargs)
         service.save_evidence(
             kwargs["user_id"],
             kind="document",
@@ -200,6 +461,23 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
         "manager@example.com",
         "--claim-element-id",
         "causation",
+        "--scan-folder",
+        "[Gmail]/Sent Mail",
+        "--years-back",
+        "2",
+        "--complaint-query",
+        "termination retaliation hr complaint",
+        "--complaint-keyword",
+        "termination",
+        "--complaint-keyword",
+        "retaliation",
+        "--min-relevance-score",
+        "1.5",
+        "--use-uid-checkpoint",
+        "--checkpoint-name",
+        "gmail-resume",
+        "--uid-window-size",
+        "250",
         "--gmail-user",
         "user@gmail.com",
         "--gmail-app-password",
@@ -209,6 +487,14 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
     assert payload["status"] == "success"
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
     assert payload["imported_count"] == 1
+    assert captured["folders"] == ["[Gmail]/Sent Mail"]
+    assert captured["years_back"] == 2
+    assert captured["complaint_query"] == "termination retaliation hr complaint"
+    assert captured["complaint_keywords"] == ["termination", "retaliation"]
+    assert captured["min_relevance_score"] == 1.5
+    assert captured["use_uid_checkpoint"] is True
+    assert captured["checkpoint_name"] == "gmail-resume"
+    assert captured["uid_window_size"] == 250
 
     session = service.get_session("cli-user")["session"]
     documents = session["evidence"]["documents"]
@@ -219,6 +505,7 @@ def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
 
 def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-import-mcp-sessions")
+    captured = {}
 
     def fake_import_gmail_evidence(
         user_id,
@@ -226,13 +513,33 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
         addresses,
         claim_element_id="causation",
         folder="INBOX",
+        folders=None,
         limit=None,
         date_after=None,
         date_before=None,
+        years_back=None,
         evidence_root=None,
         gmail_user=None,
         gmail_app_password=None,
+        complaint_query=None,
+        complaint_keywords=None,
+        min_relevance_score=0.0,
+        use_uid_checkpoint=False,
+        checkpoint_name=None,
+        uid_window_size=None,
     ):
+        captured.update(
+            {
+                "folders": folders,
+                "years_back": years_back,
+                "complaint_query": complaint_query,
+                "complaint_keywords": complaint_keywords,
+                "min_relevance_score": min_relevance_score,
+                "use_uid_checkpoint": use_uid_checkpoint,
+                "checkpoint_name": checkpoint_name,
+                "uid_window_size": uid_window_size,
+            }
+        )
         service.save_evidence(
             user_id,
             kind="document",
@@ -268,6 +575,14 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
             "user_id": "mcp-user",
             "addresses": ["hr@example.com", "manager@example.com"],
             "claim_element_id": "causation",
+            "folders": ["[Gmail]/Sent Mail", "[Gmail]/All Mail"],
+            "years_back": 2,
+            "complaint_query": "termination retaliation hr complaint",
+            "complaint_keywords": ["termination", "retaliation"],
+            "min_relevance_score": 2.0,
+            "use_uid_checkpoint": True,
+            "checkpoint_name": "gmail-resume",
+            "uid_window_size": 100,
             "gmail_user": "user@gmail.com",
             "gmail_app_password": "app-password",
         },
@@ -276,6 +591,14 @@ def test_import_gmail_evidence_mcp_tool(monkeypatch, tmp_path):
     assert payload["status"] == "success"
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
     assert payload["imported_count"] == 1
+    assert captured["folders"] == ["[Gmail]/Sent Mail", "[Gmail]/All Mail"]
+    assert captured["years_back"] == 2
+    assert captured["complaint_query"] == "termination retaliation hr complaint"
+    assert captured["complaint_keywords"] == ["termination", "retaliation"]
+    assert captured["min_relevance_score"] == 2.0
+    assert captured["use_uid_checkpoint"] is True
+    assert captured["checkpoint_name"] == "gmail-resume"
+    assert captured["uid_window_size"] == 100
 
     session = service.get_session("mcp-user")["session"]
     documents = session["evidence"]["documents"]
@@ -292,19 +615,41 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
 
     client = TestClient(app)
 
+    captured = {}
+
     def fake_import_gmail_evidence(
         user_id,
         *,
         addresses,
         claim_element_id="causation",
         folder="INBOX",
+        folders=None,
         limit=None,
         date_after=None,
         date_before=None,
+        years_back=None,
         evidence_root=None,
         gmail_user=None,
         gmail_app_password=None,
+        complaint_query=None,
+        complaint_keywords=None,
+        min_relevance_score=0.0,
+        use_uid_checkpoint=False,
+        checkpoint_name=None,
+        uid_window_size=None,
     ):
+        captured.update(
+            {
+                "folders": folders,
+                "years_back": years_back,
+                "complaint_query": complaint_query,
+                "complaint_keywords": complaint_keywords,
+                "min_relevance_score": min_relevance_score,
+                "use_uid_checkpoint": use_uid_checkpoint,
+                "checkpoint_name": checkpoint_name,
+                "uid_window_size": uid_window_size,
+            }
+        )
         service.save_evidence(
             user_id,
             kind="document",
@@ -332,6 +677,14 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
             "user_id": "api-user",
             "addresses": ["hr@example.com", "manager@example.com"],
             "claim_element_id": "causation",
+            "folders": ["[Gmail]/Sent Mail"],
+            "years_back": 2,
+            "complaint_query": "termination retaliation hr complaint",
+            "complaint_keywords": ["termination", "retaliation"],
+            "min_relevance_score": 1.25,
+            "use_uid_checkpoint": True,
+            "checkpoint_name": "gmail-resume",
+            "uid_window_size": 50,
             "gmail_user": "user@gmail.com",
             "gmail_app_password": "app-password",
         },
@@ -341,6 +694,14 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
     payload = response.json()
     assert payload["status"] == "success"
     assert payload["matched_addresses"] == ["hr@example.com", "manager@example.com"]
+    assert captured["folders"] == ["[Gmail]/Sent Mail"]
+    assert captured["years_back"] == 2
+    assert captured["complaint_query"] == "termination retaliation hr complaint"
+    assert captured["complaint_keywords"] == ["termination", "retaliation"]
+    assert captured["min_relevance_score"] == 1.25
+    assert captured["use_uid_checkpoint"] is True
+    assert captured["checkpoint_name"] == "gmail-resume"
+    assert captured["uid_window_size"] == 50
     assert payload["imported_count"] == 1
 
     session = service.get_session("api-user")["session"]
@@ -348,6 +709,279 @@ def test_import_gmail_evidence_api_route(monkeypatch, tmp_path):
     assert len(documents) == 1
     assert documents[0]["title"] == "Email import: Termination email"
     assert documents[0]["attachment_names"] == ["message.eml", "termination.pdf", "message.json"]
+
+
+def test_import_local_evidence_cli_command(monkeypatch, tmp_path):
+    runner = CliRunner()
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "local-import-cli-sessions")
+    monkeypatch.setattr(complaint_cli_impl, "service", service)
+
+    evidence_file = tmp_path / "timeline.txt"
+    evidence_file.write_text("Timeline notes for the retaliation case.", encoding="utf-8")
+
+    payload = _invoke_cli(
+        runner,
+        "import-local-evidence",
+        "--user-id",
+        "cli-user",
+        "--path",
+        str(evidence_file),
+        "--claim-element-id",
+        "causation",
+    )
+
+    assert payload["status"] == "success"
+    assert payload["imported_count"] == 1
+    session = service.get_session("cli-user")["session"]
+    documents = session["evidence"]["documents"]
+    assert len(documents) == 1
+    assert documents[0]["title"] == "Local import: timeline.txt"
+
+
+def test_run_gmail_duckdb_pipeline_cli_command(monkeypatch, tmp_path):
+    runner = CliRunner()
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-pipeline-cli-sessions")
+    monkeypatch.setattr(complaint_cli_impl, "service", service)
+
+    async def fake_run_gmail_duckdb_pipeline(**kwargs):
+        return {
+            "status": "success",
+            "pipeline": "gmail_duckdb_pipeline",
+            "user_id": kwargs["user_id"],
+            "batch_count": 2,
+            "total_imported_count": 3,
+            "duckdb_index": {"duckdb_path": str(tmp_path / "duckdb" / "email_corpus.duckdb")},
+            "bm25_search": {"query": "termination", "result_count": 2},
+        }
+
+    monkeypatch.setattr(complaint_cli_impl, "run_gmail_duckdb_pipeline", fake_run_gmail_duckdb_pipeline)
+
+    payload = _invoke_cli(
+        runner,
+        "run-gmail-duckdb-pipeline",
+        "--user-id",
+        "cli-user",
+        "--address",
+        "hr@example.com",
+        "--years-back",
+        "2",
+        "--uid-window-size",
+        "250",
+        "--max-batches",
+        "5",
+        "--gmail-user",
+        "user@gmail.com",
+        "--gmail-app-password",
+        "app-password",
+        "--bm25-search-query",
+        "termination",
+    )
+
+    assert payload["status"] == "success"
+    assert payload["pipeline"] == "gmail_duckdb_pipeline"
+    assert payload["batch_count"] == 2
+    assert payload["bm25_search"]["result_count"] == 2
+
+
+def test_search_email_duckdb_cli_command(monkeypatch, tmp_path):
+    runner = CliRunner()
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "email-search-cli-sessions")
+    monkeypatch.setattr(complaint_cli_impl, "service", service)
+    monkeypatch.setattr(
+        complaint_cli_impl,
+        "search_email_duckdb_corpus",
+        lambda **kwargs: {
+            "status": "success",
+            "query": kwargs["query"],
+            "ranking": kwargs["ranking"],
+            "result_count": 1,
+            "results": [{"subject": "Termination email"}],
+        },
+    )
+
+    payload = _invoke_cli(
+        runner,
+        "search-email-duckdb",
+        "--index-path",
+        str(tmp_path / "duckdb" / "email_corpus.duckdb"),
+        "--query",
+        "termination retaliation",
+        "--ranking",
+        "bm25",
+    )
+
+    assert payload["status"] == "success"
+    assert payload["ranking"] == "bm25"
+    assert payload["result_count"] == 1
+
+
+def test_run_gmail_duckdb_pipeline_mcp_tool(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-pipeline-mcp-sessions")
+    monkeypatch.setattr(
+        service,
+        "run_gmail_duckdb_pipeline",
+        lambda user_id, **kwargs: {
+            "status": "success",
+            "pipeline": "gmail_duckdb_pipeline",
+            "user_id": user_id,
+            "years_back": kwargs["years_back"],
+            "batch_count": 1,
+        },
+    )
+
+    payload = _call_mcp_tool(
+        service,
+        23_1,
+        "complaint.run_gmail_duckdb_pipeline",
+        {
+            "user_id": "mcp-user",
+            "addresses": ["hr@example.com"],
+            "years_back": 2,
+        },
+    )
+
+    assert payload["status"] == "success"
+    assert payload["years_back"] == 2
+    assert payload["batch_count"] == 1
+
+
+def test_search_email_duckdb_mcp_tool(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "email-search-mcp-sessions")
+    monkeypatch.setattr(
+        service,
+        "search_email_duckdb_corpus",
+        lambda **kwargs: {
+            "status": "success",
+            "query": kwargs["query"],
+            "result_count": 1,
+            "results": [{"subject": "Termination email"}],
+        },
+    )
+
+    payload = _call_mcp_tool(
+        service,
+        24_1,
+        "complaint.search_email_duckdb_corpus",
+        {
+            "index_path": str(tmp_path / "duckdb" / "email_corpus.duckdb"),
+            "query": "termination",
+        },
+    )
+
+    assert payload["status"] == "success"
+    assert payload["result_count"] == 1
+
+
+def test_run_gmail_duckdb_pipeline_api_route(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "gmail-pipeline-api-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    monkeypatch.setattr(
+        service,
+        "run_gmail_duckdb_pipeline",
+        lambda user_id, **kwargs: {
+            "status": "success",
+            "pipeline": "gmail_duckdb_pipeline",
+            "user_id": user_id,
+            "batch_count": 2,
+            "years_back": kwargs["years_back"],
+        },
+    )
+
+    response = client.post(
+        "/api/complaint-workspace/run-gmail-duckdb-pipeline",
+        json={"user_id": "api-user", "addresses": ["hr@example.com"], "years_back": 2},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["years_back"] == 2
+
+
+def test_search_email_duckdb_api_route(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "email-search-api-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    monkeypatch.setattr(
+        service,
+        "search_email_duckdb_corpus",
+        lambda **kwargs: {
+            "status": "success",
+            "ranking": kwargs["ranking"],
+            "result_count": 1,
+            "results": [{"subject": "Termination email"}],
+        },
+    )
+
+    response = client.post(
+        "/api/complaint-workspace/search-email-duckdb",
+        json={"index_path": str(tmp_path / "duckdb" / "email_corpus.duckdb"), "query": "termination", "ranking": "bm25"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["ranking"] == "bm25"
+
+
+def test_import_local_evidence_mcp_tool(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "local-import-mcp-sessions")
+    evidence_file = tmp_path / "timeline.txt"
+    evidence_file.write_text("Timeline notes for the retaliation case.", encoding="utf-8")
+
+    payload = _call_mcp_tool(
+        service,
+        22_1,
+        "complaint.import_local_evidence",
+        {
+            "user_id": "mcp-user",
+            "paths": [str(evidence_file)],
+            "claim_element_id": "causation",
+        },
+    )
+
+    assert payload["status"] == "success"
+    assert payload["imported_count"] == 1
+    session = service.get_session("mcp-user")["session"]
+    documents = session["evidence"]["documents"]
+    assert len(documents) == 1
+    assert documents[0]["title"] == "Local import: timeline.txt"
+
+
+def test_import_local_evidence_api_route(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "local-import-api-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app)
+    evidence_file = tmp_path / "timeline.txt"
+    evidence_file.write_text("Timeline notes for the retaliation case.", encoding="utf-8")
+
+    response = client.post(
+        "/api/complaint-workspace/import-local-evidence",
+        json={
+            "user_id": "api-user",
+            "paths": [str(evidence_file)],
+            "claim_element_id": "causation",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["imported_count"] == 1
+    session = service.get_session("api-user")["session"]
+    documents = session["evidence"]["documents"]
+    assert len(documents) == 1
+    assert documents[0]["title"] == "Local import: timeline.txt"
 
 
 def test_all_cli_commands_are_exercised_end_to_end(monkeypatch, tmp_path):
@@ -421,6 +1055,9 @@ def test_all_cli_commands_are_exercised_end_to_end(monkeypatch, tmp_path):
         "Reported discrimination to HR",
     )
     assert answer_payload["session"]["intake_answers"]["protected_activity"] == "Reported discrimination to HR"
+
+    chat_turn_payload = _invoke_cli(runner, "chat-turn", "--user-id", "cli-user")
+    assert chat_turn_payload["inquiry"]["question_id"] == "party_name"
 
     evidence_payload = _invoke_cli(
         runner,
@@ -575,7 +1212,9 @@ def test_all_cli_commands_are_exercised_end_to_end(monkeypatch, tmp_path):
     assert formal_diagnostics_payload["formal_diagnostics"]["release_gate_verdict"] in {"pass", "warning", "blocked"}
     assert isinstance(formal_diagnostics_payload["release_gate"], dict)
     provider_diagnostics_payload = _invoke_cli(runner, "provider-diagnostics", "--user-id", "cli-user")
-    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "copilot_cli", "openai", "hf_inference_api"]
+    assert provider_diagnostics_payload["ui_review_default_provider"] == "codex_cli"
+    assert provider_diagnostics_payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
     assert isinstance(provider_diagnostics_payload["providers"], list)
 
     claim_type_payload = _invoke_cli(
@@ -780,7 +1419,10 @@ def test_all_mcp_server_tools_are_exercised_via_jsonrpc(tmp_path):
     assert formal_diagnostics_payload["packet_summary"]["has_draft"] is True
     assert formal_diagnostics_payload["formal_diagnostics"]["release_gate_verdict"] in {"pass", "warning", "blocked"}
     provider_diagnostics_payload = _call_mcp_tool(service, 34, "complaint.get_provider_diagnostics", {"user_id": "mcp-user"})
-    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "copilot_cli", "openai", "hf_inference_api"]
+    assert provider_diagnostics_payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["effective_complaint_draft_provider"] == "codex_cli"
+    assert provider_diagnostics_payload["ui_review_multimodal_rate_limit_fallbacks"]["codex_cli"] == ["copilot_cli", "hf_inference_api"]
     assert isinstance(provider_diagnostics_payload["providers"], list)
 
 
@@ -794,12 +1436,16 @@ def test_provider_diagnostics_are_exposed_across_package_cli_and_mcp(monkeypatch
     mcp_payload = _call_mcp_tool(service, 91, "complaint.get_provider_diagnostics", {"user_id": "diag-user"})
 
     for payload in (package_payload, cli_payload, mcp_payload):
-        assert payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+        assert payload["default_order"][:4] == ["codex_cli", "copilot_cli", "openai", "hf_inference_api"]
+        assert payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
+        assert payload["effective_complaint_draft_provider"] == "codex_cli"
+        assert payload["ui_review_default_provider"] == "codex_cli"
+        assert payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
         assert isinstance(payload["providers"], list)
         assert "effective_default_provider" in payload
         codex_entry = next(item for item in payload["providers"] if item["name"] == "codex_cli")
         copilot_entry = next(item for item in payload["providers"] if item["name"] == "copilot_cli")
-        assert codex_entry["draft_timeout_seconds"] == 60
+        assert codex_entry["draft_timeout_seconds"] == 90
         assert copilot_entry["draft_timeout_seconds"] == 45
 
 
@@ -937,6 +1583,77 @@ def test_filing_provenance_is_exposed_across_package_cli_and_mcp(monkeypatch, tm
 
     package_payload = get_filing_provenance("provenance-user", service=service)
     assert package_payload["ui_workflow_type"] == "ui_ux_closed_loop"
+
+
+def test_packaged_docket_operator_dashboard_is_exposed_across_package_mcp_and_api(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-packaged-docket-tools")
+    manifest_path = _build_packaged_docket_manifest(
+        tmp_path,
+        routing_reason="Workspace packaged dashboard routing reason.",
+    )
+
+    package_payload = get_packaged_docket_operator_dashboard(
+        manifest_path,
+        service=service,
+    )
+    assert package_payload["source"] == "complaint_workspace_packaged_operator_dashboard"
+    assert package_payload["inspection"]["latest_routing_reason"] == "Workspace packaged dashboard routing reason."
+
+    report_payload = load_packaged_docket_operator_dashboard_report(
+        manifest_path,
+        report_format="text",
+        service=service,
+    )
+    assert report_payload["report_format"] == "text"
+    assert "Packaged Docket Operator Dashboard" in report_payload["report"]
+
+    mcp_payload = _call_mcp_tool(
+        service,
+        94,
+        "complaint.get_packaged_docket_operator_dashboard",
+        {"manifest_path": manifest_path},
+    )
+    assert mcp_payload["manifest_path"] == str(manifest_path)
+    assert mcp_payload["inspection"]["latest_routing_reason"] == "Workspace packaged dashboard routing reason."
+
+    mcp_report_payload = _call_mcp_tool(
+        service,
+        95,
+        "complaint.load_packaged_docket_operator_dashboard_report",
+        {"manifest_path": manifest_path, "report_format": "parsed"},
+    )
+    assert mcp_report_payload["report_format"] == "parsed"
+    assert mcp_report_payload["report"]["source"] == "packaged_operator_dashboard"
+
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    client = TestClient(app)
+
+    dashboard_response = client.get(
+        "/api/complaint-workspace/packaged-docket/operator-dashboard",
+        params={"manifest_path": manifest_path},
+    )
+    assert dashboard_response.status_code == 200
+    assert dashboard_response.json()["inspection"]["latest_routing_reason"] == "Workspace packaged dashboard routing reason."
+
+    report_response = client.get(
+        "/api/complaint-workspace/packaged-docket/operator-dashboard-report",
+        params={"manifest_path": manifest_path, "report_format": "text"},
+    )
+    assert report_response.status_code == 200
+    assert "Packaged Docket Operator Dashboard" in report_response.json()["report"]
+
+    view_response = client.get(
+        "/api/complaint-workspace/packaged-docket/view",
+        params={"manifest_path": manifest_path, "include_document_text": True, "document_limit": 5},
+    )
+    assert view_response.status_code == 200
+    assert view_response.json()["source"] == "complaint_workspace_docket_view"
+    assert isinstance(view_response.json()["documents"], list)
+    assert view_response.json()["case_calendar_summary"]["count"] == 1
+    assert view_response.json()["case_calendar"][0]["kind"] == "hearing"
+    assert view_response.json()["case_calendar"][0]["title"] == "Notice of Hearing"
+    assert view_response.json()["case_calendar"][0]["date"] == "May 1, 2024"
 
 
 def test_successful_llm_draft_persists_effective_router_backend_metadata(monkeypatch, tmp_path):
@@ -1173,6 +1890,143 @@ def test_cli_and_mcp_can_request_llm_backed_complaint_generation(monkeypatch, tm
     assert observed_calls[0]["model"] == "stub-model"
     assert observed_calls[1]["provider"] == "stub-provider-2"
     assert observed_calls[1]["model"] == "stub-model-2"
+
+
+def test_generate_complaint_defaults_llm_backend_to_verified_codex_profile(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "default-llm-profile-sessions")
+    service.submit_intake_answers(
+        "default-llm-user",
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10.",
+            "harm": "Lost wages and emotional distress.",
+        },
+    )
+
+    observed_kwargs = {}
+
+    def fake_refine(self, state, base_draft, **kwargs):
+        observed_kwargs.update(kwargs)
+        return {
+            **base_draft,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "complaint-draft",
+                "provider": kwargs.get("provider"),
+                "model": kwargs.get("model"),
+                "requested_provider": None,
+                "requested_model": None,
+            },
+        }
+
+    monkeypatch.setattr(ComplaintWorkspaceService, "_refine_draft_with_llm_router", fake_refine)
+
+    payload = service.generate_complaint(
+        "default-llm-user",
+        requested_relief=["Back pay"],
+        use_llm=True,
+    )
+
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert observed_kwargs["provider"] == "codex_cli"
+    assert observed_kwargs["model"] == "gpt-5.3-codex"
+    assert observed_kwargs["requested_provider"] is None
+    assert observed_kwargs["requested_model"] is None
+    assert payload["draft"]["draft_backend"]["provider"] == "codex_cli"
+    assert payload["draft"]["draft_backend"]["model"] == "gpt-5.3-codex"
+
+
+def test_generate_complaint_uses_env_override_for_default_llm_backend(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "env-default-llm-profile-sessions")
+    service.submit_intake_answers(
+        "env-default-llm-user",
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10.",
+            "harm": "Lost wages and emotional distress.",
+        },
+    )
+
+    observed_kwargs = {}
+
+    def fake_refine(self, state, base_draft, **kwargs):
+        observed_kwargs.update(kwargs)
+        return {
+            **base_draft,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "complaint-draft",
+                "provider": kwargs.get("provider"),
+                "model": kwargs.get("model"),
+            },
+        }
+
+    monkeypatch.setattr(ComplaintWorkspaceService, "_refine_draft_with_llm_router", fake_refine)
+    monkeypatch.setenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "copilot_cli")
+    monkeypatch.setenv("COMPLAINT_GENERATOR_LLM_DRAFT_MODEL_COPILOT_CLI", "gpt-5-mini")
+
+    payload = service.generate_complaint(
+        "env-default-llm-user",
+        requested_relief=["Back pay"],
+        use_llm=True,
+    )
+
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert observed_kwargs["provider"] == "copilot_cli"
+    assert observed_kwargs["model"] == "gpt-5-mini"
+    assert observed_kwargs["requested_provider"] is None
+    assert observed_kwargs["requested_model"] is None
+
+
+def test_generate_complaint_falls_back_through_verified_provider_chain(monkeypatch, tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "fallback-chain-sessions")
+    service.submit_intake_answers(
+        "fallback-chain-user",
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10.",
+            "harm": "Lost wages and emotional distress.",
+        },
+    )
+
+    attempted = []
+
+    def fake_refine(self, state, base_draft, **kwargs):
+        attempted.append(str(kwargs.get("provider") or ""))
+        if kwargs.get("provider") in {"codex_cli", "copilot_cli"}:
+            self._last_draft_refinement_error = f"provider failed: {kwargs.get('provider')}"
+            return None
+        return {
+            **base_draft,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "complaint-draft",
+                "provider": kwargs.get("provider"),
+                "model": kwargs.get("model"),
+            },
+        }
+
+    monkeypatch.setattr(ComplaintWorkspaceService, "_refine_draft_with_llm_router", fake_refine)
+
+    payload = service.generate_complaint(
+        "fallback-chain-user",
+        requested_relief=["Back pay"],
+        use_llm=True,
+    )
+
+    assert attempted == ["codex_cli", "copilot_cli", "hf_inference_api"]
+    assert payload["draft"]["draft_strategy"] == "llm_router"
+    assert payload["draft"]["draft_backend"]["provider"] == "hf_inference_api"
+    assert payload["draft"]["draft_backend_fallback_chain"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
 
 
 def test_llm_draft_timeout_falls_back_to_template_with_reason(monkeypatch, tmp_path):
@@ -2222,6 +3076,31 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
         "Jordan Example alleges retaliation after protected complaints about safety and scheduling.",
     )
     service.generate_complaint("iter-user", requested_relief=["Back pay"])
+    service._persist_ui_readiness(
+        "iter-user",
+        {
+            "workflow_type": "iterative_actor_critic_review",
+            "backend": {"strategy": "multimodal_router", "provider": "codex_cli", "model": "gpt-5.3-codex"},
+            "review": {
+                "summary": "Cached review says the draft stage still hides exports.",
+                "critic_review": {"verdict": "warning", "acceptance_checks": ["Keep export controls visible."]},
+                "complaint_journey": {"tested_stages": ["draft", "export"]},
+            },
+            "screenshot_findings": [
+                {
+                    "stage": "draft",
+                    "surface": "workspace-draft",
+                    "summary": "The export CTA drops below dense metadata.",
+                    "criticisms": [{"problem": "Actors miss the next step after draft generation."}],
+                }
+            ],
+            "optimization_targets": [
+                {"title": "Pin export controls beside the complaint preview", "reason": "The actor should not hunt for the next action."}
+            ],
+            "playwright_followups": ["Verify exports remain visible after testimony updates."],
+            "recommended_changes": ["Keep the export lane sticky within the draft panel."],
+        },
+    )
 
     def fake_iterative(**kwargs):
         assert kwargs["iterations"] == 2
@@ -2229,10 +3108,64 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
         assert kwargs["goals"] == ["reduce intake friction", "keep evidence and draft connected"]
         assert kwargs["supplemental_artifacts"][0]["artifact_type"] == "complaint_export"
         assert "Tighten review-to-draft gatekeeping" in kwargs["supplemental_artifacts"][0]["ui_suggestions_excerpt"]
+        assert kwargs["supplemental_artifacts"][1]["artifact_type"] == "ui_readiness_review"
+        assert "Screenshot findings:" in kwargs["supplemental_artifacts"][1]["review_excerpt"]
+        assert kwargs["supplemental_artifacts"][1]["screenshot_findings"][0]["surface"] == "workspace-draft"
         return {
             "iterations": 2,
             "screenshot_dir": str(tmp_path),
             "output_dir": str(tmp_path / "reviews"),
+            "review": {
+                "summary": "Audit found broken stage transitions around draft handoff.",
+                "critic_review": {"verdict": "warning", "acceptance_checks": ["Keep every export action reachable from the draft review stage."]},
+                "complaint_journey": {
+                    "tested_stages": ["intake", "evidence", "review", "draft", "export"],
+                    "sdk_tool_invocations": ["generateComplaint", "exportComplaintPdf"],
+                },
+            },
+            "issues": [
+                {
+                    "severity": "high",
+                    "stage": "draft",
+                    "summary": "Primary export button becomes inert after review refresh.",
+                }
+            ],
+            "recommended_changes": [
+                "Keep the primary export action anchored beside the complaint draft preview."
+            ],
+            "playwright_followups": [
+                "Assert the export control stays enabled after evidence edits."
+            ],
+            "stage_findings": {
+                "draft": ["Export path looks disconnected from the complaint preview after a refresh."]
+            },
+            "screenshot_findings": [
+                {
+                    "artifact_path": str(tmp_path / "workspace-draft.png"),
+                    "stage": "draft",
+                    "surface": "workspace-draft",
+                    "summary": "The draft page hides the export affordance below the fold.",
+                    "criticisms": [
+                        "The actor loses the next step after generating the complaint.",
+                    ],
+                }
+            ],
+            "optimization_targets": [
+                {
+                    "stage": "draft",
+                    "target": "Keep export buttons visible next to the generated complaint.",
+                }
+            ],
+            "carry_forward_assessment": {
+                "prior_review_available": True,
+                "unresolved_findings": [{"stage": "draft", "surface": "workspace-draft", "summary": "Export CTA still hidden."}],
+                "resolved_findings": [],
+                "continued_optimization_targets": [{"title": "Keep export buttons visible next to the generated complaint."}],
+                "retired_optimization_targets": [],
+                "summary": "1 prior screenshot finding still appears unresolved.",
+            },
+            "latest_review_markdown_path": str(tmp_path / "reviews" / "iteration-01-review.md"),
+            "latest_review_json_path": str(tmp_path / "reviews" / "iteration-01-review.json"),
             "runs": [
                 {
                     "iteration": 1,
@@ -2261,6 +3194,75 @@ def test_review_ui_tool_supports_iterative_workflow_through_mcp(monkeypatch, tmp
     assert mcp_payload["runs"][0]["iteration"] == 1
     cached_payload = _call_mcp_tool(service, 13, "complaint.get_ui_readiness", {"user_id": "iter-user"})
     assert cached_payload["status"] == "cached"
+    assert cached_payload["screenshot_findings"][0]["surface"] == "workspace-draft"
+    assert cached_payload["optimization_targets"][0]["stage"] == "draft"
+    assert cached_payload["playwright_followups"] == ["Assert the export control stays enabled after evidence edits."]
+    assert cached_payload["carry_forward_assessment"]["unresolved_findings"][0]["surface"] == "workspace-draft"
+    assert cached_payload["latest_review_json_path"] == str(tmp_path / "reviews" / "iteration-01-review.json")
+    assert cached_payload["runs"][0]["iteration"] == 1
+
+
+def test_ui_readiness_summary_preserves_screenshot_driven_optimizer_feedback(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "ui-readiness-summary")
+
+    summarized = service._summarize_ui_readiness_result(
+        {
+            "workflow_type": "iterative_actor_critic_review",
+            "backend": {"strategy": "multimodal_router", "provider": "codex_cli", "model": "gpt-5.3-codex"},
+            "latest_review": "The draft stage needs a clearer export handoff.",
+            "review": {
+                "summary": "The draft stage needs a clearer export handoff.",
+                "critic_review": {"verdict": "warning", "acceptance_checks": ["Keep export actions visible."]},
+                "complaint_journey": {
+                    "tested_stages": ["intake", "evidence", "review", "draft", "export"],
+                    "sdk_tool_invocations": ["generateComplaint", "exportComplaintPdf"],
+                },
+            },
+            "issues": [{"severity": "high", "summary": "Export CTA disappears after review."}],
+            "recommended_changes": ["Pin export actions in the draft sidebar."],
+            "playwright_followups": ["Verify PDF and markdown downloads remain reachable after testimony edits."],
+            "stage_findings": {"draft": ["Draft stage loses the export CTA after a refresh."]},
+            "screenshot_findings": [
+                {
+                    "artifact_path": str(tmp_path / "workspace-draft.png"),
+                    "stage": "draft",
+                    "surface": "workspace-draft",
+                    "summary": "Export controls are visually buried beneath dense metadata.",
+                    "criticisms": ["Actor cannot confidently continue from the draft stage."],
+                }
+            ],
+            "optimization_targets": [
+                {
+                    "stage": "draft",
+                    "target": "Move export controls adjacent to the complaint preview and mediator handoff panel.",
+                }
+            ],
+            "carry_forward_assessment": {
+                "prior_review_available": True,
+                "unresolved_findings": [{"stage": "draft", "surface": "workspace-draft", "summary": "Export CTA still hidden."}],
+                "resolved_findings": [{"stage": "review", "surface": "workspace-review", "summary": "Support gap cue looks improved."}],
+                "continued_optimization_targets": [{"title": "Pin export actions in the draft sidebar."}],
+                "retired_optimization_targets": [],
+                "summary": "1 prior screenshot finding still appears unresolved. 1 prior screenshot finding looks improved or no longer visible.",
+            },
+            "latest_review_markdown_path": str(tmp_path / "iteration-01-review.md"),
+            "latest_review_json_path": str(tmp_path / "iteration-01-review.json"),
+            "runs": [{"iteration": 1, "optimization_target_count": 1}],
+        }
+    )
+
+    assert summarized["workflow_type"] == "iterative_actor_critic_review"
+    assert summarized["review_backend"]["provider"] == "codex_cli"
+    assert summarized["issues"][0]["summary"] == "Export CTA disappears after review."
+    assert summarized["recommended_changes"] == ["Pin export actions in the draft sidebar."]
+    assert summarized["playwright_followups"] == ["Verify PDF and markdown downloads remain reachable after testimony edits."]
+    assert summarized["stage_findings"]["draft"] == ["Draft stage loses the export CTA after a refresh."]
+    assert summarized["screenshot_findings"][0]["artifact_path"] == str(tmp_path / "workspace-draft.png")
+    assert summarized["optimization_targets"][0]["stage"] == "draft"
+    assert summarized["carry_forward_assessment"]["resolved_findings"][0]["surface"] == "workspace-review"
+    assert summarized["latest_review_markdown_path"] == str(tmp_path / "iteration-01-review.md")
+    assert summarized["latest_review_json_path"] == str(tmp_path / "iteration-01-review.json")
+    assert summarized["runs"][0]["optimization_target_count"] == 1
 
 
 def test_optimize_ui_tool_supports_closed_loop_workflow_through_cli_and_mcp(monkeypatch, tmp_path):
@@ -2271,6 +3273,54 @@ def test_optimize_ui_tool_supports_closed_loop_workflow_through_cli_and_mcp(monk
         "Jordan Example alleges retaliation after reporting payroll fraud and safety violations.",
     )
     service.generate_complaint("mcp-user", requested_relief=["Back pay"])
+    service._persist_ui_readiness(
+        "cli-user",
+        {
+            "workflow_type": "iterative_actor_critic_review",
+            "backend": {"strategy": "multimodal_router", "provider": "codex_cli", "model": "gpt-5.3-codex"},
+            "review": {
+                "summary": "Cached review says the workspace still needs calmer entry cues.",
+                "critic_review": {"verdict": "warning"},
+                "complaint_journey": {"tested_stages": ["intake", "draft", "export"]},
+            },
+            "screenshot_findings": [
+                {
+                    "stage": "intake",
+                    "surface": "workspace-intake",
+                    "summary": "The form hierarchy makes the next legal step feel unclear.",
+                    "criticisms": [{"problem": "The actor loses confidence before the evidence stage."}],
+                }
+            ],
+            "optimization_targets": [
+                {"title": "Reduce intake clutter", "reason": "A calmer entry path should lower abandonment risk."}
+            ],
+            "playwright_followups": ["Capture the intake hero after the next UI pass."],
+        },
+    )
+    service._persist_ui_readiness(
+        "mcp-user",
+        {
+            "workflow_type": "iterative_actor_critic_review",
+            "backend": {"strategy": "multimodal_router", "provider": "codex_cli", "model": "gpt-5.3-codex"},
+            "review": {
+                "summary": "Cached review says intake-to-draft flow still needs calmer cues.",
+                "critic_review": {"verdict": "warning"},
+                "complaint_journey": {"tested_stages": ["intake", "draft", "export"]},
+            },
+            "screenshot_findings": [
+                {
+                    "stage": "intake",
+                    "surface": "workspace-intake",
+                    "summary": "The form hierarchy makes the next legal step feel unclear.",
+                    "criticisms": [{"problem": "The actor loses confidence before the evidence stage."}],
+                }
+            ],
+            "optimization_targets": [
+                {"title": "Reduce intake clutter", "reason": "A calmer entry path should lower abandonment risk."}
+            ],
+            "playwright_followups": ["Capture the intake hero after the next UI pass."],
+        },
+    )
 
     def fake_closed_loop(**kwargs):
         assert kwargs["method"] == "adversarial"
@@ -2278,6 +3328,8 @@ def test_optimize_ui_tool_supports_closed_loop_workflow_through_cli_and_mcp(monk
         assert kwargs["goals"] == ["make intake calmer", "surface every complaint-generator feature"]
         assert kwargs["supplemental_artifacts"][0]["artifact_type"] == "complaint_export"
         assert "Tighten review-to-draft gatekeeping" in kwargs["supplemental_artifacts"][0]["ui_suggestions_excerpt"]
+        assert kwargs["supplemental_artifacts"][1]["artifact_type"] == "ui_readiness_review"
+        assert kwargs["supplemental_artifacts"][1]["optimization_targets"][0]["title"] == "Reduce intake clutter"
         return {
             "workflow_type": "ui_ux_closed_loop",
             "max_rounds": kwargs["max_rounds"],
@@ -2450,6 +3502,66 @@ def test_browser_audit_is_exposed_through_cli_and_mcp(monkeypatch, tmp_path):
     assert captured["pytest_target"] == "playwright/tests/complaint-flow.spec.js"
 
 
+def test_ui_optimizer_daemon_cli_commands_delegate_to_daemon_module(monkeypatch, tmp_path):
+    runner = CliRunner()
+    captured = {}
+
+    def fake_start(args):
+        captured["start"] = args
+        return {"status": "started", "user_id": args.user_id, "artifact_root": args.artifact_root}
+
+    def fake_status(args):
+        captured["status"] = args
+        return {"status": "ok", "running": True, "artifact_root": args.artifact_root}
+
+    def fake_stop(args):
+        captured["stop"] = args
+        return {"status": "stopping", "user_id": args.user_id, "artifact_root": args.artifact_root}
+
+    monkeypatch.setattr("complaint_generator.ui_optimizer_daemon._start_daemon", fake_start)
+    monkeypatch.setattr("complaint_generator.ui_optimizer_daemon._status_payload", fake_status)
+    monkeypatch.setattr("complaint_generator.ui_optimizer_daemon._stop_daemon", fake_stop)
+
+    start_payload = _invoke_cli(
+        runner,
+        "ui-optimizer-start",
+        "--user-id",
+        "daemon-user",
+        "--artifact-root",
+        str(tmp_path / "daemon"),
+        "--goals",
+        "seed goal one\nseed goal two",
+        "--provider",
+        "codex_cli",
+        "--use-llm-draft",
+    )
+    status_payload = _invoke_cli(
+        runner,
+        "ui-optimizer-status",
+        "--user-id",
+        "daemon-user",
+        "--artifact-root",
+        str(tmp_path / "daemon"),
+    )
+    stop_payload = _invoke_cli(
+        runner,
+        "ui-optimizer-stop",
+        "--user-id",
+        "daemon-user",
+        "--artifact-root",
+        str(tmp_path / "daemon"),
+    )
+
+    assert start_payload["status"] == "started"
+    assert status_payload["running"] is True
+    assert stop_payload["status"] == "stopping"
+    assert captured["start"].goals == ["seed goal one", "seed goal two"]
+    assert captured["start"].provider == "codex_cli"
+    assert captured["start"].use_llm_draft is True
+    assert captured["status"].artifact_root == str(tmp_path / "daemon")
+    assert captured["stop"].artifact_root == str(tmp_path / "daemon")
+
+
 def test_package_wrappers_delegate_to_matching_ui_review_and_browser_tools(monkeypatch, tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "package-wrapper-sessions")
     captured_calls = []
@@ -2576,3 +3688,75 @@ def test_workspace_download_route_serves_json_markdown_and_pdf_exports(tmp_path)
         document_xml = docx_archive.read("word/document.xml").decode("utf-8")
     assert "Jordan Example v. Acme Corporation Complaint" in document_xml
     assert "COMPLAINT FOR RETALIATION" in document_xml
+
+
+def test_exported_packet_snapshot_is_restored_in_session_state(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "restored-export-sessions")
+    user_id = "restored-export-user"
+    service.submit_intake_answers(
+        user_id,
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Acme Corporation",
+            "protected_activity": "Reported discrimination to HR",
+            "adverse_action": "Was terminated two days later",
+            "timeline": "Reported discrimination on March 8 and was terminated on March 10",
+            "harm": "Lost wages and benefits",
+        },
+    )
+    service.save_evidence(
+        user_id,
+        kind="document",
+        claim_element_id="causation",
+        title="Termination email",
+        content="The termination email followed within two days of the HR complaint.",
+        source="Inbox export",
+    )
+    service.generate_complaint(
+        user_id,
+        requested_relief=["Back pay", "Compensatory damages"],
+        title_override="Jordan Example v. Acme Corporation Complaint",
+    )
+
+    export_payload = service.export_complaint_packet(user_id)
+    session_payload = service.get_session(user_id)
+    restored_export = session_payload["session"]["latest_packet_export"]
+
+    assert restored_export["packet"]["title"] == export_payload["packet"]["title"]
+    assert restored_export["packet"]["claim_type"] == export_payload["packet"]["claim_type"]
+    assert restored_export["packet"]["draft"]["body"] == export_payload["packet"]["draft"]["body"]
+    assert restored_export["packet_summary"]["artifact_formats"] == export_payload["packet_summary"]["artifact_formats"]
+
+
+def test_get_session_recovers_from_malformed_workspace_state(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "malformed-session-sessions")
+    user_id = "malformed-session-user"
+    session_path = service._session_path(user_id)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    session_path.write_text("{")
+
+    payload = service.get_session(user_id)
+
+    assert payload["session"]["user_id"] == user_id
+    assert payload["session"]["claim_type"] == "retaliation"
+    assert payload["session"]["intake_answers"] == {}
+    restored_payload = json.loads(session_path.read_text())
+    assert restored_payload["user_id"] == user_id
+    assert restored_payload["claim_type"] == "retaliation"
+    assert restored_export["ui_feedback"]["release_gate"] == export_payload["ui_feedback"]["release_gate"]
+
+
+def test_workspace_save_state_uses_stable_tmp_path(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "stable-save-sessions")
+    user_id = "stable-save-user"
+
+    state = service._load_state(user_id)
+    saved = service._save_state(state)
+    saved_again = service._save_state(saved)
+
+    session_path = service._session_path(user_id)
+    tmp_path_candidate = session_path.with_name(f"{session_path.name}.tmp")
+
+    assert session_path.is_file()
+    assert not tmp_path_candidate.exists()
+    assert saved_again["user_id"] == user_id

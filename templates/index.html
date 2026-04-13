@@ -159,6 +159,15 @@
             font-size: 13px;
         }
 
+        .surface-link.is-disabled,
+        .resume-link.is-disabled,
+        .route-link.is-disabled {
+            opacity: 0.62;
+            cursor: not-allowed;
+            background: rgba(141, 127, 116, 0.14);
+            color: var(--muted);
+        }
+
         .hero {
             display: grid;
             grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
@@ -681,6 +690,36 @@
                 });
             }
 
+            function setGateForIds(ids, enabled, reason) {
+                ids.forEach((id) => {
+                    const node = document.getElementById(id);
+                    if (!node) {
+                        return;
+                    }
+                    node.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+                    node.dataset.disabledReason = enabled ? '' : String(reason || '');
+                    node.classList.toggle('is-disabled', !enabled);
+                    if (!enabled) {
+                        node.title = String(reason || 'This route stays locked until the complaint is ready.');
+                    } else {
+                        node.removeAttribute('title');
+                    }
+                });
+            }
+
+            function builderReadyFromComplaintReadiness(complaintReadiness) {
+                const verdict = String((complaintReadiness || {}).verdict || '').trim().toLowerCase();
+                return verdict === 'ready for first draft' || verdict === 'draft in progress';
+            }
+
+            function builderGateReason(complaintReadiness) {
+                const detail = String((complaintReadiness || {}).detail || '').trim();
+                if (detail) {
+                    return `Builder locked. ${detail}`;
+                }
+                return 'Builder locked. Finish intake and strengthen support before drafting.';
+            }
+
             function nextHomepageRoute(payload) {
                 const answered = countAnswers(payload);
                 const reviewOverview = overview(payload);
@@ -691,7 +730,7 @@
                 if (answered < 6) {
                     return {
                         href: '/workspace',
-                        label: answered > 0 ? 'Resume Complaint' : 'Start Secure Intake',
+                        label: answered > 0 ? 'Resume Complaint' : 'Open Guided Workspace',
                         detail: 'Continue the guided intake so the complaint has a complete factual record before drafting.',
                     };
                 }
@@ -757,6 +796,7 @@
                 const badge = document.getElementById('homepage-session-badge');
                 const workspaceLink = document.getElementById('homepage-open-workspace');
                 const resumeLink = document.getElementById('homepage-resume-link');
+                const readinessSummaryNode = document.getElementById('homepage-complaint-readiness-summary');
                 let readiness = loadCachedReadiness();
 
                 if (readiness) {
@@ -785,6 +825,8 @@
                         claimType: String(payload.claim_type || ((payload.session || {}).claim_type) || '').trim(),
                     };
                     const actionHref = buildHomepageSurfaceUrl(action.href, context);
+                    const canOpenBuilder = builderReadyFromComplaintReadiness(complaintReadiness);
+                    const builderBlockedReason = builderGateReason(complaintReadiness);
                     const nextQuestion = payload && payload.next_question && payload.next_question.prompt
                         ? payload.next_question.prompt
                         : action.detail;
@@ -807,6 +849,7 @@
                     setHrefForIds(['homepage-nav-review', 'homepage-open-review', 'homepage-resume-review', 'homepage-route-review'], buildHomepageSurfaceUrl('/claim-support-review', context));
                     setHrefForIds(['homepage-nav-builder', 'homepage-resume-builder', 'homepage-route-builder'], buildHomepageSurfaceUrl('/document', context));
                     setHrefForIds(['homepage-nav-chat'], buildHomepageSurfaceUrl('/chat', context));
+                    setGateForIds(['homepage-nav-builder', 'homepage-resume-builder', 'homepage-route-builder'], canOpenBuilder, builderBlockedReason);
                     if (workspaceLink) {
                         workspaceLink.href = actionHref;
                         workspaceLink.textContent = action.label;
@@ -815,6 +858,9 @@
                         resumeLink.href = action.href === '/claim-support-review' || action.href === '/document'
                             ? actionHref
                             : buildHomepageSurfaceUrl('/workspace', context);
+                    }
+                    if (!canOpenBuilder && readinessSummaryNode && !String(readinessSummaryNode.textContent || '').includes('Builder locked.')) {
+                        readinessSummaryNode.textContent += ` ${builderBlockedReason}`;
                     }
                 } catch (error) {
                     setText('homepage-did', 'Unavailable');
@@ -833,11 +879,21 @@
                         workspaceLink.href = '/workspace';
                         workspaceLink.textContent = 'Resume Complaint';
                     }
+                    setGateForIds(['homepage-nav-builder', 'homepage-resume-builder', 'homepage-route-builder'], false, 'Builder locked. Start intake and capture the core facts before drafting.');
                     if (!readiness) {
                         setText('homepage-ui-readiness-summary', 'No actor/critic verdict is cached on this device yet. Run UX Audit from the workspace before trusting the client flow.');
                     }
                 }
             }
+
+            document.addEventListener('click', (event) => {
+                const gatedLink = event.target.closest('a[aria-disabled="true"]');
+                if (!gatedLink) {
+                    return;
+                }
+                event.preventDefault();
+                setText('homepage-next-step', gatedLink.dataset.disabledReason || 'That route stays locked until the complaint reaches the next safe stage.');
+            });
 
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', hydrateHomepageSession);

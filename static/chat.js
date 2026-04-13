@@ -1,5 +1,11 @@
 window.ChatPage = (function() {
-    const hostname = "localhost:19000";
+    const websocketOrigin = (function() {
+        if (typeof window !== 'undefined' && window.location) {
+            const socketProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${socketProtocol}//${window.location.host}`;
+        }
+        return 'ws://localhost:19030';
+    })();
     const chatEntryUtils = window.ChatEntryUtils || {};
 
     function loadProfile(username, password) {
@@ -100,7 +106,25 @@ window.ChatPage = (function() {
         const prefillMessage = String(params.get('prefill_message') || '').trim();
         const returnTo = String(params.get('return_to') || '').trim();
         if (!(source || userId || caseSynopsis || prefillMessage || returnTo)) {
-            return null;
+            try {
+                const cached = window.localStorage.getItem('complaintWorkspaceHandoff');
+                if (!cached) {
+                    return null;
+                }
+                const payload = JSON.parse(cached);
+                if (!payload || typeof payload !== 'object') {
+                    return null;
+                }
+                return {
+                    source: String(payload.source || '').trim(),
+                    userId: String(payload.userId || '').trim(),
+                    caseSynopsis: String(payload.caseSynopsis || '').trim(),
+                    prefillMessage: String(payload.prefillMessage || '').trim(),
+                    returnTo: String(payload.returnTo || '').trim(),
+                };
+            } catch (error) {
+                return null;
+            }
         }
         return {
             source,
@@ -260,6 +284,7 @@ window.ChatPage = (function() {
     function initialize() {
         let cookies = "";
         $("body").css("background-color", "transparent");
+        applyWorkspaceHandoff();
         $.ajax({
             url: "/cookies",
             type: "get",
@@ -288,6 +313,7 @@ window.ChatPage = (function() {
 
         let socket = null;
         let socketReady = false;
+        let lastOptimisticMessage = null;
 
         async function sendViaFallback(message) {
             const response = await fetch("/api/chat/fallback", {
@@ -316,7 +342,7 @@ window.ChatPage = (function() {
         }
 
         try {
-            socket = new WebSocket("ws://" + hostname + "/api/chat");
+            socket = new WebSocket(websocketOrigin + "/api/chat");
             socket.onopen = function() {
                 socketReady = true;
             };
@@ -328,6 +354,14 @@ window.ChatPage = (function() {
             };
             socket.onmessage = function(event) {
                 const data = JSON.parse(event.data);
+                if (
+                    lastOptimisticMessage
+                    && String(data && data.sender || '').trim() === String(lastOptimisticMessage.sender || '').trim()
+                    && String(data && data.message || '').trim() === String(lastOptimisticMessage.message || '').trim()
+                ) {
+                    lastOptimisticMessage = null;
+                    return;
+                }
                 renderMessage(parent, data, hashedUsername);
             };
         } catch (error) {
@@ -344,6 +378,8 @@ window.ChatPage = (function() {
                             "sender": hashedUsername,
                             "message": message
                         };
+                        lastOptimisticMessage = data;
+                        renderMessage(parent, data, hashedUsername);
                         socket.send(JSON.stringify(data));
                     } else {
                         await sendViaFallback(message);

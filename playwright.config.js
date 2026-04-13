@@ -1,5 +1,8 @@
 const { defineConfig } = require('@playwright/test');
 
+const port = Number(process.env.PLAYWRIGHT_TEST_PORT || 19030);
+const baseURL = `http://127.0.0.1:${port}`;
+
 module.exports = defineConfig({
   testDir: './playwright/tests',
   timeout: 30_000,
@@ -9,13 +12,13 @@ module.exports = defineConfig({
   fullyParallel: true,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:19000',
+    baseURL,
     trace: 'on-first-retry',
   },
   webServer: {
     command: 'node ./playwright/server.js',
-    url: 'http://localhost:19000/health',
-    reuseExistingServer: false,
+    url: `${baseURL}/health`,
+    reuseExistingServer: true,
     timeout: 30_000,
   },
 });

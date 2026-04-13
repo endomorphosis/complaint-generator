@@ -5,6 +5,8 @@ from copy import deepcopy
 import inspect
 from typing import Any, Dict, Iterable, List
 
+from lib.formal_logic.frames import FrameKnowledgeBase
+
 from .loader import import_module_optional
 from .types import with_adapter_metadata
 
@@ -32,6 +34,8 @@ LOGIC_ERROR = _logic_error or _fol_error or _deontic_error or _tdfol_error or _z
 REASONER_BRIDGE_AVAILABLE = _reasoner_module is not None
 REASONER_BRIDGE_ERROR = _reasoner_error
 REASONER_BRIDGE_PATH = getattr(_reasoner_module, "__name__", "") if _reasoner_module is not None else ""
+LOCAL_FORMAL_LOGIC_AVAILABLE = True
+LOCAL_FORMAL_LOGIC_PATH = "lib.formal_logic"
 
 
 def _normalize_logic_symbol(value: Any, *, prefix: str) -> str:
@@ -501,6 +505,57 @@ def _summarize_predicates(predicates: Iterable[Dict[str, Any]]) -> Dict[str, Any
     }
 
 
+def _build_local_logic_snapshot(temporal_reasoning_payload: Dict[str, Any]) -> Dict[str, Any]:
+    frame_kb = FrameKnowledgeBase()
+
+    for claim in temporal_reasoning_payload.get("claim_elements", []) or []:
+        claim_symbol = str(claim.get("claim_symbol") or "claim_unknown")
+        frame_name = str(claim.get("claim_element_text") or claim_symbol)
+        for slot in ("claim_type", "claim_element_id", "coverage_status"):
+            value = claim.get(slot)
+            if value:
+                frame_kb.add_fact(claim_symbol, frame_name, slot, value, "claim_element")
+
+    for trace in temporal_reasoning_payload.get("support_traces", []) or []:
+        trace_symbol = str(trace.get("support_symbol") or "support_unknown")
+        frame_name = str(trace.get("text") or trace_symbol)
+        for slot in ("claim_type", "support_ref", "support_kind"):
+            value = trace.get(slot)
+            if value:
+                frame_kb.add_fact(trace_symbol, frame_name, slot, value, "support_trace")
+
+    for event in temporal_reasoning_payload.get("timeline_events", []) or []:
+        event_symbol = str(event.get("event_symbol") or "event_unknown")
+        frame_name = str(event.get("text") or event_symbol)
+        for slot in ("claim_type", "fact_id", "fact_type", "start_date", "end_date", "granularity"):
+            value = event.get(slot)
+            if value:
+                frame_kb.add_fact(event_symbol, frame_name, slot, value, "temporal_fact")
+        for marker in event.get("relative_markers", []) or []:
+            frame_kb.add_fact(event_symbol, frame_name, "relative_marker", marker, "temporal_fact")
+
+    for relation in temporal_reasoning_payload.get("temporal_relations", []) or []:
+        relation_symbol = str(relation.get("relation_id") or relation.get("relation_type") or "relation_unknown")
+        frame_name = str(relation.get("relation_type") or relation_symbol)
+        for slot in ("claim_type", "relation_type", "source_event_symbol", "target_event_symbol"):
+            value = relation.get(slot)
+            if value:
+                frame_kb.add_fact(relation_symbol, frame_name, slot, value, "temporal_relation")
+
+    for signal in temporal_reasoning_payload.get("contradiction_signals", []) or []:
+        signal_symbol = str(signal.get("signal_symbol") or "signal_unknown")
+        frame_name = str(signal.get("summary") or signal.get("issue_type") or signal_symbol)
+        for slot in ("claim_type", "predicate_type", "issue_type", "severity"):
+            value = signal.get(slot)
+            if value:
+                frame_kb.add_fact(signal_symbol, frame_name, slot, value, "contradiction_signal")
+
+    return {
+        "frame_count": frame_kb.frame_count(),
+        "frames": frame_kb.to_dict(),
+    }
+
+
 def text_to_fol(text: str) -> Dict[str, Any]:
     return with_adapter_metadata(
         {
@@ -512,6 +567,10 @@ def text_to_fol(text: str) -> Dict[str, Any]:
         backend_available=LOGIC_AVAILABLE,
         degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
         implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
+        extra_metadata={
+            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
+            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+        },
     )
 
 
@@ -526,6 +585,10 @@ def legal_text_to_deontic(text: str) -> Dict[str, Any]:
         backend_available=LOGIC_AVAILABLE,
         degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
         implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
+        extra_metadata={
+            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
+            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+        },
     )
 
 
@@ -550,7 +613,12 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
         backend_available=LOGIC_AVAILABLE,
         degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
         implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
-        extra_metadata={**predicate_summary, "temporal_reasoning_payload": temporal_reasoning_payload},
+        extra_metadata={
+            **predicate_summary,
+            "temporal_reasoning_payload": temporal_reasoning_payload,
+            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
+            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+        },
     )
 
 
@@ -574,7 +642,12 @@ def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
         backend_available=LOGIC_AVAILABLE,
         degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
         implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
-        extra_metadata={**predicate_summary, "temporal_reasoning_payload": temporal_reasoning_payload},
+        extra_metadata={
+            **predicate_summary,
+            "temporal_reasoning_payload": temporal_reasoning_payload,
+            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
+            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+        },
     )
 
 
@@ -618,6 +691,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
         temporal_reasoning_payload,
         claim_support_temporal_handoff,
     )
+    local_logic_snapshot = _build_local_logic_snapshot(temporal_reasoning_payload)
 
     result_payload = {
         "status": "success",
@@ -633,6 +707,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
             "reasoning_mode": "temporal_bridge",
             "compiler_bridge_available": REASONER_BRIDGE_AVAILABLE,
             "proof_artifact": proof_artifact,
+            "local_logic_snapshot": local_logic_snapshot,
             "claim_reasoning_review": deepcopy(temporal_reasoning_payload.get("claim_reasoning_review") or {}),
             "compiler_bridge_path": (
                 REASONER_BRIDGE_PATH if REASONER_BRIDGE_AVAILABLE else ""
@@ -655,6 +730,9 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
             "compiler_bridge_path": (
                 REASONER_BRIDGE_PATH if REASONER_BRIDGE_AVAILABLE else ""
             ),
+            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
+            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+            "local_logic_snapshot_frame_count": local_logic_snapshot["frame_count"],
         },
     )
 
@@ -662,6 +740,8 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
 __all__ = [
     "LOGIC_AVAILABLE",
     "LOGIC_ERROR",
+    "LOCAL_FORMAL_LOGIC_AVAILABLE",
+    "LOCAL_FORMAL_LOGIC_PATH",
     "REASONER_BRIDGE_AVAILABLE",
     "REASONER_BRIDGE_ERROR",
     "text_to_fol",

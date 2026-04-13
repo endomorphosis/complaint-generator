@@ -9,7 +9,9 @@
   },
   "intake_answers": {},
   "intake_history": [],
+  "latest_export_critic": null,
+  "latest_packet_export": null,
   "ui_readiness": null,
-  "updated_at": "2026-03-24T20:55:14.992448+00:00",
+  "updated_at": "2026-03-26T00:39:41.793999+00:00",
   "user_id": "alias-script-user"
 }

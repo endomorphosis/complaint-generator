@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import sys
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -14,11 +15,22 @@ from intake_status import (
     build_intake_status_summary,
     build_intake_warning_entries,
 )
-from workflow_phase_guidance import (
-    humanize_workflow_priority_label,
-    normalize_workflow_phase_recommended_actions,
-    resolve_prioritized_workflow_phase,
-)
+try:
+    from workflow_phase_guidance import (
+        humanize_workflow_priority_label,
+        normalize_workflow_phase_recommended_actions,
+        resolve_prioritized_workflow_phase,
+    )
+except ModuleNotFoundError:
+    _REPO_ROOT = Path(__file__).resolve().parent.parent
+    _REPO_ROOT_TEXT = str(_REPO_ROOT)
+    if _REPO_ROOT_TEXT not in sys.path:
+        sys.path.insert(0, _REPO_ROOT_TEXT)
+    from workflow_phase_guidance import (
+        humanize_workflow_priority_label,
+        normalize_workflow_phase_recommended_actions,
+        resolve_prioritized_workflow_phase,
+    )
 
 
 FORMAL_COMPLAINT_DOCUMENT_REQUEST_EXAMPLE = {
@@ -121,6 +133,8 @@ class FormalComplaintDocumentRequest(BaseModel):
     optimization_model_name: Optional[str] = None
     optimization_llm_config: Dict[str, Any] = Field(default_factory=dict)
     optimization_persist_artifacts: bool = False
+    email_timeline_handoff_path: Optional[str] = None
+    email_authority_enrichment_path: Optional[str] = None
     output_dir: Optional[str] = None
     output_formats: List[str] = Field(default_factory=lambda: ["docx", "pdf"])
 
@@ -1454,6 +1468,8 @@ def create_document_router(mediator: Any) -> APIRouter:
             optimization_provider=request.optimization_provider,
             optimization_model_name=request.optimization_model_name,
             optimization_persist_artifacts=request.optimization_persist_artifacts,
+            email_timeline_handoff_path=request.email_timeline_handoff_path,
+            email_authority_enrichment_path=request.email_authority_enrichment_path,
             output_dir=request.output_dir,
             output_formats=request.output_formats,
         )

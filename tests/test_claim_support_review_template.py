@@ -332,6 +332,9 @@ def test_claim_support_review_template_exists_and_targets_review_endpoints():
     assert "signal-supportive-authorities" in content
     assert "signal-adverse-authorities" in content
     assert "signal-follow-up-source-context" in content
+    assert "signal-legal-retrieval-warnings" in content
+    assert "signal-legal-retrieval-warning-chips" in content
+    assert "signal-legal-retrieval-warning-note" in content
     assert "execution-result-card" in content
     assert "parse_quality_recommendation" in content
     assert "authority_treatment_summary" in content
@@ -347,6 +350,14 @@ def test_claim_support_review_template_exists_and_targets_review_endpoints():
     assert "authority program ${task.authority_search_program_summary.primary_program_type}" in content
     assert "authority bias ${task.authority_search_program_summary.primary_program_bias}" in content
     assert "rule bias ${task.authority_search_program_summary.primary_program_rule_bias}" in content
+    assert "Legal retrieval warnings" in content
+    assert "Latest legal retrieval warning:" in content
+    assert "No legal retrieval warnings recorded." in content
+    assert "No legal retrieval warnings" in content
+    assert "buildFollowUpWarningSignalState" in content
+    assert "formatSearchWarningNote" in content
+    assert "Plan ${humanizeQueryValue(code)}" in content
+    assert "History ${humanizeQueryValue(code)}" in content
     assert "primary gap: ${entry.primary_missing_fact}" in content
     assert "covered facts: ${satisfiedFactBundle.length}" in content
     assert "History programs: ${selectedProgramTypes.map(([label, count]) => `${label}=${count}`).join(', ')}" in content
@@ -737,10 +748,17 @@ def test_review_surface_app_registers_dashboard_and_api_routes():
         ("/api/complaint-workspace/intake", "POST"),
         ("/api/complaint-workspace/evidence", "POST"),
         ("/api/complaint-workspace/import-gmail-evidence", "POST"),
+        ("/api/complaint-workspace/run-gmail-duckdb-pipeline", "POST"),
+        ("/api/complaint-workspace/import-local-evidence", "POST"),
+        ("/api/complaint-workspace/upload-local-evidence", "POST"),
+        ("/api/complaint-workspace/search-email-duckdb", "POST"),
         ("/api/complaint-workspace/review", "POST"),
         ("/api/complaint-workspace/generate", "POST"),
         ("/api/complaint-workspace/update-draft", "POST"),
         ("/api/complaint-workspace/reset", "POST"),
+        ("/api/complaint-workspace/packaged-docket/view", "GET"),
+        ("/api/complaint-workspace/packaged-docket/operator-dashboard", "GET"),
+        ("/api/complaint-workspace/packaged-docket/operator-dashboard-report", "GET"),
         ("/api/complaint-workspace/mcp/tools", "GET"),
         ("/api/complaint-workspace/mcp/call", "POST"),
         ("/api/complaint-workspace/mcp/rpc", "POST"),
@@ -834,6 +852,11 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "complaint-mcp-server" in workspace_response.text
     assert "Complaint Editor Workshop" in wysiwyg_response.text
     assert "Unified Dashboard Hub" in dashboard_hub_response.text
+    assert "Chat Upload Modal" in dashboard_hub_response.text
+    assert "Complaint Workspace Snapshot" in dashboard_hub_response.text
+    assert "Heads-Up Display Dashboard" in dashboard_hub_response.text
+    assert "Case Calendar Preview" in dashboard_hub_response.text
+    assert "Operator Queue" in dashboard_hub_response.text
     assert "IPFS Datasets MCP Dashboard" in mcp_response.text
     assert analytics_history_response.json()["history"]
     assert workspace_tools_response.json()["tools"]

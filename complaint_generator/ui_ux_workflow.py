@@ -3,8 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from queue import Queue
+import re
+import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
+import threading
+from time import perf_counter
+from time import time
 from typing import Any
 
 from backends import LLMRouterBackend, MultimodalRouterBackend
@@ -14,12 +21,21 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SCREENSHOT_TEST = "playwright/tests/complaint-flow.spec.js"
 DEFAULT_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_OPTIMIZER_PRIORITY = 90
+DEFAULT_UI_REVIEW_TIMEOUT_S = 10.0
+_TEXT_UI_REVIEW_TIMEOUTS = {
+    "codex": 120.0,
+    "codex_cli": 120.0,
+    "copilot_cli": 25.0,
+    "copilot_sdk": 25.0,
+    "hf_inference_api": 60.0,
+}
 DEFAULT_UI_UX_REVIEW_GOALS = [
     "Make the complaint generator easier for first-time complainants to complete without legal coaching.",
     "Keep intake, evidence, review, draft, package, CLI, MCP, and JavaScript SDK paths visibly connected as one workflow.",
     "Expose every major complaint-generator capability with clearer next-step guidance so users can actually use the full system.",
     "Prefer calmer, trauma-informed language and remove friction that makes evidence capture or draft completion feel risky or confusing.",
     "Make the end-to-end actor journey work cleanly from testimony and intake through evidence upload, claim review, complaint generation, and final draft revision.",
+    "Make the final markdown, PDF, and docx outputs read like a filing-ready legal complaint with a coherent caption, jurisdiction section, counts, prayer for relief, signature block, and export/download affordances that match the selected claim type.",
 ]
 DEFAULT_COMPLAINT_WORKFLOW_CAPABILITIES = [
     "Intake questions can be understood and completed without legal coaching.",
@@ -33,7 +49,8 @@ DEFAULT_COMPLAINT_WORKFLOW_CAPABILITIES = [
 DEFAULT_UI_UX_REVIEW_NOTES = (
     "Review the interface as if a stressed first-time complainant and a complaint operator both need to succeed without hand-holding. "
     "Actively look for places where the user could miss a required step, misunderstand what evidence helps prove, lose track of progress, "
-    "or fail to discover package, CLI, MCP, and browser SDK capabilities that should remain part of one coherent complaint workflow."
+    "or fail to discover package, CLI, MCP, and browser SDK capabilities that should remain part of one coherent complaint workflow. "
+    "Treat any mismatch between the selected claim type, the visible complaint framing, and the exported pleading shape as a release blocker."
 )
 
 
@@ -42,6 +59,13 @@ def _read_text(path: Path, limit: int = 12000) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + "\n...[truncated]..."
+
+
+def _write_progress_artifact(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = dict(payload or {})
+    normalized["updated_at"] = datetime.now(UTC).isoformat()
+    path.write_text(json.dumps(normalized, indent=2, sort_keys=True))
 
 
 def collect_screenshot_artifacts(screenshot_dir: str | Path) -> list[dict[str, Any]]:
@@ -73,6 +97,77 @@ def _artifact_image_paths(artifacts: list[dict[str, Any]]) -> list[str]:
     return image_paths
 
 
+def _unique_nonempty(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if text in seen:
+            continue
+        seen.add(text)
+        ordered.append(text)
+    return ordered
+
+
+def _collect_complaint_output_signals(artifacts: list[dict[str, Any]]) -> dict[str, Any]:
+    exports = [
+        dict(item)
+        for item in list(artifacts or [])
+        if isinstance(item, dict) and str(item.get("artifact_type") or "").strip() == "complaint_export"
+    ]
+    filing_shape_scores = [int(item.get("filing_shape_score") or 0) for item in exports if item.get("filing_shape_score") is not None]
+    alignment_scores = [int(item.get("claim_type_alignment_score") or 0) for item in exports if item.get("claim_type_alignment_score") is not None]
+    claim_type_alignment_failures: list[str] = []
+    export_formats: list[str] = []
+    for export in exports:
+        alignment = dict(export.get("claim_type_alignment") or {}) if isinstance(export.get("claim_type_alignment"), dict) else {}
+        for key, value in alignment.items():
+            if value is False:
+                claim_type_alignment_failures.append(str(key).strip())
+        for key in ("markdown_filename", "pdf_filename", "docx_filename"):
+            if str(export.get(key) or "").strip():
+                export_formats.append(key.replace("_filename", ""))
+        artifacts_block = dict(export.get("artifacts") or {}) if isinstance(export.get("artifacts"), dict) else {}
+        for key in artifacts_block.keys():
+            if str(key).strip():
+                export_formats.append(str(key).strip())
+    release_gate_verdicts = _unique_nonempty([
+        ((item.get("release_gate") or {}) if isinstance(item.get("release_gate"), dict) else {}).get("verdict")
+        for item in exports
+    ])
+    blocking_reasons = _unique_nonempty([
+        ((item.get("release_gate") or {}) if isinstance(item.get("release_gate"), dict) else {}).get("blocking_reason")
+        for item in exports
+    ])
+    formal_section_gaps = _unique_nonempty([
+        gap
+        for export in exports
+        for gap in list(export.get("formal_section_gaps") or [])
+    ])
+    ui_suggestion_hints = _unique_nonempty([
+        str(item.get("ui_suggestions_excerpt") or "").splitlines()[0]
+        for item in exports
+        if str(item.get("ui_suggestions_excerpt") or "").strip()
+    ])
+    return {
+        "export_artifact_count": len(exports),
+        "claim_types": _unique_nonempty([item.get("claim_type") for item in exports]),
+        "draft_strategies": _unique_nonempty([item.get("draft_strategy") for item in exports]),
+        "filing_shape_scores": filing_shape_scores,
+        "claim_type_alignment_scores": alignment_scores,
+        "average_filing_shape_score": round(sum(filing_shape_scores) / len(filing_shape_scores)) if filing_shape_scores else 0,
+        "average_claim_type_alignment_score": round(sum(alignment_scores) / len(alignment_scores)) if alignment_scores else 0,
+        "release_gate_verdicts": release_gate_verdicts,
+        "release_gate_blocking_reasons": blocking_reasons,
+        "formal_section_gaps": formal_section_gaps,
+        "claim_type_alignment_failures": _unique_nonempty(claim_type_alignment_failures),
+        "export_formats": _unique_nonempty(export_formats),
+        "ui_suggestion_hints": ui_suggestion_hints,
+    }
+
+
 def _resolve_review_goals(goals: list[str] | None) -> list[str]:
     cleaned = [goal.strip() for goal in (goals or []) if str(goal).strip()]
     return cleaned or list(DEFAULT_UI_UX_REVIEW_GOALS)
@@ -81,6 +176,531 @@ def _resolve_review_goals(goals: list[str] | None) -> list[str]:
 def _resolve_review_notes(notes: str | None) -> str:
     cleaned = str(notes or "").strip()
     return cleaned or DEFAULT_UI_UX_REVIEW_NOTES
+
+
+def _call_with_timeout(fn, *, timeout_s: float):
+    result_queue: Queue[tuple[str, Any]] = Queue(maxsize=1)
+
+    def _runner():
+        try:
+            result_queue.put(("ok", fn()))
+        except Exception as exc:
+            result_queue.put(("err", exc))
+
+    worker = threading.Thread(target=_runner, name="ui-ux-workflow-timeout-worker", daemon=True)
+    worker.start()
+    worker.join(timeout=max(0.001, float(timeout_s)))
+    if worker.is_alive():
+        raise TimeoutError(f"UI/UX workflow router review timed out after {float(timeout_s):g}s")
+    status, payload = result_queue.get_nowait()
+    if status == "err":
+        raise payload
+    return payload
+
+
+def _ui_review_timeout_for_provider(provider: str | None) -> float:
+    normalized = str(provider or "").strip().lower()
+    provider_env = str(os.getenv(f"COMPLAINT_GENERATOR_UI_REVIEW_TIMEOUT_SECONDS_{normalized.upper()}", "") or "").strip()
+    global_env = str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_TIMEOUT_SECONDS", "") or "").strip()
+    for candidate in (provider_env, global_env):
+        if not candidate:
+            continue
+        try:
+            return max(1.0, float(candidate))
+        except Exception:
+            continue
+    return float(_TEXT_UI_REVIEW_TIMEOUTS.get(normalized, DEFAULT_UI_REVIEW_TIMEOUT_S))
+
+
+def _build_timeout_fallback_review_markdown(
+    *,
+    artifacts: list[dict[str, Any]],
+    multimodal_error: Exception | None,
+    fallback_error: Exception | None,
+) -> str:
+    export_artifact = next(
+        (
+            dict(item)
+            for item in artifacts
+            if isinstance(item, dict) and str(item.get("artifact_type") or "").strip() == "complaint_export"
+        ),
+        {},
+    )
+    claim_type = str(export_artifact.get("claim_type") or "current claim type").strip()
+    draft_strategy = str(export_artifact.get("draft_strategy") or "current draft strategy").strip()
+    filing_shape_score = str(export_artifact.get("filing_shape_score") or "unknown").strip()
+    alignment_score = str(export_artifact.get("claim_type_alignment_score") or "unknown").strip()
+    ui_hint = str(export_artifact.get("ui_suggestions_excerpt") or "").strip()
+    screenshot_names = [
+        str(item.get("name") or "").strip()
+        for item in artifacts
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    ]
+    screenshot_summary = ", ".join(screenshot_names[:5]) or "workspace screenshots"
+    fallback_reason = str(fallback_error or multimodal_error or "router review unavailable").strip()
+    primary_hint = ui_hint.splitlines()[0].strip() if ui_hint else (
+        "Keep release-gate, filing-shape, and export guidance visible before download."
+    )
+    return "\n".join(
+        [
+            "# Top Risks",
+            f"- Router-backed screenshot review timed out while auditing {screenshot_summary}, so the actor/critic loop is relying on complaint-output metadata instead of fresh visual reasoning.",
+            f"- Draft and export affordances must keep the release gate, filing-shape score, and claim-type alignment visible for {claim_type} / {draft_strategy} outputs.",
+            "",
+            "# High-Impact UX Fixes",
+            f"- {primary_hint}",
+            "- Preserve a visible release-gate badge and next-step explanation above export and download controls.",
+            "",
+            "# Complaint Journey Coverage",
+            "- Intake, evidence, review, draft, and export screenshots were captured successfully for the current complaint journey.",
+            "- The browser flow still needs screenshot-review fallback behavior so operators get actionable guidance even when router review is slow.",
+            "",
+            "# Hidden Or Missing Feature Paths",
+            "- The actor/critic workflow should never stall in `running_router_review`; return a fallback review artifact instead.",
+            "- Keep complaint.review_ui, complaint.optimize_ui, and complaint.run_browser_audit discoverable from the same workspace session.",
+            "",
+            "# Stage Findings",
+            "## Intake",
+            "- Intake appears covered by the browser audit, but the screenshot critic timed out before returning page-specific findings.",
+            "## Evidence",
+            "- Evidence capture should continue to explain which claim element each saved item strengthens before drafting becomes the dominant action.",
+            "## Review",
+            "- Review should keep support posture and remaining corroboration work visible before users trust the filing posture.",
+            "## Draft",
+            f"- Current export metadata reports filing-shape score {filing_shape_score} and claim-type alignment score {alignment_score}; keep those signals visible beside export controls.",
+            "## Integration Discovery",
+            "- Integration panels should expose actionable UI review, optimization, and browser-audit affordances without requiring command-line guesswork.",
+            "",
+            "# Actor Journey Findings",
+            "- The actor can still complete the browser complaint journey, but the optimizer must fall back gracefully when screenshot router review is unavailable.",
+            "- Broken optimizer behavior is itself a UX risk because operators lose confidence when the actor/critic lane appears to hang.",
+            "",
+            "# Critic Test Obligations",
+            "- Assert that review-ui and optimize-ui finish with either a router-backed report or a deterministic fallback report instead of hanging.",
+            "- Assert that release-gate, filing-shape score, and export guidance remain visible before markdown/pdf/docx download starts.",
+            "",
+            "# MCP/SDK Workflow Improvements",
+            "- Surface fallback status directly in the workspace so operators know when the optimizer used complaint-output metadata instead of live screenshot critique.",
+            "- Keep MCP tool status, last run time, and fallback reason visible through the same shared browser SDK workflow.",
+            "",
+            "# Actor Plan",
+            "- Ensure the optimizer always returns a review artifact within the configured timeout window.",
+            "- Keep export readiness, release-gate status, and next-step guidance visible even when screenshot critique falls back to artifact metadata.",
+            "",
+            "# Critic Verdict",
+            "- Warning: the complaint flow is working, but the optimizer path needs bounded router calls and an explicit fallback artifact to stay trustworthy.",
+            "",
+            "# Complaint Intake Language Fixes",
+            "- Preserve calm, plain-language explanations while making fallback and readiness signals more explicit for first-time complainants and operators.",
+            "",
+            "# Playwright Assertions To Add",
+            "- Add an assertion that optimizer progress never remains stuck at `running_router_review` after router timeouts.",
+            "- Add an assertion that the final draft/export surface still exposes release-gate and filing-shape guidance before download.",
+            "",
+            "# Implementation Order",
+            "- First, bound multimodal and text router calls with timeouts.",
+            "- Next, emit a deterministic fallback markdown review when both router paths fail.",
+            "- Finally, keep the fallback reason visible in workflow progress and review artifacts.",
+            "",
+            f"Fallback reason: {fallback_reason}",
+        ]
+    )
+
+
+def _markdown_heading_sections(markdown_text: str) -> dict[str, str]:
+    text = str(markdown_text or "")
+    pattern = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return {}
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        heading = str(match.group(2) or "").strip()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        sections[heading] = text[start:end].strip()
+    return sections
+
+
+def _markdown_bullets(section_text: str) -> list[str]:
+    bullets: list[str] = []
+    for line in str(section_text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            bullets.append(stripped[2:].strip())
+        elif re.match(r"^\d+\.\s+", stripped):
+            bullets.append(re.sub(r"^\d+\.\s+", "", stripped).strip())
+    return [item for item in bullets if item]
+
+
+def _first_nonempty_line(section_text: str) -> str:
+    for line in str(section_text or "").splitlines():
+        cleaned = line.strip()
+        if cleaned and not cleaned.startswith("#"):
+            return cleaned
+    return ""
+
+
+def _extract_named_markdown_section(markdown_text: str, heading: str) -> str:
+    escaped = re.escape(str(heading or "").strip())
+    pattern = re.compile(
+        rf"(?ms)^\#{1,6}\s+{escaped}\s*$\n?(.*?)(?=^\#{1,6}\s+.+?$|\Z)"
+    )
+    match = pattern.search(str(markdown_text or ""))
+    return str(match.group(1) or "").strip() if match else ""
+
+
+def _stage_from_artifact(artifact: dict[str, Any]) -> str:
+    haystack = " ".join(
+        [
+            str(artifact.get("name") or ""),
+            str(artifact.get("title") or ""),
+            str(artifact.get("url") or ""),
+            str(artifact.get("text_excerpt") or ""),
+        ]
+    ).lower()
+    if "intake" in haystack or "chat" in haystack:
+        return "Intake"
+    if "evidence" in haystack or "document" in haystack:
+        return "Evidence"
+    if "review" in haystack or "support" in haystack:
+        return "Review"
+    if "draft" in haystack or "builder" in haystack or "document" in haystack:
+        return "Draft"
+    if "integration" in haystack or "sdk" in haystack or "tool" in haystack:
+        return "Integration Discovery"
+    return "Workspace"
+
+
+def _surface_from_artifact(artifact: dict[str, Any]) -> str:
+    url = str(artifact.get("url") or "").strip()
+    name = str(artifact.get("name") or "").strip()
+    title = str(artifact.get("title") or "").strip()
+    return url or name or title or "unknown-surface"
+
+
+def _artifact_text_context(artifact: dict[str, Any]) -> str:
+    return " ".join(
+        [
+            str(artifact.get("name") or ""),
+            str(artifact.get("title") or ""),
+            str(artifact.get("text_excerpt") or ""),
+            str(artifact.get("url") or ""),
+        ]
+    ).lower()
+
+
+def _match_artifacts_to_stage(
+    artifacts: list[dict[str, Any]],
+    stage_name: str,
+) -> list[dict[str, Any]]:
+    matches = [artifact for artifact in artifacts if _stage_from_artifact(artifact) == stage_name]
+    return matches or list(artifacts[:1])
+
+
+def _build_screenshot_findings(
+    *,
+    artifacts: list[dict[str, Any]],
+    issues: list[dict[str, Any]],
+    stage_findings: dict[str, str],
+    top_risks: list[str],
+) -> list[dict[str, Any]]:
+    screenshot_findings: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        stage_name = _stage_from_artifact(artifact)
+        artifact_context = _artifact_text_context(artifact)
+        related_issues = [
+            dict(item)
+            for item in issues
+            if str(item.get("surface") or "").strip() in {"", _surface_from_artifact(artifact)}
+            or str(item.get("surface") or "").strip().lower() in artifact_context
+            or stage_name.lower() in str(item.get("surface") or "").strip().lower()
+        ]
+        if not related_issues and top_risks:
+            related_issues = [
+                {
+                    "severity": "warning",
+                    "surface": _surface_from_artifact(artifact),
+                    "problem": top_risks[0],
+                    "user_impact": stage_findings.get(stage_name) or top_risks[0],
+                    "recommended_fix": "Use this screenshot to verify the actor can see the next required complaint step without guessing.",
+                }
+            ]
+        screenshot_findings.append(
+            {
+                "name": str(artifact.get("name") or "").strip() or "screenshot",
+                "path": str(artifact.get("screenshot_path") or "").strip(),
+                "url": str(artifact.get("url") or "").strip(),
+                "stage": stage_name,
+                "surface": _surface_from_artifact(artifact),
+                "visible_text_excerpt": str(artifact.get("text_excerpt") or "").strip(),
+                "stage_finding": str(stage_findings.get(stage_name) or "").strip(),
+                "criticisms": related_issues[:3],
+            }
+        )
+    return screenshot_findings
+
+
+def _normalized_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _build_carry_forward_assessment(
+    *,
+    artifacts: list[dict[str, Any]],
+    screenshot_findings: list[dict[str, Any]],
+    optimization_targets: list[dict[str, Any]],
+    stage_findings: dict[str, str],
+) -> dict[str, Any]:
+    prior_review_artifact = next(
+        (
+            dict(item)
+            for item in artifacts
+            if isinstance(item, dict) and str(item.get("artifact_type") or "").strip() == "ui_readiness_review"
+        ),
+        {},
+    )
+    if not prior_review_artifact:
+        return {
+            "prior_review_available": False,
+            "unresolved_findings": [],
+            "resolved_findings": [],
+            "continued_optimization_targets": [],
+            "retired_optimization_targets": [],
+            "summary": "",
+        }
+
+    current_stage_keys = {_normalized_text(key) for key in stage_findings.keys()}
+    current_surface_keys = {
+        _normalized_text(item.get("surface") or item.get("name") or item.get("stage") or "")
+        for item in screenshot_findings
+    }
+    current_target_keys = {
+        _normalized_text(item.get("title") or item.get("target_surface") or item.get("reason") or "")
+        for item in optimization_targets
+    }
+
+    unresolved_findings: list[dict[str, Any]] = []
+    resolved_findings: list[dict[str, Any]] = []
+    for item in list(prior_review_artifact.get("screenshot_findings") or []):
+        if not isinstance(item, dict):
+            continue
+        stage_key = _normalized_text(item.get("stage") or "")
+        surface_key = _normalized_text(item.get("surface") or item.get("name") or "")
+        summary = str(item.get("summary") or item.get("stage_finding") or "").strip()
+        record = {
+            "stage": str(item.get("stage") or "").strip(),
+            "surface": str(item.get("surface") or item.get("name") or "").strip(),
+            "summary": summary,
+        }
+        if (stage_key and stage_key in current_stage_keys) or (surface_key and surface_key in current_surface_keys):
+            unresolved_findings.append(record)
+        else:
+            resolved_findings.append(record)
+
+    continued_targets: list[dict[str, Any]] = []
+    retired_targets: list[dict[str, Any]] = []
+    for item in list(prior_review_artifact.get("optimization_targets") or []):
+        if not isinstance(item, dict):
+            continue
+        target_key = _normalized_text(item.get("title") or item.get("target") or item.get("target_surface") or "")
+        record = {
+            "title": str(item.get("title") or item.get("target") or item.get("target_surface") or "").strip(),
+            "target_surface": str(item.get("target_surface") or "").strip(),
+            "reason": str(item.get("reason") or "").strip(),
+        }
+        if target_key and target_key in current_target_keys:
+            continued_targets.append(record)
+        else:
+            retired_targets.append(record)
+
+    summary_parts: list[str] = []
+    if unresolved_findings:
+        summary_parts.append(f"{len(unresolved_findings)} prior screenshot finding(s) still appear unresolved.")
+    if resolved_findings:
+        summary_parts.append(f"{len(resolved_findings)} prior screenshot finding(s) look improved or no longer visible.")
+    if continued_targets:
+        summary_parts.append(f"{len(continued_targets)} optimization target(s) carried forward into this pass.")
+    if retired_targets:
+        summary_parts.append(f"{len(retired_targets)} optimization target(s) were not repeated in the new review.")
+
+    return {
+        "prior_review_available": True,
+        "unresolved_findings": unresolved_findings,
+        "resolved_findings": resolved_findings,
+        "continued_optimization_targets": continued_targets,
+        "retired_optimization_targets": retired_targets,
+        "summary": " ".join(summary_parts).strip(),
+    }
+
+
+def structure_ui_ux_review(
+    *,
+    review_text: str,
+    artifacts: list[dict[str, Any]],
+    iteration: int,
+) -> dict[str, Any]:
+    sections = _markdown_heading_sections(review_text)
+    complaint_output_signals = _collect_complaint_output_signals(artifacts)
+    top_risks = _markdown_bullets(sections.get("Top Risks", ""))
+    fixes = _markdown_bullets(sections.get("High-Impact UX Fixes", ""))
+    playwright_followups = _markdown_bullets(sections.get("Playwright Assertions To Add", "")) or _markdown_bullets(
+        sections.get("Critic Test Obligations", "")
+    )
+    hidden_paths = _markdown_bullets(sections.get("Hidden Or Missing Feature Paths", ""))
+    actor_plan_lines = _markdown_bullets(sections.get("Actor Plan", ""))
+    implementation_order = _markdown_bullets(sections.get("Implementation Order", ""))
+    complaint_journey_lines = _markdown_bullets(sections.get("Complaint Journey Coverage", ""))
+    actor_journey_lines = _markdown_bullets(sections.get("Actor Journey Findings", ""))
+    mcp_sdk_lines = _markdown_bullets(sections.get("MCP/SDK Workflow Improvements", ""))
+    critic_test_lines = _markdown_bullets(sections.get("Critic Test Obligations", ""))
+    language_lines = _markdown_bullets(sections.get("Complaint Intake Language Fixes", ""))
+    critic_section = sections.get("Critic Verdict", "")
+    critic_verdict_line = _first_nonempty_line(critic_section)
+    critic_verdict = "warning"
+    lowered_critic = critic_verdict_line.lower()
+    if "pass" in lowered_critic or "safe" in lowered_critic:
+        critic_verdict = "pass"
+    elif "fail" in lowered_critic or "block" in lowered_critic:
+        critic_verdict = "fail"
+
+    stage_section = sections.get("Stage Findings", "")
+    stage_subsections = _markdown_heading_sections(stage_section)
+    stage_findings = {
+        stage: _first_nonempty_line(stage_subsections.get(stage, ""))
+        for stage in ("Intake", "Evidence", "Review", "Draft", "Integration Discovery")
+        if _first_nonempty_line(stage_subsections.get(stage, ""))
+    }
+    for stage in ("Intake", "Evidence", "Review", "Draft", "Integration Discovery"):
+        if stage not in stage_findings:
+            direct_stage_body = str(sections.get(stage) or "").strip()
+            if direct_stage_body:
+                stage_findings[stage] = _first_nonempty_line(direct_stage_body)
+    if not stage_findings:
+        for stage in ("Intake", "Evidence", "Review", "Draft", "Integration Discovery"):
+            stage_body = _extract_named_markdown_section(stage_section, stage)
+            if stage_body:
+                stage_findings[stage] = _first_nonempty_line(stage_body)
+    if "Draft" not in stage_findings and complaint_output_signals["formal_section_gaps"]:
+        first_gap = complaint_output_signals["formal_section_gaps"][0].replace("_", " ")
+        stage_findings["Draft"] = f"The audited complaint output still shows a {first_gap} gap that the draft/export UI should make obvious before download."
+
+    issues: list[dict[str, Any]] = []
+    stage_order = list(stage_findings.keys()) or ["Workspace"]
+    for index, risk in enumerate(top_risks, start=1):
+        stage_name = stage_order[min(index - 1, len(stage_order) - 1)]
+        stage_artifacts = _match_artifacts_to_stage(artifacts, stage_name)
+        surface = _surface_from_artifact(stage_artifacts[0]) if stage_artifacts else stage_name
+        issues.append(
+            {
+                "severity": "high" if index <= 2 else "medium",
+                "surface": surface,
+                "problem": risk,
+                "user_impact": stage_findings.get(stage_name) or risk,
+                "recommended_fix": fixes[min(index - 1, len(fixes) - 1)] if fixes else "Apply the actor/critic repair described in the review.",
+            }
+        )
+
+    recommended_changes: list[dict[str, Any]] = []
+    for index, fix in enumerate(fixes, start=1):
+        related_stage = stage_order[min(index - 1, len(stage_order) - 1)]
+        stage_artifacts = _match_artifacts_to_stage(artifacts, related_stage)
+        shared_code_path = "templates/workspace.html"
+        artifact_context = _artifact_text_context(stage_artifacts[0]) if stage_artifacts else ""
+        fix_lower = fix.lower()
+        workspace_ui_terms = (
+            "client mode",
+            "operator mode",
+            "drawer",
+            "panel",
+            "sidebar",
+            "tab",
+            "cta",
+        )
+        if any(term in fix_lower for term in workspace_ui_terms):
+            shared_code_path = "templates/workspace.html"
+        elif "sdk" in fix_lower or "tool" in fix_lower or "integration" in fix_lower or "sdk" in artifact_context:
+            shared_code_path = "static/complaint_mcp_sdk.js"
+        elif "playwright" in fix_lower:
+            shared_code_path = "playwright/tests/complaint-flow.spec.js"
+        recommended_changes.append(
+            {
+                "title": f"UX repair {index}",
+                "implementation_notes": fix,
+                "shared_code_path": shared_code_path,
+                "sdk_considerations": "Keep the shared ComplaintMcpClient and MCP tool workflow visible while applying this repair.",
+            }
+        )
+
+    broken_controls = [
+        {
+            "surface": item.get("surface"),
+            "control": "Visible CTA or tab in screenshot flow",
+            "failure_mode": item.get("problem"),
+            "repair": item.get("recommended_fix"),
+        }
+        for item in issues[: min(3, len(issues))]
+    ]
+
+    screenshot_findings = _build_screenshot_findings(
+        artifacts=artifacts,
+        issues=issues,
+        stage_findings=stage_findings,
+        top_risks=top_risks,
+    )
+
+    optimization_targets = [
+        {
+            "title": item.get("title"),
+            "target_surface": item.get("shared_code_path"),
+            "reason": item.get("implementation_notes"),
+        }
+        for item in recommended_changes[:5]
+    ]
+    carry_forward_assessment = _build_carry_forward_assessment(
+        artifacts=artifacts,
+        screenshot_findings=screenshot_findings,
+        optimization_targets=optimization_targets,
+        stage_findings=stage_findings,
+    )
+
+    return {
+        "summary": _first_nonempty_line(sections.get("Top Risks", "")) or _first_nonempty_line(review_text),
+        "issues": issues,
+        "recommended_changes": recommended_changes,
+        "broken_controls": broken_controls,
+        "workflow_gaps": hidden_paths,
+        "playwright_followups": playwright_followups,
+        "actor_path_breaks": actor_journey_lines,
+        "critic_test_obligations": critic_test_lines or playwright_followups,
+        "complaint_journey": {
+            "tested_stages": list(stage_findings.keys()),
+            "journey_gaps": complaint_journey_lines or hidden_paths,
+            "sdk_tool_invocations": mcp_sdk_lines,
+            "release_blockers": top_risks[:3],
+        },
+        "actor_plan": {
+            "primary_objective": actor_plan_lines[0] if actor_plan_lines else (fixes[0] if fixes else ""),
+            "repair_sequence": actor_plan_lines or implementation_order or fixes[:3],
+            "playwright_objectives": playwright_followups[:5],
+            "mcp_sdk_expectations": mcp_sdk_lines[:5],
+        },
+        "critic_review": {
+            "verdict": critic_verdict,
+            "blocking_findings": top_risks[:5],
+            "acceptance_checks": critic_test_lines[:5] or playwright_followups[:5],
+        },
+        "actor_summary": _first_nonempty_line(sections.get("Actor Journey Findings", "")),
+        "critic_summary": critic_verdict_line or _first_nonempty_line(critic_section),
+        "stage_findings": stage_findings,
+        "complaint_intake_language_fixes": language_lines,
+        "screenshot_findings": screenshot_findings,
+        "optimization_targets": optimization_targets,
+        "carry_forward_assessment": carry_forward_assessment,
+        "complaint_output_signals": complaint_output_signals,
+        "review_sections": sections,
+        "iteration": iteration,
+    }
 
 
 def run_playwright_screenshot_audit(
@@ -95,12 +715,51 @@ def run_playwright_screenshot_audit(
     for stale in list(target_dir.glob("*.png")) + list(target_dir.glob("*.json")):
         stale.unlink()
 
+    def _prune_playwright_temp_dirs(root: Path, *, max_age_seconds: int = 6 * 60 * 60) -> None:
+        if not root.exists():
+            return
+        now = time()
+        prefixes = (
+            "playwright-artifacts-",
+            "playwright_chromiumdev_profile-",
+            "playwright-firefox-",
+            "playwright-webkit-",
+            "playwright-downloads-",
+            "playwright-upload-",
+            "playwright-transform-cache-",
+        )
+        for candidate in root.iterdir():
+            if not candidate.is_dir():
+                continue
+            if not any(candidate.name.startswith(prefix) for prefix in prefixes):
+                continue
+            try:
+                age_seconds = max(0, int(now - candidate.stat().st_mtime))
+            except Exception:
+                continue
+            if age_seconds < max_age_seconds:
+                continue
+            shutil.rmtree(candidate, ignore_errors=True)
+
+    tmp_root = target_dir / ".playwright-tmp"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    _prune_playwright_temp_dirs(Path("/tmp"))
+    _prune_playwright_temp_dirs(tmp_root, max_age_seconds=60 * 60)
+
     env = dict(os.environ)
     env["COMPLAINT_UI_SCREENSHOT_DIR"] = str(target_dir)
+    env.setdefault("RUN_LLM_TESTS", "1")
+    env.setdefault("RUN_NETWORK_TESTS", "1")
+    env.setdefault("RUN_HEAVY_TESTS", "1")
+    env["PLAYWRIGHT_TEST_PORT"] = str(19030 + (int(time() * 1000) % 1000))
+    env["TMPDIR"] = str(tmp_root)
+    env["TMP"] = str(tmp_root)
+    env["TEMP"] = str(tmp_root)
     target_text = str(pytest_target or "").strip()
     if target_text.endswith(".js") or "playwright/tests/" in target_text:
+        playwright_command = ["npm", "run", "test:e2e", "--", "--workers=1", target_text]
         completed = subprocess.run(
-            ["npm", "run", "test:e2e", "--", target_text],
+            playwright_command,
             cwd=str(workdir or REPO_ROOT),
             env=env,
             stdout=subprocess.PIPE,
@@ -108,7 +767,7 @@ def run_playwright_screenshot_audit(
             text=True,
             check=False,
         )
-        command = ["npm", "run", "test:e2e", "--", target_text]
+        command = playwright_command
     else:
         pytest_cmd = str(pytest_executable or (REPO_ROOT / ".venv" / "bin" / "pytest"))
         completed = subprocess.run(
@@ -121,9 +780,6 @@ def run_playwright_screenshot_audit(
             check=False,
         )
         command = [pytest_cmd, "-q", target_text]
-    env.setdefault("RUN_LLM_TESTS", "1")
-    env.setdefault("RUN_NETWORK_TESTS", "1")
-    env.setdefault("RUN_HEAVY_TESTS", "1")
 
     artifacts = collect_screenshot_artifacts(target_dir)
     return {
@@ -134,6 +790,21 @@ def run_playwright_screenshot_audit(
         "artifact_count": len(artifacts),
         "artifacts": artifacts,
         "screenshot_dir": str(target_dir),
+    }
+
+
+def _reuse_existing_screenshot_audit(screenshot_dir: str | Path) -> dict[str, Any]:
+    target_dir = Path(screenshot_dir)
+    artifacts = collect_screenshot_artifacts(target_dir)
+    return {
+        "command": ["reuse-existing-screenshots"],
+        "returncode": 0,
+        "stdout": "Reused existing screenshot artifacts.",
+        "stderr": "",
+        "artifact_count": len(artifacts),
+        "artifacts": artifacts,
+        "screenshot_dir": str(target_dir),
+        "reused_existing_screenshots": True,
     }
 
 
@@ -164,6 +835,7 @@ def build_ui_ux_review_prompt(
     resolved_notes = _resolve_review_notes(notes)
     workspace_html = _read_text(REPO_ROOT / "templates" / "workspace.html", limit=14000)
     sdk_source = _read_text(REPO_ROOT / "static" / "complaint_mcp_sdk.js", limit=8000)
+    complaint_output_signals = _collect_complaint_output_signals(artifacts)
     artifact_blocks = []
     for artifact in artifacts:
         lines = [
@@ -182,13 +854,41 @@ def build_ui_ux_review_prompt(
                     f"Claim type: {artifact.get('claim_type', '')}",
                     f"Draft strategy: {artifact.get('draft_strategy', '')}",
                     f"Filing shape score: {artifact.get('filing_shape_score', '')}",
+                    f"Claim type alignment score: {artifact.get('claim_type_alignment_score', '')}",
+                    f"Release gate verdict: {((artifact.get('release_gate') or {}) if isinstance(artifact.get('release_gate'), dict) else {}).get('verdict', '')}",
+                    f"Release gate blocking reason: {((artifact.get('release_gate') or {}) if isinstance(artifact.get('release_gate'), dict) else {}).get('blocking_reason', '')}",
+                    "Formal section gaps:",
+                    ", ".join(str(item).strip() for item in list(artifact.get("formal_section_gaps") or []) if str(item).strip()) or "(none reported)",
+                    "Claim-type alignment details:",
+                    json.dumps(artifact.get("claim_type_alignment", {}), indent=2, sort_keys=True),
                     f"Markdown filename: {artifact.get('markdown_filename', '')}",
                     f"PDF filename: {artifact.get('pdf_filename', '')}",
+                    f"DOCX filename: {artifact.get('docx_filename', '')}",
                     "Exported complaint markdown excerpt:",
                     str(artifact.get("markdown_excerpt", "")).strip(),
                     f"PDF header: {artifact.get('pdf_header', '')}",
                     "Complaint-output-informed UI suggestions:",
                     str(artifact.get("ui_suggestions_excerpt", "")).strip(),
+                ]
+            )
+        if artifact.get("artifact_type") == "ui_readiness_review":
+            lines.extend(
+                [
+                    f"Cached review artifact type: {artifact.get('artifact_type')}",
+                    f"Cached UI verdict: {artifact.get('verdict', '')}",
+                    f"Cached UI score: {artifact.get('score', '')}",
+                    f"Cached critic verdict: {artifact.get('critic_verdict', '')}",
+                    f"Cached workflow type: {artifact.get('workflow_type', '')}",
+                    "Previously observed screenshot findings:",
+                    json.dumps(artifact.get("screenshot_findings", []), indent=2, sort_keys=True),
+                    "Previously proposed optimization targets:",
+                    json.dumps(artifact.get("optimization_targets", []), indent=2, sort_keys=True),
+                    "Previously proposed Playwright follow-ups:",
+                    "\n".join(f"- {item}" for item in list(artifact.get("playwright_followups", []))[:6]),
+                    "Previously recommended changes:",
+                    "\n".join(f"- {item}" for item in list(artifact.get("recommended_changes", []))[:6]),
+                    "Cached review excerpt:",
+                    str(artifact.get("review_excerpt", "")).strip(),
                 ]
             )
         artifact_blocks.append("\n".join(lines))
@@ -201,6 +901,8 @@ def build_ui_ux_review_prompt(
         "Treat this as an actor/critic workflow audit with adversarial pressure-testing: identify where a real user could fail to complete the full complaint journey, where the UI hides the next best step, or where major product capabilities disappear from view.",
         "Explicitly audit visible buttons, links, tabs, and handoff controls. Treat any dead, misleading, duplicated, or context-losing control as a release blocker until proven otherwise.",
         "Use an actor/critic lens: the actor should propose the smallest high-impact UX repair sequence, and the critic should decide whether the dashboard is actually safe to send legal clients through.",
+        "Do not treat a workflow as successful unless the final complaint output still looks like a formal pleading and the export/download controls produce artifacts consistent with the selected claim type and draft strategy.",
+        "If cached screenshot-driven findings or optimization targets are supplied, treat them as prior unresolved hypotheses that should be confirmed, refined, or explicitly retired with evidence from the current screenshots.",
         f"Iteration: {iteration}",
     ]
     prompt_sections.extend(
@@ -224,15 +926,21 @@ def build_ui_ux_review_prompt(
         [
             "Surface artifacts:",
             "\n\n".join(artifact_blocks) or "No screenshot artifacts were captured.",
+            "Complaint output summary across artifacts:",
+            json.dumps(complaint_output_signals, indent=2, sort_keys=True),
             "External interface contract:",
             (
                 "Package exports: complaint_generator.ComplaintWorkspaceService, "
                 "complaint_generator.start_session, "
                 "complaint_generator.submit_intake_answers, "
                 "complaint_generator.save_evidence, "
+                "complaint_generator.import_gmail_evidence, "
+                "complaint_generator.run_gmail_duckdb_pipeline, "
+                "complaint_generator.search_email_duckdb_corpus, "
                 "complaint_generator.review_case, "
                 "complaint_generator.build_mediator_prompt, "
                 "complaint_generator.get_workflow_capabilities, "
+                "complaint_generator.get_tooling_contract, "
                 "complaint_generator.generate_complaint, "
                 "complaint_generator.update_draft, "
                 "complaint_generator.export_complaint_packet, "
@@ -240,7 +948,11 @@ def build_ui_ux_review_prompt(
                 "complaint_generator.export_complaint_pdf, "
                 "complaint_generator.export_complaint_docx, "
                 "complaint_generator.analyze_complaint_output, "
+                "complaint_generator.get_formal_diagnostics, "
+                "complaint_generator.get_filing_provenance, "
+                "complaint_generator.get_provider_diagnostics, "
                 "complaint_generator.review_generated_exports, "
+                "complaint_generator.update_claim_type, "
                 "complaint_generator.update_case_synopsis, "
                 "complaint_generator.review_ui, "
                 "complaint_generator.optimize_ui, "
@@ -250,9 +962,9 @@ def build_ui_ux_review_prompt(
                 "complaint_generator.run_closed_loop_ui_ux_improvement, "
                 "complaint_generator.run_end_to_end_complaint_browser_audit, "
                 "complaint_generator.create_ui_review_report\n"
-                "CLI tools: complaint-generator, complaint-workspace, complaint-generator-workspace, complaint-mcp-server, complaint-workspace export-packet, complaint-workspace export-markdown, complaint-workspace export-pdf, complaint-workspace export-docx, complaint-workspace analyze-output, complaint-workspace review-ui, complaint-workspace optimize-ui, complaint-workspace browser-audit\n"
-                "MCP server tools: complaint.create_identity, complaint.list_intake_questions, complaint.list_claim_elements, complaint.start_session, complaint.submit_intake, complaint.save_evidence, complaint.review_case, complaint.build_mediator_prompt, complaint.get_workflow_capabilities, complaint.generate_complaint, complaint.update_draft, complaint.export_complaint_packet, complaint.export_complaint_markdown, complaint.export_complaint_pdf, complaint.export_complaint_docx, complaint.analyze_complaint_output, complaint.review_generated_exports, complaint.update_case_synopsis, complaint.reset_session, complaint.review_ui, complaint.optimize_ui, complaint.run_browser_audit\n"
-                "Browser SDK: window.ComplaintMcpSdk.ComplaintMcpClient with bootstrapWorkspace(), getOrCreateDid(), callTool(), exportComplaintPacket(), exportComplaintMarkdown(), exportComplaintPdf(), exportComplaintDocx(), analyzeComplaintOutput(), reviewGeneratedExports(), reviewUiArtifacts(), optimizeUiArtifacts(), and runBrowserAudit()"
+                "CLI tools: complaint-generator, complaint-workspace, complaint-generator-workspace, complaint-mcp-server, complaint-workspace import-gmail-evidence, complaint-workspace run-gmail-duckdb-pipeline, complaint-workspace search-email-duckdb, complaint-workspace tooling-contract, complaint-workspace set-claim-type, complaint-workspace update-synopsis, complaint-workspace export-packet, complaint-workspace export-markdown, complaint-workspace export-pdf, complaint-workspace export-docx, complaint-workspace analyze-output, complaint-workspace review-ui, complaint-workspace optimize-ui, complaint-workspace browser-audit\n"
+                "MCP server tools: complaint.create_identity, complaint.list_intake_questions, complaint.list_claim_elements, complaint.start_session, complaint.submit_intake, complaint.save_evidence, complaint.import_gmail_evidence, complaint.run_gmail_duckdb_pipeline, complaint.search_email_duckdb_corpus, complaint.review_case, complaint.build_mediator_prompt, complaint.get_workflow_capabilities, complaint.get_tooling_contract, complaint.generate_complaint, complaint.update_draft, complaint.export_complaint_packet, complaint.export_complaint_markdown, complaint.export_complaint_pdf, complaint.export_complaint_docx, complaint.analyze_complaint_output, complaint.review_generated_exports, complaint.update_claim_type, complaint.update_case_synopsis, complaint.reset_session, complaint.review_ui, complaint.optimize_ui, complaint.run_browser_audit\n"
+                "Browser SDK: window.ComplaintMcpSdk.ComplaintMcpClient with bootstrapWorkspace(), getOrCreateDid(), callTool(), importGmailEvidence(), runGmailDuckdbPipeline(), searchEmailDuckdb(), getToolingContract(), exportComplaintPacket(), exportComplaintMarkdown(), exportComplaintPdf(), exportComplaintDocx(), analyzeComplaintOutput(), reviewGeneratedExports(), updateClaimType(), updateCaseSynopsis(), reviewUiArtifacts(), optimizeUiArtifacts(), and runBrowserAudit()"
             ),
             "Current workspace HTML:",
             workspace_html,
@@ -288,10 +1000,17 @@ def build_ui_ux_review_prompt(
                 "If exported complaint markdown or PDF artifacts are present, critique whether the final complaint output is coherent, filing-shaped, and consistent with what the UI promised the user during intake, review, and draft generation."
             ),
             (
+                "Explicitly verify whether the generated complaint still presents a recognizable caption, civil action header, jurisdiction or venue section, factual allegations, count headings, prayer for relief, and signature block. "
+                "If any of those elements are missing, mislabeled, or generic, treat that as both a complaint-output defect and a UI/UX failure."
+            ),
+            (
                 "If complaint-output artifacts include claim-type alignment data, explicitly judge whether the UI let the selected claim type drift into the wrong complaint heading, wrong count heading, or a generic pleading shape."
             ),
             (
                 "If complaint-output-informed UI suggestions are present, use them to propose concrete changes to buttons, validation, warnings, panel hierarchy, and handoff copy that would make the generated complaint stronger before export."
+            ),
+            (
+                "Under `Playwright Assertions To Add`, include assertions that markdown, PDF, and docx downloads succeed, and that the markdown or PDF visibly contains the formal pleading sections the UI promised."
             ),
             (
                 "Use the screenshot evidence together with any complaint-output analysis excerpts as a single actor/critic review context: the multimodal router should reason across both when images are available, and the llm_router fallback should still preserve those complaint-output suggestions in the review."
@@ -321,32 +1040,94 @@ def review_screenshot_audit_with_llm_router(
         goals=goals,
     )
     image_paths = _artifact_image_paths(artifacts)
-    backend = MultimodalRouterBackend(
-        id=f"complaint-ui-ux-review-{iteration}",
-        provider=provider,
-        model=model,
-    )
+    timeout_s = _ui_review_timeout_for_provider(provider)
+    backend_metadata: dict[str, Any]
+    multimodal_error: Exception | None = None
     try:
-        review_text = backend(
-            prompt,
-            image_paths=image_paths,
-            system_prompt=(
-                "You are reviewing complaint intake and MCP dashboard screenshots. "
-                "Use the images and prompt together to find concrete UI/UX issues."
-            ),
-        )
-    except Exception:
-        fallback_backend = LLMRouterBackend(
-            id=f"complaint-ui-ux-review-{iteration}-fallback",
+        backend = MultimodalRouterBackend(
+            id=f"complaint-ui-ux-review-{iteration}",
             provider=provider,
             model=model,
         )
-        review_text = fallback_backend(prompt)
+        started_at = perf_counter()
+        review_text = _call_with_timeout(
+            lambda: backend(
+                prompt,
+                image_paths=image_paths,
+                system_prompt=(
+                    "You are reviewing complaint intake and MCP dashboard screenshots. "
+                    "Use the images and prompt together to find concrete UI/UX issues."
+                ),
+            ),
+            timeout_s=timeout_s,
+        )
+        backend_metadata = {
+            "id": getattr(backend, "id", f"complaint-ui-ux-review-{iteration}"),
+            "provider": getattr(backend, "provider", provider),
+            "model": getattr(backend, "model", model),
+            "strategy": "multimodal_router",
+            "elapsed_seconds": round(float(perf_counter() - started_at), 3),
+            "timeout_seconds": timeout_s,
+            "image_count": len(image_paths),
+        }
+    except Exception as exc:
+        multimodal_error = exc
+        try:
+            fallback_backend = LLMRouterBackend(
+                id=f"complaint-ui-ux-review-{iteration}-fallback",
+                provider=provider,
+                model=model,
+            )
+            started_at = perf_counter()
+            review_text = _call_with_timeout(
+                lambda: fallback_backend(prompt),
+                timeout_s=timeout_s,
+            )
+            backend_metadata = {
+                "id": getattr(fallback_backend, "id", f"complaint-ui-ux-review-{iteration}-fallback"),
+                "provider": getattr(fallback_backend, "provider", provider),
+                "model": getattr(fallback_backend, "model", model),
+                "strategy": "llm_router",
+                "elapsed_seconds": round(float(perf_counter() - started_at), 3),
+                "timeout_seconds": timeout_s,
+                "fallback_from": "multimodal_router",
+                "fallback_error": str(multimodal_error),
+            }
+        except Exception as fallback_exc:
+            review_text = _build_timeout_fallback_review_markdown(
+                artifacts=artifacts,
+                multimodal_error=multimodal_error,
+                fallback_error=fallback_exc,
+            )
+            backend_metadata = {
+                "id": f"complaint-ui-ux-review-{iteration}-fallback",
+                "provider": provider,
+                "model": model,
+                "strategy": "deterministic_fallback",
+                "timeout_seconds": timeout_s,
+                "multimodal_error": str(multimodal_error),
+                "fallback_error": str(fallback_exc),
+            }
+    structured_review = structure_ui_ux_review(
+        review_text=review_text,
+        artifacts=artifacts,
+        iteration=iteration,
+    )
     return {
         "iteration": iteration,
         "artifact_count": len(artifacts),
         "review": review_text,
+        "backend": backend_metadata,
         "artifacts": artifacts,
+        "structured_review": structured_review,
+        "issues": list(structured_review.get("issues") or []),
+        "recommended_changes": list(structured_review.get("recommended_changes") or []),
+        "broken_controls": list(structured_review.get("broken_controls") or []),
+        "playwright_followups": list(structured_review.get("playwright_followups") or []),
+        "stage_findings": dict(structured_review.get("stage_findings") or {}),
+        "screenshot_findings": list(structured_review.get("screenshot_findings") or []),
+        "optimization_targets": list(structured_review.get("optimization_targets") or []),
+        "carry_forward_assessment": dict(structured_review.get("carry_forward_assessment") or {}),
     }
 
 
@@ -362,31 +1143,92 @@ def run_iterative_ui_ux_workflow(
     goals: list[str] | None = None,
     initial_previous_review: str | None = None,
     supplemental_artifacts: list[dict[str, Any]] | None = None,
+    reuse_existing_screenshots: bool = False,
 ) -> dict[str, Any]:
     resolved_goals = _resolve_review_goals(goals)
     resolved_notes = _resolve_review_notes(notes)
     target_output_dir = Path(output_dir or (Path(screenshot_dir) / "reviews"))
     target_output_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = target_output_dir / "workflow-progress.json"
+    _write_progress_artifact(
+        progress_path,
+        {
+            "status": "initialized",
+            "iterations_requested": max(1, iterations),
+            "screenshot_dir": str(screenshot_dir),
+            "pytest_target": str(pytest_target),
+            "provider": str(provider or ""),
+            "model": str(model or ""),
+            "reuse_existing_screenshots": bool(reuse_existing_screenshots),
+        },
+    )
 
     previous_review: str | None = initial_previous_review
     run_reports: list[dict[str, Any]] = []
+    latest_structured_review: dict[str, Any] = {}
+    latest_backend: dict[str, Any] = {}
 
     for iteration in range(1, max(1, iterations) + 1):
-        audit = run_playwright_screenshot_audit(
-            screenshot_dir=screenshot_dir,
-            pytest_target=pytest_target,
-        )
+        existing_artifacts = collect_screenshot_artifacts(screenshot_dir)
+        if reuse_existing_screenshots and existing_artifacts:
+            _write_progress_artifact(
+                progress_path,
+                {
+                    "status": "reusing_existing_screenshots",
+                    "iteration": iteration,
+                    "output_dir": str(target_output_dir),
+                    "artifact_count": len(existing_artifacts),
+                },
+            )
+            audit = _reuse_existing_screenshot_audit(screenshot_dir)
+        else:
+            _write_progress_artifact(
+                progress_path,
+                {
+                    "status": "running_playwright_audit",
+                    "iteration": iteration,
+                    "output_dir": str(target_output_dir),
+                },
+            )
+            audit = run_playwright_screenshot_audit(
+                screenshot_dir=screenshot_dir,
+                pytest_target=pytest_target,
+            )
         if audit["returncode"] != 0:
+            _write_progress_artifact(
+                progress_path,
+                {
+                    "status": "playwright_audit_failed",
+                    "iteration": iteration,
+                    "returncode": int(audit.get("returncode") or 1),
+                },
+            )
             raise RuntimeError(
                 "Playwright screenshot audit failed.\n"
                 f"stdout:\n{audit['stdout']}\n\nstderr:\n{audit['stderr']}"
             )
         if int(audit.get("artifact_count") or 0) <= 0:
+            _write_progress_artifact(
+                progress_path,
+                {
+                    "status": "playwright_audit_empty",
+                    "iteration": iteration,
+                    "returncode": int(audit.get("returncode") or 0),
+                },
+            )
             raise RuntimeError(
                 "Playwright screenshot audit completed without screenshot artifacts.\n"
                 f"stdout:\n{audit['stdout']}\n\nstderr:\n{audit['stderr']}"
             )
 
+        _write_progress_artifact(
+            progress_path,
+            {
+                "status": "running_router_review",
+                "iteration": iteration,
+                "artifact_count": int(audit.get("artifact_count") or 0),
+            },
+        )
         review = review_screenshot_audit_with_llm_router(
             screenshot_dir=screenshot_dir,
             iteration=iteration,
@@ -401,25 +1243,63 @@ def run_iterative_ui_ux_workflow(
         json_path = target_output_dir / f"iteration-{iteration:02d}-review.json"
         markdown_path.write_text(review["review"])
         json_path.write_text(json.dumps(review, indent=2, sort_keys=True))
+        _write_progress_artifact(
+            progress_path,
+            {
+                "status": "review_written",
+                "iteration": iteration,
+                "review_markdown_path": str(markdown_path),
+                "review_json_path": str(json_path),
+                "artifact_count": int(review.get("artifact_count") or 0),
+            },
+        )
         previous_review = review["review"]
+        latest_structured_review = dict(review.get("structured_review") or {})
+        latest_backend = dict(review.get("backend") or {})
         run_reports.append(
             {
                 "iteration": iteration,
                 "audit": audit,
+                "backend": dict(review.get("backend") or {}),
                 "artifact_count": review["artifact_count"],
                 "review_excerpt": str(review["review"] or "")[:600],
                 "review_markdown_path": str(markdown_path),
                 "review_json_path": str(json_path),
+                "issues_count": len(list(review.get("issues") or [])),
+                "broken_controls_count": len(list(review.get("broken_controls") or [])),
+                "optimization_target_count": len(list(review.get("optimization_targets") or [])),
+                "carry_forward_summary": str((review.get("carry_forward_assessment") or {}).get("summary") or "").strip(),
             }
         )
 
+    _write_progress_artifact(
+        progress_path,
+        {
+            "status": "completed",
+            "iterations_completed": len(run_reports),
+            "latest_review_json_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.json") if run_reports else "",
+        },
+    )
+    latest_progress = json.loads(progress_path.read_text()) if progress_path.exists() else {}
     return {
         "iterations": len(run_reports),
         "screenshot_dir": str(screenshot_dir),
         "output_dir": str(target_output_dir),
         "latest_review": previous_review,
+        "backend": latest_backend,
+        "latest_progress": latest_progress,
+        "review": latest_structured_review,
+        "issues": list(latest_structured_review.get("issues") or []),
+        "recommended_changes": list(latest_structured_review.get("recommended_changes") or []),
+        "broken_controls": list(latest_structured_review.get("broken_controls") or []),
+        "playwright_followups": list(latest_structured_review.get("playwright_followups") or []),
+        "stage_findings": dict(latest_structured_review.get("stage_findings") or {}),
+        "screenshot_findings": list(latest_structured_review.get("screenshot_findings") or []),
+        "optimization_targets": list(latest_structured_review.get("optimization_targets") or []),
+        "carry_forward_assessment": dict(latest_structured_review.get("carry_forward_assessment") or {}),
         "latest_review_markdown_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.md") if run_reports else None,
         "latest_review_json_path": str(target_output_dir / f"iteration-{len(run_reports):02d}-review.json") if run_reports else None,
+        "reuse_existing_screenshots": bool(reuse_existing_screenshots),
         "runs": run_reports,
     }
 
@@ -447,6 +1327,7 @@ def run_closed_loop_ui_ux_improvement(
     components: dict[str, Any] | None = None,
     stop_when_review_stable: bool = True,
     break_on_no_changes: bool = True,
+    reuse_existing_screenshots: bool = False,
 ) -> dict[str, Any]:
     from adversarial_harness import Optimizer
 
@@ -476,6 +1357,7 @@ def run_closed_loop_ui_ux_improvement(
         components=components,
         stop_when_review_stable=stop_when_review_stable,
         break_on_no_changes=break_on_no_changes,
+        reuse_existing_screenshots=reuse_existing_screenshots,
     )
 
 
@@ -494,6 +1376,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--method", default=DEFAULT_OPTIMIZER_METHOD)
     parser.add_argument("--priority", type=int, default=DEFAULT_OPTIMIZER_PRIORITY)
     parser.add_argument("--max-rounds", type=int, default=0)
+    parser.add_argument("--reuse-existing-screenshots", action="store_true")
     args = parser.parse_args(argv)
 
     if args.max_rounds > 0:
@@ -509,6 +1392,7 @@ def main(argv: list[str] | None = None) -> int:
             goals=args.goals,
             method=args.method,
             priority=args.priority,
+            reuse_existing_screenshots=args.reuse_existing_screenshots,
         )
     else:
         result = run_iterative_ui_ux_workflow(
@@ -520,6 +1404,7 @@ def main(argv: list[str] | None = None) -> int:
             pytest_target=args.pytest_target,
             notes=args.notes,
             goals=args.goals,
+            reuse_existing_screenshots=args.reuse_existing_screenshots,
         )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -538,5 +1423,7 @@ __all__ = [
     "run_closed_loop_ui_ux_improvement",
     "run_iterative_ui_ux_workflow",
     "run_playwright_screenshot_audit",
+    "_reuse_existing_screenshot_audit",
+    "structure_ui_ux_review",
     "main",
 ]

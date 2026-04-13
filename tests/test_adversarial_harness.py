@@ -3310,6 +3310,18 @@ SUGGESTIONS:
             item.get("title") == "Formal complaint diagnostics warning"
             for item in bundle.recommended_changes
         )
+        assert any(
+            item.get("id") == "complaint-output-formality"
+            for item in bundle.patch_briefs
+        )
+        assert any(
+            item.get("id") == "claim-type-alignment"
+            for item in bundle.patch_briefs
+        )
+        assert any(
+            item.get("title") == "Repair Next Best Action card"
+            for item in bundle.patch_briefs
+        )
 
     def test_ui_patch_task_metadata_includes_complaint_output_suggestions(self, tmp_path):
         optimizer = Optimizer()
@@ -3335,6 +3347,57 @@ SUGGESTIONS:
             recommendation == "Template fallback warning"
             for recommendation in summary.get("recommendations", [])
         )
+        assert any(
+            brief.get("id") == "complaint-output-formality"
+            for brief in summary.get("patch_briefs", [])
+            if isinstance(brief, dict)
+        )
+        assert any(
+            brief.get("id") == "claim-type-alignment"
+            for brief in summary.get("patch_briefs", [])
+            if isinstance(brief, dict)
+        )
+
+    def test_ui_patch_task_prefers_patch_briefs_artifact_when_available(self, tmp_path):
+        optimizer = Optimizer()
+        report = _fake_ui_review_report(tmp_path)
+        patch_briefs_path = tmp_path / "patch-briefs.json"
+        patch_briefs_path.write_text(
+            json.dumps(
+                {
+                    "patch_briefs": [
+                        {
+                            "id": "warning-brief",
+                            "title": "Warning brief",
+                            "surface": "/workspace",
+                            "severity": "warning",
+                            "related_controls": ["Export PDF"],
+                            "validation_checks": ["Check warning flow."],
+                        },
+                        {
+                            "id": "critical-brief",
+                            "title": "Critical brief",
+                            "surface": "/workspace?tab=draft",
+                            "severity": "critical",
+                            "related_controls": ["Generate Draft", "Export PDF"],
+                            "validation_checks": ["Check draft flow.", "Check export flow."],
+                        },
+                    ]
+                }
+            )
+        )
+        report["patch_briefs_path"] = str(patch_briefs_path)
+
+        tasks = optimizer.build_ui_patch_tasks(ui_review_report=report, components=optimizer._fallback_agentic_optimizer_components())
+
+        summary = dict(tasks[0].metadata.get("report_summary") or {})
+        prioritized = list(summary.get("prioritized_patch_briefs") or [])
+        assert summary.get("patch_briefs_path") == str(patch_briefs_path)
+        assert prioritized
+        assert prioritized[0]["id"] == "critical-brief"
+        assert summary.get("top_patch_brief", {}).get("id") == "critical-brief"
+        assert summary.get("active_target_files")
+        assert "Critical brief" in tasks[0].description
 
     def test_run_adversarial_autopatch_batch_includes_ui_review_lane_when_screenshots_exist(self, tmp_path, monkeypatch):
         review_output_dir = tmp_path / "reviews"
@@ -3388,6 +3451,8 @@ SUGGESTIONS:
         assert payload["ui_phase_tasks"][0]["phase"] == "ui_ux_review"
         assert "templates/workspace.html" in payload["ui_phase_tasks"][0]["target_files"]
         assert Path(payload["ui_phase_tasks"][0]["patch_path"]).is_file()
+        assert "prioritized_patch_briefs" in payload["ui_phase_tasks"][0]
+        assert "top_patch_brief" in payload["ui_phase_tasks"][0]
         assert payload["ui_ux_workflow_result"]["iterations"] == 1
         assert "templates/workspace.html" in payload["ui_ux_optimization_bundle"]["target_files"]
         assert payload["ui_ux_phase_task"]["workflow_type"] == "ui_ux_autopatch"

@@ -76,6 +76,14 @@ def _run_uvicorn_app(app: Any, application_config: Dict[str, Any]) -> None:
     )
 
 
+def _run_server_app(mediator: Any, application_config: Dict[str, Any]) -> None:
+    SERVER(mediator).run(
+        host=application_config.get("host", "0.0.0.0"),
+        port=application_config.get("port", 8000),
+        reload=bool(application_config.get("reload", False)),
+    )
+
+
 def _run_adversarial_autopatch_app(mediator: Any, application_config: Dict[str, Any]) -> None:
     project_root = application_config.get("project_root")
     if not project_root:
@@ -139,8 +147,8 @@ def launch_application(
         return
 
     if canonical == "server":
-        target = SERVER
-        args = (mediator,)
+        target = _run_server_app
+        args = (mediator, application_config)
     else:
         app = create_uvicorn_app_for_type(canonical, mediator)
         target = _run_uvicorn_app

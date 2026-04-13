@@ -1,5 +1,6 @@
 import json
 import shlex
+import importlib.util
 from pathlib import Path
 from urllib import request
 from adversarial_harness.demo_autopatch import run_adversarial_autopatch_batch
@@ -7,6 +8,7 @@ from lib.log import make_logger
 from mediator.exceptions import UserPresentableException
 from datetime import datetime
 from glob import glob
+from uuid import uuid4
 
 log = make_logger('cli')
 
@@ -14,6 +16,7 @@ log = make_logger('cli')
 class CLI:
 	def __init__(self, mediator):
 		self.mediator = mediator
+		self._temporary_session_announced = False
 
 		log.info('created CLI app')
 
@@ -30,20 +33,25 @@ class CLI:
 
 	def loop(self):
 		while True:
-			
-			if self.mediator.state.hashed_username is not None and self.mediator.state.hashed_password is not None:
-				profile = self.mediator.state.load_profile(self, {"hashed_username": self.mediator.state.hashed_username, "hashed_password": self.mediator.state.hashed_password})
+			request_results = self._ensure_session_identity()
+			if self._using_temporary_session():
+				profile = {"data": {}}
 			else:
-				if self.mediator.state.username is None:	
-					self.mediator.state.username = input('Username:\n> ')
-			
-				if self.mediator.state.password is None:
-					self.mediator.state.password = input('Password:\n> ')
-				profile = self.mediator.state.load_profile(self, {"username": self.mediator.state.username, "password": self.mediator.state.password})
+				try:
+					profile = self.mediator.state.load_profile({"results": request_results})
+				except Exception as exception:
+					self.print_error('profile load failed, continuing with a local-only session: %s' % exception)
+					profile = {"data": {}}
+			if not isinstance(profile, dict):
+				profile = {"data": {}}
 
-			last_question = self.mediator.state.last_question
+			last_question = self._resolve_prompt_text()
 
-			text = input(last_question + '> ')
+			try:
+				text = input(last_question + '> ')
+			except EOFError:
+				print('\nExiting mediator CLI.')
+				return
 			self.mediator.state.answered_questions["last_question"] = text
 
 			if text == '':
@@ -51,13 +59,65 @@ class CLI:
 			elif text[0] != '!':
 				self.feed(text)
 			else:
-				self.interpret_command(text[len(last_question + '> '):])
+				self.interpret_command(text[1:])
 
-			self.mediator.state.last_question.pop(0)
-			self.mediator.state.store_profile(self, profile)
+			if isinstance(self.mediator.state.last_question, list) and self.mediator.state.last_question:
+				self.mediator.state.last_question.pop(0)
+			if not self._using_temporary_session():
+				try:
+					self.mediator.state.store_profile({"results": {
+						**request_results,
+						"data": profile.get("data", {}) if isinstance(profile, dict) else {},
+					}})
+				except Exception as exception:
+					self.print_error('profile save failed, continuing with a local-only session: %s' % exception)
+
+	def _ensure_session_identity(self):
+		if self.mediator.state.hashed_username is not None and self.mediator.state.hashed_password is not None:
+			return {
+				"hashed_username": self.mediator.state.hashed_username,
+				"hashed_password": self.mediator.state.hashed_password,
+			}
+		if self.mediator.state.username is None or self.mediator.state.password is None:
+			temporary_id = f"temporary-{uuid4().hex[:12]}"
+			self.mediator.state.username = temporary_id
+			self.mediator.state.password = temporary_id
+			if not self._temporary_session_announced:
+				print('Using a temporary local session. No username or password is required.')
+				self._temporary_session_announced = True
+		return {
+			"username": self.mediator.state.username,
+			"password": self.mediator.state.password,
+		}
+
+	def _using_temporary_session(self):
+		username = str(self.mediator.state.username or '')
+		password = str(self.mediator.state.password or '')
+		return username.startswith('temporary-') and password == username
+
+	def _resolve_prompt_text(self):
+		last_question = self.mediator.state.last_question
+		if isinstance(last_question, list) and last_question:
+			return str(last_question[0] or '').strip() or 'Response'
+		if isinstance(last_question, str) and last_question.strip():
+			return last_question.strip()
+		payload_getter = getattr(self.mediator, 'get_current_inquiry_payload', None)
+		if callable(payload_getter):
+			try:
+				payload = payload_getter() or {}
+				inquiry = payload.get('inquiry') or {}
+				question = str(inquiry.get('question') or payload.get('question') or '').strip()
+				if question:
+					return question
+			except Exception:
+				pass
+		return 'Response'
 
 	def feed(self, text=None):
 		try:
+			if text is not None:
+				print('\033[96m%s\033[0m' % f'You: {text}')
+			print('\033[93m%s\033[0m' % 'Mediator is thinking...')
 			response = self.mediator.io(text)
 			self.print_response(response)
 			payload_getter = getattr(self.mediator, 'get_current_inquiry_payload', None)
@@ -83,7 +143,13 @@ class CLI:
 			return
 		command = parts[0]
 
-		if command == 'reset':
+		if command == 'help':
+			self.print_commands()
+		elif command == 'status':
+			self.print_response(self._format_status_output())
+		elif command == 'history':
+			self.print_response(self._format_history_output(parts[1:]))
+		elif command == 'reset':
 			self.mediator.reset()
 			self.feed()
 		elif command == 'save':
@@ -101,6 +167,86 @@ class CLI:
 		else:
 			self.print_error('command unknown, available commands are:')
 			self.print_commands()
+
+	def _format_status_output(self):
+		state = self.mediator.state
+		last_question = self._resolve_prompt_text()
+		answered_count = len(state.answered_questions) if isinstance(state.answered_questions, dict) else 0
+		chat_history = state.chat_history if isinstance(getattr(state, 'chat_history', None), dict) else {}
+		chat_count = len(chat_history)
+		current_inquiry = getattr(state, 'current_inquiry', None)
+		current_inquiry_type = ''
+		if isinstance(current_inquiry, dict):
+			current_inquiry_type = str(current_inquiry.get('type') or current_inquiry.get('question_type') or '').strip()
+		lines = ['session status:']
+		lines.append(f"- session_mode={'temporary-local' if self._using_temporary_session() else 'profile-backed'}")
+		lines.append(f"- answered_questions={answered_count}")
+		lines.append(f"- chat_history_entries={chat_count}")
+		lines.append(f"- next_prompt={last_question}")
+		if current_inquiry_type:
+			lines.append(f"- current_inquiry_type={current_inquiry_type}")
+		return '\n'.join(lines)
+
+	def _format_history_output(self, args):
+		limit = 5
+		if args:
+			try:
+				limit = max(1, min(20, int(args[0])))
+			except Exception:
+				limit = 5
+		chat_history = self.mediator.state.chat_history if isinstance(getattr(self.mediator.state, 'chat_history', None), dict) else {}
+		if not chat_history:
+			return 'chat history:\n- no messages recorded yet'
+		lines = ['chat history:']
+		for timestamp, entry in list(chat_history.items())[-limit:]:
+			if isinstance(entry, dict):
+				sender = str(entry.get('sender') or 'message').strip() or 'message'
+				message = str(entry.get('message') or entry.get('question') or '').strip()
+			else:
+				sender = 'message'
+				message = str(entry).strip()
+			if not message:
+				continue
+			lines.append(f"- [{timestamp}] {sender}: {message}")
+		return '\n'.join(lines)
+
+	def _local_state_dir(self):
+		return Path(__file__).resolve().parent.parent / 'statefiles'
+
+	def _build_local_session_payload(self):
+		state = self.mediator.state
+		return {
+			"saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+			"session_mode": "temporary-local" if self._using_temporary_session() else "profile-backed",
+			"state": {
+				"complaint_summary": getattr(state, 'complaint_summary', None),
+				"original_complaint": getattr(state, 'original_complaint', None),
+				"inquiries": getattr(state, 'inquiries', []),
+				"complaint": getattr(state, 'complaint', None),
+				"log": getattr(state, 'log', []),
+				"username": getattr(state, 'username', None),
+				"password": getattr(state, 'password', None),
+				"hashed_username": getattr(state, 'hashed_username', None),
+				"hashed_password": getattr(state, 'hashed_password', None),
+				"chat_history": getattr(state, 'chat_history', {}),
+				"questions": getattr(state, 'questions', {}),
+				"answered_questions": getattr(state, 'answered_questions', {}),
+				"last_question": getattr(state, 'last_question', None),
+				"last_message": getattr(state, 'last_message', None),
+				"current_inquiry": getattr(state, 'current_inquiry', None),
+				"current_inquiry_explanation": getattr(state, 'current_inquiry_explanation', None),
+				"data": getattr(state, 'data', {}),
+			},
+		}
+
+	def _restore_local_session_payload(self, payload):
+		state_payload = payload.get('state', {}) if isinstance(payload, dict) else {}
+		state = self.mediator.state
+		for field_name, value in state_payload.items():
+			setattr(state, field_name, value)
+		sync_chat_history = getattr(state, '_sync_chat_history_state', None)
+		if callable(sync_chat_history):
+			sync_chat_history()
 
 	def _parse_command_options(self, args):
 		options = {}
@@ -198,6 +344,12 @@ class CLI:
 				)
 			)
 			sections.append(
+				self._format_search_warning_summary(
+					'follow-up plan legal retrieval warnings:',
+					follow_up_plan_summary,
+				)
+			)
+			sections.append(
 				self._format_temporal_follow_up_summary(
 					'follow-up plan chronology summary:',
 					follow_up_plan_summary,
@@ -214,6 +366,12 @@ class CLI:
 			sections.append(
 				self._format_authority_search_history_summary(
 					'follow-up history authority search summary:',
+					follow_up_history_summary,
+				)
+			)
+			sections.append(
+				self._format_search_warning_summary(
+					'follow-up history legal retrieval warnings:',
 					follow_up_history_summary,
 				)
 			)
@@ -492,6 +650,42 @@ class CLI:
 				lines.append(f'  source_context: {source_context_summary}')
 		return '' if len(lines) == 1 else '\n'.join(lines)
 
+	def _format_search_warning_summary(self, title, follow_up_summary):
+		lines = [title]
+		for claim_type in sorted(follow_up_summary.keys()):
+			summary = follow_up_summary.get(claim_type, {})
+			if not isinstance(summary, dict):
+				continue
+			warning_count = int(summary.get('search_warning_count', 0) or 0)
+			warning_summary = summary.get('search_warning_summary', []) if isinstance(summary.get('search_warning_summary'), list) else []
+			warning_code_counts = summary.get('warning_code_counts', {}) if isinstance(summary.get('warning_code_counts'), dict) else {}
+			warning_family_counts = summary.get('warning_family_counts', {}) if isinstance(summary.get('warning_family_counts'), dict) else {}
+			hf_dataset_id_counts = summary.get('hf_dataset_id_counts', {}) if isinstance(summary.get('hf_dataset_id_counts'), dict) else {}
+			if warning_count <= 0 or not warning_summary:
+				continue
+			lines.append(f'- {claim_type}: warnings={warning_count}')
+			if warning_family_counts:
+				family_labels = self._format_cli_count_labels(warning_family_counts)
+				lines.append(f'  warning_families: {family_labels}')
+			if warning_code_counts:
+				warning_labels = self._format_cli_count_labels(warning_code_counts)
+				lines.append(f'  warning_codes: {warning_labels}')
+			if hf_dataset_id_counts:
+				dataset_labels = ', '.join(
+					f"{dataset_id}={count}" for dataset_id, count in sorted(hf_dataset_id_counts.items())
+				)
+				lines.append(f'  hf_datasets: {dataset_labels}')
+			primary_warning = warning_summary[0] if warning_summary else {}
+			warning_message = str(primary_warning.get('warning_message') or '').strip()
+			warning_code = str(primary_warning.get('warning_code') or '').strip()
+			warning_family = self._humanize_cli_label(primary_warning.get('family')) or 'Unknown'
+			if warning_message:
+				message_prefix = f'{warning_family}'
+				if warning_code:
+					message_prefix += f' [{warning_code}]'
+				lines.append(f'  latest_warning: {message_prefix} {warning_message}')
+		return '' if len(lines) == 1 else '\n'.join(lines)
+
 	def _format_temporal_follow_up_summary(self, title, follow_up_summary):
 		lines = [title]
 		for claim_type in sorted(follow_up_summary.keys()):
@@ -671,6 +865,12 @@ class CLI:
 				)
 			)
 			sections.append(
+				self._format_search_warning_summary(
+					'follow-up execution legal retrieval warnings:',
+					follow_up_execution_summary,
+				)
+			)
+			sections.append(
 				self._format_temporal_follow_up_summary(
 					'follow-up execution chronology summary:',
 					follow_up_execution_summary,
@@ -696,6 +896,12 @@ class CLI:
 			sections.append(
 				self._format_authority_search_history_summary(
 					'follow-up history authority search summary:',
+					post_execution_history_summary,
+				)
+			)
+			sections.append(
+				self._format_search_warning_summary(
+					'follow-up history legal retrieval warnings:',
 					post_execution_history_summary,
 				)
 			)
@@ -760,6 +966,16 @@ class CLI:
 		output_dir = options.get('output_dir')
 		if output_dir is None and positionals:
 			output_dir = positionals[0]
+		output_formats = options.get('output_formats')
+		if not output_formats:
+			output_formats = ['pdf']
+		docx_available = importlib.util.find_spec('docx') is not None
+		if isinstance(output_formats, list):
+			if 'docx' in output_formats and not docx_available:
+				self.print_error('python-docx is not installed; skipping docx export for this run.')
+				output_formats = [fmt for fmt in output_formats if fmt != 'docx']
+			if not output_formats:
+				output_formats = ['pdf']
 		service_recipient_details = options.get('service_recipient_details')
 		if isinstance(service_recipient_details, str):
 			try:
@@ -811,15 +1027,17 @@ class CLI:
 			service_date=options.get('service_date'),
 			affidavit_title=options.get('affidavit_title'),
 			affidavit_intro=options.get('affidavit_intro'),
-			affidavit_facts=options.get('affidavit_facts'),
-			affidavit_supporting_exhibits=affidavit_supporting_exhibits,
-			affidavit_include_complaint_exhibits=options.get('affidavit_include_complaint_exhibits'),
-			affidavit_venue_lines=options.get('affidavit_venue_lines'),
-			affidavit_jurat=options.get('affidavit_jurat'),
-			affidavit_notary_block=options.get('affidavit_notary_block'),
-			output_dir=output_dir,
-			output_formats=options.get('output_formats'),
-		)
+				affidavit_facts=options.get('affidavit_facts'),
+				affidavit_supporting_exhibits=affidavit_supporting_exhibits,
+				affidavit_include_complaint_exhibits=options.get('affidavit_include_complaint_exhibits'),
+				affidavit_venue_lines=options.get('affidavit_venue_lines'),
+				affidavit_jurat=options.get('affidavit_jurat'),
+				affidavit_notary_block=options.get('affidavit_notary_block'),
+				email_timeline_handoff_path=options.get('email_timeline_handoff_path'),
+				email_authority_enrichment_path=options.get('email_authority_enrichment_path'),
+				output_dir=output_dir,
+				output_formats=output_formats,
+			)
 		self.print_response(self._format_export_complaint_output(payload))
 
 	def _format_export_complaint_output(self, payload):
@@ -899,16 +1117,51 @@ class CLI:
 
 
 	def save(self):
-		request = dict({"username": self.mediator.state.username, "password": self.mediator.state.password})
-		profile = self.mediator.state.load_profile(self, request)
+		if self._using_temporary_session():
+			output_dir = self._local_state_dir()
+			output_dir.mkdir(parents=True, exist_ok=True)
+			output_path = output_dir / "temporary-cli-session-latest.json"
+			payload = self._build_local_session_payload()
+			output_path.write_text(json.dumps(payload, indent=2, default=str))
+			print(f"Temporary session saved locally to {output_path}")
+			return
+		request = {
+			"results": {
+				"username": self.mediator.state.username,
+				"password": self.mediator.state.password,
+			}
+		}
+		profile = self.mediator.state.load_profile(request)
+		if not isinstance(profile, dict):
+			profile = {"data": {}}
 		profile["data"] = self.mediator.state.answered_questions
 		profile["data"]["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-		self.mediator.state.store_profile(self, profile)
+		self.mediator.state.store_profile({"results": {
+			"username": self.mediator.state.username,
+			"password": self.mediator.state.password,
+			"data": profile.get("data", {}),
+		}})
 		print("Profile saved")
 	
 	def resume(self):
-		request = dict({"username": self.mediator.state.username, "password": self.mediator.state.password})
-		profile = self.mediator.state.load_profile(self,request)
+		if self._using_temporary_session():
+			state_dir = self._local_state_dir()
+			files = sorted(state_dir.glob('temporary-cli-session-*.json'))
+			if not files:
+				print(f'No temporary session files found in {state_dir}')
+				return
+			latest_file = files[-1]
+			payload = json.loads(latest_file.read_text())
+			self._restore_local_session_payload(payload)
+			print(f'Resumed temporary local session from {latest_file}')
+			return
+		request = {
+			"results": {
+				"username": self.mediator.state.username,
+				"password": self.mediator.state.password,
+			}
+		}
+		profile = self.mediator.state.load_profile(request)
 		print('')
 		print('[resumed state]')
 		print('')
@@ -919,12 +1172,16 @@ class CLI:
 
 
 	def print_response(self, text):
+		print('\033[92m%s\033[0m' % 'Mediator response:')
 		print('\033[1m%s\033[0m' % text)
 
 	def print_error(self, text):
 		print('\033[91m%s\033[0m' % text)
 
 	def print_commands(self):
+		print('!help       show available commands')
+		print('!status     show current session status')
+		print('!history    show recent chat history (!history 10 for more)')
 		print('!reset      wipe current state and start over')
 		print('!resume     resumes from a statefile from disk')
 		print('!save       saves current state to disk')

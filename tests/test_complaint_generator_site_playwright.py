@@ -326,7 +326,10 @@ def _build_document_package(artifact_dir: Path) -> dict:
 
 @pytest.fixture
 def site_app(monkeypatch: pytest.MonkeyPatch):
+    import applications.complaint_workspace as complaint_workspace_module
     import applications.document_api as document_api_module
+    import applications.ui_review as ui_review_module
+    import complaint_generator.ui_ux_workflow as ui_ux_workflow_module
 
     mediator = _build_dashboard_mediator()
     artifact_dir = Path(tempfile.mkdtemp(prefix="complaint-site-playwright-"))
@@ -340,6 +343,308 @@ def site_app(monkeypatch: pytest.MonkeyPatch):
         return {"status": "missing", "error": "unknown cid"}
 
     monkeypatch.setattr(document_api_module, "retrieve_bytes", fake_retrieve_bytes)
+
+    def fake_refine_draft_with_llm_router(self, state, base_draft, **kwargs):
+        answers = dict(state.get("intake_answers") or {})
+        plaintiff = str(answers.get("party_name") or "Jane Doe").strip()
+        defendant = str(answers.get("opposing_party") or "Acme Corporation").strip()
+        claim_type = str(base_draft.get("claim_type") or state.get("claim_type") or "retaliation").strip() or "retaliation"
+        claim_label = "Housing Discrimination" if claim_type == "housing_discrimination" else "Retaliation"
+        count_heading = "COUNT I - HOUSING DISCRIMINATION" if claim_type == "housing_discrimination" else "COUNT I - RETALIATION"
+        relief = [str(item).strip() for item in list(base_draft.get("requested_relief") or ["Back pay", "Injunctive relief"]) if str(item).strip()]
+        relief_lines = "\n".join(f"{index + 1}. {item}" for index, item in enumerate(relief))
+        body = "\n\n".join(
+            [
+                "IN THE UNITED STATES DISTRICT COURT",
+                str(answers.get("court_header") or "FOR THE NORTHERN DISTRICT OF CALIFORNIA").strip(),
+                "",
+                f"{plaintiff}, Plaintiff,",
+                "v.",
+                f"{defendant}, Defendant.",
+                "",
+                "Civil Action No. ________________",
+                f"COMPLAINT FOR {claim_label.upper()}",
+                "JURY TRIAL DEMANDED",
+                "",
+                "NATURE OF THE ACTION",
+                f"{plaintiff} brings this {claim_label.lower()} complaint against {defendant}.",
+                "",
+                "JURISDICTION AND VENUE",
+                "Jurisdiction and venue are proper because the events described here were directed into this district.",
+                "",
+                "PARTIES",
+                f"1. Plaintiff {plaintiff} is the complainant injured by Defendant's conduct.",
+                f"2. Defendant {defendant} is the opposing party responsible for the acts described below.",
+                "",
+                "FACTUAL ALLEGATIONS",
+                f"3. Plaintiff engaged in protected activity by {str(answers.get('protected_activity') or 'reporting misconduct').strip().lower()}.",
+                f"4. Defendant then took adverse action by {str(answers.get('adverse_action') or 'terminating Plaintiff').strip().lower()}.",
+                f"5. The relevant chronology is as follows: {str(answers.get('timeline') or 'the complaint and retaliation occurred in close proximity').strip()}.",
+                f"6. Plaintiff suffered harm including {str(answers.get('harm') or 'economic and emotional injury').strip().lower()}.",
+                "",
+                "EVIDENTIARY SUPPORT AND NOTICE",
+                "7. Plaintiff has preserved testimony and documentary evidence supporting the chronology, causation, and resulting harm.",
+                "8. Plaintiff will supplement authenticated exhibits and additional testimony as discovery proceeds.",
+                "",
+                "CLAIM FOR RELIEF",
+                count_heading,
+                "9. Plaintiff repeats and realleges the preceding paragraphs as if fully set forth herein.",
+                "10. Defendant's conduct violated the governing anti-retaliation protections and entitles Plaintiff to relief.",
+                "",
+                "PRAYER FOR RELIEF",
+                "Wherefore, Plaintiff respectfully requests judgment against Defendant and the following relief:",
+                relief_lines or "1. Appropriate relief according to proof.",
+                "",
+                "JURY DEMAND",
+                "Plaintiff demands a trial by jury on all issues so triable.",
+                "",
+                "SIGNATURE BLOCK",
+                "Dated: ____________________",
+                "",
+                "Respectfully submitted,",
+                "",
+                plaintiff,
+                "Plaintiff, Pro Se",
+                "Address: ____________________",
+                "Telephone: ____________________",
+                "Email: ____________________",
+            ]
+        )
+        return {
+            **dict(base_draft or {}),
+            "title": f"{plaintiff} v. {defendant} {claim_label} Complaint",
+            "body": body,
+            "requested_relief": relief,
+            "draft_strategy": "llm_router",
+            "draft_backend": {
+                "id": "formal_complaint_reviewer",
+                "provider": "llm_router",
+                "model": "formal_complaint_reviewer",
+                "requested_provider": kwargs.get("provider") or "llm_router",
+                "requested_model": kwargs.get("model") or "formal_complaint_reviewer",
+            },
+            "draft_normalizations": [],
+        }
+
+    def fake_review_complaint_output_with_llm_router(markdown_text, **kwargs):
+        claim_type = str(kwargs.get("claim_type") or "retaliation").strip() or "retaliation"
+        return {
+            "backend": {
+                "strategy": "llm_router",
+                "provider": "llm_router",
+                "model": "formal_complaint_reviewer",
+            },
+            "review": {
+                "summary": f"The {claim_type.replace('_', ' ')} complaint reads like a formal filing and is suitable for continued UI-guided review.",
+                "filing_shape_score": 96,
+                "claim_type_alignment_score": 95,
+                "strengths": ["Caption is present", "Prayer for relief is present", "Signature posture is visible"],
+                "missing_formal_sections": [],
+                "issues": [
+                    {
+                        "severity": "low",
+                        "finding": "Export warnings could still be more explicit before download.",
+                        "complaint_impact": "The filing is strong, but users still need clearer readiness messaging.",
+                        "ui_implication": "The draft and integrations surfaces should keep the release gate visible before export.",
+                    }
+                ],
+                "ui_suggestions": [
+                    {
+                        "title": "Keep the release gate visible before export",
+                        "target_surface": "draft,review,integrations",
+                        "recommendation": "Show the filing-shape score and release verdict beside the download controls.",
+                        "why_it_matters": "This keeps users from treating a draft as filing-ready without checking support and export posture.",
+                    }
+                ],
+                "ui_priority_repairs": [
+                    {
+                        "priority": "high",
+                        "target_surface": "draft,integrations",
+                        "repair": "Preserve filing-shape and support warnings beside the export buttons.",
+                        "filing_benefit": "Users are less likely to download a complaint without understanding readiness and support.",
+                    }
+                ],
+                "actor_risk_summary": "The actor can now reach a formal complaint, but still needs explicit release-gate cues before export.",
+                "critic_gate": {
+                    "verdict": "pass",
+                    "blocking_reason": "",
+                    "required_repairs": ["Keep export readiness messaging visible."],
+                },
+            },
+        }
+
+    def fake_iterative_ui_ux_workflow(**kwargs):
+        screenshot_dir = str(kwargs.get("screenshot_dir") or "artifacts/ui-audit/screenshots")
+        output_dir = str(kwargs.get("output_dir") or "artifacts/ui-audit/reviews")
+        return {
+            "iterations": int(kwargs.get("iterations") or 1),
+            "screenshot_dir": screenshot_dir,
+            "output_dir": output_dir,
+            "workflow_type": "iterative_ui_review",
+            "backend": {
+                "strategy": "multimodal_router",
+                "provider": "llm_router",
+                "model": "multimodal_router",
+            },
+            "latest_review": "Multimodal actor/critic review complete. Complaint-output suggestion carried into router review.",
+            "review": {
+                "summary": "Multimodal actor/critic review complete. Complaint-output suggestion carried into router review.",
+                "issues": [
+                    {
+                        "severity": "medium",
+                        "surface": "/workspace",
+                        "problem": "The export controls still compete with draft-editing controls.",
+                        "user_impact": "A complainant could download too early without noticing the release gate.",
+                        "recommended_fix": "Keep export warnings and next-step guidance pinned near the download buttons.",
+                    }
+                ],
+                "broken_controls": [
+                    {
+                        "surface": "/workspace",
+                        "control": "Download Markdown",
+                        "failure_mode": "Users may treat download as the primary CTA before reviewing readiness.",
+                        "repair": "Pin the release gate and support summary beside the export controls.",
+                    }
+                ],
+                "button_audit": [
+                    {
+                        "surface": "/workspace",
+                        "control": "Run Iterative UX Review",
+                        "expected_outcome": "Produce a multimodal actor/critic report for the current screenshot set.",
+                        "status": "pass",
+                        "notes": "The optimizer lane is exposed and actionable.",
+                    }
+                ],
+                "route_handoffs": [
+                    {
+                        "from_surface": "workspace",
+                        "to_surface": "chat",
+                        "trigger": "handoff-chat-button",
+                        "state_requirements": ["shared DID", "case synopsis"],
+                        "status": "pass",
+                    }
+                ],
+                "complaint_journey": {
+                    "tested_stages": ["chat", "intake", "evidence", "review", "draft", "integrations", "optimizer"],
+                    "journey_gaps": ["Export warnings should remain more prominent beside the download controls."],
+                    "sdk_tool_invocations": ["complaint.generate_complaint", "complaint.review_generated_exports", "complaint.review_ui"],
+                    "release_blockers": [],
+                },
+                "actor_plan": {
+                    "primary_objective": "Keep the release gate visible until the complaint is downloaded.",
+                    "repair_sequence": ["Pin release-gate messaging beside exports", "Reduce competing CTAs in the draft panel"],
+                },
+                "critic_review": {
+                    "verdict": "warning",
+                    "blocking_findings": ["Export controls still need stronger readiness framing."],
+                    "acceptance_checks": ["Download controls must keep the release gate visible.", "The optimizer report must stay wired to MCP tool invocations."],
+                },
+                "actor_summary": "The actor can complete the complaint, but export messaging still needs to feel safer and more linear.",
+                "critic_summary": "The critic accepts the flow, but wants a stronger release-gate emphasis near download controls.",
+                "actor_path_breaks": ["Export feels slightly too easy relative to the readiness messaging."],
+                "critic_test_obligations": ["Verify the release gate remains visible after complaint generation and before download."],
+                "stage_findings": {
+                    "Draft": "Complaint-output suggestion carried into router review.",
+                    "Integration Discovery": "The MCP tool contract remains visible from the workspace integrations panel.",
+                },
+                "playwright_followups": ["Capture the draft panel after the release gate updates and before export."],
+                "screenshot_findings": [
+                    {
+                        "name": "workspace-draft",
+                        "stage": "Draft",
+                        "surface": "/workspace?tab=draft",
+                        "stage_finding": "The screenshot shows export controls overshadowing readiness guidance.",
+                        "criticisms": [
+                            {
+                                "problem": "The export controls still compete with draft-editing controls.",
+                                "recommended_fix": "Keep export warnings and next-step guidance pinned near the download buttons.",
+                            }
+                        ],
+                    }
+                ],
+                "optimization_targets": [
+                    {
+                        "title": "Pin release-gate messaging beside exports",
+                        "target_surface": "templates/workspace.html",
+                        "reason": "The screenshot review shows the actor can download too early unless readiness stays visually dominant.",
+                    }
+                ],
+            },
+            "screenshot_findings": [
+                {
+                    "name": "workspace-draft",
+                    "stage": "Draft",
+                    "surface": "/workspace?tab=draft",
+                    "stage_finding": "The screenshot shows export controls overshadowing readiness guidance.",
+                    "criticisms": [
+                        {
+                            "problem": "The export controls still compete with draft-editing controls.",
+                            "recommended_fix": "Keep export warnings and next-step guidance pinned near the download buttons.",
+                        }
+                    ],
+                }
+            ],
+            "optimization_targets": [
+                {
+                    "title": "Pin release-gate messaging beside exports",
+                    "target_surface": "templates/workspace.html",
+                    "reason": "The screenshot review shows the actor can download too early unless readiness stays visually dominant.",
+                }
+            ],
+            "carry_forward_assessment": {
+                "prior_review_available": True,
+                "unresolved_findings": [
+                    {
+                        "stage": "Draft",
+                        "surface": "/workspace?tab=draft",
+                        "summary": "Export messaging is still competing with other draft actions.",
+                    }
+                ],
+                "resolved_findings": [
+                    {
+                        "stage": "Review",
+                        "surface": "/workspace?tab=review",
+                        "summary": "Support-gap guidance is more visible than it was before.",
+                    }
+                ],
+                "continued_optimization_targets": [
+                    {
+                        "title": "Pin release-gate messaging beside exports",
+                        "target_surface": "templates/workspace.html",
+                        "reason": "The export lane still needs stronger readiness framing.",
+                    }
+                ],
+                "retired_optimization_targets": [],
+                "summary": "1 prior screenshot finding still appears unresolved. 1 prior screenshot finding looks improved or no longer visible. 1 optimization target carried forward into this pass.",
+            },
+            "runs": [
+                {
+                    "iteration": 1,
+                    "review_excerpt": "Multimodal actor/critic review complete. Complaint-output suggestion carried into router review.",
+                    "issues_count": 1,
+                    "broken_controls_count": 1,
+                    "optimization_target_count": 1,
+                    "carry_forward_summary": "1 prior screenshot finding still appears unresolved.",
+                }
+            ],
+        }
+
+    def fake_browser_audit(**kwargs):
+        return {
+            "command": ["playwright", "test", "complaint-flow.spec.js"],
+            "returncode": 0,
+            "artifact_count": 6,
+            "screenshot_dir": str(kwargs.get("screenshot_dir") or "artifacts/ui-audit/browser-audit"),
+        }
+
+    monkeypatch.setattr(
+        complaint_workspace_module.ComplaintWorkspaceService,
+        "_refine_draft_with_llm_router",
+        fake_refine_draft_with_llm_router,
+    )
+    monkeypatch.setattr(ui_review_module, "review_complaint_output_with_llm_router", fake_review_complaint_output_with_llm_router)
+    monkeypatch.setattr(ui_ux_workflow_module, "run_iterative_ui_ux_workflow", fake_iterative_ui_ux_workflow)
+    monkeypatch.setattr(ui_ux_workflow_module, "run_end_to_end_complaint_browser_audit", fake_browser_audit)
 
     app = create_review_surface_app(mediator)
 
@@ -508,10 +813,16 @@ def test_workspace_page_uses_browser_mcp_sdk(site_app: FastAPI):
                 "() => typeof window.ComplaintMcpSdk.ComplaintMcpClient.prototype.exportComplaintPdf === 'function'"
             )
             assert page.evaluate(
+                "() => typeof window.ComplaintMcpSdk.ComplaintMcpClient.prototype.importGmailEvidence === 'function'"
+            )
+            assert page.evaluate(
                 "() => typeof window.ComplaintMcpSdk.ComplaintMcpClient.prototype.analyzeComplaintOutput === 'function'"
             )
             assert page.evaluate(
                 "() => typeof window.ComplaintMcpSdk.ComplaintMcpClient.prototype.getToolingContract === 'function'"
+            )
+            assert page.evaluate(
+                "() => typeof window.ComplaintMcpSdk.ComplaintMcpClient.prototype.updateClaimType === 'function'"
             )
 
             page.locator('#intake-party_name').fill('Jane Doe')
@@ -549,6 +860,246 @@ def test_workspace_page_uses_browser_mcp_sdk(site_app: FastAPI):
             assert any(
                 'complaint.generate_complaint' in tool_names.nth(index).inner_text()
                 for index in range(tool_count)
+            )
+
+            browser.close()
+
+
+def test_real_workspace_browser_flow_generates_formal_complaint_downloads_and_optimizer_feedback(site_app: FastAPI, tmp_path: Path):
+    if not PLAYWRIGHT_AVAILABLE:
+        pytest.skip("Playwright not available")
+
+    with _serve_app(site_app) as base_url:
+        with sync_playwright() as playwright_context:
+            browser = playwright_context.chromium.launch()
+            page = browser.new_page()
+            page.on("dialog", _dismiss_dialog)
+
+            page.goto(f"{base_url}/workspace?user_id=site-full-flow-user")
+            page.wait_for_function(
+                "() => document.getElementById('workspace-status').textContent.includes('site-full-flow-user')"
+            )
+
+            page.locator('#intake-party_name').fill('Jordan Example')
+            page.locator('#intake-opposing_party').fill('Acme Corporation')
+            page.locator('#intake-protected_activity').fill('Reported discrimination to HR')
+            page.locator('#intake-adverse_action').fill('Was terminated two days later')
+            page.locator('#intake-timeline').fill('Report on March 8, termination on March 10')
+            page.locator('#intake-harm').fill('Lost wages and emotional distress')
+            page.locator('#intake-court_header').fill('FOR THE NORTHERN DISTRICT OF CALIFORNIA')
+            page.locator('#save-intake-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('workspace-status').textContent.includes('Intake answers saved.')"
+            )
+
+            page.locator('#case-synopsis').fill(
+                'Jordan Example alleges retaliation after reporting discrimination to HR, and the next step is to tie the evidence and chronology into a filing-ready complaint.'
+            )
+            page.locator('#save-synopsis-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('workspace-status').textContent.includes('Shared case synopsis saved')"
+            )
+
+            page.locator('#handoff-chat-button').click()
+            page.wait_for_url("**/chat?**")
+            page.wait_for_function(
+                "() => document.getElementById('chat-context-prefill').textContent.includes('Prepared mediator prompt')"
+            )
+            page.locator('#chat-form input').fill('I reported discrimination to HR, and my manager terminated me two days later.')
+            page.get_by_role('button', name='Send').click()
+            page.wait_for_function(
+                "() => document.querySelector('#chat-form input').value === ''"
+            )
+
+            page.goto(f"{base_url}/workspace?user_id=site-full-flow-user")
+            page.wait_for_function(
+                "() => document.getElementById('workspace-status').textContent.includes('site-full-flow-user')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('continuity-gating-summary').textContent.includes('same DID-backed complaint session') || document.getElementById('continuity-gating-summary').textContent.includes('same DID-backed') || document.getElementById('continuity-gating-summary').textContent.includes('shared complaint record')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('continuity-phase-note').textContent.length > 20"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('workspace-nav-builder').getAttribute('aria-disabled') !== null"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('session-sync-summary').textContent.length > 40 && document.getElementById('session-sync-did-chip').textContent.includes('did:')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('session-tool-activity-summary').textContent.includes('complaint.start_session') || document.getElementById('session-tool-activity-summary').textContent.includes('Latest MCP activity')"
+            )
+
+            page.get_by_role('button', name='Evidence', exact=True).click()
+            page.locator('#evidence-kind').select_option('testimony')
+            page.locator('#evidence-claim-element').select_option('causation')
+            page.locator('#evidence-title').fill('Mediator testimony summary')
+            page.locator('#evidence-source').fill('Chat mediator')
+            page.locator('#evidence-content').fill('The termination followed immediately after the protected complaint to HR.')
+            page.locator('#save-evidence-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('evidence-list').textContent.includes('Mediator testimony summary')"
+            )
+
+            page.locator('#evidence-kind').select_option('document')
+            page.locator('#evidence-claim-element').select_option('causation')
+            page.locator('#evidence-title').fill('Termination email')
+            page.locator('#evidence-source').fill('Email archive')
+            page.locator('#evidence-content').fill('The archived email shows the termination immediately after the HR complaint.')
+            page.locator('#evidence-attachment').set_input_files(
+                files=[{"name": "termination-email.txt", "mimeType": "text/plain", "buffer": b"Termination email evidence"}]
+            )
+            page.locator('#save-evidence-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('evidence-list').textContent.includes('termination-email.txt')"
+            )
+
+            page.get_by_role('button', name='Review', exact=True).click()
+            page.wait_for_function(
+                "() => document.getElementById('support-grid').textContent.includes('Protected activity')"
+            )
+            assert 'Jordan Example alleges retaliation' in page.locator('#review-synopsis-preview').inner_text()
+
+            page.get_by_role('button', name='Draft', exact=True).click()
+            page.locator('#draft-mode').select_option('llm_router')
+            page.locator('#requested-relief').fill('Back pay\nInjunctive relief')
+            page.locator('#generate-draft-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('workspace-status').textContent.includes('llm_router formal complaint path')"
+            )
+            page.wait_for_function(
+                "() => { const text = document.getElementById('draft-preview').textContent || ''; return text.includes('COMPLAINT FOR RETALIATION') && text.includes('COUNT I - RETALIATION') && text.includes('SIGNATURE BLOCK'); }"
+            )
+            page.wait_for_function(
+                "() => !document.body.innerText.includes('No draft generated yet.')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('handoff-builder-button').getAttribute('aria-disabled') === 'false'"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('workspace-nav-builder').getAttribute('aria-disabled') === 'false'"
+            )
+
+            page.locator('#export-packet-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('packet-preview').textContent.includes('Jordan Example v. Acme Corporation Retaliation Complaint')"
+            )
+
+            with page.expect_download() as markdown_download_info:
+                page.locator('#download-packet-markdown-button').click()
+            markdown_download = markdown_download_info.value
+            markdown_path = tmp_path / markdown_download.suggested_filename
+            markdown_download.save_as(str(markdown_path))
+            markdown_text = markdown_path.read_text(encoding='utf-8')
+            assert 'IN THE UNITED STATES DISTRICT COURT' in markdown_text
+            assert 'FOR THE NORTHERN DISTRICT OF CALIFORNIA' in markdown_text
+            assert 'COMPLAINT FOR RETALIATION' in markdown_text
+            assert 'PRAYER FOR RELIEF' in markdown_text
+            assert 'SIGNATURE BLOCK' in markdown_text
+
+            with page.expect_download() as pdf_download_info:
+                page.locator('#download-packet-pdf-button').click()
+            pdf_download = pdf_download_info.value
+            pdf_path = tmp_path / pdf_download.suggested_filename
+            pdf_download.save_as(str(pdf_path))
+            pdf_bytes = pdf_path.read_bytes()
+            assert pdf_bytes.startswith(b'%PDF-1.4')
+
+            page.get_by_role('button', name='CLI + MCP', exact=True).click()
+            page.wait_for_function(
+                "() => document.getElementById('integrations-operations-preview').textContent.includes('Recommended tool workflow')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('tool-list-summary').textContent.includes('MCP tools')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('tool-list-phase-chips').textContent.includes('Draft + export')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('tooling-parity-preview').textContent.includes('Browser SDK parity summary')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('tooling-parity-preview').textContent.includes('parity verified')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('operations-tool-readiness-button').getAttribute('aria-disabled') === 'false'"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('operations-ui-audit-tool-button').getAttribute('aria-disabled') === 'false'"
+            )
+            page.locator('#analyze-complaint-output-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('complaint-output-analysis-preview').textContent.includes('\"filing_shape_score\": 96')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('complaint-output-analysis-preview').textContent.includes('formal_complaint_reviewer')"
+            )
+
+            page.locator('#review-generated-exports-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('workspace-status').textContent.includes('export critic')"
+            )
+            page.get_by_role('button', name='UX Audit', exact=True).click()
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Recommended UI surfaces')"
+            )
+            page.locator('#run-ux-review-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-summary').textContent.includes('Multimodal actor/critic review complete')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-actor-critic').textContent.includes('Actor journey')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-stage-findings').textContent.includes('Complaint-output suggestion carried into router review')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-artifacts').textContent.includes('Screenshot critic: workspace-draft')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Screenshot-driven optimization target')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-metadata').textContent.includes('optimization targets: 1')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Carry-forward assessment')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-artifacts').textContent.includes('Carry-forward assessment')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-metadata').textContent.includes('unresolved prior findings: 1')"
+            )
+
+            page.reload()
+            page.get_by_role('button', name='UX Audit', exact=True).click()
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-summary').textContent.includes('Multimodal actor/critic review complete')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-artifacts').textContent.includes('Screenshot critic: workspace-draft')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Screenshot-driven optimization target')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-metadata').textContent.includes('optimization targets: 1')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-repair-brief').textContent.includes('Carry-forward assessment')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-artifacts').textContent.includes('Carry-forward assessment')"
+            )
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-metadata').textContent.includes('unresolved prior findings: 1')"
+            )
+
+            page.locator('#run-browser-audit-button').click()
+            page.wait_for_function(
+                "() => document.getElementById('ux-review-summary').textContent.includes('6 screenshot artifacts')"
             )
 
             browser.close()

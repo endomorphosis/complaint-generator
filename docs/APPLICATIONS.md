@@ -92,6 +92,20 @@ After authentication, the system enters interactive mode where:
 | `!execute-follow-up` | Execute follow-up retrieval tasks, print a compact execution-quality summary with the canonical `recommended_next_action` when parse-quality remediation is still needed, include authority search-program counts plus graph-source-context and post-execution selected-program history mixes when present, and then print the execution payload in JSON |
 | `!export-complaint` | Build a court-style complaint draft and render document artifacts such as DOCX and PDF, then print a compact summary and the full package JSON |
 
+### Related Workspace Dataset Tooling
+
+The `ipfs_datasets_py` submodule ships its own CLI for workspace dataset bundles. Use it when you need to ingest large evidence corpora and pre-build knowledge graphs, BM25, and vector indices before feeding that evidence into complaint workflows.
+
+```bash
+# Export a single-parquet workspace bundle
+ipfs-datasets workspace --action export --input-path /path/to/workspace.json \
+  --output-parquet /tmp/workspace_bundle.parquet --json
+
+# Package a chain-loadable workspace bundle
+ipfs-datasets workspace --action package --input-path /path/to/discord_export.json \
+  --output-dir /tmp/workspace_bundle --package-name workspace_bundle --json
+```
+
 Review command examples:
 
 ```text
@@ -223,8 +237,8 @@ Use `--user-id` and `--claim-type` to scope the repair when you only want to upd
 
 | Endpoint | Description | Returns |
 |----------|-------------|---------|
-| `/api/claim-support/review` | Claim-element review packet for operator or UI workflows | JSON payload with `claim_coverage_matrix`, `claim_coverage_summary`, `claim_support_gaps`, `claim_contradiction_candidates`, optional `support_summary`, `claim_overview`, `follow_up_plan`, compact `follow_up_plan_summary`, and persisted `follow_up_history` or `follow_up_history_summary`; coverage payloads include compact support-lineage packet summaries for archived captures and authority fallbacks; `follow_up_execution` remains compatibility-only |
-| `/api/claim-support/execute-follow-up` | Explicit side-effecting follow-up execution endpoint | JSON payload with `follow_up_execution`, lineage-aware `follow_up_execution_summary`, optional `execution_quality_summary`, and optional `post_execution_review` with refreshed `follow_up_history_summary` |
+| `/api/claim-support/review` | Claim-element review packet for operator or UI workflows | JSON payload with `claim_coverage_matrix`, `claim_coverage_summary`, `claim_support_gaps`, `claim_contradiction_candidates`, optional `support_summary`, `claim_overview`, `follow_up_plan`, compact `follow_up_plan_summary`, and persisted `follow_up_history` or `follow_up_history_summary`; authority-targeted follow-up summaries can also expose compact legal-retrieval warning aggregates such as `search_warning_count`, `warning_family_counts`, `warning_code_counts`, `hf_dataset_id_counts`, and `search_warning_summary`; coverage payloads include compact support-lineage packet summaries for archived captures and authority fallbacks; `follow_up_execution` remains compatibility-only |
+| `/api/claim-support/execute-follow-up` | Explicit side-effecting follow-up execution endpoint | JSON payload with `follow_up_execution`, lineage-aware `follow_up_execution_summary`, optional `execution_quality_summary`, and optional `post_execution_review` with refreshed `follow_up_history_summary`; authority executions can also expose compact legal-retrieval warning aggregates such as `search_warning_count`, `warning_family_counts`, `warning_code_counts`, `hf_dataset_id_counts`, and `search_warning_summary` |
 | `/api/claim-support/save-testimony` | Persist a structured testimony record for the current claim-support review context | JSON payload with `testimony_result`, `recorded`, and optional `post_save_review` using the standard review contract; save-time canonicalization resolves text-only claim elements to registered `claim_element_id` values when the match is unambiguous |
 | `/api/claim-support/save-document` | Persist pasted document text for the current claim-support review context through the shared evidence parse, chunk, and graph pipeline | JSON payload with `document_result`, `recorded`, and optional `post_save_review` using the standard review contract |
 | `/api/claim-support/upload-document` | Persist an uploaded file for the current claim-support review context through the shared evidence parse, chunk, and graph pipeline | Multipart form response with `document_result`, `recorded`, and optional `post_save_review` using the standard review contract |
@@ -268,11 +282,11 @@ Example response fields:
 - `support_summary`: persisted support-link summary keyed by claim type.
 - `claim_overview`: covered, partially supported, and missing element buckets keyed by claim type.
 - `follow_up_plan`: actionable retrieval tasks keyed by claim type; authority-targeted tasks now include claim-aware `authority_search_programs` bundles and a compact `authority_search_program_summary`.
-- `follow_up_plan_summary`: compact task, suppression, graph-support, parse-remediation, chronology-follow-up, and graph-source-context counts keyed by claim type.
+- `follow_up_plan_summary`: compact task, suppression, graph-support, parse-remediation, chronology-follow-up, graph-source-context, and optional legal-retrieval warning counts keyed by claim type.
 - `follow_up_history`: recent persisted follow-up execution and manual-review rows keyed by claim type; graph-backed executions can flatten dominant source-lineage fields such as `source_family`, `artifact_family`, and `content_origin` onto each row for compact operator and CLI review.
-- `follow_up_history_summary`: compact history ledger counts keyed by claim type, including selected authority-program mixes, adaptive retry counts, chronology-follow-up aggregates, and persisted graph-source-context families when the follow-up ledger stored graph-backed lineage.
+- `follow_up_history_summary`: compact history ledger counts keyed by claim type, including selected authority-program mixes, adaptive retry counts, chronology-follow-up aggregates, persisted graph-source-context families, and optional legal-retrieval warning aggregates when authority execution stored Hugging Face search warnings.
 - `follow_up_execution`: compatibility-only opt-in execution results keyed by claim type when `execute_follow_up=true`.
-- `follow_up_execution_summary`: compatibility-only compact execution, suppression, cooldown-skip, graph-support, and graph-source-context counts keyed by claim type.
+- `follow_up_execution_summary`: compatibility-only compact execution, suppression, cooldown-skip, graph-support, graph-source-context, and optional legal-retrieval warning counts keyed by claim type.
 - `compatibility_notice`: route-level deprecation metadata returned only when `execute_follow_up=true`.
 
 If `user_id` is omitted, the endpoint resolves it from the mediator state and falls back to `anonymous`.

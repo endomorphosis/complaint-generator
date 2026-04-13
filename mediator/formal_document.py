@@ -8,6 +8,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from complaint_phases import ComplaintPhase, NodeType
+from lib.document_render import build_case_caption_table, build_case_caption_text_lines, build_case_detail_lines, build_caption_party_block_lines, make_page_footer_renderer
 
 try:
     from docx import Document as DocxDocument
@@ -1379,21 +1380,14 @@ class ComplaintDocumentBuilder:
             lines.append(str(caption["county_line"]))
         lines.append("")
 
-        plaintiffs = ", ".join(parties.get("plaintiffs", []) or ["Plaintiff"])
-        defendants = ", ".join(parties.get("defendants", []) or ["Defendant"])
         case_number = draft.get("case_number") or caption.get("case_number") or "________________"
-        lines.append(f"{plaintiffs}, Plaintiff,")
-        lines.append("v.")
-        lines.append(f"{defendants}, Defendant.")
-        lines.append(f"Case No.: {case_number}")
-        if caption.get("lead_case_number"):
-            lines.append(f"Lead Case No.: {caption['lead_case_number']}")
-        if caption.get("related_case_number"):
-            lines.append(f"Related Case No.: {caption['related_case_number']}")
-        if caption.get("assigned_judge"):
-            lines.append(f"Assigned to: {caption['assigned_judge']}")
-        if caption.get("courtroom"):
-            lines.append(f"Courtroom: {caption['courtroom']}")
+        lines.extend(
+            build_case_caption_text_lines(
+                parties,
+                {"case_number": case_number, **caption},
+                assigned_judge_label="Assigned to:",
+            )
+        )
         lines.append("")
         lines.append("COMPLAINT")
         if caption.get("jury_demand_notice"):
@@ -2614,21 +2608,11 @@ class ComplaintDocumentBuilder:
         table = document.add_table(rows=1, cols=2)
         table.columns[0].width = Inches(4.75)
         table.columns[1].width = Inches(2.0)
-        table.cell(0, 0).text = (
-            f"{', '.join(draft.get('parties', {}).get('plaintiffs', []) or ['Plaintiff'])}, Plaintiff,\n"
-            f"v.\n"
-            f"{', '.join(draft.get('parties', {}).get('defendants', []) or ['Defendant'])}, Defendant."
+        resolved_case_number = caption.get("case_number") or draft.get("case_number") or "________________"
+        table.cell(0, 0).text = "\n".join(build_caption_party_block_lines(draft.get("parties", {})))
+        table.cell(0, 1).text = "\n".join(
+            build_case_detail_lines({"case_number": resolved_case_number, **caption})
         )
-        right_lines = [f"Case No.: {caption.get('case_number', '________________')}"]
-        if caption.get("lead_case_number"):
-            right_lines.append(f"Lead Case No.: {caption['lead_case_number']}")
-        if caption.get("related_case_number"):
-            right_lines.append(f"Related Case No.: {caption['related_case_number']}")
-        if caption.get("assigned_judge"):
-            right_lines.append(f"Judge: {caption['assigned_judge']}")
-        if caption.get("courtroom"):
-            right_lines.append(f"Courtroom: {caption['courtroom']}")
-        table.cell(0, 1).text = "\n".join(right_lines)
 
         title = document.add_paragraph()
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2766,43 +2750,30 @@ class ComplaintDocumentBuilder:
     def _write_pdf(self, draft: Dict[str, Any], destination: Path) -> None:
         if not HAS_REPORTLAB:
             raise RuntimeError("PDF export requires reportlab to be installed")
+        caption = draft.get("caption", {}) if isinstance(draft.get("caption"), dict) else {}
         styles = getSampleStyleSheet()
         centered = ParagraphStyle("ComplaintCentered", parent=styles["Heading2"], alignment=TA_CENTER)
         section = ParagraphStyle("ComplaintSection", parent=styles["Heading3"], spaceBefore=10, spaceAfter=6)
         body = ParagraphStyle("ComplaintBody", parent=styles["BodyText"], leading=15)
         story = []
         story.append(Paragraph(str(draft.get("court_header") or "IN THE COURT OF COMPETENT JURISDICTION"), centered))
-        if draft.get("caption", {}).get("division_line"):
-            story.append(Paragraph(str(draft["caption"]["division_line"]), centered))
+        if caption.get("division_line"):
+            story.append(Paragraph(str(caption["division_line"]), centered))
         story.append(Spacer(1, 0.2 * inch))
 
-        left_caption = (
-            f"{', '.join(draft.get('parties', {}).get('plaintiffs', []) or ['Plaintiff'])}, Plaintiff,<br/>"
-            f"v.<br/>{', '.join(draft.get('parties', {}).get('defendants', []) or ['Defendant'])}, Defendant."
+        story.append(
+            build_case_caption_table(
+                draft.get("parties", {}),
+                {"case_number": draft.get("case_number") or caption.get("case_number"), **caption},
+                body,
+                left_width=4.5 * inch,
+                right_width=2.0 * inch,
+            )
         )
-        right_lines = [f"Case No.: {draft.get('case_number') or '________________'}"]
-        if draft.get("caption", {}).get("lead_case_number"):
-            right_lines.append(f"Lead Case No.: {draft['caption']['lead_case_number']}")
-        if draft.get("caption", {}).get("related_case_number"):
-            right_lines.append(f"Related Case No.: {draft['caption']['related_case_number']}")
-        if draft.get("caption", {}).get("assigned_judge"):
-            right_lines.append(f"Judge: {draft['caption']['assigned_judge']}")
-        if draft.get("caption", {}).get("courtroom"):
-            right_lines.append(f"Courtroom: {draft['caption']['courtroom']}")
-        right_caption = "<br/>".join(right_lines)
-        caption_table = Table([[Paragraph(left_caption, body), Paragraph(right_caption, body)]], colWidths=[4.5 * inch, 2.0 * inch])
-        caption_table.setStyle(TableStyle([
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("BOX", (0, 0), (-1, -1), 0.5, colors.black),
-            ("INNERGRID", (0, 0), (-1, -1), 0.5, colors.black),
-            ("LEFTPADDING", (0, 0), (-1, -1), 8),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ]))
-        story.append(caption_table)
         story.append(Spacer(1, 0.2 * inch))
         story.append(Paragraph("COMPLAINT", centered))
-        if draft.get("caption", {}).get("jury_demand_notice"):
-            story.append(Paragraph(str(draft["caption"]["jury_demand_notice"]), centered))
+        if caption.get("jury_demand_notice"):
+            story.append(Paragraph(str(caption["jury_demand_notice"]), centered))
 
         self._pdf_section(story, section, body, "Nature of the Action", [draft.get("nature_of_action")])
         party_lines = []
@@ -2911,7 +2882,8 @@ class ComplaintDocumentBuilder:
             ["Respectfully submitted,", *self._signature_block_lines(signature_block)],
         )
         document = SimpleDocTemplate(str(destination), pagesize=letter)
-        document.build(story)
+        footer = make_page_footer_renderer("Complaint")
+        document.build(story, onFirstPage=footer, onLaterPages=footer)
 
     def _pdf_section(self, story, section_style, body_style, heading: str, paragraphs: Sequence[Any], *, numbered: bool = False, bulleted: bool = False) -> None:
         story.append(Paragraph(heading, section_style))

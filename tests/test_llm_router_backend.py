@@ -7,6 +7,15 @@ from unittest.mock import Mock, patch, MagicMock
 
 class TestLLMRouterBackend:
     """Test cases for LLM Router Backend functionality"""
+
+    @staticmethod
+    def _metadata_payload(text="Generated text response"):
+        return {
+            "status": "available",
+            "text": text,
+            "provider_name": "mock-provider",
+            "model_name": "mock-model",
+        }
     
     def test_llm_router_backend_module_exists(self):
         """Test that the llm_router_backend module can be imported"""
@@ -27,8 +36,7 @@ class TestLLMRouterBackend:
     def test_llm_router_backend_initialization(self):
         """Test that LLMRouterBackend can be initialized with mocked imports"""
         try:
-            # Mock the generate_text import
-            with patch('backends.llm_router_backend.generate_text', return_value="mocked response"):
+            with patch('backends.llm_router_backend.generate_text_with_metadata', return_value=self._metadata_payload("mocked response")):
                 from backends.llm_router_backend import LLMRouterBackend
                 
                 backend = LLMRouterBackend(
@@ -38,7 +46,7 @@ class TestLLMRouterBackend:
                 )
                 
                 assert backend.id == 'test-router'
-                assert backend.provider == 'hf'
+                assert backend.provider == 'local_hf'
                 assert backend.model == 'gpt2'
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
@@ -46,10 +54,9 @@ class TestLLMRouterBackend:
     def test_llm_router_backend_call(self):
         """Test that LLMRouterBackend can generate text"""
         try:
-            # Mock the generate_text function
-            mock_generate = Mock(return_value="Generated text response")
+            mock_generate = Mock(return_value=self._metadata_payload("Generated text response"))
             
-            with patch('backends.llm_router_backend.generate_text', mock_generate):
+            with patch('backends.llm_router_backend.generate_text_with_metadata', mock_generate):
                 from backends.llm_router_backend import LLMRouterBackend
                 
                 backend = LLMRouterBackend(
@@ -66,7 +73,7 @@ class TestLLMRouterBackend:
                 # Verify the call arguments
                 call_args = mock_generate.call_args
                 assert call_args.kwargs['prompt'] == "Test prompt"
-                assert call_args.kwargs['provider'] == 'hf'
+                assert call_args.kwargs['provider'] == 'local_hf'
                 assert call_args.kwargs['model_name'] == 'gpt2'
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
@@ -74,9 +81,9 @@ class TestLLMRouterBackend:
     def test_llm_router_backend_normalizes_local_provider_alias(self):
         """Test that simple local provider aliases are normalized for the shared router."""
         try:
-            mock_generate = Mock(return_value="Generated text response")
+            mock_generate = Mock(return_value=self._metadata_payload("Generated text response"))
 
-            with patch('backends.llm_router_backend.generate_text', mock_generate):
+            with patch('backends.llm_router_backend.generate_text_with_metadata', mock_generate):
                 from backends.llm_router_backend import LLMRouterBackend
 
                 backend = LLMRouterBackend(
@@ -88,18 +95,18 @@ class TestLLMRouterBackend:
                 response = backend("Test prompt")
 
                 assert response == "Generated text response"
-                assert backend.provider == 'hf'
+                assert backend.provider == 'local_hf'
                 call_args = mock_generate.call_args
-                assert call_args.kwargs['provider'] == 'hf'
+                assert call_args.kwargs['provider'] == 'local_hf'
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
     
     def test_llm_router_backend_with_config(self):
         """Test that LLMRouterBackend passes config to generate_text"""
         try:
-            mock_generate = Mock(return_value="Response with config")
+            mock_generate = Mock(return_value=self._metadata_payload("Response with config"))
             
-            with patch('backends.llm_router_backend.generate_text', mock_generate):
+            with patch('backends.llm_router_backend.generate_text_with_metadata', mock_generate):
                 from backends.llm_router_backend import LLMRouterBackend
                 
                 backend = LLMRouterBackend(
@@ -122,9 +129,9 @@ class TestLLMRouterBackend:
     def test_llm_router_backend_leaves_provider_unpinned_when_not_supplied(self):
         """Test that an omitted provider defers to router/env defaults instead of forcing Copilot."""
         try:
-            mock_generate = Mock(return_value="Generated text response")
+            mock_generate = Mock(return_value=self._metadata_payload("Generated text response"))
 
-            with patch('backends.llm_router_backend.generate_text', mock_generate):
+            with patch('backends.llm_router_backend.generate_text_with_metadata', mock_generate):
                 from backends.llm_router_backend import LLMRouterBackend
 
                 backend = LLMRouterBackend(
@@ -149,7 +156,7 @@ class TestLLMRouterBackend:
         try:
             mock_generate = Mock(side_effect=Exception("LLM error"))
             
-            with patch('backends.llm_router_backend.generate_text', mock_generate):
+            with patch('backends.llm_router_backend.generate_text_with_metadata', mock_generate):
                 from backends.llm_router_backend import LLMRouterBackend
                 
                 backend = LLMRouterBackend(
@@ -167,7 +174,7 @@ class TestLLMRouterBackend:
     def test_llm_router_alias_exists(self):
         """Test that LLMRouter alias exists"""
         try:
-            with patch('backends.llm_router_backend.generate_text', return_value="test"):
+            with patch('backends.llm_router_backend.generate_text_with_metadata', return_value=self._metadata_payload("test")):
                 from backends.llm_router_backend import LLMRouter, LLMRouterBackend
                 assert LLMRouter is LLMRouterBackend
         except ImportError as e:

@@ -2487,18 +2487,49 @@ class Mediator:
 		Returns:
 			Dictionary with search results by source type
 		"""
+		def _build_warning_summary(search_diagnostics):
+			if not isinstance(search_diagnostics, dict):
+				return []
+			summary = []
+			for family, payload in search_diagnostics.items():
+				if family == 'source_availability' or not isinstance(payload, dict):
+					continue
+				warning_code = str(payload.get('warning_code') or '').strip()
+				warning_message = str(payload.get('warning_message') or '').strip()
+				if not warning_code or not warning_message:
+					continue
+				summary.append(
+					{
+						'family': family,
+						'warning_code': warning_code,
+						'warning_message': warning_message,
+						'state_code': str(payload.get('state_code') or '').strip(),
+						'hf_dataset_id': str(payload.get('hf_dataset_id') or '').strip(),
+					}
+				)
+			return summary
+
 		if search_all:
-			return self.legal_authority_search.search_all_sources(
+			results = self.legal_authority_search.search_all_sources(
 				query, claim_type, jurisdiction, authority_families=authority_families
 			)
+			results['search_warning_summary'] = _build_warning_summary(results.get('search_diagnostics'))
+			return results
 		else:
 			# Default to US Code search
 			results = {
 				'statutes': self.legal_authority_search.search_us_code(query),
+				'state_statutes': self.legal_authority_search.search_state_laws(query, state=jurisdiction),
 				'regulations': [],
+				'administrative_rules': self.legal_authority_search.search_administrative_law(query, state=jurisdiction),
 				'case_law': [],
 				'web_archives': []
 			}
+			results['search_diagnostics'] = self.legal_authority_search._collect_search_diagnostics(
+				query=query,
+				state=jurisdiction,
+			)
+			results['search_warning_summary'] = _build_warning_summary(results.get('search_diagnostics'))
 			return results
 	
 	def store_legal_authorities(self, authorities: Dict[str, List[Dict[str, Any]]], 
@@ -2531,9 +2562,13 @@ class Mediator:
 			'total_support_links_reused': 0,
 		}
 		for auth_type, auth_list in authorities.items():
+			if not isinstance(auth_list, list):
+				continue
 			if auth_list:
 				# Add type info to each authority
 				for auth in auth_list:
+					if not isinstance(auth, dict):
+						continue
 					auth['type'] = auth_type.rstrip('s')  # statutes -> statute
 					if search_programs and not auth.get('search_programs'):
 						auth['search_programs'] = [
@@ -4658,6 +4693,12 @@ class Mediator:
 							search_all=True,
 							authority_families=program_authority_families or None,
 						)
+						search_result_counts = {
+							key: len(value)
+							for key, value in search_results.items()
+							if isinstance(value, list)
+						}
+						search_warning_summary = list(search_results.get('search_warning_summary') or [])
 						authority_result_count = self._count_authority_follow_up_results(search_results)
 						stored_counts = self.store_legal_authorities(
 							search_results,
@@ -4673,7 +4714,8 @@ class Mediator:
 							'zero_result': authority_result_count <= 0,
 							'metadata': self._build_follow_up_record_metadata(
 								task,
-								search_results={key: len(value) for key, value in search_results.items()},
+								search_results=search_result_counts,
+								search_warning_summary=search_warning_summary,
 								query_variants=task.get('queries', {}).get('authority', []),
 								task_query=task_query_text,
 								effective_query=query_text,
@@ -4705,7 +4747,9 @@ class Mediator:
 							'selected_search_program_families': list(program_authority_families),
 							'search_program_summary': task.get('authority_search_program_summary', {}),
 							'search_programs': list(task.get('authority_search_programs') or []),
-							'search_results': {key: len(value) for key, value in search_results.items()},
+							'search_results': search_result_counts,
+							'search_diagnostics': dict(search_results.get('search_diagnostics') or {}),
+							'search_warning_summary': search_warning_summary,
 							'stored_counts': stored_counts,
 						}
 				if lane_execution_records:
@@ -5137,6 +5181,8 @@ class Mediator:
 		results = {
 			'claim_types': classification.get('claim_types', []),
 			'authorities_found': {},
+			'authorities_diagnostics': {},
+			'authorities_warning_summary': {},
 			'authorities_stored': {},
 			'support_summary': {},
 			'claim_coverage_matrix': {},
@@ -5176,8 +5222,14 @@ class Mediator:
 			)
 			
 			results['authorities_found'][claim_type] = {
-				k: len(v) for k, v in search_results.items()
+				k: len(v) for k, v in search_results.items() if isinstance(v, list)
 			}
+			results['authorities_diagnostics'][claim_type] = dict(
+				search_results.get('search_diagnostics') or {}
+			)
+			results['authorities_warning_summary'][claim_type] = list(
+				search_results.get('search_warning_summary') or []
+			)
 			results['authorities_stored'][claim_type] = stored_counts
 			support_summary = self.summarize_claim_support(user_id, claim_type)
 			results['support_summary'][claim_type] = support_summary.get('claims', {}).get(
@@ -10717,6 +10769,8 @@ class Mediator:
 		optimization_model_name: str = None,
 		optimization_llm_config: Dict[str, Any] = None,
 		optimization_persist_artifacts: bool = False,
+		email_timeline_handoff_path: str = None,
+		email_authority_enrichment_path: str = None,
 		output_dir: str = None,
 		output_formats: List[str] = None,
 	):
@@ -10768,6 +10822,8 @@ class Mediator:
 			optimization_model_name=optimization_model_name,
 			optimization_llm_config=optimization_llm_config,
 			optimization_persist_artifacts=optimization_persist_artifacts,
+			email_timeline_handoff_path=email_timeline_handoff_path,
+			email_authority_enrichment_path=email_authority_enrichment_path,
 			output_dir=output_dir,
 			output_formats=output_formats,
 		)

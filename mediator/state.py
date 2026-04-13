@@ -112,7 +112,7 @@ class State:
 		self.chat_history = {}
 
 		self.hostname = "http://10.10.0.10:1792"
-		self.hostname2 = "http://localhost:19000"
+		self.hostname2 = os.getenv("COMPLAINT_GENERATOR_ORIGIN", "http://localhost:19030")
 
 	def response(self):
 		warnings.warn(
@@ -230,18 +230,28 @@ class State:
 
 	
 	def load_profile(self, request):
-		if "hashed_username" in request["results"]:
-			hashed_username = request["results"]["hashed_username"]
-		if "hashed_password" in request["results"]:
-			hashed_password = request["results"]["hashed_password"]
+		results = request.get("results", request) if isinstance(request, dict) else {}
+		hashed_username = results.get("hashed_username")
+		hashed_password = results.get("hashed_password")
+		username = results.get("username")
+		password = results.get("password")
+		response = {}
+		if (hashed_username is None or hashed_password is None) and username is not None and password is not None:
+			hashed_username = username
+			hashed_password = password
 		if hashed_username is not None and hashed_password is not None:
-			r = requests.post(
-				self.hostname + '/load_profile',
-				headers={
-					'Content-Type': 'application/json'
-				},
-				data=json.dumps({'request': {"hashed_username": hashed_username, "hashed_password": hashed_password}})
-			)
+			try:
+				r = requests.post(
+					self.hostname + '/load_profile',
+					headers={
+						'Content-Type': 'application/json'
+					},
+					data=json.dumps({'request': {"hashed_username": hashed_username, "hashed_password": hashed_password}}),
+					timeout=3,
+				)
+			except Exception as exception:
+				self.log.append(f"Profile load unavailable, using local-only session: {exception}")
+				return {"data": self.data}
 
 			if "{" in r.text:
 				response  = json.loads(r.text)
@@ -296,12 +306,14 @@ class State:
 
 	def store_profile(self, request):
 		store_data = dict()
-		if "hashed_username" in request["results"]:
-			hashed_username = request["results"]["hashed_username"]
-		if "hashed_password" in request["results"]:
-			hashed_password = request["results"]["hashed_password"]
-		if "data" in request["results"]:
-			data = request["results"]["data"]
+		results = request.get("results", request) if isinstance(request, dict) else {}
+		hashed_username = results.get("hashed_username")
+		hashed_password = results.get("hashed_password")
+		if (hashed_username is None or hashed_password is None) and results.get("username") is not None and results.get("password") is not None:
+			hashed_username = results.get("username")
+			hashed_password = results.get("password")
+		if "data" in results:
+			data = results["data"]
 		else:
 			data = None
 		if type(data) is str:
@@ -314,13 +326,18 @@ class State:
 			if (type(data) is dict) and (type(store_data) is dict):
 				store_data = self.merge_dictionaries(data, store_data)	
 		
-			r = requests.post(
-				self.hostname + '/store_profile',
-				headers={
-					'Content-Type': 'application/json'
-				},
-				data=json.dumps({'request': {"hashed_username": hashed_username, "hashed_password": hashed_password, "data": store_data}})
-			)
+			try:
+				r = requests.post(
+					self.hostname + '/store_profile',
+					headers={
+						'Content-Type': 'application/json'
+					},
+					data=json.dumps({'request': {"hashed_username": hashed_username, "hashed_password": hashed_password, "data": store_data}}),
+					timeout=3,
+				)
+			except Exception as exception:
+				self.log.append(f"Profile save unavailable, keeping local-only session: {exception}")
+				return {"data": store_data}
 
 			if "{" in r.text:
 				response  = json.loads(r.text)

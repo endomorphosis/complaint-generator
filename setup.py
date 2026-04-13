@@ -54,6 +54,7 @@ setup(
             "complaint-mcp-server=complaint_generator.mcp_server:main",
             "complaint-generator-mcp=complaint_generator.mcp_server:main",
             "complaint-ui-ux-workflow=complaint_generator.ui_ux_workflow:main",
+            "complaint-ui-optimizer-daemon=complaint_generator.ui_optimizer_daemon:main",
         ],
     },
 )

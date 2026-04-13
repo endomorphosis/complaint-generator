@@ -20,7 +20,7 @@ def _load_script_module():
 
 def test_resolve_credentials_can_prompt_securely(monkeypatch):
     module = _load_script_module()
-    credentials_module = importlib.import_module("complaint_generator.email_credentials")
+    auth_module = importlib.import_module("ipfs_datasets_py.processors.legal_data.email_auth")
     parser = argparse.ArgumentParser()
     args = argparse.Namespace(
         gmail_user="",
@@ -34,10 +34,10 @@ def test_resolve_credentials_can_prompt_securely(monkeypatch):
 
     monkeypatch.setattr(module.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(module.sys.stderr, "isatty", lambda: True)
-    monkeypatch.setattr(credentials_module.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(credentials_module.sys.stderr, "isatty", lambda: True)
+    monkeypatch.setattr(auth_module.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(auth_module.sys.stderr, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt="": "user@gmail.com")
-    monkeypatch.setattr(credentials_module.getpass, "getpass", lambda prompt="": "app-password")
+    monkeypatch.setattr(auth_module.getpass, "getpass", lambda prompt="": "app-password")
 
     gmail_user, gmail_password = module._resolve_credentials(args, parser)
 
@@ -64,7 +64,7 @@ def test_resolve_credentials_requires_non_interactive_credentials():
 
 def test_resolve_credentials_can_load_password_from_keyring(monkeypatch):
     module = _load_script_module()
-    credentials_module = importlib.import_module("complaint_generator.email_credentials")
+    auth_module = importlib.import_module("ipfs_datasets_py.processors.legal_data.email_auth")
     parser = argparse.ArgumentParser()
     args = argparse.Namespace(
         gmail_user="user@gmail.com",
@@ -76,7 +76,7 @@ def test_resolve_credentials_can_load_password_from_keyring(monkeypatch):
         save_to_ipfs_secrets_vault=False,
     )
 
-    monkeypatch.setattr(credentials_module, "read_password_from_keyring", lambda user: "stored-app-password")
+    monkeypatch.setattr(auth_module, "read_password_from_keyring", lambda user: "stored-app-password")
 
     gmail_user, gmail_password = module._resolve_credentials(args, parser)
 
@@ -86,7 +86,7 @@ def test_resolve_credentials_can_load_password_from_keyring(monkeypatch):
 
 def test_resolve_credentials_can_save_password_to_keyring(monkeypatch):
     module = _load_script_module()
-    credentials_module = importlib.import_module("complaint_generator.email_credentials")
+    auth_module = importlib.import_module("ipfs_datasets_py.processors.legal_data.email_auth")
     parser = argparse.ArgumentParser()
     args = argparse.Namespace(
         gmail_user="user@gmail.com",
@@ -99,7 +99,7 @@ def test_resolve_credentials_can_save_password_to_keyring(monkeypatch):
     )
     captured = {}
 
-    monkeypatch.setattr(credentials_module, "save_password_to_keyring", lambda user, password, parser_obj: captured.update({"user": user, "password": password}))
+    monkeypatch.setattr(auth_module, "save_password_to_keyring", lambda user, password, parser_obj: captured.update({"user": user, "password": password}))
 
     gmail_user, gmail_password = module._resolve_credentials(args, parser)
 
@@ -110,7 +110,7 @@ def test_resolve_credentials_can_save_password_to_keyring(monkeypatch):
 
 def test_resolve_credentials_can_load_password_from_ipfs_secrets_vault(monkeypatch):
     module = _load_script_module()
-    credentials_module = importlib.import_module("complaint_generator.email_credentials")
+    auth_module = importlib.import_module("ipfs_datasets_py.processors.legal_data.email_auth")
     parser = argparse.ArgumentParser()
     args = argparse.Namespace(
         gmail_user="user@gmail.com",
@@ -123,7 +123,7 @@ def test_resolve_credentials_can_load_password_from_ipfs_secrets_vault(monkeypat
     )
 
     monkeypatch.setattr(
-        credentials_module,
+        auth_module,
         "read_password_from_ipfs_secrets_vault",
         lambda user: "stored-vault-password",
     )
@@ -134,9 +134,30 @@ def test_resolve_credentials_can_load_password_from_ipfs_secrets_vault(monkeypat
     assert gmail_password == "stored-vault-password"
 
 
+def test_resolve_credentials_supports_gmail_oauth_without_app_password():
+    module = _load_script_module()
+    parser = argparse.ArgumentParser()
+    args = argparse.Namespace(
+        gmail_user="user@gmail.com",
+        gmail_app_password="",
+        use_gmail_oauth=True,
+        gmail_oauth_client_secrets="/tmp/client-secrets.json",
+        prompt_for_credentials=False,
+        use_keyring=False,
+        save_to_keyring=False,
+        use_ipfs_secrets_vault=False,
+        save_to_ipfs_secrets_vault=False,
+    )
+
+    gmail_user, gmail_password = module._resolve_credentials(args, parser)
+
+    assert gmail_user == "user@gmail.com"
+    assert gmail_password == ""
+
+
 def test_resolve_credentials_can_save_password_to_ipfs_secrets_vault(monkeypatch):
     module = _load_script_module()
-    credentials_module = importlib.import_module("complaint_generator.email_credentials")
+    auth_module = importlib.import_module("ipfs_datasets_py.processors.legal_data.email_auth")
     parser = argparse.ArgumentParser()
     args = argparse.Namespace(
         gmail_user="user@gmail.com",
@@ -150,7 +171,7 @@ def test_resolve_credentials_can_save_password_to_ipfs_secrets_vault(monkeypatch
     captured = {}
 
     monkeypatch.setattr(
-        credentials_module,
+        auth_module,
         "save_password_to_ipfs_secrets_vault",
         lambda user, password, parser_obj: captured.update({"user": user, "password": password}),
     )
@@ -160,3 +181,16 @@ def test_resolve_credentials_can_save_password_to_ipfs_secrets_vault(monkeypatch
     assert gmail_user == "user@gmail.com"
     assert gmail_password == "provided-app-password"
     assert captured == {"user": "user@gmail.com", "password": "provided-app-password"}
+
+
+def test_build_parser_exposes_years_back_and_duckdb_flags():
+    module = _load_script_module()
+
+    help_text = module.build_parser().format_help()
+
+    assert "--years-back" in help_text
+    assert "--build-duckdb-index" in help_text
+    assert "--duckdb-output-dir" in help_text
+    assert "--append-duckdb-index" in help_text
+    assert "--bm25-search-query" in help_text
+    assert "--bm25-search-limit" in help_text

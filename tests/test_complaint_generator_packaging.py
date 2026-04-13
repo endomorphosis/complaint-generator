@@ -15,7 +15,11 @@ from complaint_generator import (
     create_review_surface_app,
     handle_jsonrpc_message,
     import_gmail_evidence,
+    import_local_evidence,
+    run_intake_chat_turn,
+    run_gmail_duckdb_pipeline,
     run_main,
+    search_email_duckdb_corpus,
     tool_list_payload,
 )
 from applications import complaint_cli as complaint_cli_impl
@@ -62,6 +66,9 @@ def test_package_exports_expose_workspace_review_and_entrypoint_helpers():
     assert create_review_surface_app is not None
     assert handle_jsonrpc_message is not None
     assert import_gmail_evidence is not None
+    assert import_local_evidence is not None
+    assert run_gmail_duckdb_pipeline is not None
+    assert search_email_duckdb_corpus is not None
     assert tool_list_payload is not None
     assert ComplaintWorkspaceService is complaint_workspace_module.ComplaintWorkspaceService
     assert handle_jsonrpc_message is complaint_mcp_module.handle_jsonrpc_message
@@ -74,15 +81,29 @@ def test_package_exports_expose_workspace_review_and_entrypoint_helpers():
     commonjs_sdk = (REPO_ROOT / "static" / "complaint_mcp_sdk.js").read_text(encoding="utf-8")
     esm_sdk = (REPO_ROOT / "static" / "complaint_mcp_sdk.mjs").read_text(encoding="utf-8")
 
+    assert "ComplaintMcpSdk =" in commonjs_sdk
+    assert "module.exports = ComplaintMcpSdk" in commonjs_sdk
+
     for method_name in (
         "getClientReleaseGate",
         "getFilingProvenance",
         "getFormalDiagnostics",
+        "importGmailEvidence",
+        "importLocalEvidence",
         "getProviderDiagnostics",
         "getToolingContract",
+        "runIntakeChatTurn",
+        "updateClaimType",
+        "_extractToolDiagnostics",
+        "_buildToolDiagnosticSummary",
     ):
         assert method_name in commonjs_sdk
         assert method_name in esm_sdk
+
+    shell_sdk = (REPO_ROOT / "static" / "complaint_app_shell.js").read_text(encoding="utf-8")
+    assert "Latest retrieval warning:" in shell_sdk
+    assert "Retrieval warning details:" in shell_sdk
+    assert "diagnostic_summary" in shell_sdk
 
 
 def test_workspace_cli_is_exposed_through_package_entrypoint(monkeypatch, tmp_path):
@@ -107,6 +128,18 @@ def test_workspace_cli_is_exposed_through_package_entrypoint(monkeypatch, tmp_pa
     payload = json.loads(result.stdout)
     assert payload["session"]["user_id"] == "pkg-user"
     assert payload["session"]["intake_answers"]["protected_activity"] == "Reported retaliation to HR"
+
+
+def test_package_exposes_shared_intake_chat_turn_wrapper(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "workspace-chat-sessions")
+
+    opening = run_intake_chat_turn("pkg-chat-user", service=service)
+    assert opening["inquiry"]["question_id"] == "party_name"
+    assert opening["accepted_answer"] is None
+
+    follow_up = run_intake_chat_turn("pkg-chat-user", message="Jordan Example", service=service)
+    assert follow_up["accepted_answer"]["question_id"] == "party_name"
+    assert follow_up["next_question"]["id"] == "opposing_party"
 
 
 def test_stdio_mcp_server_responds_with_initialize_and_tool_payload(monkeypatch, tmp_path):

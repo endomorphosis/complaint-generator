@@ -2481,6 +2481,185 @@ def test_claim_support_follow_up_execution_payload_can_skip_post_review():
     mediator.get_claim_follow_up_plan.assert_not_called()
 
 
+def test_claim_support_review_payload_exposes_legal_warning_summary():
+    mediator = Mock()
+    mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+    mediator.get_claim_coverage_matrix.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "elements": []}}}
+    mediator.get_claim_overview.return_value = {"claims": {"retaliation": {}}}
+    mediator.get_claim_support_diagnostic_snapshots.return_value = {"claims": {}}
+    mediator.get_claim_support_gaps.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "unresolved_elements": []}}}
+    mediator.get_claim_contradiction_candidates.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "candidates": []}}}
+    mediator.get_claim_support_validation.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "elements": []}}}
+    mediator.get_recent_claim_follow_up_execution.return_value = {
+        "claims": {
+            "retaliation": [
+                {
+                    "status": "executed",
+                    "support_kind": "authority",
+                    "search_warning_summary": [
+                        {
+                            "family": "state_statutes",
+                            "warning_code": "hf_dataset_files_missing",
+                            "warning_message": "Dataset missing Oregon parquet coverage.",
+                            "state_code": "OR",
+                            "hf_dataset_id": "justicedao/ipfs_state_laws",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    mediator.get_claim_follow_up_plan.return_value = {
+        "claims": {
+            "retaliation": {
+                "claim_type": "retaliation",
+                "tasks": [
+                    {
+                        "claim_element": "Causal connection",
+                        "search_warning_summary": [
+                            {
+                                "family": "state_statutes",
+                                "warning_code": "hf_dataset_files_missing",
+                                "warning_message": "Dataset missing Oregon parquet coverage.",
+                                "state_code": "OR",
+                                "hf_dataset_id": "justicedao/ipfs_state_laws",
+                            },
+                            {
+                                "family": "administrative_rules",
+                                "warning_code": "hf_state_rows_missing",
+                                "warning_message": "Dataset exposes no Oregon admin rows.",
+                                "state_code": "OR",
+                                "hf_dataset_id": "justicedao/ipfs_state_admin_rules",
+                            },
+                        ],
+                    }
+                ],
+            }
+        }
+    }
+    mediator.summarize_claim_support.return_value = {"claims": {"retaliation": {}}}
+    mediator.get_user_evidence.return_value = []
+    mediator.get_three_phase_status.return_value = {}
+
+    payload = build_claim_support_review_payload(
+        mediator,
+        ClaimSupportReviewRequest(user_id="state-user", claim_type="retaliation"),
+    )
+
+    plan_summary = payload["follow_up_plan_summary"]["retaliation"]
+    history_summary = payload["follow_up_history_summary"]["retaliation"]
+    assert plan_summary["search_warning_count"] == 2
+    assert plan_summary["warning_family_counts"] == {"state_statutes": 1, "administrative_rules": 1}
+    assert plan_summary["warning_code_counts"] == {
+        "hf_dataset_files_missing": 1,
+        "hf_state_rows_missing": 1,
+    }
+    assert plan_summary["hf_dataset_id_counts"] == {
+        "justicedao/ipfs_state_laws": 1,
+        "justicedao/ipfs_state_admin_rules": 1,
+    }
+    assert len(plan_summary["search_warning_summary"]) == 2
+    assert history_summary["search_warning_count"] == 1
+    assert history_summary["warning_code_counts"] == {"hf_dataset_files_missing": 1}
+    assert history_summary["search_warning_summary"][0]["family"] == "state_statutes"
+
+
+def test_claim_support_follow_up_execution_payload_exposes_legal_warning_summary():
+    mediator = Mock()
+    mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+    mediator.get_claim_coverage_matrix.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "elements": []}}}
+    mediator.get_claim_overview.return_value = {"claims": {"retaliation": {}}}
+    mediator.get_claim_support_diagnostic_snapshots.return_value = {"claims": {}}
+    mediator.get_claim_support_gaps.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "unresolved_elements": []}}}
+    mediator.get_claim_contradiction_candidates.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "candidates": []}}}
+    mediator.get_claim_support_validation.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "elements": []}}}
+    mediator.get_claim_follow_up_plan.return_value = {"claims": {"retaliation": {"claim_type": "retaliation", "tasks": []}}}
+    mediator.get_recent_claim_follow_up_execution.side_effect = [
+        {"claims": {"retaliation": []}},
+        {
+            "claims": {
+                "retaliation": [
+                    {
+                        "status": "executed",
+                        "support_kind": "authority",
+                        "search_warning_summary": [
+                            {
+                                "family": "state_statutes",
+                                "warning_code": "hf_dataset_files_missing",
+                                "warning_message": "Dataset missing Oregon parquet coverage.",
+                                "state_code": "OR",
+                                "hf_dataset_id": "justicedao/ipfs_state_laws",
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    ]
+    mediator.summarize_claim_support.return_value = {"claims": {"retaliation": {}}}
+    mediator.get_user_evidence.return_value = []
+    mediator.get_three_phase_status.return_value = {}
+    mediator.execute_claim_follow_up_plan.return_value = {
+        "claims": {
+            "retaliation": {
+                "task_count": 1,
+                "tasks": [
+                    {
+                        "claim_element": "Causal connection",
+                        "follow_up_focus": "reasoning_gap_closure",
+                        "query_strategy": "reasoning_gap_targeted",
+                        "proof_decision_source": "logic_unprovable",
+                        "executed": {
+                            "authority": {
+                                "query": "oregon retaliation housing",
+                                "search_warning_summary": [
+                                    {
+                                        "family": "state_statutes",
+                                        "warning_code": "hf_dataset_files_missing",
+                                        "warning_message": "Dataset missing Oregon parquet coverage.",
+                                        "state_code": "OR",
+                                        "hf_dataset_id": "justicedao/ipfs_state_laws",
+                                    },
+                                    {
+                                        "family": "administrative_rules",
+                                        "warning_code": "hf_state_rows_missing",
+                                        "warning_message": "Dataset exposes no Oregon admin rows.",
+                                        "state_code": "OR",
+                                        "hf_dataset_id": "justicedao/ipfs_state_admin_rules",
+                                    },
+                                ],
+                            }
+                        },
+                    }
+                ],
+                "skipped_tasks": [],
+            }
+        }
+    }
+
+    payload = build_claim_support_follow_up_execution_payload(
+        mediator,
+        ClaimSupportFollowUpExecuteRequest(user_id="state-user", claim_type="retaliation"),
+    )
+
+    execution_summary = payload["follow_up_execution_summary"]["retaliation"]
+    history_summary = payload["post_execution_review"]["follow_up_history_summary"]["retaliation"]
+    assert execution_summary["search_warning_count"] == 2
+    assert execution_summary["warning_family_counts"] == {"state_statutes": 1, "administrative_rules": 1}
+    assert execution_summary["warning_code_counts"] == {
+        "hf_dataset_files_missing": 1,
+        "hf_state_rows_missing": 1,
+    }
+    assert execution_summary["hf_dataset_id_counts"] == {
+        "justicedao/ipfs_state_laws": 1,
+        "justicedao/ipfs_state_admin_rules": 1,
+    }
+    assert len(execution_summary["search_warning_summary"]) == 2
+    assert history_summary["search_warning_count"] == 1
+    assert history_summary["warning_code_counts"] == {"hf_dataset_files_missing": 1}
+    assert history_summary["search_warning_summary"][0]["family"] == "state_statutes"
+
+
 def test_claim_support_review_payload_includes_confirmed_handoff_metadata():
     mediator = Mock()
     mediator.state = SimpleNamespace(username="state-user", hashed_username=None)

@@ -139,6 +139,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 
+# Note: the base environment intentionally excludes the third-party `brave-search`
+# package because its published dependency line conflicts with the MCP/httpx stack
+# used by this workspace. Install it only in an isolated optional environment if
+# you specifically need that client.
+
 # (Optional) Configure API keys
 export OPENAI_API_KEY="your-key"
 export BRAVE_SEARCH_API_KEY="your-key"
@@ -186,11 +191,65 @@ complaint-generator-mcp
 .venv/bin/python -m complaint_generator.mcp_server
 ```
 
+### HACC Master Email Corpus
+
+Email workflow ownership now lives in `ipfs_datasets_py.processors.legal_data`. The `complaint_generator.email_*` modules are compatibility shims kept for CLI stability, older imports, and test monkeypatch surfaces.
+
+The HACC workspace now has a canonical merged email corpus that combines the confirmed local case emails with the recommended packet exhibit emails.
+
+Canonical artifacts:
+
+- Manifest: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/email_import_manifest.json`
+- GraphRAG summary: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/graphrag/email_graphrag_summary.json`
+- Search index: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/graphrag/duckdb/email_search.duckdb`
+
+Use the repo-local helper to rebuild or search that corpus without retyping the long paths:
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --search-query 'hcv orientation living room' \
+  --search-limit 5
+```
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --agentic-query 'mobility accommodation retaliation' \
+  --complaint-keyword voucher \
+  --seed-term 'ashley ferron' \
+  --seed-participant aferron@clackamas.us \
+  --required-participant-domain clackamas.us
+```
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --rebuild
+```
+
 **Browser SDK and unified workspace page:**
 
 - The browser SDK is served from `/static/complaint_mcp_sdk.js`
 - The unified workspace is available at `/workspace`
 - The workspace page uses the same complaint service contract exposed by the package, CLI, and MCP server
+
+### Workspace Dataset Bundles
+
+Workspace dataset ingestion and packaging lives in `ipfs_datasets_py.processors.legal_data.workspace_dataset` and supports search + indexing for large mixed evidence corpora (emails, chat exports, drive dumps, and web captures). The `ipfs-datasets` CLI provides single-bundle exports and chain-loadable bundle packaging so you can defer deeper processing until later.
+
+```bash
+# Export a workspace dataset bundle (single parquet) from a JSON workspace payload
+ipfs-datasets workspace --action export --input-path /path/to/workspace.json \
+  --output-parquet /tmp/workspace_bundle.parquet --json
+
+# Package a workspace dataset bundle into chain-loadable parquet + optional CAR artifacts
+ipfs-datasets workspace --action package --input-path /path/to/discord_export.json \
+  --output-dir /tmp/workspace_bundle --package-name workspace_bundle --json
+
+# Inspect a packaged workspace bundle summary
+ipfs-datasets workspace --action package-summary --input-path /tmp/workspace_bundle/bundle_manifest.json --json
+```
 
 ### Running
 
@@ -251,6 +310,37 @@ There is also a dedicated install-smoke helper for the installed console scripts
 The standard regression workflow runs that helper in a separate `package-install-smoke` CI job before the broader regression lane.
 
 The repo also includes a separate Node Playwright compatibility suite available through `npm test:e2e`, but that path runs against a stubbed server for browser-level compatibility checks. The Python regression runners remain the authoritative browser gate for the real FastAPI site surface.
+
+The stubbed Playwright server defaults to port `19030` so it does not collide as easily with local app servers already using `19000`. You can still override the port per run with `PLAYWRIGHT_TEST_PORT`, for example `PLAYWRIGHT_TEST_PORT=19045 npm run test:e2e:navigation`.
+
+The browser-focused UI/UX optimizer and screenshot-audit workflow now default to the full JavaScript complaint journey:
+
+```bash
+npm test
+npm run test:e2e:list
+npm run test:e2e:complaint-flow
+npm run test:e2e:navigation
+
+.venv/bin/python -m complaint_generator.ui_ux_workflow \
+  --screenshot-dir artifacts/ui-audit/screenshots \
+  --output-dir artifacts/ui-audit/reviews
+
+complaint-workspace browser-audit --screenshot-dir artifacts/ui-audit/screenshots
+complaint-workspace optimize-ui --screenshot-dir artifacts/ui-audit/screenshots
+python3 -m complaint_generator.ui_optimizer_daemon start \
+  --user-id demo-user \
+  --daemon-root artifacts/ui-optimizer-daemon/demo-user \
+  --poll-seconds 1800 \
+  --max-rounds 2 \
+  --goal "keep export and testimony actions obvious" \
+  --goal "make the generated complaint read like a formal pleading" \
+  --use-llm-draft \
+  --json
+```
+
+That browser journey explicitly drives intake, evidence capture, claim review, draft generation, export downloads, complaint-output analysis, actor/critic review, and browser-audit handoffs. The Playwright spec at `playwright/tests/complaint-flow.spec.js` now asserts that the generated markdown and PDF still read like a formal pleading rather than a generic summary.
+
+The overnight daemon wraps that same complaint journey into a long-running loop, leaving status JSON, logs, screenshots, export reviews, and closed-loop optimizer artifacts under `artifacts/ui-optimizer-daemon/<user-id>`. Use `python3 -m complaint_generator.ui_optimizer_daemon status --user-id demo-user --daemon-root artifacts/ui-optimizer-daemon/demo-user --json` to check whether it is still running, and `python3 -m complaint_generator.ui_optimizer_daemon stop --user-id demo-user --daemon-root artifacts/ui-optimizer-daemon/demo-user --json` to stop it cleanly.
 
 **Claim Support Regression:**
 

@@ -38,8 +38,12 @@ from integrations.ipfs_datasets.graphrag import (
     validate_ontology,
 )
 from integrations.ipfs_datasets.legal import (
+    LEGAL_SOURCE_AVAILABILITY,
+    get_last_legal_search_diagnostic,
     search_federal_register,
     search_recap_documents,
+    search_state_administrative_rules,
+    search_state_laws,
     search_us_code,
 )
 from integrations.ipfs_datasets.llm import generate_text_with_metadata
@@ -227,9 +231,10 @@ def test_search_federal_register_normalizes_documents():
             }
         ],
     }
-    with patch('integrations.ipfs_datasets.legal._search_federal_register_async', new=Mock(return_value=object())):
-        with patch('integrations.ipfs_datasets.legal.run_async_compat', return_value=payload):
-            results = search_federal_register('test rule', max_results=5)
+    with patch('integrations.ipfs_datasets.legal._search_federal_register_hf_index_async', new=None):
+        with patch('integrations.ipfs_datasets.legal._search_federal_register_async', new=Mock(return_value=object())):
+            with patch('integrations.ipfs_datasets.legal.run_async_compat', return_value=payload):
+                results = search_federal_register('test rule', max_results=5)
 
     assert len(results) == 1
     assert results[0]['source'] == 'federal_register'
@@ -238,6 +243,31 @@ def test_search_federal_register_normalizes_documents():
     assert results[0]['provider'] == 'ipfs_datasets_py'
     assert results[0]['metadata']['details']['operation'] == 'search_federal_register'
     assert results[0]['metadata']['details']['upstream_collection'] == 'documents'
+    assert results[0]['metadata']['details']['hf_dataset_id'] == 'justicedao/ipfs_federal_register'
+    assert results[0]['metadata']['details']['retrieval_backend'] == 'upstream_api'
+
+
+def test_search_federal_register_prefers_huggingface_index_results():
+    payload = {
+        'status': 'success',
+        'hits': [
+            {
+                'identifier': '2026-0002',
+                'name': 'HF Indexed Rule',
+                'snippet': 'Indexed via Hugging Face.',
+            }
+        ],
+    }
+    with patch('integrations.ipfs_datasets.legal._search_federal_register_hf_index_async', new=Mock(return_value=object())):
+        with patch('integrations.ipfs_datasets.legal.run_async_compat', return_value=payload):
+            results = search_federal_register('indexed rule', max_results=5)
+
+    assert len(results) == 1
+    assert results[0]['citation'] == '2026-0002'
+    assert results[0]['title'] == 'HF Indexed Rule'
+    assert results[0]['metadata']['details']['operation'] == 'search_federal_register_hf_index'
+    assert results[0]['metadata']['details']['hf_dataset_id'] == 'justicedao/ipfs_federal_register'
+    assert results[0]['metadata']['details']['retrieval_backend'] == 'huggingface_index'
 
 
 def test_search_recap_normalizes_documents():
@@ -262,6 +292,162 @@ def test_search_recap_normalizes_documents():
     assert results[0]['url'] == 'https://example.com/recap/1'
     assert results[0]['provider'] == 'ipfs_datasets_py'
     assert results[0]['metadata']['details']['operation'] == 'search_recap_documents'
+
+
+def test_search_state_laws_normalizes_vector_results():
+    payload = {
+        'status': 'success',
+        'results': [
+            {
+                'title': 'ORS 90.385',
+                'content': 'A landlord may not retaliate against a tenant.',
+                'url': 'https://example.com/ors/90.385',
+                'metadata': {'state': 'OR'},
+            }
+        ],
+    }
+    with patch('integrations.ipfs_datasets.legal._build_query_vector', return_value=[0.1, 0.2, 0.3]):
+        with patch('integrations.ipfs_datasets.legal._search_state_law_corpus_async', new=Mock(return_value=object())):
+            with patch('integrations.ipfs_datasets.legal.run_async_compat', return_value=payload):
+                results = search_state_laws('tenant retaliation', state='OR', max_results=5)
+
+    assert len(results) == 1
+    assert results[0]['source'] == 'state_law'
+    assert results[0]['type'] == 'statute'
+    assert results[0]['url'] == 'https://example.com/ors/90.385'
+    assert results[0]['metadata']['details']['operation'] == 'search_state_laws'
+    assert results[0]['metadata']['details']['hf_dataset_id'] == 'justicedao/ipfs_state_laws'
+    assert results[0]['metadata']['details']['retrieval_backend'] == 'huggingface_corpus'
+
+
+def test_search_state_administrative_rules_normalizes_vector_results():
+    payload = {
+        'status': 'success',
+        'results': [
+            {
+                'title': 'OAR 839-003-0001',
+                'content': 'Administrative enforcement rule text.',
+                'url': 'https://example.com/oar/839-003-0001',
+                'metadata': {'state': 'OR'},
+            }
+        ],
+    }
+    with patch('integrations.ipfs_datasets.legal._build_query_vector', return_value=[0.1, 0.2, 0.3]):
+        with patch('integrations.ipfs_datasets.legal._search_state_law_corpus_async', new=Mock(return_value=object())):
+            with patch('integrations.ipfs_datasets.legal.run_async_compat', return_value=payload):
+                results = search_state_administrative_rules('housing rule', state='OR', max_results=5)
+
+    assert len(results) == 1
+    assert results[0]['source'] == 'state_admin_rules'
+    assert results[0]['type'] == 'administrative_rule'
+    assert results[0]['metadata']['details']['operation'] == 'search_state_administrative_rules'
+    assert results[0]['metadata']['details']['hf_dataset_id'] == 'justicedao/ipfs_state_admin_rules'
+    assert results[0]['metadata']['details']['retrieval_backend'] == 'huggingface_corpus'
+
+
+def test_search_state_laws_can_skip_live_scrape_fallback():
+    payload = {'status': 'success', 'results': []}
+    with patch('integrations.ipfs_datasets.legal._build_query_vector', return_value=[0.1, 0.2, 0.3]):
+        with patch('integrations.ipfs_datasets.legal._search_state_law_corpus_async', new=Mock(return_value=object())):
+            with patch('integrations.ipfs_datasets.legal.run_async_compat', return_value=payload):
+                with patch('integrations.ipfs_datasets.legal._scrape_state_laws_async', new=Mock(return_value=object())) as scrape_mock:
+                    results = search_state_laws(
+                        'tenant retaliation',
+                        state='OR',
+                        max_results=5,
+                        allow_live_scrape_fallback=False,
+                    )
+
+    assert results == []
+    scrape_mock.assert_not_called()
+
+
+def test_search_state_laws_uses_hf_parquet_fallback_before_live_scrape():
+    payload = {'status': 'success', 'results': []}
+    parquet_results = [
+        {
+            'citation': 'ORS 90.385',
+            'title': 'Retaliatory conduct by landlord',
+            'metadata': {
+                'details': {
+                    'operation': 'search_state_laws_hf_parquet',
+                    'hf_dataset_id': 'justicedao/ipfs_state_laws',
+                    'retrieval_backend': 'huggingface_parquet',
+                }
+            },
+        }
+    ]
+    with patch('integrations.ipfs_datasets.legal._build_query_vector', return_value=[0.1, 0.2, 0.3]):
+        with patch('integrations.ipfs_datasets.legal._search_state_law_corpus_async', new=Mock(return_value=object())):
+            with patch('integrations.ipfs_datasets.legal.run_async_compat', return_value=payload):
+                with patch('integrations.ipfs_datasets.legal._search_hf_parquet_text', return_value=parquet_results) as parquet_mock:
+                    with patch('integrations.ipfs_datasets.legal._scrape_state_laws_async', new=Mock(return_value=object())) as scrape_mock:
+                        results = search_state_laws('tenant retaliation', state='OR', max_results=5)
+
+    assert results == parquet_results
+    parquet_mock.assert_called_once()
+    scrape_mock.assert_not_called()
+
+
+def test_search_state_laws_records_hf_coverage_diagnostic_for_missing_state_rows():
+    payload = {'status': 'success', 'results': []}
+
+    def _parquet_side_effect(**kwargs):
+        kwargs['diagnostics'].update({
+            'warning_code': 'hf_state_rows_missing',
+            'warning_message': 'Hugging Face dataset justicedao/ipfs_state_laws does not currently expose rows for requested state OR.',
+        })
+        kwargs['diagnostics'].setdefault('parquet', {})['state_row_count'] = 0
+        return []
+
+    with patch('integrations.ipfs_datasets.legal._build_query_vector', return_value=[0.1, 0.2, 0.3]):
+        with patch('integrations.ipfs_datasets.legal._search_state_law_corpus_async', new=Mock(return_value=object())):
+            with patch('integrations.ipfs_datasets.legal.run_async_compat', return_value=payload):
+                with patch('integrations.ipfs_datasets.legal._search_hf_parquet_text', side_effect=_parquet_side_effect):
+                    results = search_state_laws(
+                        'tenant retaliation',
+                        state='OR',
+                        max_results=5,
+                        allow_live_scrape_fallback=False,
+                    )
+
+    assert results == []
+    diagnostic = get_last_legal_search_diagnostic('search_state_laws')
+    assert diagnostic['warning_code'] == 'hf_state_rows_missing'
+    assert diagnostic['state_code'] == 'OR'
+    assert diagnostic['hf_dataset_id'] == 'justicedao/ipfs_state_laws'
+    assert diagnostic['parquet']['state_row_count'] == 0
+
+
+def test_legal_source_availability_exposes_state_families():
+    assert 'state_statutes' in LEGAL_SOURCE_AVAILABILITY
+    assert 'administrative_rules' in LEGAL_SOURCE_AVAILABILITY
+
+
+def test_mediator_adapter_detects_current_legal_scraper_paths():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        package_root = Path(tmpdir) / 'ipfs_datasets_py'
+        processors_root = package_root / 'processors'
+        legal_root = processors_root / 'legal_scrapers'
+        package_root.mkdir()
+        processors_root.mkdir()
+        legal_root.mkdir()
+        (package_root / '__init__.py').write_text('', encoding='utf-8')
+        (processors_root / '__init__.py').write_text('', encoding='utf-8')
+        (legal_root / '__init__.py').write_text('', encoding='utf-8')
+        (legal_root / 'legal_dataset_api.py').write_text('', encoding='utf-8')
+
+        fake_spec = type(
+            'FakeSpec',
+            (),
+            {'submodule_search_locations': [str(package_root)]},
+        )()
+
+        with patch('mediator.integrations.adapter.importlib.util.find_spec', return_value=fake_spec):
+            status = mediator_adapter_module.detect_ipfs_datasets_capabilities().legal_datasets
+
+    assert status.available is True
+    assert status.name == 'ipfs_datasets_py.processors.legal_scrapers'
 
 
 def test_search_brave_web_normalizes_results():

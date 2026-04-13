@@ -159,6 +159,47 @@ graph_query = query_pdf_knowledge_graph(
 )
 ```
 
+### 6. Workspace Dataset Bundles (Index + Package)
+
+Workspace dataset ingestion and packaging are implemented in `ipfs_datasets_py.processors.legal_data`. The workspace bundle shape mirrors docket bundles but targets mixed evidence sources such as chat exports, mailboxes, and web captures. Use these bundles when you want BM25, vector indices, and knowledge graphs ready now, while deferring deeper per-document processing until later.
+
+**Key capabilities:**
+- Normalize mixed evidence payloads into a single workspace dataset object.
+- Build knowledge graphs plus BM25/vector indices for retrieval.
+- Export a single parquet bundle or a chain-loadable bundle (parquet + optional CAR).
+
+**CLI usage (preferred):**
+```bash
+# Export a workspace dataset bundle (single parquet) from a JSON workspace payload
+ipfs-datasets workspace --action export --input-path /path/to/workspace.json \
+  --output-parquet /tmp/workspace_bundle.parquet --json
+
+# Package a workspace dataset bundle into chain-loadable parquet + optional CAR artifacts
+ipfs-datasets workspace --action package --input-path /path/to/discord_export.json \
+  --output-dir /tmp/workspace_bundle --package-name workspace_bundle --json
+
+# Inspect a packaged workspace bundle summary
+ipfs-datasets workspace --action package-summary --input-path /tmp/workspace_bundle/bundle_manifest.json --json
+```
+
+**Python usage (direct upstream API):**
+```python
+from ipfs_datasets_py.processors.legal_data import (
+    WorkspaceDatasetBuilder,
+    package_workspace_dataset,
+)
+
+builder = WorkspaceDatasetBuilder()
+dataset = builder.build_from_workspace({
+    "workspace_id": "ws-01",
+    "workspace_name": "Evidence Workspace",
+    "documents": [{"id": "doc-1", "title": "Email", "text": "Sample evidence"}],
+})
+
+package = package_workspace_dataset(dataset, output_dir="/tmp/workspace_bundle", package_name="workspace_bundle")
+print(package["manifest_json_path"])
+```
+
 ## Setup Instructions
 
 ### 1. Initialize Submodule

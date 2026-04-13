@@ -407,6 +407,35 @@ def test_execute_follow_up_command_prints_execution_quality_summary_before_json(
         },
         'follow_up_execution_summary': {
             'retaliation': {
+                'search_warning_count': 2,
+                'warning_family_counts': {
+                    'state_statutes': 1,
+                    'administrative_rules': 1,
+                },
+                'warning_code_counts': {
+                    'hf_dataset_files_missing': 1,
+                    'hf_state_rows_missing': 1,
+                },
+                'hf_dataset_id_counts': {
+                    'justicedao/ipfs_state_laws': 1,
+                    'justicedao/ipfs_state_admin_rules': 1,
+                },
+                'search_warning_summary': [
+                    {
+                        'family': 'state_statutes',
+                        'warning_code': 'hf_dataset_files_missing',
+                        'warning_message': 'Dataset missing Oregon parquet coverage.',
+                        'state_code': 'OR',
+                        'hf_dataset_id': 'justicedao/ipfs_state_laws',
+                    },
+                    {
+                        'family': 'administrative_rules',
+                        'warning_code': 'hf_state_rows_missing',
+                        'warning_message': 'Dataset exposes no Oregon admin rows.',
+                        'state_code': 'OR',
+                        'hf_dataset_id': 'justicedao/ipfs_state_admin_rules',
+                    },
+                ],
                     'temporal_gap_task_count': 1,
                     'temporal_gap_targeted_task_count': 1,
                     'temporal_rule_status_counts': {
@@ -471,6 +500,25 @@ def test_execute_follow_up_command_prints_execution_quality_summary_before_json(
             },
             'follow_up_history_summary': {
                 'retaliation': {
+                    'search_warning_count': 1,
+                    'warning_family_counts': {
+                        'state_statutes': 1,
+                    },
+                    'warning_code_counts': {
+                        'hf_dataset_files_missing': 1,
+                    },
+                    'hf_dataset_id_counts': {
+                        'justicedao/ipfs_state_laws': 1,
+                    },
+                    'search_warning_summary': [
+                        {
+                            'family': 'state_statutes',
+                            'warning_code': 'hf_dataset_files_missing',
+                            'warning_message': 'Dataset missing Oregon parquet coverage.',
+                            'state_code': 'OR',
+                            'hf_dataset_id': 'justicedao/ipfs_state_laws',
+                        },
+                    ],
                     'temporal_gap_task_count': 1,
                     'temporal_gap_targeted_task_count': 1,
                     'temporal_rule_status_counts': {
@@ -546,6 +594,12 @@ def test_execute_follow_up_command_prints_execution_quality_summary_before_json(
     assert 'primary_biases: Adverse=1' in rendered
     assert 'primary_rule_biases: Procedural Prerequisite=1' in rendered
     assert 'source_context: lane Authority=1; family Legal Authority=1; artifact Legal Authority Reference=1' in rendered
+    assert 'follow-up execution legal retrieval warnings:' in rendered
+    assert '- retaliation: warnings=2' in rendered
+    assert 'warning_families: Administrative Rules=1, State Statutes=1' in rendered
+    assert 'warning_codes: Hf Dataset Files Missing=1, Hf State Rows Missing=1' in rendered
+    assert 'hf_datasets: justicedao/ipfs_state_admin_rules=1, justicedao/ipfs_state_laws=1' in rendered
+    assert 'latest_warning: State Statutes [hf_dataset_files_missing] Dataset missing Oregon parquet coverage.' in rendered
     assert 'follow-up execution chronology summary:' in rendered
     assert '- retaliation: chronology_tasks=1 chronology_targeted=1' in rendered
     assert 'rule_status: Partial=1' in rendered
@@ -562,6 +616,8 @@ def test_execute_follow_up_command_prints_execution_quality_summary_before_json(
     assert 'selected_biases: Uncertain=1' in rendered
     assert 'selected_rule_biases: Procedural Prerequisite=1' in rendered
     assert 'source_context: family Legal Authority=1; artifact Legal Authority Reference=1' in rendered
+    assert 'follow-up history legal retrieval warnings:' in rendered
+    assert 'latest_warning: State Statutes [hf_dataset_files_missing] Dataset missing Oregon parquet coverage.' in rendered
     assert 'follow-up history chronology summary:' in rendered
     assert '- retaliation: chronology_tasks=1 chronology_targeted=1' in rendered
     assert 'rule_status: Partial=1' in rendered
@@ -698,6 +754,8 @@ def test_export_complaint_command_calls_document_package_builder():
         'affidavit_venue_lines=["State of California", "County of San Francisco"]',
         'affidavit_jurat=Subscribed and sworn to before me on March 13, 2026 by Jane Doe.',
         'affidavit_notary_block=["__________________________________", "Notary Public for the State of California", "My commission expires: March 13, 2029"]',
+        'email_timeline_handoff_path=/tmp/email_timeline_handoff.json',
+        'email_authority_enrichment_path=/tmp/email_authority_enrichment.json',
         'service_method=CM/ECF',
         'service_recipients=Registered Agent for Acme Corporation,Defense Counsel',
         'service_recipient_details=[{"recipient":"Defense Counsel","method":"Email","address":"counsel@example.com"}]',
@@ -740,6 +798,8 @@ def test_export_complaint_command_calls_document_package_builder():
         affidavit_venue_lines=['State of California', 'County of San Francisco'],
         affidavit_jurat='Subscribed and sworn to before me on March 13, 2026 by Jane Doe.',
         affidavit_notary_block=['__________________________________', 'Notary Public for the State of California', 'My commission expires: March 13, 2029'],
+        email_timeline_handoff_path='/tmp/email_timeline_handoff.json',
+        email_authority_enrichment_path='/tmp/email_authority_enrichment.json',
         service_method='CM/ECF',
         service_recipients=['Registered Agent for Acme Corporation', 'Defense Counsel'],
         service_recipient_details=[{'recipient': 'Defense Counsel', 'method': 'Email', 'address': 'counsel@example.com'}],

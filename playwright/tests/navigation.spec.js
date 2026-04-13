@@ -69,6 +69,9 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#cg-app-shell')).toHaveCount(0);
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Secure Intake/i);
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Builder/i);
+    await expect(page.getByRole('link', { name: 'Start Secure Intake', exact: true })).toHaveCount(1);
+    await expect(page.locator('#homepage-nav-builder')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('#homepage-resume-builder')).toHaveAttribute('aria-disabled', 'true');
 
     const screenshotPath = testInfo.outputPath('homepage-overview.png');
     await page.locator('.hero').screenshot({ path: screenshotPath });
@@ -327,7 +330,7 @@ test.describe('website surface navigation', () => {
 
     await expect(page.locator('#handoff-chat-summary')).toContainText(/Open Chat/i);
     await expect(page.locator('#handoff-review-summary')).toContainText(/Open the review dashboard/i);
-    await expect(page.locator('#handoff-builder-summary')).toContainText(/Open the formal builder/i);
+    await expect(page.locator('#handoff-builder-summary')).toContainText(/Open the formal builder|held back until the complaint record can support a real filing draft/i);
     await expect(page.locator('#handoff-chat-button')).toHaveAttribute('href', /\/chat\?/);
     await expect(page.locator('#handoff-chat-button')).toHaveAttribute('href', /source=workspace/);
     await expect(page.locator('#handoff-chat-button')).toHaveAttribute('href', /user_id=did%3Akey%3Aworkspace-handoff-demo/);
@@ -468,8 +471,76 @@ test.describe('website surface navigation', () => {
     await expect(page).toHaveURL(/\/profile\?/);
     await expect(page).toHaveURL(/user_id=did%3Akey%3Areview-nav-demo/);
     await page.goto('/claim-support-review?claim_type=retaliation&user_id=did:key:review-nav-demo&workspace_user_id=did:key:review-nav-demo');
+    await page.locator('#review-open-workspace-link').click();
+    await expect(page).toHaveURL(/\/workspace\?/);
+    await expect(page).toHaveURL(/user_id=did%3Akey%3Areview-nav-demo/);
+    await expect(page).toHaveURL(/target_tab=review/);
+    await expect(page.locator('body')).toContainText(/Unified Complaint Workspace/i, { timeout: 30000 });
+    await expect(page.locator('#sdk-server-info')).toContainText(/complaint-workspace-mcp/i, { timeout: 20000 });
+    await expect(page.locator('#did-chip')).toContainText(/did:key:review-nav-demo/i);
+    await expect(page.locator('[data-tab-target="review"]')).toHaveClass(/is-active/);
+    await expect(page.locator('#workspace-status')).toContainText(/Returned from review to the workspace/i, { timeout: 20000 });
+    await page.goto('/claim-support-review?claim_type=retaliation&user_id=did:key:review-nav-demo&workspace_user_id=did:key:review-nav-demo');
     await page.locator('#review-open-builder-link').click();
     await expect(page).toHaveURL(/\/document/);
+  });
+
+  test('review handoff back to workspace preserves exported packet context after reload', async ({ page }) => {
+    const did = `did:key:review-return-${Date.now()}`;
+    await page.addInitScript((value) => {
+      window.localStorage.setItem('complaintGenerator.did', value);
+    }, did);
+
+    await page.goto('/workspace');
+    await waitForWorkspaceReady(page);
+
+    await page.locator('#intake-party_name').fill('Jane Doe');
+    await page.locator('#intake-opposing_party').fill('Acme Corporation');
+    await page.locator('#intake-protected_activity').fill('Reported discrimination to HR');
+    await page.locator('#intake-adverse_action').fill('Termination two days later');
+    await page.locator('#intake-timeline').fill('Complaint on March 8, termination on March 10');
+    await page.locator('#intake-harm').fill('Lost wages and benefits');
+    await page.locator('#intake-court_header').fill('FOR THE NORTHERN DISTRICT OF CALIFORNIA');
+    await page.locator('#save-intake-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Intake answers saved/i);
+
+    await page.getByRole('button', { name: 'Evidence', exact: true }).click();
+    await page.locator('#evidence-kind').selectOption('document');
+    await page.locator('#evidence-claim-element').selectOption('causation');
+    await page.locator('#evidence-title').fill('Termination email');
+    await page.locator('#evidence-source').fill('Inbox export');
+    await page.locator('#evidence-content').fill('The termination followed the HR complaint within two days.');
+    await page.locator('#save-evidence-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Evidence saved and support review refreshed/i);
+
+    await page.getByRole('button', { name: 'Draft', exact: true }).click();
+    await page.locator('#draft-title').fill('Jane Doe v. Acme Corporation Complaint');
+    await page.locator('#requested-relief').fill('Back pay\nInjunctive relief');
+    await page.locator('#generate-draft-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Complaint draft generated through the llm_router formal complaint path/i);
+    await expect(page.locator('#draft-preview')).toContainText(/Jane Doe brings this retaliation complaint against Acme Corporation/i);
+
+    await page.locator('#export-packet-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Complaint packet exported/i);
+    await expect(page.locator('#packet-preview')).toContainText(/Title: Jane Doe v\. Acme Corporation Complaint/i);
+
+    await page.goto(`/claim-support-review?claim_type=retaliation&user_id=${encodeURIComponent(did)}&workspace_user_id=${encodeURIComponent(did)}`);
+    await expect(page.locator('#review-open-workspace-link')).toBeVisible();
+    await page.locator('#review-open-workspace-link').click();
+    await expect(page).toHaveURL(/\/workspace\?/);
+    await expect(page).toHaveURL(new RegExp(`user_id=${encodeURIComponent(did).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    await expect(page).toHaveURL(/target_tab=review/);
+    await expect(page.locator('#workspace-status')).toContainText(/Returned from review to the workspace/i, { timeout: 20000 });
+    await expect(page.locator('#did-chip')).toContainText(did);
+    await expect(page.locator('[data-tab-target="review"]')).toHaveClass(/is-active/);
+
+    await page.reload({ waitUntil: 'networkidle' });
+    await expect(page.locator('#did-chip')).toContainText(did);
+    await expect(page.locator('[data-tab-target="review"]')).toHaveClass(/is-active/);
+    await page.getByRole('button', { name: 'Draft', exact: true }).click();
+    await expect(page.locator('#packet-preview')).toContainText(/Title: Jane Doe v\. Acme Corporation Complaint/i);
+    await expect(page.locator('#packet-preview')).toContainText(/Jane Doe brings this retaliation complaint against Acme Corporation/i);
+    await expect(page.locator('#download-packet-tool-markdown-button')).toHaveAttribute('data-download-url', /output_format=markdown/);
   });
 
   test('dashboard hub and every mounted shell route are reachable in the JS stub surface', async ({ page }) => {
@@ -510,7 +581,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#draft-title')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('#reset-session-button')).toBeVisible({ timeout: 10000 });
     await page.locator('#reset-session-button').click();
-    await expect(page.locator('#workspace-status')).toContainText(/reset to a clean state/i);
+    await expect(page.locator('#workspace-status')).toContainText(/resetting the workspace|reset to a clean state/i);
     await page.locator('[data-tab-target="intake"]').click();
     await expect(page.locator('#sdk-server-info')).toContainText(/complaint-workspace-mcp/i);
     await expect(page.locator('#tool-list')).toContainText(/complaint.generate_complaint/i);
@@ -527,7 +598,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#feature-walkthrough-list')).toContainText(/5\. Coach testimony with the mediator/i);
     await expect(page.locator('#feature-walkthrough-list')).toContainText(/7\. Improve the UI with the optimizer/i);
     await expect(page.locator('#quick-action-grid')).toContainText(/Finish intake/i);
-    await expect(page.locator('#quick-action-grid')).toContainText(/Update the mediator brief/i);
+    await expect(page.locator('#quick-action-grid')).toContainText(/Update the mediator brief|Inspect shared tool access/i);
     await expect(page.locator('#quick-action-grid')).toContainText(/Run the actor\/critic optimizer/i);
     await page.locator('#shortcut-optimizer-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Opened UX Audit/i);
@@ -538,10 +609,8 @@ test.describe('website surface navigation', () => {
     await page.locator('#shortcut-intake-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Opened Intake/i);
     await expect(page.locator('#intake-party_name')).toBeFocused();
-    await page.locator('#quick-action-grid').getByRole('button', { name: 'Open Review' }).click();
-    await expect(page.locator('#workspace-status')).toContainText(/Opened Review/i);
-    await expect(page.locator('#support-grid')).toBeVisible();
-    await page.locator('#shortcut-intake-button').click();
+    await expect(page.locator('#shortcut-review-button')).toBeDisabled();
+    await expect(page.locator('#shortcut-review-button')).toHaveAttribute('title', /Finish more intake and save at least one targeted evidence item/i);
 
     await page.locator('#intake-party_name').fill('Jane Doe');
     await page.locator('#intake-opposing_party').fill('Acme Corporation');
@@ -586,6 +655,10 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#workspace-status')).toContainText(/Evidence saved and support review refreshed/i);
     await expect(page.locator('#evidence-list')).toContainText(/Termination email/i);
     await expect(page.locator('#evidence-list')).toContainText(/termination-email\.txt/i);
+    await expect(page.locator('#shortcut-review-button')).toBeEnabled();
+    await page.locator('#shortcut-review-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Opened Review/i);
+    await expect(page.locator('#support-grid')).toBeVisible();
 
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
     await page.locator('#draft-title').fill('Jane Doe v. Acme Corporation Complaint');
@@ -594,7 +667,7 @@ test.describe('website surface navigation', () => {
 
     await expect(page.locator('#workspace-status')).toContainText(/Complaint draft generated through the llm_router formal complaint path/i);
     await expect(page.locator('#draft-preview')).toContainText(/Jane Doe brings this retaliation complaint against Acme Corporation/i);
-    await expect(page.locator('#feature-walkthrough-list')).toContainText(/A complaint draft exists and can be revised directly/i);
+    await expect(page.locator('#feature-walkthrough-list')).toContainText(/A complaint draft exists and can be refined/i);
     await page.locator('#export-packet-button').click();
     await expect(page.locator('#workspace-status')).toContainText(/Complaint packet exported/i);
     await expect(page.locator('#packet-preview')).toContainText(/Title: Jane Doe v\. Acme Corporation Complaint/i);
@@ -631,7 +704,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#ux-review-actor-critic')).toContainText(/Critic obligations/i);
     await expect(page.locator('#ux-review-runs')).toContainText(/Iteration 1/i);
     await expect(page.locator('#ux-review-stage-findings')).toContainText(/First-time complainants need clearer reassurance that incomplete dates and imperfect wording can still be saved/i);
-    await expect(page.locator('#ux-review-stage-findings')).toContainText(/The evidence step should explain which documents help prove causation before users are asked to upload or summarize proof/i);
+    await expect(page.locator('#ux-review-stage-findings')).toContainText(/The Gmail import affordance keeps evidence ingestion inside the browser workspace and the shared MCP SDK path|The evidence step should explain which documents help prove causation before users are asked to upload or summarize proof/i);
     await expect(page.locator('#ux-review-stage-findings')).not.toContainText(/Markdown fallback should not replace the structured intake guidance/i);
     await expect(page.locator('#ux-review-stage-findings')).not.toContainText(/Markdown fallback should not replace the structured evidence guidance/i);
 
@@ -658,6 +731,35 @@ test.describe('website surface navigation', () => {
     await page.goto('/');
     await expect(page.locator('#homepage-ui-readiness-summary')).toContainText(/Do not send to clients yet|Needs repair|Client-safe/i);
     await expect(page.locator('#homepage-ui-readiness-summary')).toContainText(/100|release blocker|No release blocker/i);
+  });
+
+  test('workspace integrations stay usable on a narrow viewport', async ({ page }, testInfo) => {
+    test.slow();
+    await page.addInitScript(() => {
+      window.localStorage.setItem('complaintGenerator.did', 'did:key:nav-workspace-mobile');
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/workspace');
+    await waitForWorkspaceReady(page, { requireIntakeVisible: false });
+
+    await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
+    await expect(page.locator('#integrations-start-readiness-button')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#integrations-start-export-button')).toBeVisible();
+    await expect(page.locator('#feature-coverage-list')).toContainText(/Actor\/Critic UI optimizer/i);
+    await expect(page.locator('#tool-list')).toContainText(/complaint\.optimize_ui/i);
+
+    const panelMetrics = await page.locator('[data-tab-panel="integrations"]').evaluate((node) => ({
+      clientWidth: node.clientWidth,
+      scrollWidth: node.scrollWidth,
+    }));
+    expect(panelMetrics.scrollWidth).toBeLessThanOrEqual(panelMetrics.clientWidth + 2);
+
+    const screenshotPath = testInfo.outputPath('workspace-integrations-mobile.png');
+    await page.locator('[data-tab-panel="integrations"]').screenshot({ path: screenshotPath });
+    await testInfo.attach('workspace-integrations-mobile', {
+      path: screenshotPath,
+      contentType: 'image/png',
+    });
   });
 
   test('first-class pages share the same DID-backed application sidebar and session summary', async ({ page, request }) => {

@@ -209,6 +209,51 @@
       }
     },
     {
+      "label": "HACC Master Email Search",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe"
+      },
+      "args": [
+        "scripts/master_case_email.py",
+        "--search-query",
+        "hcv orientation living room",
+        "--search-limit",
+        "5"
+      ],
+      "group": "test",
+      "isBackground": false,
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}"
+        }
+      }
+    },
+    {
+      "label": "HACC Master Email Rebuild",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe"
+      },
+      "args": [
+        "scripts/master_case_email.py",
+        "--rebuild"
+      ],
+      "group": "test",
+      "isBackground": false,
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}"
+        }
+      }
+    },
+    {
       "label": "HACC Adversarial Runner Tests",
       "type": "shell",
       "command": "python3",
