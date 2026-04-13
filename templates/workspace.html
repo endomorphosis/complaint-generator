@@ -9637,6 +9637,12 @@ function extractComplaintOutputSignals(result) {
                 persistPackagedDocketManifestHistory(manifestPath);
                 renderPackagedDocketManifestHistory();
                 renderPackagedDocketOperatorDashboardPanel();
+                publishWorkspaceSyncEvent({
+                    event_type: 'docket.updated',
+                    source: 'workspace-packaged-docket-dashboard',
+                    manifest_path: manifestPath,
+                    payload: latestPackagedDocketOperatorDashboard || null,
+                });
                 setStatus('Packaged docket operator dashboard loaded.');
             } catch (error) {
                 console.error(error);
@@ -9660,6 +9666,12 @@ function extractComplaintOutputSignals(result) {
                 persistPackagedDocketManifestHistory(manifestPath);
                 renderPackagedDocketManifestHistory();
                 renderPackagedDocketOperatorDashboardPanel();
+                publishWorkspaceSyncEvent({
+                    event_type: 'docket.updated',
+                    source: 'workspace-packaged-docket-report',
+                    manifest_path: manifestPath,
+                    payload: latestPackagedDocketOperatorDashboardReport || null,
+                });
                 setStatus('Archived packaged docket operator dashboard report loaded.');
             } catch (error) {
                 console.error(error);
@@ -9691,6 +9703,16 @@ function extractComplaintOutputSignals(result) {
                 latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(manifestPath);
                 latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat);
                 renderPackagedDocketOperatorDashboardPanel();
+                publishWorkspaceSyncEvent({
+                    event_type: 'docket.updated',
+                    source: 'workspace-packaged-docket-revalidation',
+                    manifest_path: manifestPath,
+                    payload: {
+                        dashboard: latestPackagedDocketOperatorDashboard || null,
+                        report: latestPackagedDocketOperatorDashboardReport || null,
+                        execution: latestPackagedDocketRevalidationExecution || null,
+                    },
+                });
                 setStatus(attachRefreshedPackets
                     ? `Packaged docket proof revalidation queue executed at ${minPriority} priority and refreshed packets were attached.`
                     : `Packaged docket proof revalidation queue executed at ${minPriority} priority without attaching refreshed packets.`);
@@ -9741,6 +9763,16 @@ function extractComplaintOutputSignals(result) {
                 latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(nextManifestPath);
                 latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(nextManifestPath, reportFormat);
                 renderPackagedDocketOperatorDashboardPanel();
+                publishWorkspaceSyncEvent({
+                    event_type: 'docket.persisted',
+                    source: 'workspace-packaged-docket-persist',
+                    manifest_path: nextManifestPath,
+                    payload: {
+                        dashboard: latestPackagedDocketOperatorDashboard || null,
+                        report: latestPackagedDocketOperatorDashboardReport || null,
+                        persisted: latestPackagedDocketRevalidationPersist || null,
+                    },
+                });
                 setStatus(`Refreshed packaged docket bundle persisted to ${String(latestPackagedDocketRevalidationPersist.package_root || outputDir)}.`);
             } catch (error) {
                 console.error(error);
@@ -9807,6 +9839,20 @@ function extractComplaintOutputSignals(result) {
             persistLatestPackagedDocketManifestPreference(manifestPath);
             activateTab('integrations');
             setStatus('Loaded a recent packaged docket manifest path from history.');
+        }
+
+        function publishWorkspaceSyncEvent(detail) {
+            if (window.ComplaintMcpSdk && typeof window.ComplaintMcpSdk.publishSyncEvent === 'function') {
+                return window.ComplaintMcpSdk.publishSyncEvent(detail || {});
+            }
+            if (typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+                window.dispatchEvent(new CustomEvent('complaint-mcp-sync', {
+                    detail: Object.assign({
+                        emitted_at: new Date().toISOString(),
+                    }, detail || {}),
+                }));
+            }
+            return detail || {};
         }
 
         async function previewMediatorBrief() {
