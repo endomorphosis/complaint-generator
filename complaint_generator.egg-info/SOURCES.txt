@@ -59,6 +59,7 @@ complaint_generator/__main__.py
 complaint_generator/agentic_evidence_download.py
 complaint_generator/apps.py
 complaint_generator/cli.py
+complaint_generator/data_migration.py
 complaint_generator/email_agentic_search.py
 complaint_generator/email_authority_enrichment.py
 complaint_generator/email_credentials.py
@@ -244,6 +245,7 @@ tests/test_contextual_entity_disambiguation.py
 tests/test_critic_intake_priority.py
 tests/test_dei_analysis.py
 tests/test_deontic_logic.py
+tests/test_docket_workspace_surface.py
 tests/test_document_optimization_workflow_actions.py
 tests/test_document_pipeline.py
 tests/test_document_pipeline_fallbacks.py
@@ -380,5 +382,6 @@ tests/test_vector_phase2_integration.py
 tests/test_web_evidence_hooks.py
 tests/test_website_cohesion_playwright.py
 tests/test_workflow_phase_guidance.py
+tests/test_workspace_data_migration.py
 tests/test_workspace_legacy_intake_sanitization.py
 tests/test_workspace_template_contract.py

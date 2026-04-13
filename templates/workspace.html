@@ -2891,6 +2891,8 @@ complaint-workspace answer --user-id did:key:example --question-id protected_act
 complaint-generator-workspace generate --user-id did:key:example --requested-relief "Back pay|Injunctive relief"
 complaint-workspace run-gmail-duckdb-pipeline --user-id did:key:example --address hr@example.com --complaint-keyword retaliation
 complaint-workspace search-email-duckdb --index-path artifacts/email_corpus.duckdb --query "termination retaliation"
+complaint-workspace workspace-data-schema --user-id did:key:example
+complaint-workspace migrate-legacy-workspace-data --user-id did:key:example --output-dir artifacts/workspace-dataset
 complaint-workspace export-markdown --user-id did:key:example
 complaint-workspace export-docx --user-id did:key:example
 complaint-workspace export-pdf --user-id did:key:example
@@ -2901,6 +2903,8 @@ complaint-workspace browser-audit artifacts/ui-audit/browser-audit</pre>
                             <h3>MCP stdio server</h3>
                             <pre>complaint-generator-mcp
 complaint-mcp-server
+tool: complaint.get_workspace_data_schema
+tool: complaint.migrate_legacy_workspace_data
 tool: complaint.export_complaint_docx
 tool: complaint.run_browser_audit</pre>
                         </div>
@@ -2912,6 +2916,8 @@ const bootstrap = await client.bootstrapWorkspace();
 await client.callTool('complaint.review_case', { user_id: bootstrap.did });
 await client.runGmailDuckdbPipeline({ user_id: bootstrap.did, addresses: ['hr@example.com'] });
 await client.searchEmailDuckdb({ index_path: 'artifacts/email_corpus.duckdb', query: 'termination retaliation' });
+await client.getWorkspaceDataSchema(bootstrap.did);
+await client.migrateLegacyWorkspaceData(bootstrap.did, 'artifacts/workspace-dataset');
 await client.exportComplaintMarkdown(bootstrap.did);
 await client.exportComplaintDocx(bootstrap.did);
 await client.exportComplaintPdf(bootstrap.did);
@@ -5413,6 +5419,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     mcpExample: `tool: complaint.export_complaint_packet\n{"user_id":"${did}"}`,
                     sdkExample: `await client.callTool('complaint.export_complaint_packet', { user_id: '${did}' });`,
                 },
+                {
+                    title: 'Inspect workspace parquet schema',
+                    packageExample: `from complaint_generator import ComplaintWorkspaceService\n\nservice = ComplaintWorkspaceService()\nschema = service.get_workspace_data_schema("${did}")`,
+                    cliExample: `complaint-workspace workspace-data-schema --user-id ${did}`,
+                    mcpExample: `tool: complaint.get_workspace_data_schema\n{"user_id":"${did}"}`,
+                    sdkExample: `await client.getWorkspaceDataSchema('${did}');`,
+                },
             ];
         }
 
@@ -6324,8 +6337,41 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             `).join('');
         }
 
+        function getSchemaGuidedRecommendations() {
+            const toolingContract = workspaceToolingContract || (workspaceCapabilities && workspaceCapabilities.tooling_contract) || {};
+            const recommendations = toolingContract && Array.isArray(toolingContract.schema_guided_recommendations)
+                ? toolingContract.schema_guided_recommendations
+                : Array.isArray(workspaceCapabilities && workspaceCapabilities.schema_guided_recommendations)
+                    ? workspaceCapabilities.schema_guided_recommendations
+                    : [];
+            return recommendations;
+        }
+
+        function getWorkspaceSchemaSnapshot() {
+            return workspaceDataSchema || (workspaceCapabilities && workspaceCapabilities.workspace_data_schema) || null;
+        }
+
+        function getSchemaHintIndex() {
+            const schema = getWorkspaceSchemaSnapshot() || {};
+            const items = [
+                ...(Array.isArray(schema.ui_design_hints) ? schema.ui_design_hints : []),
+                ...(Array.isArray(schema.mcp_design_hints) ? schema.mcp_design_hints : []),
+            ];
+            return items.reduce((acc, item) => {
+                const id = String((item && item.id) || '').trim();
+                if (id) {
+                    acc[id] = String((item && item.reason) || '').trim();
+                }
+                return acc;
+            }, {});
+        }
+
         function classifyToolFamily(toolName) {
             const name = String(toolName || '');
+            const recommendationToolNames = new Set(getSchemaGuidedRecommendations().map((item) => String((item && item.tool_name) || '').trim()).filter(Boolean));
+            if (name.includes('workspace_data') || name.includes('migrate_legacy') || recommendationToolNames.has(name)) {
+                return 'Data + schema';
+            }
             if (name.includes('intake') || name.includes('start_session') || name.includes('claim_type') || name.includes('case_synopsis')) {
                 return 'Intake + framing';
             }
@@ -6354,6 +6400,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 groups.get(family).push(tool);
             });
             const orderedFamilies = [
+                'Data + schema',
                 'Intake + framing',
                 'Evidence + review',
                 'Draft + export',
@@ -6361,9 +6408,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 'Shared platform',
             ].filter((family) => groups.has(family));
             const topFamily = orderedFamilies[0] || 'Shared platform';
+            const schemaRecommendations = getSchemaGuidedRecommendations();
+            const topSchemaRecommendation = schemaRecommendations[0] || null;
 
             toolSummary.textContent = (tools || []).length
-                ? `The browser currently sees ${(tools || []).length} MCP tools. Start with ${topFamily.toLowerCase()} if you want the clearest next operational lane.`
+                ? topSchemaRecommendation
+                    ? `The browser currently sees ${(tools || []).length} MCP tools. Schema guidance currently recommends ${String(topSchemaRecommendation.tool_name || topFamily).replace(/^complaint\./, '')} before branching into the rest of the workflow.`
+                    : `The browser currently sees ${(tools || []).length} MCP tools. Start with ${topFamily.toLowerCase()} if you want the clearest next operational lane.`
                 : 'No MCP tools are currently visible to the browser workspace.';
             phaseChips.innerHTML = orderedFamilies.length
                 ? orderedFamilies.map((family) => `<span class="chip">${escapeHtml(family)}: ${escapeHtml(String((groups.get(family) || []).length))}</span>`).join('')
@@ -6372,7 +6423,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             toolList.innerHTML = orderedFamilies.map((family) => `
                 <div class="item">
                     <strong>${escapeHtml(family)}</strong>
-                    <div class="muted">${escapeHtml(`These tools support the ${family.toLowerCase()} phase of the complaint workflow.`)}</div>
+                    <div class="muted">${escapeHtml(
+                        family === 'Data + schema'
+                            ? 'These tools inspect the parquet-backed workspace schema, migrate legacy stores, and shape downstream MCP/UI affordances.'
+                            : `These tools support the ${family.toLowerCase()} phase of the complaint workflow.`
+                    )}</div>
                     <div class="list">
                         ${(groups.get(family) || []).map((tool) => `
                             <div class="item">
@@ -6393,6 +6448,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const resolvedDraft = resolveDraftState(sessionPayload);
             const draftState = draftStatusCopy(sessionPayload);
             const toolNames = new Set((tools || []).map((tool) => tool.name));
+            const workspaceSchema = getWorkspaceSchemaSnapshot() || {};
+            const schemaRecommendations = getSchemaGuidedRecommendations();
+            const pieceSchemas = Array.isArray(workspaceSchema.piece_schemas) ? workspaceSchema.piece_schemas : [];
+            const filterDimensions = Array.isArray(workspaceSchema.filter_dimensions) ? workspaceSchema.filter_dimensions : [];
             const answeredCount = Object.values(session.intake_answers || {}).filter((value) => String(value || '').trim()).length;
             const totalQuestions = (sessionPayload.questions || []).length || 0;
             const evidenceCount = (overview.testimony_items || 0) + (overview.document_items || 0);
@@ -6427,6 +6486,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     name: 'Shared MCP SDK path',
                     enabled: toolNames.size > 0,
                     detail: `The browser is connected to ${toolNames.size} MCP tools through the shared JavaScript SDK client.`,
+                },
+                {
+                    name: 'Workspace parquet schema',
+                    enabled: toolNames.has('complaint.get_workspace_data_schema'),
+                    detail: pieceSchemas.length
+                        ? `${pieceSchemas.length} packaged workspace piece schemas are available with ${filterDimensions.length} filter dimensions for MCP and UI decisions.`
+                        : 'The workspace schema tool is available, but no schema snapshot has been refreshed in this browser session yet.',
+                },
+                {
+                    name: 'Legacy data migration',
+                    enabled: toolNames.has('complaint.migrate_legacy_workspace_data'),
+                    detail: schemaRecommendations.length
+                        ? `${schemaRecommendations.length} schema-guided recommendations are available to steer migration and operator design.`
+                        : 'The parquet migration tool is exposed so old complaint session stores can be consolidated into the new dataset primitives.',
                 },
                 {
                     name: 'Mediator testimony handoff',
@@ -6536,6 +6609,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const toolingContract = workspaceToolingContract || (workspaceCapabilities && workspaceCapabilities.tooling_contract)
                 ? (workspaceToolingContract || workspaceCapabilities.tooling_contract)
                 : null;
+            const schemaGuidedRecommendations = toolingContract && Array.isArray(toolingContract.schema_guided_recommendations)
+                ? toolingContract.schema_guided_recommendations
+                : Array.isArray(workspaceCapabilities && workspaceCapabilities.schema_guided_recommendations)
+                    ? workspaceCapabilities.schema_guided_recommendations
+                    : [];
             const toolingContractMarkup = toolingContract
                 ? `
                     <div class="item">
@@ -6549,6 +6627,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                                 : escapeHtml(`Missing cross-surface exposures: ${(toolingContract.missing_exposures || []).join(', ') || 'unknown'}.`)}
                         </div>
                     </div>
+                    ${schemaGuidedRecommendations.length ? `
+                    <div class="item">
+                        <strong>Schema-guided recommendations</strong>
+                        <div class="muted">${escapeHtml(schemaGuidedRecommendations.slice(0, 3).map((item) => `${String(item.tool_name || '').replace(/^complaint\./, '')}: ${String(item.reason || '')}`).join(' | '))}</div>
+                    </div>
+                    ` : ''}
                 `
                 : '';
             const sdkToMcpParityMap = {
@@ -7382,6 +7466,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const state = deriveWorkflowState(sessionPayload || {});
             const toolNames = new Set((tools || []).map((tool) => tool.name));
             const availableToolCount = toolNames.size;
+            const schemaRecommendations = getSchemaGuidedRecommendations();
+            const schemaHintIndex = getSchemaHintIndex();
+            const topSchemaRecommendation = schemaRecommendations[0] || null;
             const phaseChip = document.getElementById('integrations-operations-phase-chip');
             const toolChip = document.getElementById('integrations-operations-tool-chip');
             const guidance = document.getElementById('integrations-operations-guidance');
@@ -7405,19 +7492,26 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const hasMediatorPath = toolNames.has('complaint.build_mediator_prompt');
             const hasExportPath = toolNames.has('complaint.export_packet') || toolNames.has('complaint.export_complaint_markdown');
             const hasUiAuditPath = toolNames.has('complaint.review_ui') || toolNames.has('complaint.optimize_ui');
+            const hasSchemaPath = toolNames.has('complaint.get_workspace_data_schema');
 
             phaseChip.textContent = `case phase: ${state.phaseLabel}`;
             toolChip.textContent = `tools: ${availableToolCount} shared MCP tools`;
-            guidance.textContent = state.builderReady
-                ? 'The case is far enough along to treat export, release-gate review, and UX audit as operational actions from this panel.'
-                : state.reviewReady
-                    ? 'Use this lane to verify tool readiness, prepare the mediator handoff, and keep the shared workflow coherent before formal drafting.'
-                    : 'Start by checking the tool contract and mediator handoff so the shared session stays coherent while intake is still being built.';
-            preview.textContent = state.builderReady
-                ? 'Recommended tool workflow: export the packet through the MCP surface, review the release gate, then run UX audit on the resulting browser journey.'
-                : state.reviewReady
-                    ? 'Recommended tool workflow: check tool readiness, prepare the mediator brief, then use review and evidence to close the remaining support gaps.'
-                    : 'Recommended tool workflow: inspect the shared tooling contract first, then build the mediator handoff once intake and synopsis are less sparse.';
+            guidance.textContent = topSchemaRecommendation && hasSchemaPath
+                ? `Schema-guided recommendation: ${String(topSchemaRecommendation.reason || '').trim() || 'Refresh the workspace schema before making downstream UI or MCP design choices.'}`
+                : state.builderReady
+                    ? 'The case is far enough along to treat export, release-gate review, and UX audit as operational actions from this panel.'
+                    : state.reviewReady
+                        ? 'Use this lane to verify tool readiness, prepare the mediator handoff, and keep the shared workflow coherent before formal drafting.'
+                        : 'Start by checking the tool contract and mediator handoff so the shared session stays coherent while intake is still being built.';
+            preview.textContent = topSchemaRecommendation && hasSchemaPath
+                ? `Recommended schema-first workflow: run ${String(topSchemaRecommendation.tool_name || 'complaint.get_workspace_data_schema')}, then apply the returned hints to filters, navigation, and follow-on tool affordances.`
+                : schemaHintIndex.dual_search_modes
+                    ? `Recommended tool workflow: refresh the workspace schema, keep keyword and semantic search visible, then continue with ${state.builderReady ? 'export and release-gate review.' : 'review and evidence refinement.'}`
+                    : state.builderReady
+                        ? 'Recommended tool workflow: export the packet through the MCP surface, review the release gate, then run UX audit on the resulting browser journey.'
+                        : state.reviewReady
+                            ? 'Recommended tool workflow: check tool readiness, prepare the mediator brief, then use review and evidence to close the remaining support gaps.'
+                            : 'Recommended tool workflow: inspect the shared tooling contract first, then build the mediator handoff once intake and synopsis are less sparse.';
 
             readinessButtons.forEach((button) => setButtonGateState(button, true, availableToolCount > 0
                 ? 'The shared MCP tooling contract is available for inspection.'

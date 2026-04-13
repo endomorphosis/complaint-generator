@@ -1093,7 +1093,7 @@ def test_workspace_page_uses_mcp_sdk_tools_for_connected_complaint_flow():
                 "() => document.getElementById('workspace-status').innerText.includes('Provider diagnostics refreshed.')"
             )
             page.wait_for_function(
-                "() => document.getElementById('provider-diagnostics-preview').innerText.includes('Preference order: codex_cli -> openai -> copilot_cli -> hf_inference_api')"
+                "() => document.getElementById('provider-diagnostics-preview').innerText.includes('Preference order: codex_cli -> copilot_cli -> openai -> hf_inference_api')"
             )
             page.click("#analyze-complaint-output-button")
             page.wait_for_function(

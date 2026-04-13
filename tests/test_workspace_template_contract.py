@@ -223,6 +223,12 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "workspace-data-output-dir" in content
     assert "workspace-data-package-name" in content
     assert "workspace-data-include-car" in content
+    assert "complaint-workspace workspace-data-schema --user-id did:key:example" in content
+    assert "complaint-workspace migrate-legacy-workspace-data --user-id did:key:example --output-dir artifacts/workspace-dataset" in content
+    assert "tool: complaint.get_workspace_data_schema" in content
+    assert "tool: complaint.migrate_legacy_workspace_data" in content
+    assert "await client.getWorkspaceDataSchema(bootstrap.did);" in content
+    assert "await client.migrateLegacyWorkspaceData(bootstrap.did, 'artifacts/workspace-dataset');" in content
     assert "refresh-workspace-data-schema-panel-button" in content
     assert "migrate-legacy-workspace-data-button" in content
     assert "copy-workspace-data-manifest-button" in content
@@ -274,6 +280,10 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "function packagedDocketManifestHistoryStorageKey()" in content
     assert "function packagedDocketPreferencesStorageKey()" in content
     assert "function workspaceDataPreferencesStorageKey()" in content
+    assert "function getSchemaGuidedRecommendations()" in content
+    assert "function getWorkspaceSchemaSnapshot()" in content
+    assert "function getSchemaHintIndex()" in content
+    assert "title: 'Inspect workspace parquet schema'" in content
     assert "loadWorkspaceDataPreferences()" in content
     assert "persistWorkspaceDataPreferences()" in content
     assert "hydrateWorkspaceDataPreferences()" in content
@@ -293,6 +303,9 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "client.getToolingContract(workspaceUserId)" in content
     assert "client.getWorkspaceDataSchema(workspaceUserId, payload)" in content
     assert "client.migrateLegacyWorkspaceData(workspaceUserId, outputDir, Object.assign({}, payload, {" in content
+    assert "Schema-guided recommendation:" in content
+    assert "Recommended schema-first workflow:" in content
+    assert "These tools inspect the parquet-backed workspace schema" in content
     assert "client.getPackagedDocketOperatorDashboard(manifestPath)" in content
     assert "client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat)" in content
     assert "client.executePackagedDocketProofRevalidationQueue(manifestPath, {" in content

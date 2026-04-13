@@ -16,6 +16,13 @@ from applications.complaint_workspace_api import attach_complaint_workspace_rout
 from applications.complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
 from complaint_generator import ComplaintWorkspaceService, analyze_complaint_output, get_client_release_gate, get_formal_diagnostics, get_packaged_docket_operator_dashboard, get_provider_diagnostics, get_tooling_contract, load_packaged_docket_operator_dashboard_report, optimize_ui, review_generated_exports, review_ui, run_browser_audit
 
+try:
+    import python_multipart  # type: ignore  # noqa: F401
+
+    HAS_MULTIPART = True
+except ModuleNotFoundError:
+    HAS_MULTIPART = False
+
 
 pytestmark = [pytest.mark.no_auto_network]
 
@@ -61,6 +68,13 @@ def _build_packaged_docket_manifest(tmp_path, *, routing_reason: str = "Workspac
                     "id": "doc_1",
                     "title": "Complaint",
                     "text": "Plaintiff seeks relief under 42 U.S.C. § 1983.",
+                },
+                {
+                    "id": "doc_2",
+                    "title": "Notice of Hearing",
+                    "date_filed": "2024-04-18",
+                    "document_number": "12",
+                    "text": "The court sets a hearing for May 1, 2024 at 10:00 a.m.",
                 },
             ],
         }
@@ -195,6 +209,8 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "search-email-duckdb" in cli_payload["cli_commands"]
     assert "chat-turn" in cli_payload["cli_commands"]
     assert "tooling-contract" in cli_payload["cli_commands"]
+    assert "workspace-data-schema" in cli_payload["cli_commands"]
+    assert "migrate-legacy-workspace-data" in cli_payload["cli_commands"]
     assert "set-claim-type" in cli_payload["cli_commands"]
     assert "update-synopsis" in cli_payload["cli_commands"]
 
@@ -204,6 +220,8 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert any(step["id"] == "gmail_evidence_import" for step in mcp_payload["core_flow_steps"])
     assert any(step["id"] == "local_evidence_import" for step in mcp_payload["core_flow_steps"])
     assert any(step["id"] == "tooling_contract" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "workspace_data_schema" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "workspace_data_migration" for step in mcp_payload["core_flow_steps"])
 
     package_payload = get_tooling_contract("contract-user", service=service)
     assert package_payload["all_core_flow_steps_exposed"] is True
@@ -215,6 +233,8 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "run_intake_chat_turn" in package_payload["package_exports"]
     assert "update_claim_type" in package_payload["package_exports"]
     assert "update_case_synopsis" in package_payload["package_exports"]
+    assert "get_workspace_data_schema" in package_payload["package_exports"]
+    assert "migrate_legacy_workspace_data" in package_payload["package_exports"]
     assert "importGmailEvidence" in package_payload["browser_sdk_methods"]
     assert "importLocalEvidence" in package_payload["browser_sdk_methods"]
     assert "runGmailDuckdbPipeline" in package_payload["browser_sdk_methods"]
@@ -223,9 +243,12 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "updateClaimType" in package_payload["browser_sdk_methods"]
     assert "updateCaseSynopsis" in package_payload["browser_sdk_methods"]
     assert "getToolingContract" in package_payload["browser_sdk_methods"]
+    assert "getWorkspaceDataSchema" in package_payload["browser_sdk_methods"]
+    assert "migrateLegacyWorkspaceData" in package_payload["browser_sdk_methods"]
     assert any(step["id"] == "gmail_duckdb_pipeline" for step in package_payload["core_flow_steps"])
     assert any(step["id"] == "email_duckdb_search" for step in package_payload["core_flow_steps"])
     assert any(step["id"] == "intake_chat" for step in package_payload["core_flow_steps"])
+    assert any(item["id"] == "workspace_schema_refresh" for item in package_payload["schema_guided_recommendations"])
 
 
 def test_intake_chat_turn_is_exposed_across_cli_mcp_and_api(monkeypatch, tmp_path):
@@ -350,6 +373,46 @@ def test_generate_api_route_forwards_llm_router_options(monkeypatch, tmp_path):
         "config_path": "config.llm_router.json",
         "backend_id": "formal_complaint_reviewer",
     }
+
+
+def test_upload_local_evidence_api_route_imports_files_and_note(tmp_path):
+    if not HAS_MULTIPART:
+        pytest.skip("python-multipart is not installed")
+
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "upload-local-evidence-sessions")
+    app = FastAPI()
+    attach_complaint_workspace_routes(app, service)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/complaint-workspace/upload-local-evidence",
+        data={
+            "user_id": "upload-user",
+            "claim_element_id": "causation",
+            "kind": "document",
+            "note_title": "Dashboard upload note",
+            "note": "These files were added from the dashboard chat modal.",
+            "source": "dashboard-chat-upload",
+        },
+        files=[
+            (
+                "files",
+                ("timeline.txt", b"Termination email arrived two days after the HR report.", "text/plain"),
+            ),
+        ],
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["imported_count"] == 1
+    assert payload["uploaded_files"][0]["filename"] == "timeline.txt"
+    assert payload["note_record"]["title"] == "Dashboard upload note"
+    assert payload["note_record"]["attachment_names"] == ["timeline.txt"]
+    assert payload["session"]["user_id"] == "upload-user"
+    documents = payload["session"]["evidence"]["documents"]
+    testimony = payload["session"]["evidence"]["testimony"]
+    assert any("timeline.txt" in str(record["title"]) for record in documents)
+    assert any(record["title"] == "Dashboard upload note" for record in testimony)
 
 
 def test_import_gmail_evidence_cli_command(monkeypatch, tmp_path):
@@ -1149,7 +1212,7 @@ def test_all_cli_commands_are_exercised_end_to_end(monkeypatch, tmp_path):
     assert formal_diagnostics_payload["formal_diagnostics"]["release_gate_verdict"] in {"pass", "warning", "blocked"}
     assert isinstance(formal_diagnostics_payload["release_gate"], dict)
     provider_diagnostics_payload = _invoke_cli(runner, "provider-diagnostics", "--user-id", "cli-user")
-    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "copilot_cli", "openai", "hf_inference_api"]
     assert provider_diagnostics_payload["ui_review_default_provider"] == "codex_cli"
     assert provider_diagnostics_payload["ui_review_hf_fallback_model"] == "Qwen/Qwen2.5-VL-7B-Instruct"
     assert isinstance(provider_diagnostics_payload["providers"], list)
@@ -1356,7 +1419,7 @@ def test_all_mcp_server_tools_are_exercised_via_jsonrpc(tmp_path):
     assert formal_diagnostics_payload["packet_summary"]["has_draft"] is True
     assert formal_diagnostics_payload["formal_diagnostics"]["release_gate_verdict"] in {"pass", "warning", "blocked"}
     provider_diagnostics_payload = _call_mcp_tool(service, 34, "complaint.get_provider_diagnostics", {"user_id": "mcp-user"})
-    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "copilot_cli", "openai", "hf_inference_api"]
     assert provider_diagnostics_payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
     assert provider_diagnostics_payload["effective_complaint_draft_provider"] == "codex_cli"
     assert provider_diagnostics_payload["ui_review_multimodal_rate_limit_fallbacks"]["codex_cli"] == ["copilot_cli", "hf_inference_api"]
@@ -1373,7 +1436,7 @@ def test_provider_diagnostics_are_exposed_across_package_cli_and_mcp(monkeypatch
     mcp_payload = _call_mcp_tool(service, 91, "complaint.get_provider_diagnostics", {"user_id": "diag-user"})
 
     for payload in (package_payload, cli_payload, mcp_payload):
-        assert payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+        assert payload["default_order"][:4] == ["codex_cli", "copilot_cli", "openai", "hf_inference_api"]
         assert payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
         assert payload["effective_complaint_draft_provider"] == "codex_cli"
         assert payload["ui_review_default_provider"] == "codex_cli"
@@ -1579,6 +1642,18 @@ def test_packaged_docket_operator_dashboard_is_exposed_across_package_mcp_and_ap
     )
     assert report_response.status_code == 200
     assert "Packaged Docket Operator Dashboard" in report_response.json()["report"]
+
+    view_response = client.get(
+        "/api/complaint-workspace/packaged-docket/view",
+        params={"manifest_path": manifest_path, "include_document_text": True, "document_limit": 5},
+    )
+    assert view_response.status_code == 200
+    assert view_response.json()["source"] == "complaint_workspace_docket_view"
+    assert isinstance(view_response.json()["documents"], list)
+    assert view_response.json()["case_calendar_summary"]["count"] == 1
+    assert view_response.json()["case_calendar"][0]["kind"] == "hearing"
+    assert view_response.json()["case_calendar"][0]["title"] == "Notice of Hearing"
+    assert view_response.json()["case_calendar"][0]["date"] == "May 1, 2024"
 
 
 def test_successful_llm_draft_persists_effective_router_backend_metadata(monkeypatch, tmp_path):

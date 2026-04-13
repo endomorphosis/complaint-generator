@@ -324,3 +324,37 @@ def test_migrate_legacy_workspace_data_packages_bundle_and_tools(tmp_path):
     )
     assert mcp_migration["status"] == "success"
     assert Path(mcp_migration["manifest_json_path"]).exists()
+
+
+def test_schema_guided_recommendations_surface_across_contracts(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "schema-guided-contracts")
+    user_id = "schema-guided-user"
+    service.submit_intake_answers(
+        user_id,
+        {
+            "party_name": "Jordan Example",
+            "opposing_party": "Housing Authority",
+            "protected_activity": "Requested a reasonable accommodation.",
+            "adverse_action": "Received an eviction notice.",
+            "timeline": "Request in January 2026; notice in February 2026.",
+            "harm": "Housing instability and lost time.",
+            "court_header": "FOR THE DISTRICT OF OREGON",
+        },
+    )
+    evidence_db = _build_evidence_db(tmp_path / "schema-guided-evidence.duckdb", user_id=user_id)
+
+    tooling_contract = service.get_tooling_contract(user_id)
+    workflow_capabilities = service.get_workflow_capabilities(user_id)
+
+    assert "workspace-data-schema" in tooling_contract["cli_commands"]
+    assert "migrate-legacy-workspace-data" in tooling_contract["cli_commands"]
+    assert "getWorkspaceDataSchema" in tooling_contract["browser_sdk_methods"]
+    assert "migrateLegacyWorkspaceData" in tooling_contract["browser_sdk_methods"]
+    assert any(step["id"] == "workspace_data_schema" for step in tooling_contract["core_flow_steps"])
+    assert any(step["id"] == "workspace_data_migration" for step in tooling_contract["core_flow_steps"])
+    assert any(item["id"] == "workspace_schema_refresh" for item in tooling_contract["schema_guided_recommendations"])
+
+    schema_snapshot = service.get_workspace_data_schema(user_id, evidence_db_path=evidence_db)
+    assert schema_snapshot["summary"]["document_count"] >= 2
+    assert any(item["id"] == "workspace_schema_refresh" for item in workflow_capabilities["schema_guided_recommendations"])
+    assert workflow_capabilities["workspace_data_schema"]["schema_version"] == "workspace_data_schema.v1"

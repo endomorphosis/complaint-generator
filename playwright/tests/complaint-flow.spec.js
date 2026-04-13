@@ -1119,7 +1119,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Router provider diagnostics/i);
     await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Complaint draft default: codex_cli/i);
     await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Complaint draft fallback chain: codex_cli -> copilot_cli -> hf_inference_api/i);
-    await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Preference order: codex_cli -> openai -> copilot_cli -> hf_inference_api/i);
+    await expect(page.locator('#provider-diagnostics-preview')).toContainText(/Preference order: codex_cli -> copilot_cli -> openai -> hf_inference_api/i);
     await expect(page.locator('#provider-diagnostics-preview')).toContainText(/copilot_cli:/i);
 
     await page.locator('#export-packet-tool-button').click();

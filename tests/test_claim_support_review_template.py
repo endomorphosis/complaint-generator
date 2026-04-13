@@ -750,11 +750,13 @@ def test_review_surface_app_registers_dashboard_and_api_routes():
         ("/api/complaint-workspace/import-gmail-evidence", "POST"),
         ("/api/complaint-workspace/run-gmail-duckdb-pipeline", "POST"),
         ("/api/complaint-workspace/import-local-evidence", "POST"),
+        ("/api/complaint-workspace/upload-local-evidence", "POST"),
         ("/api/complaint-workspace/search-email-duckdb", "POST"),
         ("/api/complaint-workspace/review", "POST"),
         ("/api/complaint-workspace/generate", "POST"),
         ("/api/complaint-workspace/update-draft", "POST"),
         ("/api/complaint-workspace/reset", "POST"),
+        ("/api/complaint-workspace/packaged-docket/view", "GET"),
         ("/api/complaint-workspace/packaged-docket/operator-dashboard", "GET"),
         ("/api/complaint-workspace/packaged-docket/operator-dashboard-report", "GET"),
         ("/api/complaint-workspace/mcp/tools", "GET"),
@@ -850,6 +852,11 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "complaint-mcp-server" in workspace_response.text
     assert "Complaint Editor Workshop" in wysiwyg_response.text
     assert "Unified Dashboard Hub" in dashboard_hub_response.text
+    assert "Chat Upload Modal" in dashboard_hub_response.text
+    assert "Complaint Workspace Snapshot" in dashboard_hub_response.text
+    assert "Heads-Up Display Dashboard" in dashboard_hub_response.text
+    assert "Case Calendar Preview" in dashboard_hub_response.text
+    assert "Operator Queue" in dashboard_hub_response.text
     assert "IPFS Datasets MCP Dashboard" in mcp_response.text
     assert analytics_history_response.json()["history"]
     assert workspace_tools_response.json()["tools"]

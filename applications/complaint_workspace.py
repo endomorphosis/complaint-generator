@@ -14,7 +14,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from xml.sax.saxutils import escape
 
 from complaint_phases.legal_document import parse_legal_document
@@ -196,6 +196,8 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "client-release-gate",
     "capabilities",
     "tooling-contract",
+    "workspace-data-schema",
+    "migrate-legacy-workspace-data",
     "generate",
     "export-packet",
     "export-markdown",
@@ -234,6 +236,8 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "getClientReleaseGate",
     "getWorkflowCapabilities",
     "getToolingContract",
+    "getWorkspaceDataSchema",
+    "migrateLegacyWorkspaceData",
     "generateComplaint",
     "exportComplaintPacket",
     "exportComplaintMarkdown",
@@ -382,6 +386,18 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "mcp_tool": "complaint.get_tooling_contract",
         "browser_sdk_method": "getToolingContract",
     },
+    "workspace_data_schema": {
+        "package_export": "get_workspace_data_schema",
+        "cli_command": "workspace-data-schema",
+        "mcp_tool": "complaint.get_workspace_data_schema",
+        "browser_sdk_method": "getWorkspaceDataSchema",
+    },
+    "workspace_data_migration": {
+        "package_export": "migrate_legacy_workspace_data",
+        "cli_command": "migrate-legacy-workspace-data",
+        "mcp_tool": "complaint.migrate_legacy_workspace_data",
+        "browser_sdk_method": "migrateLegacyWorkspaceData",
+    },
     "export_critic": {
         "package_export": "review_generated_exports",
         "cli_command": "review-exports",
@@ -426,6 +442,89 @@ def _unique_preserve_order(values: List[str]) -> List[str]:
         seen.add(normalized)
         ordered.append(normalized)
     return ordered
+
+
+def _build_schema_guided_tooling_recommendations(schema_snapshot: Optional[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    snapshot = dict(schema_snapshot or {})
+    if not snapshot:
+        return []
+
+    recommendations: List[Dict[str, Any]] = []
+    hint_index = {
+        str((item or {}).get("id") or "").strip(): str((item or {}).get("reason") or "").strip()
+        for item in list(snapshot.get("ui_design_hints") or []) + list(snapshot.get("mcp_design_hints") or [])
+        if isinstance(item, Mapping)
+    }
+    filter_dimensions = [str(item).strip() for item in list(snapshot.get("filter_dimensions") or []) if str(item).strip()]
+    piece_ids = {
+        str((piece or {}).get("piece_id") or "").strip()
+        for piece in list(snapshot.get("piece_schemas") or [])
+        if isinstance(piece, Mapping)
+    }
+
+    def add_recommendation(
+        rec_id: str,
+        *,
+        tool_name: str,
+        ui_surface: str,
+        reason: str,
+        priority: str = "medium",
+    ) -> None:
+        recommendations.append({
+            "id": rec_id,
+            "tool_name": tool_name,
+            "ui_surface": ui_surface,
+            "reason": reason,
+            "priority": priority,
+        })
+
+    add_recommendation(
+        "workspace_schema_refresh",
+        tool_name="complaint.get_workspace_data_schema",
+        ui_surface="workspace-data-operator-card",
+        reason="Refresh the workspace parquet schema before designing MCP filters or navigation so the UI follows the stored dataset pieces.",
+        priority="high",
+    )
+    add_recommendation(
+        "workspace_migration_path",
+        tool_name="complaint.migrate_legacy_workspace_data",
+        ui_surface="workspace-data-operator-card",
+        reason="Use the legacy migration flow to consolidate old complaint session and mediator stores into the packaged parquet workspace bundle.",
+        priority="high",
+    )
+    if "schema_guided_filters" in hint_index and filter_dimensions:
+        add_recommendation(
+            "workspace_filter_design",
+            tool_name="complaint.get_workspace_data_schema",
+            ui_surface="workspace-data-schema-preview",
+            reason=f"Prioritize MCP filters and browser chips for {', '.join(filter_dimensions)} because the dataset exposes those as useful selection dimensions.",
+            priority="high",
+        )
+    if "dual_search_modes" in hint_index:
+        add_recommendation(
+            "dual_search_affordances",
+            tool_name="complaint.search_docket_dataset",
+            ui_surface="workspace-data-schema-hints-preview",
+            reason=hint_index["dual_search_modes"],
+            priority="medium",
+        )
+    if "claim_alignment_filters" in hint_index:
+        add_recommendation(
+            "claim_alignment_navigation",
+            tool_name="complaint.review_case",
+            ui_surface="review",
+            reason=hint_index["claim_alignment_filters"],
+            priority="medium",
+        )
+    if "knowledge_graph_presence" in hint_index or any(piece_id.startswith("knowledge_graph") for piece_id in piece_ids):
+        add_recommendation(
+            "graph_navigation",
+            tool_name="complaint.get_docket_dataset_graph",
+            ui_surface="packaged-docket-operator-card",
+            reason=hint_index.get("knowledge_graph_presence") or "Graph entities are present in the packaged workspace and should inform related-issue exploration.",
+            priority="medium",
+        )
+    return recommendations
 
 
 def _normalize_fragment(value: Optional[str], fallback: str) -> str:
@@ -2978,8 +3077,14 @@ class ComplaintWorkspaceService:
         if user_id:
             try:
                 payload["workspace_data_schema"] = self.get_workspace_data_schema(user_id)
+                payload["schema_guided_recommendations"] = _build_schema_guided_tooling_recommendations(
+                    payload["workspace_data_schema"]
+                )
             except Exception as exc:
                 payload["workspace_data_schema_error"] = str(exc)
+                payload["schema_guided_recommendations"] = []
+        else:
+            payload["schema_guided_recommendations"] = []
         return payload
 
     def get_workspace_data_schema(
@@ -3112,6 +3217,7 @@ class ComplaintWorkspaceService:
                 "detail": "The lawsuit packet can be exported as a structured browser, CLI, or MCP artifact.",
             },
         ]
+        workspace_data_schema = self.get_workspace_data_schema(session["session"]["user_id"])
         return {
             "user_id": session["session"]["user_id"],
             "case_synopsis": session["case_synopsis"],
@@ -3123,7 +3229,8 @@ class ComplaintWorkspaceService:
             "ui_readiness": self.get_ui_readiness(user_id),
             "client_release_gate": self.get_client_release_gate(user_id),
             "tooling_contract": self.get_tooling_contract(user_id),
-            "workspace_data_schema": self.get_workspace_data_schema(session["session"]["user_id"]),
+            "workspace_data_schema": workspace_data_schema,
+            "schema_guided_recommendations": _build_schema_guided_tooling_recommendations(workspace_data_schema),
             "capabilities": capabilities,
         }
 
