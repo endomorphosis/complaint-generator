@@ -3112,6 +3112,18 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                     <div class="status draft-preview-shell"><pre id="workspace-data-migration-preview">No workspace parquet migration has been run yet.</pre></div>
                                 </div>
                             </div>
+                            <div>
+                                <label>Schema-Driven Filter Dimensions</label>
+                                <div class="chip-row" id="workspace-data-filter-dimensions"><span class="chip">Refresh the workspace schema to derive filter dimensions.</span></div>
+                            </div>
+                            <div>
+                                <label>Schema Piece Explorer</label>
+                                <div class="list" id="workspace-data-piece-schema-list"></div>
+                            </div>
+                            <div>
+                                <label>Schema-Driven MCP / UI Query Plan</label>
+                                <div class="status draft-preview-shell"><pre id="workspace-data-query-plan-preview">No schema-driven query plan generated yet.</pre></div>
+                            </div>
                         </div>
                         <div class="tool-card" id="packaged-docket-operator-card">
                             <span class="integrations-stack-label">Packaged Docket Ops</span>
@@ -6366,6 +6378,34 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }, {});
         }
 
+        function buildSchemaDrivenQueryPlan(schema, options = {}) {
+            const snapshot = schema && typeof schema === 'object' ? schema : {};
+            const userId = String(options.userId || workspaceUserId || '').trim() || 'did:key:current-session';
+            const manifestPath = String(snapshot.manifest_path || document.getElementById('workspace-data-manifest-path').value.trim() || '').trim();
+            const filterDimensions = Array.isArray(snapshot.filter_dimensions) ? snapshot.filter_dimensions : [];
+            const pieceSchemas = Array.isArray(snapshot.piece_schemas) ? snapshot.piece_schemas : [];
+            const pieceIds = pieceSchemas.map((item) => String((item && (item.piece_id || item.name)) || '').trim()).filter(Boolean);
+            const preferredFilters = filterDimensions.slice(0, 4);
+            const lines = [
+                'Schema-driven query plan',
+                `Workspace selector: ${manifestPath ? `manifest_path=${manifestPath}` : `user_id=${userId}`}`,
+                `Preferred filters: ${preferredFilters.length ? preferredFilters.join(', ') : 'none surfaced yet'}`,
+                `Indexed pieces: ${pieceIds.length ? pieceIds.join(', ') : 'none surfaced yet'}`,
+                '',
+                'Suggested MCP-first sequence:',
+                manifestPath
+                    ? `1. complaint.get_workspace_data_schema -> {"manifest_path":"${manifestPath}","user_id":"${userId}"}`
+                    : `1. complaint.get_workspace_data_schema -> {"user_id":"${userId}"}`,
+                preferredFilters.length
+                    ? `2. Promote browser chips and MCP arguments for ${preferredFilters.join(', ')} before adding any broader search controls.`
+                    : '2. Refresh or migrate the workspace dataset before adding query controls.',
+                pieceIds.includes('bm25_documents') || pieceIds.includes('vector_items')
+                    ? '3. Keep keyword and semantic retrieval visible together because the packaged workspace exposes both search artifacts.'
+                    : '3. Prefer summary and facet navigation until richer retrieval artifacts are packaged.',
+            ];
+            return lines.join('\n');
+        }
+
         function classifyToolFamily(toolName) {
             const name = String(toolName || '');
             const recommendationToolNames = new Set(getSchemaGuidedRecommendations().map((item) => String((item && item.tool_name) || '').trim()).filter(Boolean));
@@ -6591,6 +6631,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const workspaceDataSchemaNode = document.getElementById('workspace-data-schema-preview');
             const workspaceDataHintsNode = document.getElementById('workspace-data-schema-hints-preview');
             const workspaceDataMigrationNode = document.getElementById('workspace-data-migration-preview');
+            const workspaceDataFilterDimensionsNode = document.getElementById('workspace-data-filter-dimensions');
+            const workspaceDataPieceSchemaListNode = document.getElementById('workspace-data-piece-schema-list');
+            const workspaceDataQueryPlanNode = document.getElementById('workspace-data-query-plan-preview');
             const packetSummaryNode = document.getElementById('packet-export-summary');
             const releaseGateNode = document.getElementById('formal-complaint-release-gate');
             const formalDefectsNode = document.getElementById('formal-complaint-defects');
@@ -6900,6 +6943,25 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 workspaceDataSchemaNode.textContent = 'No workspace dataset schema loaded yet.';
                 workspaceDataHintsNode.textContent = 'No workspace dataset design hints loaded yet.';
             }
+            workspaceDataFilterDimensionsNode.innerHTML = filterDimensions.length
+                ? filterDimensions.map((item) => `<span class="chip good">${escapeHtml(String(item))}</span>`).join('')
+                : '<span class="chip">Refresh the workspace schema to derive filter dimensions.</span>';
+            workspaceDataPieceSchemaListNode.innerHTML = schemaPieces.length
+                ? schemaPieces.map((item) => `
+                    <div class="item">
+                        <strong>${escapeHtml(String(item.piece_id || item.name || 'piece'))}</strong>
+                        <div class="chip-row">
+                            <span class="chip">${escapeHtml(`rows: ${String(item.row_count || 0)}`)}</span>
+                            <span class="chip">${escapeHtml(`fields: ${String(Array.isArray(item.fields) ? item.fields.length : 0)}`)}</span>
+                            <span class="chip">${escapeHtml(`group: ${String(item.group || 'workspace')}`)}</span>
+                        </div>
+                        <div class="muted">${escapeHtml((Array.isArray(item.fields) ? item.fields.slice(0, 8).join(', ') : '') || 'No extracted fields surfaced for this piece yet.')}</div>
+                    </div>
+                `).join('')
+                : '<div class="item"><strong>No schema pieces loaded yet.</strong><div class="muted">Refresh the workspace schema to inspect parquet piece groups and field coverage.</div></div>';
+            workspaceDataQueryPlanNode.textContent = workspaceSchema
+                ? buildSchemaDrivenQueryPlan(workspaceSchema, { userId: workspaceUserId })
+                : 'No schema-driven query plan generated yet.';
             if (latestWorkspaceDataMigration) {
                 workspaceDataMigrationNode.textContent = [
                     `Status: ${String(latestWorkspaceDataMigration.status || 'unknown')}`,

@@ -235,6 +235,9 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "workspace-data-schema-source-chip" in content
     assert "workspace-data-schema-piece-chip" in content
     assert "workspace-data-schema-filter-chip" in content
+    assert "workspace-data-filter-dimensions" in content
+    assert "workspace-data-piece-schema-list" in content
+    assert "workspace-data-query-plan-preview" in content
     assert "Workspace Data Ops" in content
     assert "Inspect and Migrate Workspace Dataset Primitives" in content
     assert "packaged-docket-manifest-path" in content
@@ -283,6 +286,7 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "function getSchemaGuidedRecommendations()" in content
     assert "function getWorkspaceSchemaSnapshot()" in content
     assert "function getSchemaHintIndex()" in content
+    assert "function buildSchemaDrivenQueryPlan(schema, options = {})" in content
     assert "title: 'Inspect workspace parquet schema'" in content
     assert "loadWorkspaceDataPreferences()" in content
     assert "persistWorkspaceDataPreferences()" in content
@@ -306,6 +310,9 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Schema-guided recommendation:" in content
     assert "Recommended schema-first workflow:" in content
     assert "These tools inspect the parquet-backed workspace schema" in content
+    assert "Schema-driven query plan" in content
+    assert "Preferred filters:" in content
+    assert "Suggested MCP-first sequence:" in content
     assert "client.getPackagedDocketOperatorDashboard(manifestPath)" in content
     assert "client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat)" in content
     assert "client.executePackagedDocketProofRevalidationQueue(manifestPath, {" in content
