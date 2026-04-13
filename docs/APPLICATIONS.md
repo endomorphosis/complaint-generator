@@ -92,6 +92,20 @@ After authentication, the system enters interactive mode where:
 | `!execute-follow-up` | Execute follow-up retrieval tasks, print a compact execution-quality summary with the canonical `recommended_next_action` when parse-quality remediation is still needed, include authority search-program counts plus graph-source-context and post-execution selected-program history mixes when present, and then print the execution payload in JSON |
 | `!export-complaint` | Build a court-style complaint draft and render document artifacts such as DOCX and PDF, then print a compact summary and the full package JSON |
 
+### Related Workspace Dataset Tooling
+
+The `ipfs_datasets_py` submodule ships its own CLI for workspace dataset bundles. Use it when you need to ingest large evidence corpora and pre-build knowledge graphs, BM25, and vector indices before feeding that evidence into complaint workflows.
+
+```bash
+# Export a single-parquet workspace bundle
+ipfs-datasets workspace --action export --input-path /path/to/workspace.json \
+  --output-parquet /tmp/workspace_bundle.parquet --json
+
+# Package a chain-loadable workspace bundle
+ipfs-datasets workspace --action package --input-path /path/to/discord_export.json \
+  --output-dir /tmp/workspace_bundle --package-name workspace_bundle --json
+```
+
 Review command examples:
 
 ```text

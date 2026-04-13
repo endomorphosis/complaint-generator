@@ -139,6 +139,11 @@ python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
 
+# Note: the base environment intentionally excludes the third-party `brave-search`
+# package because its published dependency line conflicts with the MCP/httpx stack
+# used by this workspace. Install it only in an isolated optional environment if
+# you specifically need that client.
+
 # (Optional) Configure API keys
 export OPENAI_API_KEY="your-key"
 export BRAVE_SEARCH_API_KEY="your-key"
@@ -186,11 +191,65 @@ complaint-generator-mcp
 .venv/bin/python -m complaint_generator.mcp_server
 ```
 
+### HACC Master Email Corpus
+
+Email workflow ownership now lives in `ipfs_datasets_py.processors.legal_data`. The `complaint_generator.email_*` modules are compatibility shims kept for CLI stability, older imports, and test monkeypatch surfaces.
+
+The HACC workspace now has a canonical merged email corpus that combines the confirmed local case emails with the recommended packet exhibit emails.
+
+Canonical artifacts:
+
+- Manifest: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/email_import_manifest.json`
+- GraphRAG summary: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/graphrag/email_graphrag_summary.json`
+- Search index: `/home/barberb/HACC/evidence/email_imports/starworks5-master-case-email-import/graphrag/duckdb/email_search.duckdb`
+
+Use the repo-local helper to rebuild or search that corpus without retyping the long paths:
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --search-query 'hcv orientation living room' \
+  --search-limit 5
+```
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --agentic-query 'mobility accommodation retaliation' \
+  --complaint-keyword voucher \
+  --seed-term 'ashley ferron' \
+  --seed-participant aferron@clackamas.us \
+  --required-participant-domain clackamas.us
+```
+
+```bash
+PYTHONPATH='/home/barberb/HACC/complaint-generator' \
+.venv/bin/python scripts/master_case_email.py \
+  --rebuild
+```
+
 **Browser SDK and unified workspace page:**
 
 - The browser SDK is served from `/static/complaint_mcp_sdk.js`
 - The unified workspace is available at `/workspace`
 - The workspace page uses the same complaint service contract exposed by the package, CLI, and MCP server
+
+### Workspace Dataset Bundles
+
+Workspace dataset ingestion and packaging lives in `ipfs_datasets_py.processors.legal_data.workspace_dataset` and supports search + indexing for large mixed evidence corpora (emails, chat exports, drive dumps, and web captures). The `ipfs-datasets` CLI provides single-bundle exports and chain-loadable bundle packaging so you can defer deeper processing until later.
+
+```bash
+# Export a workspace dataset bundle (single parquet) from a JSON workspace payload
+ipfs-datasets workspace --action export --input-path /path/to/workspace.json \
+  --output-parquet /tmp/workspace_bundle.parquet --json
+
+# Package a workspace dataset bundle into chain-loadable parquet + optional CAR artifacts
+ipfs-datasets workspace --action package --input-path /path/to/discord_export.json \
+  --output-dir /tmp/workspace_bundle --package-name workspace_bundle --json
+
+# Inspect a packaged workspace bundle summary
+ipfs-datasets workspace --action package-summary --input-path /tmp/workspace_bundle/bundle_manifest.json --json
+```
 
 ### Running
 

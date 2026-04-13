@@ -11,9 +11,12 @@ import anyio
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from complaint_generator.email_credentials import resolve_gmail_credentials
-from complaint_generator.email_graphrag import build_email_duckdb_artifacts, search_email_graphrag_duckdb
-from complaint_generator.email_import import import_gmail_evidence
+from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
+from ipfs_datasets_py.processors.legal_data.email_corpus import (
+    build_email_duckdb_artifacts,
+    search_email_graphrag_duckdb,
+)
+from ipfs_datasets_py.processors.legal_data.email_workspace import import_gmail_workspace_evidence as import_gmail_evidence
 
 
 def build_parser() -> argparse.ArgumentParser:

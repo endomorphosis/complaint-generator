@@ -335,6 +335,83 @@ def get_tooling_contract(
     return _resolve_service(service, root_dir=root_dir).get_tooling_contract(user_id)
 
 
+def get_workspace_data_schema(
+    user_id: Optional[str] = None,
+    *,
+    manifest_path: Optional[str | Path] = None,
+    statefile_path: Optional[str | Path] = None,
+    evidence_db_path: Optional[str | Path] = None,
+    legal_authority_db_path: Optional[str | Path] = None,
+    claim_support_db_path: Optional[str | Path] = None,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_workspace_data_schema(
+        user_id,
+        manifest_path=str(manifest_path) if manifest_path is not None else None,
+        statefile_path=str(statefile_path) if statefile_path is not None else None,
+        evidence_db_path=str(evidence_db_path) if evidence_db_path is not None else None,
+        legal_authority_db_path=str(legal_authority_db_path) if legal_authority_db_path is not None else None,
+        claim_support_db_path=str(claim_support_db_path) if claim_support_db_path is not None else None,
+    )
+
+
+def migrate_legacy_workspace_data(
+    user_id: Optional[str] = None,
+    *,
+    output_dir: Optional[str | Path] = None,
+    statefile_path: Optional[str | Path] = None,
+    evidence_db_path: Optional[str | Path] = None,
+    legal_authority_db_path: Optional[str | Path] = None,
+    claim_support_db_path: Optional[str | Path] = None,
+    package_name: Optional[str] = None,
+    include_car: bool = True,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).migrate_legacy_workspace_data(
+        user_id,
+        output_dir=str(output_dir) if output_dir is not None else None,
+        statefile_path=str(statefile_path) if statefile_path is not None else None,
+        evidence_db_path=str(evidence_db_path) if evidence_db_path is not None else None,
+        legal_authority_db_path=str(legal_authority_db_path) if legal_authority_db_path is not None else None,
+        claim_support_db_path=str(claim_support_db_path) if claim_support_db_path is not None else None,
+        package_name=package_name,
+        include_car=include_car,
+    )
+
+
+def search_workspace_dataset(
+    input_path: str | Path,
+    *,
+    query: str,
+    input_type: str = "packaged",
+    search_backend: str = "bm25",
+    top_k: int = 10,
+    vector_dimension: int = 32,
+    collection_id: Optional[str] = None,
+    document_type: Optional[str] = None,
+    claim_type: Optional[str] = None,
+    claim_element_id: Optional[str] = None,
+    source_type: Optional[str] = None,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).search_workspace_dataset(
+        str(input_path),
+        input_type=input_type,
+        query=query,
+        search_backend=search_backend,
+        top_k=top_k,
+        vector_dimension=vector_dimension,
+        collection_id=collection_id,
+        document_type=document_type,
+        claim_type=claim_type,
+        claim_element_id=claim_element_id,
+        source_type=source_type,
+    )
+
+
 def generate_complaint(
     user_id: Optional[str],
     *,
@@ -447,6 +524,142 @@ def get_provider_diagnostics(
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
     return _resolve_service(service, root_dir=root_dir).get_provider_diagnostics(user_id)
+
+
+def view_docket_dataset(
+    input_path: str | Path,
+    *,
+    input_type: str = "packaged",
+    include_document_text: bool = False,
+    document_limit: int = 25,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).view_docket_dataset(
+        input_path,
+        input_type=input_type,
+        include_document_text=include_document_text,
+        document_limit=document_limit,
+    )
+
+
+def search_docket_dataset(
+    input_path: str | Path,
+    *,
+    query: str,
+    input_type: str = "packaged",
+    search_backend: str = "bm25",
+    top_k: int = 10,
+    vector_dimension: int = 32,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).search_docket_dataset(
+        input_path,
+        input_type=input_type,
+        query=query,
+        search_backend=search_backend,
+        top_k=top_k,
+        vector_dimension=vector_dimension,
+    )
+
+
+def get_docket_dataset_metadata(
+    input_path: str | Path,
+    *,
+    input_type: str = "packaged",
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_docket_dataset_metadata(
+        input_path,
+        input_type=input_type,
+    )
+
+
+def get_docket_dataset_graph(
+    input_path: str | Path,
+    *,
+    input_type: str = "packaged",
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_docket_dataset_graph(
+        input_path,
+        input_type=input_type,
+    )
+
+
+def get_packaged_docket_operator_dashboard(
+    manifest_path: str | Path,
+    *,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_packaged_docket_operator_dashboard(manifest_path)
+
+
+def load_packaged_docket_operator_dashboard_report(
+    manifest_path: str | Path,
+    *,
+    report_format: str = "parsed",
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).load_packaged_docket_operator_dashboard_report(
+        manifest_path,
+        report_format=report_format,
+    )
+
+
+def execute_packaged_docket_proof_revalidation_queue(
+    manifest_path: str | Path,
+    *,
+    top_k: int = 10,
+    min_priority: str = "low",
+    queue_limit: Optional[int] = None,
+    execution_top_k: int = 10,
+    chain_until_satisfied: bool = True,
+    attach_refreshed_packets: bool = False,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).execute_packaged_docket_proof_revalidation_queue(
+        manifest_path,
+        top_k=top_k,
+        min_priority=min_priority,
+        queue_limit=queue_limit,
+        execution_top_k=execution_top_k,
+        chain_until_satisfied=chain_until_satisfied,
+        attach_refreshed_packets=attach_refreshed_packets,
+    )
+
+
+def persist_packaged_docket_proof_revalidation_queue(
+    manifest_path: str | Path,
+    output_dir: str | Path,
+    *,
+    package_name: Optional[str] = None,
+    include_car: bool = True,
+    top_k: int = 10,
+    min_priority: str = "low",
+    queue_limit: Optional[int] = None,
+    execution_top_k: int = 10,
+    chain_until_satisfied: bool = True,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).persist_packaged_docket_proof_revalidation_queue(
+        manifest_path,
+        output_dir,
+        package_name=package_name,
+        include_car=include_car,
+        top_k=top_k,
+        min_priority=min_priority,
+        queue_limit=queue_limit,
+        execution_top_k=execution_top_k,
+        chain_until_satisfied=chain_until_satisfied,
+    )
 
 
 def review_generated_exports(
@@ -631,6 +844,8 @@ __all__ = [
     "get_complaint_readiness",
     "get_ui_readiness",
     "get_client_release_gate",
+    "get_tooling_contract",
+    "get_workspace_data_schema",
     "create_identity",
     "create_complaint_workspace_router",
     "export_complaint_packet",
@@ -641,11 +856,17 @@ __all__ = [
     "get_formal_diagnostics",
     "get_filing_provenance",
     "get_provider_diagnostics",
+    "get_packaged_docket_operator_dashboard",
+    "load_packaged_docket_operator_dashboard_report",
+    "execute_packaged_docket_proof_revalidation_queue",
+    "persist_packaged_docket_proof_revalidation_queue",
     "review_generated_exports",
     "update_claim_type",
     "generate_decentralized_id",
     "generate_complaint",
     "get_workflow_capabilities",
+    "migrate_legacy_workspace_data",
+    "search_workspace_dataset",
     "import_gmail_evidence",
     "list_claim_elements",
     "list_intake_questions",

@@ -1,7 +1,8 @@
-.PHONY: canary-validate canary-smoke canary-sample package-install-smoke regression regression-lean regression-review regression-full hacc-grounding hacc-grounding-no-smoke hacc-grounded-history hacc-unit hacc-adversarial-runner complaint-workspace-cli complaint-mcp-server
+.PHONY: canary-validate canary-smoke canary-sample package-install-smoke regression regression-lean regression-review regression-full hacc-grounding hacc-grounding-no-smoke hacc-grounded-history hacc-master-email hacc-master-email-rebuild hacc-unit hacc-adversarial-runner complaint-workspace-cli complaint-mcp-server
 
 HACC_GROUNDED_RUN_DIR ?= output/hacc_grounded/latest
 HACC_REPO_DIR ?= ../HACC
+HACC_MASTER_EMAIL_QUERY ?= hcv orientation living room
 
 regression: regression-full
 
@@ -26,6 +27,12 @@ hacc-grounding-no-smoke:
 
 hacc-grounded-history:
 	.venv/bin/python scripts/show_hacc_grounded_history.py --output-dir "$(HACC_GROUNDED_RUN_DIR)"
+
+hacc-master-email:
+	PYTHONPATH="$(CURDIR)" .venv/bin/python scripts/master_case_email.py --search-query "$(HACC_MASTER_EMAIL_QUERY)" --search-limit 5
+
+hacc-master-email-rebuild:
+	PYTHONPATH="$(CURDIR)" .venv/bin/python scripts/master_case_email.py --rebuild
 
 hacc-unit:
 	.venv/bin/python scripts/run_hacc_unit_regression.py

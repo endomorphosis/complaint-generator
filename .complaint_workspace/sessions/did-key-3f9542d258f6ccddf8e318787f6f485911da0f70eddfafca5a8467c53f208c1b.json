@@ -7,6 +7,7 @@
     "documents": [],
     "testimony": []
   },
+  "filing_metadata": {},
   "intake_answers": {
     "opposing_party": "Housing Authority of Clackamas County, and Quantum Residential",
     "party_name": "Benjamin Barber and Jane Cortez"
@@ -26,6 +27,6 @@
   "latest_export_critic": null,
   "latest_packet_export": null,
   "ui_readiness": null,
-  "updated_at": "2026-03-28T17:44:04.948511+00:00",
+  "updated_at": "2026-04-01T05:32:43.329335+00:00",
   "user_id": "did:key:3f9542d258f6ccddf8e318787f6f485911da0f70eddfafca5a8467c53f208c1b"
 }

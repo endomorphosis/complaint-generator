@@ -558,6 +558,8 @@ def test_run_hacc_grounded_pipeline_persists_grounding_handoff_artifacts(tmp_pat
     assert grounded_workflow_status["workflow_stage"] == "pre_grounded_follow_up"
     assert grounded_workflow_status["effective_next_action"]["action"] == "upload_local_repository_evidence"
     assert grounded_workflow_status["has_persisted_completed_grounded_worksheet"] is False
+    assert grounded_workflow_status["canonical_master_email_corpus"]["manifest_exists"] is True
+    assert grounded_workflow_status["canonical_master_email_corpus"]["duckdb_index_exists"] is True
     assert grounded_workflow_status["recommended_commands"]["recommended_command_kind"] == "rerun"
     assert grounded_workflow_status["recommended_commands"]["inspect_command"].endswith(str(tmp_path))
     assert grounded_workflow_status["recommended_commands"]["recommended_command"].startswith(
@@ -574,6 +576,14 @@ def test_run_hacc_grounded_pipeline_persists_grounding_handoff_artifacts(tmp_pat
     assert "Recommended rerun:" in grounded_workflow_status_md
     assert "Recent Workflow Transitions" in grounded_workflow_status_md
     assert "Recorded transitions: 1" in grounded_workflow_status_md
+    assert summary["source_artifacts"]["canonical_master_email_corpus"]["manifest_exists"] is True
+    assert summary["source_artifacts"]["canonical_master_email_corpus"]["graphrag_summary_exists"] is True
+    assert summary["artifacts"]["canonical_master_email_manifest_json"].endswith(
+        "evidence/email_imports/starworks5-master-case-email-import/email_import_manifest.json"
+    )
+    assert summary["artifacts"]["canonical_master_email_duckdb"].endswith(
+        "evidence/email_imports/starworks5-master-case-email-import/graphrag/duckdb/email_search.duckdb"
+    )
 
 
 def test_run_hacc_grounded_pipeline_degrades_when_seeded_discovery_raises(tmp_path, monkeypatch):
@@ -734,6 +744,8 @@ def test_run_hacc_grounded_pipeline_persists_synthesis_roundtrip_artifacts(tmp_p
     assert workflow_status["grounded_follow_up_answer_count"] == 2
     assert workflow_status["has_persisted_completed_grounded_worksheet"] is True
     assert workflow_status["persisted_completed_grounded_worksheet_path"] == str(completed_copy_path)
+    assert workflow_status["canonical_master_email_corpus"]["manifest_exists"] is True
+    assert workflow_status["canonical_master_email_corpus"]["duckdb_index_exists"] is True
     assert workflow_status["recommended_commands"]["recommended_command_kind"] == "synthesize"
     assert workflow_status["recommended_commands"]["recommended_command"].startswith(
         "python scripts/synthesize_hacc_complaint.py --grounded-run-dir"
@@ -747,6 +759,10 @@ def test_run_hacc_grounded_pipeline_persists_synthesis_roundtrip_artifacts(tmp_p
     assert "Workflow stage: post_grounded_follow_up" in workflow_status_md_path.read_text(encoding="utf-8")
     assert "Recommended synthesis:" in workflow_status_md_path.read_text(encoding="utf-8")
     assert json.loads(completed_copy_path.read_text(encoding="utf-8"))["follow_up_items"][0]["answer"] == "Answered"
+    assert summary["source_artifacts"]["canonical_master_email_corpus"]["manifest_exists"] is True
+    assert summary["artifacts"]["canonical_master_email_graphrag_summary_json"].endswith(
+        "evidence/email_imports/starworks5-master-case-email-import/graphrag/email_graphrag_summary.json"
+    )
 
 
 def test_run_hacc_grounded_pipeline_reuses_persisted_completed_grounded_worksheet(tmp_path, monkeypatch):

@@ -8,7 +8,10 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from complaint_generator.email_graphrag import build_email_graphrag_artifacts, search_email_graphrag_duckdb
+from ipfs_datasets_py.processors.legal_data.email_corpus import (
+    build_email_graphrag_artifacts,
+    search_email_graphrag_duckdb,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:

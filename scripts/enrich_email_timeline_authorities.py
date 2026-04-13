@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from complaint_generator.email_authority_enrichment import enrich_email_timeline_authorities
+from ipfs_datasets_py.processors.legal_data.email_authority_enrichment import enrich_email_timeline_authorities
 
 
 def build_parser() -> argparse.ArgumentParser:

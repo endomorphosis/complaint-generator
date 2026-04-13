@@ -318,6 +318,9 @@ def create_vector_index(
     batch_size: int = 32,
     provider: Optional[str] = None,
     model_name: Optional[str] = None,
+    device: Optional[str] = None,
+    embedding_batch_size: int = 32,
+    embedding_num_workers: int = 0,
 ) -> Dict[str, Any]:
     document_list = _normalize_documents(documents)
     resolved_index_name = index_name or "vector_index"
@@ -355,6 +358,9 @@ def create_vector_index(
             batch_size=batch_size,
             provider=provider,
             model_name=model_name,
+            device=device,
+            embedding_batch_size=max(1, int(embedding_batch_size)),
+            embedding_num_workers=max(0, int(embedding_num_workers)),
         )
     except Exception as exc:
         return with_adapter_metadata(

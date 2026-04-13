@@ -180,6 +180,48 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "type": "object",
         "properties": {"user_id": {"type": "string"}},
     },
+    "complaint.get_workspace_data_schema": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "manifest_path": {"type": "string"},
+            "statefile_path": {"type": "string"},
+            "evidence_db_path": {"type": "string"},
+            "legal_authority_db_path": {"type": "string"},
+            "claim_support_db_path": {"type": "string"},
+        },
+    },
+    "complaint.migrate_legacy_workspace_data": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "output_dir": {"type": "string"},
+            "statefile_path": {"type": "string"},
+            "evidence_db_path": {"type": "string"},
+            "legal_authority_db_path": {"type": "string"},
+            "claim_support_db_path": {"type": "string"},
+            "package_name": {"type": "string"},
+            "include_car": {"type": "boolean"},
+        },
+    },
+    "complaint.search_workspace_dataset": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "manifest_path": {"type": "string"},
+            "input_type": {"type": "string"},
+            "query": {"type": "string"},
+            "search_backend": {"type": "string"},
+            "top_k": {"type": "integer"},
+            "vector_dimension": {"type": "integer"},
+            "collection_id": {"type": "string"},
+            "document_type": {"type": "string"},
+            "claim_type": {"type": "string"},
+            "claim_element_id": {"type": "string"},
+            "source_type": {"type": "string"},
+        },
+        "required": ["query"],
+    },
     "complaint.generate_complaint": {
         "type": "object",
         "properties": {
@@ -240,6 +282,44 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "type": "object",
         "properties": {"user_id": {"type": "string"}},
     },
+    "complaint.view_docket_dataset": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "input_type": {"type": "string", "enum": ["packaged", "json"]},
+            "include_document_text": {"type": "boolean"},
+            "document_limit": {"type": "integer"},
+        },
+        "required": ["input_path"],
+    },
+    "complaint.search_docket_dataset": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "input_type": {"type": "string", "enum": ["packaged", "json"]},
+            "query": {"type": "string"},
+            "search_backend": {"type": "string", "enum": ["bm25", "vector"]},
+            "top_k": {"type": "integer"},
+            "vector_dimension": {"type": "integer"},
+        },
+        "required": ["input_path", "query"],
+    },
+    "complaint.get_docket_dataset_metadata": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "input_type": {"type": "string", "enum": ["packaged", "json"]},
+        },
+        "required": ["input_path"],
+    },
+    "complaint.get_docket_dataset_graph": {
+        "type": "object",
+        "properties": {
+            "input_path": {"type": "string"},
+            "input_type": {"type": "string", "enum": ["packaged", "json"]},
+        },
+        "required": ["input_path"],
+    },
     "complaint.review_generated_exports": {
         "type": "object",
         "properties": {
@@ -252,6 +332,49 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "config_path": {"type": "string"},
             "backend_id": {"type": "string"},
         },
+    },
+    "complaint.get_packaged_docket_operator_dashboard": {
+        "type": "object",
+        "properties": {
+            "manifest_path": {"type": "string"},
+        },
+        "required": ["manifest_path"],
+    },
+    "complaint.load_packaged_docket_operator_dashboard_report": {
+        "type": "object",
+        "properties": {
+            "manifest_path": {"type": "string"},
+            "report_format": {"type": "string", "enum": ["json", "markdown", "text", "parsed", "row"]},
+        },
+        "required": ["manifest_path"],
+    },
+    "complaint.execute_packaged_docket_proof_revalidation_queue": {
+        "type": "object",
+        "properties": {
+            "manifest_path": {"type": "string"},
+            "top_k": {"type": "integer"},
+            "min_priority": {"type": "string"},
+            "queue_limit": {"type": "integer"},
+            "execution_top_k": {"type": "integer"},
+            "chain_until_satisfied": {"type": "boolean"},
+            "attach_refreshed_packets": {"type": "boolean"},
+        },
+        "required": ["manifest_path"],
+    },
+    "complaint.persist_packaged_docket_proof_revalidation_queue": {
+        "type": "object",
+        "properties": {
+            "manifest_path": {"type": "string"},
+            "output_dir": {"type": "string"},
+            "package_name": {"type": "string"},
+            "include_car": {"type": "boolean"},
+            "top_k": {"type": "integer"},
+            "min_priority": {"type": "string"},
+            "queue_limit": {"type": "integer"},
+            "execution_top_k": {"type": "integer"},
+            "chain_until_satisfied": {"type": "boolean"},
+        },
+        "required": ["manifest_path", "output_dir"],
     },
     "complaint.update_claim_type": {
         "type": "object",

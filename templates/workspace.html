@@ -2891,6 +2891,8 @@ complaint-workspace answer --user-id did:key:example --question-id protected_act
 complaint-generator-workspace generate --user-id did:key:example --requested-relief "Back pay|Injunctive relief"
 complaint-workspace run-gmail-duckdb-pipeline --user-id did:key:example --address hr@example.com --complaint-keyword retaliation
 complaint-workspace search-email-duckdb --index-path artifacts/email_corpus.duckdb --query "termination retaliation"
+complaint-workspace workspace-data-schema --user-id did:key:example
+complaint-workspace migrate-legacy-workspace-data --user-id did:key:example --output-dir artifacts/workspace-dataset
 complaint-workspace export-markdown --user-id did:key:example
 complaint-workspace export-docx --user-id did:key:example
 complaint-workspace export-pdf --user-id did:key:example
@@ -2901,6 +2903,8 @@ complaint-workspace browser-audit artifacts/ui-audit/browser-audit</pre>
                             <h3>MCP stdio server</h3>
                             <pre>complaint-generator-mcp
 complaint-mcp-server
+tool: complaint.get_workspace_data_schema
+tool: complaint.migrate_legacy_workspace_data
 tool: complaint.export_complaint_docx
 tool: complaint.run_browser_audit</pre>
                         </div>
@@ -2912,6 +2916,8 @@ const bootstrap = await client.bootstrapWorkspace();
 await client.callTool('complaint.review_case', { user_id: bootstrap.did });
 await client.runGmailDuckdbPipeline({ user_id: bootstrap.did, addresses: ['hr@example.com'] });
 await client.searchEmailDuckdb({ index_path: 'artifacts/email_corpus.duckdb', query: 'termination retaliation' });
+await client.getWorkspaceDataSchema(bootstrap.did);
+await client.migrateLegacyWorkspaceData(bootstrap.did, 'artifacts/workspace-dataset');
 await client.exportComplaintMarkdown(bootstrap.did);
 await client.exportComplaintDocx(bootstrap.did);
 await client.exportComplaintPdf(bootstrap.did);
@@ -2959,6 +2965,7 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 <button class="secondary" id="refresh-formal-diagnostics-button" type="button">Refresh Formal Diagnostics</button>
                                 <button class="secondary" id="refresh-filing-provenance-button" type="button">Refresh Filing Provenance</button>
                                 <button class="secondary" id="refresh-provider-diagnostics-button" type="button">Refresh Provider Diagnostics</button>
+                                <button class="secondary" id="refresh-workspace-data-schema-button" type="button">Refresh Workspace Data Schema</button>
                                 <button class="secondary" id="build-mediator-prompt-button" type="button">Preview Mediator Brief</button>
                                 <button class="secondary" id="export-packet-tool-button" type="button">Export Packet via Tools</button>
                                 <button class="secondary" id="analyze-complaint-output-button" type="button">Analyze Exported Complaint</button>
@@ -3011,6 +3018,19 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 <div class="status draft-preview-shell"><pre id="provider-diagnostics-preview">No provider-diagnostics payload loaded yet.</pre></div>
                             </div>
                             <div>
+                                <label>Workspace Dataset Schema</label>
+                                <div class="chip-row">
+                                    <span class="chip" id="workspace-data-schema-source-chip">source: not loaded</span>
+                                    <span class="chip" id="workspace-data-schema-piece-chip">pieces: 0</span>
+                                    <span class="chip" id="workspace-data-schema-filter-chip">filters: 0</span>
+                                </div>
+                                <div class="status draft-preview-shell"><pre id="workspace-data-schema-preview">No workspace dataset schema loaded yet.</pre></div>
+                            </div>
+                            <div>
+                                <label>Workspace Dataset Design Hints</label>
+                                <div class="status draft-preview-shell"><pre id="workspace-data-schema-hints-preview">No workspace dataset design hints loaded yet.</pre></div>
+                            </div>
+                            <div>
                                 <label>Packet Export Summary</label>
                                 <div class="status draft-preview-shell"><pre id="packet-export-summary">No packet export run yet.</pre></div>
                             </div>
@@ -3029,6 +3049,232 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                             <div>
                                 <label>Claim Alignment Readout</label>
                                 <div class="status draft-preview-shell"><pre id="claim-alignment-preview">No claim-alignment review run yet.</pre></div>
+                            </div>
+                        </div>
+                        <div class="tool-card" id="workspace-data-operator-card">
+                            <span class="integrations-stack-label">Workspace Data Ops</span>
+                            <h3>Inspect and Migrate Workspace Dataset Primitives</h3>
+                            <p class="muted">Use the live workspace schema or a packaged manifest to drive MCP tool choices and UI layout from the actual parquet model, then migrate older complaint workspace stores into the packaged dataset bundle.</p>
+                            <div class="field-row">
+                                <div>
+                                    <label for="workspace-data-manifest-path">Workspace Manifest Path</label>
+                                    <input id="workspace-data-manifest-path" type="text" placeholder="/path/to/workspace/bundle_manifest.json">
+                                </div>
+                                <div>
+                                    <label for="workspace-data-statefile-path">Legacy Statefile Path</label>
+                                    <input id="workspace-data-statefile-path" type="text" placeholder="/path/to/legacy-session.json">
+                                </div>
+                            </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="workspace-data-evidence-db-path">Evidence DuckDB Path</label>
+                                    <input id="workspace-data-evidence-db-path" type="text" placeholder="/path/to/evidence.duckdb">
+                                </div>
+                                <div>
+                                    <label for="workspace-data-legal-authority-db-path">Legal Authority DuckDB Path</label>
+                                    <input id="workspace-data-legal-authority-db-path" type="text" placeholder="/path/to/legal_authority.duckdb">
+                                </div>
+                            </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="workspace-data-claim-support-db-path">Claim Support DuckDB Path</label>
+                                    <input id="workspace-data-claim-support-db-path" type="text" placeholder="/path/to/claim_support.duckdb">
+                                </div>
+                                <div>
+                                    <label for="workspace-data-output-dir">Migration Output Directory</label>
+                                    <input id="workspace-data-output-dir" type="text" placeholder="/path/to/workspace-dataset-output">
+                                </div>
+                            </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="workspace-data-package-name">Package Name</label>
+                                    <input id="workspace-data-package-name" type="text" placeholder="optional-workspace-package-name">
+                                </div>
+                                <div class="chip-row" style="align-items: flex-end; min-height: 72px;">
+                                    <label class="checkbox-label" for="workspace-data-include-car">
+                                        <input id="workspace-data-include-car" type="checkbox" checked>
+                                        Include CAR artifact during migration packaging
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="button-row">
+                                <button class="primary" id="refresh-workspace-data-schema-panel-button" type="button">Refresh Workspace Schema</button>
+                                <button class="secondary" id="migrate-legacy-workspace-data-button" type="button">Migrate Legacy Workspace Data</button>
+                                <button class="secondary" id="copy-workspace-data-manifest-button" type="button">Copy Workspace Manifest Path</button>
+                            </div>
+                            <div class="field-grid">
+                                <div>
+                                    <label>Schema Snapshot</label>
+                                    <div class="status draft-preview-shell"><pre id="workspace-data-schema-preview-inline">Schema details are mirrored in the workflow operations panel.</pre></div>
+                                </div>
+                                <div>
+                                    <label>Migration Result</label>
+                                    <div class="status draft-preview-shell"><pre id="workspace-data-migration-preview">No workspace parquet migration has been run yet.</pre></div>
+                                </div>
+                            </div>
+                            <div>
+                                <label>Schema-Driven Filter Dimensions</label>
+                                <div class="chip-row" id="workspace-data-filter-dimensions"><span class="chip">Refresh the workspace schema to derive filter dimensions.</span></div>
+                            </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="workspace-data-search-query">Workspace Dataset Query</label>
+                                    <input id="workspace-data-search-query" type="text" placeholder="reasonable accommodation eviction notice">
+                                </div>
+                                <div>
+                                    <label for="workspace-data-search-backend">Search Backend</label>
+                                    <select id="workspace-data-search-backend">
+                                        <option value="bm25">bm25</option>
+                                        <option value="vector">vector</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="workspace-data-search-top-k">Top K</label>
+                                    <input id="workspace-data-search-top-k" type="number" min="1" step="1" value="8">
+                                </div>
+                            </div>
+                            <div>
+                                <label>Schema-Driven Filter Inputs</label>
+                                <div class="field-grid" id="workspace-data-filter-controls">
+                                    <div class="muted">Refresh the workspace schema to derive filter inputs.</div>
+                                </div>
+                            </div>
+                            <div class="button-row">
+                                <button class="secondary" id="search-workspace-data-button" type="button">Search Workspace Dataset</button>
+                            </div>
+                            <div>
+                                <label>Schema Piece Explorer</label>
+                                <div class="list" id="workspace-data-piece-schema-list"></div>
+                            </div>
+                            <div>
+                                <label>Schema-Driven MCP / UI Query Plan</label>
+                                <div class="status draft-preview-shell"><pre id="workspace-data-query-plan-preview">No schema-driven query plan generated yet.</pre></div>
+                            </div>
+                            <div>
+                                <label>Workspace Dataset Search Results</label>
+                                <div class="status draft-preview-shell"><pre id="workspace-data-search-results-preview">No workspace dataset search has been run yet.</pre></div>
+                            </div>
+                        </div>
+                        <div class="tool-card" id="packaged-docket-operator-card">
+                            <span class="integrations-stack-label">Packaged Docket Ops</span>
+                            <h3>Load Packaged Legal Ops Dashboard</h3>
+                            <p class="muted">Paste a packaged docket manifest path to inspect the persisted operator dashboard or load the archived report directly through the shared browser MCP SDK.</p>
+                            <div class="field-row">
+                                <div>
+                                    <label for="packaged-docket-manifest-path">Bundle Manifest Path</label>
+                                    <input id="packaged-docket-manifest-path" type="text" placeholder="/path/to/bundle_manifest.json">
+                                </div>
+                                <div>
+                                    <label for="packaged-docket-report-format">Archived Report Format</label>
+                                    <select id="packaged-docket-report-format">
+                                        <option value="text">text</option>
+                                        <option value="parsed">parsed</option>
+                                        <option value="markdown">markdown</option>
+                                        <option value="json">json</option>
+                                        <option value="row">row</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="chip-row">
+                                <label class="checkbox-label" for="packaged-docket-attach-refreshed-packets">
+                                    <input id="packaged-docket-attach-refreshed-packets" type="checkbox">
+                                    Attach refreshed proof packets during revalidation
+                                </label>
+                            </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="packaged-docket-min-priority">Minimum Queue Priority</label>
+                                    <select id="packaged-docket-min-priority">
+                                        <option value="low">low</option>
+                                        <option value="medium">medium</option>
+                                        <option value="high">high</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label for="packaged-docket-execution-top-k">Execution Top K</label>
+                                    <input id="packaged-docket-execution-top-k" type="number" min="1" step="1" value="10">
+                                </div>
+                            </div>
+                            <div class="field-row">
+                                <div>
+                                    <label for="packaged-docket-output-dir">Persist Output Directory</label>
+                                    <input id="packaged-docket-output-dir" type="text" placeholder="/path/to/refreshed-package-output">
+                                </div>
+                                <div>
+                                    <label for="packaged-docket-package-name">Persist Package Name</label>
+                                    <input id="packaged-docket-package-name" type="text" placeholder="optional-package-name">
+                                </div>
+                            </div>
+                            <div class="chip-row">
+                                <label class="checkbox-label" for="packaged-docket-include-car">
+                                    <input id="packaged-docket-include-car" type="checkbox" checked>
+                                    Include CAR artifact when persisting refreshed bundle
+                                </label>
+                            </div>
+                            <div class="button-row">
+                                <button class="primary" id="load-packaged-docket-dashboard-button" type="button">Load Docket Dashboard</button>
+                                <button class="secondary" id="load-packaged-docket-dashboard-report-button" type="button">Load Archived Report</button>
+                                <button class="secondary" id="execute-packaged-docket-revalidation-button" type="button">Run Revalidation Queue</button>
+                                <button class="secondary" id="persist-packaged-docket-revalidation-button" type="button">Persist Revalidated Bundle</button>
+                                <button class="secondary" id="use-latest-packaged-docket-manifest-button" type="button">Use Latest Persisted Manifest</button>
+                                <button class="secondary" id="clear-packaged-docket-preferences-button" type="button">Clear Saved Preferences</button>
+                            </div>
+                            <div class="chip-row" id="packaged-docket-dashboard-chips">
+                                <span class="chip" id="packaged-docket-dashboard-source-chip">source: not loaded</span>
+                                <span class="chip" id="packaged-docket-dashboard-review-chip">review: n/a</span>
+                                <span class="chip" id="packaged-docket-dashboard-run-chip">runs: n/a</span>
+                            </div>
+                            <div>
+                                <label>Recent Persisted Manifests</label>
+                                <div class="list" id="packaged-docket-manifest-history-preview"></div>
+                            </div>
+                            <div class="feature-grid" id="packaged-docket-dashboard-scorecard">
+                                <div class="metric-card">
+                                    <strong>Pending Review</strong>
+                                    <span id="packaged-docket-dashboard-pending-count">0 items</span>
+                                </div>
+                                <div class="metric-card">
+                                    <strong>High Priority</strong>
+                                    <span id="packaged-docket-dashboard-high-priority-count">0 items</span>
+                                </div>
+                                <div class="metric-card">
+                                    <strong>Queue Size</strong>
+                                    <span id="packaged-docket-dashboard-queue-count">0 items</span>
+                                </div>
+                                <div class="metric-card">
+                                    <strong>Latest Source</strong>
+                                    <span id="packaged-docket-dashboard-latest-source">n/a</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label>Dashboard Summary</label>
+                                <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-preview">No packaged docket operator dashboard loaded yet.</pre></div>
+                            </div>
+                            <div class="field-grid">
+                                <div>
+                                    <label>Latest Revalidation Run</label>
+                                    <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-latest-run-preview">No packaged docket revalidation run loaded yet.</pre></div>
+                                </div>
+                                <div>
+                                    <label>Queue Status</label>
+                                    <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-queue-preview">No packaged docket revalidation queue loaded yet.</pre></div>
+                                </div>
+                            </div>
+                            <div>
+                                <label>Revalidation Execution</label>
+                                <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-execution-preview">No packaged docket revalidation execution run yet.</pre></div>
+                            </div>
+                            <div>
+                                <label>Persisted Bundle</label>
+                                <div class="button-row">
+                                    <button class="secondary" id="copy-packaged-docket-persist-manifest-button" type="button">Copy Manifest Path</button>
+                                    <button class="secondary" id="copy-packaged-docket-persist-root-button" type="button">Copy Package Root</button>
+                                </div>
+                                <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-persist-preview">No refreshed packaged docket bundle has been persisted yet.</pre></div>
+                            </div>
+                            <div>
+                                <label>Archived Operator Report</label>
+                                <div class="status draft-preview-shell"><pre id="packaged-docket-dashboard-report-preview">No packaged docket operator dashboard report loaded yet.</pre></div>
                             </div>
                         </div>
                         <div class="tool-card">
@@ -3178,6 +3424,13 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let workspaceFormalDiagnostics = null;
         let workspaceFilingProvenance = null;
         let workspaceProviderDiagnostics = null;
+        let workspaceDataSchema = null;
+        let latestWorkspaceDataMigration = null;
+        let latestWorkspaceDatasetSearch = null;
+        let latestPackagedDocketOperatorDashboard = null;
+        let latestPackagedDocketOperatorDashboardReport = null;
+        let latestPackagedDocketRevalidationExecution = null;
+        let latestPackagedDocketRevalidationPersist = null;
         let latestPacketExport = null;
         let latestComplaintOutputAnalysis = null;
         let latestUiReviewResult = null;
@@ -3530,6 +3783,240 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
 
         function synopsisStorageKey() {
             return `complaint-workspace-synopsis:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function packagedDocketManifestStorageKey() {
+            return `complaint-workspace-packaged-docket-manifest:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function packagedDocketManifestHistoryStorageKey() {
+            return `complaint-workspace-packaged-docket-manifest-history:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function packagedDocketPreferencesStorageKey() {
+            return `complaint-workspace-packaged-docket-preferences:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function workspaceDataPreferencesStorageKey() {
+            return `complaint-workspace-data-preferences:${workspaceUserId || 'anonymous'}`;
+        }
+
+        function loadLatestPackagedDocketManifestPreference() {
+            if (typeof window.localStorage === 'undefined') {
+                return '';
+            }
+            return String(window.localStorage.getItem(packagedDocketManifestStorageKey()) || '').trim();
+        }
+
+        function persistLatestPackagedDocketManifestPreference(manifestPath) {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            const normalized = String(manifestPath || '').trim();
+            if (!normalized) {
+                window.localStorage.removeItem(packagedDocketManifestStorageKey());
+                return;
+            }
+            window.localStorage.setItem(packagedDocketManifestStorageKey(), normalized);
+        }
+
+        function loadPackagedDocketManifestHistory() {
+            if (typeof window.localStorage === 'undefined') {
+                return [];
+            }
+            try {
+                const raw = window.localStorage.getItem(packagedDocketManifestHistoryStorageKey());
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed.map((item) => String(item || '').trim()).filter(Boolean) : [];
+            } catch (error) {
+                console.warn('Failed to parse packaged docket manifest history', error);
+                return [];
+            }
+        }
+
+        function persistPackagedDocketManifestHistory(manifestPath) {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            const normalized = String(manifestPath || '').trim();
+            if (!normalized) {
+                return;
+            }
+            const nextHistory = [
+                normalized,
+                ...loadPackagedDocketManifestHistory().filter((item) => item !== normalized),
+            ].slice(0, 5);
+            window.localStorage.setItem(packagedDocketManifestHistoryStorageKey(), JSON.stringify(nextHistory));
+        }
+
+        function clearPackagedDocketPreferences() {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            window.localStorage.removeItem(packagedDocketManifestStorageKey());
+            window.localStorage.removeItem(packagedDocketManifestHistoryStorageKey());
+            window.localStorage.removeItem(packagedDocketPreferencesStorageKey());
+        }
+
+        function loadPackagedDocketPreferences() {
+            if (typeof window.localStorage === 'undefined') {
+                return {};
+            }
+            try {
+                const raw = window.localStorage.getItem(packagedDocketPreferencesStorageKey());
+                const parsed = raw ? JSON.parse(raw) : {};
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch (error) {
+                console.warn('Failed to parse packaged docket preferences', error);
+                return {};
+            }
+        }
+
+        function persistPackagedDocketPreferences() {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            const payload = {
+                output_dir: document.getElementById('packaged-docket-output-dir').value.trim(),
+                package_name: document.getElementById('packaged-docket-package-name').value.trim(),
+                include_car: Boolean(document.getElementById('packaged-docket-include-car').checked),
+                min_priority: document.getElementById('packaged-docket-min-priority').value || 'low',
+                execution_top_k: Math.max(1, Number(document.getElementById('packaged-docket-execution-top-k').value || '10')),
+                attach_refreshed_packets: Boolean(document.getElementById('packaged-docket-attach-refreshed-packets').checked),
+            };
+            window.localStorage.setItem(packagedDocketPreferencesStorageKey(), JSON.stringify(payload));
+        }
+
+        function hydratePackagedDocketPreferences() {
+            const preferences = loadPackagedDocketPreferences();
+            const outputDirNode = document.getElementById('packaged-docket-output-dir');
+            const packageNameNode = document.getElementById('packaged-docket-package-name');
+            const includeCarNode = document.getElementById('packaged-docket-include-car');
+            const minPriorityNode = document.getElementById('packaged-docket-min-priority');
+            const executionTopKNode = document.getElementById('packaged-docket-execution-top-k');
+            const attachPacketsNode = document.getElementById('packaged-docket-attach-refreshed-packets');
+            if (outputDirNode && preferences.output_dir && !outputDirNode.value.trim()) {
+                outputDirNode.value = String(preferences.output_dir);
+            }
+            if (packageNameNode && preferences.package_name && !packageNameNode.value.trim()) {
+                packageNameNode.value = String(preferences.package_name);
+            }
+            if (includeCarNode && typeof preferences.include_car === 'boolean') {
+                includeCarNode.checked = preferences.include_car;
+            }
+            if (minPriorityNode && preferences.min_priority) {
+                minPriorityNode.value = String(preferences.min_priority);
+            }
+            if (executionTopKNode && preferences.execution_top_k) {
+                executionTopKNode.value = String(preferences.execution_top_k);
+            }
+            if (attachPacketsNode && typeof preferences.attach_refreshed_packets === 'boolean') {
+                attachPacketsNode.checked = preferences.attach_refreshed_packets;
+            }
+        }
+
+        function resetPackagedDocketPreferenceControls() {
+            document.getElementById('packaged-docket-manifest-path').value = '';
+            document.getElementById('packaged-docket-output-dir').value = '';
+            document.getElementById('packaged-docket-package-name').value = '';
+            document.getElementById('packaged-docket-include-car').checked = true;
+            document.getElementById('packaged-docket-min-priority').value = 'low';
+            document.getElementById('packaged-docket-execution-top-k').value = '10';
+            document.getElementById('packaged-docket-attach-refreshed-packets').checked = false;
+        }
+
+        function renderPackagedDocketManifestHistory() {
+            const historyNode = document.getElementById('packaged-docket-manifest-history-preview');
+            if (!historyNode) {
+                return;
+            }
+            const history = loadPackagedDocketManifestHistory();
+            if (!history.length) {
+                historyNode.innerHTML = '<div class="muted">No persisted packaged docket manifests remembered yet.</div>';
+                return;
+            }
+            historyNode.innerHTML = history.map((manifestPath) => `
+                <button class="secondary" type="button" data-packaged-docket-history-manifest="${escapeHtml(manifestPath)}">${escapeHtml(manifestPath)}</button>
+            `).join('');
+        }
+
+        function loadWorkspaceDataPreferences() {
+            if (typeof window.localStorage === 'undefined') {
+                return {};
+            }
+            try {
+                const raw = window.localStorage.getItem(workspaceDataPreferencesStorageKey());
+                const parsed = raw ? JSON.parse(raw) : {};
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch (error) {
+                console.warn('Failed to parse workspace data preferences', error);
+                return {};
+            }
+        }
+
+        function persistWorkspaceDataPreferences() {
+            if (typeof window.localStorage === 'undefined') {
+                return;
+            }
+            const payload = {
+                manifest_path: document.getElementById('workspace-data-manifest-path').value.trim(),
+                statefile_path: document.getElementById('workspace-data-statefile-path').value.trim(),
+                evidence_db_path: document.getElementById('workspace-data-evidence-db-path').value.trim(),
+                legal_authority_db_path: document.getElementById('workspace-data-legal-authority-db-path').value.trim(),
+                claim_support_db_path: document.getElementById('workspace-data-claim-support-db-path').value.trim(),
+                output_dir: document.getElementById('workspace-data-output-dir').value.trim(),
+                package_name: document.getElementById('workspace-data-package-name').value.trim(),
+                include_car: Boolean(document.getElementById('workspace-data-include-car').checked),
+            };
+            window.localStorage.setItem(workspaceDataPreferencesStorageKey(), JSON.stringify(payload));
+        }
+
+        function hydrateWorkspaceDataPreferences() {
+            const preferences = loadWorkspaceDataPreferences();
+            const fieldMap = {
+                'workspace-data-manifest-path': 'manifest_path',
+                'workspace-data-statefile-path': 'statefile_path',
+                'workspace-data-evidence-db-path': 'evidence_db_path',
+                'workspace-data-legal-authority-db-path': 'legal_authority_db_path',
+                'workspace-data-claim-support-db-path': 'claim_support_db_path',
+                'workspace-data-output-dir': 'output_dir',
+                'workspace-data-package-name': 'package_name',
+            };
+            Object.entries(fieldMap).forEach(([nodeId, key]) => {
+                const node = document.getElementById(nodeId);
+                if (node && preferences[key] && !node.value.trim()) {
+                    node.value = String(preferences[key]);
+                }
+            });
+            const includeCarNode = document.getElementById('workspace-data-include-car');
+            if (includeCarNode && typeof preferences.include_car === 'boolean') {
+                includeCarNode.checked = preferences.include_car;
+            }
+        }
+
+        function buildWorkspaceDataToolPayload() {
+            const manifestPath = document.getElementById('workspace-data-manifest-path').value.trim();
+            const statefilePath = document.getElementById('workspace-data-statefile-path').value.trim();
+            const evidenceDbPath = document.getElementById('workspace-data-evidence-db-path').value.trim();
+            const legalAuthorityDbPath = document.getElementById('workspace-data-legal-authority-db-path').value.trim();
+            const claimSupportDbPath = document.getElementById('workspace-data-claim-support-db-path').value.trim();
+            const payload = {};
+            if (manifestPath) {
+                payload.manifest_path = manifestPath;
+            }
+            if (statefilePath) {
+                payload.statefile_path = statefilePath;
+            }
+            if (evidenceDbPath) {
+                payload.evidence_db_path = evidenceDbPath;
+            }
+            if (legalAuthorityDbPath) {
+                payload.legal_authority_db_path = legalAuthorityDbPath;
+            }
+            if (claimSupportDbPath) {
+                payload.claim_support_db_path = claimSupportDbPath;
+            }
+            return payload;
         }
 
         function gmailImportUserStorageKey() {
@@ -4975,6 +5462,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     mcpExample: `tool: complaint.export_complaint_packet\n{"user_id":"${did}"}`,
                     sdkExample: `await client.callTool('complaint.export_complaint_packet', { user_id: '${did}' });`,
                 },
+                {
+                    title: 'Inspect workspace parquet schema',
+                    packageExample: `from complaint_generator import ComplaintWorkspaceService\n\nservice = ComplaintWorkspaceService()\nschema = service.get_workspace_data_schema("${did}")`,
+                    cliExample: `complaint-workspace workspace-data-schema --user-id ${did}`,
+                    mcpExample: `tool: complaint.get_workspace_data_schema\n{"user_id":"${did}"}`,
+                    sdkExample: `await client.getWorkspaceDataSchema('${did}');`,
+                },
             ];
         }
 
@@ -5886,8 +6380,104 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             `).join('');
         }
 
+        function getSchemaGuidedRecommendations() {
+            const toolingContract = workspaceToolingContract || (workspaceCapabilities && workspaceCapabilities.tooling_contract) || {};
+            const recommendations = toolingContract && Array.isArray(toolingContract.schema_guided_recommendations)
+                ? toolingContract.schema_guided_recommendations
+                : Array.isArray(workspaceCapabilities && workspaceCapabilities.schema_guided_recommendations)
+                    ? workspaceCapabilities.schema_guided_recommendations
+                    : [];
+            return recommendations;
+        }
+
+        function getWorkspaceSchemaSnapshot() {
+            return workspaceDataSchema || (workspaceCapabilities && workspaceCapabilities.workspace_data_schema) || null;
+        }
+
+        function getSchemaHintIndex() {
+            const schema = getWorkspaceSchemaSnapshot() || {};
+            const items = [
+                ...(Array.isArray(schema.ui_design_hints) ? schema.ui_design_hints : []),
+                ...(Array.isArray(schema.mcp_design_hints) ? schema.mcp_design_hints : []),
+            ];
+            return items.reduce((acc, item) => {
+                const id = String((item && item.id) || '').trim();
+                if (id) {
+                    acc[id] = String((item && item.reason) || '').trim();
+                }
+                return acc;
+            }, {});
+        }
+
+        function buildSchemaDrivenQueryPlan(schema, options = {}) {
+            const snapshot = schema && typeof schema === 'object' ? schema : {};
+            const userId = String(options.userId || workspaceUserId || '').trim() || 'did:key:current-session';
+            const manifestPath = String(snapshot.manifest_path || document.getElementById('workspace-data-manifest-path').value.trim() || '').trim();
+            const filterDimensions = Array.isArray(snapshot.filter_dimensions) ? snapshot.filter_dimensions : [];
+            const pieceSchemas = Array.isArray(snapshot.piece_schemas) ? snapshot.piece_schemas : [];
+            const pieceIds = pieceSchemas.map((item) => String((item && (item.piece_id || item.name)) || '').trim()).filter(Boolean);
+            const preferredFilters = filterDimensions.slice(0, 4);
+            const lines = [
+                'Schema-driven query plan',
+                `Workspace selector: ${manifestPath ? `manifest_path=${manifestPath}` : `user_id=${userId}`}`,
+                `Preferred filters: ${preferredFilters.length ? preferredFilters.join(', ') : 'none surfaced yet'}`,
+                `Indexed pieces: ${pieceIds.length ? pieceIds.join(', ') : 'none surfaced yet'}`,
+                '',
+                'Suggested MCP-first sequence:',
+                manifestPath
+                    ? `1. complaint.get_workspace_data_schema -> {"manifest_path":"${manifestPath}","user_id":"${userId}"}`
+                    : `1. complaint.get_workspace_data_schema -> {"user_id":"${userId}"}`,
+                preferredFilters.length
+                    ? `2. Promote browser chips and MCP arguments for ${preferredFilters.join(', ')} before adding any broader search controls.`
+                    : '2. Refresh or migrate the workspace dataset before adding query controls.',
+                pieceIds.includes('bm25_documents') || pieceIds.includes('vector_items')
+                    ? '3. Keep keyword and semantic retrieval visible together because the packaged workspace exposes both search artifacts.'
+                    : '3. Prefer summary and facet navigation until richer retrieval artifacts are packaged.',
+            ];
+            return lines.join('\n');
+        }
+
+        function renderWorkspaceDataFilterControls(filterDimensions) {
+            const container = document.getElementById('workspace-data-filter-controls');
+            if (!container) {
+                return;
+            }
+            const dimensions = Array.isArray(filterDimensions) ? filterDimensions : [];
+            if (!dimensions.length) {
+                container.innerHTML = '<div class="muted">Refresh the workspace schema to derive filter inputs.</div>';
+                return;
+            }
+            container.innerHTML = dimensions.map((dimension) => `
+                <div>
+                    <label for="workspace-data-filter-${escapeHtml(String(dimension))}">${escapeHtml(String(dimension))}</label>
+                    <input
+                        id="workspace-data-filter-${escapeHtml(String(dimension))}"
+                        data-workspace-filter-dimension="${escapeHtml(String(dimension))}"
+                        type="text"
+                        placeholder="Optional ${escapeHtml(String(dimension))} filter"
+                    >
+                </div>
+            `).join('');
+        }
+
+        function buildWorkspaceDataSearchFilters() {
+            const filters = {};
+            document.querySelectorAll('[data-workspace-filter-dimension]').forEach((node) => {
+                const key = String(node.getAttribute('data-workspace-filter-dimension') || '').trim();
+                const value = String(node.value || '').trim();
+                if (key && value) {
+                    filters[key] = value;
+                }
+            });
+            return filters;
+        }
+
         function classifyToolFamily(toolName) {
             const name = String(toolName || '');
+            const recommendationToolNames = new Set(getSchemaGuidedRecommendations().map((item) => String((item && item.tool_name) || '').trim()).filter(Boolean));
+            if (name.includes('workspace_data') || name.includes('migrate_legacy') || recommendationToolNames.has(name)) {
+                return 'Data + schema';
+            }
             if (name.includes('intake') || name.includes('start_session') || name.includes('claim_type') || name.includes('case_synopsis')) {
                 return 'Intake + framing';
             }
@@ -5916,6 +6506,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 groups.get(family).push(tool);
             });
             const orderedFamilies = [
+                'Data + schema',
                 'Intake + framing',
                 'Evidence + review',
                 'Draft + export',
@@ -5923,9 +6514,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 'Shared platform',
             ].filter((family) => groups.has(family));
             const topFamily = orderedFamilies[0] || 'Shared platform';
+            const schemaRecommendations = getSchemaGuidedRecommendations();
+            const topSchemaRecommendation = schemaRecommendations[0] || null;
 
             toolSummary.textContent = (tools || []).length
-                ? `The browser currently sees ${(tools || []).length} MCP tools. Start with ${topFamily.toLowerCase()} if you want the clearest next operational lane.`
+                ? topSchemaRecommendation
+                    ? `The browser currently sees ${(tools || []).length} MCP tools. Schema guidance currently recommends ${String(topSchemaRecommendation.tool_name || topFamily).replace(/^complaint\./, '')} before branching into the rest of the workflow.`
+                    : `The browser currently sees ${(tools || []).length} MCP tools. Start with ${topFamily.toLowerCase()} if you want the clearest next operational lane.`
                 : 'No MCP tools are currently visible to the browser workspace.';
             phaseChips.innerHTML = orderedFamilies.length
                 ? orderedFamilies.map((family) => `<span class="chip">${escapeHtml(family)}: ${escapeHtml(String((groups.get(family) || []).length))}</span>`).join('')
@@ -5934,7 +6529,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             toolList.innerHTML = orderedFamilies.map((family) => `
                 <div class="item">
                     <strong>${escapeHtml(family)}</strong>
-                    <div class="muted">${escapeHtml(`These tools support the ${family.toLowerCase()} phase of the complaint workflow.`)}</div>
+                    <div class="muted">${escapeHtml(
+                        family === 'Data + schema'
+                            ? 'These tools inspect the parquet-backed workspace schema, migrate legacy stores, and shape downstream MCP/UI affordances.'
+                            : `These tools support the ${family.toLowerCase()} phase of the complaint workflow.`
+                    )}</div>
                     <div class="list">
                         ${(groups.get(family) || []).map((tool) => `
                             <div class="item">
@@ -5955,6 +6554,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const resolvedDraft = resolveDraftState(sessionPayload);
             const draftState = draftStatusCopy(sessionPayload);
             const toolNames = new Set((tools || []).map((tool) => tool.name));
+            const workspaceSchema = getWorkspaceSchemaSnapshot() || {};
+            const schemaRecommendations = getSchemaGuidedRecommendations();
+            const pieceSchemas = Array.isArray(workspaceSchema.piece_schemas) ? workspaceSchema.piece_schemas : [];
+            const filterDimensions = Array.isArray(workspaceSchema.filter_dimensions) ? workspaceSchema.filter_dimensions : [];
             const answeredCount = Object.values(session.intake_answers || {}).filter((value) => String(value || '').trim()).length;
             const totalQuestions = (sessionPayload.questions || []).length || 0;
             const evidenceCount = (overview.testimony_items || 0) + (overview.document_items || 0);
@@ -5989,6 +6592,20 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     name: 'Shared MCP SDK path',
                     enabled: toolNames.size > 0,
                     detail: `The browser is connected to ${toolNames.size} MCP tools through the shared JavaScript SDK client.`,
+                },
+                {
+                    name: 'Workspace parquet schema',
+                    enabled: toolNames.has('complaint.get_workspace_data_schema'),
+                    detail: pieceSchemas.length
+                        ? `${pieceSchemas.length} packaged workspace piece schemas are available with ${filterDimensions.length} filter dimensions for MCP and UI decisions.`
+                        : 'The workspace schema tool is available, but no schema snapshot has been refreshed in this browser session yet.',
+                },
+                {
+                    name: 'Legacy data migration',
+                    enabled: toolNames.has('complaint.migrate_legacy_workspace_data'),
+                    detail: schemaRecommendations.length
+                        ? `${schemaRecommendations.length} schema-guided recommendations are available to steer migration and operator design.`
+                        : 'The parquet migration tool is exposed so old complaint session stores can be consolidated into the new dataset primitives.',
                 },
                 {
                     name: 'Mediator testimony handoff',
@@ -6077,6 +6694,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const formalDiagnosticsNode = document.getElementById('formal-diagnostics-preview');
             const filingProvenanceNode = document.getElementById('filing-provenance-preview');
             const providerDiagnosticsNode = document.getElementById('provider-diagnostics-preview');
+            const workspaceDataSchemaNode = document.getElementById('workspace-data-schema-preview');
+            const workspaceDataHintsNode = document.getElementById('workspace-data-schema-hints-preview');
+            const workspaceDataMigrationNode = document.getElementById('workspace-data-migration-preview');
+            const workspaceDataFilterDimensionsNode = document.getElementById('workspace-data-filter-dimensions');
+            const workspaceDataPieceSchemaListNode = document.getElementById('workspace-data-piece-schema-list');
+            const workspaceDataQueryPlanNode = document.getElementById('workspace-data-query-plan-preview');
+            const workspaceDataSearchResultsNode = document.getElementById('workspace-data-search-results-preview');
             const packetSummaryNode = document.getElementById('packet-export-summary');
             const releaseGateNode = document.getElementById('formal-complaint-release-gate');
             const formalDefectsNode = document.getElementById('formal-complaint-defects');
@@ -6095,6 +6719,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const toolingContract = workspaceToolingContract || (workspaceCapabilities && workspaceCapabilities.tooling_contract)
                 ? (workspaceToolingContract || workspaceCapabilities.tooling_contract)
                 : null;
+            const schemaGuidedRecommendations = toolingContract && Array.isArray(toolingContract.schema_guided_recommendations)
+                ? toolingContract.schema_guided_recommendations
+                : Array.isArray(workspaceCapabilities && workspaceCapabilities.schema_guided_recommendations)
+                    ? workspaceCapabilities.schema_guided_recommendations
+                    : [];
             const toolingContractMarkup = toolingContract
                 ? `
                     <div class="item">
@@ -6108,6 +6737,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                                 : escapeHtml(`Missing cross-surface exposures: ${(toolingContract.missing_exposures || []).join(', ') || 'unknown'}.`)}
                         </div>
                     </div>
+                    ${schemaGuidedRecommendations.length ? `
+                    <div class="item">
+                        <strong>Schema-guided recommendations</strong>
+                        <div class="muted">${escapeHtml(schemaGuidedRecommendations.slice(0, 3).map((item) => `${String(item.tool_name || '').replace(/^complaint\./, '')}: ${String(item.reason || '')}`).join(' | '))}</div>
+                    </div>
+                    ` : ''}
                 `
                 : '';
             const sdkToMcpParityMap = {
@@ -6127,6 +6762,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 getClientReleaseGate: 'complaint.get_client_release_gate',
                 getWorkflowCapabilities: 'complaint.get_workflow_capabilities',
                 getToolingContract: 'complaint.get_tooling_contract',
+                getWorkspaceDataSchema: 'complaint.get_workspace_data_schema',
+                migrateLegacyWorkspaceData: 'complaint.migrate_legacy_workspace_data',
                 generateComplaint: 'complaint.generate_complaint',
                 updateDraft: 'complaint.update_draft',
                 exportComplaintPacket: 'complaint.export_complaint_packet',
@@ -6334,6 +6971,83 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 providerDiagnosticsNode.textContent = 'No provider-diagnostics payload loaded yet.';
             }
 
+            const workspaceSchema = workspaceDataSchema || (workspaceCapabilities && workspaceCapabilities.workspace_data_schema) || null;
+            const schemaPieces = Array.isArray(workspaceSchema && workspaceSchema.piece_schemas)
+                ? workspaceSchema.piece_schemas
+                : [];
+            const filterDimensions = Array.isArray(workspaceSchema && workspaceSchema.filter_dimensions)
+                ? workspaceSchema.filter_dimensions
+                : [];
+            const uiDesignHints = Array.isArray(workspaceSchema && workspaceSchema.ui_design_hints)
+                ? workspaceSchema.ui_design_hints
+                : [];
+            const mcpDesignHints = Array.isArray(workspaceSchema && workspaceSchema.mcp_design_hints)
+                ? workspaceSchema.mcp_design_hints
+                : [];
+            document.getElementById('workspace-data-schema-source-chip').textContent = `source: ${String((workspaceSchema && workspaceSchema.source) || 'not loaded')}`;
+            document.getElementById('workspace-data-schema-piece-chip').textContent = `pieces: ${String(schemaPieces.length)}`;
+            document.getElementById('workspace-data-schema-filter-chip').textContent = `filters: ${String(filterDimensions.length)}`;
+            if (workspaceSchema) {
+                workspaceDataSchemaNode.textContent = [
+                    `Version: ${String(workspaceSchema.schema_version || 'workspace_data_schema.v1')}`,
+                    `Source: ${String(workspaceSchema.source || 'workspace_data_schema')}`,
+                    `Workspace: ${String(workspaceSchema.workspace_name || workspaceSchema.user_id || workspaceUserId || 'unknown')}`,
+                    `Manifest path: ${String(workspaceSchema.manifest_path || document.getElementById('workspace-data-manifest-path').value.trim() || 'live workspace projection')}`,
+                    `Filter dimensions: ${filterDimensions.map((item) => String(item.name || item.dimension || item)).join(', ') || 'none declared'}`,
+                    `Indexed pieces: ${schemaPieces.map((item) => String(item.piece_name || item.name || 'piece')).join(', ') || 'none declared'}`,
+                ].join('\n');
+                workspaceDataHintsNode.textContent = [
+                    'UI design hints:',
+                    ...(uiDesignHints.length ? uiDesignHints.map((item, index) => `${index + 1}. ${String(item)}`) : ['1. No UI design hints returned yet.']),
+                    '',
+                    'MCP design hints:',
+                    ...(mcpDesignHints.length ? mcpDesignHints.map((item, index) => `${index + 1}. ${String(item)}`) : ['1. No MCP design hints returned yet.']),
+                    '',
+                    'Schema payload:',
+                    JSON.stringify(workspaceSchema, null, 2),
+                ].join('\n');
+            } else {
+                workspaceDataSchemaNode.textContent = 'No workspace dataset schema loaded yet.';
+                workspaceDataHintsNode.textContent = 'No workspace dataset design hints loaded yet.';
+            }
+            workspaceDataFilterDimensionsNode.innerHTML = filterDimensions.length
+                ? filterDimensions.map((item) => `<span class="chip good">${escapeHtml(String(item))}</span>`).join('')
+                : '<span class="chip">Refresh the workspace schema to derive filter dimensions.</span>';
+            renderWorkspaceDataFilterControls(filterDimensions);
+            workspaceDataPieceSchemaListNode.innerHTML = schemaPieces.length
+                ? schemaPieces.map((item) => `
+                    <div class="item">
+                        <strong>${escapeHtml(String(item.piece_id || item.name || 'piece'))}</strong>
+                        <div class="chip-row">
+                            <span class="chip">${escapeHtml(`rows: ${String(item.row_count || 0)}`)}</span>
+                            <span class="chip">${escapeHtml(`fields: ${String(Array.isArray(item.fields) ? item.fields.length : 0)}`)}</span>
+                            <span class="chip">${escapeHtml(`group: ${String(item.group || 'workspace')}`)}</span>
+                        </div>
+                        <div class="muted">${escapeHtml((Array.isArray(item.fields) ? item.fields.slice(0, 8).join(', ') : '') || 'No extracted fields surfaced for this piece yet.')}</div>
+                    </div>
+                `).join('')
+                : '<div class="item"><strong>No schema pieces loaded yet.</strong><div class="muted">Refresh the workspace schema to inspect parquet piece groups and field coverage.</div></div>';
+            workspaceDataQueryPlanNode.textContent = workspaceSchema
+                ? buildSchemaDrivenQueryPlan(workspaceSchema, { userId: workspaceUserId })
+                : 'No schema-driven query plan generated yet.';
+            workspaceDataSearchResultsNode.textContent = latestWorkspaceDatasetSearch
+                ? JSON.stringify(latestWorkspaceDatasetSearch, null, 2)
+                : 'No workspace dataset search has been run yet.';
+            if (latestWorkspaceDataMigration) {
+                workspaceDataMigrationNode.textContent = [
+                    `Status: ${String(latestWorkspaceDataMigration.status || 'unknown')}`,
+                    `Output dir: ${String(latestWorkspaceDataMigration.output_dir || document.getElementById('workspace-data-output-dir').value.trim() || 'n/a')}`,
+                    `Bundle dir: ${String(latestWorkspaceDataMigration.bundle_dir || 'n/a')}`,
+                    `Manifest JSON: ${String(latestWorkspaceDataMigration.manifest_json_path || 'n/a')}`,
+                    `Single parquet: ${String(latestWorkspaceDataMigration.single_parquet_path || 'n/a')}`,
+                    `Dataset JSON: ${String(latestWorkspaceDataMigration.dataset_json_path || 'n/a')}`,
+                    '',
+                    JSON.stringify(latestWorkspaceDataMigration, null, 2),
+                ].join('\n');
+            } else {
+                workspaceDataMigrationNode.textContent = 'No workspace parquet migration has been run yet.';
+            }
+
             if (latestPacketExport && latestPacketExport.packet_summary) {
                 packetSummaryNode.textContent = JSON.stringify(latestPacketExport.packet_summary, null, 2);
             } else {
@@ -6413,6 +7127,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 outputAnalysisNode.textContent = 'No complaint-output analysis run yet.';
                 claimAlignmentNode.textContent = 'No claim-alignment review run yet.';
             }
+            mirrorWorkspaceDataSchemaPreview();
             renderDraftReadiness(workspaceSession || {});
             renderOptimizerRepairBrief();
         }
@@ -6884,6 +7599,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const state = deriveWorkflowState(sessionPayload || {});
             const toolNames = new Set((tools || []).map((tool) => tool.name));
             const availableToolCount = toolNames.size;
+            const schemaRecommendations = getSchemaGuidedRecommendations();
+            const schemaHintIndex = getSchemaHintIndex();
+            const topSchemaRecommendation = schemaRecommendations[0] || null;
             const phaseChip = document.getElementById('integrations-operations-phase-chip');
             const toolChip = document.getElementById('integrations-operations-tool-chip');
             const guidance = document.getElementById('integrations-operations-guidance');
@@ -6907,19 +7625,26 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const hasMediatorPath = toolNames.has('complaint.build_mediator_prompt');
             const hasExportPath = toolNames.has('complaint.export_packet') || toolNames.has('complaint.export_complaint_markdown');
             const hasUiAuditPath = toolNames.has('complaint.review_ui') || toolNames.has('complaint.optimize_ui');
+            const hasSchemaPath = toolNames.has('complaint.get_workspace_data_schema');
 
             phaseChip.textContent = `case phase: ${state.phaseLabel}`;
             toolChip.textContent = `tools: ${availableToolCount} shared MCP tools`;
-            guidance.textContent = state.builderReady
-                ? 'The case is far enough along to treat export, release-gate review, and UX audit as operational actions from this panel.'
-                : state.reviewReady
-                    ? 'Use this lane to verify tool readiness, prepare the mediator handoff, and keep the shared workflow coherent before formal drafting.'
-                    : 'Start by checking the tool contract and mediator handoff so the shared session stays coherent while intake is still being built.';
-            preview.textContent = state.builderReady
-                ? 'Recommended tool workflow: export the packet through the MCP surface, review the release gate, then run UX audit on the resulting browser journey.'
-                : state.reviewReady
-                    ? 'Recommended tool workflow: check tool readiness, prepare the mediator brief, then use review and evidence to close the remaining support gaps.'
-                    : 'Recommended tool workflow: inspect the shared tooling contract first, then build the mediator handoff once intake and synopsis are less sparse.';
+            guidance.textContent = topSchemaRecommendation && hasSchemaPath
+                ? `Schema-guided recommendation: ${String(topSchemaRecommendation.reason || '').trim() || 'Refresh the workspace schema before making downstream UI or MCP design choices.'}`
+                : state.builderReady
+                    ? 'The case is far enough along to treat export, release-gate review, and UX audit as operational actions from this panel.'
+                    : state.reviewReady
+                        ? 'Use this lane to verify tool readiness, prepare the mediator handoff, and keep the shared workflow coherent before formal drafting.'
+                        : 'Start by checking the tool contract and mediator handoff so the shared session stays coherent while intake is still being built.';
+            preview.textContent = topSchemaRecommendation && hasSchemaPath
+                ? `Recommended schema-first workflow: run ${String(topSchemaRecommendation.tool_name || 'complaint.get_workspace_data_schema')}, then apply the returned hints to filters, navigation, and follow-on tool affordances.`
+                : schemaHintIndex.dual_search_modes
+                    ? `Recommended tool workflow: refresh the workspace schema, keep keyword and semantic search visible, then continue with ${state.builderReady ? 'export and release-gate review.' : 'review and evidence refinement.'}`
+                    : state.builderReady
+                        ? 'Recommended tool workflow: export the packet through the MCP surface, review the release gate, then run UX audit on the resulting browser journey.'
+                        : state.reviewReady
+                            ? 'Recommended tool workflow: check tool readiness, prepare the mediator brief, then use review and evidence to close the remaining support gaps.'
+                            : 'Recommended tool workflow: inspect the shared tooling contract first, then build the mediator handoff once intake and synopsis are less sparse.';
 
             readinessButtons.forEach((button) => setButtonGateState(button, true, availableToolCount > 0
                 ? 'The shared MCP tooling contract is available for inspection.'
@@ -7150,6 +7875,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             renderGmailDuckdbPipelineSummary();
             renderEmailDuckdbSearchSummary();
             renderGmailImportCommandExamples();
+            mirrorWorkspaceDataSchemaPreview();
             if (workspaceUiReadiness && typeof workspaceUiReadiness === 'object') {
                 renderUiReviewResult(normalizeUiReadinessResultForDisplay(workspaceUiReadiness));
             }
@@ -7165,6 +7891,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             workspaceUiReadiness = await client.getUiReadiness(workspaceUserId);
             workspaceClientReleaseGate = await client.getClientReleaseGate(workspaceUserId);
             workspaceProviderDiagnostics = await client.getProviderDiagnostics(workspaceUserId);
+            workspaceDataSchema = workspaceCapabilities && workspaceCapabilities.workspace_data_schema
+                ? workspaceCapabilities.workspace_data_schema
+                : workspaceDataSchema;
             if ((!latestPacketExport || !latestPacketExport.packet) && workspaceComplaintReadiness && workspaceComplaintReadiness.has_draft) {
                 try {
                     latestPacketExport = await client.exportComplaintPacket(workspaceUserId);
@@ -8688,6 +9417,364 @@ function extractComplaintOutputSignals(result) {
             setStatus('Provider diagnostics refreshed.');
         }
 
+        function mirrorWorkspaceDataSchemaPreview() {
+            const inlineNode = document.getElementById('workspace-data-schema-preview-inline');
+            const panelNode = document.getElementById('workspace-data-schema-preview');
+            if (inlineNode && panelNode) {
+                inlineNode.textContent = panelNode.textContent;
+            }
+        }
+
+        async function refreshWorkspaceDataSchemaPanel() {
+            activateTab('integrations');
+            setBusyStatus('Refreshing the workspace parquet schema and design hints through the MCP tools…');
+            try {
+                const payload = buildWorkspaceDataToolPayload();
+                workspaceDataSchema = await client.getWorkspaceDataSchema(workspaceUserId, payload);
+                persistWorkspaceDataPreferences();
+                renderWorkflowOperations();
+                setStatus('Workspace dataset schema refreshed.');
+            } catch (error) {
+                console.error(error);
+                setStatus(`Workspace dataset schema refresh failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function migrateLegacyWorkspaceDataPanel() {
+            const outputDir = document.getElementById('workspace-data-output-dir').value.trim();
+            const packageName = document.getElementById('workspace-data-package-name').value.trim();
+            const includeCar = Boolean(document.getElementById('workspace-data-include-car').checked);
+            if (!outputDir) {
+                activateTab('integrations');
+                setStatus('Add an output directory before migrating legacy workspace data into parquet artifacts.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Migrating legacy complaint workspace state into packaged parquet datasets through the MCP tools…');
+            try {
+                const payload = buildWorkspaceDataToolPayload();
+                delete payload.manifest_path;
+                latestWorkspaceDataMigration = await client.migrateLegacyWorkspaceData(workspaceUserId, outputDir, Object.assign({}, payload, {
+                    include_car: includeCar,
+                    package_name: packageName || undefined,
+                }));
+                if (latestWorkspaceDataMigration && latestWorkspaceDataMigration.manifest_json_path) {
+                    document.getElementById('workspace-data-manifest-path').value = String(latestWorkspaceDataMigration.manifest_json_path);
+                }
+                workspaceDataSchema = latestWorkspaceDataMigration && latestWorkspaceDataMigration.schema_snapshot
+                    ? latestWorkspaceDataMigration.schema_snapshot
+                    : workspaceDataSchema;
+                persistWorkspaceDataPreferences();
+                renderWorkflowOperations();
+                setStatus(`Workspace parquet migration persisted to ${String(latestWorkspaceDataMigration.bundle_dir || outputDir)}.`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Workspace parquet migration failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function copyWorkspaceDataMigrationManifestPath() {
+            const manifestPath = String(
+                (latestWorkspaceDataMigration && latestWorkspaceDataMigration.manifest_json_path)
+                || document.getElementById('workspace-data-manifest-path').value.trim()
+                || '',
+            );
+            if (!manifestPath) {
+                setStatus('Run or load a workspace parquet migration before copying the manifest path.');
+                return;
+            }
+            await copyTextToClipboard(manifestPath, 'Workspace dataset manifest path copied.');
+        }
+
+        async function searchWorkspaceDataPanel() {
+            const inputPath = document.getElementById('workspace-data-manifest-path').value.trim();
+            const query = document.getElementById('workspace-data-search-query').value.trim();
+            const searchBackend = document.getElementById('workspace-data-search-backend').value || 'bm25';
+            const topK = Math.max(1, Number(document.getElementById('workspace-data-search-top-k').value || '8'));
+            if (!inputPath) {
+                activateTab('integrations');
+                setStatus('Add a workspace manifest path before searching the packaged workspace dataset.');
+                return;
+            }
+            if (!query) {
+                activateTab('integrations');
+                setStatus('Enter a workspace dataset query before searching.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Searching the packaged workspace dataset through the shared MCP tools…');
+            try {
+                latestWorkspaceDatasetSearch = await client.searchWorkspaceDataset(inputPath, query, Object.assign({
+                    input_type: 'packaged',
+                    search_backend: searchBackend,
+                    top_k: topK,
+                }, buildWorkspaceDataSearchFilters()));
+                renderWorkflowOperations();
+                setStatus(`Workspace dataset search completed with ${String(((latestWorkspaceDatasetSearch.search_results || {}).result_count) || 0)} hit(s).`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Workspace dataset search failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        function renderPackagedDocketOperatorDashboardPanel() {
+            const dashboard = latestPackagedDocketOperatorDashboard || {};
+            const reportPayload = latestPackagedDocketOperatorDashboardReport || {};
+            const executionPayload = latestPackagedDocketRevalidationExecution || {};
+            const persistedPayload = latestPackagedDocketRevalidationPersist || {};
+            const summary = dashboard.summary || {};
+            const inspection = dashboard.inspection || {};
+            const snapshot = dashboard.proof_revalidation_snapshot || {};
+            const currentStatus = snapshot.current_status || {};
+            const latestRun = snapshot.latest_run_summary || {};
+            const nextQueueItem = snapshot.next_queue_item_summary || {};
+            const executionSummary = executionPayload.best_execution_summary || executionPayload.best_execution || {};
+            document.getElementById('packaged-docket-dashboard-source-chip').textContent = `source: ${String(dashboard.source || 'not loaded')}`;
+            document.getElementById('packaged-docket-dashboard-review-chip').textContent = `review: ${String(currentStatus.review_required_work_item_count || 0)}`;
+            document.getElementById('packaged-docket-dashboard-run-chip').textContent = `runs: ${String(summary.revalidation_run_count || latestRun.run_id || '0')}`;
+            document.getElementById('packaged-docket-dashboard-pending-count').textContent = `${String(currentStatus.review_required_work_item_count || 0)} item(s)`;
+            document.getElementById('packaged-docket-dashboard-high-priority-count').textContent = `${String(currentStatus.high_priority_revalidation_count || 0)} item(s)`;
+            document.getElementById('packaged-docket-dashboard-queue-count').textContent = `${String(currentStatus.queue_count || 0)} item(s)`;
+            document.getElementById('packaged-docket-dashboard-latest-source').textContent = String(latestRun.best_terminal_source_type || 'n/a');
+            document.getElementById('packaged-docket-dashboard-preview').textContent = dashboard.source
+                ? [
+                    `Manifest path: ${String(dashboard.manifest_path || document.getElementById('packaged-docket-manifest-path').value.trim() || '')}`,
+                    `Case: ${String(dashboard.case_name || '')}`,
+                    `Court: ${String(dashboard.court || '')}`,
+                    `Latest routing reason: ${String(inspection.latest_routing_reason || 'n/a')}`,
+                    `Pending review count: ${String(currentStatus.review_required_work_item_count || 0)}`,
+                    `High priority revalidation count: ${String(currentStatus.high_priority_revalidation_count || 0)}`,
+                    `Latest terminal source: ${String(latestRun.best_terminal_source_type || 'n/a')}`,
+                ].join('\n')
+                : 'No packaged docket operator dashboard loaded yet.';
+            document.getElementById('packaged-docket-dashboard-latest-run-preview').textContent = latestRun.run_id
+                ? [
+                    `Run ID: ${String(latestRun.run_id || '')}`,
+                    `Terminal source: ${String(latestRun.best_terminal_source_type || 'n/a')}`,
+                    `Support strength: ${String(latestRun.best_terminal_support_strength || 'n/a')}`,
+                    `Attached packets: ${String(latestRun.attached_packet_count || 0)}`,
+                ].join('\n')
+                : 'No packaged docket revalidation run loaded yet.';
+            document.getElementById('packaged-docket-dashboard-queue-preview').textContent = (currentStatus.queue_count || nextQueueItem.work_item_id)
+                ? [
+                    `Queue count: ${String(currentStatus.queue_count || 0)}`,
+                    `Next work item: ${String(nextQueueItem.work_item_id || 'n/a')}`,
+                    `Next priority: ${String(nextQueueItem.proof_revalidation_priority || 'n/a')}`,
+                    `Next status: ${String(nextQueueItem.proof_revalidation_status || 'n/a')}`,
+                ].join('\n')
+                : 'No packaged docket revalidation queue loaded yet.';
+            document.getElementById('packaged-docket-dashboard-execution-preview').textContent = executionPayload.source
+                ? [
+                    `Executed count: ${String(executionPayload.executed_count || 0)}`,
+                    `Attached refreshed packets: ${String(Boolean(executionPayload.attach_refreshed_packets || executionPayload.attached_package_view))}`,
+                    `Minimum priority: ${String(executionPayload.min_priority || 'low')}`,
+                    `Execution top K: ${String(executionPayload.execution_top_k || 10)}`,
+                    `Best source: ${String(executionSummary.source_type || executionSummary.source || 'n/a')}`,
+                    `Support strength: ${String(executionSummary.support_strength || 'n/a')}`,
+                    `Work item: ${String(executionSummary.work_item_id || executionSummary.source_id || 'n/a')}`,
+                ].join('\n')
+                : 'No packaged docket revalidation execution run yet.';
+            document.getElementById('packaged-docket-dashboard-persist-preview').textContent = persistedPayload.source
+                ? [
+                    `Persisted: ${String(Boolean(persistedPayload.persisted))}`,
+                    `Package root: ${String(persistedPayload.package_root || 'n/a')}`,
+                    `Manifest JSON: ${String(persistedPayload.manifest_json_path || 'n/a')}`,
+                    `CAR manifest: ${String(persistedPayload.car_manifest_path || 'n/a')}`,
+                ].join('\n')
+                : 'No refreshed packaged docket bundle has been persisted yet.';
+            const report = reportPayload.report;
+            document.getElementById('packaged-docket-dashboard-report-preview').textContent = reportPayload.report_format
+                ? (typeof report === 'string' ? report : JSON.stringify(report || {}, null, 2))
+                : 'No packaged docket operator dashboard report loaded yet.';
+        }
+
+        async function loadPackagedDocketOperatorDashboardPanel() {
+            const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
+            if (!manifestPath) {
+                activateTab('integrations');
+                setStatus('Add a packaged docket bundle manifest path before loading the operator dashboard.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Loading the packaged docket operator dashboard through the shared MCP SDK…');
+            try {
+                latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(manifestPath);
+                persistLatestPackagedDocketManifestPreference(manifestPath);
+                persistPackagedDocketManifestHistory(manifestPath);
+                renderPackagedDocketManifestHistory();
+                renderPackagedDocketOperatorDashboardPanel();
+                setStatus('Packaged docket operator dashboard loaded.');
+            } catch (error) {
+                console.error(error);
+                setStatus(`Packaged docket operator dashboard failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function loadPackagedDocketOperatorDashboardReportPanel() {
+            const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
+            const reportFormat = document.getElementById('packaged-docket-report-format').value;
+            if (!manifestPath) {
+                activateTab('integrations');
+                setStatus('Add a packaged docket bundle manifest path before loading the archived operator report.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Loading the archived packaged docket operator dashboard report through the shared MCP SDK…');
+            try {
+                latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat);
+                persistLatestPackagedDocketManifestPreference(manifestPath);
+                persistPackagedDocketManifestHistory(manifestPath);
+                renderPackagedDocketManifestHistory();
+                renderPackagedDocketOperatorDashboardPanel();
+                setStatus('Archived packaged docket operator dashboard report loaded.');
+            } catch (error) {
+                console.error(error);
+                setStatus(`Packaged docket operator dashboard report failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function executePackagedDocketRevalidationPanel() {
+            const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
+            const reportFormat = document.getElementById('packaged-docket-report-format').value;
+            const attachRefreshedPackets = Boolean(document.getElementById('packaged-docket-attach-refreshed-packets').checked);
+            const minPriority = document.getElementById('packaged-docket-min-priority').value || 'low';
+            const executionTopK = Math.max(1, Number(document.getElementById('packaged-docket-execution-top-k').value || '10'));
+            if (!manifestPath) {
+                activateTab('integrations');
+                setStatus('Add a packaged docket bundle manifest path before running the revalidation queue.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Running packaged docket proof revalidation through the shared MCP SDK…');
+            try {
+                latestPackagedDocketRevalidationExecution = await client.executePackagedDocketProofRevalidationQueue(manifestPath, {
+                    attach_refreshed_packets: attachRefreshedPackets,
+                    chain_until_satisfied: true,
+                    execution_top_k: executionTopK,
+                    min_priority: minPriority,
+                });
+                persistPackagedDocketPreferences();
+                latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(manifestPath);
+                latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat);
+                renderPackagedDocketOperatorDashboardPanel();
+                setStatus(attachRefreshedPackets
+                    ? `Packaged docket proof revalidation queue executed at ${minPriority} priority and refreshed packets were attached.`
+                    : `Packaged docket proof revalidation queue executed at ${minPriority} priority without attaching refreshed packets.`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Packaged docket proof revalidation failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function persistPackagedDocketRevalidationPanel() {
+            const manifestPath = document.getElementById('packaged-docket-manifest-path').value.trim();
+            const reportFormat = document.getElementById('packaged-docket-report-format').value;
+            const outputDir = document.getElementById('packaged-docket-output-dir').value.trim();
+            const packageName = document.getElementById('packaged-docket-package-name').value.trim();
+            const includeCar = Boolean(document.getElementById('packaged-docket-include-car').checked);
+            const minPriority = document.getElementById('packaged-docket-min-priority').value || 'low';
+            const executionTopK = Math.max(1, Number(document.getElementById('packaged-docket-execution-top-k').value || '10'));
+            if (!manifestPath) {
+                activateTab('integrations');
+                setStatus('Add a packaged docket bundle manifest path before persisting a refreshed bundle.');
+                return;
+            }
+            if (!outputDir) {
+                activateTab('integrations');
+                setStatus('Add a persist output directory before writing a refreshed bundle.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Persisting a refreshed packaged docket bundle through the shared MCP SDK…');
+            try {
+                latestPackagedDocketRevalidationPersist = await client.persistPackagedDocketProofRevalidationQueue(manifestPath, outputDir, {
+                    chain_until_satisfied: true,
+                    execution_top_k: executionTopK,
+                    include_car: includeCar,
+                    min_priority: minPriority,
+                    package_name: packageName || undefined,
+                });
+                persistPackagedDocketPreferences();
+                const nextManifestPath = String(
+                    latestPackagedDocketRevalidationPersist.manifest_json_path
+                    || latestPackagedDocketRevalidationPersist.manifest_path
+                    || manifestPath,
+                );
+                document.getElementById('packaged-docket-manifest-path').value = nextManifestPath;
+                persistLatestPackagedDocketManifestPreference(nextManifestPath);
+                persistPackagedDocketManifestHistory(nextManifestPath);
+                renderPackagedDocketManifestHistory();
+                latestPackagedDocketOperatorDashboard = await client.getPackagedDocketOperatorDashboard(nextManifestPath);
+                latestPackagedDocketOperatorDashboardReport = await client.loadPackagedDocketOperatorDashboardReport(nextManifestPath, reportFormat);
+                renderPackagedDocketOperatorDashboardPanel();
+                setStatus(`Refreshed packaged docket bundle persisted to ${String(latestPackagedDocketRevalidationPersist.package_root || outputDir)}.`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Persisting packaged docket revalidation failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function copyPackagedDocketPersistManifestPath() {
+            const manifestPath = String(
+                (latestPackagedDocketRevalidationPersist && latestPackagedDocketRevalidationPersist.manifest_json_path)
+                || document.getElementById('packaged-docket-manifest-path').value.trim()
+                || '',
+            );
+            if (!manifestPath) {
+                setStatus('Persist a refreshed packaged docket bundle before copying the manifest path.');
+                return;
+            }
+            await copyTextToClipboard(manifestPath, 'Persisted packaged docket manifest path copied.');
+        }
+
+        async function copyPackagedDocketPersistPackageRoot() {
+            const packageRoot = String(
+                (latestPackagedDocketRevalidationPersist && latestPackagedDocketRevalidationPersist.package_root)
+                || ''
+            );
+            if (!packageRoot) {
+                setStatus('Persist a refreshed packaged docket bundle before copying the package root.');
+                return;
+            }
+            await copyTextToClipboard(packageRoot, 'Persisted packaged docket package root copied.');
+        }
+
+        async function useLatestPackagedDocketManifestPreference() {
+            const storedManifestPath = loadLatestPackagedDocketManifestPreference();
+            if (!storedManifestPath) {
+                activateTab('integrations');
+                setStatus('No persisted packaged docket manifest has been remembered in this browser yet.');
+                return;
+            }
+            document.getElementById('packaged-docket-manifest-path').value = storedManifestPath;
+            activateTab('integrations');
+            renderPackagedDocketManifestHistory();
+            setStatus('Loaded the latest persisted packaged docket manifest path into the panel.');
+        }
+
+        async function clearSavedPackagedDocketPreferences() {
+            clearPackagedDocketPreferences();
+            resetPackagedDocketPreferenceControls();
+            activateTab('integrations');
+            renderPackagedDocketManifestHistory();
+            setStatus('Cleared the saved packaged docket manifest and operator preferences for this browser session.');
+        }
+
+        async function usePackagedDocketManifestHistoryItem(event) {
+            const trigger = event.target.closest('[data-packaged-docket-history-manifest]');
+            if (!trigger) {
+                return;
+            }
+            const manifestPath = String(trigger.getAttribute('data-packaged-docket-history-manifest') || '').trim();
+            if (!manifestPath) {
+                return;
+            }
+            document.getElementById('packaged-docket-manifest-path').value = manifestPath;
+            persistLatestPackagedDocketManifestPreference(manifestPath);
+            activateTab('integrations');
+            setStatus('Loaded a recent packaged docket manifest path from history.');
+        }
+
         async function previewMediatorBrief() {
             setBusyStatus('Refreshing the mediator testimony brief through the MCP tools…');
             workspaceMediatorPrompt = await client.buildMediatorPrompt(workspaceUserId);
@@ -8858,6 +9945,34 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('refresh-formal-diagnostics-button').addEventListener('click', refreshFormalDiagnosticsPanel);
         document.getElementById('refresh-filing-provenance-button').addEventListener('click', refreshFilingProvenancePanel);
         document.getElementById('refresh-provider-diagnostics-button').addEventListener('click', refreshProviderDiagnosticsPanel);
+        document.getElementById('refresh-workspace-data-schema-button').addEventListener('click', refreshWorkspaceDataSchemaPanel);
+        document.getElementById('refresh-workspace-data-schema-panel-button').addEventListener('click', refreshWorkspaceDataSchemaPanel);
+        document.getElementById('migrate-legacy-workspace-data-button').addEventListener('click', migrateLegacyWorkspaceDataPanel);
+        document.getElementById('copy-workspace-data-manifest-button').addEventListener('click', copyWorkspaceDataMigrationManifestPath);
+        document.getElementById('search-workspace-data-button').addEventListener('click', searchWorkspaceDataPanel);
+        document.getElementById('load-packaged-docket-dashboard-button').addEventListener('click', loadPackagedDocketOperatorDashboardPanel);
+        document.getElementById('load-packaged-docket-dashboard-report-button').addEventListener('click', loadPackagedDocketOperatorDashboardReportPanel);
+        document.getElementById('execute-packaged-docket-revalidation-button').addEventListener('click', executePackagedDocketRevalidationPanel);
+        document.getElementById('persist-packaged-docket-revalidation-button').addEventListener('click', persistPackagedDocketRevalidationPanel);
+        document.getElementById('copy-packaged-docket-persist-manifest-button').addEventListener('click', copyPackagedDocketPersistManifestPath);
+        document.getElementById('copy-packaged-docket-persist-root-button').addEventListener('click', copyPackagedDocketPersistPackageRoot);
+        document.getElementById('use-latest-packaged-docket-manifest-button').addEventListener('click', useLatestPackagedDocketManifestPreference);
+        document.getElementById('clear-packaged-docket-preferences-button').addEventListener('click', clearSavedPackagedDocketPreferences);
+        document.getElementById('packaged-docket-output-dir').addEventListener('input', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-package-name').addEventListener('input', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-include-car').addEventListener('change', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-min-priority').addEventListener('change', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-execution-top-k').addEventListener('input', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-attach-refreshed-packets').addEventListener('change', persistPackagedDocketPreferences);
+        document.getElementById('packaged-docket-manifest-history-preview').addEventListener('click', usePackagedDocketManifestHistoryItem);
+        document.getElementById('workspace-data-manifest-path').addEventListener('input', persistWorkspaceDataPreferences);
+        document.getElementById('workspace-data-statefile-path').addEventListener('input', persistWorkspaceDataPreferences);
+        document.getElementById('workspace-data-evidence-db-path').addEventListener('input', persistWorkspaceDataPreferences);
+        document.getElementById('workspace-data-legal-authority-db-path').addEventListener('input', persistWorkspaceDataPreferences);
+        document.getElementById('workspace-data-claim-support-db-path').addEventListener('input', persistWorkspaceDataPreferences);
+        document.getElementById('workspace-data-output-dir').addEventListener('input', persistWorkspaceDataPreferences);
+        document.getElementById('workspace-data-package-name').addEventListener('input', persistWorkspaceDataPreferences);
+        document.getElementById('workspace-data-include-car').addEventListener('change', persistWorkspaceDataPreferences);
         document.getElementById('build-mediator-prompt-button').addEventListener('click', previewMediatorBrief);
         document.getElementById('analyze-complaint-output-button').addEventListener('click', analyzeComplaintOutputPanel);
         document.getElementById('review-generated-exports-button').addEventListener('click', reviewGeneratedExportsPanel);
@@ -9104,6 +10219,10 @@ function extractComplaintOutputSignals(result) {
             };
             renderWorkspace(bootstrap.session);
             hydrateGmailImportUser();
+            document.getElementById('packaged-docket-manifest-path').value = loadLatestPackagedDocketManifestPreference() || document.getElementById('packaged-docket-manifest-path').value;
+            hydratePackagedDocketPreferences();
+            hydrateWorkspaceDataPreferences();
+            renderPackagedDocketManifestHistory();
             renderTools(workspaceSessionTools);
             renderSdkServerInfo(bootstrap.initialization, workspaceSessionTools);
             setStatus(`Workspace synchronized for ${workspaceUserId}.`);

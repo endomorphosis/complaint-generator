@@ -211,12 +211,210 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Tooling contract refreshed." in content
     assert "refresh-provider-diagnostics-button" in content
     assert "provider-diagnostics-preview" in content
+    assert "refresh-workspace-data-schema-button" in content
+    assert "workspace-data-schema-preview" in content
+    assert "workspace-data-schema-hints-preview" in content
+    assert "workspace-data-migration-preview" in content
+    assert "workspace-data-manifest-path" in content
+    assert "workspace-data-statefile-path" in content
+    assert "workspace-data-evidence-db-path" in content
+    assert "workspace-data-legal-authority-db-path" in content
+    assert "workspace-data-claim-support-db-path" in content
+    assert "workspace-data-output-dir" in content
+    assert "workspace-data-package-name" in content
+    assert "workspace-data-include-car" in content
+    assert "complaint-workspace workspace-data-schema --user-id did:key:example" in content
+    assert "complaint-workspace migrate-legacy-workspace-data --user-id did:key:example --output-dir artifacts/workspace-dataset" in content
+    assert "tool: complaint.get_workspace_data_schema" in content
+    assert "tool: complaint.migrate_legacy_workspace_data" in content
+    assert "await client.getWorkspaceDataSchema(bootstrap.did);" in content
+    assert "await client.migrateLegacyWorkspaceData(bootstrap.did, 'artifacts/workspace-dataset');" in content
+    assert "refresh-workspace-data-schema-panel-button" in content
+    assert "migrate-legacy-workspace-data-button" in content
+    assert "copy-workspace-data-manifest-button" in content
+    assert "workspace-data-schema-source-chip" in content
+    assert "workspace-data-schema-piece-chip" in content
+    assert "workspace-data-schema-filter-chip" in content
+    assert "workspace-data-filter-dimensions" in content
+    assert "workspace-data-filter-controls" in content
+    assert "workspace-data-piece-schema-list" in content
+    assert "workspace-data-query-plan-preview" in content
+    assert "workspace-data-search-query" in content
+    assert "workspace-data-search-backend" in content
+    assert "workspace-data-search-top-k" in content
+    assert "search-workspace-data-button" in content
+    assert "workspace-data-search-results-preview" in content
+    assert "Workspace Data Ops" in content
+    assert "Inspect and Migrate Workspace Dataset Primitives" in content
+    assert "packaged-docket-manifest-path" in content
+    assert "packaged-docket-report-format" in content
+    assert "packaged-docket-attach-refreshed-packets" in content
+    assert "packaged-docket-min-priority" in content
+    assert "packaged-docket-execution-top-k" in content
+    assert "packaged-docket-output-dir" in content
+    assert "packaged-docket-package-name" in content
+    assert "packaged-docket-include-car" in content
+    assert "load-packaged-docket-dashboard-button" in content
+    assert "load-packaged-docket-dashboard-report-button" in content
+    assert "execute-packaged-docket-revalidation-button" in content
+    assert "persist-packaged-docket-revalidation-button" in content
+    assert "copy-packaged-docket-persist-manifest-button" in content
+    assert "copy-packaged-docket-persist-root-button" in content
+    assert "use-latest-packaged-docket-manifest-button" in content
+    assert "clear-packaged-docket-preferences-button" in content
+    assert "packaged-docket-manifest-history-preview" in content
+    assert "packaged-docket-dashboard-preview" in content
+    assert "packaged-docket-dashboard-report-preview" in content
+    assert "packaged-docket-dashboard-execution-preview" in content
+    assert "packaged-docket-dashboard-persist-preview" in content
+    assert "packaged-docket-dashboard-source-chip" in content
+    assert "packaged-docket-dashboard-review-chip" in content
+    assert "packaged-docket-dashboard-run-chip" in content
+    assert "packaged-docket-dashboard-scorecard" in content
+    assert "packaged-docket-dashboard-pending-count" in content
+    assert "packaged-docket-dashboard-high-priority-count" in content
+    assert "packaged-docket-dashboard-queue-count" in content
+    assert "packaged-docket-dashboard-latest-source" in content
+    assert "packaged-docket-dashboard-latest-run-preview" in content
+    assert "packaged-docket-dashboard-queue-preview" in content
     assert "workspaceProviderDiagnostics = null;" in content
+    assert "workspaceDataSchema = null;" in content
+    assert "latestWorkspaceDataMigration = null;" in content
+    assert "latestPackagedDocketOperatorDashboard = null;" in content
+    assert "latestPackagedDocketOperatorDashboardReport = null;" in content
+    assert "latestPackagedDocketRevalidationExecution = null;" in content
+    assert "latestPackagedDocketRevalidationPersist = null;" in content
     assert "latestUiReviewResult = null;" in content
+    assert "function packagedDocketManifestStorageKey()" in content
+    assert "function packagedDocketManifestHistoryStorageKey()" in content
+    assert "function packagedDocketPreferencesStorageKey()" in content
+    assert "function workspaceDataPreferencesStorageKey()" in content
+    assert "function getSchemaGuidedRecommendations()" in content
+    assert "function getWorkspaceSchemaSnapshot()" in content
+    assert "function getSchemaHintIndex()" in content
+    assert "function buildSchemaDrivenQueryPlan(schema, options = {})" in content
+    assert "function renderWorkspaceDataFilterControls(filterDimensions)" in content
+    assert "function buildWorkspaceDataSearchFilters()" in content
+    assert "title: 'Inspect workspace parquet schema'" in content
+    assert "loadWorkspaceDataPreferences()" in content
+    assert "persistWorkspaceDataPreferences()" in content
+    assert "hydrateWorkspaceDataPreferences()" in content
+    assert "buildWorkspaceDataToolPayload()" in content
+    assert "loadLatestPackagedDocketManifestPreference()" in content
+    assert "persistLatestPackagedDocketManifestPreference(manifestPath)" in content
+    assert "loadPackagedDocketManifestHistory()" in content
+    assert "persistPackagedDocketManifestHistory(manifestPath)" in content
+    assert "clearPackagedDocketPreferences()" in content
+    assert "loadPackagedDocketPreferences()" in content
+    assert "persistPackagedDocketPreferences()" in content
+    assert "hydratePackagedDocketPreferences()" in content
+    assert "resetPackagedDocketPreferenceControls()" in content
+    assert "renderPackagedDocketManifestHistory()" in content
     assert "normalizeUiReadinessResultForDisplay" in content
     assert "client.getProviderDiagnostics(workspaceUserId)" in content
     assert "client.getToolingContract(workspaceUserId)" in content
+    assert "client.getWorkspaceDataSchema(workspaceUserId, payload)" in content
+    assert "client.migrateLegacyWorkspaceData(workspaceUserId, outputDir, Object.assign({}, payload, {" in content
+    assert "client.searchWorkspaceDataset(inputPath, query, Object.assign({" in content
+    assert "Schema-guided recommendation:" in content
+    assert "Recommended schema-first workflow:" in content
+    assert "These tools inspect the parquet-backed workspace schema" in content
+    assert "Schema-driven query plan" in content
+    assert "Preferred filters:" in content
+    assert "Suggested MCP-first sequence:" in content
+    assert "Searching the packaged workspace dataset through the shared MCP tools…" in content
+    assert "Workspace dataset search completed with ${String(((latestWorkspaceDatasetSearch.search_results || {}).result_count) || 0)} hit(s)." in content
+    assert "Add a workspace manifest path before searching the packaged workspace dataset." in content
+    assert "Enter a workspace dataset query before searching." in content
+    assert "document.getElementById('search-workspace-data-button').addEventListener('click', searchWorkspaceDataPanel);" in content
+    assert "client.getPackagedDocketOperatorDashboard(manifestPath)" in content
+    assert "client.loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat)" in content
+    assert "client.executePackagedDocketProofRevalidationQueue(manifestPath, {" in content
+    assert "client.persistPackagedDocketProofRevalidationQueue(manifestPath, outputDir, {" in content
+    assert "attach_refreshed_packets: attachRefreshedPackets" in content
+    assert "execution_top_k: executionTopK" in content
+    assert "min_priority: minPriority" in content
+    assert "include_car: includeCar" in content
+    assert "package_name: packageName || undefined" in content
+    assert "function renderPackagedDocketOperatorDashboardPanel()" in content
+    assert "function mirrorWorkspaceDataSchemaPreview()" in content
+    assert "async function refreshWorkspaceDataSchemaPanel()" in content
+    assert "async function migrateLegacyWorkspaceDataPanel()" in content
+    assert "async function copyWorkspaceDataMigrationManifestPath()" in content
+    assert "async function loadPackagedDocketOperatorDashboardPanel()" in content
+    assert "async function loadPackagedDocketOperatorDashboardReportPanel()" in content
+    assert "async function executePackagedDocketRevalidationPanel()" in content
+    assert "async function persistPackagedDocketRevalidationPanel()" in content
+    assert "async function copyPackagedDocketPersistManifestPath()" in content
+    assert "async function copyPackagedDocketPersistPackageRoot()" in content
+    assert "async function useLatestPackagedDocketManifestPreference()" in content
+    assert "async function clearSavedPackagedDocketPreferences()" in content
+    assert "async function usePackagedDocketManifestHistoryItem(event)" in content
+    assert "Packaged Docket Ops" in content
+    assert "Load Packaged Legal Ops Dashboard" in content
+    assert "Pending Review" in content
+    assert "High Priority" in content
+    assert "Queue Size" in content
+    assert "Latest Revalidation Run" in content
+    assert "Queue Status" in content
+    assert "Loading the packaged docket operator dashboard through the shared MCP SDK…" in content
+    assert "Running packaged docket proof revalidation through the shared MCP SDK…" in content
+    assert "Persisting a refreshed packaged docket bundle through the shared MCP SDK…" in content
+    assert "Packaged docket proof revalidation queue executed at ${minPriority} priority and refreshed packets were attached." in content
+    assert "Packaged docket proof revalidation queue executed at ${minPriority} priority without attaching refreshed packets." in content
+    assert "Refreshed packaged docket bundle persisted to ${String(latestPackagedDocketRevalidationPersist.package_root || outputDir)}." in content
+    assert "Persisted packaged docket manifest path copied." in content
+    assert "Persisted packaged docket package root copied." in content
+    assert "Loaded the latest persisted packaged docket manifest path into the panel." in content
+    assert "Loaded a recent packaged docket manifest path from history." in content
+    assert "No persisted packaged docket manifest has been remembered in this browser yet." in content
+    assert "Cleared the saved packaged docket manifest and operator preferences for this browser session." in content
+    assert "Archived packaged docket operator dashboard report loaded." in content
+    assert "document.getElementById('packaged-docket-dashboard-pending-count').textContent" in content
+    assert "document.getElementById('packaged-docket-dashboard-latest-run-preview').textContent" in content
+    assert "document.getElementById('packaged-docket-dashboard-queue-preview').textContent" in content
+    assert "document.getElementById('packaged-docket-dashboard-execution-preview').textContent" in content
+    assert "document.getElementById('packaged-docket-dashboard-persist-preview').textContent" in content
+    assert "document.getElementById('packaged-docket-attach-refreshed-packets').checked" in content
+    assert "document.getElementById('packaged-docket-min-priority').value" in content
+    assert "document.getElementById('packaged-docket-execution-top-k').value" in content
+    assert "document.getElementById('packaged-docket-output-dir').value" in content
+    assert "document.getElementById('packaged-docket-package-name').value" in content
+    assert "document.getElementById('packaged-docket-include-car').checked" in content
+    assert "document.getElementById('packaged-docket-manifest-path').value = loadLatestPackagedDocketManifestPreference()" in content
+    assert "persistPackagedDocketPreferences();" in content
+    assert "hydratePackagedDocketPreferences();" in content
+    assert "renderPackagedDocketManifestHistory();" in content
+    assert "data-packaged-docket-history-manifest" in content
+    assert "document.getElementById('load-packaged-docket-dashboard-button').addEventListener('click', loadPackagedDocketOperatorDashboardPanel);" in content
+    assert "document.getElementById('load-packaged-docket-dashboard-report-button').addEventListener('click', loadPackagedDocketOperatorDashboardReportPanel);" in content
+    assert "document.getElementById('execute-packaged-docket-revalidation-button').addEventListener('click', executePackagedDocketRevalidationPanel);" in content
+    assert "document.getElementById('persist-packaged-docket-revalidation-button').addEventListener('click', persistPackagedDocketRevalidationPanel);" in content
+    assert "document.getElementById('copy-packaged-docket-persist-manifest-button').addEventListener('click', copyPackagedDocketPersistManifestPath);" in content
+    assert "document.getElementById('copy-packaged-docket-persist-root-button').addEventListener('click', copyPackagedDocketPersistPackageRoot);" in content
+    assert "document.getElementById('use-latest-packaged-docket-manifest-button').addEventListener('click', useLatestPackagedDocketManifestPreference);" in content
+    assert "document.getElementById('clear-packaged-docket-preferences-button').addEventListener('click', clearSavedPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-output-dir').addEventListener('input', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-package-name').addEventListener('input', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-include-car').addEventListener('change', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-min-priority').addEventListener('change', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-execution-top-k').addEventListener('input', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-attach-refreshed-packets').addEventListener('change', persistPackagedDocketPreferences);" in content
+    assert "document.getElementById('packaged-docket-manifest-history-preview').addEventListener('click', usePackagedDocketManifestHistoryItem);" in content
     assert "refreshProviderDiagnosticsPanel()" in content
+    assert "Workspace dataset schema refreshed." in content
+    assert "Migrating legacy complaint workspace state into packaged parquet datasets through the MCP tools…" in content
+    assert "Workspace parquet migration persisted to ${String(latestWorkspaceDataMigration.bundle_dir || outputDir)}." in content
+    assert "Workspace dataset manifest path copied." in content
+    assert "Add an output directory before migrating legacy workspace data into parquet artifacts." in content
+    assert "document.getElementById('refresh-workspace-data-schema-button').addEventListener('click', refreshWorkspaceDataSchemaPanel);" in content
+    assert "document.getElementById('refresh-workspace-data-schema-panel-button').addEventListener('click', refreshWorkspaceDataSchemaPanel);" in content
+    assert "document.getElementById('migrate-legacy-workspace-data-button').addEventListener('click', migrateLegacyWorkspaceDataPanel);" in content
+    assert "document.getElementById('copy-workspace-data-manifest-button').addEventListener('click', copyWorkspaceDataMigrationManifestPath);" in content
+    assert "document.getElementById('workspace-data-output-dir').addEventListener('input', persistWorkspaceDataPreferences);" in content
+    assert "document.getElementById('workspace-data-package-name').addEventListener('input', persistWorkspaceDataPreferences);" in content
+    assert "document.getElementById('workspace-data-include-car').addEventListener('change', persistWorkspaceDataPreferences);" in content
+    assert "hydrateWorkspaceDataPreferences();" in content
     assert "Provider diagnostics refreshed." in content
     assert "Router provider diagnostics" in content
     assert "Complaint draft default:" in content

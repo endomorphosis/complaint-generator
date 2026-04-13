@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from complaint_generator.evidence_relevance import generate_email_search_plan
+from ipfs_datasets_py.processors.legal_data.email_relevance import generate_email_search_plan
 
 
 def build_parser() -> argparse.ArgumentParser:

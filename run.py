@@ -1,6 +1,56 @@
 import argparse
 import json
 import os
+import tempfile
+import warnings
+from pathlib import Path
+
+
+warnings.filterwarnings(
+	"ignore",
+	category=SyntaxWarning,
+	module=r"pydub(\..*)?$",
+)
+warnings.filterwarnings(
+	"ignore",
+	category=RuntimeWarning,
+	module=r"pydub(\..*)?$",
+	message=r"Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work",
+)
+warnings.filterwarnings(
+	"ignore",
+	category=SyntaxWarning,
+	module=r"newspaper(\..*)?$",
+)
+
+
+def _configure_runtime_tempdir_early() -> str:
+	root = Path(__file__).resolve().parent
+	candidates = [
+		Path(os.environ.get("COMPLAINT_GENERATOR_TMPDIR", "")).expanduser() if os.environ.get("COMPLAINT_GENERATOR_TMPDIR") else None,
+		root / "statefiles",
+		root / "tmp",
+	]
+	for candidate in candidates:
+		if candidate is None:
+			continue
+		try:
+			candidate.mkdir(parents=True, exist_ok=True)
+			probe = candidate / ".tmp-write-probe"
+			probe.write_text("ok")
+			probe.unlink()
+			resolved = str(candidate)
+			os.environ["TMPDIR"] = resolved
+			os.environ.setdefault("TEMP", resolved)
+			os.environ.setdefault("TMP", resolved)
+			tempfile.tempdir = resolved
+			return resolved
+		except Exception:
+			continue
+	return ""
+
+
+_configure_runtime_tempdir_early()
 
 from applications import normalize_application_types, start_configured_applications
 from backends import LLMRouterBackend, WorkstationBackendDatabases, WorkstationBackendModels
@@ -8,7 +58,45 @@ from lib.log import init_logging, make_logger
 from mediator import Mediator
 
 
+def _normalize_cli_mediator_backends(config_backends, config_mediator, config_application):
+	application_types = normalize_application_types(config_application.get('type', []))
+	if 'cli' not in application_types:
+		return
+	if os.environ.get('COMPLAINT_GENERATOR_USE_LEGACY_CLI_BACKEND', '').strip().lower() in {'1', 'true', 'yes'}:
+		return
+	backend_ids = list(config_mediator.get('backends') or [])
+	if backend_ids != ['llm-router']:
+		return
+	legacy_backend = next((conf for conf in config_backends if conf.get('id') == 'llm-router'), None)
+	preferred_backend = next((conf for conf in config_backends if conf.get('id') == 'llm-router-codex'), None)
+	if not isinstance(legacy_backend, dict) or not isinstance(preferred_backend, dict):
+		return
+	if str(legacy_backend.get('type') or '').strip() != 'llm_router':
+		return
+	if str(legacy_backend.get('provider') or '').strip() != 'codex':
+		return
+	if str(preferred_backend.get('type') or '').strip() != 'llm_router':
+		return
+	if str(preferred_backend.get('provider') or '').strip() != 'codex_cli':
+		return
+	config_mediator['backends'] = ['llm-router-codex']
+
+
+def _apply_runtime_config_overrides(config_mediator, config_application):
+	override_application_type = os.environ.get('COMPLAINT_GENERATOR_APPLICATION_TYPE', '').strip()
+	if override_application_type:
+		config_application['type'] = [item.strip() for item in override_application_type.split(',') if item.strip()]
+	override_backends = os.environ.get('COMPLAINT_GENERATOR_MEDIATOR_BACKENDS', '').strip()
+	if override_backends:
+		config_mediator['backends'] = [item.strip() for item in override_backends.split(',') if item.strip()]
+
+
+def _configure_runtime_tempdir() -> str:
+	return _configure_runtime_tempdir_early()
+
+
 def main(argv=None):
+	_configure_runtime_tempdir()
 	parser = argparse.ArgumentParser(description='Complaint Generator')
 	parser.add_argument(
 		'--config',
@@ -26,6 +114,8 @@ def main(argv=None):
 		config_mediator = config['MEDIATOR']
 		config_application = config['APPLICATION']
 		config_log = config['LOG']
+		_apply_runtime_config_overrides(config_mediator, config_application)
+		_normalize_cli_mediator_backends(config_backends, config_mediator, config_application)
 
 	init_logging(level=config_log['level'])
 	log = make_logger('main')

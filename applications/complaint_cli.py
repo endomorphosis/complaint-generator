@@ -1,17 +1,89 @@
 from __future__ import annotations
 
 import argparse
-import anyio
+import inspect
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
-import typer
+try:
+    import typer
+except ModuleNotFoundError:
+    class _MiniTyperApp:
+        def __init__(self, help: str | None = None) -> None:
+            self.help = help or ""
+            self._commands: dict[str, object] = {}
 
-from complaint_generator.email_graphrag import build_email_duckdb_artifacts, search_email_graphrag_duckdb
-from complaint_generator.email_import import import_gmail_evidence
-from complaint_generator.email_pipeline import run_gmail_duckdb_pipeline, search_email_duckdb_corpus
+        def command(self, name: str):
+            def _decorator(func):
+                self._commands[name] = func
+                return func
+
+            return _decorator
+
+        def __call__(self) -> None:
+            argv = sys.argv[1:]
+            if not argv:
+                raise SystemExit(self.help or "No command provided.")
+            command_name = argv[0]
+            func = self._commands.get(command_name)
+            if func is None:
+                raise SystemExit(f"Unknown command: {command_name}")
+            signature = inspect.signature(func)
+            parsed: dict[str, object] = {}
+            list_defaults = {
+                name: list(param.default)
+                for name, param in signature.parameters.items()
+                if isinstance(param.default, list)
+            }
+            index = 1
+            while index < len(argv):
+                token = argv[index]
+                if not token.startswith("--"):
+                    index += 1
+                    continue
+                key = token[2:].replace("-", "_")
+                parameter = signature.parameters.get(key)
+                if parameter is None:
+                    index += 1
+                    continue
+                default = parameter.default
+                if isinstance(default, bool):
+                    parsed[key] = True
+                    index += 1
+                    continue
+                if index + 1 >= len(argv):
+                    raise SystemExit(f"Missing value for --{token[2:]}")
+                value = argv[index + 1]
+                if isinstance(default, list):
+                    list_defaults.setdefault(key, []).append(value)
+                else:
+                    parsed[key] = value
+                index += 2
+            for key, values in list_defaults.items():
+                parsed[key] = values
+            func(**parsed)
+
+    class _MiniTyperModule:
+        Typer = _MiniTyperApp
+
+        @staticmethod
+        def Option(default=None, *args, **kwargs):
+            return default
+
+        @staticmethod
+        def Argument(default=None, *args, **kwargs):
+            return default
+
+        @staticmethod
+        def echo(value) -> None:
+            print(value)
+
+    typer = _MiniTyperModule()
+
+from complaint_generator.legacy_session_migration import migrate_legacy_session
 from applications.ui_review import run_ui_review_workflow
 
 from .complaint_workspace import ComplaintWorkspaceService
@@ -168,7 +240,14 @@ def import_gmail_evidence_command(
     use_ipfs_secrets_vault: bool = typer.Option(False, "--use-ipfs-secrets-vault"),
     save_to_ipfs_secrets_vault: bool = typer.Option(False, "--save-to-ipfs-secrets-vault"),
 ) -> None:
-    from complaint_generator.email_credentials import resolve_gmail_credentials
+    import anyio
+
+    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
+    from ipfs_datasets_py.processors.legal_data.email_corpus import (
+        build_email_duckdb_artifacts,
+        search_email_graphrag_duckdb,
+    )
+    from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
 
     parser = argparse.ArgumentParser(prog="complaint-workspace import-gmail-evidence")
     if not collect_all_messages and not list(address or []):
@@ -256,6 +335,21 @@ def import_local_evidence_command(
     _print(payload)
 
 
+@app.command("migrate-legacy-session")
+def migrate_legacy_session_command(
+    statefile: str = str(Path("/home/barberb/HACC/complaint-generator/statefiles/temporary-cli-session-latest.json")),
+    workspace_root: str = str(Path("/home/barberb/HACC/workspace")),
+    user_id: str = "did:key:legacy-temporary-session",
+) -> None:
+    _print(
+        migrate_legacy_session(
+            statefile=Path(statefile),
+            workspace_root=Path(workspace_root),
+            user_id=user_id,
+        )
+    )
+
+
 @app.command("run-gmail-duckdb-pipeline")
 def run_gmail_duckdb_pipeline_command(
     user_id: str = "demo-user",
@@ -291,7 +385,10 @@ def run_gmail_duckdb_pipeline_command(
     use_ipfs_secrets_vault: bool = typer.Option(False, "--use-ipfs-secrets-vault"),
     save_to_ipfs_secrets_vault: bool = typer.Option(False, "--save-to-ipfs-secrets-vault"),
 ) -> None:
-    from complaint_generator.email_credentials import resolve_gmail_credentials
+    import anyio
+
+    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
+    from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
 
     parser = argparse.ArgumentParser(prog="complaint-workspace run-gmail-duckdb-pipeline")
     if not collect_all_messages and not list(address or []):
@@ -359,6 +456,8 @@ def search_email_duckdb_command(
     bm25_k1: float = typer.Option(1.2, "--bm25-k1"),
     bm25_b: float = typer.Option(0.75, "--bm25-b"),
 ) -> None:
+    from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
+
     _print(
         search_email_duckdb_corpus(
             index_path=index_path,
@@ -404,6 +503,83 @@ def capabilities(user_id: str = "demo-user") -> None:
 @app.command("tooling-contract")
 def tooling_contract(user_id: str = "demo-user") -> None:
     _print(service.get_tooling_contract(user_id))
+
+
+@app.command("workspace-data-schema")
+def workspace_data_schema(
+    user_id: str = "demo-user",
+    manifest_path: Optional[str] = None,
+    statefile_path: Optional[str] = None,
+    evidence_db_path: Optional[str] = None,
+    legal_authority_db_path: Optional[str] = None,
+    claim_support_db_path: Optional[str] = None,
+) -> None:
+    _print(
+        service.get_workspace_data_schema(
+            user_id,
+            manifest_path=manifest_path,
+            statefile_path=statefile_path,
+            evidence_db_path=evidence_db_path,
+            legal_authority_db_path=legal_authority_db_path,
+            claim_support_db_path=claim_support_db_path,
+        )
+    )
+
+
+@app.command("migrate-legacy-workspace-data")
+def migrate_legacy_workspace_data_command(
+    user_id: str = "demo-user",
+    output_dir: Optional[str] = None,
+    statefile_path: Optional[str] = None,
+    evidence_db_path: Optional[str] = None,
+    legal_authority_db_path: Optional[str] = None,
+    claim_support_db_path: Optional[str] = None,
+    package_name: Optional[str] = None,
+    include_car: bool = True,
+) -> None:
+    _print(
+        service.migrate_legacy_workspace_data(
+            user_id,
+            output_dir=output_dir,
+            statefile_path=statefile_path,
+            evidence_db_path=evidence_db_path,
+            legal_authority_db_path=legal_authority_db_path,
+            claim_support_db_path=claim_support_db_path,
+            package_name=package_name,
+            include_car=include_car,
+        )
+    )
+
+
+@app.command("search-workspace-data")
+def search_workspace_data(
+    input_path: str,
+    query: str,
+    input_type: str = "packaged",
+    search_backend: str = "bm25",
+    top_k: int = 10,
+    vector_dimension: int = 32,
+    collection_id: Optional[str] = None,
+    document_type: Optional[str] = None,
+    claim_type: Optional[str] = None,
+    claim_element_id: Optional[str] = None,
+    source_type: Optional[str] = None,
+) -> None:
+    _print(
+        service.search_workspace_dataset(
+            input_path,
+            input_type=input_type,
+            query=query,
+            search_backend=search_backend,
+            top_k=top_k,
+            vector_dimension=vector_dimension,
+            collection_id=collection_id,
+            document_type=document_type,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            source_type=source_type,
+        )
+    )
 
 
 @app.command("generate")
@@ -481,6 +657,54 @@ def filing_provenance(user_id: str = "demo-user") -> None:
 @app.command("provider-diagnostics")
 def provider_diagnostics(user_id: str = "demo-user") -> None:
     _print(service.get_provider_diagnostics(user_id))
+
+
+@app.command("docket-view")
+def docket_view(
+    input_path: str,
+    input_type: str = "packaged",
+    include_document_text: bool = False,
+    document_limit: int = 25,
+) -> None:
+    _print(
+        service.view_docket_dataset(
+            input_path,
+            input_type=input_type,
+            include_document_text=include_document_text,
+            document_limit=document_limit,
+        )
+    )
+
+
+@app.command("docket-search")
+def docket_search(
+    input_path: str,
+    query: str,
+    input_type: str = "packaged",
+    search_backend: str = "bm25",
+    top_k: int = 10,
+    vector_dimension: int = 32,
+) -> None:
+    _print(
+        service.search_docket_dataset(
+            input_path,
+            input_type=input_type,
+            query=query,
+            search_backend=search_backend,
+            top_k=top_k,
+            vector_dimension=vector_dimension,
+        )
+    )
+
+
+@app.command("docket-metadata")
+def docket_metadata(input_path: str, input_type: str = "packaged") -> None:
+    _print(service.get_docket_dataset_metadata(input_path, input_type=input_type))
+
+
+@app.command("docket-graph")
+def docket_graph(input_path: str, input_type: str = "packaged") -> None:
+    _print(service.get_docket_dataset_graph(input_path, input_type=input_type))
 
 
 @app.command("review-exports")

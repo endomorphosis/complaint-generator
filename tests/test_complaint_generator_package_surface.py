@@ -37,8 +37,10 @@ from complaint_generator import (
     get_client_release_gate,
     get_filing_provenance,
     get_formal_diagnostics,
+    get_packaged_docket_operator_dashboard,
     get_provider_diagnostics,
     get_tooling_contract,
+    load_packaged_docket_operator_dashboard_report,
     review_generated_exports,
     export_complaint_packet,
     export_complaint_markdown,
@@ -140,7 +142,9 @@ def test_complaint_generator_package_exports_workspace_review_and_mcp_surfaces(t
     assert callable(get_tooling_contract)
     assert callable(get_filing_provenance)
     assert callable(get_formal_diagnostics)
+    assert callable(get_packaged_docket_operator_dashboard)
     assert callable(get_provider_diagnostics)
+    assert callable(load_packaged_docket_operator_dashboard_report)
     assert callable(review_generated_exports)
     assert callable(create_review_dashboard_app)
     assert callable(review_ui)
@@ -267,6 +271,11 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
     assert capabilities_payload["draft_strategy"] == "template"
     assert release_gate_payload["verdict"] in {"client_safe", "warning", "blocked"}
     assert tooling_contract_payload["all_core_flow_steps_exposed"] is True
+    assert "workspace-data-schema" in tooling_contract_payload["cli_commands"]
+    assert "migrate-legacy-workspace-data" in tooling_contract_payload["cli_commands"]
+    assert "getWorkspaceDataSchema" in tooling_contract_payload["browser_sdk_methods"]
+    assert "migrateLegacyWorkspaceData" in tooling_contract_payload["browser_sdk_methods"]
+    assert any(item["id"] == "workspace_schema_refresh" for item in tooling_contract_payload["schema_guided_recommendations"])
     assert filing_provenance_payload["draft_strategy"] == "template"
     assert "draft_backend" in filing_provenance_payload
     assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]

@@ -63,6 +63,19 @@ pytest -m unit
 pytest -m integration
 ```
 
+### Workspace Bundle Tooling (ipfs_datasets_py)
+
+Workspace dataset bundle helpers (indexing + packaging) live in the `ipfs_datasets_py` submodule. Run these tests from within the submodule to validate the workspace dataset bundle flow:
+
+```bash
+cd ipfs_datasets_py
+.venv/bin/python -m pytest -q \
+  tests/unit/processors/test_workspace_dataset.py \
+  tests/unit/processors/test_workspace_packaging.py \
+  tests/unit/test_workspace_cli.py \
+  tests/unit/test_workspace_bundle_export_script.py
+```
+
 ### Optional Browser Smoke
 The claim-support dashboard now includes an optional real-browser smoke test for the legacy testimony-link repair path:
 

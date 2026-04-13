@@ -434,6 +434,52 @@ class ComplaintMcpClient {
         });
     }
 
+    getWorkspaceDataSchema(userId, options = {}) {
+        return this.callTool('complaint.get_workspace_data_schema', Object.assign({
+            user_id: userId,
+        }, options || {}));
+    }
+
+    migrateLegacyWorkspaceData(userId, outputDir, options = {}) {
+        return this.callTool('complaint.migrate_legacy_workspace_data', Object.assign({
+            user_id: userId,
+            output_dir: outputDir,
+        }, options || {}));
+    }
+
+    searchWorkspaceDataset(inputPath, query, options = {}) {
+        return this.callTool('complaint.search_workspace_dataset', Object.assign({
+            input_path: inputPath,
+            query: query,
+        }, options || {}));
+    }
+
+    getPackagedDocketOperatorDashboard(manifestPath) {
+        return this.callTool('complaint.get_packaged_docket_operator_dashboard', {
+            manifest_path: manifestPath,
+        });
+    }
+
+    loadPackagedDocketOperatorDashboardReport(manifestPath, reportFormat = 'parsed') {
+        return this.callTool('complaint.load_packaged_docket_operator_dashboard_report', {
+            manifest_path: manifestPath,
+            report_format: reportFormat || 'parsed',
+        });
+    }
+
+    executePackagedDocketProofRevalidationQueue(manifestPath, options = {}) {
+        return this.callTool('complaint.execute_packaged_docket_proof_revalidation_queue', Object.assign({
+            manifest_path: manifestPath,
+        }, options || {}));
+    }
+
+    persistPackagedDocketProofRevalidationQueue(manifestPath, outputDir, options = {}) {
+        return this.callTool('complaint.persist_packaged_docket_proof_revalidation_queue', Object.assign({
+            manifest_path: manifestPath,
+            output_dir: outputDir,
+        }, options || {}));
+    }
+
     generateComplaint(userId, payload) {
         return this.callTool('complaint.generate_complaint', Object.assign({
             user_id: userId,

@@ -3,13 +3,13 @@ import json
 from unittest.mock import patch
 
 
-def test_unpinned_optional_provider_order_prefers_codex_then_openai_then_copilot_then_hf():
+def test_unpinned_optional_provider_order_prefers_codex_then_copilot_then_openai_then_hf():
     from ipfs_datasets_py.llm_router import _UNPINNED_OPTIONAL_PROVIDER_ORDER
 
     assert _UNPINNED_OPTIONAL_PROVIDER_ORDER[:4] == [
         "codex_cli",
-        "openai",
         "copilot_cli",
+        "openai",
         "hf_inference_api",
     ]
 
