@@ -3140,6 +3140,7 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 </div>
                             </div>
                             <div class="button-row">
+                                <button class="secondary" id="browse-workspace-data-button" type="button">Browse Workspace Dataset</button>
                                 <button class="secondary" id="search-workspace-data-button" type="button">Search Workspace Dataset</button>
                             </div>
                             <div>
@@ -3153,6 +3154,10 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                             <div>
                                 <label>Workspace Dataset Search Results</label>
                                 <div class="status draft-preview-shell"><pre id="workspace-data-search-results-preview">No workspace dataset search has been run yet.</pre></div>
+                            </div>
+                            <div>
+                                <label>Workspace Dataset Browse Preview</label>
+                                <div class="status draft-preview-shell"><pre id="workspace-data-view-results-preview">No workspace dataset browse preview has been loaded yet.</pre></div>
                             </div>
                         </div>
                         <div class="tool-card" id="packaged-docket-operator-card">
@@ -3427,6 +3432,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let workspaceDataSchema = null;
         let latestWorkspaceDataMigration = null;
         let latestWorkspaceDatasetSearch = null;
+        let latestWorkspaceDatasetView = null;
         let latestPackagedDocketOperatorDashboard = null;
         let latestPackagedDocketOperatorDashboardReport = null;
         let latestPackagedDocketRevalidationExecution = null;
@@ -6701,6 +6707,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const workspaceDataPieceSchemaListNode = document.getElementById('workspace-data-piece-schema-list');
             const workspaceDataQueryPlanNode = document.getElementById('workspace-data-query-plan-preview');
             const workspaceDataSearchResultsNode = document.getElementById('workspace-data-search-results-preview');
+            const workspaceDataViewResultsNode = document.getElementById('workspace-data-view-results-preview');
             const packetSummaryNode = document.getElementById('packet-export-summary');
             const releaseGateNode = document.getElementById('formal-complaint-release-gate');
             const formalDefectsNode = document.getElementById('formal-complaint-defects');
@@ -7033,6 +7040,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             workspaceDataSearchResultsNode.textContent = latestWorkspaceDatasetSearch
                 ? JSON.stringify(latestWorkspaceDatasetSearch, null, 2)
                 : 'No workspace dataset search has been run yet.';
+            workspaceDataViewResultsNode.textContent = latestWorkspaceDatasetView
+                ? JSON.stringify(latestWorkspaceDatasetView, null, 2)
+                : 'No workspace dataset browse preview has been loaded yet.';
             if (latestWorkspaceDataMigration) {
                 workspaceDataMigrationNode.textContent = [
                     `Status: ${String(latestWorkspaceDataMigration.status || 'unknown')}`,
@@ -9517,6 +9527,30 @@ function extractComplaintOutputSignals(result) {
             }
         }
 
+        async function browseWorkspaceDataPanel() {
+            const inputPath = document.getElementById('workspace-data-manifest-path').value.trim();
+            const topK = Math.max(1, Number(document.getElementById('workspace-data-search-top-k').value || '8'));
+            if (!inputPath) {
+                activateTab('integrations');
+                setStatus('Add a workspace manifest path before browsing the packaged workspace dataset.');
+                return;
+            }
+            activateTab('integrations');
+            setBusyStatus('Loading a filtered workspace dataset preview through the shared MCP tools…');
+            try {
+                latestWorkspaceDatasetView = await client.viewWorkspaceDataset(inputPath, Object.assign({
+                    input_type: 'packaged',
+                    document_limit: topK,
+                    include_document_text: false,
+                }, buildWorkspaceDataSearchFilters()));
+                renderWorkflowOperations();
+                setStatus(`Workspace dataset browse preview loaded with ${String((latestWorkspaceDatasetView.documents || []).length)} document preview(s).`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Workspace dataset browse preview failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
         function renderPackagedDocketOperatorDashboardPanel() {
             const dashboard = latestPackagedDocketOperatorDashboard || {};
             const reportPayload = latestPackagedDocketOperatorDashboardReport || {};
@@ -9949,6 +9983,7 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('refresh-workspace-data-schema-panel-button').addEventListener('click', refreshWorkspaceDataSchemaPanel);
         document.getElementById('migrate-legacy-workspace-data-button').addEventListener('click', migrateLegacyWorkspaceDataPanel);
         document.getElementById('copy-workspace-data-manifest-button').addEventListener('click', copyWorkspaceDataMigrationManifestPath);
+        document.getElementById('browse-workspace-data-button').addEventListener('click', browseWorkspaceDataPanel);
         document.getElementById('search-workspace-data-button').addEventListener('click', searchWorkspaceDataPanel);
         document.getElementById('load-packaged-docket-dashboard-button').addEventListener('click', loadPackagedDocketOperatorDashboardPanel);
         document.getElementById('load-packaged-docket-dashboard-report-button').addEventListener('click', loadPackagedDocketOperatorDashboardReportPanel);
