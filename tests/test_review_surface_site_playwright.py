@@ -1254,6 +1254,9 @@ def test_review_surface_dashboard_parquet_cards_support_search_review_and_annota
                 assert int(page.locator("#dashboard-workspace-dataset-results").inner_text()) >= 1
 
                 page.locator("#dashboard-dataset-annotation-user-id").fill(user_id)
+                page.locator("#dashboard-dataset-annotation-user-name").fill("Playwright Reviewer")
+                page.locator("#dashboard-dataset-annotation-user-role").fill("browser QA reviewer")
+                page.locator("#dashboard-dataset-annotation-tags").fill("accommodation, causation, playwright-reviewed")
                 page.locator("#dashboard-dataset-annotation-note").fill(
                     "Reviewed in Playwright: this document supports the accommodation causation theory."
                 )
@@ -1261,6 +1264,12 @@ def test_review_surface_dashboard_parquet_cards_support_search_review_and_annota
                 _wait_for_text(page, "#dashboard-dataset-annotation-status", "Saved annotation for workspace-doc-1")
                 _wait_for_text(page, "#dashboard-dataset-annotation-preview", "dashboard-workspace-dataset-annotation")
                 _wait_for_text(page, "#dashboard-dataset-annotation-preview", "Accommodation Request Email annotation")
+                _wait_for_text(page, "#dashboard-dataset-annotation-preview", "playwright-reviewed")
+                _wait_for_text(page, "#dashboard-dataset-annotation-preview", "Playwright Reviewer")
+                _wait_for_text(page, "#dashboard-dataset-annotation-preview", "tagged_with")
+                _wait_for_text(page, "#dashboard-dataset-annotation-preview", "workspace_annotation_index")
+                _wait_for_text(page, "#dashboard-dataset-annotation-preview", "workspace-collection-1")
+                _wait_for_text(page, "#dashboard-dataset-annotation-preview", "email")
                 assert page.locator("#dashboard-workspace-evidence").inner_text() == "1"
                 page.screenshot(path=str(screenshot_dir / "workspace-dataset-annotation.png"), full_page=True)
 

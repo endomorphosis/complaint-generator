@@ -153,6 +153,39 @@ class EvidenceRequest(BaseModel):
     attachment_names: List[str] = Field(default_factory=list)
 
 
+class DocumentAnnotationTagRequest(BaseModel):
+    user_id: Optional[str] = None
+    document_id: str
+    tags: List[str] = Field(default_factory=list)
+    note: str
+    claim_element_id: str = "causation"
+    title: str = "Dataset document annotation"
+    dataset_kind: str = "dataset"
+    document_title: Optional[str] = None
+    document_text_preview: Optional[str] = None
+    document_metadata: Dict[str, Any] = Field(default_factory=dict)
+    user_metadata: Dict[str, Any] = Field(default_factory=dict)
+    source: Optional[str] = None
+
+
+class WorkspaceDatasetAnnotationRequest(BaseModel):
+    user_id: Optional[str] = None
+    document_id: str
+    tags: List[str] = Field(default_factory=list)
+    note: str
+    claim_element_id: str = "causation"
+    title: str = "Workspace dataset document annotation"
+    document_title: Optional[str] = None
+    document_text_preview: Optional[str] = None
+    collection_id: Optional[str] = None
+    document_type: Optional[str] = None
+    claim_type: Optional[str] = None
+    source_type: Optional[str] = None
+    document_metadata: Dict[str, Any] = Field(default_factory=dict)
+    user_metadata: Dict[str, Any] = Field(default_factory=dict)
+    source: Optional[str] = None
+
+
 class GmailEvidenceImportRequest(BaseModel):
     user_id: Optional[str] = None
     addresses: List[str] = Field(default_factory=list)
@@ -318,6 +351,51 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             source=request.source,
             attachment_names=list(request.attachment_names or []),
         )
+
+    @router.post("/api/complaint-workspace/document-annotations/tag")
+    async def tag_document_annotation(request: DocumentAnnotationTagRequest) -> Dict[str, Any]:
+        return workspace.tag_document_annotation(
+            request.user_id,
+            document_id=request.document_id,
+            tags=list(request.tags or []),
+            note=request.note,
+            claim_element_id=request.claim_element_id,
+            title=request.title,
+            dataset_kind=request.dataset_kind,
+            document_title=request.document_title,
+            document_text_preview=request.document_text_preview,
+            document_metadata=dict(request.document_metadata or {}),
+            user_metadata=dict(request.user_metadata or {}),
+            source=request.source,
+        )
+
+    @router.get("/api/complaint-workspace/document-annotations/graph")
+    async def get_document_annotation_graph(user_id: Optional[str] = None) -> Dict[str, Any]:
+        return workspace.get_document_annotation_graph(user_id)
+
+    @router.post("/api/complaint-workspace/workspace-dataset/annotations/tag")
+    async def tag_workspace_dataset_document(request: WorkspaceDatasetAnnotationRequest) -> Dict[str, Any]:
+        return workspace.tag_workspace_dataset_document(
+            request.user_id,
+            document_id=request.document_id,
+            tags=list(request.tags or []),
+            note=request.note,
+            claim_element_id=request.claim_element_id,
+            title=request.title,
+            document_title=request.document_title,
+            document_text_preview=request.document_text_preview,
+            collection_id=request.collection_id,
+            document_type=request.document_type,
+            claim_type=request.claim_type,
+            source_type=request.source_type,
+            document_metadata=dict(request.document_metadata or {}),
+            user_metadata=dict(request.user_metadata or {}),
+            source=request.source,
+        )
+
+    @router.get("/api/complaint-workspace/workspace-dataset/annotations")
+    async def get_workspace_dataset_annotation_index(user_id: Optional[str] = None) -> Dict[str, Any]:
+        return workspace.get_workspace_dataset_annotation_index(user_id)
 
     @router.post("/api/complaint-workspace/import-gmail-evidence")
     async def import_gmail_evidence_route(request: GmailEvidenceImportRequest) -> Dict[str, Any]:

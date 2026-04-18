@@ -672,6 +672,14 @@ def _render_dashboard_hub(
                         <input id="dashboard-dataset-annotation-user-id" type="text" value="{escape(default_user_id)}" placeholder="dashboard-review-user">
                     </div>
                     <div>
+                        <label class="field-label" for="dashboard-dataset-annotation-user-name">Annotator Name</label>
+                        <input id="dashboard-dataset-annotation-user-name" type="text" placeholder="Reviewer name">
+                    </div>
+                    <div>
+                        <label class="field-label" for="dashboard-dataset-annotation-user-role">Annotator Role</label>
+                        <input id="dashboard-dataset-annotation-user-role" type="text" value="workspace reviewer" placeholder="workspace reviewer">
+                    </div>
+                    <div>
                         <label class="field-label" for="dashboard-dataset-annotation-document-id">Document ID</label>
                         <input id="dashboard-dataset-annotation-document-id" type="text" placeholder="Load or search a dataset to choose a document">
                     </div>
@@ -688,6 +696,10 @@ def _render_dashboard_hub(
                     <div>
                         <label class="field-label" for="dashboard-dataset-annotation-title">Annotation Title</label>
                         <input id="dashboard-dataset-annotation-title" type="text" value="Dataset document annotation">
+                    </div>
+                    <div>
+                        <label class="field-label" for="dashboard-dataset-annotation-tags">Tags</label>
+                        <input id="dashboard-dataset-annotation-tags" type="text" placeholder="causation, accommodation, hearing">
                     </div>
                 </div>
                 <div style="margin-top: 14px;">
@@ -1268,9 +1280,15 @@ def _render_dashboard_hub(
 
             async function saveDatasetDocumentAnnotation() {{
                 const userId = String((document.getElementById('dashboard-dataset-annotation-user-id') || {{}}).value || '').trim();
+                const userName = String((document.getElementById('dashboard-dataset-annotation-user-name') || {{}}).value || '').trim();
+                const userRole = String((document.getElementById('dashboard-dataset-annotation-user-role') || {{}}).value || 'workspace reviewer').trim();
                 const documentId = String((document.getElementById('dashboard-dataset-annotation-document-id') || {{}}).value || '').trim();
                 const claimElementId = String((document.getElementById('dashboard-dataset-annotation-claim-element') || {{}}).value || 'causation').trim();
                 const title = String((document.getElementById('dashboard-dataset-annotation-title') || {{}}).value || 'Dataset document annotation').trim();
+                const tags = String((document.getElementById('dashboard-dataset-annotation-tags') || {{}}).value || '')
+                    .split(/[,;\\n]+/)
+                    .map((tag) => tag.trim())
+                    .filter(Boolean);
                 const note = String((document.getElementById('dashboard-dataset-annotation-note') || {{}}).value || '').trim();
                 if (!documentId) {{
                     setText('dashboard-dataset-annotation-status', 'Choose or load a dataset document before saving an annotation.');
@@ -1284,24 +1302,39 @@ def _render_dashboard_hub(
                 const sourceKind = String(selected.dataset_kind || 'dataset');
                 setText('dashboard-dataset-annotation-status', 'Saving dataset document annotation into the complaint workspace...');
                 try {{
-                    const payload = await fetchJson('/api/complaint-workspace/evidence', {{
+                    const endpoint = sourceKind === 'workspace'
+                        ? '/api/complaint-workspace/workspace-dataset/annotations/tag'
+                        : '/api/complaint-workspace/document-annotations/tag';
+                    const metadata = selected.metadata || {{}};
+                    const requestBody = {{
+                        user_id: userId || undefined,
+                        document_id: documentId,
+                        tags,
+                        note,
+                        claim_element_id: claimElementId || selected.claim_element_id || metadata.claim_element_id || 'causation',
+                        title,
+                        document_title: selected.title || selected.source_document_title || '',
+                        document_text_preview: selected.text ? String(selected.text).slice(0, 500) : '',
+                        document_metadata: metadata,
+                        user_metadata: {{
+                            user_id: userId || undefined,
+                            display_name: userName || userId || 'workspace reviewer',
+                            role: userRole || 'workspace reviewer',
+                        }},
+                        source: `dashboard-${{sourceKind}}-dataset-annotation`,
+                    }};
+                    if (sourceKind === 'workspace') {{
+                        requestBody.collection_id = selected.collection_id || metadata.collection_id || '';
+                        requestBody.document_type = selected.document_type || metadata.document_type || '';
+                        requestBody.claim_type = selected.claim_type || metadata.claim_type || '';
+                        requestBody.source_type = selected.source_type || metadata.source_type || metadata.source_family || '';
+                    }} else {{
+                        requestBody.dataset_kind = sourceKind;
+                    }}
+                    const payload = await fetchJson(endpoint, {{
                         method: 'POST',
                         headers: {{ 'Content-Type': 'application/json' }},
-                        body: JSON.stringify({{
-                            user_id: userId || undefined,
-                            kind: 'document',
-                            claim_element_id: claimElementId || 'causation',
-                            title,
-                            content: [
-                                `Dataset: ${{sourceKind}}`,
-                                `Document ID: ${{documentId}}`,
-                                selected.title ? `Document title: ${{selected.title}}` : '',
-                                selected.text ? `Document text preview: ${{String(selected.text).slice(0, 500)}}` : '',
-                                `Review note: ${{note}}`,
-                            ].filter(Boolean).join('\\n'),
-                            source: `dashboard-${{sourceKind}}-dataset-annotation`,
-                            attachment_names: [documentId],
-                        }}),
+                        body: JSON.stringify(requestBody),
                     }});
                     setText('dashboard-dataset-annotation-status', `Saved annotation for ${{documentId}} into the complaint workspace.`);
                     setText('dashboard-dataset-annotation-preview', JSON.stringify(payload, null, 2));

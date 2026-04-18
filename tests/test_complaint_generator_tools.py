@@ -196,6 +196,7 @@ def _build_single_docket_parquet(tmp_path) -> str:
     return str(output_path)
 
 
+@pytest.mark.no_auto_llm
 def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path / "tool-list-sessions")
     payload = tool_list_payload(service)
@@ -210,6 +211,10 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.submit_intake",
         "complaint.run_intake_chat_turn",
         "complaint.save_evidence",
+        "complaint.tag_document_annotation",
+        "complaint.get_document_annotation_graph",
+        "complaint.tag_workspace_dataset_document",
+        "complaint.get_workspace_dataset_annotation_index",
         "complaint.import_gmail_evidence",
         "complaint.run_gmail_duckdb_pipeline",
         "complaint.import_local_evidence",
@@ -221,6 +226,10 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.get_client_release_gate",
         "complaint.get_workflow_capabilities",
         "complaint.get_tooling_contract",
+        "complaint.get_workspace_data_schema",
+        "complaint.migrate_legacy_workspace_data",
+        "complaint.view_workspace_dataset",
+        "complaint.search_workspace_dataset",
         "complaint.generate_complaint",
         "complaint.update_draft",
         "complaint.export_complaint_packet",
@@ -231,9 +240,15 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.get_formal_diagnostics",
         "complaint.get_filing_provenance",
         "complaint.get_provider_diagnostics",
+        "complaint.view_docket_dataset",
+        "complaint.search_docket_dataset",
+        "complaint.get_docket_dataset_metadata",
+        "complaint.get_docket_dataset_graph",
+        "complaint.review_generated_exports",
         "complaint.get_packaged_docket_operator_dashboard",
         "complaint.load_packaged_docket_operator_dashboard_report",
-        "complaint.review_generated_exports",
+        "complaint.execute_packaged_docket_proof_revalidation_queue",
+        "complaint.persist_packaged_docket_proof_revalidation_queue",
         "complaint.update_claim_type",
         "complaint.update_case_synopsis",
         "complaint.reset_session",
@@ -246,6 +261,8 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     assert all("inputSchema" in tool for tool in payload["tools"])
     assert tools_by_name["complaint.get_tooling_contract"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
     assert tools_by_name["complaint.get_filing_provenance"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.tag_document_annotation"]["inputSchema"]["required"] == ["document_id", "note"]
+    assert tools_by_name["complaint.tag_workspace_dataset_document"]["inputSchema"]["required"] == ["document_id", "note"]
     assert tools_by_name["complaint.get_packaged_docket_operator_dashboard"]["inputSchema"]["required"] == ["manifest_path"]
     assert tools_by_name["complaint.load_packaged_docket_operator_dashboard_report"]["inputSchema"]["required"] == ["manifest_path"]
 
@@ -295,6 +312,50 @@ def test_client_release_gate_is_exposed_across_package_cli_and_mcp(monkeypatch, 
     package_payload = get_client_release_gate("gate-user", service=service)
     assert package_payload["user_id"] == "gate-user"
     assert package_payload["complaint_readiness"]["has_draft"] is True
+
+
+@pytest.mark.no_auto_llm
+def test_document_annotation_tags_update_workspace_knowledge_graph(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path / "annotation-tag-sessions")
+
+    payload = service.tag_workspace_dataset_document(
+        "reviewer-user",
+        document_id="workspace-doc-1",
+        tags=["accommodation", "causation", "accommodation"],
+        note="This email ties the accommodation request to the later adverse action.",
+        claim_element_id="causation",
+        title="Accommodation Request Email annotation",
+        document_title="Accommodation Request Email",
+        document_text_preview="Tenant requested a reasonable accommodation before the adverse notice.",
+        collection_id="housing-case",
+        document_type="email",
+        claim_type="housing_discrimination",
+        source_type="workspace_dataset",
+        user_metadata={"display_name": "Alex Reviewer", "role": "legal reviewer"},
+    )
+
+    assert payload["saved"]["kind"] == "document"
+    assert payload["source"] == "complaint_workspace_dataset_document_annotation"
+    assert payload["annotation_tags"] == ["accommodation", "causation"]
+    assert payload["annotation"]["user_metadata"]["display_name"] == "Alex Reviewer"
+    assert payload["workspace_annotation_index"]["by_collection"]["housing-case"][0]["document_id"] == "workspace-doc-1"
+    assert payload["workspace_annotation_index"]["by_document_type"]["email"][0]["annotation_id"] == payload["annotation"]["id"]
+    graph = payload["annotation_knowledge_graph"]
+    entity_ids = {entity["id"] for entity in graph["entities"]}
+    relationship_types = {relationship["type"] for relationship in graph["relationships"]}
+    assert "document:workspace-doc-1" in entity_ids
+    assert "tag:accommodation" in entity_ids
+    assert "user:reviewer-user" in entity_ids
+    assert {"annotates", "tagged_with", "tag_applied_by", "created_by", "supports_claim_element"} <= relationship_types
+
+    mcp_payload = _call_mcp_tool(
+        service,
+        92,
+        "complaint.get_workspace_dataset_annotation_index",
+        {"user_id": "reviewer-user"},
+    )
+    assert mcp_payload["workspace_annotation_index"]["workspace_annotation_count"] == 1
+    assert mcp_payload["workspace_annotations"][0]["user_metadata"]["role"] == "legal reviewer"
 
 
 def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp_path):
