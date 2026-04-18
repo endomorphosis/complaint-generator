@@ -29,7 +29,7 @@ setup(
     ),
     include_package_data=True,
     install_requires=[
-        "ipfs_datasets_py[file_conversion,ipld,knowledge_graphs,logic,scraping,vectors]>=0.2.0",
+        "ipfs_datasets_py[api,file_conversion,ipld,knowledge_graphs,logic,scraping,vectors]>=0.2.0",
         "mcp>=1.2.0",
         "fastapi>=0.104.0",
         "uvicorn>=0.30.0,<1.0.0",

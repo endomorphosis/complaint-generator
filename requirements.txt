@@ -1,5 +1,6 @@
 -e .
--e ./ipfs_datasets_py[file_conversion,knowledge_graphs,scraping,vectors]
+-e ./ipfs_datasets_py/ipfs_kit_py[api,ipld,ai_ml]
+-e ./ipfs_datasets_py[file_conversion,ipld,knowledge_graphs,logic,scraping,vectors,api]
 
 pytest>=7.4.0
 pytest-mock>=3.12.0
