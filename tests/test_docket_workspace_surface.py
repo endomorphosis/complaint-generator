@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from applications import complaint_cli
 from applications.complaint_workspace import ComplaintWorkspaceService
 import ipfs_datasets_py.processors.legal_data as legal_data
+from ipfs_datasets_py.processors.legal_data import workspace_dataset as workspace_dataset_module
 
 
 def _sample_dataset() -> dict:
@@ -91,6 +94,40 @@ def test_workspace_dispatches_docket_search_tool(monkeypatch) -> None:
     )
 
     assert result == expected
+
+
+def test_workspace_pdf_ingest_records_source_sha256(tmp_path: Path, monkeypatch) -> None:
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\nsource document bytes\n")
+
+    monkeypatch.setattr(
+        workspace_dataset_module,
+        "_extract_pdf_text",
+        lambda *args, **kwargs: {
+            "text": "HACC must review accommodation requests.",
+            "backend": "unit-test",
+            "page_count": 1,
+            "errors": [],
+        },
+    )
+
+    dataset = workspace_dataset_module.WorkspaceDatasetBuilder().build_from_pdf_paths(
+        [pdf_path],
+        workspace_id="hash-workspace",
+        include_knowledge_graph=False,
+        include_bm25=False,
+        include_vector_index=False,
+        include_formal_logic=False,
+    )
+
+    metadata = dataset.documents[0].metadata
+    assert metadata["sha256"]
+    assert metadata["content_sha256"] == metadata["sha256"]
+    assert metadata["source_digest"] == {
+        "algorithm": "sha256",
+        "value": metadata["sha256"],
+        "file_size_bytes": pdf_path.stat().st_size,
+    }
 
 
 def test_workspace_dataset_graph_explorer_projects_entities_and_logic(monkeypatch) -> None:
