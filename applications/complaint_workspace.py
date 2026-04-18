@@ -5069,23 +5069,183 @@ class ComplaintWorkspaceService:
         *,
         input_type: str = "packaged",
     ) -> Dict[str, Any]:
+        resolved_path = self._resolve_workspace_dataset_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            return self._load_workspace_single_parquet_payload(resolved_path)
+
         from ipfs_datasets_py.processors.legal_data import (
             WorkspaceDatasetBuilder,
             load_packaged_workspace_dataset,
-            load_workspace_dataset_single_parquet,
         )
 
-        resolved_path = self._resolve_workspace_dataset_path(input_path)
-        normalized_type = str(input_type or "packaged").strip().lower()
         if normalized_type == "packaged":
             dataset = load_packaged_workspace_dataset(resolved_path)
         elif normalized_type == "json":
             dataset = WorkspaceDatasetBuilder().build_from_json_file(resolved_path)
-        elif normalized_type == "single":
-            dataset = load_workspace_dataset_single_parquet(resolved_path)
         else:
             raise ValueError(f"Unsupported workspace dataset input_type: {input_type}")
         return dict(dataset.to_dict() if hasattr(dataset, "to_dict") else dataset)
+
+    @staticmethod
+    def _load_workspace_single_parquet_payload(input_path: str | Path) -> Dict[str, Any]:
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(
+            str(input_path),
+            columns=[
+                "dataset_id",
+                "workspace_id",
+                "workspace_name",
+                "source_type",
+                "section",
+                "row_id",
+                "title",
+                "text",
+                "payload_json",
+            ],
+        )
+        rows = table.to_pylist()
+        sections: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            section = str(row.get("section") or "").strip()
+            if not section:
+                continue
+            try:
+                payload = json.loads(str(row.get("payload_json") or "{}"))
+            except json.JSONDecodeError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.setdefault("row_id", row.get("row_id"))
+            if row.get("title") and not payload.get("title"):
+                payload["title"] = row.get("title")
+            if row.get("text") and not payload.get("text"):
+                payload["text"] = row.get("text")
+            sections.setdefault(section, []).append(payload)
+
+        core = dict(sections.get("dataset_core", [{}])[0] or {})
+        metadata = dict(core.get("metadata") or {})
+        if sections.get("zkp_proof_certificates"):
+            metadata.setdefault("zkp_proof_certificates", sections["zkp_proof_certificates"])
+        formal_logic = dict(metadata.get("formal_logic") or {})
+        proof_store = dict(formal_logic.get("proof_store") or {})
+        if sections.get("zkp_proof_certificates"):
+            proof_store.setdefault("zkp_proof_certificates", sections["zkp_proof_certificates"])
+            formal_logic["proof_store"] = proof_store
+            metadata["formal_logic"] = formal_logic
+
+        return {
+            **core,
+            "dataset_id": core.get("dataset_id") or (rows[0].get("dataset_id") if rows else ""),
+            "workspace_id": core.get("workspace_id") or (rows[0].get("workspace_id") if rows else ""),
+            "workspace_name": core.get("workspace_name") or (rows[0].get("workspace_name") if rows else ""),
+            "source_type": core.get("source_type") or (rows[0].get("source_type") if rows else ""),
+            "documents": sections.get("documents", []),
+            "collections": sections.get("collections", []),
+            "knowledge_graph": {
+                **dict(core.get("knowledge_graph") or {}),
+                "entities": sections.get("knowledge_graph_entities", []),
+                "relationships": sections.get("knowledge_graph_relationships", []),
+            },
+            "bm25_index": {
+                **dict(core.get("bm25_index") or {}),
+                "documents": sections.get("bm25_documents", []),
+            },
+            "vector_index": {
+                **dict(core.get("vector_index") or {}),
+                "items": sections.get("vector_items", []),
+            },
+            "metadata": metadata,
+            "_single_parquet_sections": {key: len(value) for key, value in sections.items()},
+        }
+
+    @staticmethod
+    def _summarize_workspace_dataset_payload(dataset_payload: Mapping[str, Any]) -> Dict[str, Any]:
+        metadata = dict(dataset_payload.get("metadata") or {})
+        formal_logic = dict(metadata.get("formal_logic") or {})
+        summary = dict(metadata.get("formal_logic_summary") or formal_logic.get("summary") or {})
+        proof_store = dict(formal_logic.get("proof_store") or {})
+        knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
+        return {
+            "document_count": len(list(dataset_payload.get("documents") or [])),
+            "collection_count": len(list(dataset_payload.get("collections") or [])),
+            "knowledge_graph_entity_count": len(list(knowledge_graph.get("entities") or [])),
+            "knowledge_graph_relationship_count": len(list(knowledge_graph.get("relationships") or [])),
+            "bm25_document_count": len(list((dataset_payload.get("bm25_index") or {}).get("documents") or [])),
+            "vector_document_count": len(list((dataset_payload.get("vector_index") or {}).get("items") or [])),
+            "first_order_formula_count": int(summary.get("first_order_formula_count") or summary.get("fol_formula_count") or 0),
+            "temporal_deontic_formula_count": int(
+                summary.get("temporal_deontic_formula_count")
+                or summary.get("temporal_formula_count")
+                or summary.get("tdfol_formula_count")
+                or 0
+            ),
+            "deontic_cognitive_event_count": int(summary.get("deontic_cognitive_event_count") or summary.get("dcec_formula_count") or 0),
+            "formal_proof_count": int(summary.get("formal_proof_count") or summary.get("proof_count") or len(list(proof_store.get("proofs") or []))),
+            "proof_certificate_count": int(summary.get("proof_certificate_count") or len(list(proof_store.get("certificates") or []))),
+            "zkp_certificate_count": int(
+                summary.get("zkp_certificate_count")
+                or len(list(proof_store.get("zkp_proof_certificates") or metadata.get("zkp_proof_certificates") or []))
+            ),
+        }
+
+    @staticmethod
+    def _search_workspace_dataset_local(
+        dataset_payload: Mapping[str, Any],
+        query: str,
+        *,
+        search_backend: str,
+        top_k: int,
+    ) -> Dict[str, Any]:
+        terms = [term for term in re.findall(r"[A-Za-z0-9$%.-]+", str(query or "").lower()) if term]
+        documents = [dict(item) for item in list(dataset_payload.get("documents") or []) if isinstance(item, dict)]
+        rows = (
+            list((dataset_payload.get("vector_index") or {}).get("items") or [])
+            if str(search_backend or "").lower() == "vector"
+            else list((dataset_payload.get("bm25_index") or {}).get("documents") or [])
+        )
+        document_by_id = {
+            str(document.get("document_id") or document.get("id") or document.get("row_id") or ""): document
+            for document in documents
+        }
+        scored: List[Dict[str, Any]] = []
+        for row in rows or documents:
+            item = dict(row) if isinstance(row, dict) else {}
+            document_id = str(item.get("document_id") or item.get("id") or item.get("row_id") or "")
+            document = dict(document_by_id.get(document_id) or item)
+            haystack = " ".join(
+                str(value or "")
+                for value in [
+                    item.get("title"),
+                    item.get("text"),
+                    item.get("content"),
+                    item.get("payload_json"),
+                    document.get("title"),
+                    document.get("text"),
+                    document.get("content"),
+                    json.dumps(document, sort_keys=True),
+                ]
+            ).lower()
+            score = float(sum(haystack.count(term) for term in terms)) if terms else 0.0
+            if score <= 0:
+                continue
+            scored.append(
+                {
+                    "document_id": document_id or document.get("document_id") or document.get("id"),
+                    "title": document.get("title") or item.get("title") or document_id,
+                    "score": score,
+                    "document": document,
+                    "match_text": str(document.get("text") or item.get("text") or "")[:500],
+                }
+            )
+        scored.sort(key=lambda item: (-float(item.get("score") or 0), str(item.get("title") or "")))
+        return {
+            "query": str(query or ""),
+            "backend": f"local_{str(search_backend or 'bm25').lower()}",
+            "results": scored[: max(1, int(top_k or 10))],
+            "result_count": len(scored[: max(1, int(top_k or 10))]),
+        }
 
     @staticmethod
     def _apply_workspace_dataset_filters(
@@ -5448,9 +5608,8 @@ class ComplaintWorkspaceService:
         claim_element_id: Optional[str] = None,
         source_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
-
         resolved_path = self._resolve_workspace_dataset_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
         dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
         filtered_payload = self._apply_workspace_dataset_filters(
             dataset_payload,
@@ -5460,10 +5619,16 @@ class ComplaintWorkspaceService:
             claim_element_id=claim_element_id,
             source_type=source_type,
         )
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            summary = self._summarize_workspace_dataset_payload(filtered_payload)
+        else:
+            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+
+            summary = dict(summarize_workspace_dataset(filtered_payload))
         return {
             "input_path": resolved_path,
-            "input_type": str(input_type or "packaged").strip().lower(),
-            "summary": dict(summarize_workspace_dataset(filtered_payload)),
+            "input_type": normalized_type,
+            "summary": summary,
             "documents": self._build_workspace_document_view(
                 filtered_payload,
                 include_document_text=bool(include_document_text),
@@ -5955,11 +6120,15 @@ class ComplaintWorkspaceService:
         modality: str = "",
         limit: int = 50,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
-
         resolved_path = self._resolve_workspace_dataset_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
         dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
-        summary = dict(summarize_workspace_dataset(dataset_payload))
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            summary = self._summarize_workspace_dataset_payload(dataset_payload)
+        else:
+            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+
+            summary = dict(summarize_workspace_dataset(dataset_payload))
         knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
         entities = [dict(item) for item in list(knowledge_graph.get("entities") or []) if isinstance(item, dict)]
         relationships = [dict(item) for item in list(knowledge_graph.get("relationships") or []) if isinstance(item, dict)]
@@ -6071,14 +6240,9 @@ class ComplaintWorkspaceService:
         claim_element_id: Optional[str] = None,
         source_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import (
-            search_workspace_dataset_bm25,
-            search_workspace_dataset_vector,
-            summarize_workspace_dataset,
-        )
-
         resolved_path = self._resolve_workspace_dataset_path(input_path)
         normalized_backend = str(search_backend or "bm25").strip().lower()
+        normalized_type = str(input_type or "packaged").strip().lower()
         dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
         filtered_payload = self._apply_workspace_dataset_filters(
             dataset_payload,
@@ -6088,23 +6252,39 @@ class ComplaintWorkspaceService:
             claim_element_id=claim_element_id,
             source_type=source_type,
         )
-        if normalized_backend == "bm25":
-            results = search_workspace_dataset_bm25(filtered_payload, query, top_k=int(top_k or 10))
-        elif normalized_backend == "vector":
-            results = search_workspace_dataset_vector(
+        if normalized_backend not in {"bm25", "vector"}:
+            raise ValueError(f"Unsupported workspace search backend: {search_backend}")
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            results = self._search_workspace_dataset_local(
                 filtered_payload,
                 query,
+                search_backend=normalized_backend,
                 top_k=int(top_k or 10),
-                vector_dimension=int(vector_dimension or 32),
             )
+            summary = self._summarize_workspace_dataset_payload(filtered_payload)
         else:
-            raise ValueError(f"Unsupported workspace search backend: {search_backend}")
+            from ipfs_datasets_py.processors.legal_data import (
+                search_workspace_dataset_bm25,
+                search_workspace_dataset_vector,
+                summarize_workspace_dataset,
+            )
+
+            if normalized_backend == "bm25":
+                results = search_workspace_dataset_bm25(filtered_payload, query, top_k=int(top_k or 10))
+            else:
+                results = search_workspace_dataset_vector(
+                    filtered_payload,
+                    query,
+                    top_k=int(top_k or 10),
+                    vector_dimension=int(vector_dimension or 32),
+                )
+            summary = dict(summarize_workspace_dataset(filtered_payload))
         return {
             "input_path": resolved_path,
             "input_type": str(input_type or "packaged").strip().lower(),
             "query": str(query or ""),
             "search_backend": normalized_backend,
-            "summary": dict(summarize_workspace_dataset(filtered_payload)),
+            "summary": summary,
             "search_results": dict(results),
             "applied_filters": dict(filtered_payload.get("applied_filters") or {}),
             "source": "complaint_workspace_dataset_search",
