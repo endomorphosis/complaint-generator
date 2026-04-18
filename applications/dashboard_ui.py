@@ -653,6 +653,10 @@ def _render_dashboard_hub(
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-collections">0</strong><span>Collections</span></div>
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-results">0</strong><span>Search results</span></div>
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-entities">0</strong><span>Graph entities</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-dataset-relationships">0</strong><span>Graph relationships</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-dataset-vectors">0</strong><span>Vector documents</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-dataset-logic">0</strong><span>Logic statements</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-dataset-proofs">0</strong><span>Theorem proofs</span></div>
                 </div>
                 <div class="chip-row" style="margin-top: 14px;">
                     <span class="chip" id="dashboard-workspace-dataset-workspace-chip">workspace: waiting</span>
@@ -1263,10 +1267,15 @@ def _render_dashboard_hub(
                 const collections = Array.isArray(payload && payload.collections) ? payload.collections : [];
                 const searchResults = (payload && payload.search_results) || {{}};
                 const results = Array.isArray(searchResults.results) ? searchResults.results : [];
+                const vectorItems = Array.isArray(payload && payload.vector_index && payload.vector_index.items) ? payload.vector_index.items : [];
                 setText('dashboard-workspace-dataset-documents', String(Number(summary.document_count || documents.length || 0)));
                 setText('dashboard-workspace-dataset-collections', String(Number(summary.collection_count || collections.length || 0)));
                 setText('dashboard-workspace-dataset-results', String(Number(searchResults.result_count || results.length || 0)));
                 setText('dashboard-workspace-dataset-entities', String(Number(summary.knowledge_graph_entity_count || 0)));
+                setText('dashboard-workspace-dataset-relationships', String(Number(summary.knowledge_graph_relationship_count || 0)));
+                setText('dashboard-workspace-dataset-vectors', String(Number(summary.vector_document_count || vectorItems.length || 0)));
+                setText('dashboard-workspace-dataset-logic', String(Number(summary.deontic_statement_count || 0)));
+                setText('dashboard-workspace-dataset-proofs', String(Number(summary.proof_count || 0)));
                 setText('dashboard-workspace-dataset-workspace-chip', `workspace: ${{String(summary.workspace_name || summary.workspace_id || 'unknown')}}`);
                 setText('dashboard-workspace-dataset-source-chip', `source: ${{String((payload && payload.source) || label || 'dataset')}}`);
                 setText('dashboard-workspace-dataset-status', `Loaded workspace dataset ${{label || 'view'}} through ipfs_datasets_py.`);

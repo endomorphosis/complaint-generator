@@ -724,6 +724,22 @@ def _write_dashboard_workspace_parquet(tmp_path: Path) -> Path:
                 title="Accommodation request",
                 payload={"id": "entity-request", "type": "event", "label": "Accommodation request"},
             ),
+            _bundle_row(
+                dataset_id=dataset_id,
+                workspace_id=workspace_id,
+                workspace_name=workspace_name,
+                section="vector_items",
+                row_index=1,
+                row_id="workspace-doc-1",
+                title="Accommodation Request Email",
+                text="Accommodation Request Email Tenant requested a reasonable accommodation and attached medical support.",
+                payload={
+                    "document_id": "workspace-doc-1",
+                    "title": "Accommodation Request Email",
+                    "vector": [0.2, 0.4, 0.6, 0.8],
+                    "metadata": {"collection_id": "workspace-collection-1", "document_type": "email"},
+                },
+            ),
         ],
     )
 
@@ -1246,6 +1262,8 @@ def test_review_surface_dashboard_parquet_cards_support_search_review_and_annota
                 _wait_for_text(page, "#dashboard-workspace-dataset-preview", "Accommodation Request Email")
                 assert page.locator("#dashboard-workspace-dataset-documents").inner_text() == "1"
                 assert page.locator("#dashboard-workspace-dataset-collections").inner_text() == "1"
+                assert int(page.locator("#dashboard-workspace-dataset-entities").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-dataset-vectors").inner_text()) >= 1
 
                 page.locator("#dashboard-search-workspace-dataset").click()
                 _wait_for_text(page, "#dashboard-workspace-dataset-status", "Loaded workspace dataset search")
