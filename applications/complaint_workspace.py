@@ -5475,6 +5475,587 @@ class ComplaintWorkspaceService:
             "source": "complaint_workspace_dataset_view",
         }
 
+    @staticmethod
+    def _workspace_graph_text(item: Dict[str, Any]) -> str:
+        values = [
+            item.get("id"),
+            item.get("label"),
+            item.get("name"),
+            item.get("type"),
+            item.get("document_id"),
+            item.get("source_document"),
+        ]
+        properties = item.get("properties") or item.get("metadata") or {}
+        if isinstance(properties, dict):
+            values.extend(str(value) for value in properties.values() if isinstance(value, (str, int, float)))
+        return " ".join(str(value or "") for value in values).lower()
+
+    @staticmethod
+    def _workspace_relationship_endpoints(relationship: Dict[str, Any]) -> tuple[str, str]:
+        source_id = str(
+            relationship.get("source")
+            or relationship.get("source_id")
+            or relationship.get("from")
+            or relationship.get("head")
+            or ""
+        )
+        target_id = str(
+            relationship.get("target")
+            or relationship.get("target_id")
+            or relationship.get("to")
+            or relationship.get("tail")
+            or ""
+        )
+        return source_id, target_id
+
+    @staticmethod
+    def _compact_workspace_entity(entity: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": str(entity.get("id") or ""),
+            "label": str(entity.get("label") or entity.get("name") or entity.get("id") or ""),
+            "type": str(entity.get("type") or ""),
+            "properties": dict(entity.get("properties") or entity.get("metadata") or {}),
+            "confidence": entity.get("confidence"),
+        }
+
+    @classmethod
+    def _compact_workspace_relationship(
+        cls,
+        relationship: Dict[str, Any],
+        entity_by_id: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        source_id, target_id = cls._workspace_relationship_endpoints(relationship)
+        return {
+            "id": str(relationship.get("id") or ""),
+            "type": str(relationship.get("type") or relationship.get("label") or ""),
+            "source": source_id,
+            "target": target_id,
+            "source_label": str((entity_by_id.get(source_id) or {}).get("label") or source_id),
+            "target_label": str((entity_by_id.get(target_id) or {}).get("label") or target_id),
+            "properties": dict(relationship.get("properties") or relationship.get("metadata") or {}),
+            "confidence": relationship.get("confidence"),
+        }
+
+    @staticmethod
+    def _workspace_logic_statement_text(statement: Dict[str, Any]) -> str:
+        return " ".join(
+            str(statement.get(key) or "")
+            for key in ("id", "entity", "modality", "action", "source_document", "source_text")
+        ).lower()
+
+    @staticmethod
+    def _normalize_workspace_modality(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"permission", "permitted", "may", "allowed", "allowance"}:
+            return "allowed"
+        if text in {"obligation", "obligatory", "required", "requirement", "must", "shall", "duty"}:
+            return "required"
+        if text in {"prohibition", "prohibited", "forbidden", "disallowed", "cannot", "must_not"}:
+            return "prohibited"
+        if text in {"conditional", "condition", "if_then"}:
+            return "conditional"
+        return text or "unknown"
+
+    @staticmethod
+    def _statement_event_candidates(statement: Dict[str, Any], events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        statement_id = str(statement.get("id") or "")
+        action = str(statement.get("action") or "").strip().lower()
+        entity = str(statement.get("entity") or "").strip().lower()
+        direct_matches: List[Dict[str, Any]] = []
+        entity_matches: List[Dict[str, Any]] = []
+        for event in events:
+            event_id = str(event.get("id") or "")
+            event_label = str(event.get("label") or "").strip().lower()
+            event_agent = str(event.get("agent") or "").strip().lower()
+            if statement_id and event_id.startswith(f"{statement_id}:"):
+                direct_matches.append(event)
+            elif action and (action in event_label or event_label in action):
+                direct_matches.append(event)
+            elif entity and event_agent == entity:
+                entity_matches.append(event)
+        return (direct_matches or entity_matches)[:5]
+
+    @staticmethod
+    def _workspace_formula_text(value: Any) -> str:
+        if isinstance(value, dict):
+            return " ".join(str(item or "") for item in value.values()).lower()
+        return str(value or "").lower()
+
+    @staticmethod
+    def _compact_workspace_proof_certificate(certificate: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "certificate_id": str(certificate.get("certificate_id") or ""),
+            "backend": str(certificate.get("backend") or ""),
+            "format": str(certificate.get("format") or ""),
+            "theorem": str(certificate.get("theorem") or "")[:500],
+            "assumptions": [str(item)[:300] for item in list(certificate.get("assumptions") or [])[:5]],
+        }
+
+    @classmethod
+    def _build_workspace_logic_systems(
+        cls,
+        formal_logic: Dict[str, Any],
+        *,
+        query: str = "",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        normalized_query = str(query or "").strip().lower()
+        sample_limit = min(max(int(limit or 50), 1), 20)
+
+        def formula_sample(system_payload: Any) -> List[Any]:
+            if isinstance(system_payload, dict):
+                formulas = list(system_payload.get("formulas") or [])
+            elif isinstance(system_payload, list):
+                formulas = list(system_payload)
+            else:
+                formulas = []
+            if normalized_query:
+                formulas = [
+                    formula
+                    for formula in formulas
+                    if normalized_query in cls._workspace_formula_text(formula)
+                ]
+            return formulas[:sample_limit]
+
+        temporal_payload = dict(formal_logic.get("temporal_fol") or {})
+        dcec_payload = dict(formal_logic.get("deontic_cognitive_event_calculus") or {})
+        fol_payload = dict(formal_logic.get("first_order_logic") or {})
+        frame_logic_payload = dict(formal_logic.get("frame_logic") or {})
+        document_frame_logic_payload = dict(formal_logic.get("document_frame_logic") or {})
+        temporal_formulas = formula_sample(temporal_payload)
+        dcec_formulas = formula_sample(dcec_payload)
+        fol_formulas = formula_sample(fol_payload)
+        frame_records = list(frame_logic_payload.values()) or list(document_frame_logic_payload.values())
+        if normalized_query:
+            frame_records = [
+                record
+                for record in frame_records
+                if normalized_query in cls._workspace_formula_text(record)
+            ]
+
+        return {
+            "deontic_temporal_first_order_logic": {
+                "backend": str(temporal_payload.get("backend") or ""),
+                "formula_count": int(temporal_payload.get("formula_count") or len(temporal_payload.get("formulas") or [])),
+                "sample": temporal_formulas,
+            },
+            "first_order_logic": {
+                "backend": str(fol_payload.get("backend") or temporal_payload.get("backend") or ""),
+                "formula_count": int(fol_payload.get("formula_count") or len(fol_payload.get("formulas") or [])),
+                "sample": fol_formulas,
+            },
+            "deontic_cognitive_event_calculus": {
+                "backend": str(dcec_payload.get("backend") or ""),
+                "formula_count": int(dcec_payload.get("formula_count") or len(dcec_payload.get("formulas") or [])),
+                "sample": dcec_formulas,
+            },
+            "frame_logic": {
+                "backend": str((frame_logic_payload.get("metadata") or {}).get("backend") or ""),
+                "record_count": len(frame_logic_payload) or len(document_frame_logic_payload),
+                "sample": frame_records[:sample_limit],
+            },
+        }
+
+    @classmethod
+    def _build_workspace_proof_system(
+        cls,
+        proof_store: Dict[str, Any],
+        *,
+        query: str = "",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        normalized_query = str(query or "").strip().lower()
+        sample_limit = min(max(int(limit or 50), 1), 20)
+        proof_summary = dict(proof_store.get("summary") or {})
+        proof_metadata = dict(proof_store.get("metadata") or {})
+        zkp_status = dict(proof_metadata.get("zkp_status") or {})
+        proofs = {
+            str(key): dict(value)
+            for key, value in dict(proof_store.get("proofs") or {}).items()
+            if isinstance(value, dict)
+        }
+        certificates = [dict(item) for item in list(proof_store.get("certificates") or []) if isinstance(item, dict)]
+        if normalized_query:
+            sample_proofs = [
+                proof
+                for proof in proofs.values()
+                if normalized_query in json.dumps(proof, ensure_ascii=False).lower()
+            ]
+            sample_certificates = [
+                certificate
+                for certificate in certificates
+                if normalized_query in json.dumps(certificate, ensure_ascii=False).lower()
+            ]
+        else:
+            sample_proofs = list(proofs.values())
+            sample_certificates = certificates
+
+        certificate_backend_counts: Dict[str, int] = {}
+        certificate_format_counts: Dict[str, int] = {}
+        for certificate in certificates:
+            backend = str(certificate.get("backend") or "unknown")
+            proof_format = str(certificate.get("format") or "unknown")
+            certificate_backend_counts[backend] = certificate_backend_counts.get(backend, 0) + 1
+            certificate_format_counts[proof_format] = certificate_format_counts.get(proof_format, 0) + 1
+
+        return {
+            "backend": str(proof_metadata.get("backend") or ""),
+            "summary": proof_summary,
+            "proof_count": int(proof_summary.get("proof_count") or len(proofs)),
+            "certificate_count": len(certificates),
+            "certificate_backend_counts": certificate_backend_counts,
+            "certificate_format_counts": certificate_format_counts,
+            "zero_knowledge_proofs": {
+                "available": bool(zkp_status.get("available")),
+                "backend": str(zkp_status.get("backend") or ""),
+                "backend_info": dict(zkp_status.get("backend_info") or {}),
+                "certificate_count": certificate_backend_counts.get(str(zkp_status.get("backend") or "groth16"), 0),
+            },
+            "sample_proofs": [
+                {
+                    "proof_id": str(proof.get("proof_id") or ""),
+                    "status": str(proof.get("status") or ""),
+                    "query": str(proof.get("query") or "")[:500],
+                    "root_conclusion": str(proof.get("root_conclusion") or "")[:500],
+                    "proof_hash": str(proof.get("proof_hash") or ""),
+                    "certificate_count": len(list(proof.get("certificates") or [])),
+                }
+                for proof in sample_proofs[:sample_limit]
+            ],
+            "sample_certificates": [
+                cls._compact_workspace_proof_certificate(certificate)
+                for certificate in sample_certificates[:sample_limit]
+            ],
+        }
+
+    @classmethod
+    def _build_workspace_logic_flow(
+        cls,
+        formal_logic: Dict[str, Any],
+        *,
+        entity_query: str = "",
+        document_id: str = "",
+        modality: str = "",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        normalized_query = str(entity_query or "").strip().lower()
+        normalized_document_id = str(document_id or "").strip()
+        normalized_modality = cls._normalize_workspace_modality(modality)
+        apply_modality_filter = bool(str(modality or "").strip())
+        document_analyses = {
+            str(key): dict(value)
+            for key, value in dict(formal_logic.get("document_analyses") or {}).items()
+            if isinstance(value, dict)
+        }
+        proof_store = dict(formal_logic.get("proof_store") or {})
+        certificates = [dict(item) for item in list(proof_store.get("certificates") or []) if isinstance(item, dict)]
+        certificate_by_theorem: Dict[str, List[Dict[str, Any]]] = {}
+        for certificate in certificates:
+            theorem = str(certificate.get("theorem") or "").strip().lower()
+            if theorem:
+                certificate_by_theorem.setdefault(theorem, []).append(certificate)
+
+        rows: List[Dict[str, Any]] = []
+        edges: List[Dict[str, Any]] = []
+        deontic_analysis: List[Dict[str, Any]] = []
+        event_rows: List[Dict[str, Any]] = []
+        event_flow_edges: List[Dict[str, Any]] = []
+        status_counts = {"allowed": 0, "required": 0, "prohibited": 0, "conditional": 0, "unknown": 0}
+        for current_document_id, analysis in document_analyses.items():
+            if normalized_document_id and normalized_document_id not in current_document_id:
+                continue
+            statements = [dict(item) for item in list(analysis.get("deontic_statements") or []) if isinstance(item, dict)]
+            frames = [dict(item) for item in list(analysis.get("frames") or []) if isinstance(item, dict)]
+            events = [dict(item) for item in list(analysis.get("events") or []) if isinstance(item, dict)]
+            frame_by_statement_id = {
+                str((frame.get("slots") or {}).get("statement_id") or frame.get("object_id") or frame.get("frame_id") or ""): frame
+                for frame in frames
+            }
+            for statement in statements:
+                if normalized_query and normalized_query not in cls._workspace_logic_statement_text(statement):
+                    continue
+                deontic_status = cls._normalize_workspace_modality(statement.get("modality"))
+                if apply_modality_filter and deontic_status != normalized_modality:
+                    continue
+                statement_id = str(statement.get("id") or f"{current_document_id}:statement:{len(rows) + 1}")
+                action = str(statement.get("action") or "")
+                entity = str(statement.get("entity") or "")
+                conditions = [str(item) for item in list(statement.get("conditions") or []) if str(item or "").strip()]
+                exceptions = [str(item) for item in list(statement.get("exceptions") or []) if str(item or "").strip()]
+                matched_events = cls._statement_event_candidates(statement, events)
+                theorem_key = action.strip().lower()
+                matching_certificates = [
+                    dict(certificate)
+                    for key, theorem_certificates in certificate_by_theorem.items()
+                    if theorem_key and (theorem_key in key or key in theorem_key)
+                    for certificate in theorem_certificates[:2]
+                ]
+                proof_backends = sorted({str(certificate.get("backend") or "") for certificate in matching_certificates if str(certificate.get("backend") or "").strip()})
+                zkp_certificate_ids = [
+                    str(certificate.get("certificate_id") or "")
+                    for certificate in matching_certificates
+                    if str(certificate.get("backend") or "").lower() == "groth16"
+                    or "groth16" in str(certificate.get("format") or "").lower()
+                ]
+                frame = frame_by_statement_id.get(statement_id) or {}
+                rows.append(
+                    {
+                        "document_id": current_document_id,
+                        "statement_id": statement_id,
+                        "entity": entity,
+                        "modality": str(statement.get("modality") or ""),
+                        "deontic_status": deontic_status,
+                        "action": action,
+                        "event_label": str((matched_events[0] if matched_events else {}).get("label") or action),
+                        "conditions": conditions,
+                        "exceptions": exceptions,
+                        "source_text": str(statement.get("source_text") or "")[:500],
+                        "frame_id": str(frame.get("frame_id") or frame.get("object_id") or ""),
+                        "event_ids": [str(event.get("id") or "") for event in matched_events],
+                        "proof_certificate_count": len(matching_certificates),
+                        "proof_status": "proved" if matching_certificates else "unproved",
+                        "proof_backends": proof_backends,
+                        "zkp_certificate_ids": zkp_certificate_ids,
+                        "proof_certificates": [
+                            cls._compact_workspace_proof_certificate(certificate)
+                            for certificate in matching_certificates[:2]
+                        ],
+                    }
+                )
+                status_counts[deontic_status if deontic_status in status_counts else "unknown"] += 1
+                deontic_analysis.append(
+                    {
+                        "entity": entity,
+                        "event": str((matched_events[0] if matched_events else {}).get("label") or action),
+                        "status": deontic_status,
+                        "modality": str(statement.get("modality") or ""),
+                        "conditions": conditions,
+                        "exceptions": exceptions,
+                        "document_id": current_document_id,
+                        "statement_id": statement_id,
+                        "source_text": str(statement.get("source_text") or "")[:500],
+                        "proof_certificate_count": len(matching_certificates),
+                        "proof_status": "proved" if matching_certificates else "unproved",
+                        "proof_backends": proof_backends,
+                        "zkp_certificate_ids": zkp_certificate_ids,
+                    }
+                )
+                for event in matched_events:
+                    event_id = str(event.get("id") or "")
+                    if event_id and not any(str(item.get("id") or "") == event_id for item in event_rows):
+                        event_rows.append(
+                            {
+                                "id": event_id,
+                                "label": str(event.get("label") or ""),
+                                "agent": str(event.get("agent") or ""),
+                                "time": str(event.get("time") or ""),
+                                "document_id": current_document_id,
+                            }
+                        )
+                edges.extend(
+                    [
+                        {
+                            "source": current_document_id,
+                            "target": statement_id,
+                            "type": "EXTRACTED_STATEMENT",
+                            "label": "document -> statement",
+                        },
+                        {
+                            "source": statement_id,
+                            "target": entity or "unknown_entity",
+                            "type": deontic_status.upper(),
+                            "label": "statement -> entity",
+                        },
+                    ]
+                )
+                for event in matched_events:
+                    event_id = str(event.get("id") or "")
+                    if event_id:
+                        event_flow_edges.extend(
+                            [
+                                {
+                                    "source": statement_id,
+                                    "target": event_id,
+                                    "type": "GOVERNS_EVENT",
+                                    "label": f"{deontic_status} event",
+                                },
+                                {
+                                    "source": entity or "unknown_entity",
+                                    "target": event_id,
+                                    "type": deontic_status.upper(),
+                                    "label": f"{entity or 'entity'} is {deontic_status}",
+                                },
+                            ]
+                        )
+                for index, condition in enumerate(conditions, start=1):
+                    event_flow_edges.append(
+                        {
+                            "source": f"{statement_id}:condition:{index}",
+                            "target": statement_id,
+                            "type": "CONDITION_FOR",
+                            "label": condition,
+                        }
+                    )
+                for index, exception in enumerate(exceptions, start=1):
+                    event_flow_edges.append(
+                        {
+                            "source": f"{statement_id}:exception:{index}",
+                            "target": statement_id,
+                            "type": "EXCEPTION_TO",
+                            "label": exception,
+                        }
+                    )
+                if len(rows) >= limit:
+                    break
+            if len(rows) >= limit:
+                break
+
+        conflicts = [dict(item) for item in list(formal_logic.get("deontic_conflicts") or []) if isinstance(item, dict)]
+        if normalized_query:
+            conflicts = [
+                conflict
+                for conflict in conflicts
+                if normalized_query in json.dumps(conflict, ensure_ascii=False).lower()
+            ]
+        formulas = {
+            "temporal_fol": list((formal_logic.get("temporal_fol") or {}).get("formulas") or [])[: min(limit, 20)],
+            "first_order_logic": list((formal_logic.get("first_order_logic") or {}).get("formulas") or [])[: min(limit, 20)],
+            "dcec": list((formal_logic.get("deontic_cognitive_event_calculus") or {}).get("formulas") or [])[: min(limit, 20)],
+            "frame_logic": list(dict(formal_logic.get("frame_logic") or {}).values())[: min(limit, 20)],
+        }
+        logic_systems = cls._build_workspace_logic_systems(formal_logic, query=entity_query, limit=limit)
+        proof_system = cls._build_workspace_proof_system(proof_store, query=entity_query, limit=limit)
+        return {
+            "statements": rows,
+            "flow_edges": edges[: limit * 2],
+            "events": event_rows[:limit],
+            "event_flow_edges": event_flow_edges[: limit * 3],
+            "deontic_analysis": deontic_analysis[:limit],
+            "deontic_status_counts": status_counts,
+            "conflicts": conflicts[: min(limit, 20)],
+            "formulas": formulas,
+            "logic_systems": logic_systems,
+            "proof_system": proof_system,
+            "returned_statement_count": len(rows),
+            "returned_flow_edge_count": min(len(edges), limit * 2),
+            "returned_event_count": min(len(event_rows), limit),
+            "returned_event_flow_edge_count": min(len(event_flow_edges), limit * 3),
+            "returned_deontic_analysis_count": min(len(deontic_analysis), limit),
+            "returned_conflict_count": min(len(conflicts), min(limit, 20)),
+        }
+
+    def get_workspace_dataset_graph(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+        entity_query: str = "",
+        relationship_type: str = "",
+        document_id: str = "",
+        modality: str = "",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+
+        resolved_path = self._resolve_workspace_dataset_path(input_path)
+        dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
+        summary = dict(summarize_workspace_dataset(dataset_payload))
+        knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
+        entities = [dict(item) for item in list(knowledge_graph.get("entities") or []) if isinstance(item, dict)]
+        relationships = [dict(item) for item in list(knowledge_graph.get("relationships") or []) if isinstance(item, dict)]
+        entity_by_id = {str(entity.get("id") or ""): entity for entity in entities if str(entity.get("id") or "").strip()}
+
+        normalized_query = str(entity_query or "").strip().lower()
+        normalized_relationship_type = str(relationship_type or "").strip().lower()
+        normalized_document_id = str(document_id or "").strip().lower()
+        bounded_limit = max(1, min(int(limit or 50), 500))
+
+        matched_entities = []
+        for entity in entities:
+            entity_text = self._workspace_graph_text(entity)
+            if normalized_query and normalized_query not in entity_text:
+                continue
+            matched_entities.append(entity)
+        if not normalized_query and not normalized_document_id:
+            matched_entities = entities
+        matched_entity_ids = {str(entity.get("id") or "") for entity in matched_entities if str(entity.get("id") or "").strip()}
+
+        matched_relationships = []
+        for relationship in relationships:
+            source_id, target_id = self._workspace_relationship_endpoints(relationship)
+            relationship_type_text = str(relationship.get("type") or relationship.get("label") or "").lower()
+            relationship_text = self._workspace_graph_text(relationship)
+            touches_matched_entity = (
+                (not normalized_query and not normalized_document_id)
+                or source_id in matched_entity_ids
+                or target_id in matched_entity_ids
+            )
+            if normalized_relationship_type and normalized_relationship_type not in relationship_type_text:
+                continue
+            if normalized_document_id and normalized_document_id not in relationship_text and normalized_document_id not in source_id.lower() and normalized_document_id not in target_id.lower():
+                continue
+            if normalized_query and not touches_matched_entity and normalized_query not in relationship_text:
+                continue
+            matched_relationships.append(relationship)
+
+        neighbor_ids = set(matched_entity_ids)
+        for relationship in matched_relationships:
+            source_id, target_id = self._workspace_relationship_endpoints(relationship)
+            if source_id:
+                neighbor_ids.add(source_id)
+            if target_id:
+                neighbor_ids.add(target_id)
+        neighborhood_entities = [entity_by_id[entity_id] for entity_id in neighbor_ids if entity_id in entity_by_id]
+
+        metadata = dict(dataset_payload.get("metadata") or {})
+        formal_logic = dict(metadata.get("formal_logic") or {})
+        logic_flow = self._build_workspace_logic_flow(
+            formal_logic,
+            entity_query=entity_query,
+            document_id=document_id,
+            modality=modality,
+            limit=bounded_limit,
+        )
+        formal_summary = dict(metadata.get("formal_logic_summary") or formal_logic.get("summary") or {})
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "dataset_id": dataset_payload.get("dataset_id"),
+            "workspace_id": dataset_payload.get("workspace_id"),
+            "workspace_name": dataset_payload.get("workspace_name"),
+            "summary": summary,
+            "filters": {
+                "entity_query": str(entity_query or ""),
+                "relationship_type": str(relationship_type or ""),
+                "document_id": str(document_id or ""),
+                "modality": str(modality or ""),
+                "limit": bounded_limit,
+            },
+            "knowledge_graph": {
+                "entity_count": len(entities),
+                "relationship_count": len(relationships),
+                "matched_entity_count": len(matched_entities),
+                "matched_relationship_count": len(matched_relationships),
+                "returned_entity_count": min(len(neighborhood_entities), bounded_limit),
+                "returned_relationship_count": min(len(matched_relationships), bounded_limit),
+                "entities": [self._compact_workspace_entity(entity) for entity in neighborhood_entities[:bounded_limit]],
+                "relationships": [
+                    self._compact_workspace_relationship(relationship, entity_by_id)
+                    for relationship in matched_relationships[:bounded_limit]
+                ],
+            },
+            "logical_flow": {
+                **logic_flow,
+                "summary": formal_summary,
+            },
+            "metadata": {
+                "artifact_status": dict(metadata.get("artifact_status") or {}),
+                "artifact_provenance": dict(metadata.get("artifact_provenance") or {}),
+                "formal_logic_summary": formal_summary,
+            },
+            "source": "complaint_workspace_dataset_graph",
+        }
+
     def search_workspace_dataset(
         self,
         input_path: str | Path,
@@ -5741,6 +6322,7 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.migrate_legacy_workspace_data", "description": "Project legacy complaint session and mediator DuckDB state into a packaged workspace dataset stored as parquet pieces."},
                 {"name": "complaint.view_workspace_dataset", "description": "Browse a packaged or single-file workspace dataset with schema-aligned filters and filtered document previews."},
                 {"name": "complaint.search_workspace_dataset", "description": "Search a packaged or single-file workspace dataset using BM25 or vector retrieval plus schema-aligned filters."},
+                {"name": "complaint.get_workspace_dataset_graph", "description": "Explore workspace dataset knowledge-graph entities, relationships, deontic logic flow, formulas, conflicts, and proof links."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
                 {"name": "complaint.export_complaint_packet", "description": "Export the current lawsuit complaint packet with intake, evidence, review, and draft content."},
@@ -5976,6 +6558,19 @@ class ComplaintWorkspaceService:
                 claim_type=args.get("claim_type"),
                 claim_element_id=args.get("claim_element_id"),
                 source_type=args.get("source_type"),
+            )
+        if tool_name == "complaint.get_workspace_dataset_graph":
+            input_path = args.get("input_path") or args.get("manifest_path")
+            if not input_path:
+                raise ValueError("complaint.get_workspace_dataset_graph requires input_path or manifest_path.")
+            return self.get_workspace_dataset_graph(
+                input_path,
+                input_type=args.get("input_type", "packaged"),
+                entity_query=str(args.get("entity_query") or ""),
+                relationship_type=str(args.get("relationship_type") or ""),
+                document_id=str(args.get("document_id") or ""),
+                modality=str(args.get("modality") or args.get("deontic_status") or ""),
+                limit=int(args.get("limit") or 50),
             )
         if tool_name == "complaint.generate_complaint":
             return self.generate_complaint(

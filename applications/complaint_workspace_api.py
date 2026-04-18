@@ -741,6 +741,26 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             source_type=source_type,
         )
 
+    @router.get("/api/complaint-workspace/workspace-dataset/graph")
+    async def get_workspace_dataset_graph_route(
+        input_path: str,
+        input_type: str = Query(default="single"),
+        entity_query: str = Query(default=""),
+        relationship_type: str = Query(default=""),
+        document_id: str = Query(default=""),
+        modality: str = Query(default=""),
+        limit: int = Query(default=50),
+    ) -> Dict[str, Any]:
+        return workspace.get_workspace_dataset_graph(
+            input_path,
+            input_type=input_type,
+            entity_query=entity_query,
+            relationship_type=relationship_type,
+            document_id=document_id,
+            modality=modality,
+            limit=limit,
+        )
+
     @router.post("/api/complaint-workspace/packaged-docket/revalidation/execute")
     async def execute_packaged_docket_revalidation_route(
         request: PackagedDocketRevalidationRequest,

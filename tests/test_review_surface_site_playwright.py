@@ -651,7 +651,109 @@ def _write_dashboard_workspace_parquet(tmp_path: Path) -> Path:
                     "workspace_id": workspace_id,
                     "workspace_name": workspace_name,
                     "source_type": "workspace",
-                    "metadata": {"fixture": "dashboard-playwright"},
+                    "metadata": {
+                        "fixture": "dashboard-playwright",
+                        "formal_logic_summary": {
+                            "deontic_statement_count": 2,
+                            "proof_count": 1,
+                            "deontic_conflict_count": 1,
+                        },
+                        "formal_logic": {
+                            "document_analyses": {
+                                "workspace-doc-1": {
+                                    "deontic_statements": [
+                                        {
+                                            "id": "stmt-accommodation-1",
+                                            "entity": "Housing Provider",
+                                            "modality": "obligation",
+                                            "action": "review reasonable accommodation",
+                                            "conditions": ["tenant requests disability-related accommodation"],
+                                            "exceptions": ["request is only a preference"],
+                                            "source_document": "workspace-doc-1",
+                                            "source_text": "Housing Provider must review reasonable accommodation.",
+                                        },
+                                        {
+                                            "id": "stmt-accommodation-2",
+                                            "entity": "Housing Provider",
+                                            "modality": "prohibition",
+                                            "action": "deny reasonable accommodation without review",
+                                            "conditions": ["request is complete"],
+                                            "exceptions": [],
+                                            "source_document": "workspace-doc-1",
+                                            "source_text": "Housing Provider cannot deny reasonable accommodation without review.",
+                                        }
+                                    ],
+                                    "events": [
+                                        {
+                                            "id": "stmt-accommodation-1:event",
+                                            "agent": "Housing Provider",
+                                            "label": "review reasonable accommodation",
+                                            "time": "",
+                                        },
+                                        {
+                                            "id": "stmt-accommodation-2:event",
+                                            "agent": "Housing Provider",
+                                            "label": "deny reasonable accommodation without review",
+                                            "time": "",
+                                        },
+                                    ],
+                                    "frames": [
+                                        {
+                                            "frame_id": "frame-accommodation-1",
+                                            "object_id": "stmt-accommodation-1",
+                                            "slots": {"document_id": "workspace-doc-1"},
+                                        }
+                                    ],
+                                }
+                            },
+                            "deontic_conflicts": [
+                                {
+                                    "id": "conflict-accommodation-1",
+                                    "severity": "medium",
+                                    "explanation": "Accommodation review timing conflict",
+                                }
+                            ],
+                            "temporal_fol": {"backend": "tdfol_constructor", "formulas": ["Eventually(accommodation_reviewed)"]},
+                            "first_order_logic": {"backend": "fol_constructor", "formulas": ["Prohibited(provider, deny_without_review)"]},
+                            "deontic_cognitive_event_calculus": {"backend": "eng_dcec_wrapper", "formulas": ["Obligation(provider, review)"]},
+                            "frame_logic": {
+                                "frame-accommodation-1": {
+                                    "frame_id": "frame-accommodation-1",
+                                    "isa": "DeonticStatement",
+                                }
+                            },
+                            "proof_store": {
+                                "proofs": {
+                                    "proof-accommodation-1": {
+                                        "proof_id": "proof-accommodation-1",
+                                        "status": "proved",
+                                        "query": "deny reasonable accommodation without review",
+                                        "root_conclusion": "provider is prohibited from denial without review",
+                                        "proof_hash": "proofhash1",
+                                        "certificates": ["cert-accommodation-1"],
+                                    }
+                                },
+                                "certificates": [
+                                    {
+                                        "certificate_id": "cert-accommodation-1",
+                                        "backend": "groth16",
+                                        "format": "groth16_zksnark",
+                                        "theorem": "deny reasonable accommodation without review",
+                                        "assumptions": ["request is complete"],
+                                    }
+                                ],
+                                "summary": {"proof_count": 1},
+                                "metadata": {
+                                    "backend": "formal_logic_proof_store",
+                                    "zkp_status": {
+                                        "available": True,
+                                        "backend": "groth16",
+                                        "backend_info": {"binary_available": True, "curve_id": "bn254"},
+                                    },
+                                },
+                            },
+                        },
+                    },
                 },
             ),
             _bundle_row(
@@ -723,6 +825,21 @@ def _write_dashboard_workspace_parquet(tmp_path: Path) -> Path:
                 row_id="entity-request",
                 title="Accommodation request",
                 payload={"id": "entity-request", "type": "event", "label": "Accommodation request"},
+            ),
+            _bundle_row(
+                dataset_id=dataset_id,
+                workspace_id=workspace_id,
+                workspace_name=workspace_name,
+                section="knowledge_graph_relationships",
+                row_index=1,
+                row_id="relationship-request-doc",
+                title="Accommodation request relationship",
+                payload={
+                    "id": "relationship-request-doc",
+                    "type": "DESCRIBES",
+                    "source": "workspace-doc-1",
+                    "target": "entity-request",
+                },
             ),
             _bundle_row(
                 dataset_id=dataset_id,
@@ -1263,13 +1380,43 @@ def test_review_surface_dashboard_parquet_cards_support_search_review_and_annota
                 assert page.locator("#dashboard-workspace-dataset-documents").inner_text() == "1"
                 assert page.locator("#dashboard-workspace-dataset-collections").inner_text() == "1"
                 assert int(page.locator("#dashboard-workspace-dataset-entities").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-dataset-relationships").inner_text()) >= 1
                 assert int(page.locator("#dashboard-workspace-dataset-vectors").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-dataset-logic").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-dataset-proofs").inner_text()) >= 1
 
                 page.locator("#dashboard-search-workspace-dataset").click()
                 _wait_for_text(page, "#dashboard-workspace-dataset-status", "Loaded workspace dataset search")
                 _wait_for_text(page, "#dashboard-workspace-dataset-preview", "workspace-doc-1")
                 _wait_for_input_value(page, "#dashboard-dataset-annotation-document-id", "workspace-doc-1")
                 assert int(page.locator("#dashboard-workspace-dataset-results").inner_text()) >= 1
+
+                page.locator("#dashboard-workspace-graph-query").fill("accommodation")
+                page.locator("#dashboard-workspace-graph-relationship-type").fill("DESCRIBES")
+                page.locator("#dashboard-workspace-graph-modality").select_option("prohibited")
+                page.locator("#dashboard-load-workspace-graph").click()
+                _wait_for_text(page, "#dashboard-workspace-graph-status", "Loaded workspace graph explorer")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "relationship-request-doc")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "stmt-accommodation-2")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "deny reasonable accommodation without review")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "request is complete")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "event_flow_edges")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "prohibited")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "flow_edges")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "deontic_temporal_first_order_logic")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "deontic_cognitive_event_calculus")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "first_order_logic")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "proof_system")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "zero_knowledge_proofs")
+                _wait_for_text(page, "#dashboard-workspace-graph-preview", "groth16")
+                assert int(page.locator("#dashboard-workspace-graph-matches").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-flow-statements").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-flow-events").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-flow-prohibited").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-flow-conflicts").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-flow-tdfol").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-flow-dcec").inner_text()) >= 1
+                assert int(page.locator("#dashboard-workspace-flow-zkp").inner_text()) >= 1
 
                 page.locator("#dashboard-dataset-annotation-user-id").fill(user_id)
                 page.locator("#dashboard-dataset-annotation-user-name").fill("Playwright Reviewer")

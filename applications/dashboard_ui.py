@@ -648,6 +648,37 @@ def _render_dashboard_hub(
                     <button id="dashboard-load-workspace-dataset" type="button">Load Workspace Dataset</button>
                     <button id="dashboard-search-workspace-dataset" type="button" class="secondary">Search Workspace Dataset</button>
                 </div>
+                <div class="modal-grid" style="margin-top: 14px;">
+                    <div>
+                        <label class="field-label" for="dashboard-workspace-graph-query">Graph / Logic Query</label>
+                        <input id="dashboard-workspace-graph-query" type="text" placeholder="HACC, accommodation, family, agent">
+                    </div>
+                    <div>
+                        <label class="field-label" for="dashboard-workspace-graph-relationship-type">Relationship Type</label>
+                        <input id="dashboard-workspace-graph-relationship-type" type="text" placeholder="CONTAINS_DOCUMENT, IMPOSES_NORM">
+                    </div>
+                    <div>
+                        <label class="field-label" for="dashboard-workspace-graph-document-id">Document ID</label>
+                        <input id="dashboard-workspace-graph-document-id" type="text" placeholder="Optional document id">
+                    </div>
+                    <div>
+                        <label class="field-label" for="dashboard-workspace-graph-modality">Allowed / Required / Prohibited</label>
+                        <select id="dashboard-workspace-graph-modality">
+                            <option value="">All modalities</option>
+                            <option value="allowed">Allowed</option>
+                            <option value="required">Required</option>
+                            <option value="prohibited">Prohibited</option>
+                            <option value="conditional">Conditional</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="field-label" for="dashboard-workspace-graph-limit">Explorer Limit</label>
+                        <input id="dashboard-workspace-graph-limit" type="text" value="60" placeholder="60">
+                    </div>
+                </div>
+                <div class="button-row" style="margin-top: 12px;">
+                    <button id="dashboard-load-workspace-graph" type="button" class="secondary">Load Graph + Logic Flow</button>
+                </div>
                 <div class="stat-grid">
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-documents">0</strong><span>Workspace documents</span></div>
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-collections">0</strong><span>Collections</span></div>
@@ -657,6 +688,14 @@ def _render_dashboard_hub(
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-vectors">0</strong><span>Vector documents</span></div>
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-logic">0</strong><span>Logic statements</span></div>
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-proofs">0</strong><span>Theorem proofs</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-graph-matches">0</strong><span>Matched graph edges</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-flow-statements">0</strong><span>Flow statements</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-flow-events">0</strong><span>Governed events</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-flow-prohibited">0</strong><span>Prohibited rows</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-flow-conflicts">0</strong><span>Logic conflicts</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-flow-tdfol">0</strong><span>TDFOL formulas</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-flow-dcec">0</strong><span>DCEC formulas</span></div>
+                    <div class="stat-card"><strong id="dashboard-workspace-flow-zkp">0</strong><span>ZK certificates</span></div>
                 </div>
                 <div class="chip-row" style="margin-top: 14px;">
                     <span class="chip" id="dashboard-workspace-dataset-workspace-chip">workspace: waiting</span>
@@ -664,6 +703,8 @@ def _render_dashboard_hub(
                 </div>
                 <div class="status-line" id="dashboard-workspace-dataset-status">Add a workspace dataset parquet path to enter the dataset workspace.</div>
                 <pre id="dashboard-workspace-dataset-preview">Workspace dataset details will appear here.</pre>
+                <div class="status-line" id="dashboard-workspace-graph-status">Load a workspace graph to inspect entity neighborhoods and logical flow.</div>
+                <pre id="dashboard-workspace-graph-preview">Knowledge graph and logic-flow details will appear here.</pre>
             </article>
 
             <article class="dashboard-card" id="dataset-document-annotation-dashboard">
@@ -950,8 +991,12 @@ def _render_dashboard_hub(
                 );
                 const idNode = document.getElementById('dashboard-dataset-annotation-document-id');
                 const titleNode = document.getElementById('dashboard-dataset-annotation-title');
+                const graphDocumentNode = document.getElementById('dashboard-workspace-graph-document-id');
                 if (idNode && documentId) {{
                     idNode.value = documentId;
+                }}
+                if (graphDocumentNode && documentId && (datasetKind || '').toLowerCase() === 'workspace') {{
+                    graphDocumentNode.value = documentId;
                 }}
                 if (titleNode && title) {{
                     titleNode.value = `${{title}} annotation`;
@@ -1283,6 +1328,62 @@ def _render_dashboard_hub(
                 selectDatasetDocument(firstDocumentFromPayload(payload || {{}}), 'workspace');
             }}
 
+            function renderWorkspaceGraphExplorer(payload) {{
+                const graph = (payload && payload.knowledge_graph) || {{}};
+                const logicalFlow = (payload && payload.logical_flow) || {{}};
+                const statements = Array.isArray(logicalFlow.statements) ? logicalFlow.statements : [];
+                const flowEdges = Array.isArray(logicalFlow.flow_edges) ? logicalFlow.flow_edges : [];
+                const events = Array.isArray(logicalFlow.events) ? logicalFlow.events : [];
+                const eventFlowEdges = Array.isArray(logicalFlow.event_flow_edges) ? logicalFlow.event_flow_edges : [];
+                const deonticAnalysis = Array.isArray(logicalFlow.deontic_analysis) ? logicalFlow.deontic_analysis : [];
+                const statusCounts = (logicalFlow && logicalFlow.deontic_status_counts) || {{}};
+                const conflicts = Array.isArray(logicalFlow.conflicts) ? logicalFlow.conflicts : [];
+                const logicSystems = (logicalFlow && logicalFlow.logic_systems) || {{}};
+                const proofSystem = (logicalFlow && logicalFlow.proof_system) || {{}};
+                const tdfol = logicSystems.deontic_temporal_first_order_logic || {{}};
+                const dcec = logicSystems.deontic_cognitive_event_calculus || {{}};
+                const zkp = proofSystem.zero_knowledge_proofs || {{}};
+                const relationships = Array.isArray(graph.relationships) ? graph.relationships : [];
+                const entities = Array.isArray(graph.entities) ? graph.entities : [];
+                setText('dashboard-workspace-graph-matches', String(Number(graph.matched_relationship_count || relationships.length || 0)));
+                setText('dashboard-workspace-flow-statements', String(Number(logicalFlow.returned_statement_count || statements.length || 0)));
+                setText('dashboard-workspace-flow-events', String(Number(logicalFlow.returned_event_count || events.length || 0)));
+                setText('dashboard-workspace-flow-prohibited', String(Number(statusCounts.prohibited || 0)));
+                setText('dashboard-workspace-flow-conflicts', String(Number(logicalFlow.returned_conflict_count || conflicts.length || 0)));
+                setText('dashboard-workspace-flow-tdfol', String(Number(tdfol.formula_count || 0)));
+                setText('dashboard-workspace-flow-dcec', String(Number(dcec.formula_count || 0)));
+                setText('dashboard-workspace-flow-zkp', String(Number(zkp.certificate_count || 0)));
+                setText(
+                    'dashboard-workspace-graph-status',
+                    `Loaded workspace graph explorer with ${{entities.length}} returned entities, ${{relationships.length}} returned relationships, ${{events.length}} governed event(s), ${{eventFlowEdges.length}} event-flow edge(s), and ${{Number(zkp.certificate_count || 0)}} ZK certificate(s).`
+                );
+                setText('dashboard-workspace-graph-preview', JSON.stringify({{
+                    filters: (payload && payload.filters) || {{}},
+                    graph_totals: {{
+                        entity_count: Number(graph.entity_count || 0),
+                        relationship_count: Number(graph.relationship_count || 0),
+                        matched_entity_count: Number(graph.matched_entity_count || 0),
+                        matched_relationship_count: Number(graph.matched_relationship_count || 0),
+                    }},
+                    entities,
+                    relationships,
+                    logical_flow: {{
+                        summary: logicalFlow.summary || {{}},
+                        deontic_status_counts: statusCounts,
+                        deontic_analysis: deonticAnalysis,
+                        statements,
+                        flow_edges: flowEdges,
+                        events,
+                        event_flow_edges: eventFlowEdges,
+                        conflicts,
+                        formulas: logicalFlow.formulas || {{}},
+                        logic_systems: logicSystems,
+                        proof_system: proofSystem,
+                    }},
+                    metadata: (payload && payload.metadata) || {{}},
+                }}, null, 2));
+            }}
+
             function useLoadedDatasetDocument() {{
                 selectDatasetDocument(dashboardState.selectedDatasetDocument, dashboardState.selectedDatasetDocument && dashboardState.selectedDatasetDocument.dataset_kind || 'dataset');
             }}
@@ -1414,6 +1515,24 @@ def _render_dashboard_hub(
                     renderWorkspaceDatasetCard(payload, mode || 'view');
                 }} catch (error) {{
                     setText(statusId, `Workspace dataset load failed: ${{error.message}}`);
+                }}
+            }}
+
+            async function loadWorkspaceGraphExplorer() {{
+                setText('dashboard-workspace-graph-status', 'Loading workspace knowledge graph and logic flow...');
+                try {{
+                    const extra = {{
+                        entity_query: String((document.getElementById('dashboard-workspace-graph-query') || {{}}).value || '').trim(),
+                        relationship_type: String((document.getElementById('dashboard-workspace-graph-relationship-type') || {{}}).value || '').trim(),
+                        document_id: String((document.getElementById('dashboard-workspace-graph-document-id') || {{}}).value || '').trim(),
+                        modality: String((document.getElementById('dashboard-workspace-graph-modality') || {{}}).value || '').trim(),
+                        limit: String((document.getElementById('dashboard-workspace-graph-limit') || {{}}).value || '60').trim(),
+                    }};
+                    const params = datasetQueryParams('dashboard-workspace-dataset-path', 'dashboard-workspace-dataset-input-type', extra);
+                    const payload = await fetchJson(`/api/complaint-workspace/workspace-dataset/graph?${{params.toString()}}`);
+                    renderWorkspaceGraphExplorer(payload);
+                }} catch (error) {{
+                    setText('dashboard-workspace-graph-status', `Workspace graph load failed: ${{error.message}}`);
                 }}
             }}
 
@@ -1739,6 +1858,7 @@ def _render_dashboard_hub(
             document.getElementById('dashboard-load-docket-dataset-graph').addEventListener('click', function() {{ loadDocketDatasetDashboard('graph'); }});
             document.getElementById('dashboard-load-workspace-dataset').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('view'); }});
             document.getElementById('dashboard-search-workspace-dataset').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('search'); }});
+            document.getElementById('dashboard-load-workspace-graph').addEventListener('click', loadWorkspaceGraphExplorer);
             document.getElementById('dashboard-save-dataset-annotation').addEventListener('click', saveDatasetDocumentAnnotation);
             document.getElementById('dashboard-use-loaded-document').addEventListener('click', useLoadedDatasetDocument);
             document.getElementById('dashboard-open-upload-modal').addEventListener('click', function() {{ toggleUploadModal(true); }});
