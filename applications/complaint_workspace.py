@@ -462,6 +462,19 @@ def _unique_preserve_order(values: List[str]) -> List[str]:
     return ordered
 
 
+def _slugify_graph_id(value: Any) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(value or "").strip().lower())
+    return normalized.strip("-") or "unknown"
+
+
+def _normalize_annotation_tags(tags: Any) -> List[str]:
+    if isinstance(tags, str):
+        raw_tags = re.split(r"[,;\n]+", tags)
+    else:
+        raw_tags = list(tags or [])
+    return _unique_preserve_order([str(tag or "").strip() for tag in raw_tags if str(tag or "").strip()])
+
+
 def _build_schema_guided_tooling_recommendations(schema_snapshot: Optional[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     snapshot = dict(schema_snapshot or {})
     if not snapshot:
@@ -1557,6 +1570,9 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "intake_answers": {},
         "intake_history": [],
         "evidence": {"testimony": [], "documents": []},
+        "document_annotations": [],
+        "annotation_knowledge_graph": {"entities": [], "relationships": []},
+        "workspace_annotation_index": {"by_tag": {}, "by_collection": {}, "by_document_type": {}},
         "filing_metadata": {},
         "draft": None,
         "latest_packet_export": None,
@@ -1591,6 +1607,9 @@ class ComplaintWorkspaceService:
         payload.setdefault("intake_answers", {})
         payload.setdefault("intake_history", [])
         payload.setdefault("evidence", {"testimony": [], "documents": []})
+        payload.setdefault("document_annotations", [])
+        payload.setdefault("annotation_knowledge_graph", {"entities": [], "relationships": []})
+        payload.setdefault("workspace_annotation_index", {"by_tag": {}, "by_collection": {}, "by_document_type": {}})
         payload.setdefault("filing_metadata", {})
         payload.setdefault("draft", None)
         payload.setdefault("latest_packet_export", None)
@@ -4411,6 +4430,355 @@ class ComplaintWorkspaceService:
             "case_synopsis": self._build_case_synopsis(state),
         }
 
+    @classmethod
+    def _build_document_annotation_knowledge_graph(cls, annotations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        entities: Dict[str, Dict[str, Any]] = {}
+        relationships: Dict[str, Dict[str, Any]] = {}
+
+        def add_entity(entity_id: str, entity_type: str, label: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+            current = entities.setdefault(
+                entity_id,
+                {
+                    "id": entity_id,
+                    "type": entity_type,
+                    "label": label,
+                    "metadata": {},
+                },
+            )
+            current["label"] = current.get("label") or label
+            current["metadata"].update(dict(metadata or {}))
+
+        def add_relationship(
+            relationship_id: str,
+            relationship_type: str,
+            source: str,
+            target: str,
+            metadata: Optional[Dict[str, Any]] = None,
+        ) -> None:
+            relationships[relationship_id] = {
+                "id": relationship_id,
+                "type": relationship_type,
+                "source": source,
+                "target": target,
+                "metadata": dict(metadata or {}),
+            }
+
+        for annotation in annotations:
+            annotation_id = str(annotation.get("id") or "").strip()
+            if not annotation_id:
+                continue
+            document_id = str(annotation.get("document_id") or "").strip() or "unknown-document"
+            claim_element_id = str(annotation.get("claim_element_id") or "").strip() or "causation"
+            user_metadata = dict(annotation.get("user_metadata") or {})
+            actor_user_id = str(user_metadata.get("user_id") or annotation.get("user_id") or DEFAULT_USER_ID)
+            actor_label = str(user_metadata.get("display_name") or actor_user_id)
+            annotation_node_id = f"annotation:{_slugify_graph_id(annotation_id)}"
+            document_node_id = f"document:{_slugify_graph_id(document_id)}"
+            user_node_id = f"user:{_slugify_graph_id(actor_user_id)}"
+            claim_node_id = f"claim-element:{_slugify_graph_id(claim_element_id)}"
+
+            add_entity(
+                document_node_id,
+                "document",
+                str(annotation.get("document_title") or document_id),
+                {
+                    "document_id": document_id,
+                    "dataset_kind": annotation.get("dataset_kind"),
+                    "document_metadata": dict(annotation.get("document_metadata") or {}),
+                },
+            )
+            add_entity(
+                annotation_node_id,
+                "annotation",
+                str(annotation.get("title") or "Document annotation"),
+                {
+                    "annotation_id": annotation_id,
+                    "note": annotation.get("note"),
+                    "created_at": annotation.get("created_at"),
+                    "evidence_id": annotation.get("evidence_id"),
+                    "user_metadata": user_metadata,
+                },
+            )
+            add_entity(user_node_id, "user", actor_label, user_metadata)
+            add_entity(claim_node_id, "claim_element", claim_element_id.replace("_", " ").title(), {"claim_element_id": claim_element_id})
+            add_relationship(
+                f"{annotation_node_id}->annotates->{document_node_id}",
+                "annotates",
+                annotation_node_id,
+                document_node_id,
+                {"created_at": annotation.get("created_at")},
+            )
+            add_relationship(
+                f"{annotation_node_id}->created_by->{user_node_id}",
+                "created_by",
+                annotation_node_id,
+                user_node_id,
+                {"created_at": annotation.get("created_at")},
+            )
+            add_relationship(
+                f"{annotation_node_id}->supports_claim_element->{claim_node_id}",
+                "supports_claim_element",
+                annotation_node_id,
+                claim_node_id,
+                {"claim_element_id": claim_element_id},
+            )
+
+            for tag in _normalize_annotation_tags(annotation.get("tags") or []):
+                tag_node_id = f"tag:{_slugify_graph_id(tag)}"
+                add_entity(
+                    tag_node_id,
+                    "tag",
+                    tag,
+                    {
+                        "tag": tag,
+                        "tagged_by_user_id": actor_user_id,
+                        "tagged_by": user_metadata,
+                        "created_at": annotation.get("created_at"),
+                    },
+                )
+                add_relationship(
+                    f"{document_node_id}->tagged_with->{tag_node_id}",
+                    "tagged_with",
+                    document_node_id,
+                    tag_node_id,
+                    {"annotation_id": annotation_id, "created_at": annotation.get("created_at")},
+                )
+                add_relationship(
+                    f"{tag_node_id}->applied_by->{user_node_id}",
+                    "tag_applied_by",
+                    tag_node_id,
+                    user_node_id,
+                    {"annotation_id": annotation_id, "created_at": annotation.get("created_at")},
+                )
+
+        return {
+            "entities": list(entities.values()),
+            "relationships": list(relationships.values()),
+            "annotation_count": len([item for item in annotations if isinstance(item, dict)]),
+            "tag_count": len([entity for entity in entities.values() if entity.get("type") == "tag"]),
+            "source": "complaint_workspace_document_annotation_graph",
+        }
+
+    def tag_document_annotation(
+        self,
+        user_id: Optional[str],
+        *,
+        document_id: str,
+        tags: Any,
+        note: str,
+        claim_element_id: str = "causation",
+        title: str = "Dataset document annotation",
+        dataset_kind: str = "dataset",
+        document_title: Optional[str] = None,
+        document_text_preview: Optional[str] = None,
+        document_metadata: Optional[Dict[str, Any]] = None,
+        user_metadata: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        normalized_document_id = str(document_id or "").strip()
+        if not normalized_document_id:
+            raise ValueError("document_id is required to tag or annotate a document.")
+        normalized_note = str(note or "").strip()
+        if not normalized_note:
+            raise ValueError("note is required to tag or annotate a document.")
+
+        normalized_tags = _normalize_annotation_tags(tags)
+        state = self._load_state(resolved_user_id)
+        evidence_store = state.setdefault("evidence", {"testimony": [], "documents": []})
+        documents = evidence_store.setdefault("documents", [])
+        created_at = _utc_now()
+        evidence_record = {
+            "id": f"documents-{len(documents) + 1}",
+            "kind": "document",
+            "claim_element_id": str(claim_element_id or "causation"),
+            "title": str(title or "Dataset document annotation"),
+            "content": [
+                f"Dataset: {str(dataset_kind or 'dataset')}",
+                f"Document ID: {normalized_document_id}",
+                f"Document title: {document_title}" if document_title else "",
+                f"Document text preview: {str(document_text_preview or '')[:500]}" if document_text_preview else "",
+                f"Tags: {', '.join(normalized_tags)}" if normalized_tags else "",
+                f"Review note: {normalized_note}",
+            ],
+            "source": source or f"dashboard-{str(dataset_kind or 'dataset')}-dataset-annotation",
+            "attachment_names": [normalized_document_id],
+            "saved_at": created_at,
+            "metadata": {
+                "document_id": normalized_document_id,
+                "dataset_kind": str(dataset_kind or "dataset"),
+                "tags": normalized_tags,
+                "annotation_user_metadata": dict(user_metadata or {}),
+                "document_metadata": dict(document_metadata or {}),
+            },
+        }
+        evidence_record["content"] = "\n".join(part for part in evidence_record["content"] if part)
+        documents.append(evidence_record)
+
+        actor_metadata = {
+            "user_id": resolved_user_id,
+            **{key: value for key, value in dict(user_metadata or {}).items() if value not in (None, "")},
+        }
+        actor_metadata.setdefault("display_name", resolved_user_id)
+        actor_metadata.setdefault("role", "workspace reviewer")
+        annotation_record = {
+            "id": f"document-annotation-{len(list(state.get('document_annotations') or [])) + 1}",
+            "document_id": normalized_document_id,
+            "dataset_kind": str(dataset_kind or "dataset"),
+            "document_title": str(document_title or normalized_document_id),
+            "document_text_preview": str(document_text_preview or "")[:500],
+            "document_metadata": dict(document_metadata or {}),
+            "claim_element_id": str(claim_element_id or "causation"),
+            "title": str(title or "Dataset document annotation"),
+            "note": normalized_note,
+            "tags": normalized_tags,
+            "user_id": resolved_user_id,
+            "user_metadata": actor_metadata,
+            "evidence_id": evidence_record["id"],
+            "source": evidence_record["source"],
+            "created_at": created_at,
+        }
+        annotations = state.setdefault("document_annotations", [])
+        annotations.append(annotation_record)
+        annotation_graph = self._build_document_annotation_knowledge_graph(list(annotations))
+        workspace_index = self._build_workspace_annotation_index(list(annotations))
+        state["annotation_knowledge_graph"] = annotation_graph
+        state["workspace_annotation_index"] = workspace_index
+        self._save_state(state)
+        return {
+            "saved": evidence_record,
+            "annotation": annotation_record,
+            "annotation_tags": normalized_tags,
+            "annotation_knowledge_graph": annotation_graph,
+            "workspace_annotation_index": workspace_index,
+            "review": self._build_review(state),
+            "session": deepcopy(state),
+            "case_synopsis": self._build_case_synopsis(state),
+            "source": "complaint_workspace_document_annotation_tags",
+        }
+
+    @classmethod
+    def _build_workspace_annotation_index(cls, annotations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        index: Dict[str, Any] = {
+            "by_tag": {},
+            "by_collection": {},
+            "by_document_type": {},
+            "by_claim_element": {},
+            "workspace_annotation_count": 0,
+            "source": "complaint_workspace_dataset_annotation_index",
+        }
+
+        def add(bucket_name: str, key: Any, annotation: Dict[str, Any]) -> None:
+            normalized_key = str(key or "").strip() or "unclassified"
+            bucket = index.setdefault(bucket_name, {})
+            bucket.setdefault(normalized_key, []).append(
+                {
+                    "annotation_id": annotation.get("id"),
+                    "document_id": annotation.get("document_id"),
+                    "document_title": annotation.get("document_title"),
+                    "tags": list(annotation.get("tags") or []),
+                    "user_metadata": dict(annotation.get("user_metadata") or {}),
+                    "created_at": annotation.get("created_at"),
+                }
+            )
+
+        for annotation in annotations:
+            if not isinstance(annotation, dict) or str(annotation.get("dataset_kind") or "").lower() != "workspace":
+                continue
+            index["workspace_annotation_count"] += 1
+            metadata = dict(annotation.get("document_metadata") or {})
+            add("by_collection", metadata.get("collection_id") or annotation.get("collection_id"), annotation)
+            add("by_document_type", metadata.get("document_type") or annotation.get("document_type"), annotation)
+            add("by_claim_element", annotation.get("claim_element_id"), annotation)
+            for tag in _normalize_annotation_tags(annotation.get("tags") or []):
+                add("by_tag", tag, annotation)
+        return index
+
+    def tag_workspace_dataset_document(
+        self,
+        user_id: Optional[str],
+        *,
+        document_id: str,
+        tags: Any,
+        note: str,
+        claim_element_id: str = "causation",
+        title: str = "Workspace dataset document annotation",
+        document_title: Optional[str] = None,
+        document_text_preview: Optional[str] = None,
+        collection_id: Optional[str] = None,
+        document_type: Optional[str] = None,
+        claim_type: Optional[str] = None,
+        source_type: Optional[str] = None,
+        document_metadata: Optional[Dict[str, Any]] = None,
+        user_metadata: Optional[Dict[str, Any]] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        metadata = dict(document_metadata or {})
+        for key, value in {
+            "collection_id": collection_id,
+            "document_type": document_type,
+            "claim_type": claim_type,
+            "source_type": source_type,
+        }.items():
+            if value not in (None, ""):
+                metadata[key] = value
+        payload = self.tag_document_annotation(
+            user_id,
+            document_id=document_id,
+            tags=tags,
+            note=note,
+            claim_element_id=claim_element_id,
+            title=title,
+            dataset_kind="workspace",
+            document_title=document_title,
+            document_text_preview=document_text_preview,
+            document_metadata=metadata,
+            user_metadata=user_metadata,
+            source=source or "dashboard-workspace-dataset-annotation",
+        )
+        state = dict(payload.get("session") or {})
+        annotations = list(state.get("document_annotations") or [])
+        workspace_index = self._build_workspace_annotation_index(annotations)
+        state["workspace_annotation_index"] = workspace_index
+        self._save_state(state)
+        payload["session"] = deepcopy(state)
+        payload["workspace_annotation_index"] = workspace_index
+        payload["source"] = "complaint_workspace_dataset_document_annotation"
+        return payload
+
+    def get_document_annotation_graph(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        annotations = list(state.get("document_annotations") or [])
+        annotation_graph = self._build_document_annotation_knowledge_graph(annotations)
+        workspace_index = self._build_workspace_annotation_index(annotations)
+        state["annotation_knowledge_graph"] = annotation_graph
+        state["workspace_annotation_index"] = workspace_index
+        self._save_state(state)
+        return {
+            "user_id": str(state.get("user_id") or user_id or DEFAULT_USER_ID),
+            "document_annotations": annotations,
+            "annotation_knowledge_graph": annotation_graph,
+            "workspace_annotation_index": workspace_index,
+            "source": "complaint_workspace_document_annotation_graph",
+        }
+
+    def get_workspace_dataset_annotation_index(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        annotations = list(state.get("document_annotations") or [])
+        workspace_index = self._build_workspace_annotation_index(annotations)
+        state["workspace_annotation_index"] = workspace_index
+        self._save_state(state)
+        return {
+            "user_id": str(state.get("user_id") or user_id or DEFAULT_USER_ID),
+            "workspace_annotations": [
+                annotation
+                for annotation in annotations
+                if isinstance(annotation, dict) and str(annotation.get("dataset_kind") or "").lower() == "workspace"
+            ],
+            "workspace_annotation_index": workspace_index,
+            "source": "complaint_workspace_dataset_annotation_index",
+        }
+
     def import_gmail_evidence(
         self,
         user_id: Optional[str],
@@ -5354,6 +5722,10 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.submit_intake", "description": "Save complaint intake answers."},
                 {"name": "complaint.run_intake_chat_turn", "description": "Advance the shared mediator-style intake chat one turn and persist the captured answer."},
                 {"name": "complaint.save_evidence", "description": "Save testimony or document evidence to the workspace."},
+                {"name": "complaint.tag_document_annotation", "description": "Save a dataset document annotation with tags, annotator metadata, and knowledge-graph relationships."},
+                {"name": "complaint.get_document_annotation_graph", "description": "Return document annotation, tag, user, and claim-element relationships for the current workspace."},
+                {"name": "complaint.tag_workspace_dataset_document", "description": "Annotate and tag a workspace dataset document with collection/type indexing."},
+                {"name": "complaint.get_workspace_dataset_annotation_index", "description": "Return workspace dataset annotations grouped by tag, collection, document type, and claim element."},
                 {"name": "complaint.import_gmail_evidence", "description": "Import matching Gmail messages and attachments into the complaint evidence workspace."},
                 {"name": "complaint.run_gmail_duckdb_pipeline", "description": "Run a checkpointed Gmail-to-DuckDB pipeline across many mailbox windows and optional BM25 search."},
                 {"name": "complaint.import_local_evidence", "description": "Import local files or directories into the complaint evidence workspace."},
@@ -5425,6 +5797,43 @@ class ComplaintWorkspaceService:
                 source=args.get("source"),
                 attachment_names=args.get("attachment_names"),
             )
+        if tool_name == "complaint.tag_document_annotation":
+            return self.tag_document_annotation(
+                args.get("user_id"),
+                document_id=str(args.get("document_id") or ""),
+                tags=args.get("tags") or [],
+                note=str(args.get("note") or ""),
+                claim_element_id=str(args.get("claim_element_id") or "causation"),
+                title=str(args.get("title") or "Dataset document annotation"),
+                dataset_kind=str(args.get("dataset_kind") or "dataset"),
+                document_title=args.get("document_title"),
+                document_text_preview=args.get("document_text_preview"),
+                document_metadata=dict(args.get("document_metadata") or {}),
+                user_metadata=dict(args.get("user_metadata") or {}),
+                source=args.get("source"),
+            )
+        if tool_name == "complaint.get_document_annotation_graph":
+            return self.get_document_annotation_graph(args.get("user_id"))
+        if tool_name == "complaint.tag_workspace_dataset_document":
+            return self.tag_workspace_dataset_document(
+                args.get("user_id"),
+                document_id=str(args.get("document_id") or ""),
+                tags=args.get("tags") or [],
+                note=str(args.get("note") or ""),
+                claim_element_id=str(args.get("claim_element_id") or "causation"),
+                title=str(args.get("title") or "Workspace dataset document annotation"),
+                document_title=args.get("document_title"),
+                document_text_preview=args.get("document_text_preview"),
+                collection_id=args.get("collection_id"),
+                document_type=args.get("document_type"),
+                claim_type=args.get("claim_type"),
+                source_type=args.get("source_type"),
+                document_metadata=dict(args.get("document_metadata") or {}),
+                user_metadata=dict(args.get("user_metadata") or {}),
+                source=args.get("source"),
+            )
+        if tool_name == "complaint.get_workspace_dataset_annotation_index":
+            return self.get_workspace_dataset_annotation_index(args.get("user_id"))
         if tool_name == "complaint.import_gmail_evidence":
             return self.import_gmail_evidence(
                 args.get("user_id"),

@@ -866,7 +866,10 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "Dataset Document Annotation" in dashboard_hub_response.text
     assert "/api/complaint-workspace/docket-dataset/view" in dashboard_hub_response.text
     assert "/api/complaint-workspace/workspace-dataset/view" in dashboard_hub_response.text
-    assert "/api/complaint-workspace/evidence" in dashboard_hub_response.text
+    assert "/api/complaint-workspace/document-annotations/tag" in dashboard_hub_response.text
+    assert "/api/complaint-workspace/workspace-dataset/annotations/tag" in dashboard_hub_response.text
+    assert "dashboard-dataset-annotation-tags" in dashboard_hub_response.text
+    assert "dashboard-dataset-annotation-user-name" in dashboard_hub_response.text
     assert "dashboard-load-docket-dataset" in dashboard_hub_response.text
     assert "dashboard-load-workspace-dataset" in dashboard_hub_response.text
     assert "dashboard-save-dataset-annotation" in dashboard_hub_response.text
