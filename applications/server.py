@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from .complaint_workspace_api import attach_complaint_workspace_routes
+from .dashboard_ui import attach_dashboard_ui_routes
 from .document_api import attach_document_routes
 from .document_ui import load_document_html
 from .review_api import attach_claim_support_review_routes
@@ -100,6 +101,7 @@ class SERVER:
         attach_complaint_workspace_routes(app)
         attach_claim_support_review_routes(app, mediator)
         attach_claim_support_review_ui_routes(app)
+        attach_dashboard_ui_routes(app)
         attach_document_routes(app, mediator)
 
         @app.get("/health")

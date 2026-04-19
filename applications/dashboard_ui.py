@@ -33,17 +33,17 @@ _IPFS_DATASETS_STATIC_DIR = (
 )
 
 _COMPLAINT_DASHBOARD_LINKS = [
-    ("Landing", "/"),
+    ("Start", "/"),
     ("Account", "/home"),
-    ("Chat", "/chat"),
+    ("Guided questions", "/chat"),
     ("Profile", "/profile"),
     ("Results", "/results"),
-    ("Workspace", "/workspace"),
-    ("Review", "/claim-support-review"),
-    ("Builder", "/document"),
-    ("WYSIWYG", "/wysiwyg"),
-    ("Trace", "/document/optimization-trace"),
-    ("Dashboards", "/dashboards"),
+    ("Saved work", "/workspace"),
+    ("Proof review", "/claim-support-review"),
+    ("Build draft", "/document"),
+    ("Edit document", "/wysiwyg"),
+    ("Draft history", "/document/optimization-trace"),
+    ("All dashboards", "/dashboards"),
 ]
 
 _IPFS_DASHBOARD_ENTRIES = [
@@ -73,6 +73,484 @@ _IPFS_DASHBOARD_ENTRIES = [
 ]
 
 _IPFS_DASHBOARD_MAP = {entry.slug: entry for entry in _IPFS_DASHBOARD_ENTRIES}
+
+_CAPABILITY_CARDS = [
+    {
+        "anchor": "journey-intake-chat",
+        "title": "Intake Chat and Guided Advice",
+        "summary": "Start with the conversational intake surface when you need help turning a narrative into claims, facts, proof leads, and next questions.",
+        "primary": ("Open Intake Chat", "/chat"),
+        "secondary": ("Review Claim Support", "/claim-support-review"),
+        "features": [
+            "Guided intake prompts",
+            "Claim-support review",
+            "Follow-up question queue",
+            "Formal complaint handoff",
+        ],
+        "subsections": [
+            ("Workspace snapshot", "#dashboard-workspace-snapshot"),
+            ("Heads-up display", "#heads-up-display-dashboard"),
+            ("Document builder", "/document"),
+        ],
+    },
+    {
+        "anchor": "journey-workspace-evidence",
+        "title": "Resume a Complaint and Marshal Evidence, Law, and Caselaw",
+        "summary": "Resume an existing workspace, upload files, import local/Gmail evidence, annotate dataset documents, and package evidence, legal authority, and caselaw into workspace datasets.",
+        "primary": ("Open Workspace", "/workspace"),
+        "secondary": ("Upload Evidence", "#chat-upload-dashboard"),
+        "features": [
+            "Workspace session continuity",
+            "Evidence, law, and caselaw marshalling",
+            "Workspace dataset parquet review",
+            "MCP tool calls through the browser SDK",
+        ],
+        "subsections": [
+            ("Workspace dataset", "#workspace-dataset-parquet-dashboard"),
+            ("Law and caselaw filters", "#workspace-law-caselaw-tools"),
+            ("Document annotation", "#dataset-document-annotation-dashboard"),
+            ("MCP tools", "/api/complaint-workspace/mcp/tools"),
+        ],
+    },
+    {
+        "anchor": "journey-docket-dataset",
+        "title": "Inspect Dockets and Existing Complaints",
+        "summary": "Load packaged dockets or docket dataset parquet files, search filings, extract calendar events, and inspect graph connections.",
+        "primary": ("Open Docket Dataset", "#docket-dataset-parquet-dashboard"),
+        "secondary": ("Packaged Docket", "#packaged-docket-dashboard"),
+        "features": [
+            "Packaged docket dashboards",
+            "BM25 or vector dataset search",
+            "Case calendar extraction",
+            "Docket knowledge graph view",
+        ],
+        "subsections": [
+            ("Packaged docket", "#packaged-docket-dashboard"),
+            ("Docket parquet", "#docket-dataset-parquet-dashboard"),
+            ("Operator queue", "#heads-up-display-dashboard"),
+        ],
+    },
+    {
+        "anchor": "journey-profile",
+        "title": "Profile, Identity and Personal Context",
+        "summary": "Manage personal/profile context, cookies, decentralized workspace identity, and the session data used to resume work safely.",
+        "primary": ("Open Profile", "/profile"),
+        "secondary": ("View Cookies", "/cookies"),
+        "features": [
+            "Profile and cookie surfaces",
+            "Decentralized workspace IDs",
+            "Reusable user/session query params",
+            "Cross-tab MCP sync events",
+        ],
+        "subsections": [
+            ("Workspace session", "#dashboard-workspace-snapshot"),
+            ("SDK playground", "/ipfs-datasets/sdk-playground"),
+            ("MCP dashboard", "/mcp"),
+        ],
+    },
+]
+
+_JOURNEY_DETAIL_PANELS = [
+    {
+        "anchor": "intake-chat-workflow-panel",
+        "eyebrow": "Intake advice path",
+        "title": "From story to reviewable claim theory",
+        "description": "Use the intake chat when the user needs advice, fact gathering, claim disambiguation, and a clean handoff into evidence review or drafting.",
+        "steps": [
+            ("Start intake", "Open the chat surface and capture the narrative, parties, timeline, harms, and remedies."),
+            ("Review support", "Move into claim-support review to identify missing elements, unresolved questions, and evidence tasks."),
+            ("Draft handoff", "Send supported facts and remaining caveats to the document builder when the workspace is ready."),
+        ],
+        "links": [
+            ("Open intake chat", "/chat"),
+            ("Claim-support review", "/claim-support-review"),
+            ("Complaint builder", "/document"),
+            ("Heads-up display", "#heads-up-display-dashboard"),
+        ],
+    },
+    {
+        "anchor": "workspace-evidence-workflow-panel",
+        "eyebrow": "Workspace evidence path",
+        "title": "Resume a complaint and marshal evidence, law, and caselaw",
+        "description": "Use the workspace path when the user has an existing session, files, notes, mail exports, legal authority, caselaw, or dataset documents that need to become structured workspace records.",
+        "steps": [
+            ("Load session", "Recover the workspace by user ID and show the current intake, evidence, draft, and readiness state."),
+            ("Add records", "Upload files or annotate loaded dataset documents into the complaint workspace evidence and authority record."),
+            ("Filter by legal role", "Separate factual evidence, legal authority, caselaw, and claim-support records before graph or drafting handoff."),
+            ("Inspect dataset", "Search workspace parquet, graph links, vector documents, logic statements, proof artifacts, and ZK certificates."),
+        ],
+        "links": [
+            ("Workspace snapshot", "#dashboard-workspace-snapshot"),
+            ("Upload evidence", "#chat-upload-dashboard"),
+            ("Workspace dataset", "#workspace-dataset-parquet-dashboard"),
+            ("Law and caselaw filters", "#workspace-law-caselaw-tools"),
+            ("Document annotation", "#dataset-document-annotation-dashboard"),
+        ],
+    },
+    {
+        "anchor": "docket-complaint-workflow-panel",
+        "eyebrow": "Docket review path",
+        "title": "Inspect an existing docket or complaint dataset",
+        "description": "Use the docket path when the user wants to examine filings, packaged docket manifests, search results, hearing dates, deadlines, and graph projections.",
+        "steps": [
+            ("Load docket", "Open a packaged docket manifest or a docket dataset parquet file."),
+            ("Search filings", "Query filings, motions, deadlines, orders, hearings, or due-process events from the dataset view."),
+            ("Promote findings", "Use annotation and workspace handoffs to connect useful docket facts back to the active complaint."),
+        ],
+        "links": [
+            ("Packaged docket", "#packaged-docket-dashboard"),
+            ("Docket dataset", "#docket-dataset-parquet-dashboard"),
+            ("Case calendar", "#dashboard-docket-calendar-list"),
+            ("Annotate document", "#dataset-document-annotation-dashboard"),
+        ],
+    },
+    {
+        "anchor": "profile-identity-workflow-panel",
+        "eyebrow": "Profile and identity path",
+        "title": "Manage personal context and session continuity",
+        "description": "Use the profile path when the user needs profile data, cookies, decentralized workspace IDs, SDK sync context, or a stable way to resume prior work.",
+        "steps": [
+            ("Check profile", "Open profile and cookie surfaces to confirm the user context that follows dashboard links."),
+            ("Carry context", "Use the context bar and query-param links to keep user ID, claim type, and workspace state aligned."),
+            ("Use MCP tools", "Inspect MCP tools, SDK playground behavior, and legacy IPFS dashboards from the same server shell."),
+        ],
+        "links": [
+            ("Profile", "/profile"),
+            ("Cookies", "/cookies"),
+            ("MCP dashboard", "/mcp"),
+            ("SDK playground", "/ipfs-datasets/sdk-playground"),
+        ],
+    },
+]
+
+_PACKAGE_CAPABILITY_MATRIX = [
+    {
+        "title": "Intake and Advice",
+        "description": "Conversation, claim disambiguation, follow-up questions, readiness checks, and drafting handoff.",
+        "links": [
+            ("Chat", "/chat"),
+            ("Review", "/claim-support-review"),
+            ("Build draft", "/document"),
+            ("Readiness API", "/api/complaint-workspace/session"),
+        ],
+    },
+    {
+        "title": "Workspace Evidence and Authority",
+        "description": "Session recovery, uploads, Gmail/DuckDB imports, evidence annotations, legal authority DB paths, and workspace parquet search.",
+        "links": [
+            ("Workspace", "/workspace"),
+            ("Upload", "#chat-upload-dashboard"),
+            ("Workspace dataset", "#workspace-dataset-parquet-dashboard"),
+            ("Annotation graph", "/api/complaint-workspace/document-annotations/graph"),
+        ],
+    },
+    {
+        "title": "Law, Caselaw, and Legal Graph",
+        "description": "Legal authority/caselaw review, claim-to-law matching, graph analysis gates, deontic modalities, and authority-focused drafting blockers.",
+        "links": [
+            ("Caselaw dashboard", "/dashboards/ipfs-datasets/admin-caselaw"),
+            ("Caselaw MCP", "/dashboards/ipfs-datasets/admin-caselaw-mcp"),
+            ("Legal graph filters", "#workspace-knowledge-graph-tools"),
+            ("Deontic analyzer", "#workspace-deontic-logic-tools"),
+        ],
+    },
+    {
+        "title": "Dockets and Existing Complaints",
+        "description": "Packaged docket manifests, docket parquet search, case-calendar extraction, graph projection, and document annotation into a complaint workspace.",
+        "links": [
+            ("Packaged docket", "#packaged-docket-dashboard"),
+            ("Docket dataset", "#docket-dataset-parquet-dashboard"),
+            ("Docket graph API", "/api/complaint-workspace/docket-dataset/graph"),
+            ("Calendar preview", "#dashboard-docket-calendar-list"),
+        ],
+    },
+    {
+        "title": "Profile, Identity, and MCP Operations",
+        "description": "Profile data, cookies, decentralized workspace IDs, MCP tools, JSON-RPC calls, SDK playground, and legacy IPFS dashboards.",
+        "links": [
+            ("Profile", "/profile"),
+            ("Cookies", "/cookies"),
+            ("MCP dashboard", "/mcp"),
+            ("SDK playground", "/ipfs-datasets/sdk-playground"),
+        ],
+    },
+]
+
+_IMPROVEMENT_PLAN_ITEMS = [
+    (
+        "Unify entry navigation",
+        "Keep the dashboard organized by user journey first, then by lower-level data surfaces: intake, workspace evidence, law/caselaw, docket review, profile, graph/logic, and legacy IPFS dashboards.",
+    ),
+    (
+        "Promote real package capabilities",
+        "Expose existing APIs for intake chat, workspace uploads, Gmail/DuckDB ingestion, legal authority database paths, parquet dataset review, graph exploration, deontic analysis, caselaw dashboards, and formal complaint generation as visible actions.",
+    ),
+    (
+        "Tie dashboards together with context",
+        "Carry user_id, manifest_path, docket dataset path, and workspace dataset path through links so users can move between chat, workspace, review, builder, and dashboard cards without losing state.",
+    ),
+    (
+        "Make graph and logic inspectable",
+        "Split connections, duties, proof artifacts, and certificate counts into clear dashboard subsections with filters already backed by the workspace dataset graph endpoint.",
+    ),
+    (
+        "Separate evidence, law, and caselaw lanes",
+        "Add source/document-type presets so users can quickly inspect factual evidence, legal authority, caselaw, claim-support records, and graph/deontic consequences from the workspace dataset.",
+    ),
+    (
+        "Keep legacy dashboards discoverable",
+        "Mount every ipfs_datasets_py dashboard in the hub, but frame them as advanced/legacy package consoles instead of making users guess which template matters for a complaint workflow.",
+    ),
+]
+
+
+_ENTRY_PATH_CARDS = [
+    {
+        "anchor": "entry-path-intake",
+        "stage": "Path 1",
+        "title": "Start your complaint",
+        "description": "Answer guided questions, describe what happened, and turn your story into a clear timeline, people involved, harms, and possible claims.",
+        "primary": ("Start with guided questions", "/chat"),
+        "links": [
+            ("Check what still needs proof", "/claim-support-review"),
+            ("See next recommended step", "#heads-up-display-dashboard"),
+            ("Build a draft later", "/document"),
+        ],
+    },
+    {
+        "anchor": "entry-path-workspace",
+        "stage": "Path 2",
+        "title": "Continue your complaint",
+        "description": "Return to a saved complaint, add documents or messages, organize evidence, add laws and court cases, and keep everything together for review.",
+        "primary": ("Continue saved complaint", "#dashboard-workspace-snapshot"),
+        "links": [
+            ("Add evidence", "#chat-upload-dashboard"),
+            ("Organize materials", "#workspace-dataset-parquet-dashboard"),
+            ("Add review notes", "#dataset-document-annotation-dashboard"),
+        ],
+    },
+    {
+        "anchor": "entry-path-docket",
+        "stage": "Path 3",
+        "title": "Review a court docket or response",
+        "description": "Look through filings, deadlines, hearing dates, orders, or an existing complaint/response and bring useful facts back into your workspace.",
+        "primary": ("Review docket or filing", "#docket-dataset-parquet-dashboard"),
+        "links": [
+            ("Load docket package", "#packaged-docket-dashboard"),
+            ("Find hearing dates", "#dashboard-docket-calendar-list"),
+            ("Map docket connections", "/api/complaint-workspace/docket-dataset/graph"),
+        ],
+    },
+    {
+        "anchor": "entry-path-profile",
+        "stage": "Path 4",
+        "title": "Manage your profile",
+        "description": "Review the personal and session information used to resume your work. Technical tools stay separate so they do not interrupt the complaint path.",
+        "primary": ("Open profile", "/profile"),
+        "links": [
+            ("Cookies", "/cookies"),
+            ("Session tools", "/mcp"),
+            ("Technical tools", "#dashboard-advanced-tools"),
+        ],
+    },
+]
+
+_DASHBOARD_SUBSECTION_INDEX = [
+    {
+        "title": "Start and Review",
+        "description": "Guided questions, proof checks, next recommended action, and draft handoff.",
+        "links": [
+            ("Start guided questions", "/chat"),
+            ("Check proof gaps", "/claim-support-review"),
+            ("See next step", "#heads-up-display-dashboard"),
+            ("Build draft", "/document"),
+        ],
+    },
+    {
+        "title": "Evidence, Laws, and Court Cases",
+        "description": "Resume a complaint, upload files, organize source materials, find connections, and check duties or conflicts.",
+        "links": [
+            ("Saved complaint", "#dashboard-workspace-snapshot"),
+            ("Add evidence", "#chat-upload-dashboard"),
+            ("Organize materials", "#workspace-dataset-parquet-dashboard"),
+            ("Find connections", "#workspace-knowledge-graph-tools"),
+            ("Check duties/conflicts", "#workspace-deontic-logic-tools"),
+        ],
+    },
+    {
+        "title": "Court Dockets and Responses",
+        "description": "Load docket records, search filings, preview calendar events, and save useful notes.",
+        "links": [
+            ("Load docket package", "#packaged-docket-dashboard"),
+            ("Search docket", "#docket-dataset-parquet-dashboard"),
+            ("Find dates", "#dashboard-docket-calendar-list"),
+            ("Add notes", "#dataset-document-annotation-dashboard"),
+        ],
+    },
+    {
+        "title": "Profile and Technical Tools",
+        "description": "Profile, cookies, session tools, and optional technical package consoles.",
+        "links": [
+            ("Profile", "/profile"),
+            ("Cookies", "/cookies"),
+            ("Technical tools", "/api/complaint-workspace/mcp/tools"),
+            ("Package consoles", "#legacy-ipfs-dashboard-shells"),
+        ],
+    },
+]
+
+
+def _render_feature_chips(features: list[str]) -> str:
+    return "".join(f'<span class="chip">{escape(feature)}</span>' for feature in features)
+
+
+def _render_link_row(links: list[tuple[str, str]]) -> str:
+    return "".join(
+        f'<a class="jump-link" href="{escape(href)}">{escape(label)}</a>'
+        for label, href in links
+    )
+
+
+def _render_subsection_nav(label: str, links: list[tuple[str, str]]) -> str:
+    return f"""
+    <nav class="dashboard-subsection-nav" aria-label="{escape(label)}">
+        <span>{escape(label)}</span>
+        <div class="section-jump-row">{_render_link_row(links)}</div>
+    </nav>
+    """
+
+
+def _render_entry_path_cards() -> str:
+    cards = []
+    for item in _ENTRY_PATH_CARDS:
+        primary_label, primary_href = item["primary"]
+        cards.append(
+            f"""
+            <article class="entry-path-card" id="{escape(item["anchor"])}">
+                <div class="entry-path-stage">{escape(item["stage"])}</div>
+                <h3>{escape(item["title"])}</h3>
+                <p>{escape(item["description"])}</p>
+                <a class="primary-action" href="{escape(primary_href)}">{escape(primary_label)}</a>
+                <div class="section-jump-row">{_render_link_row(list(item["links"]))}</div>
+            </article>
+            """
+        )
+    return "\n".join(cards)
+
+
+def _render_dashboard_subsection_index() -> str:
+    cards = []
+    for item in _DASHBOARD_SUBSECTION_INDEX:
+        cards.append(
+            f"""
+            <article class="subsection-index-card">
+                <h3>{escape(item["title"])}</h3>
+                <p>{escape(item["description"])}</p>
+                <div class="section-jump-row">{_render_link_row(list(item["links"]))}</div>
+            </article>
+            """
+        )
+    return "\n".join(cards)
+
+
+def _render_capability_cards() -> str:
+    cards = []
+    for item in _CAPABILITY_CARDS:
+        primary_label, primary_href = item["primary"]
+        secondary_label, secondary_href = item["secondary"]
+        cards.append(
+            f"""
+            <article class="capability-card" id="{escape(item["anchor"])}">
+                <div class="capability-card-body">
+                    <h3>{escape(item["title"])}</h3>
+                    <p>{escape(item["summary"])}</p>
+                    <div class="chip-row">{_render_feature_chips(list(item["features"]))}</div>
+                </div>
+                <div class="capability-actions">
+                    <a class="primary-action" href="{escape(primary_href)}">{escape(primary_label)}</a>
+                    <a class="secondary-action" href="{escape(secondary_href)}">{escape(secondary_label)}</a>
+                </div>
+                <div class="section-jump-row">{_render_link_row(list(item["subsections"]))}</div>
+            </article>
+            """
+        )
+    return "\n".join(cards)
+
+
+def _render_improvement_plan() -> str:
+    return "".join(
+        f"""
+        <li>
+            <strong>{escape(title)}</strong>
+            <span>{escape(description)}</span>
+        </li>
+        """
+        for title, description in _IMPROVEMENT_PLAN_ITEMS
+    )
+
+
+def _render_journey_detail_panels() -> str:
+    panels = []
+    for panel in _JOURNEY_DETAIL_PANELS:
+        steps = "".join(
+            f"""
+            <li>
+                <strong>{escape(title)}</strong>
+                <span>{escape(description)}</span>
+            </li>
+            """
+            for title, description in panel["steps"]
+        )
+        panels.append(
+            f"""
+            <article class="journey-detail-card" id="{escape(panel["anchor"])}">
+                <div>
+                    <div class="eyebrow" style="color: var(--accent);">{escape(panel["eyebrow"])}</div>
+                    <h3>{escape(panel["title"])}</h3>
+                    <p>{escape(panel["description"])}</p>
+                </div>
+                <ol>{steps}</ol>
+                <div class="section-jump-row">{_render_link_row(list(panel["links"]))}</div>
+            </article>
+            """
+        )
+    return "\n".join(panels)
+
+
+def _render_package_capability_matrix() -> str:
+    cards = []
+    for item in _PACKAGE_CAPABILITY_MATRIX:
+        cards.append(
+            f"""
+            <article class="package-map-card">
+                <h3>{escape(item["title"])}</h3>
+                <p>{escape(item["description"])}</p>
+                <div class="section-jump-row">{_render_link_row(list(item["links"]))}</div>
+            </article>
+            """
+        )
+    return "\n".join(cards)
+
+
+def _render_dashboard_section_nav() -> str:
+    return _render_link_row(
+        [
+            ("Start", "#dashboard-start-here"),
+            ("Add evidence", "#chat-upload-dashboard"),
+            ("Organize materials", "#workspace-dataset-parquet-dashboard"),
+            ("Review proof", "/claim-support-review"),
+            ("Build draft", "/document"),
+            ("More tools", "#dashboard-subsection-index"),
+            ("Saved complaint", "#dashboard-workspace-snapshot"),
+            ("Review docket", "#docket-dataset-parquet-dashboard"),
+            ("Find connections", "#workspace-knowledge-graph-tools"),
+            ("Check duties", "#workspace-deontic-logic-tools"),
+            ("Notes", "#dataset-document-annotation-dashboard"),
+            ("Profile", "#profile-and-identity-dashboard"),
+            ("Technical tools", "#dashboard-advanced-tools"),
+        ]
+    )
+
 
 class _DashboardUndefined(ChainableUndefined):
     def __call__(self, *args: Any, **kwargs: Any) -> "_DashboardUndefined":
@@ -344,6 +822,13 @@ def _render_dashboard_hub(
         ) + "</ul></section>"
         for category, entries in ipfs_sections.items()
     )
+    capability_cards = _render_capability_cards()
+    journey_detail_panels = _render_journey_detail_panels()
+    package_capability_matrix = _render_package_capability_matrix()
+    dashboard_section_nav = _render_dashboard_section_nav()
+    improvement_plan = _render_improvement_plan()
+    entry_path_cards = _render_entry_path_cards()
+    dashboard_subsection_index = _render_dashboard_subsection_index()
     return f"""
 <!DOCTYPE html>
 <html lang=\"en\">
@@ -384,8 +869,8 @@ def _render_dashboard_hub(
         .hero-card {{ background: linear-gradient(160deg, rgba(255, 252, 247, 0.95), rgba(247, 241, 232, 0.98)); border-radius: var(--radius-xl); padding: 28px; box-shadow: var(--shadow); border: 1px solid rgba(21, 34, 48, 0.08); }}
         .eyebrow {{ text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.75rem; color: #d5f3ef; font-weight: 800; }}
         .header-copy p {{ color: rgba(255,255,255,0.84); max-width: 72ch; }}
-        .surface-pills, .button-row, .stat-grid, .chip-row {{ display: flex; flex-wrap: wrap; gap: 10px; }}
-        .surface-pills a, button, .modal-link {{
+        .surface-pills, .button-row, .stat-grid, .chip-row, .section-jump-row, .journey-nav, .decision-row, .context-actions, .preset-row, .stage-rail, .lane-grid, .mobile-action-rail {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+        .surface-pills a, button, .modal-link, .jump-link, .primary-action, .secondary-action, .mobile-action-rail a {{
             border: 0;
             border-radius: 999px;
             padding: 11px 16px;
@@ -395,13 +880,323 @@ def _render_dashboard_hub(
         .surface-pills a {{ background: rgba(255,255,255,0.12); color: white; }}
         button {{ background: linear-gradient(135deg, var(--accent), var(--accent-strong)); color: white; cursor: pointer; }}
         button.secondary {{ background: rgba(17, 92, 99, 0.10); color: var(--accent-strong); border: 1px solid rgba(17, 92, 99, 0.16); }}
-        button:disabled {{ opacity: 0.65; cursor: wait; }}
+        button:disabled {{ opacity: 0.58; cursor: not-allowed; }}
+        .is-disabled {{
+            opacity: 0.58;
+            cursor: not-allowed;
+            pointer-events: none;
+            filter: saturate(0.75);
+        }}
+        .dashboard-section-menu > summary {{
+            display: none;
+            cursor: pointer;
+            font-weight: 800;
+            color: var(--accent-strong);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-md);
+            padding: 12px 14px;
+            background: rgba(251, 247, 240, 0.96);
+            min-height: 48px;
+        }}
+        .journey-nav {{
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background: rgba(251, 247, 240, 0.94);
+            backdrop-filter: blur(14px);
+            border: 1px solid var(--line);
+            border-radius: var(--radius-lg);
+            padding: 12px;
+            box-shadow: 0 10px 28px rgba(21, 34, 48, 0.06);
+        }}
+        .jump-link {{ background: rgba(17, 92, 99, 0.08); color: var(--accent-strong); border: 1px solid rgba(17, 92, 99, 0.12); }}
+        .workflow-rail {{
+            background: #ffffff;
+            border-radius: var(--radius-xl);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(17, 92, 99, 0.16);
+        }}
+        .workflow-rail-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+            flex-wrap: wrap;
+        }}
+        .workflow-rail h2 {{ margin-bottom: 6px; }}
+        .stage-rail {{ margin-top: 16px; align-items: stretch; }}
+        .stage-card {{
+            position: relative;
+            flex: 1 1 190px;
+            min-width: 170px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            background: rgba(17, 92, 99, 0.045);
+            padding: 14px;
+        }}
+        .stage-card.is-current {{ border-color: rgba(17, 92, 99, 0.42); background: rgba(17, 92, 99, 0.10); }}
+        .stage-card[data-state="complete"] {{ border-color: rgba(29, 107, 75, 0.30); background: rgba(29, 107, 75, 0.08); }}
+        .stage-card[data-state="blocked"] {{ border-color: rgba(170, 77, 29, 0.34); background: rgba(170, 77, 29, 0.08); }}
+        .stage-card[data-state="ready"] {{ border-color: rgba(17, 92, 99, 0.30); }}
+	        .stage-card strong {{ display: block; color: var(--ink); }}
+	        .stage-card span {{ font-size: 0.9rem; }}
+	        .stage-unlock {{
+	            display: inline-flex;
+	            margin-top: 8px;
+	            color: var(--accent-strong);
+	            font-size: 0.86rem;
+	            font-weight: 900;
+	            text-decoration: none;
+	        }}
+        .stage-state-badge {{
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            border-radius: 999px;
+            padding: 4px 8px;
+            background: rgba(21, 34, 48, 0.07);
+            color: var(--ink);
+            font-size: 0.72rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }}
+        .stage-card[data-state="current"] .stage-state-badge {{ background: rgba(17, 92, 99, 0.16); color: var(--accent-strong); }}
+        .stage-card[data-state="complete"] .stage-state-badge {{ background: rgba(29, 107, 75, 0.14); color: var(--good); }}
+        .stage-card[data-state="blocked"] .stage-state-badge {{ background: rgba(170, 77, 29, 0.14); color: var(--warm); }}
+        .stage-number {{
+            width: 28px;
+            height: 28px;
+            display: inline-grid;
+            place-items: center;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }}
+        .stage-actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }}
+        .mobile-action-rail {{
+            display: none;
+            position: sticky;
+            bottom: 12px;
+            z-index: 25;
+            background: rgba(255, 253, 250, 0.97);
+            border: 1px solid rgba(17, 92, 99, 0.18);
+            border-radius: var(--radius-lg);
+            padding: 10px;
+            box-shadow: 0 16px 38px rgba(21, 34, 48, 0.14);
+        }}
+        .mobile-action-rail a {{ flex: 1 1 140px; text-align: center; }}
+        .start-here {{
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            padding: 22px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--line);
+        }}
+        .start-here h2, .workspace-context-bar h2 {{ margin-bottom: 8px; }}
+	        .decision-row {{ margin-top: 14px; }}
+	        .recommended-action-panel {{
+	            display: grid;
+	            gap: 10px;
+	            margin-top: 14px;
+	            padding: 16px;
+	            border-radius: var(--radius-lg);
+	            background: #ffffff;
+	            border: 1px solid rgba(17, 92, 99, 0.16);
+	            box-shadow: 0 10px 26px rgba(21, 34, 48, 0.055);
+	        }}
+	        .recommended-action-panel h3 {{ margin: 0; font-size: 1.05rem; }}
+	        .recommended-action-panel p {{ margin: 0; }}
+	        .recommended-action-actions {{ display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }}
+	        .secondary-decision-row {{
+	            display: flex;
+	            flex-wrap: wrap;
+	            gap: 10px;
+	            margin-top: 12px;
+	        }}
+        .decision-link {{
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 11px 16px;
+            background: rgba(21, 34, 48, 0.08);
+            color: var(--ink);
+            font-weight: 800;
+            text-decoration: none;
+            border: 1px solid rgba(21, 34, 48, 0.10);
+        }}
+        .decision-link.primary {{ background: linear-gradient(135deg, var(--accent), var(--accent-strong)); color: white; }}
+        .workspace-context-bar {{
+            display: grid;
+            gap: 16px;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            background: #ffffff;
+            border-radius: var(--radius-lg);
+            padding: 18px 20px;
+            box-shadow: 0 14px 34px rgba(21, 34, 48, 0.07);
+            border: 1px solid rgba(17, 92, 99, 0.16);
+        }}
+        .context-action-hint {{
+            display: inline-flex;
+            align-items: center;
+            margin-top: 8px;
+            font-size: 0.86rem;
+            font-weight: 800;
+            color: var(--accent-strong);
+        }}
+        .context-grid {{
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            margin-top: 12px;
+        }}
+        .context-metric {{
+            border-left: 3px solid rgba(17, 92, 99, 0.35);
+            padding-left: 10px;
+        }}
+        .context-metric span {{
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }}
+        .context-metric strong {{
+            display: block;
+            color: var(--ink);
+            margin-top: 4px;
+        }}
+        .legal-safety-note {{
+            display: grid;
+            gap: 6px;
+            margin-top: 12px;
+            padding: 12px 14px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(170, 77, 29, 0.20);
+            background: rgba(170, 77, 29, 0.08);
+            color: var(--ink);
+        }}
+        .legal-safety-note strong {{ color: var(--warm); }}
+        .entry-overview {{
+            display: grid;
+            gap: 18px;
+            grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.05fr);
+            align-items: stretch;
+        }}
+        .entry-overview-panel, .subsection-index {{
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--line);
+        }}
+        .entry-path-grid {{ display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(240px, 1fr)); }}
+        .subsection-index-grid {{ display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }}
+        .entry-path-card, .subsection-index-card {{
+            display: grid;
+            gap: 10px;
+            align-content: start;
+            background: #ffffff;
+            border-radius: var(--radius-lg);
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            padding: 18px;
+        }}
+        .entry-path-card h3, .subsection-index-card h3 {{ margin: 0; font-size: 1.05rem; }}
+        .entry-path-card p, .subsection-index-card p {{ margin: 0; }}
+        .entry-path-stage {{
+            color: var(--accent-strong);
+            font-size: 0.76rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        .dashboard-subsection-nav {{
+            margin: 12px 0;
+            padding: 12px;
+            border-radius: var(--radius-md);
+            background: rgba(17, 92, 99, 0.055);
+            border: 1px solid rgba(17, 92, 99, 0.10);
+        }}
+        .dashboard-subsection-nav > span {{
+            display: block;
+            margin: 0 0 8px;
+            color: var(--accent-strong);
+            font-size: 0.78rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        .advanced-tools {{
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            padding: 22px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--line);
+        }}
+        .advanced-tools > summary {{
+            cursor: pointer;
+            color: var(--ink);
+            font-size: 1.2rem;
+            font-weight: 900;
+        }}
+        .advanced-tools-helper {{ margin: 10px 0 0; color: var(--muted); }}
+        .advanced-tools-grid {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 16px; }}
+        .capability-grid {{ display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }}
+        .capability-card {{
+            display: grid;
+            gap: 16px;
+            align-content: space-between;
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            padding: 24px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--line);
+        }}
+        .capability-card h3 {{ margin: 0; font-size: 1.35rem; }}
+        .capability-card p {{ margin: 8px 0 0; }}
+        .capability-actions {{ display: flex; flex-wrap: wrap; gap: 10px; }}
+        .primary-action {{ background: linear-gradient(135deg, var(--accent), var(--accent-strong)); color: white; }}
+        .secondary-action {{ background: rgba(17, 92, 99, 0.10); color: var(--accent-strong); border: 1px solid rgba(17, 92, 99, 0.16); }}
+        .journey-detail-grid {{ display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }}
+        .journey-detail-card {{
+            display: grid;
+            gap: 16px;
+            background: var(--surface-strong);
+            border-radius: var(--radius-lg);
+            padding: 22px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--line);
+        }}
+        .journey-detail-card h3 {{ margin: 0; font-size: 1.2rem; }}
+        .journey-detail-card ol {{ margin: 0; padding-left: 20px; }}
+        .journey-detail-card li {{ padding-left: 4px; }}
+        .journey-detail-card strong {{ display: block; color: var(--ink); }}
+        .package-map-grid {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }}
+        .package-map-card {{
+            background: #ffffff;
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            border-radius: var(--radius-lg);
+            padding: 20px;
+            box-shadow: 0 10px 28px rgba(21, 34, 48, 0.055);
+        }}
+        .package-map-card h3 {{ margin: 0; font-size: 1.05rem; }}
+        .package-map-card p {{ margin: 8px 0 14px; }}
+        .capability-plan ul {{ padding-left: 20px; }}
+        .capability-plan li {{ margin: 14px 0; }}
+        .capability-plan strong {{ display: block; color: var(--ink); }}
         .workspace-cards {{ display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }}
         .dashboard-card {{ background: var(--surface); border-radius: var(--radius-xl); padding: 24px; box-shadow: var(--shadow); border: 1px solid var(--line); }}
+        #workspace-dataset-parquet-dashboard {{ grid-column: 1 / -1; }}
         .dashboard-card h2 {{ margin-bottom: 10px; }}
+        .dashboard-card:target, .capability-card:target, .journey-detail-card:target, #workspace-law-caselaw-tools:target, #workspace-knowledge-graph-tools:target, #workspace-deontic-logic-tools:target {{ outline: 3px solid rgba(17, 92, 99, 0.28); outline-offset: 4px; }}
+        [id] {{ scroll-margin-top: 120px; }}
         .field-label {{ display: block; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 800; color: var(--muted); margin-bottom: 8px; }}
         .field-row {{ display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; align-items: end; }}
-        input[type="text"], select, textarea, input[type="file"] {{
+	        input[type="text"], select, textarea, input[type="file"] {{
             width: 100%;
             border-radius: 16px;
             border: 1px solid rgba(21, 34, 48, 0.14);
@@ -440,6 +1235,188 @@ def _render_dashboard_hub(
             font-size: 0.95rem;
             font-weight: 700;
             color: var(--accent-strong);
+        }}
+        .preset-row {{ margin-top: 12px; }}
+        .preset-button {{
+            background: rgba(170, 77, 29, 0.10);
+            color: #763612;
+            border: 1px solid rgba(170, 77, 29, 0.18);
+        }}
+        .lane-grid {{ margin-top: 16px; }}
+        .lane-card {{
+            flex: 1 1 220px;
+            min-width: 210px;
+            border-radius: var(--radius-md);
+            background: #ffffff;
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            padding: 16px;
+            cursor: pointer;
+            transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+        }}
+        .lane-card:hover, .lane-card:focus-visible {{
+            border-color: rgba(17, 92, 99, 0.34);
+            outline: none;
+            transform: translateY(-1px);
+        }}
+        .lane-card strong {{ display: block; color: var(--ink); }}
+        .lane-card p {{ margin: 8px 0 12px; }}
+        .lane-status {{
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            border-radius: 999px;
+            padding: 5px 10px;
+            background: rgba(21, 34, 48, 0.06);
+            color: var(--ink);
+            font-size: 0.8rem;
+            font-weight: 800;
+        }}
+        .lane-card.is-selected {{
+            border-color: rgba(17, 92, 99, 0.48);
+            background: rgba(17, 92, 99, 0.08);
+            box-shadow: inset 0 0 0 2px rgba(17, 92, 99, 0.10);
+        }}
+        .lane-card.is-selected .lane-status {{ background: rgba(17, 92, 99, 0.16); color: var(--accent-strong); }}
+        .lane-summary {{
+            margin-top: 12px;
+            padding: 12px 14px;
+            border-radius: var(--radius-md);
+            background: rgba(17, 92, 99, 0.06);
+            border: 1px solid rgba(17, 92, 99, 0.10);
+            color: var(--accent-strong);
+            font-weight: 800;
+        }}
+        .workspace-flow-status {{
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            margin-top: 14px;
+            padding: 14px;
+            border-radius: var(--radius-lg);
+            background: rgba(17, 92, 99, 0.055);
+            border: 1px solid rgba(17, 92, 99, 0.14);
+        }}
+        .workspace-flow-status div {{
+            border-left: 3px solid rgba(17, 92, 99, 0.32);
+            padding-left: 10px;
+        }}
+        .workspace-flow-status span {{
+            color: var(--muted);
+            font-size: 0.76rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        .workspace-flow-status strong {{
+            display: block;
+            color: var(--ink);
+            margin-top: 4px;
+        }}
+        .workspace-empty-state {{
+            margin-top: 14px;
+            padding: 18px;
+            border-radius: var(--radius-lg);
+            background: #ffffff;
+            border: 1px solid rgba(17, 92, 99, 0.14);
+            box-shadow: 0 12px 28px rgba(21, 34, 48, 0.055);
+        }}
+	        .workspace-empty-state h3 {{ margin: 0 0 8px; }}
+	        .workspace-empty-state p {{ margin: 0 0 12px; }}
+	        .workspace-next-action-panel {{
+	            display: grid;
+	            gap: 10px;
+	            margin-top: 14px;
+	            padding: 16px;
+	            border-radius: var(--radius-lg);
+	            background: #ffffff;
+	            border: 1px solid rgba(17, 92, 99, 0.16);
+	            box-shadow: 0 10px 26px rgba(21, 34, 48, 0.055);
+	        }}
+	        input:disabled, select:disabled, textarea:disabled {{
+	            opacity: 0.62;
+	            cursor: not-allowed;
+	            background: rgba(21, 34, 48, 0.045);
+	        }}
+	        .workspace-next-action-panel h3 {{ margin: 0; font-size: 1.05rem; }}
+	        .workspace-next-action-panel p {{ margin: 0; }}
+	        .workspace-path-status {{
+	            display: grid;
+	            gap: 8px;
+	            margin-top: 12px;
+	            padding: 12px 14px;
+	            border-radius: var(--radius-md);
+	            background: rgba(21, 34, 48, 0.045);
+	            border: 1px solid rgba(21, 34, 48, 0.10);
+	        }}
+	        .workspace-path-status strong {{ color: var(--ink); }}
+	        .workspace-step-actions {{
+	            display: flex;
+	            flex-wrap: wrap;
+	            gap: 10px;
+	            margin-top: 12px;
+	        }}
+	        .field-helper {{
+	            margin: 6px 0 0;
+	            color: var(--muted);
+	            font-size: 0.9rem;
+	            font-weight: 700;
+	        }}
+	        .advanced-filter-field {{
+	            opacity: 0.86;
+	        }}
+        .workspace-checklist {{
+            display: grid;
+            gap: 8px;
+            margin: 14px 0 0;
+        }}
+        .workspace-checklist div {{
+            display: grid;
+            grid-template-columns: auto minmax(0, 1fr);
+            gap: 10px;
+            align-items: start;
+            padding: 10px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            background: rgba(255, 253, 250, 0.76);
+        }}
+        .workspace-checklist span {{
+            display: inline-grid;
+            place-items: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 999px;
+            background: rgba(17, 92, 99, 0.12);
+            color: var(--accent-strong);
+            font-weight: 900;
+        }}
+        .lane-help {{
+            margin-top: 12px;
+            color: var(--muted);
+            font-weight: 700;
+        }}
+        .preflight-hint {{
+            margin-top: 10px;
+            color: var(--warm);
+            font-weight: 800;
+        }}
+        .dataset-step {{
+            margin-top: 18px;
+            padding: 16px;
+            border-radius: var(--radius-lg);
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            background: rgba(255, 253, 250, 0.74);
+        }}
+        .dataset-step h3 {{ margin: 0 0 10px; font-size: 1.05rem; }}
+	        .dataset-step-status {{
+	            display: inline-flex;
+	            align-items: center;
+	            min-height: 30px;
+            border-radius: 999px;
+            padding: 6px 10px;
+            background: rgba(21, 34, 48, 0.06);
+            color: var(--ink);
+            font-size: 0.82rem;
+            font-weight: 900;
         }}
         pre {{
             margin: 16px 0 0;
@@ -482,44 +1459,253 @@ def _render_dashboard_hub(
         .modal-actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }}
         .modal-close {{ background: rgba(21, 34, 48, 0.08); color: var(--ink); }}
         @media (max-width: 900px) {{
-            .hero-grid, .field-row {{ grid-template-columns: 1fr; }}
+            .hero-grid, .field-row, .workspace-context-bar, .entry-overview {{ grid-template-columns: 1fr; }}
         }}
+	        @media (max-width: 640px) {{
+		            header {{ padding: 24px 20px; }}
+		            main {{ padding-left: 22px; padding-right: 22px; }}
+		            .header-copy p {{ font-size: 1rem; }}
+		            .surface-pills {{ display: none; }}
+	            .surface-pills a, button, .modal-link, .jump-link, .primary-action, .secondary-action, .decision-link {{
+	                min-height: 44px;
+	                align-items: center;
+	            }}
+	            .dashboard-section-menu {{
+	                position: static;
+	                z-index: auto;
+	            }}
+	            .dashboard-section-menu > summary {{ display: block; }}
+	            .dashboard-section-menu:not([open]) .journey-nav {{ display: none; }}
+	            .journey-nav {{
+	                position: static;
+	                margin-top: 8px;
+	                max-height: 46vh;
+	                overflow: auto;
+	                align-content: flex-start;
+	                box-shadow: none;
+	            }}
+            .stage-card, .lane-card {{ flex-basis: 100%; }}
+            .primary-action, .secondary-action, .decision-link {{ justify-content: center; }}
+            .context-actions a, .stage-actions a {{ flex: 1 1 100%; text-align: center; }}
+	            .workflow-rail h2 {{ font-size: 1.45rem; }}
+	            .workflow-rail-header .primary-action {{ width: 100%; text-align: center; justify-content: center; }}
+		            .stage-actions {{ display: none; }}
+	            .mobile-action-rail {{ display: flex; }}
+	            .dashboard-section-menu[open] ~ .mobile-action-rail {{ display: none; }}
+	            .entry-path-grid {{ grid-template-columns: 1fr; }}
+	            .secondary-decision-row .decision-link {{ flex: 1 1 100%; justify-content: center; }}
+	        }}
     </style>
 </head>
 <body>
     <header>
-        <div class="header-copy">
-            <div class="eyebrow">Complaint Operations Center</div>
-            <h1>Unified Dashboard Hub</h1>
-            <p>One complaint-generator entry point for live workspace state, packaged docket status, chat upload intake, and the legacy dashboard shells that already ship with the app.</p>
-        </div>
+	        <div class="header-copy">
+	            <div class="eyebrow">Complaint Operations Center</div>
+	            <h1>Complaint Dashboard</h1>
+	            <p>Start, continue, organize, review, and draft a legal complaint or response from one guided workspace.</p>
+	        </div>
         <div class="surface-pills">{''.join(f'<a href="{escape(path)}">{escape(label)}</a>' for label, path in _COMPLAINT_DASHBOARD_LINKS)}</div>
     </header>
     <main>
-        <section class="hero-grid">
-            <article class="hero-card">
-                <div class="eyebrow" style="color: #115c63;">Live Complaint Cards</div>
-                <h2>Workspaces, dockets, and chat uploads now belong on the same screen.</h2>
-                <p>The complaint-native cards below read from the same workspace session APIs, packaged docket tools, and evidence intake flow used elsewhere in the app. This makes the dashboard a working surface instead of a link directory.</p>
+        <details class="dashboard-section-menu" id="dashboard-section-menu" open>
+            <summary>Dashboard sections</summary>
+            <nav class="journey-nav" aria-label="Dashboard section navigation" role="tablist">
+                {dashboard_section_nav}
+            </nav>
+        </details>
+        <section class="workflow-rail" id="dashboard-workflow-rail" aria-label="Complaint workflow rail">
+            <div class="workflow-rail-header">
+                <div>
+                    <div class="eyebrow" style="color: var(--accent);">Guided Workflow</div>
+                    <h2>Intake -> Evidence, Law, and Caselaw -> Review -> Draft</h2>
+                    <p id="workflow-rail-summary">Load the workspace to align the dashboard around the next valid complaint step.</p>
+                </div>
+                <a class="primary-action" id="workflow-primary-action" href="/chat">Explain what happened</a>
+            </div>
+            <div class="stage-rail" aria-label="Workflow stages">
+                <div class="stage-card is-current" id="workflow-stage-intake" data-state="current">
+                    <span class="stage-state-badge" id="workflow-stage-intake-badge">Current</span>
+                    <span class="stage-number">1</span>
+                    <strong>Intake</strong>
+                    <span id="workflow-stage-intake-status">Start or continue the story.</span>
+                </div>
+                <div class="stage-card" id="workflow-stage-evidence" data-state="ready">
+                    <span class="stage-state-badge" id="workflow-stage-evidence-badge">Ready</span>
+                    <span class="stage-number">2</span>
+                    <strong>Evidence, Laws, and Court Cases</strong>
+                    <span id="workflow-stage-evidence-status">Add and organize documents, messages, rules, and cases.</span>
+                </div>
+	                <div class="stage-card" id="workflow-stage-review" data-state="blocked">
+	                    <span class="stage-state-badge" id="workflow-stage-review-badge">Blocked</span>
+	                    <span class="stage-number">3</span>
+	                    <strong>Review</strong>
+	                    <span id="workflow-stage-review-status">Close support gaps before drafting.</span>
+	                    <a class="stage-unlock" id="workflow-stage-review-unlock" href="/claim-support-review">Fix proof gaps</a>
+	                </div>
+	                <div class="stage-card" id="workflow-stage-draft" data-state="blocked">
+	                    <span class="stage-state-badge" id="workflow-stage-draft-badge">Blocked</span>
+	                    <span class="stage-number">4</span>
+	                    <strong>Draft</strong>
+	                    <span id="workflow-stage-draft-status">Generate or refine the complaint.</span>
+	                    <a class="stage-unlock" id="workflow-stage-draft-unlock" href="#chat-upload-dashboard">Add evidence first</a>
+	                </div>
+            </div>
+            <div class="stage-actions">
+                <a class="secondary-action" href="/chat">Intake chat</a>
+                <a class="secondary-action" href="#chat-upload-dashboard">Upload evidence</a>
+                <a class="secondary-action" href="/claim-support-review">Review support</a>
+	                <a class="secondary-action" href="/document">Build draft</a>
+            </div>
+        </section>
+        <nav class="mobile-action-rail" id="mobile-action-rail" aria-label="Mobile workflow action rail">
+            <a class="primary-action" id="mobile-workflow-primary-action" href="/chat">Explain what happened</a>
+            <a class="secondary-action" href="#workspace-dataset-parquet-dashboard">Organize materials</a>
+        </nav>
+	        <section class="start-here" id="dashboard-start-here">
+	            <div class="eyebrow" style="color: var(--accent);">Start Here</div>
+	            <h2>What are you trying to do right now?</h2>
+	            <p>Start with the safest next step for the current complaint record. Other tools stay nearby, but the dashboard will keep one recommended action in front.</p>
+	            <div class="recommended-action-panel" id="dashboard-recommended-action-panel" aria-label="Recommended next action">
+	                <div>
+	                    <div class="eyebrow" style="color: var(--accent);">Recommended Next Step</div>
+	                    <h3 id="dashboard-recommended-action-title">Explain what happened</h3>
+	                    <p id="dashboard-recommended-action-reason">Begin with guided questions so the workspace has the story, people, dates, harms, and possible claims.</p>
+	                </div>
+	                <div class="recommended-action-actions">
+	                    <a class="decision-link primary" id="dashboard-recommended-action-link" href="/chat">Explain what happened</a>
+	                    <a class="decision-link" href="#heads-up-display-dashboard">Why this step?</a>
+	                </div>
+	            </div>
+	            <div class="secondary-decision-row" aria-label="Other dashboard decisions">
+	                <a class="decision-link" href="#dashboard-workspace-snapshot">Resume complaint</a>
+	                <a class="decision-link" href="#chat-upload-dashboard">Add evidence</a>
+	                <a class="decision-link" href="#docket-dataset-parquet-dashboard">Review docket</a>
+	                <a class="decision-link" href="#dashboard-subsection-index">More tools</a>
+	            </div>
+	        </section>
+
+        <section class="entry-overview" id="dashboard-entry-overview" aria-label="MCP dashboard package capabilities overview">
+            <article class="entry-overview-panel">
+                <div class="eyebrow" style="color: var(--accent);">What this dashboard helps with</div>
+                <h2>Start, continue, organize, review, and draft legal complaints or responses.</h2>
+                <p>This dashboard groups the package around ordinary complaint work: answer guided questions, continue a saved complaint, add evidence, organize laws and court cases, review docket filings, find important connections, and build a draft when the record is ready.</p>
                 <div class="chip-row">
-                    <span class="chip good">Workspace session continuity</span>
-                    <span class="chip warm">Packaged docket monitoring</span>
-                    <span class="chip">Chat upload modal for files and notes</span>
-                    <span class="chip">Heads-up display for next actions and case calendar</span>
+                    <span class="chip good">Guided questions</span>
+                    <span class="chip warm">Evidence, laws, and court cases</span>
+                    <span class="chip">Docket and response review</span>
+                    <span class="chip">Connections and duty checks</span>
+                    <span class="chip">Profile and saved sessions</span>
+                </div>
+                <div class="legal-safety-note">
+                    <strong>Important</strong>
+                    <span>This tool helps organize information and draft documents. It does not decide whether you should file, and it is not a substitute for legal advice.</span>
                 </div>
             </article>
-            <article class="card">
+            <div class="entry-path-grid" id="dashboard-entry-paths">
+                {entry_path_cards}
+            </div>
+        </section>
+
+        <section class="subsection-index" id="dashboard-subsection-index">
+            <div class="eyebrow" style="color: var(--accent);">Find the right tool</div>
+            <h2>Jump to the part of the complaint workflow you need.</h2>
+            <p>Use this index to add evidence, organize materials, review proof gaps, search docket filings, find important connections, check duties or conflicts, add notes, or open optional technical tools.</p>
+            <div class="subsection-index-grid">
+                {dashboard_subsection_index}
+            </div>
+        </section>
+
+        <section class="workspace-context-bar" id="workspace-context-bar" aria-label="Loaded workspace context">
+            <div>
+                <div class="eyebrow" style="color: var(--accent);">Workspace Context</div>
+                <h2 id="context-next-action">Load workspace to get next action</h2>
+                <div class="context-grid">
+                    <div class="context-metric"><span>Workspace</span><strong id="context-workspace-id">not loaded</strong><a class="context-action-hint" id="context-workspace-hint" href="/workspace">Load workspace</a></div>
+                    <div class="context-metric"><span>Claim type</span><strong id="context-claim-type">waiting</strong><a class="context-action-hint" id="context-claim-hint" href="/chat">Clarify claim</a></div>
+                    <div class="context-metric"><span>Evidence</span><strong id="context-evidence-count">0 items</strong><a class="context-action-hint" id="context-evidence-hint" href="#chat-upload-dashboard">Upload evidence</a></div>
+                    <div class="context-metric"><span>Draft</span><strong id="context-draft-status">not available</strong><a class="context-action-hint" id="context-draft-hint" href="/document">Open builder</a></div>
+                </div>
+            </div>
+            <div class="context-actions">
+                <a class="secondary-action" id="context-open-workspace" href="/workspace">Workspace</a>
+                <a class="secondary-action" id="context-open-review" href="/claim-support-review">Review</a>
+                <a class="secondary-action" id="context-open-chat" href="/chat">Chat</a>
+                <a class="primary-action" id="context-open-builder" href="/document">Build draft</a>
+            </div>
+        </section>
+        <section class="hero-grid">
+            <article class="hero-card">
+                <div class="eyebrow" style="color: #115c63;">Package Capability Map</div>
+                <h2>Choose the workflow you need, then drill into the dashboard tools behind it.</h2>
+                <p>The cards below connect the package tools to ordinary complaint tasks: start intake, resume a case, inspect a docket, organize evidence and law, or draft a document.</p>
+                <div class="chip-row">
+                    <span class="chip good">Intake chat and review</span>
+                    <span class="chip warm">Workspace evidence, law, and caselaw datasets</span>
+                    <span class="chip">Docket dataset search</span>
+                    <span class="chip">Connections and duties</span>
+                    <span class="chip">Profile and decentralized identity</span>
+                </div>
+            </article>
+            <article class="card" id="profile-and-identity-dashboard">
                 <h2>Quick Surface Links</h2>
-                <p>Use these when you want to jump straight into the richer dedicated surface after checking the dashboard card.</p>
+                <p>Use these when you want to jump straight into the dedicated surface after choosing a workflow. Profile, cookies, workspace, and SDK routes share the same browser-side MCP sync context.</p>
+                {_render_subsection_nav("Profile and session subsections", [("Profile", "/profile"), ("Cookies", "/cookies"), ("Workspace context", "#workspace-context-bar"), ("Advanced tools", "#dashboard-advanced-tools")])}
                 <ul>{complaint_links}</ul>
             </article>
         </section>
 
+        <section class="capability-grid" id="dashboard-capabilities">
+            {capability_cards}
+        </section>
+
+        <section class="journey-detail-grid" id="dashboard-journey-details">
+            {journey_detail_panels}
+        </section>
+
+        <section class="card" id="dashboard-package-map">
+            <div class="eyebrow" style="color: var(--accent);">Package Capability Matrix</div>
+            <h2>How the package capabilities connect to dashboard surfaces</h2>
+            <p>This map keeps each user-facing path tied to concrete routes, MCP tools, dataset APIs, graph analyzers, legal authority/caselaw surfaces, and legacy ipfs_datasets_py dashboards.</p>
+            <div class="package-map-grid">
+                {package_capability_matrix}
+            </div>
+        </section>
+
+        <section class="card capability-plan" id="dashboard-improvement-plan">
+            <div class="eyebrow" style="color: var(--accent);">Comprehensive Improvement Plan</div>
+            <h2>How this dashboard ties the package together</h2>
+            <p>This plan keeps the UI grounded in surfaces that already exist in the package while making the next implementation slices clear.</p>
+            <ul>{improvement_plan}</ul>
+        </section>
+
+        <details class="advanced-tools" id="dashboard-advanced-tools">
+            <summary>Technical tools for administrators</summary>
+            <p class="advanced-tools-helper">Most users do not need these to create or manage a complaint. Open this section only for diagnostics, package consoles, SDK behavior, cookies, raw MCP tools, or legacy ipfs_datasets_py dashboards.</p>
+            <div class="advanced-tools-grid">
+                <article class="package-map-card">
+                    <h3>MCP and SDK Operations</h3>
+                    <p>Inspect MCP tool metadata, browser sync behavior, JSON-compatible endpoints, and SDK playground wiring.</p>
+                    <div class="section-jump-row">{_render_link_row([("MCP dashboard", "/mcp"), ("MCP tools JSON", "/api/complaint-workspace/mcp/tools"), ("SDK playground", "/ipfs-datasets/sdk-playground")])}</div>
+                </article>
+                <article class="package-map-card">
+                    <h3>Profile and Session Context</h3>
+                    <p>Open profile, cookies, workspace identity, and current context state used when moving between dashboards.</p>
+                    <div class="section-jump-row">{_render_link_row([("Profile", "/profile"), ("Cookies", "/cookies"), ("Workspace context", "#workspace-context-bar")])}</div>
+                </article>
+                <article class="package-map-card">
+                    <h3>Legacy ipfs_datasets_py Consoles</h3>
+                    <p>Reach the mounted compatibility dashboards for package administration, graph tools, vector search, audit, and monitoring.</p>
+                    <div class="section-jump-row">{_render_link_row([("Legacy dashboard list", "#legacy-ipfs-dashboard-shells"), ("Admin MCP dashboard", "/dashboards/ipfs-datasets/admin-mcp"), ("GraphRAG dashboard", "/dashboards/ipfs-datasets/admin-graphrag")])}</div>
+                </article>
+            </div>
+        </details>
+
         <section class="workspace-cards">
-            <article class="dashboard-card">
+            <article class="dashboard-card" id="dashboard-workspace-snapshot">
                 <div class="eyebrow" style="color: var(--accent);">Workspace Card</div>
                 <h2>Complaint Workspace Snapshot</h2>
                 <p>Load the shared complaint session and see the intake, evidence, and draft state that currently gates review and builder handoffs.</p>
+                {_render_subsection_nav("Workspace subsections", [("Intake chat", "/chat"), ("Upload evidence", "#chat-upload-dashboard"), ("Review support", "/claim-support-review"), ("Generate complaint", "/document")])}
                 <div class="field-row">
                     <div>
                         <label class="field-label" for="dashboard-workspace-user-id">Workspace User ID</label>
@@ -545,10 +1731,11 @@ def _render_dashboard_hub(
                 <pre id="dashboard-workspace-preview">Workspace session details will appear here.</pre>
             </article>
 
-            <article class="dashboard-card">
+            <article class="dashboard-card" id="packaged-docket-dashboard">
                 <div class="eyebrow" style="color: var(--accent);">Docket Card</div>
                 <h2>Packaged Docket Dashboard</h2>
                 <p>Load the packaged docket operator dashboard from a manifest path without leaving the complaint-generator shell.</p>
+                {_render_subsection_nav("Packaged docket subsections", [("Docket dataset", "#docket-dataset-parquet-dashboard"), ("Calendar preview", "#dashboard-docket-calendar-list"), ("Heads-up display", "#heads-up-display-dashboard")])}
                 <label class="field-label" for="dashboard-docket-manifest-path">Manifest Path</label>
                 <input id="dashboard-docket-manifest-path" type="text" value="{escape(default_manifest_path)}" placeholder="/absolute/path/to/docket-manifest.json">
                 <div class="button-row" style="margin-top: 12px;">
@@ -581,6 +1768,7 @@ def _render_dashboard_hub(
                 <div class="eyebrow" style="color: var(--accent);">Docket Dataset</div>
                 <h2>Docket Dataset Parquet Dashboard</h2>
                 <p>Review docket dataset parquet files through the same ipfs_datasets_py dataset loader, search index, graph projection, and case-calendar extraction used by the MCP tools.</p>
+                {_render_subsection_nav("Docket dataset subsections", [("Load docket", "#packaged-docket-dashboard"), ("Search filings", "#dashboard-docket-dataset-query"), ("Calendar preview", "#dashboard-docket-calendar-list"), ("Annotate document", "#dataset-document-annotation-dashboard")])}
                 <label class="field-label" for="dashboard-docket-dataset-path">Docket Dataset Path</label>
                 <input id="dashboard-docket-dataset-path" type="text" value="{escape(default_docket_dataset_path)}" placeholder="/absolute/path/to/docket.dataset.parquet">
                 <div class="field-row" style="margin-top: 12px;">
@@ -591,7 +1779,7 @@ def _render_dashboard_hub(
                     <div>
                         <label class="field-label" for="dashboard-docket-dataset-input-type">Input</label>
                         <select id="dashboard-docket-dataset-input-type">
-                            <option value="single" selected>Single parquet</option>
+                            <option value="single" selected>One saved docket file</option>
                             <option value="packaged">Packaged manifest</option>
                             <option value="json">Source JSON</option>
                         </select>
@@ -617,38 +1805,132 @@ def _render_dashboard_hub(
             </article>
 
             <article class="dashboard-card" id="workspace-dataset-parquet-dashboard">
-                <div class="eyebrow" style="color: var(--accent);">Workspace Dataset</div>
-                <h2>Workspace Dataset Parquet Entry Point</h2>
-                <p>Browse and search ipfs_datasets_py workspace dataset parquet files, then use filters that match the stored workspace schema.</p>
-                <label class="field-label" for="dashboard-workspace-dataset-path">Workspace Dataset Path</label>
-                <input id="dashboard-workspace-dataset-path" type="text" value="{escape(default_workspace_dataset_path)}" placeholder="/absolute/path/to/workspace.dataset.parquet">
-                <div class="modal-grid">
-                    <div>
-                        <label class="field-label" for="dashboard-workspace-dataset-input-type">Input</label>
-                        <select id="dashboard-workspace-dataset-input-type">
-                            <option value="single" selected>Single parquet</option>
-                            <option value="packaged">Packaged manifest</option>
-                            <option value="json">Source JSON</option>
-                        </select>
+                <div class="eyebrow" style="color: var(--accent);">Organize Materials</div>
+                <h2>Organize Evidence, Laws, and Court Cases</h2>
+                <p>Load or add materials for this complaint, choose what kind of material you want to work with, search it, then use connection and duty checks when the record is ready.</p>
+                {_render_subsection_nav("Material organization steps", [("Search materials", "#dashboard-workspace-dataset-query"), ("Choose material type", "#workspace-law-caselaw-tools"), ("Find connections", "#workspace-knowledge-graph-tools"), ("Check duties/conflicts", "#workspace-deontic-logic-tools"), ("Add notes", "#dataset-document-annotation-dashboard")])}
+                <div class="section-jump-row" aria-label="First-class analysis actions">
+                    <a class="primary-action is-disabled" id="dashboard-open-dataset-graph" href="#workspace-knowledge-graph-tools" aria-disabled="true">Find connections</a>
+                    <a class="secondary-action is-disabled" id="dashboard-run-deontic-check" href="#workspace-deontic-logic-tools" aria-disabled="true">Check duties and conflicts</a>
+                </div>
+                <div class="workspace-flow-status" id="workspace-dataset-flow-status" aria-label="Workspace dataset workflow status">
+                    <div><span>Step 1</span><strong id="workspace-flow-dataset-readiness">Materials not loaded</strong></div>
+                    <div><span>Step 2</span><strong id="workspace-flow-lane-readiness">Choose material type</strong></div>
+                    <div><span>Step 3</span><strong id="workspace-flow-graph-readiness">Connections not ready</strong></div>
+                    <div><span>Next action</span><strong id="workspace-flow-next-action">Load or add materials</strong></div>
+                </div>
+	                <div class="workspace-empty-state" id="workspace-materials-empty-state">
+	                    <h3>No materials are loaded yet</h3>
+	                    <p>Add or load documents, messages, rules, or court cases before searching or checking legal duties. If you are not sure what to add, start with evidence such as emails, notices, PDFs, photos, messages, or testimony.</p>
+                    <div class="button-row">
+                        <a class="primary-action" href="#chat-upload-dashboard">Add evidence files</a>
+                        <a class="secondary-action" href="#dashboard-workspace-dataset-path">Load saved materials</a>
                     </div>
+                    <div class="workspace-checklist" aria-label="Material organization checklist">
+                        <div><span>1</span><p><strong>Load or add materials.</strong> Bring in evidence, laws, court cases, or proof notes.</p></div>
+                        <div><span>2</span><p><strong>Choose material type.</strong> Pick the category you want to work with first.</p></div>
+                        <div><span>3</span><p><strong>Search and organize.</strong> Find the records that support or challenge the complaint.</p></div>
+                        <div><span>4</span><p><strong>Check duties and conflicts.</strong> Look for requirements, permissions, prohibitions, and contradictions.</p></div>
+                        <div><span>5</span><p><strong>Send to review or draft.</strong> Use the organized record to check proof gaps or build a draft.</p></div>
+	                    </div>
+	                </div>
+	                <div class="workspace-next-action-panel" id="workspace-materials-next-action-panel" aria-label="Materials next safe action">
+	                    <div>
+	                        <div class="eyebrow" style="color: var(--accent);">Next Safe Action</div>
+	                        <h3 id="workspace-materials-next-action-title">Add evidence files</h3>
+	                        <p id="workspace-materials-next-action-reason">Add documents or choose a saved materials file before searching, finding connections, or checking duties.</p>
+	                    </div>
+	                    <div class="button-row">
+	                        <a class="primary-action" id="workspace-materials-next-action-link" href="#chat-upload-dashboard">Add evidence files</a>
+	                    </div>
+	                </div>
+	                <div class="preflight-hint" id="workspace-action-preflight">Load or add materials and choose a material type before finding connections or checking duties.</div>
+                <p class="lane-help">Choose what kind of material you want to work with first. This changes the filters used for search, connection checks, and duty/conflict checks.</p>
+                <div class="lane-grid" id="workspace-lane-cards" role="radiogroup" aria-label="Workspace evidence law and caselaw lanes">
+                    <article class="lane-card" id="workspace-lane-evidence" role="radio" tabindex="0" aria-checked="false" data-lane-source-type="evidence">
+                        <strong>Evidence</strong>
+                        <p>Documents, emails, photos, notices, messages, PDFs, and testimony.</p>
+                        <span class="lane-status" id="workspace-lane-evidence-status">not selected</span>
+                    </article>
+                    <article class="lane-card" id="workspace-lane-law" role="radio" tabindex="0" aria-checked="false" data-lane-source-type="legal_authority">
+                        <strong>Rules and laws</strong>
+                        <p>Statutes, regulations, policies, agency rules, ordinances, and standards.</p>
+                        <span class="lane-status" id="workspace-lane-law-status">not selected</span>
+                    </article>
+                    <article class="lane-card" id="workspace-lane-caselaw" role="radio" tabindex="0" aria-checked="false" data-lane-source-type="caselaw">
+                        <strong>Court cases</strong>
+                        <p>Past court decisions, opinions, holdings, and precedent that may support or limit an argument.</p>
+                        <span class="lane-status" id="workspace-lane-caselaw-status">not selected</span>
+                    </article>
+	                    <article class="lane-card" id="workspace-lane-claim-support" role="radio" tabindex="0" aria-checked="false" data-lane-source-type="claim_support">
+	                        <strong>Proof checklist</strong>
+	                        <p>Missing facts and claim elements to review before drafting.</p>
+	                        <span class="lane-status" id="workspace-lane-claim-support-status">not selected</span>
+	                    </article>
+                </div>
+	                <div class="lane-summary" id="workspace-lane-summary">No material type selected.</div>
+	                <section class="dataset-step" id="workspace-dataset-step-load">
+	                    <h3 id="workspace-step-load-title">Step 1: Load or add materials</h3>
+	                    <span class="dataset-step-status" id="workspace-dataset-load-state">Not loaded</span>
+	                    <div class="workspace-path-status" id="workspace-materials-path-status">
+	                        <strong id="workspace-materials-path-title">No saved materials file selected</strong>
+	                        <span id="workspace-materials-path-detail">Upload evidence files, or paste the path to a saved workspace materials file.</span>
+	                    </div>
+	                    <div class="workspace-step-actions" aria-label="Load materials actions">
+	                        <a class="primary-action" href="#chat-upload-dashboard">Upload evidence files</a>
+	                        <button id="dashboard-load-workspace-dataset-step1" type="button" class="secondary">Open saved file</button>
+	                    </div>
+	                    <label class="field-label" for="dashboard-workspace-dataset-path">Saved materials file</label>
+	                    <input id="dashboard-workspace-dataset-path" type="text" value="{escape(default_workspace_dataset_path)}" placeholder="Paste saved file path">
+	                    <p class="field-helper">Use this only if you already have a saved workspace materials file.</p>
+	                </section>
+                <section class="dataset-step" id="workspace-dataset-step-filter">
+                    <h3>Step 2: Choose material type and search filters</h3>
+	                    <span class="dataset-step-status" id="workspace-dataset-filter-state">Choose one material type so search and checks use the right records.</span>
+                <div class="modal-grid" id="workspace-law-caselaw-tools">
+	                    <div>
+	                        <label class="field-label" for="dashboard-workspace-dataset-input-type">Saved material format</label>
+	                        <select id="dashboard-workspace-dataset-input-type">
+	                            <option value="single" selected>One saved materials file</option>
+	                            <option value="packaged">Saved package folder</option>
+	                            <option value="json">Source JSON file</option>
+	                        </select>
+	                    </div>
                     <div>
-                        <label class="field-label" for="dashboard-workspace-dataset-query">Search Query</label>
+                        <label class="field-label" for="dashboard-workspace-dataset-query">Words to search for</label>
                         <input id="dashboard-workspace-dataset-query" type="text" placeholder="accommodation, retaliation, notice">
                     </div>
                     <div>
-                        <label class="field-label" for="dashboard-workspace-dataset-claim-type">Claim Type</label>
-                        <input id="dashboard-workspace-dataset-claim-type" type="text" placeholder="housing_discrimination">
-                    </div>
+	                        <label class="field-label" for="dashboard-workspace-dataset-claim-type">Claim type</label>
+	                        <input id="dashboard-workspace-dataset-claim-type" type="text" placeholder="Housing discrimination">
+	                    </div>
                     <div>
                         <label class="field-label" for="dashboard-workspace-dataset-document-type">Document Type</label>
                         <input id="dashboard-workspace-dataset-document-type" type="text" placeholder="email, pdf, notice">
                     </div>
-                </div>
+	                    <div class="advanced-filter-field">
+	                        <label class="field-label" for="dashboard-workspace-dataset-source-type">Advanced material filter</label>
+	                        <select id="dashboard-workspace-dataset-source-type">
+	                            <option value="">Use selected material card</option>
+	                            <option value="evidence">Evidence</option>
+	                            <option value="legal_authority">Rules and laws</option>
+	                            <option value="caselaw">Court cases</option>
+	                            <option value="claim_support">Proof checklist</option>
+	                            <option value="gmail">Gmail / mailbox</option>
+	                            <option value="docket">Docket</option>
+	                        </select>
+	                        <p class="field-helper">The cards above are the main way to choose what you are working with.</p>
+	                    </div>
+	                </div>
+	                </section>
+                <section class="dataset-step" id="workspace-dataset-step-run">
+                    <h3>Step 3: Search, find connections, or check duties</h3>
+                    <span class="dataset-step-status" id="workspace-dataset-run-state">Load materials, then search or check connections and duties.</span>
                 <div class="button-row" style="margin-top: 12px;">
-                    <button id="dashboard-load-workspace-dataset" type="button">Load Workspace Dataset</button>
-                    <button id="dashboard-search-workspace-dataset" type="button" class="secondary">Search Workspace Dataset</button>
+                    <button id="dashboard-load-workspace-dataset" type="button">Load Saved Materials</button>
+                    <button id="dashboard-search-workspace-dataset" type="button" class="secondary">Search Materials</button>
                 </div>
-                <div class="modal-grid" style="margin-top: 14px;">
+                <div class="modal-grid" id="workspace-knowledge-graph-tools" style="margin-top: 14px;">
                     <div>
                         <label class="field-label" for="dashboard-workspace-graph-query">Graph / Logic Query</label>
                         <input id="dashboard-workspace-graph-query" type="text" placeholder="HACC, accommodation, family, agent">
@@ -661,7 +1943,7 @@ def _render_dashboard_hub(
                         <label class="field-label" for="dashboard-workspace-graph-document-id">Document ID</label>
                         <input id="dashboard-workspace-graph-document-id" type="text" placeholder="Optional document id">
                     </div>
-                    <div>
+                    <div id="workspace-deontic-logic-tools">
                         <label class="field-label" for="dashboard-workspace-graph-modality">Allowed / Required / Prohibited</label>
                         <select id="dashboard-workspace-graph-modality">
                             <option value="">All modalities</option>
@@ -676,9 +1958,17 @@ def _render_dashboard_hub(
                         <input id="dashboard-workspace-graph-limit" type="text" value="60" placeholder="60">
                     </div>
                 </div>
-                <div class="button-row" style="margin-top: 12px;">
-                    <button id="dashboard-load-workspace-graph" type="button" class="secondary">Load Graph + Logic Flow</button>
+                <div class="preset-row" aria-label="Connection and duty check presets">
+                    <button class="preset-button" type="button" data-dashboard-graph-preset data-graph-query="" data-graph-relationship="" data-graph-modality="required">What was required?</button>
+                    <button class="preset-button" type="button" data-dashboard-graph-preset data-graph-query="" data-graph-relationship="" data-graph-modality="prohibited">What was prohibited?</button>
+                    <button class="preset-button" type="button" data-dashboard-graph-preset data-graph-query="notice accommodation retaliation" data-graph-relationship="IMPOSES_NORM" data-graph-modality="">Which facts impose duties?</button>
+                    <button class="preset-button" type="button" data-dashboard-graph-preset data-graph-query="conflict exception condition" data-graph-relationship="" data-graph-modality="conditional">Find conditions and conflicts</button>
+                    <button class="preset-button" type="button" data-dashboard-graph-preset data-graph-query="document evidence support" data-graph-relationship="SUPPORTS" data-graph-modality="">Find supporting documents</button>
                 </div>
+                <div class="button-row" style="margin-top: 12px;">
+                    <button id="dashboard-load-workspace-graph" type="button" class="secondary">Find Connections and Duties</button>
+                </div>
+                </section>
                 <div class="stat-grid">
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-documents">0</strong><span>Workspace documents</span></div>
                     <div class="stat-card"><strong id="dashboard-workspace-dataset-collections">0</strong><span>Collections</span></div>
@@ -701,16 +1991,17 @@ def _render_dashboard_hub(
                     <span class="chip" id="dashboard-workspace-dataset-workspace-chip">workspace: waiting</span>
                     <span class="chip" id="dashboard-workspace-dataset-source-chip">source: waiting</span>
                 </div>
-                <div class="status-line" id="dashboard-workspace-dataset-status">Add a workspace dataset parquet path to enter the dataset workspace.</div>
-                <pre id="dashboard-workspace-dataset-preview">Workspace dataset details will appear here.</pre>
-                <div class="status-line" id="dashboard-workspace-graph-status">Load a workspace graph to inspect entity neighborhoods and logical flow.</div>
-                <pre id="dashboard-workspace-graph-preview">Knowledge graph and logic-flow details will appear here.</pre>
+                <div class="status-line" id="dashboard-workspace-dataset-status">Add or load saved materials before searching this complaint record.</div>
+                <pre id="dashboard-workspace-dataset-preview">Saved material details will appear here.</pre>
+                <div class="status-line" id="dashboard-workspace-graph-status">Load materials first, then find connections and check duties or conflicts.</div>
+                <pre id="dashboard-workspace-graph-preview">Connection and duty-check details will appear here.</pre>
             </article>
 
             <article class="dashboard-card" id="dataset-document-annotation-dashboard">
                 <div class="eyebrow" style="color: var(--accent);">Document Annotation</div>
                 <h2>Dataset Document Annotation</h2>
                 <p>Capture a review note from the currently loaded docket or workspace dataset document and save it into the complaint workspace evidence record.</p>
+                {_render_subsection_nav("Annotation subsections", [("Docket dataset", "#docket-dataset-parquet-dashboard"), ("Workspace dataset", "#workspace-dataset-parquet-dashboard"), ("Workspace session", "#dashboard-workspace-snapshot")])}
                 <div class="modal-grid">
                     <div>
                         <label class="field-label" for="dashboard-dataset-annotation-user-id">Workspace User ID</label>
@@ -759,10 +2050,11 @@ def _render_dashboard_hub(
                 <pre id="dashboard-dataset-annotation-preview">The saved annotation payload will appear here.</pre>
             </article>
 
-            <article class="dashboard-card">
+            <article class="dashboard-card" id="chat-upload-dashboard">
                 <div class="eyebrow" style="color: var(--accent);">Chat Card</div>
                 <h2>Chat Upload Modal</h2>
                 <p>Open a modal that lets intake staff or operators attach photos, videos, PDFs, mailbox exports, or notes directly into the complaint workspace evidence flow.</p>
+                {_render_subsection_nav("Upload subsections", [("Intake chat", "/chat"), ("Workspace", "#dashboard-workspace-snapshot"), ("Evidence annotation", "#dataset-document-annotation-dashboard")])}
                 <div class="chip-row">
                     <span class="chip">Accepts image, video, PDF, text, archive, and message files</span>
                     <span class="chip good">Uses complaint workspace evidence storage</span>
@@ -776,10 +2068,11 @@ def _render_dashboard_hub(
                 <pre id="dashboard-chat-upload-preview">The latest upload response will appear here.</pre>
             </article>
 
-            <article class="dashboard-card">
+            <article class="dashboard-card" id="heads-up-display-dashboard">
                 <div class="eyebrow" style="color: var(--accent);">Heads-Up Display</div>
                 <h2>Heads-Up Display Dashboard</h2>
                 <p>Get a front-page glance at the next legal action to perform, where to continue the case conversation, whether the workspace record is ready, and whether the docket exposes any calendar or hearing events.</p>
+                {_render_subsection_nav("Heads-up subsections", [("Workspace", "#dashboard-workspace-snapshot"), ("Review", "/claim-support-review"), ("Docket", "#packaged-docket-dashboard"), ("Build draft", "/document")])}
                 <div class="stat-grid">
                     <div class="stat-card"><strong id="dashboard-heads-up-action">Waiting</strong><span>Next action</span></div>
                     <div class="stat-card"><strong id="dashboard-heads-up-calendar-count">0</strong><span>Calendar events</span></div>
@@ -806,13 +2099,15 @@ def _render_dashboard_hub(
             </article>
         </section>
 
-        <section class="legacy-grid">
+        <section class="legacy-grid" id="legacy-ipfs-dashboard-shells">
             <section class="card">
                 <h2>Complaint Generator Surfaces</h2>
+                <p>Dedicated surfaces for the complaint workflow: intake chat, profile, workspace, support review, builder, and trace views.</p>
                 <ul>{complaint_links}</ul>
             </section>
             <section class="card">
                 <h2>ipfs_datasets_py Dashboards</h2>
+                <p>Advanced package dashboards exposed through the same MCP server dashboard shell.</p>
                 {ipfs_markup}
             </section>
         </section>
@@ -879,11 +2174,16 @@ def _render_dashboard_hub(
             const syncEventName = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.SYNC_EVENT_NAME) || 'complaint-mcp-sync';
             const syncEventStorageKey = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.DEFAULT_SYNC_EVENT_STORAGE_KEY) || 'complaintGenerator.sdkSyncEvent';
             const dashboardState = {{
-                workspacePayload: null,
-                docketPayload: null,
-                docketViewPayload: null,
-                selectedDatasetDocument: null,
-            }};
+	                workspacePayload: null,
+	                docketPayload: null,
+	                docketViewPayload: null,
+	                selectedDatasetDocument: null,
+	                workspaceDatasetLoaded: false,
+	                workspaceDatasetStatus: 'idle',
+	                workspaceDatasetError: '',
+	                workspaceGraphReady: false,
+	                selectedWorkspaceLane: '',
+	            }};
 
             function parseCount(value, fallback) {{
                 const numeric = Number(value);
@@ -906,14 +2206,383 @@ def _render_dashboard_hub(
                 }}
             }}
 
-            function setHref(id, value) {{
+	            function setHref(id, value) {{
+	                const node = document.getElementById(id);
+	                if (node) {{
+	                    node.href = value;
+	                }}
+	            }}
+
+	            function userFacingMaterialsError(message) {{
+	                const raw = String(message || '').trim();
+	                if (!raw || /internal server error|request failed|500|not found|no such file|does not exist|failed/i.test(raw)) {{
+	                    return 'We could not open this saved materials file. Check that the file exists, choose a different file, or upload evidence instead.';
+	                }}
+	                return raw;
+	            }}
+
+            function setButtonEnabled(id, enabled, reason) {{
                 const node = document.getElementById(id);
-                if (node) {{
-                    node.href = value;
+                if (!node) {{
+                    return;
+                }}
+                node.disabled = !enabled;
+                node.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+                if (reason) {{
+                    node.title = reason;
+                }} else {{
+                    node.removeAttribute('title');
                 }}
             }}
 
-            function renderChipList(id, values, fallback) {{
+	            function setLinkEnabled(id, enabled, reason) {{
+                const node = document.getElementById(id);
+                if (!node) {{
+                    return;
+                }}
+                node.classList.toggle('is-disabled', !enabled);
+                node.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+                if (reason) {{
+                    node.title = reason;
+                }} else {{
+                    node.removeAttribute('title');
+                }}
+            }}
+
+            function setStageCurrent(stageName) {{
+                ['intake', 'evidence', 'review', 'draft'].forEach(function(name) {{
+                    const node = document.getElementById(`workflow-stage-${{name}}`);
+                    if (node) {{
+                        node.classList.toggle('is-current', name === stageName);
+                    }}
+                }});
+            }}
+
+            function setWorkflowStageState(stageName, state) {{
+                const normalizedState = String(state || 'ready').trim() || 'ready';
+                const node = document.getElementById(`workflow-stage-${{stageName}}`);
+                const badge = document.getElementById(`workflow-stage-${{stageName}}-badge`);
+                if (node) {{
+                    node.dataset.state = normalizedState;
+                    node.classList.toggle('is-current', normalizedState === 'current');
+                }}
+                if (badge) {{
+                    badge.textContent = normalizedState.charAt(0).toUpperCase() + normalizedState.slice(1);
+                }}
+            }}
+
+	            function setWorkflowPrimaryAction(label, href, reason) {{
+	                setText('workflow-primary-action', label);
+	                setHref('workflow-primary-action', href);
+	                setText('mobile-workflow-primary-action', label);
+	                setHref('mobile-workflow-primary-action', href);
+	                setText('dashboard-recommended-action-title', label);
+	                setText('dashboard-recommended-action-link', label);
+	                setHref('dashboard-recommended-action-link', href);
+	                setText('dashboard-recommended-action-reason', reason || 'Use this step to move the complaint record forward without skipping prerequisites.');
+	            }}
+
+	            function setControlEnabled(id, enabled, reason) {{
+	                const node = document.getElementById(id);
+	                if (!node) {{
+	                    return;
+	                }}
+	                node.disabled = !enabled;
+	                node.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+	                if (reason) {{
+	                    node.title = reason;
+	                }} else {{
+	                    node.removeAttribute('title');
+	                }}
+	            }}
+
+            function updateWorkflowRail(payload) {{
+                const session = payload && payload.session ? payload.session : {{}};
+                const review = payload && payload.review ? payload.review : {{}};
+                const overview = review && review.overview ? review.overview : {{}};
+                const evidence = session && session.evidence ? session.evidence : {{}};
+                const evidenceCount = parseCount((evidence.testimony || []).length, 0) + parseCount((evidence.documents || []).length, 0);
+                const missingCount = parseCount(overview.missing_elements, 0);
+                const hasDraft = Boolean(payload && payload.draft) || Boolean(session && session.draft);
+                const userId = String(session.user_id || '').trim();
+                const claimType = String(session.claim_type || '').trim();
+                let stage = 'intake';
+                let primaryLabel = 'Explain what happened';
+	                let primaryHref = buildSurfaceUrl('/chat', {{
+	                    user_id: userId,
+	                    source: 'dashboard-workflow-rail',
+	                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
+	                }});
+	                let summary = 'Start with intake, then add evidence, laws, and court cases before review and drafting.';
+	                let primaryReason = 'Begin with guided questions so the workspace has the story, people, dates, harms, and possible claims.';
+	                if (userId && evidenceCount === 0) {{
+	                    stage = 'evidence';
+	                    primaryLabel = 'Upload evidence';
+	                    primaryHref = '#chat-upload-dashboard';
+	                    summary = 'The workspace is loaded. Add evidence, law, or caselaw records next.';
+	                    primaryReason = 'The workspace is loaded, but it needs supporting records before review or drafting will be reliable.';
+	                }} else if (userId && missingCount > 0) {{
+	                    stage = 'review';
+	                    primaryLabel = `Review ${{missingCount}} support gap${{missingCount === 1 ? '' : 's'}}`;
+                    primaryHref = buildSurfaceUrl('/claim-support-review', {{
+                        user_id: userId,
+                        workspace_user_id: userId,
+                        claim_type: claimType,
+	                    }});
+	                    summary = 'Evidence exists, but support gaps still need review before a filing-quality draft.';
+	                    primaryReason = 'Some claim elements still need proof or review. Close those gaps before treating the draft as ready.';
+	                }} else if (userId && (hasDraft || evidenceCount > 0)) {{
+	                    stage = 'draft';
+	                    primaryLabel = hasDraft ? 'Refine draft' : 'Generate complaint';
+                    primaryHref = buildSurfaceUrl('/document', {{
+                        user_id: userId,
+                        workspace_user_id: userId,
+                        claim_type: claimType,
+	                    }});
+	                    summary = hasDraft ? 'A draft exists. Continue refinement, validation, and export.' : 'The record is ready for a complaint draft handoff.';
+	                    primaryReason = hasDraft ? 'A draft already exists, so the next safe step is refinement, validation, or export.' : 'The workspace has evidence and no loaded support gaps, so it can move into drafting.';
+	                }}
+                setWorkflowStageState('intake', userId ? 'complete' : (stage === 'intake' ? 'current' : 'ready'));
+                setWorkflowStageState('evidence', stage === 'evidence' ? 'current' : (evidenceCount > 0 ? 'complete' : (userId ? 'ready' : 'blocked')));
+                setWorkflowStageState('review', stage === 'review' ? 'current' : (missingCount > 0 ? 'blocked' : (userId && evidenceCount > 0 ? 'complete' : 'blocked')));
+                setWorkflowStageState('draft', stage === 'draft' ? 'current' : (hasDraft ? 'complete' : (missingCount > 0 || evidenceCount === 0 ? 'blocked' : 'ready')));
+                setText('workflow-rail-summary', summary);
+                setText('workflow-stage-intake-status', userId ? 'Intake context is loaded.' : 'Start or continue the story.');
+                setText('workflow-stage-evidence-status', evidenceCount ? `${{evidenceCount}} record${{evidenceCount === 1 ? '' : 's'}} saved.` : 'Add documents, messages, laws, or court cases.');
+	                setText('workflow-stage-review-status', missingCount ? `${{missingCount}} proof item${{missingCount === 1 ? '' : 's'}} need review before drafting.` : 'No loaded proof gaps.');
+	                setText('workflow-stage-draft-status', hasDraft ? 'Draft available.' : (evidenceCount === 0 ? 'Blocked until evidence is added.' : (missingCount > 0 ? 'Blocked until proof items are reviewed.' : 'Ready to build a draft.')));
+	                setText('workflow-stage-review-unlock', missingCount ? 'Review required proof' : 'Open proof review');
+	                setHref('workflow-stage-review-unlock', buildSurfaceUrl('/claim-support-review', {{
+	                    user_id: userId,
+	                    workspace_user_id: userId,
+	                    claim_type: claimType,
+	                }}));
+	                setText('workflow-stage-draft-unlock', evidenceCount === 0 ? 'Add evidence first' : (missingCount > 0 ? 'Fix proof gaps first' : 'Build draft'));
+	                setHref('workflow-stage-draft-unlock', evidenceCount === 0 ? '#chat-upload-dashboard' : (missingCount > 0 ? buildSurfaceUrl('/claim-support-review', {{
+	                    user_id: userId,
+	                    workspace_user_id: userId,
+	                    claim_type: claimType,
+	                }}) : buildSurfaceUrl('/document', {{
+	                    user_id: userId,
+	                    workspace_user_id: userId,
+	                    claim_type: claimType,
+	                }})));
+	                setWorkflowPrimaryAction(primaryLabel, primaryHref, primaryReason);
+	            }}
+
+            function resetWorkflowRail() {{
+                setWorkflowStageState('intake', 'current');
+                setWorkflowStageState('evidence', 'ready');
+                setWorkflowStageState('review', 'blocked');
+                setWorkflowStageState('draft', 'blocked');
+                setText('workflow-rail-summary', 'Load the workspace to align the dashboard around the next valid complaint step.');
+                setText('workflow-stage-intake-status', 'Start or continue the story.');
+	                setText('workflow-stage-evidence-status', 'Add documents, messages, laws, or court cases.');
+	                setText('workflow-stage-review-status', 'Close support gaps before drafting.');
+	                setText('workflow-stage-draft-status', 'Generate or refine the complaint.');
+	                setText('workflow-stage-review-unlock', 'Review required proof');
+	                setHref('workflow-stage-review-unlock', '/claim-support-review');
+	                setText('workflow-stage-draft-unlock', 'Add evidence first');
+	                setHref('workflow-stage-draft-unlock', '#chat-upload-dashboard');
+	                setWorkflowPrimaryAction('Explain what happened', '/chat', 'Begin with guided questions so the workspace has the story, people, dates, harms, and possible claims.');
+	            }}
+
+            function setWorkspaceLane(sourceType) {{
+                const normalized = String(sourceType || '').trim();
+                const laneBySource = {{
+                    evidence: 'evidence',
+                    legal_authority: 'law',
+                    caselaw: 'caselaw',
+                    claim_support: 'claim-support',
+                }};
+                const activeLane = laneBySource[normalized] || '';
+                const labelByLane = {{
+                    evidence: 'Evidence',
+                    law: 'Rules and laws',
+                    caselaw: 'Court cases',
+                    'claim-support': 'Proof checklist',
+                }};
+                if (dashboardState.selectedWorkspaceLane !== activeLane) {{
+                    dashboardState.workspaceGraphReady = false;
+                }}
+                dashboardState.selectedWorkspaceLane = activeLane;
+                ['evidence', 'law', 'caselaw', 'claim-support'].forEach(function(name) {{
+                    const card = document.getElementById(`workspace-lane-${{name}}`);
+                    const status = document.getElementById(`workspace-lane-${{name}}-status`);
+                    const isActive = name === activeLane;
+                    if (card) {{
+                        card.classList.toggle('is-selected', isActive);
+                        card.setAttribute('aria-checked', isActive ? 'true' : 'false');
+                    }}
+                    if (status) {{
+                        status.textContent = isActive ? 'selected' : 'not selected';
+                    }}
+                }});
+                document.querySelectorAll('[data-workspace-dataset-preset]').forEach(function(button) {{
+                    const buttonLane = laneBySource[String(button.dataset.datasetSourceType || '').trim()] || '';
+                    button.setAttribute('aria-pressed', buttonLane && buttonLane === activeLane ? 'true' : 'false');
+                }});
+	                setText('workspace-lane-summary', activeLane ? `Selected material type: ${{labelByLane[activeLane] || activeLane}}` : 'No material type selected.');
+	                setText('workspace-dataset-filter-state', activeLane ? `${{labelByLane[activeLane] || activeLane}} filters are selected.` : 'Choose one material type so search and checks use the right records.');
+	                updateWorkspaceDatasetReadiness();
+	            }}
+
+	            function getWorkspaceDatasetPreflight() {{
+	                const pathValue = String((document.getElementById('dashboard-workspace-dataset-path') || {{}}).value || '').trim();
+	                const labelByLane = {{
+	                    evidence: 'Evidence',
+	                    law: 'Rules and laws',
+	                    caselaw: 'Court cases',
+	                    'claim-support': 'Proof checklist',
+	                }};
+	                const activeLaneLabel = dashboardState.selectedWorkspaceLane ? labelByLane[dashboardState.selectedWorkspaceLane] || dashboardState.selectedWorkspaceLane : '';
+	                if (!pathValue) {{
+	                    return {{
+	                        canLoad: false,
+	                        canSearch: false,
+	                        canGraph: false,
+	                        canDeontic: false,
+	                        reason: 'Upload evidence files or choose a saved materials file first.',
+	                        state: 'missing_path',
+	                        actionLabel: 'Add evidence files',
+	                        actionHref: '#chat-upload-dashboard',
+	                        pathTitle: 'No saved materials file selected',
+	                        pathDetail: 'Upload evidence files, or paste the path to a saved workspace materials file.',
+	                    }};
+	                }}
+	                if (!dashboardState.workspaceDatasetLoaded) {{
+	                    return {{
+	                        canLoad: true,
+                        canSearch: false,
+	                        canGraph: false,
+	                        canDeontic: false,
+	                        reason: 'Open the saved materials file before searching or checking connections.',
+	                        state: 'path_set_unloaded',
+	                        actionLabel: activeLaneLabel ? `Open ${{activeLaneLabel.toLowerCase()}}` : 'Open saved file',
+	                        actionHref: '#workspace-dataset-step-run',
+	                        pathTitle: 'Saved materials file selected',
+	                        pathDetail: `Path selected, not loaded: ${{pathValue}}`,
+	                    }};
+	                }}
+	                if (!dashboardState.selectedWorkspaceLane) {{
+	                    return {{
+	                        canLoad: true,
+                        canSearch: false,
+	                        canGraph: false,
+	                        canDeontic: false,
+	                        reason: 'Choose whether you want to work with evidence, rules and laws, court cases, or the proof checklist.',
+	                        state: 'loaded_no_lane',
+	                        actionLabel: 'Choose material type',
+	                        actionHref: '#workspace-lane-cards',
+	                        pathTitle: 'Materials loaded',
+	                        pathDetail: `Loaded from: ${{pathValue}}`,
+	                    }};
+	                }}
+	                if (!dashboardState.workspaceGraphReady) {{
+	                    return {{
+	                        canLoad: true,
+                        canSearch: true,
+	                        canGraph: true,
+	                        canDeontic: false,
+	                        reason: 'Find connections before checking duties and conflicts.',
+	                        state: 'loaded_lane_selected',
+	                        actionLabel: 'Find connections',
+	                        actionHref: '#workspace-knowledge-graph-tools',
+	                        pathTitle: `${{activeLaneLabel}} loaded`,
+	                        pathDetail: `Search and connection checks now use ${{activeLaneLabel.toLowerCase()}} from the selected materials file.`,
+	                    }};
+	                }}
+	                return {{
+	                    canLoad: true,
+	                    canSearch: true,
+	                    canGraph: true,
+	                    canDeontic: true,
+	                    reason: 'Ready to check duties, permissions, prohibitions, and conflicts.',
+	                    state: 'graph_ready',
+	                    actionLabel: 'Check duties and conflicts',
+	                    actionHref: '#workspace-deontic-logic-tools',
+	                    pathTitle: `${{activeLaneLabel}} ready`,
+	                    pathDetail: `Connections are ready for ${{activeLaneLabel.toLowerCase()}}. You can now check duties, permissions, prohibitions, and conflicts.`,
+	                }};
+	            }}
+
+            function updateWorkspaceDatasetReadiness() {{
+                const labelByLane = {{
+                    evidence: 'Evidence',
+                    law: 'Rules and laws',
+                    caselaw: 'Court cases',
+                    'claim-support': 'Proof checklist',
+                }};
+                const loadTitleByLane = {{
+                    evidence: 'Step 1: Load evidence materials',
+                    law: 'Step 1: Load rules and laws',
+                    caselaw: 'Step 1: Load court cases',
+                    'claim-support': 'Step 1: Load proof checklist',
+                }};
+                const preflight = getWorkspaceDatasetPreflight();
+                const activeLaneLabel = dashboardState.selectedWorkspaceLane ? labelByLane[dashboardState.selectedWorkspaceLane] || dashboardState.selectedWorkspaceLane : 'No material type selected';
+                setText('workspace-flow-dataset-readiness', dashboardState.workspaceDatasetLoaded ? 'Materials loaded' : 'Materials not loaded');
+                setText('workspace-flow-lane-readiness', activeLaneLabel);
+                setText('workspace-flow-graph-readiness', dashboardState.workspaceGraphReady ? 'Connections ready' : 'Connections not ready');
+	                setText('workspace-flow-next-action', preflight.reason);
+	                setText('workspace-action-preflight', preflight.reason);
+	                setText('workspace-step-load-title', loadTitleByLane[dashboardState.selectedWorkspaceLane] || 'Step 1: Load or add materials');
+	                setText('workspace-materials-next-action-title', preflight.actionLabel);
+	                setText('workspace-materials-next-action-link', preflight.actionLabel);
+	                setHref('workspace-materials-next-action-link', preflight.actionHref || '#workspace-dataset-parquet-dashboard');
+	                setText('workspace-materials-next-action-reason', preflight.reason);
+	                setText('workspace-materials-path-title', preflight.pathTitle || 'Materials file status unavailable');
+	                setText('workspace-materials-path-detail', preflight.pathDetail || preflight.reason);
+	                const loadStateText = dashboardState.workspaceDatasetStatus === 'loading'
+	                    ? 'Loading materials...'
+	                    : dashboardState.workspaceDatasetStatus === 'error'
+	                        ? dashboardState.workspaceDatasetError
+	                        : dashboardState.workspaceDatasetLoaded
+	                            ? 'Loaded successfully'
+	                            : (preflight.state === 'path_set_unloaded' ? 'Path selected, not loaded' : 'Not loaded');
+	                setText('workspace-dataset-load-state', loadStateText);
+	                setButtonEnabled('dashboard-load-workspace-dataset', preflight.canLoad, preflight.canLoad ? '' : preflight.reason);
+	                setButtonEnabled('dashboard-load-workspace-dataset-step1', preflight.canLoad, preflight.canLoad ? '' : preflight.reason);
+	                setButtonEnabled('dashboard-search-workspace-dataset', preflight.canSearch, preflight.canSearch ? '' : preflight.reason);
+	                setButtonEnabled('dashboard-load-workspace-graph', preflight.canGraph, preflight.canGraph ? '' : preflight.reason);
+	                ['dashboard-workspace-dataset-input-type', 'dashboard-workspace-dataset-query', 'dashboard-workspace-dataset-claim-type', 'dashboard-workspace-dataset-document-type', 'dashboard-workspace-dataset-source-type'].forEach(function(id) {{
+	                    setControlEnabled(id, dashboardState.workspaceDatasetLoaded, dashboardState.workspaceDatasetLoaded ? '' : 'Open a saved materials file before changing search filters.');
+	                }});
+	                setLinkEnabled('dashboard-open-dataset-graph', preflight.canGraph, preflight.canGraph ? '' : preflight.reason);
+                setLinkEnabled('dashboard-run-deontic-check', preflight.canDeontic, preflight.canDeontic ? '' : preflight.reason);
+            }}
+
+	            function collapseMobileSectionMenu() {{
+	                const menu = document.getElementById('dashboard-section-menu');
+	                if (!menu || !window.matchMedia) {{
+	                    return;
+	                }}
+                if (window.matchMedia('(max-width: 640px)').matches) {{
+                    menu.removeAttribute('open');
+                }} else {{
+	                    menu.setAttribute('open', 'open');
+	                }}
+	            }}
+
+	            function collapseMobileSectionMenuAfterChoice() {{
+	                const menu = document.getElementById('dashboard-section-menu');
+	                if (menu && window.matchMedia && window.matchMedia('(max-width: 640px)').matches) {{
+	                    menu.removeAttribute('open');
+	                }}
+	            }}
+
+	            function handleWorkspaceMaterialsNextAction(event) {{
+	                const preflight = getWorkspaceDatasetPreflight();
+	                if (preflight.state === 'path_set_unloaded') {{
+	                    event.preventDefault();
+	                    loadWorkspaceDatasetDashboard('view');
+	                }} else if (preflight.state === 'loaded_lane_selected') {{
+	                    event.preventDefault();
+	                    loadWorkspaceGraphExplorer();
+	                }}
+	            }}
+
+	            function renderChipList(id, values, fallback) {{
                 const node = document.getElementById(id);
                 if (!node) {{
                     return;
@@ -1172,6 +2841,78 @@ def _render_dashboard_hub(
                 return `in ${{diffDays}} days`;
             }}
 
+            function updateWorkspaceContextBar(payload) {{
+                const session = payload && payload.session ? payload.session : {{}};
+                const review = payload && payload.review ? payload.review : {{}};
+                const overview = review && review.overview ? review.overview : {{}};
+                const readiness = payload && payload.complaint_readiness ? payload.complaint_readiness : {{}};
+                const evidence = session && session.evidence ? session.evidence : {{}};
+                const evidenceCount = parseCount((evidence.testimony || []).length, 0) + parseCount((evidence.documents || []).length, 0);
+                const missingCount = parseCount(overview.missing_elements, 0);
+                const hasDraft = Boolean(payload && payload.draft) || Boolean(session && session.draft);
+                const userId = String(session.user_id || '').trim();
+                const claimType = String(session.claim_type || '').trim();
+                let nextAction = 'Load workspace to get next action';
+                if (userId) {{
+                    if (missingCount > 0) {{
+                        nextAction = `Review ${{missingCount}} support gap${{missingCount === 1 ? '' : 's'}}`;
+                    }} else if (!hasDraft && evidenceCount > 0) {{
+                        nextAction = 'Generate complaint draft';
+                    }} else if (hasDraft) {{
+                        nextAction = 'Refine existing draft';
+                    }} else {{
+                        nextAction = 'Continue intake and add evidence';
+                    }}
+                }}
+                const routeHint = String(readiness.recommended_route || '').trim();
+                setText('context-next-action', routeHint ? `${{nextAction}} - ${{routeHint}}` : nextAction);
+                setText('context-workspace-id', userId || 'not loaded');
+                setText('context-claim-type', claimType ? titleCase(claimType, 'Waiting') : 'waiting');
+                setText('context-evidence-count', `${{evidenceCount}} item${{evidenceCount === 1 ? '' : 's'}}`);
+                setText('context-draft-status', hasDraft ? 'available' : 'not available');
+                setHref('context-open-workspace', buildSurfaceUrl('/workspace', {{
+                    user_id: userId,
+                    target_tab: missingCount > 0 ? 'review' : 'intake',
+                }}));
+                setHref('context-open-review', buildSurfaceUrl('/claim-support-review', {{
+                    user_id: userId,
+                    workspace_user_id: userId,
+                    claim_type: claimType,
+                }}));
+                setHref('context-open-chat', buildSurfaceUrl('/chat', {{
+                    user_id: userId,
+                    source: 'dashboard-context-bar',
+                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
+                }}));
+                setHref('context-open-builder', buildSurfaceUrl('/document', {{
+                    user_id: userId,
+                    workspace_user_id: userId,
+                    claim_type: claimType,
+                }}));
+                setHref('context-workspace-hint', buildSurfaceUrl('/workspace', {{ user_id: userId }}));
+                setHref('context-claim-hint', buildSurfaceUrl('/chat', {{ user_id: userId, source: 'dashboard-context-claim' }}));
+                setHref('context-evidence-hint', '#chat-upload-dashboard');
+                setHref('context-draft-hint', buildSurfaceUrl('/document', {{ user_id: userId, workspace_user_id: userId, claim_type: claimType }}));
+                updateWorkflowRail(payload || null);
+            }}
+
+            function clearWorkspaceContextBar() {{
+                setText('context-next-action', 'Load workspace to get next action');
+                setText('context-workspace-id', 'not loaded');
+                setText('context-claim-type', 'waiting');
+                setText('context-evidence-count', '0 items');
+                setText('context-draft-status', 'not available');
+                setHref('context-open-workspace', '/workspace');
+                setHref('context-open-review', '/claim-support-review');
+                setHref('context-open-chat', '/chat');
+                setHref('context-open-builder', '/document');
+                setHref('context-workspace-hint', '/workspace');
+                setHref('context-claim-hint', '/chat');
+                setHref('context-evidence-hint', '#chat-upload-dashboard');
+                setHref('context-draft-hint', '/document');
+                resetWorkflowRail();
+            }}
+
             function renderWorkspaceCard(payload) {{
                 const session = payload && payload.session ? payload.session : {{}};
                 const review = payload && payload.review ? payload.review : {{}};
@@ -1201,6 +2942,7 @@ def _render_dashboard_hub(
                     }}, null, 2)
                 );
                 dashboardState.workspacePayload = payload || null;
+                updateWorkspaceContextBar(payload || null);
                 renderHeadsUpCard();
             }}
 
@@ -1214,6 +2956,7 @@ def _render_dashboard_hub(
                 setText('dashboard-workspace-route-chip', 'next route: waiting');
                 setText('dashboard-workspace-status', reason || 'Workspace session unloaded.');
                 setText('dashboard-workspace-preview', 'Workspace session details will appear here.');
+                clearWorkspaceContextBar();
                 renderHeadsUpCard();
             }}
 
@@ -1323,7 +3066,7 @@ def _render_dashboard_hub(
                 setText('dashboard-workspace-dataset-proofs', String(Number(summary.proof_count || 0)));
                 setText('dashboard-workspace-dataset-workspace-chip', `workspace: ${{String(summary.workspace_name || summary.workspace_id || 'unknown')}}`);
                 setText('dashboard-workspace-dataset-source-chip', `source: ${{String((payload && payload.source) || label || 'dataset')}}`);
-                setText('dashboard-workspace-dataset-status', `Loaded workspace dataset ${{label || 'view'}} through ipfs_datasets_py.`);
+                setText('dashboard-workspace-dataset-status', `Loaded saved materials for ${{label || 'view'}}. You can now choose a material type, search, or find connections.`);
                 setText('dashboard-workspace-dataset-preview', JSON.stringify(payload || {{}}, null, 2));
                 selectDatasetDocument(firstDocumentFromPayload(payload || {{}}), 'workspace');
             }}
@@ -1492,19 +3235,37 @@ def _render_dashboard_hub(
 
             async function loadWorkspaceDatasetDashboard(mode) {{
                 const statusId = 'dashboard-workspace-dataset-status';
+                const preflight = getWorkspaceDatasetPreflight();
+                if (mode === 'search' && !preflight.canSearch) {{
+                    setText(statusId, preflight.reason);
+                    setText('workspace-dataset-run-state', preflight.reason);
+                    updateWorkspaceDatasetReadiness();
+                    return;
+                }}
                 setText(statusId, mode === 'search' ? 'Searching workspace dataset parquet...' : 'Loading workspace dataset parquet...');
+                if (mode === 'search') {{
+                    setText('workspace-dataset-run-state', 'Searching workspace dataset...');
+	                }} else {{
+	                    dashboardState.workspaceDatasetLoaded = false;
+	                    dashboardState.workspaceDatasetStatus = 'loading';
+	                    dashboardState.workspaceDatasetError = '';
+	                    dashboardState.workspaceGraphReady = false;
+	                    setText('workspace-dataset-load-state', 'Loading dataset...');
+	                }}
+                updateWorkspaceDatasetReadiness();
                 try {{
                     const extra = {{
                         include_document_text: 'true',
                         document_limit: '40',
                         claim_type: String((document.getElementById('dashboard-workspace-dataset-claim-type') || {{}}).value || '').trim(),
                         document_type: String((document.getElementById('dashboard-workspace-dataset-document-type') || {{}}).value || '').trim(),
+                        source_type: String((document.getElementById('dashboard-workspace-dataset-source-type') || {{}}).value || '').trim(),
                     }};
                     let endpoint = '/api/complaint-workspace/workspace-dataset/view';
                     if (mode === 'search') {{
                         const query = String((document.getElementById('dashboard-workspace-dataset-query') || {{}}).value || '').trim();
                         if (!query) {{
-                            throw new Error('Enter a workspace dataset query before searching.');
+                            throw new Error('Enter words to search for before searching materials.');
                         }}
                         endpoint = '/api/complaint-workspace/workspace-dataset/search';
                         extra.query = query;
@@ -1512,14 +3273,90 @@ def _render_dashboard_hub(
                     }}
                     const params = datasetQueryParams('dashboard-workspace-dataset-path', 'dashboard-workspace-dataset-input-type', extra);
                     const payload = await fetchJson(`${{endpoint}}?${{params.toString()}}`);
-                    renderWorkspaceDatasetCard(payload, mode || 'view');
-                }} catch (error) {{
-                    setText(statusId, `Workspace dataset load failed: ${{error.message}}`);
+	                    renderWorkspaceDatasetCard(payload, mode || 'view');
+	                    dashboardState.workspaceDatasetLoaded = true;
+	                    dashboardState.workspaceDatasetStatus = 'loaded';
+	                    dashboardState.workspaceDatasetError = '';
+	                    dashboardState.workspaceGraphReady = false;
+                    if (mode === 'search') {{
+                        setText('workspace-dataset-run-state', 'Search complete. Results are reflected below.');
+                    }} else {{
+                        setText('workspace-dataset-load-state', 'Materials loaded');
+                        setText('workspace-dataset-run-state', 'Materials loaded. Search or find connections next.');
+                    }}
+                    updateWorkspaceDatasetReadiness();
+	                }} catch (error) {{
+	                    dashboardState.workspaceDatasetLoaded = false;
+	                    dashboardState.workspaceDatasetStatus = 'error';
+		                    dashboardState.workspaceDatasetError = userFacingMaterialsError(error.message);
+		                    dashboardState.workspaceGraphReady = false;
+	                    setText(statusId, dashboardState.workspaceDatasetError);
+	                    if (mode === 'search') {{
+	                        setText('workspace-dataset-run-state', dashboardState.workspaceDatasetError);
+	                    }} else {{
+	                        setText('workspace-dataset-load-state', dashboardState.workspaceDatasetError);
+	                    }}
+                    updateWorkspaceDatasetReadiness();
                 }}
             }}
 
+            function applyWorkspaceDatasetPreset(event) {{
+                const button = event && event.currentTarget ? event.currentTarget : null;
+                if (!button) {{
+                    return;
+                }}
+                const queryInput = document.getElementById('dashboard-workspace-dataset-query');
+                const documentTypeInput = document.getElementById('dashboard-workspace-dataset-document-type');
+                const sourceTypeInput = document.getElementById('dashboard-workspace-dataset-source-type');
+                if (queryInput) {{
+                    queryInput.value = String(button.dataset.datasetQuery || '');
+                }}
+                if (documentTypeInput) {{
+                    documentTypeInput.value = String(button.dataset.datasetDocumentType || '');
+                }}
+                if (sourceTypeInput) {{
+                    sourceTypeInput.value = String(button.dataset.datasetSourceType || '');
+                }}
+                setWorkspaceLane(button.dataset.datasetSourceType || '');
+                setText('dashboard-workspace-dataset-status', `Material type selected: ${{String(button.textContent || '').trim()}}. Load materials, then search or find connections.`);
+            }}
+
+            function applyGraphPreset(event) {{
+                const button = event && event.currentTarget ? event.currentTarget : null;
+                if (!button) {{
+                    return;
+                }}
+                const queryInput = document.getElementById('dashboard-workspace-graph-query');
+                const relationshipInput = document.getElementById('dashboard-workspace-graph-relationship-type');
+                const modalityInput = document.getElementById('dashboard-workspace-graph-modality');
+                const presetQuery = String(button.dataset.graphQuery || '');
+                const presetRelationship = String(button.dataset.graphRelationship || '');
+                const presetModality = String(button.dataset.graphModality || '');
+                if (queryInput) {{
+                    queryInput.value = presetQuery;
+                }}
+                if (relationshipInput) {{
+                    relationshipInput.value = presetRelationship;
+                }}
+                if (modalityInput) {{
+                    modalityInput.value = presetModality;
+                }}
+                setText('dashboard-workspace-graph-status', `Check selected: ${{String(button.textContent || '').trim()}}`);
+                updateWorkspaceDatasetReadiness();
+            }}
+
             async function loadWorkspaceGraphExplorer() {{
-                setText('dashboard-workspace-graph-status', 'Loading workspace knowledge graph and logic flow...');
+                const preflight = getWorkspaceDatasetPreflight();
+                if (!preflight.canGraph) {{
+                    setText('dashboard-workspace-graph-status', preflight.reason);
+                    setText('workspace-dataset-run-state', preflight.reason);
+                    updateWorkspaceDatasetReadiness();
+                    return;
+                }}
+                dashboardState.workspaceGraphReady = false;
+                setText('dashboard-workspace-graph-status', 'Finding connections and checking duties...');
+                setText('workspace-dataset-run-state', 'Finding connections and checking duties...');
+                updateWorkspaceDatasetReadiness();
                 try {{
                     const extra = {{
                         entity_query: String((document.getElementById('dashboard-workspace-graph-query') || {{}}).value || '').trim(),
@@ -1531,8 +3368,14 @@ def _render_dashboard_hub(
                     const params = datasetQueryParams('dashboard-workspace-dataset-path', 'dashboard-workspace-dataset-input-type', extra);
                     const payload = await fetchJson(`/api/complaint-workspace/workspace-dataset/graph?${{params.toString()}}`);
                     renderWorkspaceGraphExplorer(payload);
+                    dashboardState.workspaceGraphReady = true;
+                    setText('workspace-dataset-run-state', 'Connections and duty checks loaded.');
+                    updateWorkspaceDatasetReadiness();
                 }} catch (error) {{
-                    setText('dashboard-workspace-graph-status', `Workspace graph load failed: ${{error.message}}`);
+                    dashboardState.workspaceGraphReady = false;
+                    setText('dashboard-workspace-graph-status', `Connection and duty check failed: ${{error.message}}`);
+                    setText('workspace-dataset-run-state', `Connection and duty check failed: ${{error.message}}`);
+                    updateWorkspaceDatasetReadiness();
                 }}
             }}
 
@@ -1855,10 +3698,72 @@ def _render_dashboard_hub(
             }});
             document.getElementById('dashboard-load-docket-dataset').addEventListener('click', function() {{ loadDocketDatasetDashboard('view'); }});
             document.getElementById('dashboard-search-docket-dataset').addEventListener('click', function() {{ loadDocketDatasetDashboard('search'); }});
-            document.getElementById('dashboard-load-docket-dataset-graph').addEventListener('click', function() {{ loadDocketDatasetDashboard('graph'); }});
-            document.getElementById('dashboard-load-workspace-dataset').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('view'); }});
-            document.getElementById('dashboard-search-workspace-dataset').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('search'); }});
+	            document.getElementById('dashboard-load-docket-dataset-graph').addEventListener('click', function() {{ loadDocketDatasetDashboard('graph'); }});
+		            document.getElementById('dashboard-load-workspace-dataset').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('view'); }});
+		            document.getElementById('dashboard-load-workspace-dataset-step1').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('view'); }});
+		            document.getElementById('dashboard-search-workspace-dataset').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('search'); }});
+	            document.getElementById('workspace-materials-next-action-link').addEventListener('click', handleWorkspaceMaterialsNextAction);
+	            document.querySelectorAll('#dashboard-section-menu .jump-link').forEach(function(link) {{
+	                link.addEventListener('click', collapseMobileSectionMenuAfterChoice);
+	            }});
+	            document.querySelectorAll('[data-workspace-dataset-preset]').forEach(function(button) {{
+	                button.addEventListener('click', applyWorkspaceDatasetPreset);
+	            }});
+            document.querySelectorAll('[data-lane-source-type]').forEach(function(card) {{
+                const chooseLane = function() {{
+                    const sourceType = String(card.dataset.laneSourceType || '');
+                    const sourceTypeInput = document.getElementById('dashboard-workspace-dataset-source-type');
+                    if (sourceTypeInput) {{
+                        sourceTypeInput.value = sourceType;
+                    }}
+                    setWorkspaceLane(sourceType);
+                }};
+                card.addEventListener('click', chooseLane);
+                card.addEventListener('keydown', function(event) {{
+                    if (event.key === 'Enter' || event.key === ' ') {{
+                        event.preventDefault();
+                        chooseLane();
+                    }}
+                }});
+            }});
+            const workspaceSourceType = document.getElementById('dashboard-workspace-dataset-source-type');
+            if (workspaceSourceType) {{
+                workspaceSourceType.addEventListener('change', function(event) {{
+                    setWorkspaceLane(event.currentTarget && event.currentTarget.value);
+                }});
+            }}
+            const workspaceDatasetPathInput = document.getElementById('dashboard-workspace-dataset-path');
+            if (workspaceDatasetPathInput) {{
+	                workspaceDatasetPathInput.addEventListener('input', function() {{
+	                    dashboardState.workspaceDatasetLoaded = false;
+	                    dashboardState.workspaceDatasetStatus = 'idle';
+	                    dashboardState.workspaceDatasetError = '';
+	                    dashboardState.workspaceGraphReady = false;
+                    setText('workspace-dataset-load-state', 'Not loaded');
+                    setText('workspace-dataset-run-state', 'Open a saved file, then search or check connections and duties.');
+                    updateWorkspaceDatasetReadiness();
+                }});
+            }}
             document.getElementById('dashboard-load-workspace-graph').addEventListener('click', loadWorkspaceGraphExplorer);
+            document.getElementById('dashboard-open-dataset-graph').addEventListener('click', function(event) {{
+                const preflight = getWorkspaceDatasetPreflight();
+                if (!preflight.canGraph) {{
+                    event.preventDefault();
+                    setText('workspace-action-preflight', preflight.reason);
+                    setText('dashboard-workspace-graph-status', preflight.reason);
+                }}
+            }});
+            document.getElementById('dashboard-run-deontic-check').addEventListener('click', function(event) {{
+                const preflight = getWorkspaceDatasetPreflight();
+                if (!preflight.canDeontic) {{
+                    event.preventDefault();
+                    setText('workspace-action-preflight', preflight.reason);
+                    setText('dashboard-workspace-graph-status', preflight.reason);
+                }}
+            }});
+            document.querySelectorAll('[data-dashboard-graph-preset]').forEach(function(button) {{
+                button.addEventListener('click', applyGraphPreset);
+            }});
             document.getElementById('dashboard-save-dataset-annotation').addEventListener('click', saveDatasetDocumentAnnotation);
             document.getElementById('dashboard-use-loaded-document').addEventListener('click', useLoadedDatasetDocument);
             document.getElementById('dashboard-open-upload-modal').addEventListener('click', function() {{ toggleUploadModal(true); }});
@@ -1883,7 +3788,11 @@ def _render_dashboard_hub(
                     // Ignore malformed cross-tab sync payloads.
                 }}
             }});
+            window.addEventListener('resize', collapseMobileSectionMenu);
 
+            collapseMobileSectionMenu();
+            resetWorkflowRail();
+            setWorkspaceLane('');
             loadWorkspaceDashboard();
             if (String(document.getElementById('dashboard-docket-manifest-path').value || '').trim()) {{
                 loadDocketDashboard(false);
