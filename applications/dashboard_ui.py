@@ -829,6 +829,10 @@ def _render_dashboard_hub(
     improvement_plan = _render_improvement_plan()
     entry_path_cards = _render_entry_path_cards()
     dashboard_subsection_index = _render_dashboard_subsection_index()
+    docket_input_type = "single"
+    normalized_docket_path = str(default_docket_dataset_path or "").strip().lower()
+    if normalized_docket_path.endswith(".json") or "manifest" in normalized_docket_path:
+        docket_input_type = "packaged" if "manifest" in normalized_docket_path else "json"
     return f"""
 <!DOCTYPE html>
 <html lang=\"en\">
@@ -1349,12 +1353,98 @@ def _render_dashboard_hub(
 	            border: 1px solid rgba(21, 34, 48, 0.10);
 	        }}
 	        .workspace-path-status strong {{ color: var(--ink); }}
-	        .workspace-step-actions {{
-	            display: flex;
-	            flex-wrap: wrap;
-	            gap: 10px;
-	            margin-top: 12px;
-	        }}
+        .workspace-step-actions {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }}
+        .guided-case-flow {{
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            margin-top: 16px;
+        }}
+        .case-flow-step {{
+            border-radius: var(--radius-lg);
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            background: rgba(255, 253, 250, 0.76);
+            padding: 16px;
+        }}
+        .case-flow-step strong {{
+            display: block;
+            color: var(--ink);
+        }}
+        .case-flow-step p {{
+            margin: 8px 0 0;
+        }}
+        .case-flow-step .dataset-step-status {{
+            margin-top: 10px;
+        }}
+        .docket-next-action-panel, .document-insight-panel {{
+            display: grid;
+            gap: 12px;
+            margin-top: 16px;
+            padding: 16px;
+            border-radius: var(--radius-lg);
+            background: #ffffff;
+            border: 1px solid rgba(17, 92, 99, 0.16);
+            box-shadow: 0 10px 26px rgba(21, 34, 48, 0.055);
+        }}
+        .docket-next-action-panel h3, .document-insight-panel h3 {{
+            margin: 0;
+            font-size: 1.05rem;
+        }}
+        .document-insight-grid {{
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        }}
+        .document-insight-item {{
+            border-left: 3px solid rgba(17, 92, 99, 0.30);
+            padding-left: 10px;
+        }}
+        .document-insight-item span {{
+            display: block;
+            color: var(--muted);
+            font-size: 0.76rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        .document-insight-item strong {{
+            display: block;
+            margin-top: 4px;
+            color: var(--ink);
+        }}
+        .quick-search-row {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+        }}
+        .quick-search-row button {{
+            background: rgba(170, 77, 29, 0.10);
+            color: #763612;
+            border: 1px solid rgba(170, 77, 29, 0.18);
+        }}
+        .technical-details {{
+            margin-top: 14px;
+            padding: 14px;
+            border-radius: var(--radius-md);
+            background: rgba(21, 34, 48, 0.035);
+            border: 1px solid rgba(21, 34, 48, 0.08);
+        }}
+        .technical-details > summary {{
+            cursor: pointer;
+            color: var(--accent-strong);
+            font-weight: 900;
+        }}
+        .handoff-actions {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }}
 	        .field-helper {{
 	            margin: 6px 0 0;
 	            color: var(--muted);
@@ -1732,76 +1822,147 @@ def _render_dashboard_hub(
             </article>
 
             <article class="dashboard-card" id="packaged-docket-dashboard">
-                <div class="eyebrow" style="color: var(--accent);">Docket Card</div>
-                <h2>Packaged Docket Dashboard</h2>
-                <p>Load the packaged docket operator dashboard from a manifest path without leaving the complaint-generator shell.</p>
-                {_render_subsection_nav("Packaged docket subsections", [("Docket dataset", "#docket-dataset-parquet-dashboard"), ("Calendar preview", "#dashboard-docket-calendar-list"), ("Heads-up display", "#heads-up-display-dashboard")])}
-                <label class="field-label" for="dashboard-docket-manifest-path">Manifest Path</label>
-                <input id="dashboard-docket-manifest-path" type="text" value="{escape(default_manifest_path)}" placeholder="/absolute/path/to/docket-manifest.json">
+                <div class="eyebrow" style="color: var(--accent);">Court Filings</div>
+                <h2>Open a Saved Docket Package</h2>
+                <p>Use this when you already have a prepared case-filing package. The dashboard will look for filings, hearing dates, deadlines, and items that may affect a complaint or response.</p>
+                {_render_subsection_nav("Docket review steps", [("Load case filings", "#docket-dataset-parquet-dashboard"), ("Review dates", "#dashboard-docket-calendar-list"), ("Save useful note", "#dataset-document-annotation-dashboard"), ("Next action", "#heads-up-display-dashboard")])}
+                <div class="docket-next-action-panel" aria-label="Packaged docket next step">
+                    <div>
+                        <div class="eyebrow" style="color: var(--accent);">What to do here</div>
+                        <h3>Open the saved filing package, then inspect dates and useful filings</h3>
+                        <p>This path is best for an already prepared docket package. If you only have a single saved filing dataset, use the docket review card below.</p>
+                    </div>
+                </div>
+                <details class="technical-details">
+                    <summary>Saved package location</summary>
+                    <label class="field-label" for="dashboard-docket-manifest-path">Package file location</label>
+                    <input id="dashboard-docket-manifest-path" type="text" value="{escape(default_manifest_path)}" placeholder="/absolute/path/to/docket-manifest.json">
+                    <p class="field-helper">Advanced detail: this is the packaged docket manifest path used by the MCP docket tools.</p>
+                </details>
                 <div class="button-row" style="margin-top: 12px;">
-                    <button id="dashboard-load-docket" type="button">Load Docket Dashboard</button>
-                    <button id="dashboard-load-docket-report" type="button" class="secondary">Load Parsed Report</button>
-                    <button id="dashboard-unload-docket" type="button" class="secondary">Unload Docket</button>
+                    <button id="dashboard-load-docket" type="button">Open Filing Package</button>
+                    <button id="dashboard-load-docket-report" type="button" class="secondary">Preview Extracted Report</button>
+                    <button id="dashboard-unload-docket" type="button" class="secondary">Clear Package</button>
                 </div>
                 <div class="stat-grid">
-                    <div class="stat-card"><strong id="dashboard-docket-queue">0</strong><span>Queue items</span></div>
-                    <div class="stat-card"><strong id="dashboard-docket-high">0</strong><span>High priority items</span></div>
-                    <div class="stat-card"><strong id="dashboard-docket-runs">0</strong><span>Recorded runs</span></div>
-                    <div class="stat-card"><strong id="dashboard-docket-calendar-count">0</strong><span>Calendar events</span></div>
+                    <div class="stat-card"><strong id="dashboard-docket-queue">0</strong><span>Items to inspect</span></div>
+                    <div class="stat-card"><strong id="dashboard-docket-high">0</strong><span>Urgent items</span></div>
+                    <div class="stat-card"><strong id="dashboard-docket-runs">0</strong><span>Review runs</span></div>
+                    <div class="stat-card"><strong id="dashboard-docket-calendar-count">0</strong><span>Dates found</span></div>
                 </div>
                 <div class="chip-row" style="margin-top: 14px;">
-                    <span class="chip" id="dashboard-docket-source-chip">source: waiting</span>
-                    <span class="chip" id="dashboard-docket-manifest-chip">manifest: waiting</span>
-                    <span class="chip" id="dashboard-docket-calendar-chip">calendar: waiting</span>
+                    <span class="chip" id="dashboard-docket-source-chip">filings: not loaded</span>
+                    <span class="chip" id="dashboard-docket-manifest-chip">package: not selected</span>
+                    <span class="chip" id="dashboard-docket-calendar-chip">dates: waiting</span>
                 </div>
-                <div class="status-line" id="dashboard-docket-status">Add a packaged docket manifest path to inspect the operator dashboard.</div>
+                <div class="status-line" id="dashboard-docket-status">Open a saved filing package to inspect dates, deadlines, and useful docket records.</div>
                 <div style="margin-top: 14px;">
-                    <div class="field-label">Case Calendar Preview</div>
+                    <div class="field-label">Important dates found</div>
                     <div class="chip-row" id="dashboard-docket-calendar-list">
                         <span class="chip">Load a docket to preview hearings, deadlines, and conferences.</span>
                     </div>
                 </div>
-                <pre id="dashboard-docket-preview">Packaged docket details will appear here.</pre>
+                <details class="technical-details">
+                    <summary>Technical docket payload</summary>
+                    <pre id="dashboard-docket-preview">Packaged docket details will appear here.</pre>
+                </details>
             </article>
 
             <article class="dashboard-card" id="docket-dataset-parquet-dashboard">
-                <div class="eyebrow" style="color: var(--accent);">Docket Dataset</div>
-                <h2>Docket Dataset Parquet Dashboard</h2>
-                <p>Review docket dataset parquet files through the same ipfs_datasets_py dataset loader, search index, graph projection, and case-calendar extraction used by the MCP tools.</p>
-                {_render_subsection_nav("Docket dataset subsections", [("Load docket", "#packaged-docket-dashboard"), ("Search filings", "#dashboard-docket-dataset-query"), ("Calendar preview", "#dashboard-docket-calendar-list"), ("Annotate document", "#dataset-document-annotation-dashboard")])}
-                <label class="field-label" for="dashboard-docket-dataset-path">Docket Dataset Path</label>
-                <input id="dashboard-docket-dataset-path" type="text" value="{escape(default_docket_dataset_path)}" placeholder="/absolute/path/to/docket.dataset.parquet">
-                <div class="field-row" style="margin-top: 12px;">
-                    <div>
-                        <label class="field-label" for="dashboard-docket-dataset-query">Search Query</label>
-                        <input id="dashboard-docket-dataset-query" type="text" placeholder="hearing, deadline, motion, due process">
+                <div class="eyebrow" style="color: var(--accent);">Docket Review</div>
+                <h2>Review Court Filings and Existing Complaints</h2>
+                <p>Load case filings, search for hearings or deadlines, inspect the most useful document, and save a note into the complaint workspace.</p>
+                {_render_subsection_nav("Docket review steps", [("Load case filings", "#dashboard-docket-dataset-path"), ("Search filings", "#dashboard-docket-dataset-query"), ("Review dates", "#dashboard-docket-calendar-list"), ("Save useful note", "#dataset-document-annotation-dashboard")])}
+                <div class="guided-case-flow" aria-label="Docket review workflow">
+                    <div class="case-flow-step">
+                        <strong>1. Load case filings</strong>
+                        <p>Open a saved docket package or filing dataset.</p>
+                        <span class="dataset-step-status" id="docket-flow-load-state">Not loaded</span>
                     </div>
+                    <div class="case-flow-step">
+                        <strong>2. Search and inspect</strong>
+                        <p>Find filings, motions, hearings, orders, deadlines, or complaint allegations.</p>
+                        <span class="dataset-step-status" id="docket-flow-search-state">Waiting for filings</span>
+                    </div>
+                    <div class="case-flow-step">
+                        <strong>3. Save legal impact</strong>
+                        <p>Send useful document notes to the complaint workspace for review or drafting.</p>
+                        <span class="dataset-step-status" id="docket-flow-annotation-state">Waiting for selected document</span>
+                    </div>
+                </div>
+                <div class="docket-next-action-panel" id="docket-next-action-panel" aria-label="Docket next safe action">
                     <div>
-                        <label class="field-label" for="dashboard-docket-dataset-input-type">Input</label>
+                        <div class="eyebrow" style="color: var(--accent);">Next Safe Action</div>
+                        <h3 id="docket-next-action-title">Load case filings</h3>
+                        <p id="docket-next-action-reason">Choose a saved filing set before searching, finding dates, or saving notes.</p>
+                    </div>
+                    <div class="button-row">
+                        <button id="dashboard-load-docket-dataset" type="button">Load Case Filings</button>
+                        <a class="secondary-action" id="docket-next-annotation-link" href="#dataset-document-annotation-dashboard">Save note from selected filing</a>
+                    </div>
+                </div>
+                <details class="technical-details">
+                    <summary>Saved filing location and format</summary>
+                    <label class="field-label" for="dashboard-docket-dataset-path">Saved filing set location</label>
+                    <input id="dashboard-docket-dataset-path" type="text" value="{escape(default_docket_dataset_path)}" placeholder="/absolute/path/to/docket.dataset.parquet">
+                    <p class="field-helper">Advanced detail: this can be one saved docket dataset, a packaged manifest, or source JSON.</p>
+                    <div style="margin-top: 12px;">
+                        <label class="field-label" for="dashboard-docket-dataset-input-type">Saved filing format</label>
                         <select id="dashboard-docket-dataset-input-type">
-                            <option value="single" selected>One saved docket file</option>
-                            <option value="packaged">Packaged manifest</option>
-                            <option value="json">Source JSON</option>
+                            <option value="single" {'selected' if docket_input_type == 'single' else ''}>One saved filing dataset</option>
+                            <option value="packaged" {'selected' if docket_input_type == 'packaged' else ''}>Packaged docket manifest</option>
+                            <option value="json" {'selected' if docket_input_type == 'json' else ''}>Source JSON</option>
                         </select>
                     </div>
+                </details>
+                <div class="field-row" style="margin-top: 14px;">
+                    <div>
+                        <label class="field-label" for="dashboard-docket-dataset-query">What do you want to find?</label>
+                        <input id="dashboard-docket-dataset-query" type="text" placeholder="Find hearing dates, deadlines, motions, orders, or service problems">
+                        <p class="field-helper">Search in ordinary words. Good searches include deadlines, hearings, notices, dismissal motions, orders, retaliation, accommodation, or service.</p>
+                    </div>
+                </div>
+                <div class="quick-search-row" aria-label="Suggested docket searches">
+                    <button type="button" data-docket-query="hearing deadline court date">Find dates</button>
+                    <button type="button" data-docket-query="motion dismissal answer response due">Find response issues</button>
+                    <button type="button" data-docket-query="notice service summons complaint">Find service or notice problems</button>
+                    <button type="button" data-docket-query="order judgment eviction possession">Find orders or judgments</button>
                 </div>
                 <div class="button-row" style="margin-top: 12px;">
-                    <button id="dashboard-load-docket-dataset" type="button">Load Docket Dataset</button>
-                    <button id="dashboard-search-docket-dataset" type="button" class="secondary">Search Docket Dataset</button>
-                    <button id="dashboard-load-docket-dataset-graph" type="button" class="secondary">Load Graph</button>
+                    <button id="dashboard-search-docket-dataset" type="button" class="secondary">Search Filings</button>
+                    <button id="dashboard-load-docket-dataset-graph" type="button" class="secondary">Map Filing Connections</button>
                 </div>
                 <div class="stat-grid">
-                    <div class="stat-card"><strong id="dashboard-docket-dataset-documents">0</strong><span>Docket documents</span></div>
-                    <div class="stat-card"><strong id="dashboard-docket-dataset-events">0</strong><span>Calendar events</span></div>
+                    <div class="stat-card"><strong id="dashboard-docket-dataset-documents">0</strong><span>Filings found</span></div>
+                    <div class="stat-card"><strong id="dashboard-docket-dataset-events">0</strong><span>Dates found</span></div>
                     <div class="stat-card"><strong id="dashboard-docket-dataset-results">0</strong><span>Search results</span></div>
-                    <div class="stat-card"><strong id="dashboard-docket-dataset-graph-count">0</strong><span>Graph links</span></div>
+                    <div class="stat-card"><strong id="dashboard-docket-dataset-graph-count">0</strong><span>Connections</span></div>
                 </div>
                 <div class="chip-row" style="margin-top: 14px;">
                     <span class="chip" id="dashboard-docket-dataset-case-chip">case: waiting</span>
-                    <span class="chip" id="dashboard-docket-dataset-source-chip">source: waiting</span>
+                    <span class="chip" id="dashboard-docket-dataset-source-chip">filings: waiting</span>
                 </div>
-                <div class="status-line" id="dashboard-docket-dataset-status">Add a docket dataset parquet path to review docket filings.</div>
-                <pre id="dashboard-docket-dataset-preview">Docket dataset details will appear here.</pre>
+                <div class="document-insight-panel" id="docket-document-insight-panel" aria-label="Selected filing analysis">
+                    <div>
+                        <div class="eyebrow" style="color: var(--accent);">Selected Filing</div>
+                        <h3 id="docket-selected-document-title">No filing selected yet</h3>
+                        <p id="docket-selected-document-summary">Load or search filings. The first useful document will appear here with a suggested legal handoff.</p>
+                    </div>
+                    <div class="document-insight-grid">
+                        <div class="document-insight-item"><span>Document</span><strong id="docket-selected-document-id">waiting</strong></div>
+                        <div class="document-insight-item"><span>Suggested use</span><strong id="docket-selected-document-use">Review and save a note</strong></div>
+                        <div class="document-insight-item"><span>Dates</span><strong id="docket-selected-document-date">not found yet</strong></div>
+                    </div>
+                    <div class="handoff-actions">
+                        <a class="primary-action" id="docket-save-selected-document-link" href="#dataset-document-annotation-dashboard">Save note to workspace</a>
+                        <a class="secondary-action" id="docket-open-chat-about-document" href="/chat">Ask case chat about this filing</a>
+                    </div>
+                </div>
+                <div class="status-line" id="dashboard-docket-dataset-status">Choose a saved filing set, then load it to review docket filings.</div>
+                <details class="technical-details">
+                    <summary>Technical docket dataset payload</summary>
+                    <pre id="dashboard-docket-dataset-preview">Docket dataset details will appear here.</pre>
+                </details>
             </article>
 
             <article class="dashboard-card" id="workspace-dataset-parquet-dashboard">
@@ -1998,29 +2159,43 @@ def _render_dashboard_hub(
             </article>
 
             <article class="dashboard-card" id="dataset-document-annotation-dashboard">
-                <div class="eyebrow" style="color: var(--accent);">Document Annotation</div>
-                <h2>Dataset Document Annotation</h2>
-                <p>Capture a review note from the currently loaded docket or workspace dataset document and save it into the complaint workspace evidence record.</p>
-                {_render_subsection_nav("Annotation subsections", [("Docket dataset", "#docket-dataset-parquet-dashboard"), ("Workspace dataset", "#workspace-dataset-parquet-dashboard"), ("Workspace session", "#dashboard-workspace-snapshot")])}
+                <div class="eyebrow" style="color: var(--accent);">Save a Useful Note</div>
+                <h2>Send a Filing or Document Note to the Complaint Workspace</h2>
+                <p>Use this when a docket filing, evidence file, law, or court case changes what the complaint or response should say. The note becomes part of the workspace record for review and drafting.</p>
+                {_render_subsection_nav("Annotation subsections", [("Review docket filings", "#docket-dataset-parquet-dashboard"), ("Organize evidence and law", "#workspace-dataset-parquet-dashboard"), ("Workspace session", "#dashboard-workspace-snapshot"), ("Proof review", "/claim-support-review")])}
+                <div class="document-insight-panel" aria-label="Annotation guidance">
+                    <div>
+                        <div class="eyebrow" style="color: var(--accent);">What makes a useful note</div>
+                        <h3>Explain what the document proves and what should happen next</h3>
+                        <p>Good notes identify the filing, the fact or deadline it shows, the claim element it affects, and whether the draft, evidence list, timeline, or case chat should use it.</p>
+                    </div>
+                    <div class="document-insight-grid">
+                        <div class="document-insight-item"><span>Step 1</span><strong>Pick the document</strong></div>
+                        <div class="document-insight-item"><span>Step 2</span><strong>Choose claim impact</strong></div>
+                        <div class="document-insight-item"><span>Step 3</span><strong>Save to workspace</strong></div>
+                    </div>
+                </div>
                 <div class="modal-grid">
                     <div>
-                        <label class="field-label" for="dashboard-dataset-annotation-user-id">Workspace User ID</label>
+                        <label class="field-label" for="dashboard-dataset-annotation-user-id">Workspace user</label>
                         <input id="dashboard-dataset-annotation-user-id" type="text" value="{escape(default_user_id)}" placeholder="dashboard-review-user">
+                        <p class="field-helper">This keeps the note attached to the right saved complaint.</p>
                     </div>
                     <div>
-                        <label class="field-label" for="dashboard-dataset-annotation-user-name">Annotator Name</label>
+                        <label class="field-label" for="dashboard-dataset-annotation-user-name">Reviewer name</label>
                         <input id="dashboard-dataset-annotation-user-name" type="text" placeholder="Reviewer name">
                     </div>
                     <div>
-                        <label class="field-label" for="dashboard-dataset-annotation-user-role">Annotator Role</label>
+                        <label class="field-label" for="dashboard-dataset-annotation-user-role">Reviewer role</label>
                         <input id="dashboard-dataset-annotation-user-role" type="text" value="workspace reviewer" placeholder="workspace reviewer">
                     </div>
                     <div>
-                        <label class="field-label" for="dashboard-dataset-annotation-document-id">Document ID</label>
+                        <label class="field-label" for="dashboard-dataset-annotation-document-id">Selected document</label>
                         <input id="dashboard-dataset-annotation-document-id" type="text" placeholder="Load or search a dataset to choose a document">
+                        <p class="field-helper">This fills in automatically after loading or searching docket/workspace materials.</p>
                     </div>
                     <div>
-                        <label class="field-label" for="dashboard-dataset-annotation-claim-element">Claim Element</label>
+                        <label class="field-label" for="dashboard-dataset-annotation-claim-element">How this affects the case</label>
                         <select id="dashboard-dataset-annotation-claim-element">
                             <option value="protected_activity">Protected activity</option>
                             <option value="employer_knowledge">Employer knowledge</option>
@@ -2028,26 +2203,32 @@ def _render_dashboard_hub(
                             <option value="causation" selected>Causal link</option>
                             <option value="harm">Damages</option>
                         </select>
+                        <p class="field-helper">Choose the legal point this document helps prove, challenge, or explain.</p>
                     </div>
                     <div>
-                        <label class="field-label" for="dashboard-dataset-annotation-title">Annotation Title</label>
+                        <label class="field-label" for="dashboard-dataset-annotation-title">Note title</label>
                         <input id="dashboard-dataset-annotation-title" type="text" value="Dataset document annotation">
                     </div>
                     <div>
                         <label class="field-label" for="dashboard-dataset-annotation-tags">Tags</label>
                         <input id="dashboard-dataset-annotation-tags" type="text" placeholder="causation, accommodation, hearing">
+                        <p class="field-helper">Separate tags with commas, such as hearing, deadline, notice, retaliation, accommodation, service.</p>
                     </div>
                 </div>
                 <div style="margin-top: 14px;">
-                    <label class="field-label" for="dashboard-dataset-annotation-note">Review Note</label>
-                    <textarea id="dashboard-dataset-annotation-note" placeholder="Summarize what this document proves, what needs follow-up, or how it should be used in the complaint record."></textarea>
+                    <label class="field-label" for="dashboard-dataset-annotation-note">What this document shows</label>
+                    <textarea id="dashboard-dataset-annotation-note" placeholder="Example: This filing sets a hearing date, shows the landlord knew about the accommodation request, or creates a response deadline. Explain how the complaint or response should use it."></textarea>
                 </div>
                 <div class="button-row" style="margin-top: 12px;">
-                    <button id="dashboard-save-dataset-annotation" type="button">Annotate Dataset Document</button>
-                    <button id="dashboard-use-loaded-document" type="button" class="secondary">Use Loaded Document</button>
+                    <button id="dashboard-save-dataset-annotation" type="button">Save Note to Workspace</button>
+                    <button id="dashboard-use-loaded-document" type="button" class="secondary">Use Selected Document</button>
+                    <a class="secondary-action" href="/claim-support-review">Open Proof Review</a>
                 </div>
                 <div class="status-line" id="dashboard-dataset-annotation-status">Load or search a dataset document before saving an annotation.</div>
-                <pre id="dashboard-dataset-annotation-preview">The saved annotation payload will appear here.</pre>
+                <details class="technical-details">
+                    <summary>Saved annotation payload</summary>
+                    <pre id="dashboard-dataset-annotation-preview">The saved annotation payload will appear here.</pre>
+                </details>
             </article>
 
             <article class="dashboard-card" id="chat-upload-dashboard">
@@ -2178,6 +2359,11 @@ def _render_dashboard_hub(
 	                docketPayload: null,
 	                docketViewPayload: null,
 	                selectedDatasetDocument: null,
+	                docketDatasetLoaded: false,
+	                docketDatasetStatus: 'idle',
+	                docketDatasetError: '',
+	                docketDatasetCalendarEvents: [],
+	                docketDatasetSearchCount: 0,
 	                workspaceDatasetLoaded: false,
 	                workspaceDatasetStatus: 'idle',
 	                workspaceDatasetError: '',
@@ -2552,6 +2738,75 @@ def _render_dashboard_hub(
                 setLinkEnabled('dashboard-run-deontic-check', preflight.canDeontic, preflight.canDeontic ? '' : preflight.reason);
             }}
 
+            function getDocketDatasetPreflight() {{
+                const pathValue = String((document.getElementById('dashboard-docket-dataset-path') || {{}}).value || '').trim();
+                const queryValue = String((document.getElementById('dashboard-docket-dataset-query') || {{}}).value || '').trim();
+                if (!pathValue) {{
+                    return {{
+                        canLoad: false,
+                        canSearch: false,
+                        canGraph: false,
+                        canAnnotate: false,
+                        title: 'Load case filings',
+                        reason: 'Choose a saved filing set before searching, finding dates, or saving notes.',
+                        loadState: 'Choose filing set',
+                        searchState: 'Waiting for filings',
+                        annotationState: 'Waiting for selected document',
+                    }};
+                }}
+                if (!dashboardState.docketDatasetLoaded) {{
+                    return {{
+                        canLoad: true,
+                        canSearch: false,
+                        canGraph: false,
+                        canAnnotate: false,
+                        title: 'Load case filings',
+                        reason: 'Open the selected filing set first. Search and connection mapping will turn on after it loads.',
+                        loadState: dashboardState.docketDatasetStatus === 'loading' ? 'Loading filings...' : 'Ready to load',
+                        searchState: 'Waiting for filings',
+                        annotationState: 'Waiting for selected document',
+                    }};
+                }}
+                if (!queryValue) {{
+                    return {{
+                        canLoad: true,
+                        canSearch: true,
+                        canGraph: true,
+                        canAnnotate: Boolean(dashboardState.selectedDatasetDocument),
+                        title: 'Search or review dates',
+                        reason: 'Filings are loaded. Search for a deadline, hearing, motion, notice, order, or issue that affects the complaint or response.',
+                        loadState: 'Filings loaded',
+                        searchState: 'Ready for search',
+                        annotationState: dashboardState.selectedDatasetDocument ? 'Document selected' : 'Choose a filing to save',
+                    }};
+                }}
+                return {{
+                    canLoad: true,
+                    canSearch: true,
+                    canGraph: true,
+                    canAnnotate: Boolean(dashboardState.selectedDatasetDocument),
+                    title: 'Search filings',
+                    reason: 'Run the search, then save a note from the most useful filing into the complaint workspace.',
+                    loadState: 'Filings loaded',
+                    searchState: dashboardState.docketDatasetSearchCount ? `${{dashboardState.docketDatasetSearchCount}} result${{dashboardState.docketDatasetSearchCount === 1 ? '' : 's'}} found` : 'Ready for search',
+                    annotationState: dashboardState.selectedDatasetDocument ? 'Ready to save note' : 'Waiting for selected filing',
+                }};
+            }}
+
+            function updateDocketDatasetReadiness() {{
+                const preflight = getDocketDatasetPreflight();
+                setText('docket-next-action-title', preflight.title);
+                setText('docket-next-action-reason', preflight.reason);
+                setText('docket-flow-load-state', preflight.loadState);
+                setText('docket-flow-search-state', preflight.searchState);
+                setText('docket-flow-annotation-state', preflight.annotationState);
+                setButtonEnabled('dashboard-load-docket-dataset', preflight.canLoad, preflight.canLoad ? '' : preflight.reason);
+                setButtonEnabled('dashboard-search-docket-dataset', preflight.canSearch, preflight.canSearch ? '' : preflight.reason);
+                setButtonEnabled('dashboard-load-docket-dataset-graph', preflight.canGraph, preflight.canGraph ? '' : preflight.reason);
+                setLinkEnabled('docket-next-annotation-link', preflight.canAnnotate, preflight.canAnnotate ? '' : 'Load or search filings before saving a note.');
+                setLinkEnabled('docket-save-selected-document-link', preflight.canAnnotate, preflight.canAnnotate ? '' : 'Load or search filings before saving a note.');
+            }}
+
 	            function collapseMobileSectionMenu() {{
 	                const menu = document.getElementById('dashboard-section-menu');
 	                if (!menu || !window.matchMedia) {{
@@ -2637,6 +2892,79 @@ def _render_dashboard_hub(
                     .join(' ');
             }}
 
+            function extractDatesFromText(text) {{
+                const raw = String(text || '');
+                const datePattern = /\b(?:\d{{1,2}}\/\d{{1,2}}\/\d{{2,4}}|[A-Z][a-z]+ \d{{1,2}}, \d{{4}}|\d{{4}}-\d{{2}}-\d{{2}})\b/g;
+                return Array.from(new Set((raw.match(datePattern) || []).map((value) => String(value).trim()).filter(Boolean)));
+            }}
+
+            function summarizeDocumentText(document) {{
+                if (!document || typeof document !== 'object') {{
+                    return 'No filing is selected yet. Load or search filings to choose a document.';
+                }}
+                const text = String(document.text || document.snippet || document.preview || document.summary || '').replace(/\s+/g, ' ').trim();
+                if (text) {{
+                    return text.length > 240 ? `${{text.slice(0, 237)}}...` : text;
+                }}
+                const title = String(document.title || document.source_document_title || document.document_title || '').trim();
+                return title ? `Selected filing: ${{title}}. Add a note explaining why it matters to the complaint or response.` : 'Selected filing loaded. Add a note explaining why it matters to the complaint or response.';
+            }}
+
+            function classifyDocumentUse(document) {{
+                const combined = String(
+                    [
+                        document && document.title,
+                        document && document.source_document_title,
+                        document && document.document_title,
+                        document && document.text,
+                        document && document.snippet,
+                    ].filter(Boolean).join(' ')
+                ).toLowerCase();
+                if (/hearing|trial|conference|court date/.test(combined)) {{
+                    return 'Add to timeline and prepare for scheduled event';
+                }}
+                if (/deadline|due|answer|response/.test(combined)) {{
+                    return 'Check response deadline and add to timeline';
+                }}
+                if (/notice|summons|service/.test(combined)) {{
+                    return 'Review notice or service issue';
+                }}
+                if (/order|judgment|dismiss/.test(combined)) {{
+                    return 'Review order impact on complaint or response';
+                }}
+                return 'Save legal impact note for review or drafting';
+            }}
+
+            function updateSelectedDocketDocumentPanel(docketDocument) {{
+                const selected = docketDocument && typeof docketDocument === 'object' ? docketDocument : dashboardState.selectedDatasetDocument;
+                const id = String(
+                    selected && (
+                        selected.document_id
+                        || selected.id
+                        || selected.row_id
+                        || selected.source_document_id
+                        || ''
+                    ) || ''
+                ).trim();
+                const title = String(selected && (selected.title || selected.source_document_title || selected.document_title || '') || '').trim();
+                const text = String(selected && (selected.text || selected.snippet || selected.preview || selected.summary || '') || '').trim();
+                const dates = extractDatesFromText(`${{title}} ${{text}}`);
+                setText('docket-selected-document-title', title || (id ? `Selected filing ${{id}}` : 'No filing selected yet'));
+                setText('docket-selected-document-summary', summarizeDocumentText(selected));
+                setText('docket-selected-document-id', id || 'waiting');
+                setText('docket-selected-document-use', classifyDocumentUse(selected || {{}}));
+                setText('docket-selected-document-date', dates.length ? dates.slice(0, 3).join(', ') : 'not found yet');
+                const userId = String((document.getElementById('dashboard-workspace-user-id') || {{}}).value || '').trim();
+                setHref('docket-open-chat-about-document', buildSurfaceUrl('/chat', {{
+                    user_id: userId,
+                    source: 'dashboard-docket-document',
+                    prefill_message: title
+                        ? `Help me understand how this docket filing affects my complaint or response: ${{title}}`
+                        : 'Help me understand how this docket filing affects my complaint or response.',
+                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
+                }}));
+            }}
+
             function selectDatasetDocument(datasetDocument, datasetKind) {{
                 const normalizedDocument = datasetDocument && typeof datasetDocument === 'object' ? datasetDocument : null;
                 dashboardState.selectedDatasetDocument = normalizedDocument
@@ -2669,6 +2997,9 @@ def _render_dashboard_hub(
                 }}
                 if (titleNode && title) {{
                     titleNode.value = `${{title}} annotation`;
+                }}
+                if ((datasetKind || '').toLowerCase() === 'docket') {{
+                    updateSelectedDocketDocumentPanel(dashboardState.selectedDatasetDocument);
                 }}
             }}
 
@@ -2980,13 +3311,13 @@ def _render_dashboard_hub(
                 setText('dashboard-docket-high', String(stats.highPriority));
                 setText('dashboard-docket-runs', String(stats.runCount));
                 setText('dashboard-docket-calendar-count', String(calendarEvents.length));
-                setText('dashboard-docket-source-chip', `source: ${{String((payload && payload.source) || label || 'unknown')}}`);
-                setText('dashboard-docket-manifest-chip', `manifest: ${{String((payload && payload.manifest_path) || 'not set')}}`);
+                setText('dashboard-docket-source-chip', `filings: ${{String((payload && payload.source) || label || 'loaded')}}`);
+                setText('dashboard-docket-manifest-chip', `package: ${{String((payload && payload.manifest_path) || 'not set')}}`);
                 setText(
                     'dashboard-docket-calendar-chip',
                     calendarEvents.length
-                        ? `calendar: ${{summarizeCalendarEvent(calendarEvents[0])}}`
-                        : 'calendar: no events found'
+                        ? `next date: ${{summarizeCalendarEvent(calendarEvents[0])}}`
+                        : 'dates: none found'
                 );
                 setText(
                     'dashboard-docket-status',
@@ -3033,7 +3364,10 @@ def _render_dashboard_hub(
                 const documents = Array.isArray(payload && payload.documents) ? payload.documents : [];
                 const searchResults = (payload && payload.search_results) || {{}};
                 const results = Array.isArray(searchResults.results) ? searchResults.results : [];
-                const calendarEvents = prioritizeCalendarEvents(extractCalendarEvents(payload || {{}}).length ? extractCalendarEvents(payload || {{}}) : extractCalendarEventsFromDocketView(payload || {{}}));
+                const extractedCalendarEvents = prioritizeCalendarEvents(extractCalendarEvents(payload || {{}}).length ? extractCalendarEvents(payload || {{}}) : extractCalendarEventsFromDocketView(payload || {{}}));
+                const calendarEvents = extractedCalendarEvents.length
+                    ? extractedCalendarEvents
+                    : (Array.isArray(dashboardState.docketDatasetCalendarEvents) ? dashboardState.docketDatasetCalendarEvents : []);
                 const graph = (payload && payload.knowledge_graph) || {{}};
                 const issueLinkCount = Number(graph.issue_link_count || graph.relationship_count || 0);
                 setText('dashboard-docket-dataset-documents', String(Number(summary.document_count || documents.length || 0)));
@@ -3041,12 +3375,31 @@ def _render_dashboard_hub(
                 setText('dashboard-docket-dataset-results', String(Number(searchResults.result_count || results.length || 0)));
                 setText('dashboard-docket-dataset-graph-count', String(issueLinkCount));
                 setText('dashboard-docket-dataset-case-chip', `case: ${{String((payload && (payload.case_name || payload.docket_id)) || summary.case_name || summary.docket_id || 'unknown')}}`);
-                setText('dashboard-docket-dataset-source-chip', `source: ${{String((payload && payload.source) || label || 'dataset')}}`);
-                setText('dashboard-docket-dataset-status', `Loaded docket dataset ${{label || 'view'}} through ipfs_datasets_py.`);
+                setText('dashboard-docket-dataset-source-chip', `filings: ${{String((payload && payload.source) || label || 'loaded')}}`);
+                if (label === 'search') {{
+                    setText('dashboard-docket-dataset-status', results.length ? `Search complete. Review the first useful filing, then save a note to the workspace.` : 'Search complete. No matching filing was returned; try a broader search such as hearing, deadline, notice, order, or response.');
+                }} else if (label === 'graph') {{
+                    setText('dashboard-docket-dataset-status', issueLinkCount ? `Mapped ${{issueLinkCount}} filing connection${{issueLinkCount === 1 ? '' : 's'}}. Use the selected filing panel to save the legal impact.` : 'Connection map loaded, but no filing links were returned.');
+                }} else {{
+                    setText('dashboard-docket-dataset-status', calendarEvents.length ? `Loaded filings and found ${{calendarEvents.length}} possible date${{calendarEvents.length === 1 ? '' : 's'}}. Review dates, search filings, or save a note from the selected filing.` : 'Loaded filings. Search for dates, motions, orders, notice problems, or response issues.');
+                }}
                 setText('dashboard-docket-dataset-preview', JSON.stringify(Object.assign({{}}, payload || {{}}, {{
                     extracted_calendar_events: calendarEvents.slice(0, 10),
                 }}), null, 2));
+                dashboardState.docketPayload = payload || dashboardState.docketPayload || null;
+                dashboardState.docketDatasetLoaded = true;
+                dashboardState.docketDatasetStatus = 'loaded';
+                dashboardState.docketDatasetError = '';
+                dashboardState.docketDatasetCalendarEvents = calendarEvents;
+                dashboardState.docketDatasetSearchCount = Number(searchResults.result_count || results.length || 0);
                 selectDatasetDocument(firstDocumentFromPayload(payload || {{}}), 'docket');
+                renderChipList(
+                    'dashboard-docket-calendar-list',
+                    calendarEvents.slice(0, 3).map((event) => `${{summarizeCalendarEvent(event)}} (${{describeCalendarUrgency(event)}})`),
+                    'No hearing, deadline, or conference event detected in the loaded docket.'
+                );
+                updateDocketDatasetReadiness();
+                renderHeadsUpCard();
             }}
 
             function renderWorkspaceDatasetCard(payload, label) {{
@@ -3207,7 +3560,25 @@ def _render_dashboard_hub(
 
             async function loadDocketDatasetDashboard(mode) {{
                 const statusId = 'dashboard-docket-dataset-status';
-                setText(statusId, mode === 'search' ? 'Searching docket dataset parquet...' : mode === 'graph' ? 'Loading docket dataset graph...' : 'Loading docket dataset parquet...');
+                const preflight = getDocketDatasetPreflight();
+                if (mode === 'search' && !preflight.canSearch) {{
+                    setText(statusId, preflight.reason);
+                    updateDocketDatasetReadiness();
+                    return;
+                }}
+                if (mode === 'graph' && !preflight.canGraph) {{
+                    setText(statusId, preflight.reason);
+                    updateDocketDatasetReadiness();
+                    return;
+                }}
+                setText(statusId, mode === 'search' ? 'Searching filings...' : mode === 'graph' ? 'Mapping filing connections...' : 'Loading case filings...');
+                if (mode !== 'search' && mode !== 'graph') {{
+                    dashboardState.docketDatasetLoaded = false;
+                    dashboardState.docketDatasetStatus = 'loading';
+                    dashboardState.docketDatasetError = '';
+                    dashboardState.docketDatasetSearchCount = 0;
+                    updateDocketDatasetReadiness();
+                }}
                 try {{
                     let endpoint = '/api/complaint-workspace/docket-dataset/view';
                     const extra = {{
@@ -3229,7 +3600,11 @@ def _render_dashboard_hub(
                     const payload = await fetchJson(`${{endpoint}}?${{params.toString()}}`);
                     renderDocketDatasetCard(payload, mode || 'view');
                 }} catch (error) {{
-                    setText(statusId, `Docket dataset load failed: ${{error.message}}`);
+                    dashboardState.docketDatasetLoaded = false;
+                    dashboardState.docketDatasetStatus = 'error';
+                    dashboardState.docketDatasetError = String(error.message || 'Unable to load filings.');
+                    setText(statusId, `Filing review failed: ${{error.message}}`);
+                    updateDocketDatasetReadiness();
                 }}
             }}
 
@@ -3345,6 +3720,17 @@ def _render_dashboard_hub(
                 updateWorkspaceDatasetReadiness();
             }}
 
+            function applyDocketQuickSearch(event) {{
+                const button = event && event.currentTarget ? event.currentTarget : null;
+                const queryInput = document.getElementById('dashboard-docket-dataset-query');
+                if (!button || !queryInput) {{
+                    return;
+                }}
+                queryInput.value = String(button.dataset.docketQuery || '');
+                setText('dashboard-docket-dataset-status', `Search selected: ${{String(button.textContent || '').trim()}}. Run search to inspect matching filings.`);
+                updateDocketDatasetReadiness();
+            }}
+
             async function loadWorkspaceGraphExplorer() {{
                 const preflight = getWorkspaceDatasetPreflight();
                 if (!preflight.canGraph) {{
@@ -3386,10 +3772,10 @@ def _render_dashboard_hub(
                 setText('dashboard-docket-high', '0');
                 setText('dashboard-docket-runs', '0');
                 setText('dashboard-docket-calendar-count', '0');
-                setText('dashboard-docket-source-chip', 'source: not loaded');
-                setText('dashboard-docket-manifest-chip', 'manifest: not set');
-                setText('dashboard-docket-calendar-chip', 'calendar: waiting');
-                setText('dashboard-docket-status', reason || 'Packaged docket unloaded.');
+                setText('dashboard-docket-source-chip', 'filings: not loaded');
+                setText('dashboard-docket-manifest-chip', 'package: not selected');
+                setText('dashboard-docket-calendar-chip', 'dates: waiting');
+                setText('dashboard-docket-status', reason || 'Saved filing package cleared.');
                 renderChipList(
                     'dashboard-docket-calendar-list',
                     [],
@@ -3407,7 +3793,12 @@ def _render_dashboard_hub(
                 const docketViewPayload = dashboardState.docketViewPayload || null;
                 const dashboardCalendarEvents = extractCalendarEvents(docketPayload || {{}});
                 const docketViewCalendarEvents = extractCalendarEventsFromDocketView(docketViewPayload || {{}});
-                const calendarEvents = prioritizeCalendarEvents(docketViewCalendarEvents.length ? docketViewCalendarEvents : dashboardCalendarEvents);
+                const docketDatasetCalendarEvents = Array.isArray(dashboardState.docketDatasetCalendarEvents) ? dashboardState.docketDatasetCalendarEvents : [];
+                const calendarEvents = prioritizeCalendarEvents(
+                    docketDatasetCalendarEvents.length
+                        ? docketDatasetCalendarEvents
+                        : (docketViewCalendarEvents.length ? docketViewCalendarEvents : dashboardCalendarEvents)
+                );
                 const review = workspacePayload && workspacePayload.review ? workspacePayload.review : {{}};
                 const overview = review && review.overview ? review.overview : {{}};
                 const evidence = session && session.evidence ? session.evidence : {{}};
@@ -3699,6 +4090,26 @@ def _render_dashboard_hub(
             document.getElementById('dashboard-load-docket-dataset').addEventListener('click', function() {{ loadDocketDatasetDashboard('view'); }});
             document.getElementById('dashboard-search-docket-dataset').addEventListener('click', function() {{ loadDocketDatasetDashboard('search'); }});
 	            document.getElementById('dashboard-load-docket-dataset-graph').addEventListener('click', function() {{ loadDocketDatasetDashboard('graph'); }});
+	            document.querySelectorAll('[data-docket-query]').forEach(function(button) {{
+	                button.addEventListener('click', applyDocketQuickSearch);
+	            }});
+	            const docketDatasetPathInput = document.getElementById('dashboard-docket-dataset-path');
+	            if (docketDatasetPathInput) {{
+	                docketDatasetPathInput.addEventListener('input', function() {{
+	                    dashboardState.docketDatasetLoaded = false;
+	                    dashboardState.docketDatasetStatus = 'idle';
+	                    dashboardState.docketDatasetError = '';
+	                    dashboardState.docketDatasetCalendarEvents = [];
+	                    dashboardState.docketDatasetSearchCount = 0;
+	                    setText('dashboard-docket-dataset-status', 'Choose a saved filing set, then load it to review docket filings.');
+	                    updateDocketDatasetReadiness();
+	                    renderHeadsUpCard();
+	                }});
+	            }}
+	            const docketDatasetQueryInput = document.getElementById('dashboard-docket-dataset-query');
+	            if (docketDatasetQueryInput) {{
+	                docketDatasetQueryInput.addEventListener('input', updateDocketDatasetReadiness);
+	            }}
 		            document.getElementById('dashboard-load-workspace-dataset').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('view'); }});
 		            document.getElementById('dashboard-load-workspace-dataset-step1').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('view'); }});
 		            document.getElementById('dashboard-search-workspace-dataset').addEventListener('click', function() {{ loadWorkspaceDatasetDashboard('search'); }});
@@ -3793,6 +4204,8 @@ def _render_dashboard_hub(
             collapseMobileSectionMenu();
             resetWorkflowRail();
             setWorkspaceLane('');
+            updateSelectedDocketDocumentPanel(null);
+            updateDocketDatasetReadiness();
             loadWorkspaceDashboard();
             if (String(document.getElementById('dashboard-docket-manifest-path').value || '').trim()) {{
                 loadDocketDashboard(false);
