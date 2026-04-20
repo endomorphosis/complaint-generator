@@ -206,6 +206,253 @@ The dashboard should present, for each claim element:
 
 ## Delivery Workstreams
 
+## Screenshot And Router Review Addendum: Layperson Docket UX
+
+Date: 2026-04-20
+
+This addendum records a pre-implementation UI/UX review pass using Playwright screenshot artifacts from the unified workspace:
+
+- `artifacts/ui-audit-layperson/screenshots/workspace-homepage.png`
+- `artifacts/ui-audit-layperson/screenshots/workspace-intake.png`
+- `artifacts/ui-audit-layperson/screenshots/workspace-evidence.png`
+- `artifacts/ui-audit-layperson/screenshots/workspace-review.png`
+- `artifacts/ui-audit-layperson/screenshots/workspace-draft.png`
+
+The screenshot workflow did attempt to route those images through `MultimodalRouterBackend`. The multimodal review and text fallback both timed out, so the saved router artifact at `artifacts/ui-audit-layperson/reviews/iteration-01-review.json` is the deterministic fallback. That timeout is itself a P0 reliability finding: the review/optimizer path must return a bounded artifact and show the fallback reason in the workspace instead of leaving an operator guessing whether visual review actually occurred.
+
+The visual review also expands the product target. The dashboard should not only help an operator review claim support. It should help a layperson create or respond to legal complaints while managing a docket of documents, inspecting and labeling those documents, annotating evidence spans, and asking grounded questions about the docket through `llm_router` and `multimodal_router`.
+
+### Observed UX Risks
+
+1. The current workspace is capability-rich but too dense for a stressed layperson. Intake, evidence, review, draft, Gmail import, MCP examples, release-gate metadata, and generated pleadings appear as long technical panels rather than a small set of obvious next actions.
+2. The sticky bottom navigation can cover content in full-page screenshots, especially on intake, evidence, review, and draft. It should reserve layout space or collapse into a safer mobile/action-bar pattern.
+3. Evidence intake exposes advanced Gmail, DuckDB, CLI, MCP, OAuth, checkpoint, and JSON-example controls directly in the main layperson path. These should move behind an "Advanced import" or operator mode while the default path stays document/task focused.
+4. Review repeats similar proof maps and support cards. Counts are useful, but the user needs one clear answer per element: "what proves this, what is still thin, and what should I do next?"
+5. Draft is visually overloaded. The release gate, checklist, composer, recommendations, and full pleading preview compete for attention. The layperson path should show one filing-readiness decision and one primary next action before exposing full document text.
+6. Docket management is not yet visible as a primary workflow. There is no first-class list of docket documents, document status, due dates, required response type, annotation progress, or unanswered document questions.
+7. Document analysis is not yet anchored in a viewer. A layperson needs to see the actual PDF/image/text page, select a span, apply a label, and ask a question with citations back to that page or span.
+8. The chatbot is not presented as a document-grounded assistant. It needs visible scope, cited answers, confidence/fallback state, and a way to turn an answer into a saved annotation, issue, timeline event, or response draft note.
+9. Router and optimizer failures are too invisible. If `multimodal_router` times out or falls back to `llm_router`, the UI should say so plainly and preserve a review artifact.
+10. Browser regression currently has two pre-implementation blockers: the unified workspace flow tried to click a hidden `#chat-open-profile` link, and the homepage flow expected a stale provider order string. Screenshot review should not depend on brittle hidden controls or outdated provider-order assertions.
+
+### Revised Product Shape
+
+The next UI iteration should treat the workspace as four visible layperson lanes:
+
+1. **Intake**: Tell the story and capture structured facts.
+2. **Docket**: Add, triage, inspect, label, and annotate court and evidence documents.
+3. **Review**: See what each claim or response issue is supported by, what is thin, and what to do next.
+4. **Draft**: Generate or revise a complaint, answer, response, motion, or filing packet only after the record has an explicit readiness posture.
+
+Advanced import, MCP, CLI, DuckDB, provider diagnostics, and optimizer controls should remain discoverable, but they should be secondary operator tools rather than default layperson surface area.
+
+### New Workstream 0: Audit Reliability And Screenshot Review
+
+Priority: P0
+
+Goal: make visual UX review reliable before implementation starts.
+
+Primary files:
+
+- `complaint_generator/ui_ux_workflow.py`
+- `playwright/tests/complaint-flow.spec.js`
+- `templates/workspace.html`
+- `static/complaint_app_shell.js`
+
+Work:
+
+- keep the deterministic fallback, but show fallback status in the workspace UX Audit panel,
+- ensure router calls are truly bounded and cannot leave progress stuck at `running_router_review`,
+- fix the hidden profile-link browser failure or make the test navigate by URL when the link is intentionally hidden,
+- update provider-order expectations so test assertions match the actual configured router order,
+- add a screenshot-review test that succeeds with existing screenshots even when the full journey has unrelated failures.
+
+Acceptance criteria:
+
+1. Playwright can capture homepage, intake, evidence, review, draft, docket, document viewer, and chat screenshots in one reliable command.
+2. Router review returns either a multimodal result or a deterministic fallback artifact within the configured timeout.
+3. The workspace shows whether the latest UX review used `multimodal_router`, `llm_router`, or deterministic fallback.
+
+### New Workstream 1: Docket Command Center
+
+Priority: P0
+
+Goal: make docket documents the organizing object for complaints and responses.
+
+Work:
+
+- add a docket list with document type, source, filing date, response due date, status, and assigned claim/issue labels,
+- distinguish court filings, notices, exhibits, correspondence, agency records, and user-uploaded evidence,
+- show a primary next action per docket item: inspect, label, annotate, ask, respond, attach to claim, or mark complete,
+- let users create a response task from a docket document, including answer/denial/admission, affirmative defense, objection, motion, or records request paths,
+- persist docket item state separately from generic evidence records while linking both to the same artifact/chunk provenance.
+
+Acceptance criteria:
+
+1. A layperson can answer "what document needs my attention next?"
+2. Each docket document has a clear status and next action.
+3. Complaint and response drafting can start from a selected docket item.
+
+### New Workstream 2: Document Viewer, Annotation, And Labeling
+
+Priority: P0
+
+Goal: make document analysis visible, page-aware, and reusable.
+
+Work:
+
+- add a document viewer with page thumbnails, OCR/text layer status, parse quality, and source provenance,
+- support span or page annotations with label taxonomy: party, date, deadline, allegation, denial, admission, exhibit, harm, remedy, contradiction, missing proof, legal authority, service issue, and follow-up,
+- let users convert an annotation into a timeline event, claim fact, response issue, evidence link, or chatbot question,
+- expose confidence and source type on every annotation,
+- preserve annotation revisions and reviewer notes.
+
+Acceptance criteria:
+
+1. Users can select a document span and label why it matters.
+2. Labels become durable fact/evidence records rather than browser-only notes.
+3. Review and Draft can cite annotations by document, page, and span.
+
+### New Workstream 3: Grounded Docket Chat
+
+Priority: P0
+
+Goal: make the chatbot a grounded document assistant, not a generic conversation box.
+
+Work:
+
+- add a chat panel scoped to the selected docket, selected document, selected page, or selected annotation,
+- route text questions through `llm_router` and image/page questions through `multimodal_router`,
+- require cited answers with document/page/span references whenever source material is available,
+- show router state, fallback state, and "not enough evidence" answers plainly,
+- let a chat answer become a saved annotation, issue label, timeline event, evidence task, or draft note,
+- add suggested prompts for laypeople: "What is this document asking me to do?", "What deadline does this create?", "What allegations do I need to admit, deny, or explain?", "Which pages support my complaint?", and "What should I ask the court for?"
+
+Acceptance criteria:
+
+1. Chat answers cite docket documents and pages.
+2. Users can save useful answers into the proof/drafting workflow.
+3. Router fallback does not silently change the evidentiary confidence of an answer.
+
+### New Workstream 4: Complaint And Response Drafting
+
+Priority: P0
+
+Goal: support both starting a complaint and responding to documents already in the docket.
+
+Work:
+
+- add a first decision: "I need to start a complaint" vs. "I need to respond to a document",
+- for responses, bind the draft to a docket item and extract response obligations, deadlines, allegations, requested relief, and service requirements,
+- provide answer/denial/admission and motion/objection-oriented drafting paths,
+- keep release-gate checks tied to both legal sufficiency and procedural completeness,
+- keep export blocked or warning-gated when required parties, captions, deadlines, signatures, service details, or cited source support are missing.
+
+Acceptance criteria:
+
+1. The user can draft a complaint or a response from the same workspace.
+2. Response drafting shows the source docket document and the exact allegations or requests being answered.
+3. Export guidance explains procedural blockers in plain language.
+
+### New Workstream 5: Layperson Information Architecture
+
+Priority: P1
+
+Goal: reduce cognitive load without hiding power-user tools.
+
+Work:
+
+- add a mode distinction: Client, Advocate/Operator, and Advanced Tools,
+- keep CLI, MCP, DuckDB, provider diagnostics, and optimizer controls in Advanced Tools,
+- replace repeated cards with one next-action strip and one proof/readiness summary per lane,
+- reserve space for sticky navigation so it does not cover page content,
+- simplify copy by removing self-referential workflow language where a direct task label would work,
+- make "why this matters legally" available inline for questions, evidence items, and annotations.
+
+Acceptance criteria:
+
+1. A first-time user can identify the next action within five seconds on each lane.
+2. Advanced tools remain available without dominating the default task flow.
+3. Mobile and narrow desktop screenshots have no sticky-nav overlap.
+
+### Updated Implementation Order
+
+1. Stabilize Playwright screenshot review and router fallback reporting.
+2. Add the Docket lane and document-status model.
+3. Add the page-aware document viewer with annotation and labeling primitives.
+4. Add grounded docket chat with cited answers and save-to-workflow actions.
+5. Rework Evidence and Review around a single "what proves this / what is thin / what next" model.
+6. Split Draft into complaint-start and response-to-document flows.
+7. Move advanced imports and MCP/CLI diagnostics into a secondary advanced-tools lane.
+
+### Second Targeted Screenshot Pass: Docket, Document, Chat
+
+Date: 2026-04-20
+
+A narrower Playwright pass captured the current docket-adjacent surfaces:
+
+- `artifacts/ui-audit-docket-pass/screenshots/workspace-evidence-current.png`
+- `artifacts/ui-audit-docket-pass/screenshots/workspace-review-current.png`
+- `artifacts/ui-audit-docket-pass/screenshots/workspace-packaged-docket-hidden-in-tools.png`
+- `artifacts/ui-audit-docket-pass/screenshots/claim-review-document-intake.png`
+- `artifacts/ui-audit-docket-pass/screenshots/document-builder-current.png`
+- `artifacts/ui-audit-docket-pass/screenshots/chat-docket-context-current.png`
+
+Those screenshots were sent through `MultimodalRouterBackend` with a tighter docket/document/chat prompt. The multimodal call and text fallback again timed out; the saved artifact is `artifacts/ui-audit-docket-pass/reviews/iteration-02-review.json` with `strategy: deterministic_fallback`. This confirms that the first implementation slice should include visual-audit reliability before using router critique as an automated gate.
+
+The direct visual review from this second pass adds more specific product requirements:
+
+1. **Docket is present but misplaced.** The only explicit packaged-docket UI appears inside `CLI + MCP` as "Packaged Docket Ops." It asks for a bundle manifest path and exposes revalidation/persistence controls. That is useful for an operator, but it is not the layperson docket view. The layperson needs "Documents in my case" first, not "Load packaged legal ops dashboard."
+2. **Docket controls are blocked by sticky navigation overlap.** In the packaged-docket screenshot, the stage navigation bar overlays the card content. The layout must reserve space for sticky controls or use a compact action rail that does not cover forms.
+3. **Document intake is buried below operator review scaffolding.** The `/claim-support-review` screenshot shows document intake after a long operator sidebar, empty metrics, follow-up controls, and "Review request failed: Not found." A layperson looking for a document would not know whether to load review, fill claim IDs, or upload first.
+4. **Chat has a promising filing context but lacks source grounding.** The chat screenshot shows "Ready to answer questions with the selected filing context attached" and labels such as deadline, adverse action, and response needed. It still does not show the actual document page, selected span, citation target, or save buttons for "turn this answer into an annotation / deadline / response issue."
+5. **The builder is complaint-first, not docket-response-first.** `/document` describes turning a complaint record into a formal complaint. It does not yet ask whether the user is starting a complaint or responding to a docket document, nor does it bind draft sections to a selected pleading, notice, motion, summons, or agency letter.
+6. **Evidence intake and review are close to the right proof model but not a docket model.** They ask what claim element an item strengthens, which is good. They do not yet provide a docket table, document status, response deadline, annotation progress, or per-document unresolved questions.
+
+### Refined UX Target For Layperson Docket Work
+
+The default layperson flow should use this object model and language:
+
+1. **Docket Item**: a document in the case, such as a complaint, summons, notice, exhibit, email, agency letter, court order, motion, or response.
+2. **Document Status**: needs review, needs labeling, has deadline, needs response, ready to cite, low-quality OCR, duplicate, or archived.
+3. **Annotation**: a page or text span labeled as allegation, admission, denial, deadline, party, date, harm, remedy, exhibit, contradiction, authority, service issue, or follow-up.
+4. **Question**: a grounded question asked about one docket item, page, selected span, or group of documents.
+5. **Draft Task**: start complaint, answer complaint, respond to motion, object, request records, prepare declaration, or assemble exhibit packet.
+
+The UI should avoid making laypeople work with manifest paths, claim element IDs, execution lanes, queue priority, provider diagnostics, or MCP examples unless they explicitly open Advanced Tools.
+
+### Refined Implementation Slices Before Coding
+
+Slice A: Make the screenshot/router review path dependable.
+
+- Add a small deterministic screenshot-capture target for only Docket, Document Viewer, Chat, Review, and Draft.
+- Make router fallback visible in the UX Audit panel and in the generated review artifact.
+- Treat router timeout as a warning, not a blocker to saving visual evidence.
+
+Slice B: Promote a Docket tab into the main workspace.
+
+- Add a visible Docket lane between Intake and Evidence/Review.
+- Seed it from uploaded documents, review documents, imported local evidence, Gmail documents, and packaged docket manifests.
+- Show each docket item with title, type, date, deadline, source, status, labels, annotation count, unanswered questions, and primary next action.
+
+Slice C: Add the document viewer and annotation shell.
+
+- Display the selected document next to its metadata and labels.
+- Support page/span annotation records even before advanced PDF rendering is complete.
+- Make "Add label," "Ask about this page," "Attach to claim/response," and "Create deadline" the primary actions.
+
+Slice D: Make chat document-scoped.
+
+- Keep the current selected-filing context, but add visible source cards and citation targets.
+- Add save actions: save as annotation, save as deadline, save as timeline event, save as response issue, save as evidence task, or save as draft note.
+- Require `llm_router` / `multimodal_router` status and fallback messages beside each answer.
+
+Slice E: Split drafting by user intent.
+
+- First ask: "Start a complaint" or "Respond to a document."
+- If responding, force selection of a docket item and show the exact document being answered.
+- Map extracted allegations, deadlines, requests, defenses, and service requirements into the draft checklist.
+
 ## Workstream 1: Better questions
 
 Primary files:

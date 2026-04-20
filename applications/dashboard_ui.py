@@ -3384,6 +3384,82 @@ def _render_dashboard_hub(
                 setText('docket-current-task-detail', detail);
                 setText('docket-current-task-action', label);
                 setHref('docket-current-task-action', href);
+                updateAnnotationTaskState();
+            }}
+
+            function updateDocumentContextBar() {{
+                const selected = dashboardState.selectedDatasetDocument || null;
+                const title = selectedDocumentTitle(selected);
+                const id = selectedDocumentId(selected);
+                const datasetKind = String(selected && selected.dataset_kind || 'document').trim();
+                const userId = activeDashboardUserId();
+                const selectedContext = selected ? JSON.stringify(buildDocketChatContext(selected, userId, 'dashboard-selected-document-context')) : '';
+                const selectedChatHref = selected ? buildSurfaceUrl('/chat', {{
+                    user_id: userId,
+                    source: 'dashboard-selected-document-context',
+                    prefill_message: title
+                        ? `Help me label and analyze this selected filing or document: ${{title}}`
+                        : 'Help me label and analyze this selected filing or document.',
+                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
+                    chat_context: selectedContext,
+                }}) : '/chat';
+                setText('context-selected-document', title ? (title.length > 42 ? `${{title.slice(0, 39)}}...` : title) : 'none selected');
+                setText('context-router-mode', selected ? 'document Q&A ready' : 'general intake');
+                setText('context-selected-document-hint', selected ? 'Change selection' : 'Select a filing');
+                setHref('context-selected-document-hint', selected ? '#docket-filing-workspace' : '#docket-dataset-parquet-dashboard');
+                setHref('context-router-hint', selectedChatHref);
+                setHref('context-open-selected-chat', selectedChatHref);
+                setLinkEnabled('context-open-selected-chat', Boolean(selected), selected ? '' : 'Select a filing or document before asking chat about it.');
+                const selectedCard = document.getElementById('context-selected-document-card');
+                if (selectedCard) {{
+                    selectedCard.classList.toggle('is-active', Boolean(selected));
+                    selectedCard.classList.toggle('is-warning', !selected);
+                }}
+                const routerCard = document.getElementById('context-router-card');
+                if (routerCard) {{
+                    routerCard.classList.toggle('is-active', Boolean(selected));
+                }}
+                setText('annotation-selected-document-title', title || 'No document selected yet');
+                setText(
+                    'annotation-selected-document-detail',
+                    selected
+                        ? `${{titleCase(datasetKind, 'Document')}} ${{id ? '(' + id + ')' : ''}} is the active source for labels, notes, and document-aware chat.`
+                        : 'Load or search filings/materials, then choose a document before saving a note or asking chat about it.'
+                );
+                setLinkEnabled('docket-banner-chat-link', Boolean(selected), selected ? '' : 'Select a filing before asking chat about it.');
+                setLinkEnabled('docket-open-chat-about-document', Boolean(selected), selected ? '' : 'Select a filing before asking chat about it.');
+                setLinkEnabled('dashboard-note-preflight-chat-link', Boolean(selected), selected ? '' : 'Select a filing before asking chat about it.');
+            }}
+
+            function updateAnnotationTaskState() {{
+                const selected = dashboardState.selectedDatasetDocument || null;
+                const tags = currentAnnotationTags();
+                const note = String((document.getElementById('dashboard-dataset-annotation-note') || {{}}).value || '').trim();
+                let title = 'Select a document first';
+                let detail = 'Choose a docket filing or workspace material so labels, notes, and chat questions attach to the right source.';
+                let href = '#docket-dataset-parquet-dashboard';
+                let label = 'Review docket filings';
+                if (selected && !tags.length) {{
+                    title = 'Add labels to this document';
+                    detail = 'Use short labels such as deadline, hearing, notice, contradiction, supports claim, or needs review.';
+                    href = '#dashboard-dataset-annotation-tags';
+                    label = 'Add labels';
+                }} else if (selected && !note) {{
+                    title = 'Write what this document shows';
+                    detail = 'Explain the legal impact in plain language before saving it into the complaint workspace.';
+                    href = '#dashboard-dataset-annotation-note';
+                    label = 'Write note';
+                }} else if (selected && note) {{
+                    title = 'Review and save this note';
+                    detail = 'Run the handoff check, then save the document insight into the complaint workspace.';
+                    href = '#dashboard-save-dataset-annotation';
+                    label = 'Review and save note';
+                }}
+                setText('annotation-current-task-title', title);
+                setText('annotation-current-task-detail', detail);
+                setText('annotation-current-task-action', label);
+                setHref('annotation-current-task-action', href);
+                updateDocumentContextBar();
             }}
 
 	            function collapseMobileSectionMenu() {{
@@ -3696,7 +3772,7 @@ def _render_dashboard_hub(
 	                    const labels = selected ? filingLabelsForDocument(selected) : ['waiting for selection'];
 	                    bannerLabels.innerHTML = labels.map((label) => `<span class="filing-label${{/deadline|hearing/i.test(label) ? ' is-urgent' : ''}}">${{escapeHtml(label)}}</span>`).join('');
 	                }}
-	                const userId = String((document.getElementById('dashboard-workspace-user-id') || {{}}).value || '').trim();
+	                const userId = activeDashboardUserId();
 	                const documentChatContext = selected ? JSON.stringify(buildDocketChatContext(selected, userId, 'dashboard-docket-document')) : '';
 	                const bannerChatContext = selected ? JSON.stringify(buildDocketChatContext(selected, userId, 'dashboard-docket-selected-filing')) : '';
 	                setHref('docket-open-chat-about-document', buildSurfaceUrl('/chat', {{
@@ -3717,6 +3793,8 @@ def _render_dashboard_hub(
 	                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
 	                    chat_context: bannerChatContext,
 	                }}));
+                updateDocumentContextBar();
+                updateAnnotationTaskState();
 	            }}
 
             function selectDatasetDocument(datasetDocument, datasetKind) {{
@@ -3755,6 +3833,9 @@ def _render_dashboard_hub(
                 if ((datasetKind || '').toLowerCase() === 'docket') {{
                     updateSelectedDocketDocumentPanel(dashboardState.selectedDatasetDocument);
                     updateDocketCurrentTask();
+                }} else {{
+                    updateDocumentContextBar();
+                    updateAnnotationTaskState();
                 }}
             }}
 
@@ -3980,6 +4061,7 @@ def _render_dashboard_hub(
                 setHref('context-evidence-hint', '#chat-upload-dashboard');
                 setHref('context-draft-hint', buildSurfaceUrl('/document', {{ user_id: userId, workspace_user_id: userId, claim_type: claimType }}));
                 updateWorkflowRail(payload || null);
+                updateDocumentContextBar();
             }}
 
             function clearWorkspaceContextBar() {{
@@ -3997,6 +4079,7 @@ def _render_dashboard_hub(
                 setHref('context-evidence-hint', '#chat-upload-dashboard');
                 setHref('context-draft-hint', '/document');
                 resetWorkflowRail();
+                updateDocumentContextBar();
             }}
 
             function renderWorkspaceCard(payload) {{
@@ -4551,8 +4634,8 @@ def _render_dashboard_hub(
 	            }}
 
 	            function populateNotePreflight() {{
-	                const selected = dashboardState.selectedDatasetDocument || {{}};
-	                const selectedTitle = String(selected.title || selected.source_document_title || selected.document_title || selected.document_id || selected.id || 'No filing selected').trim();
+	                const selected = dashboardState.selectedDatasetDocument || null;
+	                const selectedTitle = String(selected && (selected.title || selected.source_document_title || selected.document_title || selected.document_id || selected.id) || 'No filing selected').trim();
                 const tags = currentAnnotationTags();
                 const note = String((document.getElementById('dashboard-dataset-annotation-note') || {{}}).value || '').trim();
                 const buckets = deadlineRiskBuckets(dashboardState.docketDatasetCalendarEvents || []);
@@ -4560,7 +4643,7 @@ def _render_dashboard_hub(
 	                setText('preflight-labels', tags.length ? tags.join(', ') : 'No labels added');
 	                setText('preflight-deadline-review', `${{buckets.overdue}} overdue, ${{buckets.dueSoon}} due soon, ${{buckets.upcoming}} upcoming, ${{buckets.unparsed}} need date review`);
 	                setText('preflight-note-summary', note ? (note.length > 220 ? `${{note.slice(0, 217)}}...` : note) : 'No note entered');
-	                const userId = String((document.getElementById('dashboard-workspace-user-id') || {{}}).value || '').trim();
+	                const userId = activeDashboardUserId();
 	                const chatContext = selected ? JSON.stringify(buildDocketChatContext(selected, userId, 'dashboard-docket-note-preflight')) : '';
 	                setHref('dashboard-note-preflight-chat-link', buildSurfaceUrl('/chat', {{
 	                    user_id: userId,
@@ -4571,6 +4654,7 @@ def _render_dashboard_hub(
 	                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
 	                    chat_context: chatContext,
 	                }}));
+                    setLinkEnabled('dashboard-note-preflight-chat-link', Boolean(selected), selected ? '' : 'Select a filing before asking chat about it.');
 	            }}
 
             async function loadWorkspaceGraphExplorer() {{
@@ -5056,6 +5140,11 @@ def _render_dashboard_hub(
                 toggleNotePreflightModal(false);
                 saveDatasetDocumentAnnotation();
             }});
+            window.__complaintDashboardUI = {{
+                selectDatasetDocument: selectDatasetDocument,
+                updateDocumentContextBar: updateDocumentContextBar,
+                state: dashboardState,
+            }};
             window.addEventListener(syncEventName, function(event) {{
                 handleSharedSyncEvent(event && event.detail ? event.detail : null);
             }});
