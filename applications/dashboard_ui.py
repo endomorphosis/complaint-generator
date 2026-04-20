@@ -1062,6 +1062,18 @@ def _render_dashboard_hub(
             border-left: 3px solid rgba(17, 92, 99, 0.35);
             padding-left: 10px;
         }}
+        .context-metric.is-active {{
+            border-left-color: var(--accent);
+            background: rgba(17, 92, 99, 0.055);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }}
+        .context-metric.is-warning {{
+            border-left-color: var(--warm);
+            background: rgba(170, 77, 29, 0.065);
+            border-radius: 12px;
+            padding: 10px 12px;
+        }}
         .context-metric span {{
             color: var(--muted);
             font-size: 0.78rem;
@@ -1445,6 +1457,318 @@ def _render_dashboard_hub(
             flex-wrap: wrap;
             gap: 10px;
         }}
+        .docket-workspace-summary {{
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            margin-top: 16px;
+            padding: 14px;
+            border-radius: var(--radius-lg);
+            background: rgba(17, 92, 99, 0.055);
+            border: 1px solid rgba(17, 92, 99, 0.14);
+        }}
+        .docket-summary-item {{
+            border-left: 3px solid rgba(17, 92, 99, 0.34);
+            padding-left: 10px;
+        }}
+        .docket-summary-item span {{
+            display: block;
+            color: var(--muted);
+            font-size: 0.74rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        .docket-summary-item strong {{
+            display: block;
+            color: var(--ink);
+            margin-top: 4px;
+            font-size: 1.02rem;
+        }}
+        .docket-current-task {{
+            display: grid;
+            gap: 14px;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            margin-top: 16px;
+            padding: 18px;
+            border-radius: var(--radius-lg);
+            background: rgba(255, 253, 250, 0.98);
+            border: 2px solid rgba(17, 92, 99, 0.24);
+            box-shadow: 0 14px 34px rgba(21, 34, 48, 0.075);
+        }}
+        .docket-current-task h3 {{
+            margin: 0;
+            font-size: 1.18rem;
+        }}
+        .docket-current-task p {{
+            margin: 6px 0 0;
+        }}
+        .docket-current-task .primary-action {{
+            white-space: nowrap;
+        }}
+        .annotation-current-task {{
+            display: grid;
+            gap: 14px;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            margin: 16px 0;
+            padding: 18px;
+            border-radius: var(--radius-lg);
+            background: rgba(17, 92, 99, 0.055);
+            border: 2px solid rgba(17, 92, 99, 0.20);
+        }}
+        .annotation-current-task h3 {{
+            margin: 0;
+            font-size: 1.14rem;
+        }}
+        .annotation-current-task p {{
+            margin: 6px 0 0;
+        }}
+        .selected-document-scope {{
+            display: grid;
+            gap: 10px;
+            margin: 14px 0;
+            padding: 14px 16px;
+            border-radius: var(--radius-lg);
+            background: rgba(255, 253, 250, 0.92);
+            border: 1px solid rgba(17, 92, 99, 0.16);
+        }}
+        .selected-document-scope strong {{
+            display: block;
+            color: var(--ink);
+        }}
+        .selected-document-scope span {{
+            color: var(--muted);
+        }}
+        .deadline-risk-grid {{
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+            margin-top: 12px;
+        }}
+        .deadline-risk-card {{
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            background: rgba(255, 253, 250, 0.86);
+            padding: 12px;
+        }}
+        .deadline-risk-card span {{
+            display: block;
+            color: var(--muted);
+            font-size: 0.74rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        .deadline-risk-card strong {{
+            display: block;
+            margin-top: 4px;
+            color: var(--ink);
+            font-size: 1.05rem;
+        }}
+        .deadline-risk-card.is-urgent {{
+            background: rgba(170, 77, 29, 0.12);
+            border-color: rgba(170, 77, 29, 0.22);
+        }}
+        .deadline-risk-card.is-urgent strong {{ color: var(--warm); }}
+        .docket-workflow-mode {{
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            margin-top: 16px;
+        }}
+        .docket-mode-card {{
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            background: rgba(21, 34, 48, 0.035);
+            padding: 14px;
+        }}
+        .docket-mode-card strong {{
+            display: block;
+            color: var(--ink);
+        }}
+        .docket-mode-card p {{
+            margin: 6px 0 0;
+        }}
+        .filing-workspace-panel {{
+            display: grid;
+            gap: 14px;
+            margin-top: 16px;
+            padding: 16px;
+            border-radius: var(--radius-lg);
+            background: #ffffff;
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            box-shadow: 0 10px 28px rgba(21, 34, 48, 0.055);
+        }}
+        .filing-workspace-header {{
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 14px;
+            flex-wrap: wrap;
+        }}
+        .filing-workspace-header h3 {{
+            margin: 0;
+            font-size: 1.08rem;
+        }}
+        .filing-list {{
+            display: grid;
+            gap: 8px;
+            max-height: 430px;
+            overflow: auto;
+            padding-right: 2px;
+        }}
+        .filing-row {{
+            display: grid;
+            gap: 10px;
+            grid-template-columns: minmax(0, 1.5fr) minmax(110px, 0.6fr) minmax(130px, 0.8fr) auto;
+            align-items: center;
+            padding: 12px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(21, 34, 48, 0.10);
+            background: rgba(255, 253, 250, 0.92);
+        }}
+        .filing-row.is-selected {{
+            border-color: rgba(17, 92, 99, 0.45);
+            background: rgba(17, 92, 99, 0.08);
+            box-shadow: inset 0 0 0 2px rgba(17, 92, 99, 0.08);
+        }}
+        .filing-title {{
+            display: block;
+            color: var(--ink);
+            font-weight: 900;
+        }}
+        .filing-meta {{
+            display: block;
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 0.88rem;
+            font-weight: 700;
+        }}
+        .filing-labels {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }}
+        .filing-label {{
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            border-radius: 999px;
+            padding: 4px 8px;
+            background: rgba(21, 34, 48, 0.06);
+            color: var(--ink);
+            font-size: 0.78rem;
+            font-weight: 800;
+        }}
+        .filing-label.is-urgent {{
+            background: rgba(170, 77, 29, 0.14);
+            color: var(--warm);
+        }}
+        .filing-action {{
+            white-space: nowrap;
+            background: rgba(17, 92, 99, 0.10);
+            color: var(--accent-strong);
+            border: 1px solid rgba(17, 92, 99, 0.16);
+        }}
+        .selected-filing-banner {{
+            display: grid;
+            gap: 12px;
+            margin-top: 14px;
+            padding: 16px;
+            border-radius: var(--radius-lg);
+            background: rgba(17, 92, 99, 0.08);
+            border: 1px solid rgba(17, 92, 99, 0.18);
+        }}
+        .selected-filing-banner h3 {{
+            margin: 0;
+            font-size: 1.12rem;
+        }}
+        .docket-action-strip {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }}
+        .docket-action-strip a, .docket-action-strip button {{
+            min-height: 42px;
+        }}
+        .label-suggestion-row {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }}
+        .label-suggestion-row button {{
+            background: rgba(17, 92, 99, 0.08);
+            color: var(--accent-strong);
+            border: 1px solid rgba(17, 92, 99, 0.14);
+        }}
+        .success-receipt {{
+            display: none;
+            margin-top: 12px;
+            padding: 14px;
+            border-radius: var(--radius-md);
+            background: rgba(29, 107, 75, 0.10);
+            border: 1px solid rgba(29, 107, 75, 0.18);
+            color: var(--good);
+            font-weight: 800;
+        }}
+        .success-receipt.is-visible {{
+            display: block;
+        }}
+        .preflight-panel {{
+            display: none;
+            margin-top: 14px;
+            padding: 16px;
+            border-radius: var(--radius-lg);
+            background: rgba(255, 253, 250, 0.96);
+            border: 2px solid rgba(17, 92, 99, 0.18);
+            box-shadow: 0 12px 30px rgba(21, 34, 48, 0.065);
+        }}
+        .preflight-panel.is-visible {{
+            display: block;
+        }}
+        .preflight-panel[hidden] {{
+            display: none;
+        }}
+        .preflight-panel-header {{
+            display: flex;
+            justify-content: space-between;
+            gap: 14px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }}
+        .preflight-panel-header h3 {{
+            margin: 0;
+            font-size: 1.08rem;
+        }}
+        .preflight-panel-header p {{
+            margin: 6px 0 0;
+        }}
+        .preflight-summary {{
+            display: grid;
+            gap: 10px;
+            margin-top: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }}
+        .preflight-summary div {{
+            border-left: 3px solid rgba(17, 92, 99, 0.32);
+            padding-left: 10px;
+        }}
+        .preflight-summary span {{
+            display: block;
+            color: var(--muted);
+            font-size: 0.74rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        .preflight-summary strong {{
+            display: block;
+            color: var(--ink);
+            margin-top: 4px;
+        }}
 	        .field-helper {{
 	            margin: 6px 0 0;
 	            color: var(--muted);
@@ -1575,6 +1899,10 @@ def _render_dashboard_hub(
 	                box-shadow: none;
 	            }}
             .stage-card, .lane-card {{ flex-basis: 100%; }}
+            .filing-row {{ grid-template-columns: 1fr; }}
+            .docket-workspace-summary {{ grid-template-columns: 1fr 1fr; }}
+            .docket-current-task {{ grid-template-columns: 1fr; }}
+            .docket-current-task .primary-action {{ width: 100%; justify-content: center; }}
             .primary-action, .secondary-action, .decision-link {{ justify-content: center; }}
             .context-actions a, .stage-actions a {{ flex: 1 1 100%; text-align: center; }}
 	            .workflow-rail h2 {{ font-size: 1.45rem; }}
@@ -1714,12 +2042,15 @@ def _render_dashboard_hub(
                     <div class="context-metric"><span>Claim type</span><strong id="context-claim-type">waiting</strong><a class="context-action-hint" id="context-claim-hint" href="/chat">Clarify claim</a></div>
                     <div class="context-metric"><span>Evidence</span><strong id="context-evidence-count">0 items</strong><a class="context-action-hint" id="context-evidence-hint" href="#chat-upload-dashboard">Upload evidence</a></div>
                     <div class="context-metric"><span>Draft</span><strong id="context-draft-status">not available</strong><a class="context-action-hint" id="context-draft-hint" href="/document">Open builder</a></div>
+                    <div class="context-metric is-warning" id="context-selected-document-card"><span>Selected document</span><strong id="context-selected-document">none selected</strong><a class="context-action-hint is-disabled" id="context-selected-document-hint" href="#docket-dataset-parquet-dashboard" aria-disabled="true">Select a filing</a></div>
+                    <div class="context-metric" id="context-router-card"><span>Chat mode</span><strong id="context-router-mode">general intake</strong><a class="context-action-hint" id="context-router-hint" href="/chat">Open chat</a></div>
                 </div>
             </div>
             <div class="context-actions">
                 <a class="secondary-action" id="context-open-workspace" href="/workspace">Workspace</a>
                 <a class="secondary-action" id="context-open-review" href="/claim-support-review">Review</a>
                 <a class="secondary-action" id="context-open-chat" href="/chat">Chat</a>
+                <a class="secondary-action is-disabled" id="context-open-selected-chat" href="/chat" aria-disabled="true">Ask about selected filing</a>
                 <a class="primary-action" id="context-open-builder" href="/document">Build draft</a>
             </div>
         </section>
@@ -1901,6 +2232,14 @@ def _render_dashboard_hub(
                         <a class="secondary-action" id="docket-next-annotation-link" href="#dataset-document-annotation-dashboard">Save note from selected filing</a>
                     </div>
                 </div>
+                <div class="docket-current-task" id="docket-current-task" aria-label="Current docket task">
+                    <div>
+                        <div class="eyebrow" style="color: var(--accent);">Current Task</div>
+                        <h3 id="docket-current-task-title">Load filings</h3>
+                        <p id="docket-current-task-detail">Open the saved docket package, then select one filing before labels, notes, or workspace handoff.</p>
+                    </div>
+                    <a class="primary-action" id="docket-current-task-action" href="#dashboard-docket-dataset-path">Load filings</a>
+                </div>
                 <details class="technical-details">
                     <summary>Saved filing location and format</summary>
                     <label class="field-label" for="dashboard-docket-dataset-path">Saved filing set location</label>
@@ -1938,9 +2277,69 @@ def _render_dashboard_hub(
                     <div class="stat-card"><strong id="dashboard-docket-dataset-results">0</strong><span>Search results</span></div>
                     <div class="stat-card"><strong id="dashboard-docket-dataset-graph-count">0</strong><span>Connections</span></div>
                 </div>
+                <div class="docket-workspace-summary" aria-label="Docket workspace summary">
+                    <div class="docket-summary-item"><span>Filings loaded</span><strong id="docket-summary-filings">0</strong></div>
+                    <div class="docket-summary-item"><span>Dates found</span><strong id="docket-summary-dates">0</strong></div>
+                    <div class="docket-summary-item"><span>Selected filing</span><strong id="docket-summary-selected">none yet</strong></div>
+                    <div class="docket-summary-item"><span>Notes sent</span><strong id="docket-summary-notes">0</strong></div>
+                </div>
+                <div class="deadline-risk-grid" aria-label="Deadline risk summary">
+                    <div class="deadline-risk-card is-urgent"><span>Overdue</span><strong id="docket-deadline-overdue">0</strong></div>
+                    <div class="deadline-risk-card is-urgent"><span>Due soon</span><strong id="docket-deadline-due-soon">0</strong></div>
+                    <div class="deadline-risk-card"><span>Upcoming</span><strong id="docket-deadline-upcoming">0</strong></div>
+                    <div class="deadline-risk-card"><span>Needs date review</span><strong id="docket-deadline-unparsed">0</strong></div>
+                </div>
                 <div class="chip-row" style="margin-top: 14px;">
                     <span class="chip" id="dashboard-docket-dataset-case-chip">case: waiting</span>
                     <span class="chip" id="dashboard-docket-dataset-source-chip">filings: waiting</span>
+                </div>
+                <div class="filing-workspace-panel" id="docket-filing-workspace" aria-label="Docket filing workspace">
+                    <div class="filing-workspace-header">
+                        <div>
+                            <div class="eyebrow" style="color: var(--accent);">Filing Workspace</div>
+                            <h3>Select a filing before labeling or sending notes</h3>
+                            <p class="field-helper">Pick the court document you want to analyze. The selected filing stays visible while you search, label, annotate, and send a legal-impact note.</p>
+                        </div>
+                        <div class="docket-action-strip">
+                            <a class="secondary-action" href="#dashboard-docket-dataset-query">Search within filings</a>
+                            <a class="secondary-action" href="#dataset-document-annotation-dashboard">Add labels and note</a>
+                        </div>
+                    </div>
+                    <div class="filing-list" id="docket-filing-list" role="list" aria-label="Loaded docket filings">
+                        <div class="workspace-empty-state" id="docket-filing-empty-state">
+                            <h3>No filings loaded yet</h3>
+                            <p>Load case filings to see a selectable filing list with dates, labels, and review status.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="selected-filing-banner" id="docket-selected-filing-banner" aria-label="Persistent selected filing">
+                    <div>
+                        <div class="eyebrow" style="color: var(--accent);">Selected Filing</div>
+                        <h3 id="docket-selected-banner-title">No filing selected</h3>
+                        <p id="docket-selected-banner-meta">Select a filing from the list to keep its title, dates, labels, and review actions visible.</p>
+                    </div>
+                    <div class="filing-labels" id="docket-selected-banner-labels">
+                        <span class="filing-label">waiting for selection</span>
+                    </div>
+                    <div class="docket-action-strip">
+                        <a class="primary-action" id="docket-banner-note-link" href="#dataset-document-annotation-dashboard">Add legal-impact note</a>
+                        <a class="secondary-action" href="#dashboard-docket-dataset-query">Search this docket</a>
+                        <a class="secondary-action is-disabled" id="docket-banner-chat-link" href="/chat" aria-disabled="true">Ask chat about selected filing</a>
+                    </div>
+                </div>
+                <div class="docket-workflow-mode" aria-label="Labels notes and handoff explanation">
+                    <div class="docket-mode-card">
+                        <strong>Labels classify the filing</strong>
+                        <p>Use short labels like deadline, hearing, notice, or needs review so the filing can be found later.</p>
+                    </div>
+                    <div class="docket-mode-card">
+                        <strong>Notes explain legal meaning</strong>
+                        <p>Use notes to say what the filing changes about the complaint, response, timeline, or proof gaps.</p>
+                    </div>
+                    <div class="docket-mode-card">
+                        <strong>Workspace handoff saves the insight</strong>
+                        <p>Review the preflight summary before sending the selected filing note into the complaint workspace.</p>
+                    </div>
                 </div>
                 <div class="document-insight-panel" id="docket-document-insight-panel" aria-label="Selected filing analysis">
                     <div>
@@ -1955,7 +2354,7 @@ def _render_dashboard_hub(
                     </div>
                     <div class="handoff-actions">
                         <a class="primary-action" id="docket-save-selected-document-link" href="#dataset-document-annotation-dashboard">Save note to workspace</a>
-                        <a class="secondary-action" id="docket-open-chat-about-document" href="/chat">Ask case chat about this filing</a>
+                        <a class="secondary-action is-disabled" id="docket-open-chat-about-document" href="/chat" aria-disabled="true">Ask case chat about this filing</a>
                     </div>
                 </div>
                 <div class="status-line" id="dashboard-docket-dataset-status">Choose a saved filing set, then load it to review docket filings.</div>
@@ -2175,6 +2574,19 @@ def _render_dashboard_hub(
                         <div class="document-insight-item"><span>Step 3</span><strong>Save to workspace</strong></div>
                     </div>
                 </div>
+                <div class="selected-document-scope" id="annotation-selected-document-scope" aria-live="polite">
+                    <span>Current document scope</span>
+                    <strong id="annotation-selected-document-title">No document selected yet</strong>
+                    <span id="annotation-selected-document-detail">Load or search filings/materials, then choose a document before saving a note or asking chat about it.</span>
+                </div>
+                <div class="annotation-current-task" id="annotation-current-task" aria-label="Current annotation task">
+                    <div>
+                        <div class="eyebrow" style="color: var(--accent);">Current Annotation Task</div>
+                        <h3 id="annotation-current-task-title">Select a document first</h3>
+                        <p id="annotation-current-task-detail">Choose a docket filing or workspace material so labels, notes, and chat questions attach to the right source.</p>
+                    </div>
+                    <a class="primary-action" id="annotation-current-task-action" href="#docket-dataset-parquet-dashboard">Review docket filings</a>
+                </div>
                 <div class="modal-grid">
                     <div>
                         <label class="field-label" for="dashboard-dataset-annotation-user-id">Workspace user</label>
@@ -2213,6 +2625,16 @@ def _render_dashboard_hub(
                         <label class="field-label" for="dashboard-dataset-annotation-tags">Tags</label>
                         <input id="dashboard-dataset-annotation-tags" type="text" placeholder="causation, accommodation, hearing">
                         <p class="field-helper">Separate tags with commas, such as hearing, deadline, notice, retaliation, accommodation, service.</p>
+                        <div class="label-suggestion-row" aria-label="Suggested filing labels">
+                            <button type="button" data-annotation-tag="deadline">deadline</button>
+                            <button type="button" data-annotation-tag="hearing">hearing</button>
+                            <button type="button" data-annotation-tag="notice">notice</button>
+                            <button type="button" data-annotation-tag="service issue">service issue</button>
+                            <button type="button" data-annotation-tag="supports claim">supports claim</button>
+                            <button type="button" data-annotation-tag="hurts claim">hurts claim</button>
+                            <button type="button" data-annotation-tag="needs review">needs review</button>
+                            <button type="button" data-annotation-tag="add to timeline">add to timeline</button>
+                        </div>
                     </div>
                 </div>
                 <div style="margin-top: 14px;">
@@ -2220,11 +2642,33 @@ def _render_dashboard_hub(
                     <textarea id="dashboard-dataset-annotation-note" placeholder="Example: This filing sets a hearing date, shows the landlord knew about the accommodation request, or creates a response deadline. Explain how the complaint or response should use it."></textarea>
                 </div>
                 <div class="button-row" style="margin-top: 12px;">
-                    <button id="dashboard-save-dataset-annotation" type="button">Save Note to Workspace</button>
+                    <button id="dashboard-save-dataset-annotation" type="button">Review and Save Note</button>
                     <button id="dashboard-use-loaded-document" type="button" class="secondary">Use Selected Document</button>
                     <a class="secondary-action" href="/claim-support-review">Open Proof Review</a>
                 </div>
                 <div class="status-line" id="dashboard-dataset-annotation-status">Load or search a dataset document before saving an annotation.</div>
+                <div class="preflight-panel" id="dashboard-note-preflight-modal" aria-live="polite" hidden>
+                    <div class="preflight-panel-header">
+                        <div>
+                            <div class="eyebrow" style="color: var(--accent);">Workspace Handoff Check</div>
+                            <h3 id="dashboard-note-preflight-title">Review this note before saving</h3>
+                            <p class="field-helper">These checks are advisory. You can save the note, keep editing, or ask chat about the selected filing before saving.</p>
+                        </div>
+                        <button type="button" class="secondary" id="dashboard-close-note-preflight-modal">Hide check</button>
+                    </div>
+                    <div class="preflight-summary" id="dashboard-note-preflight-summary">
+                        <div><span>Selected filing</span><strong id="preflight-selected-filing">None selected</strong></div>
+                        <div><span>Labels</span><strong id="preflight-labels">None</strong></div>
+                        <div><span>Deadline review</span><strong id="preflight-deadline-review">No date review available</strong></div>
+                        <div><span>Note summary</span><strong id="preflight-note-summary">No note entered</strong></div>
+                    </div>
+                    <div class="modal-actions">
+                        <button id="dashboard-confirm-note-preflight" type="button">Save to Complaint Workspace</button>
+                        <a class="secondary-action" id="dashboard-note-preflight-chat-link" href="/chat">Ask chat before saving</a>
+                        <button type="button" class="secondary" id="dashboard-cancel-note-preflight">Keep Editing</button>
+                    </div>
+                </div>
+                <div class="success-receipt" id="dashboard-dataset-annotation-receipt" role="status">No note has been sent yet.</div>
                 <details class="technical-details">
                     <summary>Saved annotation payload</summary>
                     <pre id="dashboard-dataset-annotation-preview">The saved annotation payload will appear here.</pre>
@@ -2364,6 +2808,10 @@ def _render_dashboard_hub(
 	                docketDatasetError: '',
 	                docketDatasetCalendarEvents: [],
 	                docketDatasetSearchCount: 0,
+	                docketDocuments: [],
+	                selectedDocketDocumentIndex: -1,
+	                docketNotesSent: 0,
+	                notePreflightApproved: false,
 	                workspaceDatasetLoaded: false,
 	                workspaceDatasetStatus: 'idle',
 	                workspaceDatasetError: '',
@@ -2390,6 +2838,15 @@ def _render_dashboard_hub(
                 if (node) {{
                     node.textContent = value;
                 }}
+            }}
+
+            function escapeHtml(value) {{
+                return String(value || '')
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
             }}
 
 	            function setHref(id, value) {{
@@ -2421,7 +2878,7 @@ def _render_dashboard_hub(
                 }}
             }}
 
-	            function setLinkEnabled(id, enabled, reason) {{
+            function setLinkEnabled(id, enabled, reason) {{
                 const node = document.getElementById(id);
                 if (!node) {{
                     return;
@@ -2433,6 +2890,44 @@ def _render_dashboard_hub(
                 }} else {{
                     node.removeAttribute('title');
                 }}
+            }}
+
+            function selectedDocumentTitle(documentValue) {{
+                const selected = documentValue && typeof documentValue === 'object' ? documentValue : dashboardState.selectedDatasetDocument;
+                if (!selected) {{
+                    return '';
+                }}
+                return String(
+                    selected.title
+                    || selected.source_document_title
+                    || selected.document_title
+                    || selected.document_id
+                    || selected.id
+                    || selected.row_id
+                    || 'selected document'
+                ).trim();
+            }}
+
+            function selectedDocumentId(documentValue) {{
+                const selected = documentValue && typeof documentValue === 'object' ? documentValue : dashboardState.selectedDatasetDocument;
+                if (!selected) {{
+                    return '';
+                }}
+                return String(
+                    selected.document_id
+                    || selected.id
+                    || selected.row_id
+                    || selected.source_document_id
+                    || ''
+                ).trim();
+            }}
+
+            function activeDashboardUserId() {{
+                return String(
+                    (document.getElementById('dashboard-workspace-user-id') || {{}}).value
+                    || (document.getElementById('dashboard-dataset-annotation-user-id') || {{}}).value
+                    || ''
+                ).trim();
             }}
 
             function setStageCurrent(stageName) {{
@@ -2807,6 +3302,90 @@ def _render_dashboard_hub(
                 setLinkEnabled('docket-save-selected-document-link', preflight.canAnnotate, preflight.canAnnotate ? '' : 'Load or search filings before saving a note.');
             }}
 
+            function updateDocketSummaryStrip(documentCount, calendarEvents) {{
+                const events = Array.isArray(calendarEvents) ? calendarEvents : dashboardState.docketDatasetCalendarEvents || [];
+                const selected = dashboardState.selectedDatasetDocument || null;
+                const selectedTitle = selected ? String(selected.title || selected.source_document_title || selected.document_title || selected.document_id || selected.id || 'selected filing') : '';
+                setText('docket-summary-filings', String(Number(documentCount || dashboardState.docketDocuments.length || 0)));
+                setText('docket-summary-dates', String(events.length || 0));
+                setText('docket-summary-selected', selectedTitle ? (selectedTitle.length > 34 ? `${{selectedTitle.slice(0, 31)}}...` : selectedTitle) : 'none yet');
+                setText('docket-summary-notes', String(dashboardState.docketNotesSent || 0));
+                updateDeadlineRiskSummary(events);
+                updateDocketCurrentTask();
+            }}
+
+            function deadlineRiskBuckets(events) {{
+                const buckets = {{ overdue: 0, dueSoon: 0, upcoming: 0, unparsed: 0 }};
+                const now = new Date();
+                const dayMs = 24 * 60 * 60 * 1000;
+                (Array.isArray(events) ? events : []).forEach(function(event) {{
+                    const parsed = normalizeEventDate(event);
+                    if (!parsed) {{
+                        buckets.unparsed += 1;
+                        return;
+                    }}
+                    const diffDays = Math.ceil((parsed.getTime() - now.getTime()) / dayMs);
+                    if (diffDays < 0) {{
+                        buckets.overdue += 1;
+                    }} else if (diffDays <= 7) {{
+                        buckets.dueSoon += 1;
+                    }} else {{
+                        buckets.upcoming += 1;
+                    }}
+                }});
+                return buckets;
+            }}
+
+            function updateDeadlineRiskSummary(events) {{
+                const buckets = deadlineRiskBuckets(events || dashboardState.docketDatasetCalendarEvents || []);
+                setText('docket-deadline-overdue', String(buckets.overdue));
+                setText('docket-deadline-due-soon', String(buckets.dueSoon));
+                setText('docket-deadline-upcoming', String(buckets.upcoming));
+                setText('docket-deadline-unparsed', String(buckets.unparsed));
+            }}
+
+            function currentAnnotationTags() {{
+                return String((document.getElementById('dashboard-dataset-annotation-tags') || {{}}).value || '')
+                    .split(/[,;\\n]+/)
+                    .map((tag) => tag.trim())
+                    .filter(Boolean);
+            }}
+
+            function updateDocketCurrentTask() {{
+                const selected = dashboardState.selectedDatasetDocument || null;
+                const note = String((document.getElementById('dashboard-dataset-annotation-note') || {{}}).value || '').trim();
+                const tags = currentAnnotationTags();
+                let title = 'Load filings';
+                let detail = 'Open the saved docket package, then select one filing before labels, notes, or workspace handoff.';
+                let href = '#dashboard-docket-dataset-path';
+                let label = 'Load filings';
+                if (dashboardState.docketDatasetLoaded && !selected) {{
+                    title = 'Select a filing';
+                    detail = 'Choose one filing from the list so searches, labels, and notes attach to the right document.';
+                    href = '#docket-filing-workspace';
+                    label = 'Select filing';
+                }} else if (selected && !tags.length) {{
+                    title = 'Add labels';
+                    detail = 'Classify this filing with labels such as deadline, hearing, notice, or needs review.';
+                    href = '#dashboard-dataset-annotation-tags';
+                    label = 'Add labels';
+                }} else if (selected && !note) {{
+                    title = 'Write legal-impact note';
+                    detail = 'Explain what this filing changes about the complaint, response, deadline, or proof record.';
+                    href = '#dashboard-dataset-annotation-note';
+                    label = 'Write note';
+                }} else if (selected && note) {{
+                    title = 'Review and save note';
+                    detail = 'Use the preflight check before saving this filing insight into the complaint workspace.';
+                    href = '#dataset-document-annotation-dashboard';
+                    label = 'Review handoff';
+                }}
+                setText('docket-current-task-title', title);
+                setText('docket-current-task-detail', detail);
+                setText('docket-current-task-action', label);
+                setHref('docket-current-task-action', href);
+            }}
+
 	            function collapseMobileSectionMenu() {{
 	                const menu = document.getElementById('dashboard-section-menu');
 	                if (!menu || !window.matchMedia) {{
@@ -2867,17 +3446,53 @@ def _render_dashboard_hub(
                 return payload;
             }}
 
-            function buildSurfaceUrl(path, params) {{
-                const query = new URLSearchParams();
-                Object.entries(params || {{}}).forEach(([key, value]) => {{
-                    if (value === null || value === undefined || value === '') {{
-                        return;
+	            function buildSurfaceUrl(path, params) {{
+	                const query = new URLSearchParams();
+	                Object.entries(params || {{}}).forEach(([key, value]) => {{
+	                    if (value === null || value === undefined || value === '') {{
+	                        return;
                     }}
                     query.set(key, String(value));
                 }});
-                const serialized = query.toString();
-                return serialized ? `${{path}}?${{serialized}}` : path;
-            }}
+	                const serialized = query.toString();
+	                return serialized ? `${{path}}?${{serialized}}` : path;
+	            }}
+
+	            function buildDocketChatContext(selected, userId, sourceSurface) {{
+	                const filing = selected && typeof selected === 'object' ? selected : {{}};
+	                const id = String(
+	                    filing.document_id
+	                    || filing.id
+	                    || filing.row_id
+	                    || filing.source_document_id
+	                    || ''
+	                ).trim();
+	                const title = String(
+	                    filing.title
+	                    || filing.source_document_title
+	                    || filing.document_title
+	                    || id
+	                    || ''
+	                ).trim();
+	                const text = String(filing.text || filing.snippet || filing.preview || filing.summary || '').trim();
+	                const labels = filingLabelsForDocument(filing);
+	                const dates = extractDatesFromText(`${{title}} ${{text}}`);
+	                return {{
+	                    kind: 'selected-docket-filing',
+	                    source_surface: sourceSurface || 'dashboard-docket',
+	                    user_id: userId || '',
+	                    router_mode: 'llm_router or multimodal_router, depending on available filing text and page images',
+	                    status: 'Selected filing context attached for case chat.',
+	                    filing: {{
+	                        id,
+	                        title,
+	                        date: dates.length ? dates[0] : String(filing.date_filed || '').trim(),
+	                        use: classifyDocumentUse(filing),
+	                    }},
+	                    labels,
+	                    excerpt: summarizeDocumentText(filing),
+	                }};
+	            }}
 
             function titleCase(value, fallback) {{
                 const text = String(value || '').trim();
@@ -2935,6 +3550,126 @@ def _render_dashboard_hub(
                 return 'Save legal impact note for review or drafting';
             }}
 
+            function filingLabelsForDocument(document) {{
+                const text = String([
+                    document && document.title,
+                    document && document.source_document_title,
+                    document && document.document_title,
+                    document && document.text,
+                    document && document.snippet,
+                    document && document.preview,
+                ].filter(Boolean).join(' ')).toLowerCase();
+                const labels = [];
+                if (/hearing|trial|conference|court date/.test(text)) {{
+                    labels.push('hearing');
+                }}
+                if (/deadline|due|answer|response/.test(text)) {{
+                    labels.push('deadline');
+                }}
+                if (/notice|summons|service/.test(text)) {{
+                    labels.push('notice');
+                }}
+                if (/order|judgment|dismiss/.test(text)) {{
+                    labels.push('order');
+                }}
+                if (/eviction|possession|tenant|landlord/.test(text)) {{
+                    labels.push('eviction');
+                }}
+                if (/accommodation|retaliation|discrimination|causation/.test(text)) {{
+                    labels.push('claim issue');
+                }}
+                if (!labels.length) {{
+                    labels.push('needs review');
+                }}
+                return Array.from(new Set(labels)).slice(0, 4);
+            }}
+
+            function normalizeDocketDocument(document, index) {{
+                const raw = document && typeof document === 'object' ? document : {{}};
+                const metadata = raw.metadata || {{}};
+                const classification = metadata.classification || {{}};
+                const id = String(raw.document_id || raw.id || raw.row_id || raw.source_document_id || metadata.document_id || metadata.id || `filing-${{index + 1}}`).trim();
+                const title = String(raw.title || raw.source_document_title || raw.document_title || raw.name || id || `Filing ${{index + 1}}`).trim();
+                const text = String(raw.text || raw.snippet || raw.preview || raw.summary || '').trim();
+                const dates = extractDatesFromText(`${{title}} ${{text}}`);
+                const filed = String(raw.date_filed || raw.filing_date || metadata.date_filed || metadata.filing_date || dates[0] || '').trim();
+                const documentType = String(raw.document_type || metadata.document_type || classification.label || 'filing').replace(/_/g, ' ');
+                return Object.assign({{}}, raw, {{
+                    document_id: id,
+                    id,
+                    title,
+                    text,
+                    date_filed: filed,
+                    document_type: documentType,
+                    docket_labels: filingLabelsForDocument(raw),
+                    detected_dates: dates,
+                    dataset_kind: raw.dataset_kind || 'docket',
+                }});
+            }}
+
+            function documentsFromDocketPayload(payload, label) {{
+                const documents = Array.isArray(payload && payload.documents) ? payload.documents : [];
+                const searchResults = (payload && payload.search_results) || {{}};
+                const results = Array.isArray(searchResults.results) ? searchResults.results : [];
+                const source = label === 'search' && results.length ? results : documents;
+                return source.map((item, index) => {{
+                    const normalized = normalizeDocketDocument(item, index);
+                    if (label === 'search') {{
+                        normalized.search_rank = index + 1;
+                        normalized.search_score = item && (item.score || item.rank_score || item.bm25_score || '');
+                    }}
+                    return normalized;
+                }});
+            }}
+
+            function renderDocketFilingList(documents) {{
+                const node = document.getElementById('docket-filing-list');
+                if (!node) {{
+                    return;
+                }}
+                const items = Array.isArray(documents) ? documents : [];
+                if (!items.length) {{
+                    node.innerHTML = `
+                        <div class="workspace-empty-state" id="docket-filing-empty-state">
+                            <h3>No filings loaded yet</h3>
+                            <p>Load case filings to see a selectable filing list with dates, labels, and review status.</p>
+                        </div>
+                    `;
+                    return;
+                }}
+                node.innerHTML = items.map((document, index) => {{
+                    const title = String(document.title || document.document_id || `Filing ${{index + 1}}`);
+                    const dateText = String(document.date_filed || (document.detected_dates || [])[0] || 'date not found');
+                    const typeText = titleCase(document.document_type || 'filing', 'Filing');
+                    const labels = Array.isArray(document.docket_labels) ? document.docket_labels : filingLabelsForDocument(document);
+                    const labelHtml = labels.map((label) => `<span class="filing-label${{/deadline|hearing/i.test(label) ? ' is-urgent' : ''}}">${{escapeHtml(label)}}</span>`).join('');
+                    const isSelected = index === dashboardState.selectedDocketDocumentIndex;
+                    return `
+                        <div class="filing-row${{isSelected ? ' is-selected' : ''}}" role="listitem" data-docket-document-index="${{index}}">
+                            <div>
+                                <span class="filing-title">${{escapeHtml(title)}}</span>
+                                <span class="filing-meta">${{escapeHtml(typeText)}}${{document.search_rank ? ` - search result ${{document.search_rank}}` : ''}}</span>
+                            </div>
+                            <div><span class="filing-meta">Date</span><strong>${{escapeHtml(dateText)}}</strong></div>
+                            <div class="filing-labels">${{labelHtml}}</div>
+                            <button class="filing-action" type="button" data-select-docket-document="${{index}}">${{isSelected ? 'Selected' : 'Select filing'}}</button>
+                        </div>
+                    `;
+                }}).join('');
+            }}
+
+            function selectDocketDocumentByIndex(index) {{
+                const numericIndex = Number(index);
+                if (!Number.isInteger(numericIndex) || numericIndex < 0 || numericIndex >= dashboardState.docketDocuments.length) {{
+                    return;
+                }}
+                dashboardState.selectedDocketDocumentIndex = numericIndex;
+                selectDatasetDocument(dashboardState.docketDocuments[numericIndex], 'docket');
+                renderDocketFilingList(dashboardState.docketDocuments);
+                updateDocketDatasetReadiness();
+                updateDocketSummaryStrip(dashboardState.docketDocuments.length, dashboardState.docketDatasetCalendarEvents);
+            }}
+
             function updateSelectedDocketDocumentPanel(docketDocument) {{
                 const selected = docketDocument && typeof docketDocument === 'object' ? docketDocument : dashboardState.selectedDatasetDocument;
                 const id = String(
@@ -2954,16 +3689,35 @@ def _render_dashboard_hub(
                 setText('docket-selected-document-id', id || 'waiting');
                 setText('docket-selected-document-use', classifyDocumentUse(selected || {{}}));
                 setText('docket-selected-document-date', dates.length ? dates.slice(0, 3).join(', ') : 'not found yet');
-                const userId = String((document.getElementById('dashboard-workspace-user-id') || {{}}).value || '').trim();
-                setHref('docket-open-chat-about-document', buildSurfaceUrl('/chat', {{
-                    user_id: userId,
-                    source: 'dashboard-docket-document',
-                    prefill_message: title
-                        ? `Help me understand how this docket filing affects my complaint or response: ${{title}}`
-                        : 'Help me understand how this docket filing affects my complaint or response.',
-                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
-                }}));
-            }}
+                setText('docket-selected-banner-title', title || (id ? `Selected filing ${{id}}` : 'No filing selected'));
+                setText('docket-selected-banner-meta', selected ? `${{id || 'filing'}} - ${{classifyDocumentUse(selected)}}` : 'Select a filing from the list to keep its title, dates, labels, and review actions visible.');
+                const bannerLabels = document.getElementById('docket-selected-banner-labels');
+	                if (bannerLabels) {{
+	                    const labels = selected ? filingLabelsForDocument(selected) : ['waiting for selection'];
+	                    bannerLabels.innerHTML = labels.map((label) => `<span class="filing-label${{/deadline|hearing/i.test(label) ? ' is-urgent' : ''}}">${{escapeHtml(label)}}</span>`).join('');
+	                }}
+	                const userId = String((document.getElementById('dashboard-workspace-user-id') || {{}}).value || '').trim();
+	                const documentChatContext = selected ? JSON.stringify(buildDocketChatContext(selected, userId, 'dashboard-docket-document')) : '';
+	                const bannerChatContext = selected ? JSON.stringify(buildDocketChatContext(selected, userId, 'dashboard-docket-selected-filing')) : '';
+	                setHref('docket-open-chat-about-document', buildSurfaceUrl('/chat', {{
+	                    user_id: userId,
+	                    source: 'dashboard-docket-document',
+	                    prefill_message: title
+	                        ? `Help me understand how this docket filing affects my complaint or response: ${{title}}`
+	                        : 'Help me understand how this docket filing affects my complaint or response.',
+	                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
+	                    chat_context: documentChatContext,
+	                }}));
+	                setHref('docket-banner-chat-link', buildSurfaceUrl('/chat', {{
+	                    user_id: userId,
+	                    source: 'dashboard-docket-selected-filing',
+	                    prefill_message: title
+	                        ? `Help me label and analyze this docket filing for my complaint or response: ${{title}}`
+	                        : 'Help me label and analyze this docket filing for my complaint or response.',
+	                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
+	                    chat_context: bannerChatContext,
+	                }}));
+	            }}
 
             function selectDatasetDocument(datasetDocument, datasetKind) {{
                 const normalizedDocument = datasetDocument && typeof datasetDocument === 'object' ? datasetDocument : null;
@@ -3000,6 +3754,7 @@ def _render_dashboard_hub(
                 }}
                 if ((datasetKind || '').toLowerCase() === 'docket') {{
                     updateSelectedDocketDocumentPanel(dashboardState.selectedDatasetDocument);
+                    updateDocketCurrentTask();
                 }}
             }}
 
@@ -3364,13 +4119,14 @@ def _render_dashboard_hub(
                 const documents = Array.isArray(payload && payload.documents) ? payload.documents : [];
                 const searchResults = (payload && payload.search_results) || {{}};
                 const results = Array.isArray(searchResults.results) ? searchResults.results : [];
+                const docketDocuments = documentsFromDocketPayload(payload || {{}}, label || 'view');
                 const extractedCalendarEvents = prioritizeCalendarEvents(extractCalendarEvents(payload || {{}}).length ? extractCalendarEvents(payload || {{}}) : extractCalendarEventsFromDocketView(payload || {{}}));
                 const calendarEvents = extractedCalendarEvents.length
                     ? extractedCalendarEvents
                     : (Array.isArray(dashboardState.docketDatasetCalendarEvents) ? dashboardState.docketDatasetCalendarEvents : []);
                 const graph = (payload && payload.knowledge_graph) || {{}};
                 const issueLinkCount = Number(graph.issue_link_count || graph.relationship_count || 0);
-                setText('dashboard-docket-dataset-documents', String(Number(summary.document_count || documents.length || 0)));
+                setText('dashboard-docket-dataset-documents', String(Number(summary.document_count || documents.length || docketDocuments.length || 0)));
                 setText('dashboard-docket-dataset-events', String(calendarEvents.length));
                 setText('dashboard-docket-dataset-results', String(Number(searchResults.result_count || results.length || 0)));
                 setText('dashboard-docket-dataset-graph-count', String(issueLinkCount));
@@ -3392,7 +4148,15 @@ def _render_dashboard_hub(
                 dashboardState.docketDatasetError = '';
                 dashboardState.docketDatasetCalendarEvents = calendarEvents;
                 dashboardState.docketDatasetSearchCount = Number(searchResults.result_count || results.length || 0);
-                selectDatasetDocument(firstDocumentFromPayload(payload || {{}}), 'docket');
+                dashboardState.docketDocuments = docketDocuments;
+                dashboardState.selectedDocketDocumentIndex = docketDocuments.length ? 0 : -1;
+                renderDocketFilingList(docketDocuments);
+                if (docketDocuments.length) {{
+                    selectDocketDocumentByIndex(0);
+                }} else {{
+                    selectDatasetDocument(firstDocumentFromPayload(payload || {{}}), 'docket');
+                }}
+                updateDocketSummaryStrip(Number(summary.document_count || documents.length || docketDocuments.length || 0), calendarEvents);
                 renderChipList(
                     'dashboard-docket-calendar-list',
                     calendarEvents.slice(0, 3).map((event) => `${{summarizeCalendarEvent(event)}} (${{describeCalendarUrgency(event)}})`),
@@ -3506,6 +4270,13 @@ def _render_dashboard_hub(
                 }}
                 const selected = dashboardState.selectedDatasetDocument || {{}};
                 const sourceKind = String(selected.dataset_kind || 'dataset');
+	                if (sourceKind === 'docket' && !dashboardState.notePreflightApproved) {{
+	                    populateNotePreflight();
+	                    toggleNotePreflightModal(true);
+	                    setText('dashboard-dataset-annotation-status', 'Preflight check is visible below. You can save, keep editing, or ask chat about this filing before saving.');
+	                    return;
+	                }}
+                dashboardState.notePreflightApproved = false;
                 setText('dashboard-dataset-annotation-status', 'Saving dataset document annotation into the complaint workspace...');
                 try {{
                     const endpoint = sourceKind === 'workspace'
@@ -3542,7 +4313,16 @@ def _render_dashboard_hub(
                         headers: {{ 'Content-Type': 'application/json' }},
                         body: JSON.stringify(requestBody),
                     }});
-                    setText('dashboard-dataset-annotation-status', `Saved annotation for ${{documentId}} into the complaint workspace.`);
+                    setText('dashboard-dataset-annotation-status', `Saved note for ${{documentId}} into the complaint workspace.`);
+                    const receipt = document.getElementById('dashboard-dataset-annotation-receipt');
+                    if (receipt) {{
+                        receipt.classList.add('is-visible');
+                        receipt.textContent = `Saved to complaint workspace: ${{title}}. Labels: ${{tags.length ? tags.join(', ') : 'none'}}. Next step: open proof review or continue reviewing filings.`;
+                    }}
+                    if (sourceKind === 'docket') {{
+                        dashboardState.docketNotesSent = Number(dashboardState.docketNotesSent || 0) + 1;
+                        updateDocketSummaryStrip(dashboardState.docketDocuments.length, dashboardState.docketDatasetCalendarEvents);
+                    }}
                     setText('dashboard-dataset-annotation-preview', JSON.stringify(payload, null, 2));
                     publishSharedSyncEvent({{
                         event_type: 'workspace.updated',
@@ -3730,6 +4510,68 @@ def _render_dashboard_hub(
                 setText('dashboard-docket-dataset-status', `Search selected: ${{String(button.textContent || '').trim()}}. Run search to inspect matching filings.`);
                 updateDocketDatasetReadiness();
             }}
+
+            function addAnnotationTag(event) {{
+                const button = event && event.currentTarget ? event.currentTarget : null;
+                const input = document.getElementById('dashboard-dataset-annotation-tags');
+                if (!button || !input) {{
+                    return;
+                }}
+                const tag = String(button.dataset.annotationTag || '').trim();
+                if (!tag) {{
+                    return;
+                }}
+                const tags = String(input.value || '')
+                    .split(/[,;\\n]+/)
+                    .map((item) => item.trim())
+                    .filter(Boolean);
+                if (!tags.some((item) => item.toLowerCase() === tag.toLowerCase())) {{
+                    tags.push(tag);
+                }}
+                input.value = tags.join(', ');
+                updateDocketCurrentTask();
+            }}
+
+            function handleDocketFilingListClick(event) {{
+                const button = event && event.target ? event.target.closest('[data-select-docket-document]') : null;
+                if (!button) {{
+                    return;
+                }}
+                selectDocketDocumentByIndex(button.dataset.selectDocketDocument);
+            }}
+
+	            function toggleNotePreflightModal(forceOpen) {{
+	                const panel = document.getElementById('dashboard-note-preflight-modal');
+	                if (!panel) {{
+	                    return;
+	                }}
+	                const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !panel.classList.contains('is-visible');
+	                panel.classList.toggle('is-visible', shouldOpen);
+	                panel.hidden = !shouldOpen;
+	            }}
+
+	            function populateNotePreflight() {{
+	                const selected = dashboardState.selectedDatasetDocument || {{}};
+	                const selectedTitle = String(selected.title || selected.source_document_title || selected.document_title || selected.document_id || selected.id || 'No filing selected').trim();
+                const tags = currentAnnotationTags();
+                const note = String((document.getElementById('dashboard-dataset-annotation-note') || {{}}).value || '').trim();
+                const buckets = deadlineRiskBuckets(dashboardState.docketDatasetCalendarEvents || []);
+                setText('preflight-selected-filing', selectedTitle);
+	                setText('preflight-labels', tags.length ? tags.join(', ') : 'No labels added');
+	                setText('preflight-deadline-review', `${{buckets.overdue}} overdue, ${{buckets.dueSoon}} due soon, ${{buckets.upcoming}} upcoming, ${{buckets.unparsed}} need date review`);
+	                setText('preflight-note-summary', note ? (note.length > 220 ? `${{note.slice(0, 217)}}...` : note) : 'No note entered');
+	                const userId = String((document.getElementById('dashboard-workspace-user-id') || {{}}).value || '').trim();
+	                const chatContext = selected ? JSON.stringify(buildDocketChatContext(selected, userId, 'dashboard-docket-note-preflight')) : '';
+	                setHref('dashboard-note-preflight-chat-link', buildSurfaceUrl('/chat', {{
+	                    user_id: userId,
+	                    source: 'dashboard-docket-note-preflight',
+	                    prefill_message: selectedTitle
+	                        ? `Before I save this note, ask me the best questions to clarify the deadline, legal impact, and labels for this filing: ${{selectedTitle}}`
+	                        : 'Before I save this note, ask me the best questions to clarify this filing.',
+	                    return_to: buildSurfaceUrl('/dashboards', {{ user_id: userId }}),
+	                    chat_context: chatContext,
+	                }}));
+	            }}
 
             async function loadWorkspaceGraphExplorer() {{
                 const preflight = getWorkspaceDatasetPreflight();
@@ -4093,6 +4935,13 @@ def _render_dashboard_hub(
 	            document.querySelectorAll('[data-docket-query]').forEach(function(button) {{
 	                button.addEventListener('click', applyDocketQuickSearch);
 	            }});
+	            document.querySelectorAll('[data-annotation-tag]').forEach(function(button) {{
+	                button.addEventListener('click', addAnnotationTag);
+	            }});
+	            const docketFilingList = document.getElementById('docket-filing-list');
+	            if (docketFilingList) {{
+	                docketFilingList.addEventListener('click', handleDocketFilingListClick);
+	            }}
 	            const docketDatasetPathInput = document.getElementById('dashboard-docket-dataset-path');
 	            if (docketDatasetPathInput) {{
 	                docketDatasetPathInput.addEventListener('input', function() {{
@@ -4101,6 +4950,12 @@ def _render_dashboard_hub(
 	                    dashboardState.docketDatasetError = '';
 	                    dashboardState.docketDatasetCalendarEvents = [];
 	                    dashboardState.docketDatasetSearchCount = 0;
+	                    dashboardState.docketDocuments = [];
+	                    dashboardState.selectedDocketDocumentIndex = -1;
+	                    dashboardState.selectedDatasetDocument = null;
+	                    renderDocketFilingList([]);
+	                    updateSelectedDocketDocumentPanel(null);
+	                    updateDocketSummaryStrip(0, []);
 	                    setText('dashboard-docket-dataset-status', 'Choose a saved filing set, then load it to review docket filings.');
 	                    updateDocketDatasetReadiness();
 	                    renderHeadsUpCard();
@@ -4177,6 +5032,14 @@ def _render_dashboard_hub(
             }});
             document.getElementById('dashboard-save-dataset-annotation').addEventListener('click', saveDatasetDocumentAnnotation);
             document.getElementById('dashboard-use-loaded-document').addEventListener('click', useLoadedDatasetDocument);
+            const annotationTagsInput = document.getElementById('dashboard-dataset-annotation-tags');
+            if (annotationTagsInput) {{
+                annotationTagsInput.addEventListener('input', updateDocketCurrentTask);
+            }}
+            const annotationNoteInput = document.getElementById('dashboard-dataset-annotation-note');
+            if (annotationNoteInput) {{
+                annotationNoteInput.addEventListener('input', updateDocketCurrentTask);
+            }}
             document.getElementById('dashboard-open-upload-modal').addEventListener('click', function() {{ toggleUploadModal(true); }});
             document.getElementById('dashboard-close-upload-modal').addEventListener('click', function() {{ toggleUploadModal(false); }});
             document.getElementById('dashboard-cancel-upload-modal').addEventListener('click', function() {{ toggleUploadModal(false); }});
@@ -4185,6 +5048,13 @@ def _render_dashboard_hub(
                 if (event.target === event.currentTarget) {{
                     toggleUploadModal(false);
                 }}
+            }});
+            document.getElementById('dashboard-close-note-preflight-modal').addEventListener('click', function() {{ toggleNotePreflightModal(false); }});
+            document.getElementById('dashboard-cancel-note-preflight').addEventListener('click', function() {{ toggleNotePreflightModal(false); }});
+            document.getElementById('dashboard-confirm-note-preflight').addEventListener('click', function() {{
+                dashboardState.notePreflightApproved = true;
+                toggleNotePreflightModal(false);
+                saveDatasetDocumentAnnotation();
             }});
             window.addEventListener(syncEventName, function(event) {{
                 handleSharedSyncEvent(event && event.detail ? event.detail : null);
@@ -4205,6 +5075,10 @@ def _render_dashboard_hub(
             resetWorkflowRail();
             setWorkspaceLane('');
             updateSelectedDocketDocumentPanel(null);
+            renderDocketFilingList([]);
+            updateDocketSummaryStrip(0, []);
+            updateDeadlineRiskSummary([]);
+            updateDocketCurrentTask();
             updateDocketDatasetReadiness();
             loadWorkspaceDashboard();
             if (String(document.getElementById('dashboard-docket-manifest-path').value || '').trim()) {{

@@ -1,9 +1,11 @@
 from pathlib import Path
-from typing import Any
+import asyncio
+import json
+from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .dashboard_ui import attach_dashboard_ui_routes
@@ -67,6 +69,231 @@ def attach_static_asset_routes(app: FastAPI) -> FastAPI:
     return app
 
 
+def _build_chat_payload(
+    message: str,
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    sender: str = "Bot:",
+    hashed_username: Optional[str] = None,
+) -> Dict[str, Any]:
+    payload_dict = dict(payload or {})
+    normalized_message = str(message or payload_dict.get("message") or "")
+    response = {
+        "sender": str(payload_dict.get("sender") or sender),
+        "message": normalized_message,
+        "question": str(payload_dict.get("question") or normalized_message),
+        "inquiry": dict(payload_dict.get("inquiry") or {}),
+        "explanation": dict(payload_dict.get("explanation") or {}),
+    }
+    normalized_username = str(
+        payload_dict.get("hashed_username") or hashed_username or ""
+    ).strip()
+    if normalized_username:
+        response["hashed_username"] = normalized_username
+    return response
+
+
+def _contextualize_chat_message(message_text: str, payload: Dict[str, Any]) -> str:
+    chat_context = payload.get("chat_context")
+    if not isinstance(chat_context, dict):
+        return message_text
+    context_kind = str(chat_context.get("kind") or chat_context.get("source_surface") or payload.get("source") or "").strip()
+    labels = chat_context.get("labels") if isinstance(chat_context.get("labels"), list) else []
+    excerpt = str(chat_context.get("excerpt") or "").strip()
+    if "intake" in context_kind.lower() or "denois" in context_kind.lower():
+        context_lines = [
+            "Intake question-generation context:",
+            "- Goal: ask the best next questions to clarify the legal basis of the complaint.",
+            "- Cover: parties, dates, duties, adverse acts, harms, remedies, evidence, and missing facts.",
+        ]
+        if labels:
+            context_lines.append(
+                "- Focus labels: " + ", ".join(str(label).strip() for label in labels if str(label).strip())
+            )
+        if excerpt:
+            context_lines.append("- Intake guidance: " + excerpt[:900])
+        context_lines.append("")
+        context_lines.append("User question:")
+        context_lines.append(message_text)
+        return "\n".join(context_lines)
+    filing = chat_context.get("filing") if isinstance(chat_context.get("filing"), dict) else {}
+    context_lines = [
+        "Selected docket filing context:",
+        f"- Filing title: {str(filing.get('title') or '').strip() or 'unknown'}",
+        f"- Filing id: {str(filing.get('id') or '').strip() or 'unknown'}",
+        f"- Suggested use: {str(filing.get('use') or '').strip() or 'not classified'}",
+    ]
+    if labels:
+        context_lines.append(
+            "- Labels: " + ", ".join(str(label).strip() for label in labels if str(label).strip())
+        )
+    if excerpt:
+        context_lines.append("- Excerpt: " + excerpt[:900])
+    context_lines.append("")
+    context_lines.append("User question:")
+    context_lines.append(message_text)
+    return "\n".join(context_lines)
+
+
+def _process_chat_message(
+    mediator: Any,
+    message_text: str,
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    hashed_username: Optional[str] = None,
+) -> Dict[str, Any]:
+    payload_dict = dict(payload or {})
+    routed_message = _contextualize_chat_message(message_text, payload_dict)
+    if callable(getattr(mediator, "io_payload", None)):
+        response_payload = mediator.io_payload(routed_message)
+        return _build_chat_payload(
+            str((response_payload or {}).get("message") or ""),
+            response_payload if isinstance(response_payload, dict) else None,
+            sender="Bot:",
+            hashed_username=hashed_username,
+        )
+
+    if callable(getattr(mediator, "io", None)):
+        reply = mediator.io(routed_message)
+        return _build_chat_payload(str(reply or ""), sender="Bot:", hashed_username=hashed_username)
+
+    return _build_chat_payload(
+        "I could not reach the chat model from this review surface. The selected filing context is attached, so you can retry after the router is available.",
+        sender="Bot:",
+        hashed_username=hashed_username,
+    )
+
+
+async def _process_chat_message_bounded(
+    mediator: Any,
+    message_text: str,
+    payload: Optional[Dict[str, Any]] = None,
+    *,
+    hashed_username: Optional[str] = None,
+    timeout_seconds: float = 12.0,
+) -> Dict[str, Any]:
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                _process_chat_message,
+                mediator,
+                message_text,
+                payload,
+                hashed_username=hashed_username,
+            ),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        pass
+    except Exception as exc:
+        return _build_chat_payload(
+            f"The chat assistant hit an error before answering: {exc}. Your complaint or filing context is still attached. You can retry, keep answering intake questions, or continue labeling the filing.",
+            {"explanation": {"summary": "Router error fallback. Context was preserved for the next attempt."}},
+            sender="Bot:",
+            hashed_username=hashed_username,
+        )
+    return _build_chat_payload(
+        "The chat assistant was slow, so backup mode answered instead. Your complaint or selected filing context is still attached. Retry the question when the router is ready, or keep answering questions and labeling documents.",
+        {"explanation": {"summary": "Timeout fallback. Context was preserved so the user can retry or continue."}},
+        sender="Bot:",
+        hashed_username=hashed_username,
+    )
+
+
+def _initial_chat_payload(mediator: Any, *, hashed_username: Optional[str] = None) -> Dict[str, Any]:
+    inquiry_payload: Dict[str, Any] = {}
+    if callable(getattr(mediator, "get_current_inquiry_payload", None)):
+        try:
+            candidate = mediator.get_current_inquiry_payload()
+            if isinstance(candidate, dict):
+                inquiry_payload = candidate
+        except Exception:
+            inquiry_payload = {}
+    return _build_chat_payload(
+        "Please state your legal complaint",
+        inquiry_payload,
+        sender="Bot:",
+        hashed_username=hashed_username,
+    )
+
+
+def attach_review_surface_chat_routes(app: FastAPI, mediator: Any) -> FastAPI:
+    @app.post("/load_profile")
+    async def load_profile(request: Request) -> JSONResponse:
+        payload = await request.json()
+        request_payload = payload.get("request") if isinstance(payload, dict) else {}
+        response_payload = {
+            "hashed_username": str(request_payload.get("hashed_username") or request.cookies.get("hashed_username") or ""),
+            "hashed_password": str(request_payload.get("hashed_password") or request.cookies.get("hashed_password") or ""),
+            "data": json.dumps({}),
+        }
+        if "username" in request_payload or "password" in request_payload:
+            return JSONResponse({"results": response_payload})
+        return JSONResponse(response_payload)
+
+    @app.post("/api/chat")
+    async def post_chat(request: Request) -> JSONResponse:
+        payload = await request.json()
+        payload_dict = payload if isinstance(payload, dict) else {}
+        message_text = str(payload_dict.get("message") or payload_dict.get("content") or "").strip()
+        if not message_text:
+            raise HTTPException(status_code=400, detail="message is required")
+        hashed_username = str(
+            payload_dict.get("hashed_username")
+            or payload_dict.get("sender")
+            or payload_dict.get("user_id")
+            or request.cookies.get("hashed_username")
+            or ""
+        ).strip()
+        response_payload = await _process_chat_message_bounded(
+            mediator,
+            message_text,
+            payload_dict,
+            hashed_username=hashed_username or None,
+        )
+        return JSONResponse({"messages": [response_payload], "context_attached": bool(payload_dict.get("chat_context"))})
+
+    @app.post("/api/chat/fallback")
+    async def chat_fallback(request: Request) -> JSONResponse:
+        return await post_chat(request)
+
+    @app.websocket("/api/chat")
+    async def websocket_chat(websocket: WebSocket) -> None:
+        await websocket.accept()
+        hashed_username = str(websocket.cookies.get("hashed_username") or "").strip()
+        await websocket.send_json(_initial_chat_payload(mediator, hashed_username=hashed_username or None))
+        try:
+            while True:
+                payload = await websocket.receive_json()
+                payload_dict = payload if isinstance(payload, dict) else {}
+                message_text = str(payload_dict.get("message") or payload_dict.get("content") or "").strip()
+                if not message_text:
+                    continue
+                user_payload = _build_chat_payload(
+                    message_text,
+                    {
+                        "sender": payload_dict.get("sender") or hashed_username or "User:",
+                        "message": message_text,
+                        "question": message_text,
+                    },
+                    sender=hashed_username or "User:",
+                    hashed_username=hashed_username or None,
+                )
+                await websocket.send_json(user_payload)
+                await websocket.send_json(
+                    await _process_chat_message_bounded(
+                        mediator,
+                        message_text,
+                        payload_dict,
+                        hashed_username=hashed_username or None,
+                    )
+                )
+        except WebSocketDisconnect:
+            return
+
+    return app
+
+
 def create_review_dashboard_app() -> FastAPI:
     app = FastAPI(title="Complaint Generator Review Dashboard")
     attach_static_asset_routes(app)
@@ -89,4 +316,5 @@ def create_review_surface_app(mediator: Any) -> FastAPI:
     attach_complaint_workspace_routes(app)
     attach_claim_support_review_routes(app, mediator)
     attach_document_routes(app, mediator)
+    attach_review_surface_chat_routes(app, mediator)
     return app

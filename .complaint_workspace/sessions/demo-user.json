@@ -1,12 +1,1485 @@
 {
   "annotation_knowledge_graph": {
-    "entities": [],
-    "relationships": []
+    "annotation_count": 1,
+    "entities": [
+      {
+        "id": "document:filing-2",
+        "label": "state court packet grounding audit",
+        "metadata": {
+          "dataset_kind": "docket",
+          "document_id": "filing-2",
+          "document_metadata": {
+            "citation_links": [
+              {
+                "citation_text": "42 U.S.C. \u00a7 1437p",
+                "citation_type": "usc",
+                "confidence": 0,
+                "corpus_key": null,
+                "dataset_id": null,
+                "matched": false,
+                "matched_field": null,
+                "metadata": {
+                  "candidate_corpora": [
+                    "us_code"
+                  ],
+                  "exhaustive_query_attempts": [],
+                  "exhaustive_query_enabled": false,
+                  "preferred_corpus_key": "us_code",
+                  "preferred_dataset_ids": [
+                    "justicedao/ipfs_uscode"
+                  ],
+                  "preferred_parquet_files": [
+                    "uscode.parquet"
+                  ],
+                  "recovery_corpus_key": "us_code",
+                  "recovery_query": "42 U.S.C. \u00a7 1437p site:uscode.house.gov OR site:govinfo.gov OR site:law.cornell.edu",
+                  "recovery_supported": true,
+                  "require_exact_anchor": true,
+                  "resolution_method": "unmatched",
+                  "source_row_present": false,
+                  "state_code": null
+                },
+                "normalized_citation": "42 U.S.C. \u00a7 1437p",
+                "snippet": null,
+                "source_cid": null,
+                "source_document_id": null,
+                "source_ref": null,
+                "source_title": null,
+                "source_url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1437p"
+              },
+              {
+                "citation_text": "24 C.F.R. \u00a7 970.21",
+                "citation_type": "cfr",
+                "confidence": 0,
+                "corpus_key": null,
+                "dataset_id": null,
+                "matched": false,
+                "matched_field": null,
+                "metadata": {
+                  "candidate_corpora": [
+                    "federal_register",
+                    "us_code"
+                  ],
+                  "exhaustive_query_attempts": [],
+                  "exhaustive_query_enabled": false,
+                  "preferred_corpus_key": "federal_register",
+                  "preferred_dataset_ids": [
+                    "justicedao/ipfs_federal_register",
+                    "justicedao/ipfs_uscode"
+                  ],
+                  "preferred_parquet_files": [
+                    "laws.parquet",
+                    "uscode.parquet"
+                  ],
+                  "recovery_corpus_key": "federal_register",
+                  "recovery_query": "24 C.F.R. \u00a7 970.21 site:federalregister.gov OR site:govinfo.gov",
+                  "recovery_supported": true,
+                  "require_exact_anchor": true,
+                  "resolution_method": "unmatched",
+                  "source_row_present": false,
+                  "state_code": null
+                },
+                "normalized_citation": "24 C.F.R. \u00a7 970.21",
+                "snippet": null,
+                "source_cid": null,
+                "source_document_id": null,
+                "source_ref": null,
+                "source_title": null,
+                "source_url": "https://www.ecfr.gov/current/title-24/section-970.21"
+              }
+            ],
+            "citation_recovery_candidates": [
+              {
+                "candidate_corpora": [
+                  "us_code"
+                ],
+                "citation_text": "42 U.S.C. \u00a7 1437p",
+                "citation_type": "usc",
+                "corpus_key": "us_code",
+                "document_id": "state_court_packet_grounding_audit",
+                "document_source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+                "document_title": "state court packet grounding audit",
+                "normalized_citation": "42 U.S.C. \u00a7 1437p",
+                "preferred_dataset_ids": [
+                  "justicedao/ipfs_uscode"
+                ],
+                "preferred_parquet_files": [
+                  "uscode.parquet"
+                ],
+                "recovery_query": "42 U.S.C. \u00a7 1437p site:uscode.house.gov OR site:govinfo.gov OR site:law.cornell.edu",
+                "state_code": ""
+              },
+              {
+                "candidate_corpora": [
+                  "federal_register",
+                  "us_code"
+                ],
+                "citation_text": "24 C.F.R. \u00a7 970.21",
+                "citation_type": "cfr",
+                "corpus_key": "federal_register",
+                "document_id": "state_court_packet_grounding_audit",
+                "document_source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+                "document_title": "state court packet grounding audit",
+                "normalized_citation": "24 C.F.R. \u00a7 970.21",
+                "preferred_dataset_ids": [
+                  "justicedao/ipfs_federal_register",
+                  "justicedao/ipfs_uscode"
+                ],
+                "preferred_parquet_files": [
+                  "laws.parquet",
+                  "uscode.parquet"
+                ],
+                "recovery_query": "24 C.F.R. \u00a7 970.21 site:federalregister.gov OR site:govinfo.gov",
+                "state_code": ""
+              }
+            ],
+            "citation_resolution_summary": {
+              "all_citations_resolved": false,
+              "citation_count": 2,
+              "matched_citation_count": 0,
+              "unmatched_citation_count": 2
+            },
+            "classification": {
+              "backend": "heuristic_legal_document_classifier",
+              "confidence": 0.6,
+              "label": "answer"
+            },
+            "classification_router": {
+              "backend": "formal_logic_pipeline",
+              "confidence": 0.7,
+              "label": "normative_legal_text"
+            },
+            "detected_case_number": "26FE0586",
+            "document_type": "md",
+            "page_count": null,
+            "raw": {
+              "case_number": "26FE0586",
+              "document_type": "md",
+              "id": "state_court_packet_grounding_audit",
+              "metadata": {
+                "detected_case_number": "26FE0586",
+                "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+                "source_suffix": ".md"
+              },
+              "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+              "source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+              "text": "# State-Court Packet Grounding Audit\n\nCase No. 26FE0586\n\nThis audit is meant to answer one question:\n\n`Is every major point in the state-court packet grounded in actual law and record facts, and have we separated verified facts from inference?`\n\nShort answer:\n\n- `Yes` for the core anti-eviction theory, if stated carefully.\n- `Yes` for the joinder and show-cause theories, if stated as process-chain theories.\n- `No` if we overstate what the graph or prover establishes by itself.\n\n## 1. What Is Verified By Primary Law\n\nThese points are grounded in primary legal sources:\n\n### A. Section 18 relocation duties exist\n\nVerified by:\n\n- `42 U.S.C. \u00a7 1437p`\n- `24 C.F.R. \u00a7 970.21`\n\nSafe statement:\n\n- HACC had real relocation and replacement-housing duties in connection with demolition/disposition-related displacement.\n\n### B. RAD/PBV hearing-before-eviction requirement appears in HACC's own Administrative Plan\n\nVerified by:\n\n- HACC Administrative Plan, `18-VI.H. Informal Reviews and Hearings`\n\nSafe statement:\n\n- In the RAD/PBV structure HACC adopted, the owner had to provide an opportunity for an informal hearing before eviction.\n\n### C. Blossom was represented as part of an HACC PBV waitlist process\n\nVerified by:\n\n- [blossom-community-apartments](/home/barberb/HACC/blossom-community-apartments)\n\nSafe statement:\n\n- HACC publicly stated that applications for Blossom and Community Apartments would be processed through HACC's PBV waitlist and that relocation households were priority groups.\n\n## 2. What Is Verified By Record Facts\n\n### A. HACC directed the household into a Blossom-or-TPV process\n\nVerified by:\n\n- [HACC Jan 2026 blossom.pdf](/home/barberb/HACC/evidence/paper%20documents/HACC%20Jan%202026%20blossom.pdf)\n\nSafe statement:\n\n- HACC told the household it had to choose between moving forward with Blossom and Community Apartments or using a Tenant Protection Voucher.\n\n### B. HACC later admitted the intake packet had gone to Quantum staff and not reached HACC\n\nVerified by:\n\n- [message.eml](/home/barberb/HACC/workspace/manual-imap-download-2026-03-31/20260202-164227_Re-Allegations-of-Fraud---JC-Household/message.eml)\n\nSafe statement:\n\n- HACC later acknowledged in writing that the intake packet had been submitted to Quantum staff at the Hillside Manor leasing office but had not been provided to HACC.\n\n### C. Waterleaf / Multnomah path remained incomplete across four calendar months\n\nVerified by:\n\n- [waterleaf_application.png](/home/barberb/HACC/evidence/history/waterleaf_application.png)\n- [message.eml](/home/barberb/HACC/workspace/manual-imap-download-2026-03-31/20260202-164227_Re-Allegations-of-Fraud---JC-Household/message.eml)\n- [message.eml](/home/barberb/HACC/workspace/temporary-cli-session-migration/prior-research-results/full-evidence-review-run/chronology/emergency_motion_packet/exhibits/Exhibit%20M%20-%20starworks5-ktilton-orientation-import/0008-Re-HCV-Orientation-CAMTdTS_hM81x2YFGZBGX3tGzBJjMjn5WhiFW-NwOC0k23-63LQ-mail.gmail.com/message.eml)\n\nSafe statement:\n\n- The Waterleaf application existed by December 23, 2025, HACC knew the path was active by January 12 and January 26, and it still remained incomplete in late March 2026.\n\n## 3. What Is Verified By Law Plus Fact Together\n\nThese are the strongest packet theories because they are grounded both legally and factually.\n\n### A. HACC had a barred-eviction problem if relocation remained materially incomplete\n\nLaw:\n\n- `42 U.S.C. \u00a7 1437p`\n- `24 C.F.R. \u00a7 970.21`\n\nFacts:\n\n- relocation was triggered;\n- HACC directed the household into Blossom or TPV;\n- HACC later admitted the intake-routing failure;\n- Waterleaf / portability remained incomplete.\n\nSafe statement:\n\n- On the present record, HACC's push toward eviction occurred while the relocation and replacement-housing process remained materially incomplete.\n\nSafer still:\n\n- `The record supports that HACC was barred from filing eviction while those duties remained materially incomplete.`\n\n### B. Quantum belongs in the case as part of the processing chain\n\nLaw / procedure:\n\n- ORCP 29A\n- ORCP 22C as fallback third-party-practice rule; ORCP 22B is limited to cross-claims between defendants already in the case\n\nFacts:\n\n- HACC identifies Quantum as Hillside Manor property manager in the Administrative Plan;\n- HACC says the packet went to Quantum staff and did not reach HACC.\n\nSafe statement:\n\n- Quantum is not a stranger to the controversy; HACC's own records place Quantum inside the disputed replacement-housing intake chain.\n\n### C. Show cause is justified as a record-clarification request\n\nLaw / procedure:\n\n- inherent case-management and motion practice posture in the joined dispute\n\nFacts:\n\n- submitted application;\n- HACC-directed intake route;\n- HACC acknowledgment that the packet stalled at the Quantum side;\n- no clear processing result shown in the current record.\n\nSafe statement:\n\n- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials.\n\n## 4. What Is Still Inference Or Needs Cautious Framing\n\nThese points should not be presented as already proved historical fact.\n\n### A. Exact percentage of delay attributable to HACC\n\nCurrent status:\n\n- `Not mathematically provable from the present record.`\n\nSafe statement:\n\n- `A substantial amount, and likely most, of the documented delay from January 8, 2026 through late March 2026 was caused by HACC's own administration.`\n\n### B. Exact contents of the signed HAP contract or management agreement\n\nCurrent status:\n\n- `Not yet in the repository.`\n\nSafe statement:\n\n- We currently rely on HACC's Administrative Plan and notices describing the contracts and roles, not the executed contract texts themselves.\n\n### C. The graph and prover prove all disputed facts\n\nCurrent status:\n\n- `False if stated that way.`\n\nSafe statement:\n\n- The graph and prover verify the encoded deontic model and dependency structure.\n- They do not, by themselves, prove every disputed historical fact.\n\n## 5. Graph Verification Status\n\n### A. Knowledge graph basis\n\nCurrent formal sources:\n\n- [title18_contract_eviction_bar_knowledge_graph.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_knowledge_graph.json)\n- [title18_contract_eviction_bar_dependency_graph.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_dependency_graph.json)\n- [title18_contract_eviction_bar_report.md](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_report.md)\n- [title18_contract_eviction_bar_tdfol_proof_audit.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_tdfol_proof_audit.json)\n\n### B. What has been verified\n\nVerified:\n\n- the graph's central normative thesis is internally consistent;\n- the TDFOL audit returns `proved` for the core obligation/prohibition nodes:\n  - `section18_relocation_completion_required`\n  - `hacc_relocation_counseling_required`\n  - `hacc_moving_expenses_required`\n  - `hacc_comparable_replacement_required`\n  - `hacc_perform_relocation_commitment`\n  - `hacc_administer_implied_relocation_process`\n  - `eviction_forbidden_while_duties_incomplete`\n  - `eviction_forbidden_while_undertaken_performance_incomplete`\n\nNot verified in that same sense:\n\n- every disputed historical event;\n- the full contents of missing executed contract documents;\n- every causal inference beyond the encoded record.\n\n### C. Court-safe use of the graph\n\nCourt-safe statement:\n\n- `The formal model confirms that if the source-linked factual predicates are true, the resulting deontic conclusion is that eviction was forbidden while relocation and undertaken processing duties remained incomplete.`\n\nNot court-safe:\n\n- `The graph itself proves all facts in the case.`\n\n## 6. Recommended Court-Safe Language\n\nBest phrasing:\n\n- `The record supports`\n- `HACC's own documents state`\n- `HACC later acknowledged in writing`\n- `On the present record`\n- `The formal model confirms the normative consequence of the source-linked facts`\n\nNormalized replacements:\n\n- Use `The record supports` rather than `This conclusively proves`, unless the point is truly undisputed.\n- Use the specific source name rather than `The contracts say` when the point actually comes from an Administrative Plan provision, a notice, or an email.\n- Use `The formal model confirms the encoded normative consequence` rather than `The graph proves`, unless you are expressly discussing the model itself rather than the historical facts.\n\n## 7. Bottom Line\n\nThe packet is in a strong position if we stay within the following boundaries:\n\n- use primary law for the federal duties;\n- use HACC's own Administrative Plan, public page, notices, and emails for the local process;\n- describe the Quantum theory as a process-chain theory;\n- describe the anti-eviction theory as a source-linked Section 18 plus undertaken-process bar;\n- and describe the graph/prover as formal support for the legal consequence of the verified record, not as a substitute for the record itself.",
+              "title": "state court packet grounding audit"
+            },
+            "rich_analysis": {
+              "classification": {
+                "backend": "formal_logic_pipeline",
+                "confidence": 0.7,
+                "label": "normative_legal_text"
+              },
+              "dcec_formulas": [
+                "Frame(frm:8dccb1903d84ef85,action,reasonably)",
+                "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85))",
+                "P(reasonably(agent:Agent))",
+                "P(reasonably(court:Agent))",
+                "P(reasonably(once:Agent))"
+              ],
+              "deontic_statements": [
+                {
+                  "action": "reasonably require quantum to explain what happened to the application materials",
+                  "conditions": [],
+                  "confidence": 0.7,
+                  "context": {
+                    "extracted_at": "2026-04-19T22:30:43.236116",
+                    "position": {
+                      "end": 4992,
+                      "start": 4898
+                    },
+                    "surrounding_text": "rected intake route;\n- HACC acknowledgment that the packet stalled at the Quantum side;\n- no clear processing result shown in the current record.\n\nSafe statement:\n\n- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials.\n\n## 4."
+                  },
+                  "document_id": "state_court_packet_grounding_audit",
+                  "entity": "the court",
+                  "exceptions": [],
+                  "id": "stmt_2",
+                  "modality": "permission",
+                  "source_document": "state_court_packet_grounding_audit",
+                  "source_text": "the court may reasonably require Quantum to explain what happened to the application materials"
+                },
+                {
+                  "action": "reasonably require quantum to explain what happened to the application materials",
+                  "conditions": [],
+                  "confidence": 0.55,
+                  "context": {
+                    "extractor": "regex_fallback"
+                  },
+                  "document_id": "state_court_packet_grounding_audit",
+                  "entity": "once quantum is before the court, the court",
+                  "exceptions": [],
+                  "id": "state_court_packet_grounding_audit:fallback:permission:1",
+                  "modality": "permission",
+                  "source_document": "state_court_packet_grounding_audit",
+                  "source_text": "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                },
+                {
+                  "action": "reasonably require quantum to explain what happened to the application materials",
+                  "conditions": [],
+                  "confidence": 0.78,
+                  "context": {
+                    "cnl_sentence": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                    "deadline": "",
+                    "extractor": "structured_court_order",
+                    "signal_type": "directive_clause"
+                  },
+                  "document_id": "state_court_packet_grounding_audit",
+                  "entity": "- once quantum is before the court, the court",
+                  "exceptions": [],
+                  "id": "state_court_packet_grounding_audit:structured:72:1",
+                  "modality": "permission",
+                  "source_document": "state_court_packet_grounding_audit",
+                  "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                }
+              ],
+              "document_frames": [
+                {
+                  "ergo": "doc_state_court_packet_grounding_audit[document_id -> \"state_court_packet_grounding_audit\", title -> \"state court packet grounding audit\", date_filed -> \"\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\", entity_count -> 0, dcec_count -> 5] : DocketDocument",
+                  "frame_id": "doc_state_court_packet_grounding_audit",
+                  "isa": "DocketDocument",
+                  "isaset": [
+                    "LegalDocument"
+                  ],
+                  "label": "state court packet grounding audit",
+                  "object_id": "doc_state_court_packet_grounding_audit",
+                  "slots": {
+                    "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                    "court": "Clackamas County Justice Court",
+                    "date_filed": "",
+                    "dcec_count": "5",
+                    "docket_id": "26FE0586",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "entity_count": "0",
+                    "title": "state court packet grounding audit"
+                  }
+                }
+              ],
+              "document_temporal_formulas": [
+                "\u25a1(document_exists(state_court_packet_grounding_audit))",
+                "document_titled(state_court_packet_grounding_audit, state_court_packet_grounding_audit)"
+              ],
+              "entities": [
+                {
+                  "id": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+                  "label": "- Once Quantum is before the court, the court",
+                  "properties": {
+                    "document_id": "state_court_packet_grounding_audit"
+                  },
+                  "type": "legal_actor"
+                },
+                {
+                  "id": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+                  "label": "- Once Quantum is before the court, the court permission reasonably require Quantum to explain what happened to the application materials",
+                  "properties": {
+                    "action": "reasonably require Quantum to explain what happened to the application materials",
+                    "actor": "- Once Quantum is before the court, the court",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "modality": "permission"
+                  },
+                  "type": "structured_deontic_norm"
+                }
+              ],
+              "events": [
+                {
+                  "agent": "the court",
+                  "id": "stmt_2:event",
+                  "label": "reasonably require quantum to explain what happened to the application materials",
+                  "time": ""
+                },
+                {
+                  "agent": "once quantum is before the court, the court",
+                  "id": "state_court_packet_grounding_audit:fallback:permission:1:event",
+                  "label": "reasonably require quantum to explain what happened to the application materials",
+                  "time": ""
+                },
+                {
+                  "agent": "- once quantum is before the court, the court",
+                  "id": "state_court_packet_grounding_audit:structured:72:1:event",
+                  "label": "reasonably require quantum to explain what happened to the application materials",
+                  "time": ""
+                }
+              ],
+              "first_order_formulas": [
+                {
+                  "backend": "fol_converter",
+                  "confidence": 1,
+                  "conversion_metadata": {},
+                  "document_id": "state_court_packet_grounding_audit",
+                  "errors": [],
+                  "formula": "\u2200x (Quantum(x) \u2192 Before(x))",
+                  "metadata": {
+                    "conversion_time_ms": 0.10418891906738281,
+                    "predicates_count": 4,
+                    "quantifiers_count": 0,
+                    "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                    "validation": {
+                      "errors": [],
+                      "valid": true
+                    }
+                  },
+                  "operators": [
+                    {
+                      "position": [
+                        34,
+                        36
+                      ],
+                      "symbol": "\u2227",
+                      "type": "conjunction"
+                    }
+                  ],
+                  "predicates": [
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "nouns"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "verbs"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "adjectives"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "relations"
+                    }
+                  ],
+                  "quantifiers": [],
+                  "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                  "status": "success",
+                  "variables": [],
+                  "warnings": []
+                },
+                {
+                  "backend": "fol_converter",
+                  "confidence": 1,
+                  "conversion_metadata": {},
+                  "document_id": "state_court_packet_grounding_audit",
+                  "errors": [],
+                  "formula": "\u2203x Quantum(x)",
+                  "metadata": {
+                    "conversion_time_ms": 0.04172325134277344,
+                    "predicates_count": 4,
+                    "quantifiers_count": 0,
+                    "source_text": "the court may reasonably require Quantum to explain what happened to the application materials",
+                    "validation": {
+                      "errors": [],
+                      "valid": true
+                    }
+                  },
+                  "operators": [],
+                  "predicates": [
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "nouns"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "verbs"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "adjectives"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "relations"
+                    }
+                  ],
+                  "quantifiers": [],
+                  "source_text": "the court may reasonably require Quantum to explain what happened to the application materials",
+                  "status": "success",
+                  "variables": [],
+                  "warnings": []
+                }
+              ],
+              "frames": [
+                {
+                  "ergo": "stmt_stmt_2[entity -> \"the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+                  "frame_id": "stmt_stmt_2",
+                  "isa": "DeonticStatement",
+                  "isaset": [
+                    "DocketStatement",
+                    "LegalNorm"
+                  ],
+                  "label": "Permission statement",
+                  "object_id": "stmt_stmt_2",
+                  "slots": {
+                    "action": "reasonably require quantum to explain what happened to the application materials",
+                    "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                    "court": "Clackamas County Justice Court",
+                    "docket_id": "26FE0586",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "entity": "the court",
+                    "modality": "permission"
+                  }
+                },
+                {
+                  "ergo": "stmt_state_court_packet_grounding_audit_fallback_permission_1[entity -> \"once quantum is before the court, the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+                  "frame_id": "stmt_state_court_packet_grounding_audit_fallback_permission_1",
+                  "isa": "DeonticStatement",
+                  "isaset": [
+                    "DocketStatement",
+                    "LegalNorm"
+                  ],
+                  "label": "Permission statement",
+                  "object_id": "stmt_state_court_packet_grounding_audit_fallback_permission_1",
+                  "slots": {
+                    "action": "reasonably require quantum to explain what happened to the application materials",
+                    "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                    "court": "Clackamas County Justice Court",
+                    "docket_id": "26FE0586",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "entity": "once quantum is before the court, the court",
+                    "modality": "permission"
+                  }
+                },
+                {
+                  "ergo": "stmt_state_court_packet_grounding_audit_structured_72_1[entity -> \"- once quantum is before the court, the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+                  "frame_id": "stmt_state_court_packet_grounding_audit_structured_72_1",
+                  "isa": "DeonticStatement",
+                  "isaset": [
+                    "DocketStatement",
+                    "LegalNorm"
+                  ],
+                  "label": "Permission statement",
+                  "object_id": "stmt_state_court_packet_grounding_audit_structured_72_1",
+                  "slots": {
+                    "action": "reasonably require quantum to explain what happened to the application materials",
+                    "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                    "court": "Clackamas County Justice Court",
+                    "docket_id": "26FE0586",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "entity": "- once quantum is before the court, the court",
+                    "modality": "permission"
+                  }
+                },
+                {
+                  "ergo": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant[actor -> \"- Once Quantum is before the court, the court\", action -> \"reasonably require Quantum to explain what happened to the application materials\", modality -> \"permission\", cnl_sentence -> \"- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials\", parse_confidence -> 0.9, temporal_detected -> false] : StructuredDeonticNorm",
+                  "frame_id": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant",
+                  "isa": "StructuredDeonticNorm",
+                  "isaset": [
+                    "DeonticStatement",
+                    "CourtDirective"
+                  ],
+                  "label": "Permission norm",
+                  "object_id": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant",
+                  "slots": {
+                    "action": "reasonably require Quantum to explain what happened to the application materials",
+                    "actor": "- Once Quantum is before the court, the court",
+                    "cnl_sentence": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                    "modality": "permission",
+                    "parse_confidence": "0.9",
+                    "temporal_detected": "false"
+                  }
+                }
+              ],
+              "propositions": [
+                {
+                  "assumptions": [
+                    "the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "statement": "the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+                },
+                {
+                  "assumptions": [
+                    "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "statement": "once quantum is before the court, the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+                },
+                {
+                  "assumptions": [
+                    "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "statement": "- once quantum is before the court, the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+                },
+                {
+                  "assumptions": [
+                    "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "document_id": "state_court_packet_grounding_audit",
+                  "logic_system": "first_order_logic",
+                  "statement": "\u2200x (Quantum(x) \u2192 Before(x))"
+                },
+                {
+                  "assumptions": [
+                    "the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "document_id": "state_court_packet_grounding_audit",
+                  "logic_system": "first_order_logic",
+                  "statement": "\u2203x Quantum(x)"
+                },
+                {
+                  "assumptions": [
+                    "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "document_id": "state_court_packet_grounding_audit",
+                  "logic_system": "first_order_logic",
+                  "statement": "\u2200x (Quantum(x) \u2192 Before(x))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "Frame(frm:8dccb1903d84ef85,action,reasonably)"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "P(reasonably(agent:Agent))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "P(reasonably(court:Agent))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "P(reasonably(once:Agent))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_temporal_first_order_logic_conversion"
+                  ],
+                  "logic_system": "deontic_temporal_first_order_logic",
+                  "statement": "P_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(the_court))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_temporal_first_order_logic_conversion"
+                  ],
+                  "logic_system": "deontic_temporal_first_order_logic",
+                  "statement": "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_temporal_first_order_logic_conversion"
+                  ],
+                  "logic_system": "deontic_temporal_first_order_logic",
+                  "statement": "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_temporal_first_order_logic_conversion"
+                  ],
+                  "logic_system": "deontic_temporal_first_order_logic",
+                  "statement": "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85,t))"
+                }
+              ],
+              "provenance": {
+                "backend": "formal_logic_pipeline",
+                "dcec_available": true,
+                "fol_available": true,
+                "model_name": "knowledge_graphs+deontic+tdfol+fol+dcec+flogic",
+                "modules": [
+                  "knowledge_graphs.extraction",
+                  "logic.integration.reasoning.deontological_reasoning",
+                  "logic.TDFOL",
+                  "logic.fol",
+                  "logic.CEC.eng_dcec_wrapper",
+                  "logic.flogic"
+                ],
+                "provider": "repo_native"
+              },
+              "relationships": [
+                {
+                  "id": "state_court_packet_grounding_audit:rel:actor:once_quantum_is_before_the_court_the_court:72:1",
+                  "properties": {
+                    "document_id": "state_court_packet_grounding_audit",
+                    "signal_type": "directive_clause"
+                  },
+                  "source": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+                  "target": "state_court_packet_grounding_audit",
+                  "type": "SUBJECT_OF"
+                },
+                {
+                  "id": "state_court_packet_grounding_audit:rel:imposes_norm:once_quantum_is_before_the_court_the_court:reasonably_require_quantum_to_explain_what_happened_to_the_application_materials:1",
+                  "properties": {
+                    "document_id": "state_court_packet_grounding_audit",
+                    "modality": "permission",
+                    "signal_type": "directive_clause"
+                  },
+                  "source": "state_court_packet_grounding_audit",
+                  "target": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+                  "type": "IMPOSES_NORM"
+                },
+                {
+                  "id": "state_court_packet_grounding_audit:rel:norm_subject:once_quantum_is_before_the_court_the_court:reasonably_require_quantum_to_explain_what_happened_to_the_application_materials:1",
+                  "properties": {
+                    "document_id": "state_court_packet_grounding_audit",
+                    "modality": "permission"
+                  },
+                  "source": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+                  "target": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+                  "type": "NORM_SUBJECT"
+                }
+              ],
+              "summary": "state court packet grounding audit; 3 deontic statements; 5 DCEC formulas",
+              "temporal_formulas": [
+                "P_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(the_court))",
+                "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))",
+                "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))",
+                "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85,t))"
+              ]
+            },
+            "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+            "source_suffix": ".md",
+            "text_extraction": {}
+          }
+        },
+        "type": "document"
+      },
+      {
+        "id": "annotation:document-annotation-1",
+        "label": "state court packet grounding audit annotation",
+        "metadata": {
+          "annotation_id": "document-annotation-1",
+          "created_at": "2026-04-20T02:05:57.527292+00:00",
+          "evidence_id": "documents-28",
+          "note": "Smoke test legal-impact note: verify the filing workspace can send selected filing labels and a note into the complaint workspace.",
+          "user_metadata": {
+            "display_name": "demo-user",
+            "role": "workspace reviewer",
+            "user_id": "demo-user"
+          }
+        },
+        "type": "annotation"
+      },
+      {
+        "id": "user:demo-user",
+        "label": "demo-user",
+        "metadata": {
+          "display_name": "demo-user",
+          "role": "workspace reviewer",
+          "user_id": "demo-user"
+        },
+        "type": "user"
+      },
+      {
+        "id": "claim-element:causation",
+        "label": "Causation",
+        "metadata": {
+          "claim_element_id": "causation"
+        },
+        "type": "claim_element"
+      },
+      {
+        "id": "tag:deadline",
+        "label": "deadline",
+        "metadata": {
+          "created_at": "2026-04-20T02:05:57.527292+00:00",
+          "tag": "deadline",
+          "tagged_by": {
+            "display_name": "demo-user",
+            "role": "workspace reviewer",
+            "user_id": "demo-user"
+          },
+          "tagged_by_user_id": "demo-user"
+        },
+        "type": "tag"
+      },
+      {
+        "id": "tag:needs-review",
+        "label": "needs review",
+        "metadata": {
+          "created_at": "2026-04-20T02:05:57.527292+00:00",
+          "tag": "needs review",
+          "tagged_by": {
+            "display_name": "demo-user",
+            "role": "workspace reviewer",
+            "user_id": "demo-user"
+          },
+          "tagged_by_user_id": "demo-user"
+        },
+        "type": "tag"
+      }
+    ],
+    "relationships": [
+      {
+        "id": "annotation:document-annotation-1->annotates->document:filing-2",
+        "metadata": {
+          "created_at": "2026-04-20T02:05:57.527292+00:00"
+        },
+        "source": "annotation:document-annotation-1",
+        "target": "document:filing-2",
+        "type": "annotates"
+      },
+      {
+        "id": "annotation:document-annotation-1->created_by->user:demo-user",
+        "metadata": {
+          "created_at": "2026-04-20T02:05:57.527292+00:00"
+        },
+        "source": "annotation:document-annotation-1",
+        "target": "user:demo-user",
+        "type": "created_by"
+      },
+      {
+        "id": "annotation:document-annotation-1->supports_claim_element->claim-element:causation",
+        "metadata": {
+          "claim_element_id": "causation"
+        },
+        "source": "annotation:document-annotation-1",
+        "target": "claim-element:causation",
+        "type": "supports_claim_element"
+      },
+      {
+        "id": "document:filing-2->tagged_with->tag:deadline",
+        "metadata": {
+          "annotation_id": "document-annotation-1",
+          "created_at": "2026-04-20T02:05:57.527292+00:00"
+        },
+        "source": "document:filing-2",
+        "target": "tag:deadline",
+        "type": "tagged_with"
+      },
+      {
+        "id": "tag:deadline->applied_by->user:demo-user",
+        "metadata": {
+          "annotation_id": "document-annotation-1",
+          "created_at": "2026-04-20T02:05:57.527292+00:00"
+        },
+        "source": "tag:deadline",
+        "target": "user:demo-user",
+        "type": "tag_applied_by"
+      },
+      {
+        "id": "document:filing-2->tagged_with->tag:needs-review",
+        "metadata": {
+          "annotation_id": "document-annotation-1",
+          "created_at": "2026-04-20T02:05:57.527292+00:00"
+        },
+        "source": "document:filing-2",
+        "target": "tag:needs-review",
+        "type": "tagged_with"
+      },
+      {
+        "id": "tag:needs-review->applied_by->user:demo-user",
+        "metadata": {
+          "annotation_id": "document-annotation-1",
+          "created_at": "2026-04-20T02:05:57.527292+00:00"
+        },
+        "source": "tag:needs-review",
+        "target": "user:demo-user",
+        "type": "tag_applied_by"
+      }
+    ],
+    "source": "complaint_workspace_document_annotation_graph",
+    "tag_count": 2
   },
   "case_synopsis": "",
   "claim_type": "retaliation",
   "created_at": "2026-03-22T20:44:38.076637+00:00",
-  "document_annotations": [],
+  "document_annotations": [
+    {
+      "claim_element_id": "causation",
+      "created_at": "2026-04-20T02:05:57.527292+00:00",
+      "dataset_kind": "docket",
+      "document_id": "filing-2",
+      "document_metadata": {
+        "citation_links": [
+          {
+            "citation_text": "42 U.S.C. \u00a7 1437p",
+            "citation_type": "usc",
+            "confidence": 0,
+            "corpus_key": null,
+            "dataset_id": null,
+            "matched": false,
+            "matched_field": null,
+            "metadata": {
+              "candidate_corpora": [
+                "us_code"
+              ],
+              "exhaustive_query_attempts": [],
+              "exhaustive_query_enabled": false,
+              "preferred_corpus_key": "us_code",
+              "preferred_dataset_ids": [
+                "justicedao/ipfs_uscode"
+              ],
+              "preferred_parquet_files": [
+                "uscode.parquet"
+              ],
+              "recovery_corpus_key": "us_code",
+              "recovery_query": "42 U.S.C. \u00a7 1437p site:uscode.house.gov OR site:govinfo.gov OR site:law.cornell.edu",
+              "recovery_supported": true,
+              "require_exact_anchor": true,
+              "resolution_method": "unmatched",
+              "source_row_present": false,
+              "state_code": null
+            },
+            "normalized_citation": "42 U.S.C. \u00a7 1437p",
+            "snippet": null,
+            "source_cid": null,
+            "source_document_id": null,
+            "source_ref": null,
+            "source_title": null,
+            "source_url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1437p"
+          },
+          {
+            "citation_text": "24 C.F.R. \u00a7 970.21",
+            "citation_type": "cfr",
+            "confidence": 0,
+            "corpus_key": null,
+            "dataset_id": null,
+            "matched": false,
+            "matched_field": null,
+            "metadata": {
+              "candidate_corpora": [
+                "federal_register",
+                "us_code"
+              ],
+              "exhaustive_query_attempts": [],
+              "exhaustive_query_enabled": false,
+              "preferred_corpus_key": "federal_register",
+              "preferred_dataset_ids": [
+                "justicedao/ipfs_federal_register",
+                "justicedao/ipfs_uscode"
+              ],
+              "preferred_parquet_files": [
+                "laws.parquet",
+                "uscode.parquet"
+              ],
+              "recovery_corpus_key": "federal_register",
+              "recovery_query": "24 C.F.R. \u00a7 970.21 site:federalregister.gov OR site:govinfo.gov",
+              "recovery_supported": true,
+              "require_exact_anchor": true,
+              "resolution_method": "unmatched",
+              "source_row_present": false,
+              "state_code": null
+            },
+            "normalized_citation": "24 C.F.R. \u00a7 970.21",
+            "snippet": null,
+            "source_cid": null,
+            "source_document_id": null,
+            "source_ref": null,
+            "source_title": null,
+            "source_url": "https://www.ecfr.gov/current/title-24/section-970.21"
+          }
+        ],
+        "citation_recovery_candidates": [
+          {
+            "candidate_corpora": [
+              "us_code"
+            ],
+            "citation_text": "42 U.S.C. \u00a7 1437p",
+            "citation_type": "usc",
+            "corpus_key": "us_code",
+            "document_id": "state_court_packet_grounding_audit",
+            "document_source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+            "document_title": "state court packet grounding audit",
+            "normalized_citation": "42 U.S.C. \u00a7 1437p",
+            "preferred_dataset_ids": [
+              "justicedao/ipfs_uscode"
+            ],
+            "preferred_parquet_files": [
+              "uscode.parquet"
+            ],
+            "recovery_query": "42 U.S.C. \u00a7 1437p site:uscode.house.gov OR site:govinfo.gov OR site:law.cornell.edu",
+            "state_code": ""
+          },
+          {
+            "candidate_corpora": [
+              "federal_register",
+              "us_code"
+            ],
+            "citation_text": "24 C.F.R. \u00a7 970.21",
+            "citation_type": "cfr",
+            "corpus_key": "federal_register",
+            "document_id": "state_court_packet_grounding_audit",
+            "document_source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+            "document_title": "state court packet grounding audit",
+            "normalized_citation": "24 C.F.R. \u00a7 970.21",
+            "preferred_dataset_ids": [
+              "justicedao/ipfs_federal_register",
+              "justicedao/ipfs_uscode"
+            ],
+            "preferred_parquet_files": [
+              "laws.parquet",
+              "uscode.parquet"
+            ],
+            "recovery_query": "24 C.F.R. \u00a7 970.21 site:federalregister.gov OR site:govinfo.gov",
+            "state_code": ""
+          }
+        ],
+        "citation_resolution_summary": {
+          "all_citations_resolved": false,
+          "citation_count": 2,
+          "matched_citation_count": 0,
+          "unmatched_citation_count": 2
+        },
+        "classification": {
+          "backend": "heuristic_legal_document_classifier",
+          "confidence": 0.6,
+          "label": "answer"
+        },
+        "classification_router": {
+          "backend": "formal_logic_pipeline",
+          "confidence": 0.7,
+          "label": "normative_legal_text"
+        },
+        "detected_case_number": "26FE0586",
+        "document_type": "md",
+        "page_count": null,
+        "raw": {
+          "case_number": "26FE0586",
+          "document_type": "md",
+          "id": "state_court_packet_grounding_audit",
+          "metadata": {
+            "detected_case_number": "26FE0586",
+            "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+            "source_suffix": ".md"
+          },
+          "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+          "source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+          "text": "# State-Court Packet Grounding Audit\n\nCase No. 26FE0586\n\nThis audit is meant to answer one question:\n\n`Is every major point in the state-court packet grounded in actual law and record facts, and have we separated verified facts from inference?`\n\nShort answer:\n\n- `Yes` for the core anti-eviction theory, if stated carefully.\n- `Yes` for the joinder and show-cause theories, if stated as process-chain theories.\n- `No` if we overstate what the graph or prover establishes by itself.\n\n## 1. What Is Verified By Primary Law\n\nThese points are grounded in primary legal sources:\n\n### A. Section 18 relocation duties exist\n\nVerified by:\n\n- `42 U.S.C. \u00a7 1437p`\n- `24 C.F.R. \u00a7 970.21`\n\nSafe statement:\n\n- HACC had real relocation and replacement-housing duties in connection with demolition/disposition-related displacement.\n\n### B. RAD/PBV hearing-before-eviction requirement appears in HACC's own Administrative Plan\n\nVerified by:\n\n- HACC Administrative Plan, `18-VI.H. Informal Reviews and Hearings`\n\nSafe statement:\n\n- In the RAD/PBV structure HACC adopted, the owner had to provide an opportunity for an informal hearing before eviction.\n\n### C. Blossom was represented as part of an HACC PBV waitlist process\n\nVerified by:\n\n- [blossom-community-apartments](/home/barberb/HACC/blossom-community-apartments)\n\nSafe statement:\n\n- HACC publicly stated that applications for Blossom and Community Apartments would be processed through HACC's PBV waitlist and that relocation households were priority groups.\n\n## 2. What Is Verified By Record Facts\n\n### A. HACC directed the household into a Blossom-or-TPV process\n\nVerified by:\n\n- [HACC Jan 2026 blossom.pdf](/home/barberb/HACC/evidence/paper%20documents/HACC%20Jan%202026%20blossom.pdf)\n\nSafe statement:\n\n- HACC told the household it had to choose between moving forward with Blossom and Community Apartments or using a Tenant Protection Voucher.\n\n### B. HACC later admitted the intake packet had gone to Quantum staff and not reached HACC\n\nVerified by:\n\n- [message.eml](/home/barberb/HACC/workspace/manual-imap-download-2026-03-31/20260202-164227_Re-Allegations-of-Fraud---JC-Household/message.eml)\n\nSafe statement:\n\n- HACC later acknowledged in writing that the intake packet had been submitted to Quantum staff at the Hillside Manor leasing office but had not been provided to HACC.\n\n### C. Waterleaf / Multnomah path remained incomplete across four calendar months\n\nVerified by:\n\n- [waterleaf_application.png](/home/barberb/HACC/evidence/history/waterleaf_application.png)\n- [message.eml](/home/barberb/HACC/workspace/manual-imap-download-2026-03-31/20260202-164227_Re-Allegations-of-Fraud---JC-Household/message.eml)\n- [message.eml](/home/barberb/HACC/workspace/temporary-cli-session-migration/prior-research-results/full-evidence-review-run/chronology/emergency_motion_packet/exhibits/Exhibit%20M%20-%20starworks5-ktilton-orientation-import/0008-Re-HCV-Orientation-CAMTdTS_hM81x2YFGZBGX3tGzBJjMjn5WhiFW-NwOC0k23-63LQ-mail.gmail.com/message.eml)\n\nSafe statement:\n\n- The Waterleaf application existed by December 23, 2025, HACC knew the path was active by January 12 and January 26, and it still remained incomplete in late March 2026.\n\n## 3. What Is Verified By Law Plus Fact Together\n\nThese are the strongest packet theories because they are grounded both legally and factually.\n\n### A. HACC had a barred-eviction problem if relocation remained materially incomplete\n\nLaw:\n\n- `42 U.S.C. \u00a7 1437p`\n- `24 C.F.R. \u00a7 970.21`\n\nFacts:\n\n- relocation was triggered;\n- HACC directed the household into Blossom or TPV;\n- HACC later admitted the intake-routing failure;\n- Waterleaf / portability remained incomplete.\n\nSafe statement:\n\n- On the present record, HACC's push toward eviction occurred while the relocation and replacement-housing process remained materially incomplete.\n\nSafer still:\n\n- `The record supports that HACC was barred from filing eviction while those duties remained materially incomplete.`\n\n### B. Quantum belongs in the case as part of the processing chain\n\nLaw / procedure:\n\n- ORCP 29A\n- ORCP 22C as fallback third-party-practice rule; ORCP 22B is limited to cross-claims between defendants already in the case\n\nFacts:\n\n- HACC identifies Quantum as Hillside Manor property manager in the Administrative Plan;\n- HACC says the packet went to Quantum staff and did not reach HACC.\n\nSafe statement:\n\n- Quantum is not a stranger to the controversy; HACC's own records place Quantum inside the disputed replacement-housing intake chain.\n\n### C. Show cause is justified as a record-clarification request\n\nLaw / procedure:\n\n- inherent case-management and motion practice posture in the joined dispute\n\nFacts:\n\n- submitted application;\n- HACC-directed intake route;\n- HACC acknowledgment that the packet stalled at the Quantum side;\n- no clear processing result shown in the current record.\n\nSafe statement:\n\n- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials.\n\n## 4. What Is Still Inference Or Needs Cautious Framing\n\nThese points should not be presented as already proved historical fact.\n\n### A. Exact percentage of delay attributable to HACC\n\nCurrent status:\n\n- `Not mathematically provable from the present record.`\n\nSafe statement:\n\n- `A substantial amount, and likely most, of the documented delay from January 8, 2026 through late March 2026 was caused by HACC's own administration.`\n\n### B. Exact contents of the signed HAP contract or management agreement\n\nCurrent status:\n\n- `Not yet in the repository.`\n\nSafe statement:\n\n- We currently rely on HACC's Administrative Plan and notices describing the contracts and roles, not the executed contract texts themselves.\n\n### C. The graph and prover prove all disputed facts\n\nCurrent status:\n\n- `False if stated that way.`\n\nSafe statement:\n\n- The graph and prover verify the encoded deontic model and dependency structure.\n- They do not, by themselves, prove every disputed historical fact.\n\n## 5. Graph Verification Status\n\n### A. Knowledge graph basis\n\nCurrent formal sources:\n\n- [title18_contract_eviction_bar_knowledge_graph.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_knowledge_graph.json)\n- [title18_contract_eviction_bar_dependency_graph.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_dependency_graph.json)\n- [title18_contract_eviction_bar_report.md](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_report.md)\n- [title18_contract_eviction_bar_tdfol_proof_audit.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_tdfol_proof_audit.json)\n\n### B. What has been verified\n\nVerified:\n\n- the graph's central normative thesis is internally consistent;\n- the TDFOL audit returns `proved` for the core obligation/prohibition nodes:\n  - `section18_relocation_completion_required`\n  - `hacc_relocation_counseling_required`\n  - `hacc_moving_expenses_required`\n  - `hacc_comparable_replacement_required`\n  - `hacc_perform_relocation_commitment`\n  - `hacc_administer_implied_relocation_process`\n  - `eviction_forbidden_while_duties_incomplete`\n  - `eviction_forbidden_while_undertaken_performance_incomplete`\n\nNot verified in that same sense:\n\n- every disputed historical event;\n- the full contents of missing executed contract documents;\n- every causal inference beyond the encoded record.\n\n### C. Court-safe use of the graph\n\nCourt-safe statement:\n\n- `The formal model confirms that if the source-linked factual predicates are true, the resulting deontic conclusion is that eviction was forbidden while relocation and undertaken processing duties remained incomplete.`\n\nNot court-safe:\n\n- `The graph itself proves all facts in the case.`\n\n## 6. Recommended Court-Safe Language\n\nBest phrasing:\n\n- `The record supports`\n- `HACC's own documents state`\n- `HACC later acknowledged in writing`\n- `On the present record`\n- `The formal model confirms the normative consequence of the source-linked facts`\n\nNormalized replacements:\n\n- Use `The record supports` rather than `This conclusively proves`, unless the point is truly undisputed.\n- Use the specific source name rather than `The contracts say` when the point actually comes from an Administrative Plan provision, a notice, or an email.\n- Use `The formal model confirms the encoded normative consequence` rather than `The graph proves`, unless you are expressly discussing the model itself rather than the historical facts.\n\n## 7. Bottom Line\n\nThe packet is in a strong position if we stay within the following boundaries:\n\n- use primary law for the federal duties;\n- use HACC's own Administrative Plan, public page, notices, and emails for the local process;\n- describe the Quantum theory as a process-chain theory;\n- describe the anti-eviction theory as a source-linked Section 18 plus undertaken-process bar;\n- and describe the graph/prover as formal support for the legal consequence of the verified record, not as a substitute for the record itself.",
+          "title": "state court packet grounding audit"
+        },
+        "rich_analysis": {
+          "classification": {
+            "backend": "formal_logic_pipeline",
+            "confidence": 0.7,
+            "label": "normative_legal_text"
+          },
+          "dcec_formulas": [
+            "Frame(frm:8dccb1903d84ef85,action,reasonably)",
+            "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85))",
+            "P(reasonably(agent:Agent))",
+            "P(reasonably(court:Agent))",
+            "P(reasonably(once:Agent))"
+          ],
+          "deontic_statements": [
+            {
+              "action": "reasonably require quantum to explain what happened to the application materials",
+              "conditions": [],
+              "confidence": 0.7,
+              "context": {
+                "extracted_at": "2026-04-19T22:30:43.236116",
+                "position": {
+                  "end": 4992,
+                  "start": 4898
+                },
+                "surrounding_text": "rected intake route;\n- HACC acknowledgment that the packet stalled at the Quantum side;\n- no clear processing result shown in the current record.\n\nSafe statement:\n\n- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials.\n\n## 4."
+              },
+              "document_id": "state_court_packet_grounding_audit",
+              "entity": "the court",
+              "exceptions": [],
+              "id": "stmt_2",
+              "modality": "permission",
+              "source_document": "state_court_packet_grounding_audit",
+              "source_text": "the court may reasonably require Quantum to explain what happened to the application materials"
+            },
+            {
+              "action": "reasonably require quantum to explain what happened to the application materials",
+              "conditions": [],
+              "confidence": 0.55,
+              "context": {
+                "extractor": "regex_fallback"
+              },
+              "document_id": "state_court_packet_grounding_audit",
+              "entity": "once quantum is before the court, the court",
+              "exceptions": [],
+              "id": "state_court_packet_grounding_audit:fallback:permission:1",
+              "modality": "permission",
+              "source_document": "state_court_packet_grounding_audit",
+              "source_text": "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+            },
+            {
+              "action": "reasonably require quantum to explain what happened to the application materials",
+              "conditions": [],
+              "confidence": 0.78,
+              "context": {
+                "cnl_sentence": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                "deadline": "",
+                "extractor": "structured_court_order",
+                "signal_type": "directive_clause"
+              },
+              "document_id": "state_court_packet_grounding_audit",
+              "entity": "- once quantum is before the court, the court",
+              "exceptions": [],
+              "id": "state_court_packet_grounding_audit:structured:72:1",
+              "modality": "permission",
+              "source_document": "state_court_packet_grounding_audit",
+              "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+            }
+          ],
+          "document_frames": [
+            {
+              "ergo": "doc_state_court_packet_grounding_audit[document_id -> \"state_court_packet_grounding_audit\", title -> \"state court packet grounding audit\", date_filed -> \"\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\", entity_count -> 0, dcec_count -> 5] : DocketDocument",
+              "frame_id": "doc_state_court_packet_grounding_audit",
+              "isa": "DocketDocument",
+              "isaset": [
+                "LegalDocument"
+              ],
+              "label": "state court packet grounding audit",
+              "object_id": "doc_state_court_packet_grounding_audit",
+              "slots": {
+                "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                "court": "Clackamas County Justice Court",
+                "date_filed": "",
+                "dcec_count": "5",
+                "docket_id": "26FE0586",
+                "document_id": "state_court_packet_grounding_audit",
+                "entity_count": "0",
+                "title": "state court packet grounding audit"
+              }
+            }
+          ],
+          "document_temporal_formulas": [
+            "\u25a1(document_exists(state_court_packet_grounding_audit))",
+            "document_titled(state_court_packet_grounding_audit, state_court_packet_grounding_audit)"
+          ],
+          "entities": [
+            {
+              "id": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+              "label": "- Once Quantum is before the court, the court",
+              "properties": {
+                "document_id": "state_court_packet_grounding_audit"
+              },
+              "type": "legal_actor"
+            },
+            {
+              "id": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+              "label": "- Once Quantum is before the court, the court permission reasonably require Quantum to explain what happened to the application materials",
+              "properties": {
+                "action": "reasonably require Quantum to explain what happened to the application materials",
+                "actor": "- Once Quantum is before the court, the court",
+                "document_id": "state_court_packet_grounding_audit",
+                "modality": "permission"
+              },
+              "type": "structured_deontic_norm"
+            }
+          ],
+          "events": [
+            {
+              "agent": "the court",
+              "id": "stmt_2:event",
+              "label": "reasonably require quantum to explain what happened to the application materials",
+              "time": ""
+            },
+            {
+              "agent": "once quantum is before the court, the court",
+              "id": "state_court_packet_grounding_audit:fallback:permission:1:event",
+              "label": "reasonably require quantum to explain what happened to the application materials",
+              "time": ""
+            },
+            {
+              "agent": "- once quantum is before the court, the court",
+              "id": "state_court_packet_grounding_audit:structured:72:1:event",
+              "label": "reasonably require quantum to explain what happened to the application materials",
+              "time": ""
+            }
+          ],
+          "first_order_formulas": [
+            {
+              "backend": "fol_converter",
+              "confidence": 1,
+              "conversion_metadata": {},
+              "document_id": "state_court_packet_grounding_audit",
+              "errors": [],
+              "formula": "\u2200x (Quantum(x) \u2192 Before(x))",
+              "metadata": {
+                "conversion_time_ms": 0.10418891906738281,
+                "predicates_count": 4,
+                "quantifiers_count": 0,
+                "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                "validation": {
+                  "errors": [],
+                  "valid": true
+                }
+              },
+              "operators": [
+                {
+                  "position": [
+                    34,
+                    36
+                  ],
+                  "symbol": "\u2227",
+                  "type": "conjunction"
+                }
+              ],
+              "predicates": [
+                {
+                  "arity": 0,
+                  "category": "unknown",
+                  "definition": "",
+                  "name": "nouns"
+                },
+                {
+                  "arity": 0,
+                  "category": "unknown",
+                  "definition": "",
+                  "name": "verbs"
+                },
+                {
+                  "arity": 0,
+                  "category": "unknown",
+                  "definition": "",
+                  "name": "adjectives"
+                },
+                {
+                  "arity": 0,
+                  "category": "unknown",
+                  "definition": "",
+                  "name": "relations"
+                }
+              ],
+              "quantifiers": [],
+              "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+              "status": "success",
+              "variables": [],
+              "warnings": []
+            },
+            {
+              "backend": "fol_converter",
+              "confidence": 1,
+              "conversion_metadata": {},
+              "document_id": "state_court_packet_grounding_audit",
+              "errors": [],
+              "formula": "\u2203x Quantum(x)",
+              "metadata": {
+                "conversion_time_ms": 0.04172325134277344,
+                "predicates_count": 4,
+                "quantifiers_count": 0,
+                "source_text": "the court may reasonably require Quantum to explain what happened to the application materials",
+                "validation": {
+                  "errors": [],
+                  "valid": true
+                }
+              },
+              "operators": [],
+              "predicates": [
+                {
+                  "arity": 0,
+                  "category": "unknown",
+                  "definition": "",
+                  "name": "nouns"
+                },
+                {
+                  "arity": 0,
+                  "category": "unknown",
+                  "definition": "",
+                  "name": "verbs"
+                },
+                {
+                  "arity": 0,
+                  "category": "unknown",
+                  "definition": "",
+                  "name": "adjectives"
+                },
+                {
+                  "arity": 0,
+                  "category": "unknown",
+                  "definition": "",
+                  "name": "relations"
+                }
+              ],
+              "quantifiers": [],
+              "source_text": "the court may reasonably require Quantum to explain what happened to the application materials",
+              "status": "success",
+              "variables": [],
+              "warnings": []
+            }
+          ],
+          "frames": [
+            {
+              "ergo": "stmt_stmt_2[entity -> \"the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+              "frame_id": "stmt_stmt_2",
+              "isa": "DeonticStatement",
+              "isaset": [
+                "DocketStatement",
+                "LegalNorm"
+              ],
+              "label": "Permission statement",
+              "object_id": "stmt_stmt_2",
+              "slots": {
+                "action": "reasonably require quantum to explain what happened to the application materials",
+                "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                "court": "Clackamas County Justice Court",
+                "docket_id": "26FE0586",
+                "document_id": "state_court_packet_grounding_audit",
+                "entity": "the court",
+                "modality": "permission"
+              }
+            },
+            {
+              "ergo": "stmt_state_court_packet_grounding_audit_fallback_permission_1[entity -> \"once quantum is before the court, the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+              "frame_id": "stmt_state_court_packet_grounding_audit_fallback_permission_1",
+              "isa": "DeonticStatement",
+              "isaset": [
+                "DocketStatement",
+                "LegalNorm"
+              ],
+              "label": "Permission statement",
+              "object_id": "stmt_state_court_packet_grounding_audit_fallback_permission_1",
+              "slots": {
+                "action": "reasonably require quantum to explain what happened to the application materials",
+                "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                "court": "Clackamas County Justice Court",
+                "docket_id": "26FE0586",
+                "document_id": "state_court_packet_grounding_audit",
+                "entity": "once quantum is before the court, the court",
+                "modality": "permission"
+              }
+            },
+            {
+              "ergo": "stmt_state_court_packet_grounding_audit_structured_72_1[entity -> \"- once quantum is before the court, the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+              "frame_id": "stmt_state_court_packet_grounding_audit_structured_72_1",
+              "isa": "DeonticStatement",
+              "isaset": [
+                "DocketStatement",
+                "LegalNorm"
+              ],
+              "label": "Permission statement",
+              "object_id": "stmt_state_court_packet_grounding_audit_structured_72_1",
+              "slots": {
+                "action": "reasonably require quantum to explain what happened to the application materials",
+                "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                "court": "Clackamas County Justice Court",
+                "docket_id": "26FE0586",
+                "document_id": "state_court_packet_grounding_audit",
+                "entity": "- once quantum is before the court, the court",
+                "modality": "permission"
+              }
+            },
+            {
+              "ergo": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant[actor -> \"- Once Quantum is before the court, the court\", action -> \"reasonably require Quantum to explain what happened to the application materials\", modality -> \"permission\", cnl_sentence -> \"- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials\", parse_confidence -> 0.9, temporal_detected -> false] : StructuredDeonticNorm",
+              "frame_id": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant",
+              "isa": "StructuredDeonticNorm",
+              "isaset": [
+                "DeonticStatement",
+                "CourtDirective"
+              ],
+              "label": "Permission norm",
+              "object_id": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant",
+              "slots": {
+                "action": "reasonably require Quantum to explain what happened to the application materials",
+                "actor": "- Once Quantum is before the court, the court",
+                "cnl_sentence": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                "modality": "permission",
+                "parse_confidence": "0.9",
+                "temporal_detected": "false"
+              }
+            }
+          ],
+          "propositions": [
+            {
+              "assumptions": [
+                "the court may reasonably require Quantum to explain what happened to the application materials"
+              ],
+              "statement": "the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+            },
+            {
+              "assumptions": [
+                "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+              ],
+              "statement": "once quantum is before the court, the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+            },
+            {
+              "assumptions": [
+                "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+              ],
+              "statement": "- once quantum is before the court, the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+            },
+            {
+              "assumptions": [
+                "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+              ],
+              "document_id": "state_court_packet_grounding_audit",
+              "logic_system": "first_order_logic",
+              "statement": "\u2200x (Quantum(x) \u2192 Before(x))"
+            },
+            {
+              "assumptions": [
+                "the court may reasonably require Quantum to explain what happened to the application materials"
+              ],
+              "document_id": "state_court_packet_grounding_audit",
+              "logic_system": "first_order_logic",
+              "statement": "\u2203x Quantum(x)"
+            },
+            {
+              "assumptions": [
+                "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+              ],
+              "document_id": "state_court_packet_grounding_audit",
+              "logic_system": "first_order_logic",
+              "statement": "\u2200x (Quantum(x) \u2192 Before(x))"
+            },
+            {
+              "assumptions": [
+                "deontic_cognitive_event_calculus_conversion"
+              ],
+              "logic_system": "deontic_cognitive_event_calculus",
+              "statement": "Frame(frm:8dccb1903d84ef85,action,reasonably)"
+            },
+            {
+              "assumptions": [
+                "deontic_cognitive_event_calculus_conversion"
+              ],
+              "logic_system": "deontic_cognitive_event_calculus",
+              "statement": "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85))"
+            },
+            {
+              "assumptions": [
+                "deontic_cognitive_event_calculus_conversion"
+              ],
+              "logic_system": "deontic_cognitive_event_calculus",
+              "statement": "P(reasonably(agent:Agent))"
+            },
+            {
+              "assumptions": [
+                "deontic_cognitive_event_calculus_conversion"
+              ],
+              "logic_system": "deontic_cognitive_event_calculus",
+              "statement": "P(reasonably(court:Agent))"
+            },
+            {
+              "assumptions": [
+                "deontic_cognitive_event_calculus_conversion"
+              ],
+              "logic_system": "deontic_cognitive_event_calculus",
+              "statement": "P(reasonably(once:Agent))"
+            },
+            {
+              "assumptions": [
+                "deontic_temporal_first_order_logic_conversion"
+              ],
+              "logic_system": "deontic_temporal_first_order_logic",
+              "statement": "P_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(the_court))"
+            },
+            {
+              "assumptions": [
+                "deontic_temporal_first_order_logic_conversion"
+              ],
+              "logic_system": "deontic_temporal_first_order_logic",
+              "statement": "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))"
+            },
+            {
+              "assumptions": [
+                "deontic_temporal_first_order_logic_conversion"
+              ],
+              "logic_system": "deontic_temporal_first_order_logic",
+              "statement": "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))"
+            },
+            {
+              "assumptions": [
+                "deontic_temporal_first_order_logic_conversion"
+              ],
+              "logic_system": "deontic_temporal_first_order_logic",
+              "statement": "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85,t))"
+            }
+          ],
+          "provenance": {
+            "backend": "formal_logic_pipeline",
+            "dcec_available": true,
+            "fol_available": true,
+            "model_name": "knowledge_graphs+deontic+tdfol+fol+dcec+flogic",
+            "modules": [
+              "knowledge_graphs.extraction",
+              "logic.integration.reasoning.deontological_reasoning",
+              "logic.TDFOL",
+              "logic.fol",
+              "logic.CEC.eng_dcec_wrapper",
+              "logic.flogic"
+            ],
+            "provider": "repo_native"
+          },
+          "relationships": [
+            {
+              "id": "state_court_packet_grounding_audit:rel:actor:once_quantum_is_before_the_court_the_court:72:1",
+              "properties": {
+                "document_id": "state_court_packet_grounding_audit",
+                "signal_type": "directive_clause"
+              },
+              "source": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+              "target": "state_court_packet_grounding_audit",
+              "type": "SUBJECT_OF"
+            },
+            {
+              "id": "state_court_packet_grounding_audit:rel:imposes_norm:once_quantum_is_before_the_court_the_court:reasonably_require_quantum_to_explain_what_happened_to_the_application_materials:1",
+              "properties": {
+                "document_id": "state_court_packet_grounding_audit",
+                "modality": "permission",
+                "signal_type": "directive_clause"
+              },
+              "source": "state_court_packet_grounding_audit",
+              "target": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+              "type": "IMPOSES_NORM"
+            },
+            {
+              "id": "state_court_packet_grounding_audit:rel:norm_subject:once_quantum_is_before_the_court_the_court:reasonably_require_quantum_to_explain_what_happened_to_the_application_materials:1",
+              "properties": {
+                "document_id": "state_court_packet_grounding_audit",
+                "modality": "permission"
+              },
+              "source": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+              "target": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+              "type": "NORM_SUBJECT"
+            }
+          ],
+          "summary": "state court packet grounding audit; 3 deontic statements; 5 DCEC formulas",
+          "temporal_formulas": [
+            "P_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(the_court))",
+            "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))",
+            "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))",
+            "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85,t))"
+          ]
+        },
+        "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+        "source_suffix": ".md",
+        "text_extraction": {}
+      },
+      "document_text_preview": "# State-Court Packet Grounding Audit\n\nCase No. 26FE0586\n\nThis audit is meant to answer one question:\n\n`Is every major point in the state-court packet grounded in actual law and record facts, and have we separated verified facts from inference?`\n\nShort answer:\n\n- `Yes` for the core anti-eviction theory, if stated carefully.\n- `Yes` for the joinder and show-cause theories, if stated as process-chain theories.\n- `No` if we overstate what the graph or prover establishes by itself.\n\n## 1. What Is Ver",
+      "document_title": "state court packet grounding audit",
+      "evidence_id": "documents-28",
+      "id": "document-annotation-1",
+      "note": "Smoke test legal-impact note: verify the filing workspace can send selected filing labels and a note into the complaint workspace.",
+      "source": "dashboard-docket-dataset-annotation",
+      "tags": [
+        "deadline",
+        "needs review"
+      ],
+      "title": "state court packet grounding audit annotation",
+      "user_id": "demo-user",
+      "user_metadata": {
+        "display_name": "demo-user",
+        "role": "workspace reviewer",
+        "user_id": "demo-user"
+      }
+    }
+  ],
   "draft": {
     "body": "IN THE UNITED STATES DISTRICT COURT\nFOR THE APPROPRIATE JUDICIAL DISTRICT\n\nPlaintiff, Plaintiff,\n\nv.\n\nDefendant, Defendant.\n\nCivil Action No. ________________\n\nCOMPLAINT FOR\nRETALIATION\n\nJURY TRIAL DEMANDED\n\nNATURE OF THE ACTION\n\nCOMPLAINT FOR RETALIATION\n1. Plaintiff Plaintiff, proceeding pro se, brings this civil action against Defendant for retaliation.\n2. This action arises from Defendant's retaliatory response after Plaintiff engaged in protected activity, including engaging in protected activity.\n\nJURISDICTION AND VENUE\n3. This Court has subject-matter jurisdiction because Plaintiff alleges retaliation for protected activity and seeks relief for materially adverse acts taken in response to that activity.\n4. Venue is proper in this District because a substantial part of the events or omissions giving rise to this claim occurred in this forum and the resulting harm was felt here.\n\nPARTIES\n5. Plaintiff Plaintiff is an individual who engaged in protected activity and was harmed by retaliatory conduct.\n6. Defendant Defendant is the party from whom relief is sought and is responsible for the retaliatory actions alleged in this pleading.\n\nFACTUAL ALLEGATIONS\n7. Plaintiff engaged in protected activity by engaging in protected activity.\n8. Defendant knew of Plaintiff's protected activity before imposing the challenged adverse action.\n9. Within days of Plaintiff's protected activity, Defendant took materially adverse action against Plaintiff by taking materially adverse action against Plaintiff.\n10. The close temporal proximity between Plaintiff's protected activity and Defendant's adverse action supports a strong inference of retaliatory motive.\n11. As a direct and proximate result of Defendant's conduct, Plaintiff suffered compensable harm, including lost pay and other damages.\n\nEVIDENTIARY SUPPORT AND NOTICE\n12. Plaintiff presently relies on documentary materials and anticipates that testimonial and documentary proof may be supplemented through discovery, amendment, or sworn declarations.\n13. Plaintiff presently identifies the following documents in support of causation: \"A Masterclass in Ribbed Essentials.\", \"Nvidia \u2013 The Inference Kingdom Expands\", and \"Passenger rail wrong fit, wrong century, for Portland.\"\n14. Plaintiff gives notice that identified testimony, documentary exhibits, and chronology materials constitute part of the evidentiary basis for this pleading and may be supplemented, authenticated, or amended as discovery proceeds.\n\nCLAIM FOR RELIEF\nCOUNT I - RETALIATION\n15. Plaintiff repeats and realleges the preceding paragraphs as if fully set forth herein.\n16. Plaintiff engaged in protected activity by engaging in protected activity.\n17. Defendant knew of Plaintiff's protected activity before taking the challenged action.\n18. Defendant then subjected Plaintiff to materially adverse action by taking materially adverse action against Plaintiff.\n19. The tight chronology, including adverse action within days of protected activity, supports a causal inference that Defendant acted with retaliatory motive.\n20. As a direct and proximate result of Defendant's retaliation, Plaintiff sustained compensable harm and damages.\n\nPRAYER FOR RELIEF\nWHEREFORE, Plaintiff respectfully requests judgment against Defendant and the following relief:\n1. Compensatory damages according to proof.\n2. Back pay.\n3. Appropriate injunctive and equitable relief.\n\nJURY DEMAND\nPlaintiff demands a trial by jury on all issues so triable.\n\nSIGNATURE BLOCK\nDated: ____________________\n\nRespectfully submitted,\n\nPlaintiff\nPlaintiff, Pro Se\nAddress: ____________________\nTelephone: ____________________\nEmail: ____________________",
     "case_synopsis": "The complainant is pursuing a retaliation complaint against the opposing party. The current theory is that The complainant an identified protected activity, then experienced an adverse action. The reported harm is described harm. Timeline posture: a still-developing timeline. Current support posture: 1 supported elements, 4 open gaps, 27 saved evidence items.",
@@ -723,6 +2196,683 @@
         "saved_at": "2026-03-24T07:48:08.968887+00:00",
         "source": "gmail_import",
         "title": "Re: HCV Orientation"
+      },
+      {
+        "attachment_names": [
+          "filing-2"
+        ],
+        "claim_element_id": "causation",
+        "content": "Dataset: docket\nDocument ID: filing-2\nDocument title: state court packet grounding audit\nDocument text preview: # State-Court Packet Grounding Audit\n\nCase No. 26FE0586\n\nThis audit is meant to answer one question:\n\n`Is every major point in the state-court packet grounded in actual law and record facts, and have we separated verified facts from inference?`\n\nShort answer:\n\n- `Yes` for the core anti-eviction theory, if stated carefully.\n- `Yes` for the joinder and show-cause theories, if stated as process-chain theories.\n- `No` if we overstate what the graph or prover establishes by itself.\n\n## 1. What Is Ver\nTags: deadline, needs review\nReview note: Smoke test legal-impact note: verify the filing workspace can send selected filing labels and a note into the complaint workspace.",
+        "id": "documents-28",
+        "kind": "document",
+        "metadata": {
+          "annotation_user_metadata": {
+            "display_name": "demo-user",
+            "role": "workspace reviewer",
+            "user_id": "demo-user"
+          },
+          "dataset_kind": "docket",
+          "document_id": "filing-2",
+          "document_metadata": {
+            "citation_links": [
+              {
+                "citation_text": "42 U.S.C. \u00a7 1437p",
+                "citation_type": "usc",
+                "confidence": 0,
+                "corpus_key": null,
+                "dataset_id": null,
+                "matched": false,
+                "matched_field": null,
+                "metadata": {
+                  "candidate_corpora": [
+                    "us_code"
+                  ],
+                  "exhaustive_query_attempts": [],
+                  "exhaustive_query_enabled": false,
+                  "preferred_corpus_key": "us_code",
+                  "preferred_dataset_ids": [
+                    "justicedao/ipfs_uscode"
+                  ],
+                  "preferred_parquet_files": [
+                    "uscode.parquet"
+                  ],
+                  "recovery_corpus_key": "us_code",
+                  "recovery_query": "42 U.S.C. \u00a7 1437p site:uscode.house.gov OR site:govinfo.gov OR site:law.cornell.edu",
+                  "recovery_supported": true,
+                  "require_exact_anchor": true,
+                  "resolution_method": "unmatched",
+                  "source_row_present": false,
+                  "state_code": null
+                },
+                "normalized_citation": "42 U.S.C. \u00a7 1437p",
+                "snippet": null,
+                "source_cid": null,
+                "source_document_id": null,
+                "source_ref": null,
+                "source_title": null,
+                "source_url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title42-section1437p"
+              },
+              {
+                "citation_text": "24 C.F.R. \u00a7 970.21",
+                "citation_type": "cfr",
+                "confidence": 0,
+                "corpus_key": null,
+                "dataset_id": null,
+                "matched": false,
+                "matched_field": null,
+                "metadata": {
+                  "candidate_corpora": [
+                    "federal_register",
+                    "us_code"
+                  ],
+                  "exhaustive_query_attempts": [],
+                  "exhaustive_query_enabled": false,
+                  "preferred_corpus_key": "federal_register",
+                  "preferred_dataset_ids": [
+                    "justicedao/ipfs_federal_register",
+                    "justicedao/ipfs_uscode"
+                  ],
+                  "preferred_parquet_files": [
+                    "laws.parquet",
+                    "uscode.parquet"
+                  ],
+                  "recovery_corpus_key": "federal_register",
+                  "recovery_query": "24 C.F.R. \u00a7 970.21 site:federalregister.gov OR site:govinfo.gov",
+                  "recovery_supported": true,
+                  "require_exact_anchor": true,
+                  "resolution_method": "unmatched",
+                  "source_row_present": false,
+                  "state_code": null
+                },
+                "normalized_citation": "24 C.F.R. \u00a7 970.21",
+                "snippet": null,
+                "source_cid": null,
+                "source_document_id": null,
+                "source_ref": null,
+                "source_title": null,
+                "source_url": "https://www.ecfr.gov/current/title-24/section-970.21"
+              }
+            ],
+            "citation_recovery_candidates": [
+              {
+                "candidate_corpora": [
+                  "us_code"
+                ],
+                "citation_text": "42 U.S.C. \u00a7 1437p",
+                "citation_type": "usc",
+                "corpus_key": "us_code",
+                "document_id": "state_court_packet_grounding_audit",
+                "document_source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+                "document_title": "state court packet grounding audit",
+                "normalized_citation": "42 U.S.C. \u00a7 1437p",
+                "preferred_dataset_ids": [
+                  "justicedao/ipfs_uscode"
+                ],
+                "preferred_parquet_files": [
+                  "uscode.parquet"
+                ],
+                "recovery_query": "42 U.S.C. \u00a7 1437p site:uscode.house.gov OR site:govinfo.gov OR site:law.cornell.edu",
+                "state_code": ""
+              },
+              {
+                "candidate_corpora": [
+                  "federal_register",
+                  "us_code"
+                ],
+                "citation_text": "24 C.F.R. \u00a7 970.21",
+                "citation_type": "cfr",
+                "corpus_key": "federal_register",
+                "document_id": "state_court_packet_grounding_audit",
+                "document_source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+                "document_title": "state court packet grounding audit",
+                "normalized_citation": "24 C.F.R. \u00a7 970.21",
+                "preferred_dataset_ids": [
+                  "justicedao/ipfs_federal_register",
+                  "justicedao/ipfs_uscode"
+                ],
+                "preferred_parquet_files": [
+                  "laws.parquet",
+                  "uscode.parquet"
+                ],
+                "recovery_query": "24 C.F.R. \u00a7 970.21 site:federalregister.gov OR site:govinfo.gov",
+                "state_code": ""
+              }
+            ],
+            "citation_resolution_summary": {
+              "all_citations_resolved": false,
+              "citation_count": 2,
+              "matched_citation_count": 0,
+              "unmatched_citation_count": 2
+            },
+            "classification": {
+              "backend": "heuristic_legal_document_classifier",
+              "confidence": 0.6,
+              "label": "answer"
+            },
+            "classification_router": {
+              "backend": "formal_logic_pipeline",
+              "confidence": 0.7,
+              "label": "normative_legal_text"
+            },
+            "detected_case_number": "26FE0586",
+            "document_type": "md",
+            "page_count": null,
+            "raw": {
+              "case_number": "26FE0586",
+              "document_type": "md",
+              "id": "state_court_packet_grounding_audit",
+              "metadata": {
+                "detected_case_number": "26FE0586",
+                "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+                "source_suffix": ".md"
+              },
+              "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+              "source_url": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+              "text": "# State-Court Packet Grounding Audit\n\nCase No. 26FE0586\n\nThis audit is meant to answer one question:\n\n`Is every major point in the state-court packet grounded in actual law and record facts, and have we separated verified facts from inference?`\n\nShort answer:\n\n- `Yes` for the core anti-eviction theory, if stated carefully.\n- `Yes` for the joinder and show-cause theories, if stated as process-chain theories.\n- `No` if we overstate what the graph or prover establishes by itself.\n\n## 1. What Is Verified By Primary Law\n\nThese points are grounded in primary legal sources:\n\n### A. Section 18 relocation duties exist\n\nVerified by:\n\n- `42 U.S.C. \u00a7 1437p`\n- `24 C.F.R. \u00a7 970.21`\n\nSafe statement:\n\n- HACC had real relocation and replacement-housing duties in connection with demolition/disposition-related displacement.\n\n### B. RAD/PBV hearing-before-eviction requirement appears in HACC's own Administrative Plan\n\nVerified by:\n\n- HACC Administrative Plan, `18-VI.H. Informal Reviews and Hearings`\n\nSafe statement:\n\n- In the RAD/PBV structure HACC adopted, the owner had to provide an opportunity for an informal hearing before eviction.\n\n### C. Blossom was represented as part of an HACC PBV waitlist process\n\nVerified by:\n\n- [blossom-community-apartments](/home/barberb/HACC/blossom-community-apartments)\n\nSafe statement:\n\n- HACC publicly stated that applications for Blossom and Community Apartments would be processed through HACC's PBV waitlist and that relocation households were priority groups.\n\n## 2. What Is Verified By Record Facts\n\n### A. HACC directed the household into a Blossom-or-TPV process\n\nVerified by:\n\n- [HACC Jan 2026 blossom.pdf](/home/barberb/HACC/evidence/paper%20documents/HACC%20Jan%202026%20blossom.pdf)\n\nSafe statement:\n\n- HACC told the household it had to choose between moving forward with Blossom and Community Apartments or using a Tenant Protection Voucher.\n\n### B. HACC later admitted the intake packet had gone to Quantum staff and not reached HACC\n\nVerified by:\n\n- [message.eml](/home/barberb/HACC/workspace/manual-imap-download-2026-03-31/20260202-164227_Re-Allegations-of-Fraud---JC-Household/message.eml)\n\nSafe statement:\n\n- HACC later acknowledged in writing that the intake packet had been submitted to Quantum staff at the Hillside Manor leasing office but had not been provided to HACC.\n\n### C. Waterleaf / Multnomah path remained incomplete across four calendar months\n\nVerified by:\n\n- [waterleaf_application.png](/home/barberb/HACC/evidence/history/waterleaf_application.png)\n- [message.eml](/home/barberb/HACC/workspace/manual-imap-download-2026-03-31/20260202-164227_Re-Allegations-of-Fraud---JC-Household/message.eml)\n- [message.eml](/home/barberb/HACC/workspace/temporary-cli-session-migration/prior-research-results/full-evidence-review-run/chronology/emergency_motion_packet/exhibits/Exhibit%20M%20-%20starworks5-ktilton-orientation-import/0008-Re-HCV-Orientation-CAMTdTS_hM81x2YFGZBGX3tGzBJjMjn5WhiFW-NwOC0k23-63LQ-mail.gmail.com/message.eml)\n\nSafe statement:\n\n- The Waterleaf application existed by December 23, 2025, HACC knew the path was active by January 12 and January 26, and it still remained incomplete in late March 2026.\n\n## 3. What Is Verified By Law Plus Fact Together\n\nThese are the strongest packet theories because they are grounded both legally and factually.\n\n### A. HACC had a barred-eviction problem if relocation remained materially incomplete\n\nLaw:\n\n- `42 U.S.C. \u00a7 1437p`\n- `24 C.F.R. \u00a7 970.21`\n\nFacts:\n\n- relocation was triggered;\n- HACC directed the household into Blossom or TPV;\n- HACC later admitted the intake-routing failure;\n- Waterleaf / portability remained incomplete.\n\nSafe statement:\n\n- On the present record, HACC's push toward eviction occurred while the relocation and replacement-housing process remained materially incomplete.\n\nSafer still:\n\n- `The record supports that HACC was barred from filing eviction while those duties remained materially incomplete.`\n\n### B. Quantum belongs in the case as part of the processing chain\n\nLaw / procedure:\n\n- ORCP 29A\n- ORCP 22C as fallback third-party-practice rule; ORCP 22B is limited to cross-claims between defendants already in the case\n\nFacts:\n\n- HACC identifies Quantum as Hillside Manor property manager in the Administrative Plan;\n- HACC says the packet went to Quantum staff and did not reach HACC.\n\nSafe statement:\n\n- Quantum is not a stranger to the controversy; HACC's own records place Quantum inside the disputed replacement-housing intake chain.\n\n### C. Show cause is justified as a record-clarification request\n\nLaw / procedure:\n\n- inherent case-management and motion practice posture in the joined dispute\n\nFacts:\n\n- submitted application;\n- HACC-directed intake route;\n- HACC acknowledgment that the packet stalled at the Quantum side;\n- no clear processing result shown in the current record.\n\nSafe statement:\n\n- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials.\n\n## 4. What Is Still Inference Or Needs Cautious Framing\n\nThese points should not be presented as already proved historical fact.\n\n### A. Exact percentage of delay attributable to HACC\n\nCurrent status:\n\n- `Not mathematically provable from the present record.`\n\nSafe statement:\n\n- `A substantial amount, and likely most, of the documented delay from January 8, 2026 through late March 2026 was caused by HACC's own administration.`\n\n### B. Exact contents of the signed HAP contract or management agreement\n\nCurrent status:\n\n- `Not yet in the repository.`\n\nSafe statement:\n\n- We currently rely on HACC's Administrative Plan and notices describing the contracts and roles, not the executed contract texts themselves.\n\n### C. The graph and prover prove all disputed facts\n\nCurrent status:\n\n- `False if stated that way.`\n\nSafe statement:\n\n- The graph and prover verify the encoded deontic model and dependency structure.\n- They do not, by themselves, prove every disputed historical fact.\n\n## 5. Graph Verification Status\n\n### A. Knowledge graph basis\n\nCurrent formal sources:\n\n- [title18_contract_eviction_bar_knowledge_graph.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_knowledge_graph.json)\n- [title18_contract_eviction_bar_dependency_graph.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_dependency_graph.json)\n- [title18_contract_eviction_bar_report.md](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_report.md)\n- [title18_contract_eviction_bar_tdfol_proof_audit.json](/home/barberb/HACC/Breach%20of%20Contract/outputs/title18_contract_eviction_bar_tdfol_proof_audit.json)\n\n### B. What has been verified\n\nVerified:\n\n- the graph's central normative thesis is internally consistent;\n- the TDFOL audit returns `proved` for the core obligation/prohibition nodes:\n  - `section18_relocation_completion_required`\n  - `hacc_relocation_counseling_required`\n  - `hacc_moving_expenses_required`\n  - `hacc_comparable_replacement_required`\n  - `hacc_perform_relocation_commitment`\n  - `hacc_administer_implied_relocation_process`\n  - `eviction_forbidden_while_duties_incomplete`\n  - `eviction_forbidden_while_undertaken_performance_incomplete`\n\nNot verified in that same sense:\n\n- every disputed historical event;\n- the full contents of missing executed contract documents;\n- every causal inference beyond the encoded record.\n\n### C. Court-safe use of the graph\n\nCourt-safe statement:\n\n- `The formal model confirms that if the source-linked factual predicates are true, the resulting deontic conclusion is that eviction was forbidden while relocation and undertaken processing duties remained incomplete.`\n\nNot court-safe:\n\n- `The graph itself proves all facts in the case.`\n\n## 6. Recommended Court-Safe Language\n\nBest phrasing:\n\n- `The record supports`\n- `HACC's own documents state`\n- `HACC later acknowledged in writing`\n- `On the present record`\n- `The formal model confirms the normative consequence of the source-linked facts`\n\nNormalized replacements:\n\n- Use `The record supports` rather than `This conclusively proves`, unless the point is truly undisputed.\n- Use the specific source name rather than `The contracts say` when the point actually comes from an Administrative Plan provision, a notice, or an email.\n- Use `The formal model confirms the encoded normative consequence` rather than `The graph proves`, unless you are expressly discussing the model itself rather than the historical facts.\n\n## 7. Bottom Line\n\nThe packet is in a strong position if we stay within the following boundaries:\n\n- use primary law for the federal duties;\n- use HACC's own Administrative Plan, public page, notices, and emails for the local process;\n- describe the Quantum theory as a process-chain theory;\n- describe the anti-eviction theory as a source-linked Section 18 plus undertaken-process bar;\n- and describe the graph/prover as formal support for the legal consequence of the verified record, not as a substitute for the record itself.",
+              "title": "state court packet grounding audit"
+            },
+            "rich_analysis": {
+              "classification": {
+                "backend": "formal_logic_pipeline",
+                "confidence": 0.7,
+                "label": "normative_legal_text"
+              },
+              "dcec_formulas": [
+                "Frame(frm:8dccb1903d84ef85,action,reasonably)",
+                "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85))",
+                "P(reasonably(agent:Agent))",
+                "P(reasonably(court:Agent))",
+                "P(reasonably(once:Agent))"
+              ],
+              "deontic_statements": [
+                {
+                  "action": "reasonably require quantum to explain what happened to the application materials",
+                  "conditions": [],
+                  "confidence": 0.7,
+                  "context": {
+                    "extracted_at": "2026-04-19T22:30:43.236116",
+                    "position": {
+                      "end": 4992,
+                      "start": 4898
+                    },
+                    "surrounding_text": "rected intake route;\n- HACC acknowledgment that the packet stalled at the Quantum side;\n- no clear processing result shown in the current record.\n\nSafe statement:\n\n- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials.\n\n## 4."
+                  },
+                  "document_id": "state_court_packet_grounding_audit",
+                  "entity": "the court",
+                  "exceptions": [],
+                  "id": "stmt_2",
+                  "modality": "permission",
+                  "source_document": "state_court_packet_grounding_audit",
+                  "source_text": "the court may reasonably require Quantum to explain what happened to the application materials"
+                },
+                {
+                  "action": "reasonably require quantum to explain what happened to the application materials",
+                  "conditions": [],
+                  "confidence": 0.55,
+                  "context": {
+                    "extractor": "regex_fallback"
+                  },
+                  "document_id": "state_court_packet_grounding_audit",
+                  "entity": "once quantum is before the court, the court",
+                  "exceptions": [],
+                  "id": "state_court_packet_grounding_audit:fallback:permission:1",
+                  "modality": "permission",
+                  "source_document": "state_court_packet_grounding_audit",
+                  "source_text": "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                },
+                {
+                  "action": "reasonably require quantum to explain what happened to the application materials",
+                  "conditions": [],
+                  "confidence": 0.78,
+                  "context": {
+                    "cnl_sentence": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                    "deadline": "",
+                    "extractor": "structured_court_order",
+                    "signal_type": "directive_clause"
+                  },
+                  "document_id": "state_court_packet_grounding_audit",
+                  "entity": "- once quantum is before the court, the court",
+                  "exceptions": [],
+                  "id": "state_court_packet_grounding_audit:structured:72:1",
+                  "modality": "permission",
+                  "source_document": "state_court_packet_grounding_audit",
+                  "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                }
+              ],
+              "document_frames": [
+                {
+                  "ergo": "doc_state_court_packet_grounding_audit[document_id -> \"state_court_packet_grounding_audit\", title -> \"state court packet grounding audit\", date_filed -> \"\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\", entity_count -> 0, dcec_count -> 5] : DocketDocument",
+                  "frame_id": "doc_state_court_packet_grounding_audit",
+                  "isa": "DocketDocument",
+                  "isaset": [
+                    "LegalDocument"
+                  ],
+                  "label": "state court packet grounding audit",
+                  "object_id": "doc_state_court_packet_grounding_audit",
+                  "slots": {
+                    "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                    "court": "Clackamas County Justice Court",
+                    "date_filed": "",
+                    "dcec_count": "5",
+                    "docket_id": "26FE0586",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "entity_count": "0",
+                    "title": "state court packet grounding audit"
+                  }
+                }
+              ],
+              "document_temporal_formulas": [
+                "\u25a1(document_exists(state_court_packet_grounding_audit))",
+                "document_titled(state_court_packet_grounding_audit, state_court_packet_grounding_audit)"
+              ],
+              "entities": [
+                {
+                  "id": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+                  "label": "- Once Quantum is before the court, the court",
+                  "properties": {
+                    "document_id": "state_court_packet_grounding_audit"
+                  },
+                  "type": "legal_actor"
+                },
+                {
+                  "id": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+                  "label": "- Once Quantum is before the court, the court permission reasonably require Quantum to explain what happened to the application materials",
+                  "properties": {
+                    "action": "reasonably require Quantum to explain what happened to the application materials",
+                    "actor": "- Once Quantum is before the court, the court",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "modality": "permission"
+                  },
+                  "type": "structured_deontic_norm"
+                }
+              ],
+              "events": [
+                {
+                  "agent": "the court",
+                  "id": "stmt_2:event",
+                  "label": "reasonably require quantum to explain what happened to the application materials",
+                  "time": ""
+                },
+                {
+                  "agent": "once quantum is before the court, the court",
+                  "id": "state_court_packet_grounding_audit:fallback:permission:1:event",
+                  "label": "reasonably require quantum to explain what happened to the application materials",
+                  "time": ""
+                },
+                {
+                  "agent": "- once quantum is before the court, the court",
+                  "id": "state_court_packet_grounding_audit:structured:72:1:event",
+                  "label": "reasonably require quantum to explain what happened to the application materials",
+                  "time": ""
+                }
+              ],
+              "first_order_formulas": [
+                {
+                  "backend": "fol_converter",
+                  "confidence": 1,
+                  "conversion_metadata": {},
+                  "document_id": "state_court_packet_grounding_audit",
+                  "errors": [],
+                  "formula": "\u2200x (Quantum(x) \u2192 Before(x))",
+                  "metadata": {
+                    "conversion_time_ms": 0.10418891906738281,
+                    "predicates_count": 4,
+                    "quantifiers_count": 0,
+                    "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                    "validation": {
+                      "errors": [],
+                      "valid": true
+                    }
+                  },
+                  "operators": [
+                    {
+                      "position": [
+                        34,
+                        36
+                      ],
+                      "symbol": "\u2227",
+                      "type": "conjunction"
+                    }
+                  ],
+                  "predicates": [
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "nouns"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "verbs"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "adjectives"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "relations"
+                    }
+                  ],
+                  "quantifiers": [],
+                  "source_text": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                  "status": "success",
+                  "variables": [],
+                  "warnings": []
+                },
+                {
+                  "backend": "fol_converter",
+                  "confidence": 1,
+                  "conversion_metadata": {},
+                  "document_id": "state_court_packet_grounding_audit",
+                  "errors": [],
+                  "formula": "\u2203x Quantum(x)",
+                  "metadata": {
+                    "conversion_time_ms": 0.04172325134277344,
+                    "predicates_count": 4,
+                    "quantifiers_count": 0,
+                    "source_text": "the court may reasonably require Quantum to explain what happened to the application materials",
+                    "validation": {
+                      "errors": [],
+                      "valid": true
+                    }
+                  },
+                  "operators": [],
+                  "predicates": [
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "nouns"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "verbs"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "adjectives"
+                    },
+                    {
+                      "arity": 0,
+                      "category": "unknown",
+                      "definition": "",
+                      "name": "relations"
+                    }
+                  ],
+                  "quantifiers": [],
+                  "source_text": "the court may reasonably require Quantum to explain what happened to the application materials",
+                  "status": "success",
+                  "variables": [],
+                  "warnings": []
+                }
+              ],
+              "frames": [
+                {
+                  "ergo": "stmt_stmt_2[entity -> \"the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+                  "frame_id": "stmt_stmt_2",
+                  "isa": "DeonticStatement",
+                  "isaset": [
+                    "DocketStatement",
+                    "LegalNorm"
+                  ],
+                  "label": "Permission statement",
+                  "object_id": "stmt_stmt_2",
+                  "slots": {
+                    "action": "reasonably require quantum to explain what happened to the application materials",
+                    "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                    "court": "Clackamas County Justice Court",
+                    "docket_id": "26FE0586",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "entity": "the court",
+                    "modality": "permission"
+                  }
+                },
+                {
+                  "ergo": "stmt_state_court_packet_grounding_audit_fallback_permission_1[entity -> \"once quantum is before the court, the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+                  "frame_id": "stmt_state_court_packet_grounding_audit_fallback_permission_1",
+                  "isa": "DeonticStatement",
+                  "isaset": [
+                    "DocketStatement",
+                    "LegalNorm"
+                  ],
+                  "label": "Permission statement",
+                  "object_id": "stmt_state_court_packet_grounding_audit_fallback_permission_1",
+                  "slots": {
+                    "action": "reasonably require quantum to explain what happened to the application materials",
+                    "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                    "court": "Clackamas County Justice Court",
+                    "docket_id": "26FE0586",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "entity": "once quantum is before the court, the court",
+                    "modality": "permission"
+                  }
+                },
+                {
+                  "ergo": "stmt_state_court_packet_grounding_audit_structured_72_1[entity -> \"- once quantum is before the court, the court\", action -> \"reasonably require quantum to explain what happened to the application materials\", modality -> \"permission\", document_id -> \"state_court_packet_grounding_audit\", docket_id -> \"26FE0586\", case_name -> \"Housing Authority of Clackamas County eviction docket packet, Case 26FE0586\", court -> \"Clackamas County Justice Court\"] : DeonticStatement",
+                  "frame_id": "stmt_state_court_packet_grounding_audit_structured_72_1",
+                  "isa": "DeonticStatement",
+                  "isaset": [
+                    "DocketStatement",
+                    "LegalNorm"
+                  ],
+                  "label": "Permission statement",
+                  "object_id": "stmt_state_court_packet_grounding_audit_structured_72_1",
+                  "slots": {
+                    "action": "reasonably require quantum to explain what happened to the application materials",
+                    "case_name": "Housing Authority of Clackamas County eviction docket packet, Case 26FE0586",
+                    "court": "Clackamas County Justice Court",
+                    "docket_id": "26FE0586",
+                    "document_id": "state_court_packet_grounding_audit",
+                    "entity": "- once quantum is before the court, the court",
+                    "modality": "permission"
+                  }
+                },
+                {
+                  "ergo": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant[actor -> \"- Once Quantum is before the court, the court\", action -> \"reasonably require Quantum to explain what happened to the application materials\", modality -> \"permission\", cnl_sentence -> \"- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials\", parse_confidence -> 0.9, temporal_detected -> false] : StructuredDeonticNorm",
+                  "frame_id": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant",
+                  "isa": "StructuredDeonticNorm",
+                  "isaset": [
+                    "DeonticStatement",
+                    "CourtDirective"
+                  ],
+                  "label": "Permission norm",
+                  "object_id": "structured_state_court_packet_grounding_audit_once_quantum_is_before_the_court_the_court_reasonably_require_quant",
+                  "slots": {
+                    "action": "reasonably require Quantum to explain what happened to the application materials",
+                    "actor": "- Once Quantum is before the court, the court",
+                    "cnl_sentence": "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials",
+                    "modality": "permission",
+                    "parse_confidence": "0.9",
+                    "temporal_detected": "false"
+                  }
+                }
+              ],
+              "propositions": [
+                {
+                  "assumptions": [
+                    "the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "statement": "the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+                },
+                {
+                  "assumptions": [
+                    "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "statement": "once quantum is before the court, the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+                },
+                {
+                  "assumptions": [
+                    "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "statement": "- once quantum is before the court, the court has permission regarding reasonably require quantum to explain what happened to the application materials"
+                },
+                {
+                  "assumptions": [
+                    "- Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "document_id": "state_court_packet_grounding_audit",
+                  "logic_system": "first_order_logic",
+                  "statement": "\u2200x (Quantum(x) \u2192 Before(x))"
+                },
+                {
+                  "assumptions": [
+                    "the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "document_id": "state_court_packet_grounding_audit",
+                  "logic_system": "first_order_logic",
+                  "statement": "\u2203x Quantum(x)"
+                },
+                {
+                  "assumptions": [
+                    "Once Quantum is before the court, the court may reasonably require Quantum to explain what happened to the application materials"
+                  ],
+                  "document_id": "state_court_packet_grounding_audit",
+                  "logic_system": "first_order_logic",
+                  "statement": "\u2200x (Quantum(x) \u2192 Before(x))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "Frame(frm:8dccb1903d84ef85,action,reasonably)"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "P(reasonably(agent:Agent))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "P(reasonably(court:Agent))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_cognitive_event_calculus_conversion"
+                  ],
+                  "logic_system": "deontic_cognitive_event_calculus",
+                  "statement": "P(reasonably(once:Agent))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_temporal_first_order_logic_conversion"
+                  ],
+                  "logic_system": "deontic_temporal_first_order_logic",
+                  "statement": "P_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(the_court))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_temporal_first_order_logic_conversion"
+                  ],
+                  "logic_system": "deontic_temporal_first_order_logic",
+                  "statement": "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_temporal_first_order_logic_conversion"
+                  ],
+                  "logic_system": "deontic_temporal_first_order_logic",
+                  "statement": "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))"
+                },
+                {
+                  "assumptions": [
+                    "deontic_temporal_first_order_logic_conversion"
+                  ],
+                  "logic_system": "deontic_temporal_first_order_logic",
+                  "statement": "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85,t))"
+                }
+              ],
+              "provenance": {
+                "backend": "formal_logic_pipeline",
+                "dcec_available": true,
+                "fol_available": true,
+                "model_name": "knowledge_graphs+deontic+tdfol+fol+dcec+flogic",
+                "modules": [
+                  "knowledge_graphs.extraction",
+                  "logic.integration.reasoning.deontological_reasoning",
+                  "logic.TDFOL",
+                  "logic.fol",
+                  "logic.CEC.eng_dcec_wrapper",
+                  "logic.flogic"
+                ],
+                "provider": "repo_native"
+              },
+              "relationships": [
+                {
+                  "id": "state_court_packet_grounding_audit:rel:actor:once_quantum_is_before_the_court_the_court:72:1",
+                  "properties": {
+                    "document_id": "state_court_packet_grounding_audit",
+                    "signal_type": "directive_clause"
+                  },
+                  "source": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+                  "target": "state_court_packet_grounding_audit",
+                  "type": "SUBJECT_OF"
+                },
+                {
+                  "id": "state_court_packet_grounding_audit:rel:imposes_norm:once_quantum_is_before_the_court_the_court:reasonably_require_quantum_to_explain_what_happened_to_the_application_materials:1",
+                  "properties": {
+                    "document_id": "state_court_packet_grounding_audit",
+                    "modality": "permission",
+                    "signal_type": "directive_clause"
+                  },
+                  "source": "state_court_packet_grounding_audit",
+                  "target": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+                  "type": "IMPOSES_NORM"
+                },
+                {
+                  "id": "state_court_packet_grounding_audit:rel:norm_subject:once_quantum_is_before_the_court_the_court:reasonably_require_quantum_to_explain_what_happened_to_the_application_materials:1",
+                  "properties": {
+                    "document_id": "state_court_packet_grounding_audit",
+                    "modality": "permission"
+                  },
+                  "source": "norm:once_quantum_is_before_the_court_the_court:permission:reasonably_require_quantum_to_explain_wh",
+                  "target": "state_court_packet_grounding_audit:actor:once_quantum_is_before_the_court_the_court",
+                  "type": "NORM_SUBJECT"
+                }
+              ],
+              "summary": "state court packet grounding audit; 3 deontic statements; 5 DCEC formulas",
+              "temporal_formulas": [
+                "P_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(the_court))",
+                "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))",
+                "P_once_quantum_is_before_the_court_the_court(reasonably_require_quantum_to_explain_what_happened_to_the_application_materials(once_quantum_is_before_the_court_the_court))",
+                "forall t (true and true and not(false) -> P(frm:8dccb1903d84ef85,t))"
+              ]
+            },
+            "source_path": "artifacts/eviction_docket_26fe0586/source_documents/audit/state_court_packet_grounding_audit.md",
+            "source_suffix": ".md",
+            "text_extraction": {}
+          },
+          "tags": [
+            "deadline",
+            "needs review"
+          ]
+        },
+        "saved_at": "2026-04-20T02:05:57.527292+00:00",
+        "source": "dashboard-docket-dataset-annotation",
+        "title": "state court packet grounding audit annotation"
       }
     ],
     "testimony": []
@@ -1305,11 +3455,14 @@
     "verdict": "Do not send to clients yet",
     "workflow_type": "page_reviews"
   },
-  "updated_at": "2026-04-20T01:16:38.701512+00:00",
+  "updated_at": "2026-04-20T05:40:45.983677+00:00",
   "user_id": "demo-user",
   "workspace_annotation_index": {
+    "by_claim_element": {},
     "by_collection": {},
     "by_document_type": {},
-    "by_tag": {}
+    "by_tag": {},
+    "source": "complaint_workspace_dataset_annotation_index",
+    "workspace_annotation_count": 0
   }
 }

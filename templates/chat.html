@@ -131,10 +131,10 @@
         }
 
         .hero {
-            margin-top: 24px;
+            margin-top: 16px;
             display: grid;
-            grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-            gap: 22px;
+            grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+            gap: 18px;
         }
 
         .hero-card,
@@ -152,10 +152,10 @@
         }
 
         h1 {
-            margin-top: 10px;
-            max-width: 11ch;
-            font-size: clamp(2.4rem, 4vw, 3.9rem);
-            line-height: 0.98;
+            margin-top: 8px;
+            max-width: 18ch;
+            font-size: clamp(2.1rem, 2.7vw, 3rem);
+            line-height: 1.04;
         }
 
         .hero-copy,
@@ -170,9 +170,10 @@
         }
 
         .hero-copy {
-            margin: 18px 0 0;
+            margin: 12px 0 0;
             max-width: 64ch;
             font-size: 1.04rem;
+            line-height: 1.55;
         }
 
         .cta-primary,
@@ -199,7 +200,7 @@
         }
 
         .summary-grid {
-            display: grid;
+            display: none;
             grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 16px;
             margin-top: 24px;
@@ -218,18 +219,19 @@
             font-size: 1.02rem;
         }
 
-        .workspace-grid {
-            margin-top: 24px;
-            display: grid;
-            grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
-            gap: 22px;
-            align-items: start;
-        }
+	        .workspace-grid {
+	            margin-top: 24px;
+	            display: grid;
+	            grid-template-columns: minmax(720px, 2fr) minmax(320px, 0.72fr);
+	            gap: 24px;
+	            align-items: start;
+	        }
 
-        .chat-card {
-            display: grid;
-            gap: 18px;
-        }
+	        .chat-card {
+	            display: grid;
+	            gap: 18px;
+	            min-width: 0;
+	        }
 
         .chat-header {
             display: flex;
@@ -327,9 +329,87 @@
             gap: 12px;
         }
 
-        .panel-card {
-            padding: 20px 22px;
-        }
+	        .panel-card {
+	            padding: 20px 22px;
+	        }
+
+	        .router-status {
+	            display: none;
+	            padding: 14px 16px;
+	            border-radius: var(--radius-md);
+	            border: 1px solid rgba(33, 77, 60, 0.16);
+	            background: rgba(223, 240, 231, 0.82);
+	            color: var(--forest);
+	            font-weight: 800;
+	            line-height: 1.5;
+	        }
+
+	        .router-status.is-visible {
+	            display: block;
+	        }
+
+	        .active-context-strip {
+	            display: grid;
+	            grid-template-columns: auto minmax(0, 1fr);
+	            gap: 8px 14px;
+	            align-items: center;
+	            padding: 14px 16px;
+	            border-radius: var(--radius-md);
+	            border: 1px solid rgba(33, 77, 60, 0.18);
+	            background: rgba(255, 253, 250, 0.94);
+	        }
+
+	        .active-context-strip[hidden] {
+	            display: none;
+	        }
+
+	        .context-mode-pill {
+	            display: inline-flex;
+	            align-items: center;
+	            justify-content: center;
+	            min-height: 30px;
+	            padding: 0 12px;
+	            border-radius: 999px;
+	            background: rgba(33, 77, 60, 0.1);
+	            color: var(--forest);
+	            font-size: 0.78rem;
+	            font-weight: 900;
+	            text-transform: uppercase;
+	        }
+
+	        .active-context-strip strong,
+	        .active-context-strip span:last-child {
+	            min-width: 0;
+	        }
+
+	        .active-context-strip strong {
+	            overflow: hidden;
+	            text-overflow: ellipsis;
+	            white-space: nowrap;
+	        }
+
+	        .active-context-strip span:last-child {
+	            grid-column: 2;
+	            color: var(--muted);
+	            line-height: 1.45;
+	        }
+
+	        .prompt-chip-row {
+	            display: flex;
+	            flex-wrap: wrap;
+	            gap: 10px;
+	            margin-top: 12px;
+	        }
+
+	        .prompt-chip-row button {
+	            min-height: 40px;
+	            border-radius: 999px;
+	            border: 1px solid rgba(33, 77, 60, 0.16);
+	            background: rgba(223, 240, 231, 0.78);
+	            color: var(--forest);
+	            font-weight: 800;
+	            padding: 0 14px;
+	        }
 
         .action-stack {
             display: grid;
@@ -344,6 +424,107 @@
             margin-top: 12px;
             display: inline-flex;
             width: fit-content;
+        }
+
+        .next-step-card {
+            padding: 20px 22px;
+            border-radius: var(--radius-lg);
+            border: 1px solid rgba(33, 77, 60, 0.18);
+            background: rgba(244, 250, 246, 0.92);
+            box-shadow: 0 16px 34px rgba(64, 35, 15, 0.08);
+        }
+
+        .stage-badge {
+            display: inline-flex;
+            width: fit-content;
+            align-items: center;
+            min-height: 30px;
+            padding: 0 12px;
+            border-radius: 999px;
+            background: rgba(33, 77, 60, 0.12);
+            color: var(--forest);
+            font-size: 0.78rem;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+
+        .next-step-card h3 {
+            margin: 12px 0 8px;
+        }
+
+        .stage-primary-action {
+            display: inline-flex;
+            justify-content: center;
+            width: 100%;
+            margin-top: 16px;
+            min-height: 46px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #214d3c, #2e6b54);
+            color: #fffaf5;
+            font-weight: 900;
+            text-decoration: none;
+            align-items: center;
+            box-shadow: 0 14px 28px rgba(33, 77, 60, 0.18);
+        }
+
+        .stage-progress-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .stage-progress-item {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 6px 12px;
+            padding: 14px 16px;
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(116, 40, 9, 0.1);
+            background: rgba(255, 252, 248, 0.9);
+        }
+
+        .stage-progress-item strong {
+            min-width: 0;
+        }
+
+        .stage-progress-item span {
+            grid-column: 1 / -1;
+            color: var(--muted);
+            line-height: 1.4;
+        }
+
+        .stage-status {
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: rgba(116, 40, 9, 0.08);
+            color: var(--accent-deep);
+            font-size: 0.78rem;
+            font-weight: 900;
+        }
+
+        .stage-progress-item.is-current {
+            border-color: rgba(33, 77, 60, 0.28);
+            background: rgba(244, 250, 246, 0.94);
+        }
+
+        .stage-progress-item.is-current .stage-status {
+            background: rgba(33, 77, 60, 0.12);
+            color: var(--forest);
+        }
+
+        .more-actions {
+            border-radius: var(--radius-md);
+            border: 1px solid rgba(116, 40, 9, 0.12);
+            background: rgba(255, 252, 248, 0.84);
+            padding: 14px 16px;
+        }
+
+        .more-actions summary {
+            cursor: pointer;
+            color: var(--accent-deep);
+            font-weight: 900;
         }
 
         .panel-actions {
@@ -398,6 +579,14 @@
             .chat-header {
                 flex-direction: column;
             }
+
+            .active-context-strip {
+                grid-template-columns: 1fr;
+            }
+
+            .active-context-strip span:last-child {
+                grid-column: auto;
+            }
         }
     </style>
     <script defer src="/static/complaint_mcp_sdk.js"></script>
@@ -405,7 +594,7 @@
     <script src="/static/chat_entry_utils.js"></script>
     <script src="/static/chat.js"></script>
 </head>
-<body>
+<body data-complaint-shell="off">
     <div class="page-shell">
         <header class="masthead">
             <div class="topbar">
@@ -494,16 +683,37 @@
                     <strong id="profile"></strong>
                 </div>
 
-                <div id="Err"></div>
+	                <div id="Err"></div>
 
-                <div class="panel-card" id="chat-context-card" hidden>
-                    <h3>Workspace handoff</h3>
-                    <p id="chat-context-summary">The shared complaint context will appear here when Chat is opened from the workspace.</p>
-                    <p id="chat-context-prefill" class="chat-explanation"></p>
-                    <a class="action-link" id="chat-context-return-link" href="/workspace">Return to workspace</a>
-                </div>
+	                <div class="router-status" id="chat-router-status" role="status">
+	                    Chat is ready. Your complaint context will stay attached as you move between intake, docket review, and drafting.
+	                </div>
 
-                <div id="messages" aria-live="polite"></div>
+	                <div class="panel-card" id="chat-context-card" hidden>
+	                    <h3 id="chat-context-title">Workspace handoff</h3>
+	                    <p id="chat-context-summary">The shared complaint context will appear here when Chat is opened from the workspace.</p>
+	                    <p id="chat-context-prefill" class="chat-explanation"></p>
+	                    <a class="action-link" id="chat-context-return-link" href="/workspace">Return to workspace</a>
+	                </div>
+
+	                <div class="panel-card" id="chat-intake-denoise-card" hidden>
+	                    <h3>Clarify the legal basis</h3>
+	                    <p>The chat can ask targeted questions about people, dates, duties, harms, remedies, and missing proof so the complaint record gets less noisy before review or drafting.</p>
+	                    <div class="prompt-chip-row" aria-label="Intake question prompts">
+	                        <button type="button" data-chat-prompt="Ask me the best next questions to clarify what legal claim my facts may support.">Legal basis</button>
+	                        <button type="button" data-chat-prompt="What dates, deadlines, and sequence details should I clarify next?">Dates</button>
+	                        <button type="button" data-chat-prompt="What evidence should I upload or label to support this story?">Evidence</button>
+	                        <button type="button" data-chat-prompt="What facts are missing before I should move to proof review or drafting?">Missing facts</button>
+	                    </div>
+	                </div>
+
+	                <div id="messages" aria-live="polite"></div>
+
+	                <div class="active-context-strip" id="chat-active-context-strip">
+	                    <span class="context-mode-pill" id="chat-active-context-mode">Intake</span>
+	                    <strong id="chat-active-context-title">No active document selected</strong>
+	                    <span id="chat-active-context-detail">Messages will use the current complaint session and can be carried into review, evidence organization, or drafting.</span>
+	                </div>
 
                 <form class="form-inline" id="chat-form">
                     <input type="text" class="form-control" placeholder="Add the next fact, clarification, or supporting detail">
@@ -513,31 +723,44 @@
 
             <aside class="support-card">
                 <span class="eyebrow">Next Connected Steps</span>
-                <div class="action-stack" aria-label="Chat next steps">
-                    <div class="panel-card">
-                        <h3>Workspace</h3>
-                        <p>Return to the complaint workspace when the narrative is clear enough to save the shared synopsis, attach evidence, or move into draft generation.</p>
-                        <a class="action-link" id="chat-open-workspace" href="/workspace">Open workspace</a>
+                <div class="next-step-card" aria-live="polite">
+                    <span class="stage-badge" id="chat-stage-label">Current step</span>
+                    <h3 id="chat-stage-title">Continue intake questioning</h3>
+                    <p id="chat-stage-detail">Use the chat to clarify facts, people, dates, harms, and missing proof before moving to review or drafting.</p>
+                    <a class="stage-primary-action" id="chat-primary-next-action" href="#chat-form">Ask the next intake question</a>
+                </div>
+                <div class="stage-progress-list" aria-label="Complaint workflow stages">
+                    <div class="stage-progress-item is-current" id="chat-stage-intake">
+                        <strong>Intake</strong>
+                        <em class="stage-status">Current</em>
+                        <span>Turn plain-language facts into a cleaner legal story.</span>
                     </div>
-                    <div class="panel-card">
-                        <h3>Profile and results</h3>
-                        <p>Use these surfaces to inspect what the intake has already captured and how the complaint record is being structured.</p>
-                        <div class="panel-actions">
-                            <a class="action-link" id="chat-open-profile" href="/profile">Open profile</a>
-                            <a class="action-link" id="chat-open-results" href="/results">Open results</a>
-                        </div>
+                    <div class="stage-progress-item" id="chat-stage-evidence">
+                        <strong>Evidence</strong>
+                        <em class="stage-status">Next</em>
+                        <span>Attach, label, and ask questions about documents or docket filings.</span>
                     </div>
-                    <div class="panel-card">
-                        <h3>Support review</h3>
-                        <p>Move here when you need to see whether the available facts and proof actually support the legal elements.</p>
-                        <a class="action-link" id="chat-open-review" href="/claim-support-review">Open review</a>
+                    <div class="stage-progress-item" id="chat-stage-review">
+                        <strong>Support review</strong>
+                        <em class="stage-status">Later</em>
+                        <span>Check whether facts and proof support the legal elements.</span>
                     </div>
-                    <div class="panel-card">
-                        <h3>Draft builder</h3>
-                        <p>Use the builder once the story is organized enough to justify a formal complaint draft.</p>
-                        <a class="action-link" id="chat-open-builder" href="/document">Open builder</a>
+                    <div class="stage-progress-item" id="chat-stage-draft">
+                        <strong>Draft</strong>
+                        <em class="stage-status">Later</em>
+                        <span>Move organized facts into complaint or response drafting.</span>
                     </div>
                 </div>
+                <details class="more-actions">
+                    <summary>Open another surface</summary>
+                    <div class="action-stack" aria-label="Additional chat destinations">
+                        <a class="action-link" id="chat-open-workspace" href="/workspace">Workspace</a>
+                        <a class="action-link" id="chat-open-profile" href="/profile">Profile</a>
+                        <a class="action-link" id="chat-open-results" href="/results">Results</a>
+                        <a class="action-link" id="chat-open-review" href="/claim-support-review">Support review</a>
+                        <a class="action-link" id="chat-open-builder" href="/document">Draft builder</a>
+                    </div>
+                </details>
             </aside>
         </section>
     </div>

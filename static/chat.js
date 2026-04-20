@@ -42,6 +42,53 @@ window.ChatPage = (function() {
         return $("<div>").text(text || "").html();
     }
 
+    function parseJsonLike(value, fallback) {
+        if (value === null || value === undefined || value === '') {
+            return fallback;
+        }
+        if (typeof value === 'object') {
+            return value;
+        }
+        if (typeof value !== 'string') {
+            return fallback;
+        }
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return fallback;
+        }
+    }
+
+    function stringValue(value) {
+        return String(value || '').trim();
+    }
+
+    function normalizeChatContext(rawContext) {
+        const context = parseJsonLike(rawContext, null);
+        if (!context || typeof context !== 'object') {
+            return null;
+        }
+        const filing = context.filing && typeof context.filing === 'object' ? context.filing : {};
+        const labels = Array.isArray(context.labels)
+            ? context.labels
+            : (Array.isArray(filing.labels) ? filing.labels : []);
+        return {
+            kind: stringValue(context.kind || context.type || 'workspace-handoff'),
+            sourceSurface: stringValue(context.source_surface || context.sourceSurface || context.source || ''),
+            routerMode: stringValue(context.router_mode || context.routerMode || ''),
+            status: stringValue(context.status || ''),
+            filing: {
+                id: stringValue(filing.id || filing.document_id || filing.documentId || context.filing_id || context.document_id),
+                title: stringValue(filing.title || filing.document_title || filing.documentTitle || context.filing_title || context.document_title),
+                date: stringValue(filing.date || filing.date_filed || filing.dateFiled || context.filing_date),
+                use: stringValue(filing.use || filing.suggested_use || filing.suggestedUse || context.suggested_use),
+            },
+            labels: labels.map((label) => stringValue(label)).filter(Boolean).slice(0, 8),
+            note: stringValue(context.note || context.annotation_note || context.annotationNote || ''),
+            excerpt: stringValue(context.excerpt || context.summary || context.preview || '').slice(0, 600),
+        };
+    }
+
     function normalizeSender(sender, hashedUsername) {
         if (typeof chatEntryUtils.normalizeSender === 'function') {
             return chatEntryUtils.normalizeSender(sender, hashedUsername);
@@ -105,6 +152,7 @@ window.ChatPage = (function() {
         const caseSynopsis = String(params.get('case_synopsis') || '').trim();
         const prefillMessage = String(params.get('prefill_message') || '').trim();
         const returnTo = String(params.get('return_to') || '').trim();
+        const chatContext = normalizeChatContext(params.get('chat_context'));
         if (!(source || userId || caseSynopsis || prefillMessage || returnTo)) {
             try {
                 const cached = window.localStorage.getItem('complaintWorkspaceHandoff');
@@ -121,6 +169,7 @@ window.ChatPage = (function() {
                     caseSynopsis: String(payload.caseSynopsis || '').trim(),
                     prefillMessage: String(payload.prefillMessage || '').trim(),
                     returnTo: String(payload.returnTo || '').trim(),
+                    chatContext: normalizeChatContext(payload.chatContext || payload.chat_context),
                 };
             } catch (error) {
                 return null;
@@ -132,6 +181,7 @@ window.ChatPage = (function() {
             caseSynopsis,
             prefillMessage,
             returnTo,
+            chatContext,
         };
     }
 
@@ -154,6 +204,135 @@ window.ChatPage = (function() {
                 node.href = href;
             }
         });
+    }
+
+    function setTextForId(id, text) {
+        const node = document.getElementById(id);
+        if (node) {
+            node.textContent = text;
+        }
+    }
+
+    function getCurrentLinks() {
+        return {
+            workspace: (document.getElementById('chat-open-workspace') || {}).href || '/workspace',
+            review: (document.getElementById('chat-open-review') || {}).href || '/claim-support-review',
+            builder: (document.getElementById('chat-open-builder') || {}).href || '/document',
+        };
+    }
+
+    function setStageItemState(id, status, isCurrent) {
+        const item = document.getElementById(id);
+        if (!item) {
+            return;
+        }
+        item.classList.toggle('is-current', Boolean(isCurrent));
+        const statusNode = item.querySelector('.stage-status');
+        if (statusNode) {
+            statusNode.textContent = status;
+        }
+    }
+
+    function describeChatStage(handoff, chatContext) {
+        const filing = chatContext && chatContext.filing ? chatContext.filing : {};
+        const stageText = `${(handoff && handoff.source) || ''} ${(chatContext && chatContext.kind) || ''} ${(chatContext && chatContext.sourceSurface) || ''}`;
+        if (filing.title || filing.id || /docket|filing|evidence|annotation|document/i.test(stageText)) {
+            return 'evidence';
+        }
+        if (/review|support/i.test(stageText)) {
+            return 'review';
+        }
+        if (/draft|builder|pleading/i.test(stageText)) {
+            return 'draft';
+        }
+        return 'intake';
+    }
+
+    function updateActiveContextStrip(handoff, chatContext, stage) {
+        const strip = document.getElementById('chat-active-context-strip');
+        if (!strip) {
+            return;
+        }
+        const filing = chatContext && chatContext.filing ? chatContext.filing : {};
+        const hasHandoff = Boolean(handoff);
+        const modeLabels = {
+            intake: 'Intake',
+            evidence: 'Filing',
+            review: 'Review',
+            draft: 'Draft',
+        };
+        const title = stage === 'evidence'
+            ? (filing.title || filing.id || 'Selected filing attached')
+            : (stage === 'review'
+                ? 'Review context attached'
+                : (stage === 'draft' ? 'Drafting context attached' : 'Complaint intake active'));
+        const details = [];
+        if (filing.date) {
+            details.push(`Filed or dated ${filing.date}.`);
+        }
+        if (filing.use) {
+            details.push(`Suggested use: ${filing.use}.`);
+        }
+        if (handoff && handoff.userId) {
+            details.push(`Complaint session ${handoff.userId}.`);
+        }
+        if (stage === 'intake' && (!details.length || !hasHandoff)) {
+            details.push('Messages can be carried into review, evidence organization, or drafting.');
+        }
+        setTextForId('chat-active-context-mode', modeLabels[stage] || 'Context');
+        setTextForId('chat-active-context-title', title);
+        setTextForId('chat-active-context-detail', details.join(' ') || 'The selected complaint context will stay attached to this conversation.');
+        strip.hidden = false;
+    }
+
+    function updateStageRail(handoff, chatContext) {
+        const stage = describeChatStage(handoff, chatContext);
+        const links = getCurrentLinks();
+        const primary = document.getElementById('chat-primary-next-action');
+        const stageCopy = {
+            intake: {
+                label: 'Current step',
+                title: 'Continue intake questioning',
+                detail: 'Use the chat to clarify facts, people, dates, harms, and missing proof before moving to review or drafting.',
+                action: 'Ask the next intake question',
+                href: '#chat-form',
+            },
+            evidence: {
+                label: 'Selected filing',
+                title: 'Ask about this document',
+                detail: 'Use the attached docket or evidence context to label the document, identify important facts, and decide how it supports the complaint.',
+                action: 'Ask about selected filing',
+                href: '#chat-form',
+            },
+            review: {
+                label: 'Support review',
+                title: 'Check legal support',
+                detail: 'Move from narrative collection into element-by-element review once the key facts and proof are organized.',
+                action: 'Open support review',
+                href: links.review,
+            },
+            draft: {
+                label: 'Drafting',
+                title: 'Build the complaint draft',
+                detail: 'Use the draft builder after the record has enough facts, evidence labels, and reviewed legal support.',
+                action: 'Open draft builder',
+                href: links.builder,
+            },
+        };
+        const copy = stageCopy[stage] || stageCopy.intake;
+        setTextForId('chat-stage-label', copy.label);
+        setTextForId('chat-stage-title', copy.title);
+        setTextForId('chat-stage-detail', copy.detail);
+        if (primary) {
+            primary.textContent = copy.action;
+            primary.href = copy.href;
+        }
+
+        setStageItemState('chat-stage-intake', stage === 'intake' ? 'Current' : 'Done', stage === 'intake');
+        setStageItemState('chat-stage-evidence', stage === 'evidence' ? 'Current' : (stage === 'intake' ? 'Next' : 'Done'), stage === 'evidence');
+        setStageItemState('chat-stage-review', stage === 'review' ? 'Current' : (stage === 'draft' ? 'Done' : 'Later'), stage === 'review');
+        setStageItemState('chat-stage-draft', stage === 'draft' ? 'Current' : 'Later', stage === 'draft');
+        updateActiveContextStrip(handoff, chatContext, stage);
     }
 
     function updateChatNextStepLinks(handoff) {
@@ -244,26 +423,70 @@ window.ChatPage = (function() {
         if (handoff && handoff.returnTo) {
             chatParams.set('return_to', handoff.returnTo);
         }
+        if (handoff && handoff.chatContext) {
+            chatParams.set('chat_context', JSON.stringify(handoff.chatContext));
+        }
         return chatParams.toString() ? `/chat?${chatParams.toString()}` : '/chat';
+    }
+
+    function updateRouterStatus(message, visible) {
+        const node = document.getElementById('chat-router-status');
+        if (!node) {
+            return;
+        }
+        if (message) {
+            node.textContent = message;
+        }
+        node.classList.toggle('is-visible', Boolean(visible || message));
     }
 
     function applyWorkspaceHandoff() {
         const handoff = readWorkspaceHandoff();
         updateChatNextStepLinks(handoff);
         if (!handoff) {
+            updateStageRail(null, null);
             return;
         }
 
         const contextCard = document.getElementById('chat-context-card');
         const contextSummary = document.getElementById('chat-context-summary');
         const contextPrefill = document.getElementById('chat-context-prefill');
+        const contextTitle = document.getElementById('chat-context-title');
+        const intakeDenoiseCard = document.getElementById('chat-intake-denoise-card');
         const returnLink = document.getElementById('chat-context-return-link');
         const input = document.querySelector('#chat-form input');
         if (!contextCard || !contextSummary || !contextPrefill || !returnLink || !input) {
             return;
         }
 
+        const chatContext = normalizeChatContext(handoff.chatContext);
+        const filing = chatContext && chatContext.filing ? chatContext.filing : {};
+        const isIntakeDenoising = Boolean(
+            (chatContext && /intake|denois|question/i.test(`${chatContext.kind} ${chatContext.sourceSurface}`))
+            || /intake|denois|question/i.test(String(handoff.source || ''))
+        );
+        const isFilingContext = Boolean(filing.title || filing.id || /docket|filing/i.test(String(handoff.source || '')));
+        if (contextTitle) {
+            contextTitle.textContent = isIntakeDenoising
+                ? 'Intake question plan'
+                : (isFilingContext ? 'Active filing context' : 'Workspace handoff');
+        }
+        if (intakeDenoiseCard) {
+            intakeDenoiseCard.hidden = !isIntakeDenoising;
+        }
         const summaryParts = [];
+        if (isIntakeDenoising) {
+            summaryParts.push('Intake mode: the chat should ask targeted questions that clarify the legal basis, facts, evidence, dates, harms, and remedies.');
+        }
+        if (filing.title || filing.id) {
+            summaryParts.push(`Active filing: ${filing.title || filing.id}.`);
+        }
+        if (filing.date) {
+            summaryParts.push(`Date found: ${filing.date}.`);
+        }
+        if (filing.use) {
+            summaryParts.push(`Suggested use: ${filing.use}.`);
+        }
         if (handoff.userId) {
             summaryParts.push(`Shared complaint session: ${handoff.userId}.`);
         }
@@ -271,20 +494,39 @@ window.ChatPage = (function() {
             summaryParts.push(handoff.caseSynopsis);
         }
         contextSummary.textContent = summaryParts.join(' ') || 'Chat was opened from the workspace with the shared complaint context.';
-        contextPrefill.textContent = handoff.prefillMessage
-            ? `Prepared mediator prompt: ${handoff.prefillMessage}`
-            : 'Use this chat to turn the current case framing into cleaner testimony and follow-up questions.';
+        const contextDetails = [];
+        if (chatContext && chatContext.labels && chatContext.labels.length) {
+            contextDetails.push(`Labels: ${chatContext.labels.join(', ')}.`);
+        }
+        if (chatContext && chatContext.routerMode) {
+            contextDetails.push(`Analysis route: ${chatContext.routerMode}.`);
+        }
+        if (chatContext && chatContext.excerpt) {
+            contextDetails.push(`Excerpt: ${chatContext.excerpt}`);
+        }
+        contextPrefill.textContent = [
+            handoff.prefillMessage ? `Prepared question: ${handoff.prefillMessage}` : 'Use this chat to turn the current case framing into cleaner testimony and follow-up questions.',
+            contextDetails.join(' '),
+        ].filter(Boolean).join(' ');
         returnLink.href = handoff.returnTo || '/workspace';
         if (handoff.prefillMessage && !input.value.trim()) {
             input.value = handoff.prefillMessage;
         }
+        updateRouterStatus(
+            isIntakeDenoising
+                ? 'Ready to ask targeted intake questions. Your answers stay attached to this complaint session.'
+                : (isFilingContext ? 'Ready to answer questions with the selected filing context attached.' : 'Chat context is attached.'),
+            true
+        );
+        updateStageRail(handoff, chatContext);
         contextCard.hidden = false;
     }
 
-    function initialize() {
-        let cookies = "";
-        $("body").css("background-color", "transparent");
-        applyWorkspaceHandoff();
+	    function initialize() {
+	        let cookies = "";
+	        $("body").css("background-color", "transparent");
+	        const activeHandoff = readWorkspaceHandoff();
+	        applyWorkspaceHandoff();
         $.ajax({
             url: "/cookies",
             type: "get",
@@ -295,15 +537,14 @@ window.ChatPage = (function() {
             }
         });
 
-        const hashedUsername = JSON.parse(cookies)["hashed_username"];
-        const hashedPassword = JSON.parse(cookies)["hashed_password"];
+        const parsedCookies = parseJsonLike(cookies, {});
+        const hashedUsername = stringValue(parsedCookies["hashed_username"]);
+        const hashedPassword = stringValue(parsedCookies["hashed_password"]);
         const profile = loadProfile(hashedUsername, hashedPassword);
-        let testdata = profile["data"];
+        let testdata = (profile && profile["data"]) || {};
         const parent = $("#messages");
 
-        if (typeof testdata === 'string') {
-            testdata = JSON.parse(testdata);
-        }
+        testdata = parseJsonLike(testdata, {});
 
         const chatHistory = testdata["chat_history"] || {};
 
@@ -322,24 +563,30 @@ window.ChatPage = (function() {
                     "Content-Type": "application/json",
                 },
                 credentials: "same-origin",
-                body: JSON.stringify({
-                    sender: hashedUsername,
-                    message: message,
-                }),
-            });
+	                body: JSON.stringify({
+	                    sender: hashedUsername,
+	                    message: message,
+	                    user_id: getActiveComplaintUserId(activeHandoff),
+	                    source: (activeHandoff && activeHandoff.source) || '',
+	                    chat_context: (activeHandoff && activeHandoff.chatContext) || null,
+	                }),
+	            });
             if (!response.ok) {
                 throw new Error("Fallback chat request failed.");
             }
             const payload = await response.json();
             const messages = Array.isArray(payload && payload.messages) ? payload.messages : [];
-            if (!messages.length) {
-                renderMessage(parent, {"sender": hashedUsername, "message": message}, hashedUsername);
-                return;
-            }
-            messages.forEach((entry) => {
-                renderMessage(parent, entry, hashedUsername);
-            });
-        }
+	            if (!messages.length) {
+	                renderMessage(parent, {"sender": hashedUsername, "message": message}, hashedUsername);
+	                return;
+	            }
+	            messages.forEach((entry) => {
+	                if (/timeout|fallback|backup|context.*attached|context.*preserved/i.test(String((entry && entry.message) || ''))) {
+	                    updateRouterStatus('The router was slow, so backup chat responded. Your selected context is still attached.', true);
+	                }
+	                renderMessage(parent, entry, hashedUsername);
+	            });
+	        }
 
         try {
             socket = new WebSocket(websocketOrigin + "/api/chat");
@@ -352,8 +599,8 @@ window.ChatPage = (function() {
             socket.onclose = function() {
                 socketReady = false;
             };
-            socket.onmessage = function(event) {
-                const data = JSON.parse(event.data);
+	            socket.onmessage = function(event) {
+	                const data = JSON.parse(event.data);
                 if (
                     lastOptimisticMessage
                     && String(data && data.sender || '').trim() === String(lastOptimisticMessage.sender || '').trim()
@@ -362,22 +609,28 @@ window.ChatPage = (function() {
                     lastOptimisticMessage = null;
                     return;
                 }
-                renderMessage(parent, data, hashedUsername);
-            };
-        } catch (error) {
-            socketReady = false;
+	                if (/timeout|fallback|backup|context.*attached|context.*preserved/i.test(String((data && data.message) || ''))) {
+	                    updateRouterStatus('The router was slow, so backup chat responded. Your selected context is still attached.', true);
+	                }
+	                renderMessage(parent, data, hashedUsername);
+	            };
+	        } catch (error) {
+	            socketReady = false;
         }
 
-        $("#chat-form").on("submit", async function(e) {
+            $("#chat-form").on("submit", async function(e) {
             e.preventDefault();
             const message = $("input").val().trim();
             if (message) {
                 try {
                     if (socket && socketReady && socket.readyState === WebSocket.OPEN) {
-                        const data = {
-                            "sender": hashedUsername,
-                            "message": message
-                        };
+	                        const data = {
+	                            "sender": hashedUsername,
+	                            "message": message,
+	                            "user_id": getActiveComplaintUserId(activeHandoff),
+	                            "source": (activeHandoff && activeHandoff.source) || '',
+	                            "chat_context": (activeHandoff && activeHandoff.chatContext) || null
+	                        };
                         lastOptimisticMessage = data;
                         renderMessage(parent, data, hashedUsername);
                         socket.send(JSON.stringify(data));
@@ -389,10 +642,21 @@ window.ChatPage = (function() {
                     showError(error && error.message ? error.message : "Unable to submit the chat message.");
                 }
             }
-        });
+            });
 
-        applyWorkspaceHandoff();
-    }
+	        document.querySelectorAll('[data-chat-prompt]').forEach((button) => {
+	            button.addEventListener('click', () => {
+	                const prompt = String(button.getAttribute('data-chat-prompt') || '').trim();
+	                const input = document.querySelector('#chat-form input');
+	                if (prompt && input) {
+	                    input.value = prompt;
+	                    input.focus();
+	                }
+	            });
+	        });
+
+	        applyWorkspaceHandoff();
+	    }
 
     return {
         initialize,
