@@ -1038,11 +1038,86 @@ def _render_dashboard_hub(
             gap: 16px;
             grid-template-columns: minmax(0, 1fr) auto;
             align-items: center;
+            position: sticky;
+            top: 74px;
+            z-index: 18;
             background: #ffffff;
             border-radius: var(--radius-lg);
             padding: 18px 20px;
             box-shadow: 0 14px 34px rgba(21, 34, 48, 0.07);
             border: 1px solid rgba(17, 92, 99, 0.16);
+        }}
+        .current-work-bar {{
+            display: grid;
+            gap: 14px;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            margin-bottom: 14px;
+            padding: 16px 18px;
+            border-radius: var(--radius-lg);
+            background: linear-gradient(135deg, rgba(17, 92, 99, 0.11), rgba(255, 253, 250, 0.96));
+            border: 2px solid rgba(17, 92, 99, 0.20);
+        }}
+        .current-work-main {{
+            display: grid;
+            gap: 8px;
+        }}
+        .current-work-title-row {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            align-items: center;
+        }}
+        .current-work-title-row h2 {{
+            margin: 0;
+            font-size: 1.28rem;
+        }}
+        .current-work-stage {{
+            display: inline-flex;
+            width: fit-content;
+            border-radius: 999px;
+            padding: 6px 10px;
+            background: rgba(17, 92, 99, 0.14);
+            color: var(--accent-strong);
+            font-size: 0.76rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }}
+        .current-work-detail {{
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.45;
+        }}
+        .current-work-status-row {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        .context-status-pill {{
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            border-radius: 999px;
+            padding: 5px 10px;
+            background: rgba(21, 34, 48, 0.07);
+            color: var(--ink);
+            font-size: 0.82rem;
+            font-weight: 800;
+        }}
+        .context-status-pill.is-ready {{
+            background: rgba(29, 107, 75, 0.12);
+            color: var(--good);
+        }}
+        .context-status-pill.is-warning {{
+            background: rgba(170, 77, 29, 0.12);
+            color: var(--warm);
+        }}
+        .current-work-actions {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: flex-end;
         }}
         .context-action-hint {{
             display: inline-flex;
@@ -1153,11 +1228,26 @@ def _render_dashboard_hub(
             box-shadow: var(--shadow);
             border: 1px solid var(--line);
         }}
-        .advanced-tools > summary {{
+        .advanced-tools > summary, .secondary-dashboard-details > summary {{
             cursor: pointer;
             color: var(--ink);
             font-size: 1.2rem;
             font-weight: 900;
+        }}
+        .secondary-dashboard-details {{
+            background: var(--surface);
+            border-radius: var(--radius-xl);
+            padding: 22px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--line);
+        }}
+        .secondary-dashboard-details > summary {{
+            list-style-position: inside;
+        }}
+        .secondary-dashboard-details .card {{
+            margin-top: 16px;
+            box-shadow: none;
+            border-radius: var(--radius-lg);
         }}
         .advanced-tools-helper {{ margin: 10px 0 0; color: var(--muted); }}
         .advanced-tools-grid {{ display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin-top: 16px; }}
@@ -1903,6 +1993,20 @@ def _render_dashboard_hub(
             .docket-workspace-summary {{ grid-template-columns: 1fr 1fr; }}
             .docket-current-task {{ grid-template-columns: 1fr; }}
             .docket-current-task .primary-action {{ width: 100%; justify-content: center; }}
+            .workspace-context-bar {{
+                position: static;
+                grid-template-columns: 1fr;
+            }}
+            .current-work-bar {{
+                grid-template-columns: 1fr;
+            }}
+            .current-work-actions {{
+                justify-content: stretch;
+            }}
+            .current-work-actions a {{
+                flex: 1 1 100%;
+                text-align: center;
+            }}
             .primary-action, .secondary-action, .decision-link {{ justify-content: center; }}
             .context-actions a, .stage-actions a {{ flex: 1 1 100%; text-align: center; }}
 	            .workflow-rail h2 {{ font-size: 1.45rem; }}
@@ -2035,6 +2139,24 @@ def _render_dashboard_hub(
 
         <section class="workspace-context-bar" id="workspace-context-bar" aria-label="Loaded workspace context">
             <div>
+                <div class="current-work-bar" id="current-work-bar" aria-label="Current work and selected document">
+                    <div class="current-work-main">
+                        <div class="current-work-title-row">
+                            <span class="current-work-stage" id="current-work-stage">Current step: Intake</span>
+                            <h2 id="current-work-title">Explain what happened</h2>
+                        </div>
+                        <p class="current-work-detail" id="current-work-detail">Start with guided questions so the complaint record has the story, people, dates, harms, and possible claims.</p>
+                        <div class="current-work-status-row" aria-label="Current context status">
+                            <span class="context-status-pill is-warning" id="current-work-selected-document">No document selected</span>
+                            <span class="context-status-pill" id="current-work-router-status">Chat uses general intake context</span>
+                            <span class="context-status-pill is-warning" id="current-work-prerequisite">Select a filing to enable document-aware chat</span>
+                        </div>
+                    </div>
+                    <div class="current-work-actions">
+                        <a class="primary-action" id="current-work-primary" href="/chat">Explain what happened</a>
+                        <a class="secondary-action is-disabled" id="current-work-secondary" href="/chat" aria-disabled="true">Ask about selected filing</a>
+                    </div>
+                </div>
                 <div class="eyebrow" style="color: var(--accent);">Workspace Context</div>
                 <h2 id="context-next-action">Load workspace to get next action</h2>
                 <div class="context-grid">
@@ -2083,21 +2205,23 @@ def _render_dashboard_hub(
             {journey_detail_panels}
         </section>
 
-        <section class="card" id="dashboard-package-map">
-            <div class="eyebrow" style="color: var(--accent);">Package Capability Matrix</div>
-            <h2>How the package capabilities connect to dashboard surfaces</h2>
-            <p>This map keeps each user-facing path tied to concrete routes, MCP tools, dataset APIs, graph analyzers, legal authority/caselaw surfaces, and legacy ipfs_datasets_py dashboards.</p>
-            <div class="package-map-grid">
-                {package_capability_matrix}
-            </div>
-        </section>
-
-        <section class="card capability-plan" id="dashboard-improvement-plan">
-            <div class="eyebrow" style="color: var(--accent);">Comprehensive Improvement Plan</div>
-            <h2>How this dashboard ties the package together</h2>
-            <p>This plan keeps the UI grounded in surfaces that already exist in the package while making the next implementation slices clear.</p>
-            <ul>{improvement_plan}</ul>
-        </section>
+        <details class="secondary-dashboard-details" id="dashboard-package-map">
+            <summary>Package capability map and implementation plan</summary>
+            <section class="card">
+                <div class="eyebrow" style="color: var(--accent);">Package Capability Matrix</div>
+                <h2>How the package capabilities connect to dashboard surfaces</h2>
+                <p>This map keeps each user-facing path tied to concrete routes, MCP tools, dataset APIs, graph analyzers, legal authority/caselaw surfaces, and legacy ipfs_datasets_py dashboards.</p>
+                <div class="package-map-grid">
+                    {package_capability_matrix}
+                </div>
+            </section>
+            <section class="card capability-plan" id="dashboard-improvement-plan">
+                <div class="eyebrow" style="color: var(--accent);">Comprehensive Improvement Plan</div>
+                <h2>How this dashboard ties the package together</h2>
+                <p>This plan keeps the UI grounded in surfaces that already exist in the package while making the next implementation slices clear.</p>
+                <ul>{improvement_plan}</ul>
+            </section>
+        </details>
 
         <details class="advanced-tools" id="dashboard-advanced-tools">
             <summary>Technical tools for administrators</summary>
@@ -2961,6 +3085,10 @@ def _render_dashboard_hub(
 	                setText('dashboard-recommended-action-link', label);
 	                setHref('dashboard-recommended-action-link', href);
 	                setText('dashboard-recommended-action-reason', reason || 'Use this step to move the complaint record forward without skipping prerequisites.');
+	                setText('current-work-title', label);
+	                setText('current-work-detail', reason || 'Use this step to move the complaint record forward without skipping prerequisites.');
+	                setText('current-work-primary', label);
+	                setHref('current-work-primary', href);
 	            }}
 
 	            function setControlEnabled(id, enabled, reason) {{
@@ -3023,10 +3151,17 @@ def _render_dashboard_hub(
 	                    summary = hasDraft ? 'A draft exists. Continue refinement, validation, and export.' : 'The record is ready for a complaint draft handoff.';
 	                    primaryReason = hasDraft ? 'A draft already exists, so the next safe step is refinement, validation, or export.' : 'The workspace has evidence and no loaded support gaps, so it can move into drafting.';
 	                }}
+	                const stageLabels = {{
+	                    intake: 'Current step: Intake',
+	                    evidence: 'Current step: Evidence, law, and caselaw',
+	                    review: 'Current step: Review support gaps',
+	                    draft: 'Current step: Draft',
+	                }};
                 setWorkflowStageState('intake', userId ? 'complete' : (stage === 'intake' ? 'current' : 'ready'));
                 setWorkflowStageState('evidence', stage === 'evidence' ? 'current' : (evidenceCount > 0 ? 'complete' : (userId ? 'ready' : 'blocked')));
                 setWorkflowStageState('review', stage === 'review' ? 'current' : (missingCount > 0 ? 'blocked' : (userId && evidenceCount > 0 ? 'complete' : 'blocked')));
                 setWorkflowStageState('draft', stage === 'draft' ? 'current' : (hasDraft ? 'complete' : (missingCount > 0 || evidenceCount === 0 ? 'blocked' : 'ready')));
+	                setText('current-work-stage', stageLabels[stage] || 'Current step');
                 setText('workflow-rail-summary', summary);
                 setText('workflow-stage-intake-status', userId ? 'Intake context is loaded.' : 'Start or continue the story.');
                 setText('workflow-stage-evidence-status', evidenceCount ? `${{evidenceCount}} record${{evidenceCount === 1 ? '' : 's'}} saved.` : 'Add documents, messages, laws, or court cases.');
@@ -3065,6 +3200,7 @@ def _render_dashboard_hub(
 	                setHref('workflow-stage-review-unlock', '/claim-support-review');
 	                setText('workflow-stage-draft-unlock', 'Add evidence first');
 	                setHref('workflow-stage-draft-unlock', '#chat-upload-dashboard');
+	                setText('current-work-stage', 'Current step: Intake');
 	                setWorkflowPrimaryAction('Explain what happened', '/chat', 'Begin with guided questions so the workspace has the story, people, dates, harms, and possible claims.');
 	            }}
 
@@ -3409,7 +3545,13 @@ def _render_dashboard_hub(
                 setHref('context-selected-document-hint', selected ? '#docket-filing-workspace' : '#docket-dataset-parquet-dashboard');
                 setHref('context-router-hint', selectedChatHref);
                 setHref('context-open-selected-chat', selectedChatHref);
+                setHref('current-work-secondary', selectedChatHref);
+                setText('current-work-secondary', selected ? 'Ask about selected filing' : 'Ask about selected filing');
+                setText('current-work-selected-document', title ? `Selected: ${{title.length > 54 ? title.slice(0, 51) + '...' : title}}` : 'No document selected');
+                setText('current-work-router-status', selected ? 'Document context will be sent to chat router' : 'Chat uses general intake context');
+                setText('current-work-prerequisite', selected ? 'Ready for document Q&A and annotation' : 'Select a filing to enable document-aware chat');
                 setLinkEnabled('context-open-selected-chat', Boolean(selected), selected ? '' : 'Select a filing or document before asking chat about it.');
+                setLinkEnabled('current-work-secondary', Boolean(selected), selected ? '' : 'Select a filing or document before asking chat about it.');
                 const selectedCard = document.getElementById('context-selected-document-card');
                 if (selectedCard) {{
                     selectedCard.classList.toggle('is-active', Boolean(selected));
@@ -3418,6 +3560,20 @@ def _render_dashboard_hub(
                 const routerCard = document.getElementById('context-router-card');
                 if (routerCard) {{
                     routerCard.classList.toggle('is-active', Boolean(selected));
+                }}
+                const selectedPill = document.getElementById('current-work-selected-document');
+                if (selectedPill) {{
+                    selectedPill.classList.toggle('is-ready', Boolean(selected));
+                    selectedPill.classList.toggle('is-warning', !selected);
+                }}
+                const routerPill = document.getElementById('current-work-router-status');
+                if (routerPill) {{
+                    routerPill.classList.toggle('is-ready', Boolean(selected));
+                }}
+                const prerequisitePill = document.getElementById('current-work-prerequisite');
+                if (prerequisitePill) {{
+                    prerequisitePill.classList.toggle('is-ready', Boolean(selected));
+                    prerequisitePill.classList.toggle('is-warning', !selected);
                 }}
                 setText('annotation-selected-document-title', title || 'No document selected yet');
                 setText(

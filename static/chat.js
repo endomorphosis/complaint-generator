@@ -282,7 +282,44 @@ window.ChatPage = (function() {
         setTextForId('chat-active-context-mode', modeLabels[stage] || 'Context');
         setTextForId('chat-active-context-title', title);
         setTextForId('chat-active-context-detail', details.join(' ') || 'The selected complaint context will stay attached to this conversation.');
+        const fields = document.getElementById('chat-active-context-fields');
+        if (fields) {
+            const hasFiling = Boolean(filing.title || filing.id);
+            setTextForId('chat-context-field-filing', filing.title || filing.id || 'none selected');
+            setTextForId('chat-context-field-date', filing.date || 'not found');
+            setTextForId('chat-context-field-use', filing.use || 'not classified');
+            setTextForId('chat-context-field-router', stage === 'evidence' ? 'document-aware Q&A' : 'general intake');
+            fields.hidden = !hasFiling;
+        }
         strip.hidden = false;
+    }
+
+    function updateComposerReadiness(handoff, chatContext) {
+        const input = document.querySelector('#chat-form input');
+        const sendButton = document.getElementById('send');
+        const readiness = document.getElementById('chat-composer-readiness');
+        if (!input || !sendButton || !readiness) {
+            return;
+        }
+        const filing = chatContext && chatContext.filing ? chatContext.filing : {};
+        const stage = describeChatStage(handoff, chatContext);
+        const hasText = Boolean(input.value.trim());
+        const hasFiling = Boolean(filing.title || filing.id);
+        sendButton.disabled = !hasText;
+        sendButton.setAttribute('aria-disabled', hasText ? 'false' : 'true');
+        if (!hasText) {
+            readiness.textContent = stage === 'evidence' && hasFiling
+                ? 'Ready: selected filing context is attached. Type a question to enable Send.'
+                : 'Type a question or fact to send. General intake context is active.';
+            readiness.classList.toggle('is-ready', false);
+            readiness.classList.toggle('is-warning', true);
+            return;
+        }
+        readiness.textContent = stage === 'evidence' && hasFiling
+            ? 'Ready to send with the selected filing attached to the router request.'
+            : 'Ready to send as part of the current complaint intake session.';
+        readiness.classList.toggle('is-ready', true);
+        readiness.classList.toggle('is-warning', false);
     }
 
     function updateStageRail(handoff, chatContext) {
@@ -333,6 +370,7 @@ window.ChatPage = (function() {
         setStageItemState('chat-stage-review', stage === 'review' ? 'Current' : (stage === 'draft' ? 'Done' : 'Later'), stage === 'review');
         setStageItemState('chat-stage-draft', stage === 'draft' ? 'Current' : 'Later', stage === 'draft');
         updateActiveContextStrip(handoff, chatContext, stage);
+        updateComposerReadiness(handoff, chatContext);
     }
 
     function updateChatNextStepLinks(handoff) {
@@ -620,7 +658,8 @@ window.ChatPage = (function() {
 
             $("#chat-form").on("submit", async function(e) {
             e.preventDefault();
-            const message = $("input").val().trim();
+            const inputNode = document.querySelector('#chat-form input');
+            const message = inputNode ? inputNode.value.trim() : "";
             if (message) {
                 try {
                     if (socket && socketReady && socket.readyState === WebSocket.OPEN) {
@@ -637,12 +676,23 @@ window.ChatPage = (function() {
                     } else {
                         await sendViaFallback(message);
                     }
-                    $("input").val("");
+                    if (inputNode) {
+                        inputNode.value = "";
+                        updateComposerReadiness(activeHandoff, normalizeChatContext(activeHandoff && activeHandoff.chatContext));
+                    }
                 } catch (error) {
                     showError(error && error.message ? error.message : "Unable to submit the chat message.");
                 }
             }
             });
+
+	        const composerInput = document.querySelector('#chat-form input');
+	        if (composerInput) {
+	            composerInput.addEventListener('input', () => {
+	                updateComposerReadiness(activeHandoff, normalizeChatContext(activeHandoff && activeHandoff.chatContext));
+	            });
+	            updateComposerReadiness(activeHandoff, normalizeChatContext(activeHandoff && activeHandoff.chatContext));
+	        }
 
 	        document.querySelectorAll('[data-chat-prompt]').forEach((button) => {
 	            button.addEventListener('click', () => {
@@ -650,6 +700,7 @@ window.ChatPage = (function() {
 	                const input = document.querySelector('#chat-form input');
 	                if (prompt && input) {
 	                    input.value = prompt;
+	                    updateComposerReadiness(activeHandoff, normalizeChatContext(activeHandoff && activeHandoff.chatContext));
 	                    input.focus();
 	                }
 	            });

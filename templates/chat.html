@@ -316,6 +316,27 @@
             font-weight: 800;
         }
 
+        #chat-form button:disabled {
+            opacity: 0.58;
+            cursor: not-allowed;
+            filter: saturate(0.75);
+        }
+
+        .chat-composer-readiness {
+            margin: -6px 0 0;
+            color: var(--muted);
+            font-size: 0.92rem;
+            font-weight: 800;
+        }
+
+        .chat-composer-readiness.is-ready {
+            color: var(--forest);
+        }
+
+        .chat-composer-readiness.is-warning {
+            color: var(--accent-deep);
+        }
+
         .support-card {
             display: grid;
             gap: 18px;
@@ -392,6 +413,37 @@
 	            grid-column: 2;
 	            color: var(--muted);
 	            line-height: 1.45;
+	        }
+
+	        .context-field-grid {
+	            grid-column: 1 / -1;
+	            display: grid;
+	            gap: 8px;
+	            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	            margin-top: 4px;
+	        }
+
+	        .context-field {
+	            display: grid;
+	            gap: 2px;
+	            padding: 10px 12px;
+	            border-radius: 14px;
+	            background: rgba(33, 77, 60, 0.06);
+	            border: 1px solid rgba(33, 77, 60, 0.10);
+	        }
+
+	        .context-field b {
+	            color: var(--forest);
+	            font-size: 0.74rem;
+	            text-transform: uppercase;
+	        }
+
+	        .context-field span {
+	            color: var(--ink);
+	            font-weight: 800;
+	            overflow: hidden;
+	            text-overflow: ellipsis;
+	            white-space: nowrap;
 	        }
 
 	        .prompt-chip-row {
@@ -587,6 +639,10 @@
             .active-context-strip span:last-child {
                 grid-column: auto;
             }
+
+            .context-field-grid {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
     <script defer src="/static/complaint_mcp_sdk.js"></script>
@@ -713,12 +769,19 @@
 	                    <span class="context-mode-pill" id="chat-active-context-mode">Intake</span>
 	                    <strong id="chat-active-context-title">No active document selected</strong>
 	                    <span id="chat-active-context-detail">Messages will use the current complaint session and can be carried into review, evidence organization, or drafting.</span>
+	                    <div class="context-field-grid" id="chat-active-context-fields" hidden>
+	                        <div class="context-field"><b>Filing</b><span id="chat-context-field-filing">none selected</span></div>
+	                        <div class="context-field"><b>Date</b><span id="chat-context-field-date">not found</span></div>
+	                        <div class="context-field"><b>Use</b><span id="chat-context-field-use">not classified</span></div>
+	                        <div class="context-field"><b>Router</b><span id="chat-context-field-router">general intake</span></div>
+	                    </div>
 	                </div>
 
                 <form class="form-inline" id="chat-form">
                     <input type="text" class="form-control" placeholder="Add the next fact, clarification, or supporting detail">
                     <button id="send" type="submit" class="btn btn-primary">Send</button>
                 </form>
+                <p class="chat-composer-readiness is-warning" id="chat-composer-readiness">Type a question or fact to send. General intake context is active.</p>
             </div>
 
             <aside class="support-card">
