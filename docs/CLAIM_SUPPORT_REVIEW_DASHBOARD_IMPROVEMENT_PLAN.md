@@ -789,6 +789,58 @@ Non-goals for Slice 2:
 - Complete response pleading generation.
 - Moving operator packaging, CAR, or provenance controls into the layperson path.
 
+### Fifth Screenshot Review: April 22 Docket And Chat Recheck
+
+Date: 2026-04-22
+
+A fresh Playwright pass captured the current Docket-to-chat review path with a housing/eviction-response scenario:
+
+- `artifacts/ui-audit-docket-plan-review-20260422/screenshots/01-docket-current.png`
+- `artifacts/ui-audit-docket-plan-review-20260422/screenshots/02-document-chat-current.png`
+- `artifacts/ui-audit-docket-plan-review-20260422/screenshots/03-review-current.png`
+- `artifacts/ui-audit-docket-plan-review-20260422/screenshots/04-draft-current.png`
+- `artifacts/ui-audit-docket-plan-review-20260422/screenshots/05-ux-review-current.png`
+
+Two bounded single-surface multimodal reviews completed successfully:
+
+- `artifacts/ui-audit-docket-plan-review-20260422/reviews/iteration-03-docket-single-review.json`
+  - strategy: `multimodal_router`
+  - provider: `codex_cli`
+  - model: `gpt-5.3-codex`
+  - issues: 8
+- `artifacts/ui-audit-docket-plan-review-20260422/reviews/iteration-03-chat-single-review.json`
+  - strategy: `multimodal_router`
+  - provider: `codex_cli`
+  - model: `gpt-5.3-codex`
+  - issues: 6
+
+Docket router summary:
+
+> The Docket Command Center page shows core case-routing concepts, but the current presentation is hard for a layperson to act on: status chips are repetitive and ambiguous, action buttons do not clearly indicate prerequisites, and key workflow states (deadlines, enrichment, annotations, and next action readiness) are fragmented across cards.
+
+Chat router summary:
+
+> The page shows a document-scoped complaint chat with useful structure, but key trust and workflow signals are weak or missing: source grounding is vague, confidence is not exposed, citation targets are not actionable, and save-to-workflow actions are unclear.
+
+The April 22 review refines Slice 2 into five concrete UI repairs:
+
+1. **Collapse low-level enrichment noise.** OCR, text extraction, BM25, vectors, knowledge graph, citation extraction, and formal logic should roll up into one plain-language readiness summary such as "Not indexed yet," "Text ready," or "Ready for cited answers." Technical statuses can remain in details.
+2. **Pin urgency and deadlines.** The selected document panel should place "Urgency & Deadlines" above enrichment status, with due date, source sentence, confidence, and "Create/Confirm Deadline" action.
+3. **Use one readiness-based primary CTA.** The Docket action panel should pick one primary action from the document state: Review Before Draft, Confirm Deadline, Add Label, Ask About Document, or Use In Draft. Other actions stay secondary.
+4. **Make chat source grounding inspectable.** Each answer needs citation chips that jump to a document/page/paragraph/span target, plus visible retrieval mode and source-support confidence.
+5. **Separate ask from save.** Chat should not blur "ask a question" with "commit this to the workflow." Use explicit Ask Question and Save Answer actions, then show a confirmation naming the destination: Annotation, Deadline, Issue, Evidence Task, or Draft Note.
+
+Updated Slice 2 acceptance checks:
+
+- Docket shows a single readiness summary for each document, with technical enrichment details collapsed.
+- Selected document shows a pinned urgency/deadline panel before metadata.
+- Only one Docket action is visually primary at a time.
+- Chat shows a persistent scope badge with selected document name, date/source when known, retrieval mode, and Change Scope.
+- Chat answer cards show citation chips, router path, confidence, and source-support state.
+- Ask Question and Save Answer are separate actions.
+- Saving an answer updates Docket annotation/deadline counts and creates a visible Review/Draft reference.
+- Playwright captures and asserts Docket, document chat, Review, Draft, and UX review artifacts one surface at a time.
+
 ## Workstream 1: Better questions
 
 Primary files:
