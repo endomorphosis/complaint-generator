@@ -278,7 +278,7 @@ def test_package_workspace_wrappers_execute_full_complaint_flow(tmp_path):
     assert any(item["id"] == "workspace_schema_refresh" for item in tooling_contract_payload["schema_guided_recommendations"])
     assert filing_provenance_payload["draft_strategy"] == "template"
     assert "draft_backend" in filing_provenance_payload
-    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "openai", "copilot_cli", "hf_inference_api"]
+    assert provider_diagnostics_payload["default_order"][:4] == ["codex_cli", "copilot_cli", "openai", "hf_inference_api"]
     assert provider_diagnostics_payload["complaint_draft_default_order"] == ["codex_cli", "copilot_cli", "hf_inference_api"]
     assert provider_diagnostics_payload["effective_complaint_draft_provider"] == "codex_cli"
     assert provider_diagnostics_payload["ui_review_default_provider"] == "codex_cli"

@@ -337,6 +337,116 @@
             color: var(--accent-deep);
         }
 
+        .grounding-preview {
+            display: grid;
+            gap: 14px;
+            padding: 18px 20px;
+            border-radius: var(--radius-md);
+            border: 2px solid rgba(33, 77, 60, 0.24);
+            background: rgba(244, 250, 246, 0.98);
+            box-shadow: 0 12px 28px rgba(33, 77, 60, 0.08);
+        }
+
+        .grounding-preview[hidden] {
+            display: none;
+        }
+
+        .grounding-preview-header {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .grounding-preview-header strong {
+            color: var(--forest);
+            font-size: 1.08rem;
+        }
+
+        .grounding-preview-route {
+            display: inline-flex;
+            min-height: 28px;
+            align-items: center;
+            border-radius: 999px;
+            padding: 4px 10px;
+            background: rgba(33, 77, 60, 0.12);
+            color: var(--forest);
+            font-size: 0.78rem;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+
+        .grounding-preview-body {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .grounding-preview-item {
+            display: grid;
+            gap: 4px;
+            min-width: 0;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: rgba(255, 253, 250, 0.92);
+            border: 1px solid rgba(33, 77, 60, 0.12);
+        }
+
+        .grounding-preview-item b {
+            color: var(--forest);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+        }
+
+        .grounding-preview-item span {
+            color: var(--ink);
+            font-weight: 800;
+            font-size: 0.96rem;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .grounding-preview-details {
+            border-radius: 14px;
+            border: 1px solid rgba(33, 77, 60, 0.12);
+            background: rgba(255, 253, 250, 0.92);
+            padding: 12px 14px;
+        }
+
+        .grounding-preview-details summary {
+            cursor: pointer;
+            color: var(--forest);
+            font-weight: 900;
+        }
+
+        .grounding-preview-excerpt {
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 0.96rem;
+            line-height: 1.55;
+        }
+
+        .grounding-preview-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .grounding-preview-actions a {
+            display: inline-flex;
+            min-height: 40px;
+            align-items: center;
+            border-radius: 999px;
+            padding: 0 14px;
+            background: rgba(33, 77, 60, 0.10);
+            color: var(--forest);
+            font-weight: 900;
+            text-decoration: none;
+        }
+
         .support-card {
             display: grid;
             gap: 18px;
@@ -350,9 +460,18 @@
             gap: 12px;
         }
 
-	        .panel-card {
-	            padding: 20px 22px;
-	        }
+        .panel-card {
+            padding: 20px 22px;
+        }
+
+        .panel-card.is-secondary-context {
+            box-shadow: none;
+            background: rgba(255, 252, 248, 0.76);
+        }
+
+        .panel-card.is-secondary-context h3 {
+            font-size: 1rem;
+        }
 
 	        .router-status {
 	            display: none;
@@ -643,6 +762,10 @@
             .context-field-grid {
                 grid-template-columns: 1fr;
             }
+
+            .grounding-preview-body {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
     <script defer src="/static/complaint_mcp_sdk.js"></script>
@@ -774,6 +897,27 @@
 	                        <div class="context-field"><b>Date</b><span id="chat-context-field-date">not found</span></div>
 	                        <div class="context-field"><b>Use</b><span id="chat-context-field-use">not classified</span></div>
 	                        <div class="context-field"><b>Router</b><span id="chat-context-field-router">general intake</span></div>
+	                    </div>
+	                </div>
+
+	                <div class="grounding-preview" id="chat-grounding-preview" hidden aria-label="Grounded router context preview">
+	                    <div class="grounding-preview-header">
+	                        <strong>Current grounded context</strong>
+	                        <span class="grounding-preview-route" id="chat-grounding-route">general intake</span>
+	                    </div>
+	                    <div class="grounding-preview-body">
+	                        <div class="grounding-preview-item"><b>Document</b><span id="chat-grounding-document">none selected</span></div>
+	                        <div class="grounding-preview-item"><b>Labels</b><span id="chat-grounding-labels">none</span></div>
+	                        <div class="grounding-preview-item"><b>Route decision</b><span id="chat-grounding-route-rationale">general intake</span></div>
+	                        <div class="grounding-preview-item"><b>Source</b><span id="chat-grounding-source">workspace handoff</span></div>
+	                    </div>
+	                    <details class="grounding-preview-details" open>
+	                        <summary>Passage excerpt</summary>
+	                        <p class="grounding-preview-excerpt" id="chat-grounding-excerpt">Select a filing from the dashboard to preview the passage or summary that will guide the next answer.</p>
+	                    </details>
+	                    <div class="grounding-preview-actions">
+	                        <a id="chat-grounding-change-link" href="/dashboards#docket-dataset-parquet-dashboard">Change selected filing</a>
+	                        <a id="chat-grounding-return-link" href="/dashboards">Back to docket workspace</a>
 	                    </div>
 	                </div>
 

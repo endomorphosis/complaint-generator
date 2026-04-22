@@ -146,6 +146,9 @@ class ComplaintMcpClient {
             'complaint.execute_packaged_docket_proof_revalidation_queue',
             'complaint.persist_packaged_docket_proof_revalidation_queue',
             'complaint.view_docket_dataset',
+            'complaint.search_docket_dataset',
+            'complaint.get_docket_dataset_metadata',
+            'complaint.get_docket_dataset_graph',
         ]);
 
         if (workspaceMutationTools.has(normalizedToolName)) {
@@ -544,6 +547,31 @@ class ComplaintMcpClient {
 
     viewWorkspaceDataset(inputPath, options = {}) {
         return this.callTool('complaint.view_workspace_dataset', Object.assign({
+            input_path: inputPath,
+        }, options || {}));
+    }
+
+    viewDocketDataset(inputPath, options = {}) {
+        return this.callTool('complaint.view_docket_dataset', Object.assign({
+            input_path: inputPath,
+        }, options || {}));
+    }
+
+    searchDocketDataset(inputPath, query, options = {}) {
+        return this.callTool('complaint.search_docket_dataset', Object.assign({
+            input_path: inputPath,
+            query: query,
+        }, options || {}));
+    }
+
+    getDocketDatasetMetadata(inputPath, options = {}) {
+        return this.callTool('complaint.get_docket_dataset_metadata', Object.assign({
+            input_path: inputPath,
+        }, options || {}));
+    }
+
+    getDocketDatasetGraph(inputPath, options = {}) {
+        return this.callTool('complaint.get_docket_dataset_graph', Object.assign({
             input_path: inputPath,
         }, options || {}));
     }

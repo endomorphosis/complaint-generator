@@ -1026,8 +1026,8 @@
         }
 
         .tab-row {
-            position: sticky;
-            top: 110px;
+            position: relative;
+            top: auto;
             z-index: 7;
             padding: 12px;
             margin: 0;
@@ -1052,8 +1052,8 @@
             }
 
         .stage-index-shell {
-            position: sticky;
-            top: 12px;
+            position: relative;
+            top: auto;
             z-index: 6;
             display: grid;
             gap: 12px;
@@ -1438,6 +1438,81 @@
             line-height: 1.5;
         }
 
+        .docket-command-grid,
+        .docket-workbench {
+            display: grid;
+            grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.35fr);
+            gap: 16px;
+            align-items: start;
+        }
+
+        .docket-document-list {
+            display: grid;
+            gap: 10px;
+            max-height: 620px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+
+        .docket-document-button {
+            display: grid;
+            gap: 8px;
+            width: 100%;
+            min-height: 116px;
+            padding: 14px;
+            border-radius: 18px;
+            text-align: left;
+            background: rgba(255, 255, 255, 0.82);
+        }
+
+        .docket-document-button.is-active {
+            border-color: rgba(154, 52, 18, 0.44);
+            background: rgba(255, 247, 237, 0.96);
+            box-shadow: 0 12px 28px rgba(141, 61, 23, 0.08);
+        }
+
+        .docket-document-title {
+            color: var(--accent-strong);
+            font-weight: 800;
+            overflow-wrap: anywhere;
+        }
+
+        .docket-document-meta {
+            color: var(--muted);
+            font-size: 0.92rem;
+            line-height: 1.45;
+        }
+
+        .docket-viewer-shell {
+            display: grid;
+            gap: 14px;
+        }
+
+        .docket-preview {
+            min-height: 260px;
+            white-space: pre-wrap;
+        }
+
+        .docket-action-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .docket-advanced {
+            margin-top: 16px;
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.68);
+            padding: 14px 16px;
+        }
+
+        .docket-advanced summary {
+            cursor: pointer;
+            color: var(--accent);
+            font-weight: 800;
+        }
+
         .walkthrough-list {
             display: grid;
             gap: 12px;
@@ -1554,6 +1629,8 @@
             .draft-layout,
             .draft-action-rail,
             .draft-action-groups,
+            .docket-command-grid,
+            .docket-workbench,
             .decision-strip,
             .support-summary-strip,
             .workbench-metrics,
@@ -1968,6 +2045,7 @@
                     <div class="tab-row" role="tablist" aria-label="Workspace stages">
                         <button class="tab-button is-active" data-tab-target="intake" type="button">Intake</button>
                         <button class="tab-button" data-tab-target="evidence" type="button">Evidence</button>
+                        <button class="tab-button" data-tab-target="docket" type="button">Docket</button>
                         <button class="tab-button" data-tab-target="review" type="button">Review</button>
                         <button class="tab-button" data-tab-target="draft" type="button">Draft</button>
                         <button class="tab-button" data-tab-target="integrations" type="button">CLI + MCP</button>
@@ -2443,6 +2521,128 @@
                     </div>
                     <div class="soft-note" id="evidence-soft-note">A short, specific summary is usually more useful than pasting an entire record without context.</div>
                     <div class="list" id="evidence-list"></div>
+                </section>
+
+                <section class="tab-panel" data-tab-panel="docket">
+                    <div class="stage-banner">
+                        <div class="stage-banner-copy">
+                            <strong>Stage 3: Docket turns case documents into next actions.</strong>
+                            <span>Use this lane to review filings, orders, notices, exhibits, and imported documents without opening the operator controls first. Each document should have a clear next action: review, label, ask, respond, attach, or archive.</span>
+                        </div>
+                        <div class="stage-banner-status">
+                            <strong>What makes Docket ready to leave</strong>
+                            <span>Important documents are labeled, deadlines are visible, and the selected item can move into chat, review, or draft work with its source context intact.</span>
+                        </div>
+                    </div>
+                    <h2>Docket Command Center</h2>
+                    <p class="muted">Start with the documents that affect deadlines, claims, defenses, and source support. Advanced manifest paths and proof-revalidation queues stay below the main document workflow.</p>
+                    <div class="docket-command-grid">
+                        <div class="tool-card">
+                            <h3>Load docket documents</h3>
+                            <p class="muted">Use a packaged docket manifest or dataset path when available. If none is loaded, the lane shows the current evidence record as a working document list.</p>
+                            <div class="readiness-list" aria-label="Docket steps">
+                                <div class="readiness-item">
+                                    <strong>1. Choose the source</strong>
+                                    <span>Use a docket manifest when you have one, or start from the evidence already saved in this workspace.</span>
+                                </div>
+                                <div class="readiness-item">
+                                    <strong>2. Review the status</strong>
+                                    <span>Look for missing labels, unreviewed router status, deadlines, and whether the document is ready for chat or draft use.</span>
+                                </div>
+                                <div class="readiness-item">
+                                    <strong>3. Take one action</strong>
+                                    <span>Ask about the selected document, open Review, add a label, or use the document in Draft once the source support is clear.</span>
+                                </div>
+                            </div>
+                            <div class="field-grid">
+                                <div>
+                                    <label for="docket-dataset-path">Docket Dataset Or Manifest Path</label>
+                                    <input id="docket-dataset-path" type="text" placeholder="/path/to/docket/manifest.json">
+                                </div>
+                                <div class="field-row">
+                                    <div>
+                                        <label for="docket-dataset-input-type">Input Type</label>
+                                        <select id="docket-dataset-input-type">
+                                            <option value="packaged" selected>Packaged</option>
+                                            <option value="json">JSON</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="docket-document-limit">Document Limit</label>
+                                        <input id="docket-document-limit" type="number" min="1" max="100" step="1" value="12">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label for="docket-search-query">Search Docket</label>
+                                    <input id="docket-search-query" type="text" placeholder="deadline retaliation order exhibit response">
+                                </div>
+                            </div>
+                            <div class="button-row" style="margin-top: 14px;">
+                                <button class="primary" id="load-docket-dataset-button" type="button">Load Docket</button>
+                                <button class="secondary" id="search-docket-dataset-button" type="button">Search</button>
+                                <button class="secondary" id="sync-docket-path-button" type="button">Use Saved Manifest</button>
+                            </div>
+                            <div class="chip-row" id="docket-summary-chips" style="margin-top: 12px;">
+                                <span class="chip">source: current evidence</span>
+                                <span class="chip">documents: loading</span>
+                            </div>
+                        </div>
+                        <div class="tool-card">
+                            <h3>Document status</h3>
+                            <div class="feature-grid" id="docket-status-grid">
+                                <div class="feature-item">
+                                    <strong>Needs Review</strong>
+                                    <span>Documents that have not been labeled or tied to a claim, deadline, or response task.</span>
+                                </div>
+                                <div class="feature-item">
+                                    <strong>Ready For Draft</strong>
+                                    <span>Documents with enough source context to cite or summarize in a complaint or response draft.</span>
+                                </div>
+                            </div>
+                            <div class="status docket-preview"><pre id="docket-router-status">Router status will appear after a docket dataset or selected document is reviewed.</pre></div>
+                        </div>
+                    </div>
+                    <div class="docket-workbench" style="margin-top: 16px;">
+                        <div class="tool-card">
+                            <h3>Documents</h3>
+                            <div class="docket-document-list" id="docket-document-list">
+                                <button class="docket-document-button" type="button">
+                                    <span class="docket-document-title">Docket is loading...</span>
+                                    <span class="docket-document-meta">The workspace will show docket documents or current evidence here.</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="tool-card">
+                            <h3 id="docket-selected-title">Select a document</h3>
+                            <div class="chip-row" id="docket-selected-chips"></div>
+                            <div class="docket-viewer-shell">
+                                <div class="status docket-preview"><pre id="docket-selected-preview">Choose a docket item to see its source, labels, next action, and chat/draft handoffs.</pre></div>
+                                <div class="chip-row" id="docket-chat-scope-chips">
+                                    <span class="chip warn">chat scope: no document selected</span>
+                                </div>
+                                <div class="docket-action-bar">
+                                    <a class="surface-link" id="docket-ask-chat-link" href="/chat">Ask About Document</a>
+                                    <button class="secondary" id="docket-use-in-draft-button" type="button">Use In Draft</button>
+                                    <button class="secondary" id="docket-open-review-button" type="button">Open Review</button>
+                                    <button class="secondary" id="docket-add-label-button" type="button">Add Label</button>
+                                </div>
+                                <div class="list" id="docket-annotation-list">
+                                    <div class="item">
+                                        <strong>No annotations saved from this workspace yet.</strong>
+                                        <div class="muted">Use labels and chat answers to turn important passages into facts, deadlines, issues, evidence tasks, or draft notes.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <details class="docket-advanced" id="docket-advanced-operations">
+                        <summary>Advanced docket operations</summary>
+                        <p class="muted">Operator queue controls, manifest persistence, CAR packaging, and proof revalidation remain available in CLI + MCP. This lane keeps those controls secondary so document review stays understandable for laypeople.</p>
+                        <div class="button-row">
+                            <button class="secondary" id="docket-open-advanced-tools-button" type="button">Open CLI + MCP Docket Tools</button>
+                            <button class="secondary" id="docket-load-operator-dashboard-button" type="button">Load Operator Dashboard</button>
+                        </div>
+                    </details>
                 </section>
 
                 <section class="tab-panel" data-tab-panel="review">
@@ -3433,6 +3633,11 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let latestWorkspaceDataMigration = null;
         let latestWorkspaceDatasetSearch = null;
         let latestWorkspaceDatasetView = null;
+        let latestDocketDatasetView = null;
+        let latestDocketDatasetSearch = null;
+        let latestDocketDatasetMetadata = null;
+        let latestDocketDatasetGraph = null;
+        let selectedDocketItemId = '';
         let latestPackagedDocketOperatorDashboard = null;
         let latestPackagedDocketOperatorDashboardReport = null;
         let latestPackagedDocketRevalidationExecution = null;
@@ -3659,6 +3864,16 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                     targetTab: 'draft',
                     sdkChip: 'sdk: complaint.generate_complaint',
                 },
+                docket: {
+                    title: 'Docket stage: review documents before drafting responses',
+                    detail: 'Use this stage to identify what each filing, order, exhibit, or imported record affects before asking chat or moving text into a draft.',
+                    stage: 'You are in Docket. Docket documents, labels, router status, and source-scoped chat handoffs should stay visible here.',
+                    readiness: 'The docket lane is ready when important documents have labels, deadlines, and a clear next action.',
+                    exportSafety: 'Do not let a draft outrun docket review when filings, orders, or response deadlines still need source-supported interpretation.',
+                    actionLabel: 'Continue in docket',
+                    targetTab: 'docket',
+                    sdkChip: 'sdk: complaint.view_docket_dataset',
+                },
                 integrations: {
                     title: 'CLI + MCP stage: operate the same session through shared tools',
                     detail: 'Use this stage to inspect parity, diagnostics, export behavior, and tool surfaces without losing the current DID-backed session.',
@@ -3687,6 +3902,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             const labels = {
                 intake: 'Intake',
                 evidence: 'Evidence',
+                docket: 'Docket',
                 review: 'Review',
                 draft: 'Draft',
                 integrations: 'CLI + MCP',
@@ -4355,6 +4571,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const focusMap = {
                 intake: '#intake-party_name',
                 evidence: '#evidence-title',
+                docket: '#docket-document-list',
                 review: '#support-grid',
                 draft: '#draft-title',
                 integrations: '#tool-list',
@@ -4367,6 +4584,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const statusMap = {
                 intake: 'Opened Intake so the complaint story can be captured.',
                 evidence: 'Opened Evidence so support can be attached to the case theory.',
+                docket: 'Opened Docket so case documents can be reviewed, labeled, and used in chat or drafting.',
                 review: 'Opened Review so support gaps can be checked.',
                 draft: 'Opened Draft so the complaint can be generated or refined.',
                 integrations: 'Opened CLI + MCP surfaces for the shared complaint tools.',
@@ -7412,6 +7630,323 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : '<div class="item"><strong>No claim element payload loaded yet.</strong><div class="muted">Refresh SDK primitives to inspect the review and evidence support model.</div></div>';
         }
 
+        function normalizeDocketDocumentItem(item, index, sourceLabel) {
+            const metadata = item && typeof item === 'object' ? (item.metadata || {}) : {};
+            const artifactStatus = item && typeof item === 'object' && item.artifact_status && typeof item.artifact_status === 'object'
+                ? item.artifact_status
+                : metadata.artifact_status && typeof metadata.artifact_status === 'object'
+                    ? metadata.artifact_status
+                    : {};
+            const enrichment = item && typeof item === 'object' && item.enrichment && typeof item.enrichment === 'object'
+                ? item.enrichment
+                : metadata.enrichment && typeof metadata.enrichment === 'object'
+                    ? metadata.enrichment
+                    : {};
+            const statusValue = (directValue, enrichmentKey, artifactKey, fallback = 'not checked') => {
+                const raw = directValue !== undefined && directValue !== null && String(directValue).trim() !== ''
+                    ? directValue
+                    : enrichment[enrichmentKey] !== undefined && enrichment[enrichmentKey] !== null && String(enrichment[enrichmentKey]).trim() !== ''
+                        ? enrichment[enrichmentKey]
+                        : artifactStatus[artifactKey] !== undefined && artifactStatus[artifactKey] !== null
+                            ? artifactStatus[artifactKey]
+                            : fallback;
+                if (raw === true) {
+                    return 'ready';
+                }
+                if (raw === false) {
+                    return 'missing';
+                }
+                return String(raw || fallback).trim() || fallback;
+            };
+            const numericValue = (directValue, enrichmentKey, metadataKey) => {
+                const raw = directValue !== undefined && directValue !== null && String(directValue).trim() !== ''
+                    ? directValue
+                    : enrichment[enrichmentKey] !== undefined && enrichment[enrichmentKey] !== null && String(enrichment[enrichmentKey]).trim() !== ''
+                        ? enrichment[enrichmentKey]
+                        : metadata[metadataKey];
+                const parsed = Number(raw || 0);
+                return Number.isFinite(parsed) ? parsed : 0;
+            };
+            const title = String(
+                (item && (item.title || item.document_title || item.name || item.label))
+                || metadata.title
+                || metadata.document_title
+                || `Document ${index + 1}`
+            ).trim();
+            const documentType = String(
+                (item && (item.document_type || item.kind || item.type))
+                || metadata.document_type
+                || metadata.kind
+                || 'document'
+            ).trim();
+            const source = String(
+                (item && (item.source || item.source_type || item.collection_id || item.source_url))
+                || metadata.source
+                || metadata.source_type
+                || sourceLabel
+                || 'workspace'
+            ).trim();
+            const dateFiled = String(
+                (item && (item.date_filed || item.filed_at || item.captured_at || item.created_at))
+                || metadata.date_filed
+                || metadata.filed_at
+                || metadata.captured_at
+                || ''
+            ).trim();
+            const claimElement = String(
+                (item && (item.claim_element_id || item.claim_element || item.element))
+                || metadata.claim_element_id
+                || metadata.claim_element
+                || ''
+            ).trim();
+            const documentId = String(
+                (item && (item.docket_item_id || item.document_id || item.id || item.work_item_id))
+                || metadata.docket_item_id
+                || metadata.document_id
+                || `${sourceLabel || 'docket'}-${index}`
+            ).trim();
+            const text = String((item && (item.text || item.content || item.summary || item.details)) || metadata.summary || '').trim();
+            const labels = [
+                documentType,
+                claimElement,
+                String(metadata.status || item.status || '').trim(),
+            ].filter(Boolean);
+            return {
+                docket_item_id: documentId,
+                title,
+                document_type: documentType,
+                source,
+                date_filed: dateFiled,
+                deadline: String((item && item.deadline) || metadata.deadline || '').trim(),
+                status: String((item && item.status) || metadata.status || (claimElement ? 'Ready For Draft' : 'Needs Review')).trim(),
+                labels,
+                annotation_count: Number((item && item.annotation_count) || metadata.annotation_count || 0),
+                question_count: Number((item && item.question_count) || metadata.question_count || 0),
+                router_status: String((item && item.router_status) || metadata.router_status || 'not reviewed'),
+                page_count: numericValue(item && (item.page_count || item.pages), 'page_count', 'page_count'),
+                vector_count: numericValue(item && (item.vector_count || item.embedding_count), 'vector_count', 'vector_count'),
+                ocr_status: statusValue(item && item.ocr_status, 'ocr_status', 'ocr'),
+                text_extraction_status: statusValue(item && (item.text_extraction_status || item.extracted_text_status), 'text_extraction_status', 'text_extraction'),
+                bm25_status: statusValue(item && item.bm25_status, 'bm25_status', 'bm25'),
+                knowledge_graph_status: statusValue(item && (item.knowledge_graph_status || item.kg_status), 'knowledge_graph_status', 'knowledge_graph'),
+                citation_status: statusValue(item && (item.citation_status || item.bluebook_status), 'citation_status', 'citations'),
+                formal_logic_status: statusValue(item && item.formal_logic_status, 'formal_logic_status', 'formal_logic'),
+                content_id: String(
+                    (item && (item.content_id || item.ipfs_cid || item.cid || item.ipld_cid))
+                    || metadata.content_id
+                    || metadata.ipfs_cid
+                    || metadata.cid
+                    || metadata.ipld_cid
+                    || ''
+                ).trim(),
+                primary_action: claimElement ? 'Use In Draft' : 'Review',
+                source_ref: String((item && (item.source_url || item.input_path || item.path)) || metadata.source_url || '').trim(),
+                text,
+            };
+        }
+
+        function extractDocketItemsFromSearch(searchPayload) {
+            const results = (((searchPayload || {}).search_results || {}).results)
+                || (((searchPayload || {}).search_results || {}).matches)
+                || [];
+            return Array.isArray(results)
+                ? results.map((item) => item.document || item.item || item).filter(Boolean)
+                : [];
+        }
+
+        function buildDocketItems(sessionPayload) {
+            const datasetDocuments = Array.isArray((latestDocketDatasetView || {}).documents)
+                ? latestDocketDatasetView.documents
+                : [];
+            const searchDocuments = extractDocketItemsFromSearch(latestDocketDatasetSearch);
+            const review = (sessionPayload && sessionPayload.review) || {};
+            const evidenceDocuments = Array.isArray(review.documents) ? review.documents : [];
+            const testimony = Array.isArray(review.testimony) ? review.testimony : [];
+            const rawItems = searchDocuments.length
+                ? searchDocuments
+                : datasetDocuments.length
+                    ? datasetDocuments
+                    : evidenceDocuments.concat(testimony);
+            const sourceLabel = searchDocuments.length
+                ? 'docket search'
+                : datasetDocuments.length
+                    ? 'docket dataset'
+                    : 'current evidence';
+            return rawItems.map((item, index) => normalizeDocketDocumentItem(item, index, sourceLabel));
+        }
+
+        function renderDocketLane(sessionPayload) {
+            const items = buildDocketItems(sessionPayload || {});
+            const list = document.getElementById('docket-document-list');
+            const chips = document.getElementById('docket-summary-chips');
+            const statusGrid = document.getElementById('docket-status-grid');
+            const routerStatus = document.getElementById('docket-router-status');
+            if (!items.length) {
+                selectedDocketItemId = '';
+                chips.innerHTML = '<span class="chip warn">documents: 0</span><span class="chip">source: no docket loaded</span>';
+                list.innerHTML = `
+                    <button class="docket-document-button" type="button">
+                        <span class="docket-document-title">No docket documents loaded yet.</span>
+                        <span class="docket-document-meta">Load a packaged docket manifest, import local evidence, or save document evidence to populate this lane.</span>
+                    </button>
+                `;
+                renderSelectedDocketItem(null);
+                return;
+            }
+            const needsReviewCount = items.filter((item) => String(item.status || '').toLowerCase().includes('review')).length;
+            const readyCount = items.filter((item) => String(item.status || '').toLowerCase().includes('ready')).length;
+            const deadlineCount = items.filter((item) => item.deadline || String(item.document_type || '').toLowerCase().includes('order')).length;
+            const vectorTotal = items.reduce((total, item) => total + Number(item.vector_count || 0), 0);
+            const enrichedCount = items.filter((item) => (
+                String(item.text_extraction_status || '').toLowerCase().includes('ready')
+                || String(item.knowledge_graph_status || '').toLowerCase().includes('ready')
+                || Number(item.vector_count || 0) > 0
+            )).length;
+            if (!selectedDocketItemId || !items.some((item) => item.docket_item_id === selectedDocketItemId)) {
+                selectedDocketItemId = items[0].docket_item_id;
+            }
+            const selected = items.find((item) => item.docket_item_id === selectedDocketItemId) || items[0];
+            chips.innerHTML = `
+                <span class="chip good">documents: ${escapeHtml(String(items.length))}</span>
+                <span class="chip">needs review: ${escapeHtml(String(needsReviewCount))}</span>
+                <span class="chip">ready for draft: ${escapeHtml(String(readyCount))}</span>
+                <span class="chip">deadlines/orders: ${escapeHtml(String(deadlineCount))}</span>
+                <span class="chip">vectors: ${escapeHtml(String(vectorTotal))}</span>
+            `;
+            statusGrid.innerHTML = [
+                ['Needs Review', `${needsReviewCount} item(s): check missing labels, source support, and router status before drafting.`],
+                ['Ready For Draft', `${readyCount} item(s): tied to a claim, issue, or draft use, but still verify citations first.`],
+                ['Deadline Watch', `${deadlineCount} item(s): check for orders, notices, filings, and response due dates.`],
+                ['Indexed And Enriched', `${enrichedCount} item(s): text, vector, or knowledge-graph enrichment is visible in this lane.`],
+                ['Chat Scope', selected ? `Ask will use only this selected document unless the scope is changed: ${selected.title}.` : 'Select a document before asking questions.'],
+            ].map(([title, detail]) => `
+                <div class="feature-item">
+                    <strong>${escapeHtml(title)}</strong>
+                    <span>${escapeHtml(detail)}</span>
+                </div>
+            `).join('');
+            list.innerHTML = items.map((item) => `
+                <button
+                    class="docket-document-button${item.docket_item_id === selected.docket_item_id ? ' is-active' : ''}"
+                    type="button"
+                    data-docket-item-id="${escapeHtml(item.docket_item_id)}"
+                >
+                    <span class="docket-document-title">${escapeHtml(item.title)}</span>
+                    <span class="docket-document-meta">${escapeHtml(item.document_type || 'document')} | ${escapeHtml(item.source || 'source unknown')}${item.date_filed ? ` | ${escapeHtml(item.date_filed)}` : ''}</span>
+                    <span class="chip-row">
+                        <span class="chip${String(item.status || '').toLowerCase().includes('review') ? ' warn' : ' good'}">${escapeHtml(item.status || 'Needs Review')}</span>
+                        <span class="chip">${escapeHtml(item.router_status || 'router: not reviewed')}</span>
+                        <span class="chip">vectors: ${escapeHtml(String(item.vector_count || 0))}</span>
+                        <span class="chip">text: ${escapeHtml(item.text_extraction_status || 'not checked')}</span>
+                    </span>
+                </button>
+            `).join('');
+            const selectedNeedsRouterReview = String(selected.router_status || '').toLowerCase().includes('not reviewed');
+            const selectedNextAction = selectedNeedsRouterReview ? 'Review Before Draft' : (selected.primary_action || 'Review');
+            routerStatus.textContent = [
+                `Selected: ${selected.title}`,
+                `Router status: ${selected.router_status || 'not reviewed'}`,
+                `OCR: ${selected.ocr_status || 'not checked'}`,
+                `Text extraction: ${selected.text_extraction_status || 'not checked'}`,
+                `BM25: ${selected.bm25_status || 'not checked'}`,
+                `Vectors: ${selected.vector_count || 0}`,
+                `Knowledge graph: ${selected.knowledge_graph_status || 'not checked'}`,
+                `Citations: ${selected.citation_status || 'not checked'}`,
+                `Formal logic: ${selected.formal_logic_status || 'not checked'}`,
+                `Source support: ${selected.source_ref || selected.source || 'source reference pending'}`,
+                `Suggested next action: ${selectedNextAction}`,
+            ].join('\n');
+            renderSelectedDocketItem(selected);
+        }
+
+        function renderSelectedDocketItem(item) {
+            const title = document.getElementById('docket-selected-title');
+            const chips = document.getElementById('docket-selected-chips');
+            const preview = document.getElementById('docket-selected-preview');
+            const chatLink = document.getElementById('docket-ask-chat-link');
+            const chatScopeChips = document.getElementById('docket-chat-scope-chips');
+            const draftButton = document.getElementById('docket-use-in-draft-button');
+            const reviewButton = document.getElementById('docket-open-review-button');
+            const annotations = document.getElementById('docket-annotation-list');
+            if (!item) {
+                title.textContent = 'Select a document';
+                chips.innerHTML = '<span class="chip warn">no document selected</span>';
+                preview.textContent = 'Choose a docket item to see its source, labels, next action, and chat/draft handoffs.';
+                chatScopeChips.innerHTML = '<span class="chip warn">chat scope: no document selected</span>';
+                chatLink.href = buildSurfaceUrl('/chat', { user_id: workspaceUserId || '', source: 'workspace-docket' });
+                draftButton.className = 'secondary';
+                reviewButton.className = 'secondary';
+                annotations.innerHTML = '<div class="item"><strong>No annotations yet.</strong><div class="muted">Load or select a document before saving labels or asking questions.</div></div>';
+                return;
+            }
+            const needsRouterReview = String(item.router_status || '').toLowerCase().includes('not reviewed');
+            title.textContent = item.title || 'Selected document';
+            chips.innerHTML = `
+                <span class="chip good">${escapeHtml(item.document_type || 'document')}</span>
+                <span class="chip">${escapeHtml(item.source || 'source unknown')}</span>
+                <span class="chip">${escapeHtml(item.status || 'Needs Review')}</span>
+                <span class="chip${needsRouterReview ? ' warn' : ''}">${escapeHtml(item.router_status || 'router: not reviewed')}</span>
+                <span class="chip">vectors: ${escapeHtml(String(item.vector_count || 0))}</span>
+                <span class="chip">ocr: ${escapeHtml(item.ocr_status || 'not checked')}</span>
+            `;
+            chatScopeChips.innerHTML = `
+                <span class="chip good">chat scoped to selected document</span>
+                <span class="chip">${escapeHtml(item.title)}</span>
+            `;
+            preview.textContent = [
+                `Title: ${item.title || 'Untitled document'}`,
+                `Type: ${item.document_type || 'document'}`,
+                `Source (where it came from): ${item.source || 'unknown'}`,
+                item.date_filed ? `Date filed/captured: ${item.date_filed}` : '',
+                item.deadline ? `Deadline: ${item.deadline}` : '',
+                item.page_count ? `Pages: ${item.page_count}` : '',
+                item.content_id ? `Content ID: ${item.content_id}` : '',
+                `OCR: ${item.ocr_status || 'not checked'}`,
+                `Text extraction: ${item.text_extraction_status || 'not checked'}`,
+                `BM25: ${item.bm25_status || 'not checked'}`,
+                `Vectors created: ${item.vector_count || 0}`,
+                `Knowledge graph: ${item.knowledge_graph_status || 'not checked'}`,
+                `Bluebook citations: ${item.citation_status || 'not checked'}`,
+                `Formal logic: ${item.formal_logic_status || 'not checked'}`,
+                `Labels (what this document affects): ${item.labels.length ? item.labels.join(', ') : 'none yet'}`,
+                `Annotations (saved notes): ${item.annotation_count}`,
+                `Questions asked in chat: ${item.question_count}`,
+                `Next action: ${needsRouterReview ? 'Review Before Draft' : (item.primary_action || 'Review')}`,
+                '',
+                item.text || 'No document text preview is loaded yet. Use chat with this scope or load the docket dataset with document text when available.',
+            ].filter((line) => line !== '').join('\n');
+            reviewButton.className = needsRouterReview ? 'primary' : 'secondary';
+            draftButton.className = needsRouterReview ? 'secondary' : 'primary';
+            reviewButton.textContent = needsRouterReview ? 'Review Before Draft' : 'Open Review';
+            draftButton.textContent = needsRouterReview ? 'Use In Draft Anyway' : 'Use In Draft';
+            const chatContext = {
+                scope: 'selected_document',
+                docket_item_id: item.docket_item_id,
+                title: item.title,
+                document_type: item.document_type,
+                source: item.source,
+                labels: item.labels,
+                router_status: item.router_status,
+            };
+            chatLink.href = buildSurfaceUrl('/chat', {
+                user_id: workspaceUserId || '',
+                source: 'workspace-docket',
+                prefill_message: `Review this docket document and explain what it affects: ${item.title}`,
+                chat_context: JSON.stringify(chatContext),
+                return_to: buildSurfaceUrl('/workspace', {
+                    user_id: workspaceUserId || '',
+                    target_tab: 'docket',
+                    status_message: 'Returned from docket-scoped chat.',
+                }),
+            });
+            annotations.innerHTML = `
+                <div class="item">
+                    <strong>${escapeHtml(needsRouterReview ? 'Review Before Draft' : (item.primary_action || 'Review'))} is the next action.</strong>
+                    <div class="muted">Save future chat answers as annotations, deadlines, issues, evidence tasks, or draft notes tied to ${escapeHtml(item.title)}.</div>
+                </div>
+            `;
+        }
+
         function renderSessionSyncStatus(sessionPayload) {
             const state = deriveWorkflowState(sessionPayload || {});
             const session = (sessionPayload && sessionPayload.session) || {};
@@ -7490,6 +8025,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 suggestedFocusSelector = '#ux-review-notes';
                 suggestedStatusMessage = 'Opened UX Audit to continue the latest optimizer workflow.';
                 suggestedButtonLabel = 'Open UX Audit';
+            } else if (lastToolName.includes('docket')) {
+                suggestedTab = 'docket';
+                suggestedFocusSelector = '#docket-document-list';
+                suggestedStatusMessage = 'Opened Docket so the latest document activity can be reviewed.';
+                suggestedButtonLabel = 'Open Docket';
             } else if (lastToolName.includes('export') || lastToolName.includes('generate_complaint') || lastToolName.includes('draft')) {
                 suggestedTab = 'draft';
                 suggestedFocusSelector = '#draft-provenance-preview';
@@ -7869,6 +8409,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             hydrateResolvedDraftState(sessionPayload);
             renderIntake(sessionPayload);
             renderEvidence(sessionPayload);
+            renderDocketLane(sessionPayload);
             renderReview(sessionPayload);
             renderDraft(sessionPayload);
             refreshSynopsisEditor(sessionPayload);
@@ -9551,6 +10092,97 @@ function extractComplaintOutputSignals(result) {
             }
         }
 
+        function syncDocketDatasetPathFromSavedManifest() {
+            const storedManifestPath = loadLatestPackagedDocketManifestPreference();
+            const packagedInput = document.getElementById('packaged-docket-manifest-path');
+            const docketInput = document.getElementById('docket-dataset-path');
+            const preferredPath = String(storedManifestPath || (packagedInput && packagedInput.value) || '').trim();
+            if (!preferredPath) {
+                activateTab('docket');
+                setStatus('No saved packaged docket manifest path is available yet.');
+                return '';
+            }
+            docketInput.value = preferredPath;
+            if (packagedInput) {
+                packagedInput.value = preferredPath;
+            }
+            activateTab('docket');
+            setStatus('Saved packaged docket manifest path copied into the Docket lane.');
+            return preferredPath;
+        }
+
+        async function loadDocketDatasetPanel() {
+            const inputPath = document.getElementById('docket-dataset-path').value.trim();
+            const inputType = document.getElementById('docket-dataset-input-type').value || 'packaged';
+            const documentLimit = Math.max(1, Number(document.getElementById('docket-document-limit').value || '12'));
+            if (!inputPath) {
+                activateTab('docket');
+                setStatus('Add a docket dataset or packaged manifest path before loading docket documents.');
+                return;
+            }
+            activateTab('docket');
+            setBusyStatus('Loading docket documents through the shared MCP SDK...');
+            try {
+                latestDocketDatasetView = await client.viewDocketDataset(inputPath, {
+                    input_type: inputType,
+                    document_limit: documentLimit,
+                    include_document_text: false,
+                });
+                latestDocketDatasetMetadata = await client.getDocketDatasetMetadata(inputPath, {
+                    input_type: inputType,
+                });
+                try {
+                    latestDocketDatasetGraph = await client.getDocketDatasetGraph(inputPath, {
+                        input_type: inputType,
+                    });
+                } catch (graphError) {
+                    console.warn('Docket graph load failed', graphError);
+                    latestDocketDatasetGraph = null;
+                }
+                selectedDocketItemId = '';
+                renderDocketLane(workspaceSession || {});
+                renderSessionSyncStatus(workspaceSession || {});
+                setStatus(`Docket loaded with ${String(((latestDocketDatasetView || {}).documents || []).length)} document(s).`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Docket load failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
+        async function searchDocketDatasetPanel() {
+            const inputPath = document.getElementById('docket-dataset-path').value.trim();
+            const query = document.getElementById('docket-search-query').value.trim();
+            const inputType = document.getElementById('docket-dataset-input-type').value || 'packaged';
+            const topK = Math.max(1, Number(document.getElementById('docket-document-limit').value || '12'));
+            if (!inputPath) {
+                activateTab('docket');
+                setStatus('Add a docket dataset or packaged manifest path before searching.');
+                return;
+            }
+            if (!query) {
+                activateTab('docket');
+                setStatus('Enter a docket search query before searching.');
+                return;
+            }
+            activateTab('docket');
+            setBusyStatus('Searching docket documents through the shared MCP SDK...');
+            try {
+                latestDocketDatasetSearch = await client.searchDocketDataset(inputPath, query, {
+                    input_type: inputType,
+                    search_backend: 'bm25',
+                    top_k: topK,
+                });
+                selectedDocketItemId = '';
+                renderDocketLane(workspaceSession || {});
+                renderSessionSyncStatus(workspaceSession || {});
+                const resultCount = (((latestDocketDatasetSearch || {}).search_results || {}).result_count) || extractDocketItemsFromSearch(latestDocketDatasetSearch).length;
+                setStatus(`Docket search completed with ${String(resultCount)} hit(s).`);
+            } catch (error) {
+                console.error(error);
+                setStatus(`Docket search failed: ${String((error && error.message) || error || 'Unknown error')}`);
+            }
+        }
+
         function renderPackagedDocketOperatorDashboardPanel() {
             const dashboard = latestPackagedDocketOperatorDashboard || {};
             const reportPayload = latestPackagedDocketOperatorDashboardReport || {};
@@ -9995,6 +10627,31 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('evidence-add-testimony-button').addEventListener('click', () => activateEvidenceComposer('testimony'));
         document.getElementById('evidence-add-document-button').addEventListener('click', () => activateEvidenceComposer('document'));
         document.getElementById('evidence-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so the current support gaps can be checked before more evidence is added.'));
+        document.getElementById('load-docket-dataset-button').addEventListener('click', loadDocketDatasetPanel);
+        document.getElementById('search-docket-dataset-button').addEventListener('click', searchDocketDatasetPanel);
+        document.getElementById('sync-docket-path-button').addEventListener('click', syncDocketDatasetPathFromSavedManifest);
+        document.getElementById('docket-document-list').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-docket-item-id]');
+            if (!button) {
+                return;
+            }
+            selectedDocketItemId = String(button.dataset.docketItemId || '');
+            renderDocketLane(workspaceSession || {});
+        });
+        document.getElementById('docket-use-in-draft-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Opened Draft with the selected docket item available as source context.'));
+        document.getElementById('docket-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the selected docket document.'));
+        document.getElementById('docket-add-label-button').addEventListener('click', () => setStatus('Docket label editing will save labels as annotations in the next implementation slice.'));
+        document.getElementById('docket-open-advanced-tools-button').addEventListener('click', () => jumpToStage('integrations', '#packaged-docket-manifest-path', 'Opened CLI + MCP packaged docket controls from the Docket lane.'));
+        document.getElementById('docket-load-operator-dashboard-button').addEventListener('click', async () => {
+            const path = document.getElementById('docket-dataset-path').value.trim() || syncDocketDatasetPathFromSavedManifest();
+            if (path) {
+                const packagedInput = document.getElementById('packaged-docket-manifest-path');
+                if (packagedInput) {
+                    packagedInput.value = path;
+                }
+                await loadPackagedDocketOperatorDashboardPanel();
+            }
+        });
         document.getElementById('import-gmail-evidence-button').addEventListener('click', importGmailEvidence);
         document.getElementById('import-local-evidence-button').addEventListener('click', importLocalEvidence);
         document.getElementById('run-gmail-duckdb-pipeline-button').addEventListener('click', runGmailDuckdbPipelineFromWorkspace);
@@ -10301,6 +10958,7 @@ function extractComplaintOutputSignals(result) {
             renderWorkspace(bootstrap.session);
             hydrateGmailImportUser();
             document.getElementById('packaged-docket-manifest-path').value = loadLatestPackagedDocketManifestPreference() || document.getElementById('packaged-docket-manifest-path').value;
+            document.getElementById('docket-dataset-path').value = loadLatestPackagedDocketManifestPreference() || document.getElementById('docket-dataset-path').value;
             hydratePackagedDocketPreferences();
             hydrateWorkspaceDataPreferences();
             renderPackagedDocketManifestHistory();

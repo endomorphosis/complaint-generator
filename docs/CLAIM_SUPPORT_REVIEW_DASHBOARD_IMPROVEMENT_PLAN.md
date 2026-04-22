@@ -453,6 +453,342 @@ Slice E: Split drafting by user intent.
 - If responding, force selection of a docket item and show the exact document being answered.
 - Map extracted allegations, deadlines, requests, defenses, and service requirements into the draft checklist.
 
+### Third Router Check: Single-Image Docket Review
+
+Date: 2026-04-20
+
+A final reduced payload sent one cropped docket screenshot to the router:
+
+- `artifacts/ui-audit-single-docket/screenshots/single-docket-tools.png`
+
+The artifact was written to:
+
+- `artifacts/ui-audit-single-docket/reviews/iteration-03-review.json`
+
+Even this one-image request timed out through both `MultimodalRouterBackend` and the `llm_router` fallback, producing another deterministic fallback. The planning conclusion is now firm: automated visual critique should be a supported capability, but it should not be the first implementation dependency for the Docket UX. The first implementation dependency is a reliable audit harness that saves screenshots, records router status, and lets the team continue with human/direct visual review when the router is unavailable.
+
+### Existing Docket/Router Hooks To Reuse
+
+The next implementation should reuse existing SDK and MCP seams instead of introducing a parallel docket backend. Current browser SDK hooks already include:
+
+- `complaint.get_packaged_docket_operator_dashboard`
+- `complaint.load_packaged_docket_operator_dashboard_report`
+- `complaint.execute_packaged_docket_proof_revalidation_queue`
+- `complaint.persist_packaged_docket_proof_revalidation_queue`
+- `complaint.view_docket_dataset`
+
+Those hooks are currently presented as advanced packaged-docket operations. The layperson Docket lane should sit above them and translate their outputs into plain objects:
+
+- docket item,
+- document status,
+- label set,
+- annotation count,
+- deadline,
+- response needed,
+- next action,
+- source/citation reference.
+
+The advanced hooks should remain visible in Advanced Tools for operators who need manifests, revalidation queues, refreshed packets, CAR artifacts, and persisted bundles.
+
+### Proposed First-Screen Docket Layout
+
+The Docket lane should open with a compact triage board:
+
+1. **Needs Attention**: documents with deadlines, required responses, missing labels, or low-quality OCR.
+2. **Ready To Use**: documents already labeled and citeable.
+3. **Questions To Ask**: unanswered document questions queued for chat or reviewer follow-up.
+4. **Recently Added**: new uploads, Gmail imports, local evidence imports, and packaged docket items.
+
+Each row should show:
+
+- document title,
+- document type,
+- source,
+- date or deadline,
+- labels,
+- annotation count,
+- router status if analyzed,
+- primary action: Review, Label, Ask, Respond, Attach, or Archive.
+
+This is the layperson surface. Manifest paths, queue priority, execution top-k, report format, CAR output, and persistence controls belong below an "Advanced docket operations" disclosure.
+
+### Proposed Document Viewer Shell
+
+The first implementation does not need a perfect PDF editor. It does need a stable shell that can evolve:
+
+1. left rail: docket items and pages,
+2. center: page/text preview with selectable spans,
+3. right rail: labels, annotations, linked claim/response issues, and chat answers,
+4. bottom action bar: Add Label, Ask About Selection, Create Deadline, Attach To Claim, Add To Response Draft.
+
+The annotation schema should be simple at first:
+
+- `annotation_id`,
+- `docket_item_id`,
+- `page_ref` or `span_ref`,
+- `label`,
+- `plain_language_note`,
+- `source_text`,
+- `confidence`,
+- `created_from`: manual, `llm_router`, or `multimodal_router`,
+- `saved_as`: fact, deadline, issue, evidence task, or draft note.
+
+### Proposed Chat Contract
+
+Document chat should always show its scope before the user sends a question:
+
+- asking about whole docket,
+- selected document,
+- selected page,
+- selected span,
+- selected annotation,
+- selected response task.
+
+Every answer should include:
+
+- router path: `llm_router`, `multimodal_router`, or fallback,
+- citation target when source text/image is available,
+- confidence or "not enough source support",
+- save actions: Save Annotation, Save Deadline, Save Issue, Save Evidence Task, Save Draft Note.
+
+The chat should not feel like a separate app. It should be a side panel or companion route that keeps the selected docket item visible.
+
+### Implementation Readiness Matrix
+
+The screenshot pass makes the next coding slice smaller than it first looked. The backend already has docket contracts that can power a layperson Docket lane; the work is mostly surfacing them with safer information architecture and adding a few browser-facing hooks.
+
+Existing service contracts to reuse:
+
+- `ComplaintWorkspaceService.view_docket_dataset`
+- `ComplaintWorkspaceService.search_docket_dataset`
+- `ComplaintWorkspaceService.get_docket_dataset_metadata`
+- `ComplaintWorkspaceService.get_docket_dataset_graph`
+- packaged docket operator helpers:
+  - `get_packaged_docket_operator_dashboard`,
+  - `load_packaged_docket_operator_dashboard_report`,
+  - `execute_packaged_docket_proof_revalidation_queue`,
+  - `persist_packaged_docket_proof_revalidation_queue`.
+
+Existing API and wrapper coverage:
+
+- `applications/complaint_workspace_api.py` already exposes docket dataset view, search, metadata, and graph routes.
+- `complaint_generator/workspace.py` already wraps docket view, search, metadata, and graph operations.
+- `applications/complaint_workspace.py` already registers MCP tool definitions for `complaint.view_docket_dataset`, `complaint.search_docket_dataset`, `complaint.get_docket_dataset_metadata`, and `complaint.get_docket_dataset_graph`.
+
+Browser SDK gap:
+
+- `static/complaint_mcp_sdk.js` currently treats packaged docket operations and `complaint.view_docket_dataset` as docket sync events.
+- It exposes packaged docket helper methods.
+- It should add first-class browser methods for:
+  - `searchDocketDataset(inputPath, query, options)`,
+  - `getDocketDatasetMetadata(inputPath, options)`,
+  - `getDocketDatasetGraph(inputPath, options)`,
+  - and, if absent from the module build, matching methods in `static/complaint_mcp_sdk.mjs`.
+- It should include search, metadata, and graph tools in the docket event set so the Docket lane can refresh consistently after MCP calls.
+
+Tests to lean on before UI work:
+
+- `tests/test_docket_workspace_surface.py` already checks MCP tool registration, service metadata, graph projection, search, PDF ingest hashing, workspace dataset graph behavior, and CLI docket graph behavior.
+- `tests/test_ui_review_multimodal.py` already covers multimodal review behavior, router fallbacks, and provider-chain reporting for a smaller UI review surface.
+- `tests/test_ui_ux_workflow.py` and `playwright/tests/complaint-flow.spec.js` cover the broader screenshot workflow, but the latest run showed two stale assumptions that should be fixed before treating the full audit as a gate:
+  - the hidden `#chat-open-profile` link should not be required as visible in the unified workspace flow,
+  - provider-order expectations should reflect the configured/current router order rather than a hard-coded old order.
+
+### First Coding Milestone
+
+Goal: create a first-class Docket lane that a layperson can use without touching manifest paths, CLI controls, queue settings, or operator-only persistence controls.
+
+Files likely touched:
+
+- `templates/workspace.html` for the Docket tab, document list, selected-document panel, document actions, and advanced disclosure.
+- `static/complaint_app_shell.js` if the workspace shell behavior already belongs there; otherwise keep the first slice local to `templates/workspace.html` and extract only after the flow stabilizes.
+- `static/complaint_mcp_sdk.js` and `static/complaint_mcp_sdk.mjs` for docket search, metadata, graph, and sync-event method coverage.
+- `playwright/tests/complaint-flow.spec.js` or a new focused docket workspace spec for screenshot capture and overlap checks.
+- `tests/test_docket_workspace_surface.py` only if SDK-facing or route-facing behavior needs a small assertion update.
+
+Suggested data shape for the first visible docket item:
+
+- `docket_item_id`,
+- `title`,
+- `document_type`,
+- `source`,
+- `date_filed`,
+- `deadline`,
+- `status`,
+- `labels`,
+- `annotation_count`,
+- `question_count`,
+- `router_status`,
+- `primary_action`,
+- `source_ref`.
+
+Initial visible states:
+
+- **Needs Review**: newly imported or unanalyzed documents.
+- **Important**: documents tied to claims, defenses, deadlines, jurisdiction, service, exhaustion, or retaliation facts.
+- **Deadline**: filings, orders, notices, and response due dates.
+- **Ready For Draft**: items that can be attached to complaint or response drafting.
+- **Needs Source Support**: AI output exists but lacks a citation target or confidence threshold.
+
+First implementation non-goals:
+
+- full PDF annotation editing,
+- full-page OCR correction,
+- replacing the existing packaged docket pipeline,
+- writing new legal strategy logic,
+- changing backend docket parsing,
+- making chat provide uncited legal advice,
+- completing every response-drafting workflow.
+
+### Acceptance Checks For Milestone 1
+
+Playwright/UI:
+
+- Docket appears as a primary workspace tab or first-screen lane, not buried in CLI/MCP tooling.
+- A layperson can see document title, type, source, date/deadline, labels, annotation count, router status, and one obvious next action.
+- Sticky navigation and bottom actions do not cover content on desktop or mobile screenshots.
+- "Ask" opens chat with an explicit `chat_context` for the selected docket item.
+- "Respond" or "Use In Draft" opens the Draft lane with the selected docket item referenced.
+- Operator controls are moved under an "Advanced docket operations" disclosure.
+- Empty states explain the next action without exposing manifest path mechanics as the first required input.
+
+Router/review artifact:
+
+- Screenshot review artifacts should record whether the result came from `multimodal_router`, text fallback, or deterministic fallback.
+- A deterministic fallback should still produce actionable findings and should not be reported as a silent pass.
+- The UI review workflow should tolerate one screenshot at a time as well as the full workspace bundle, because the current router path timed out on the six-image and one-image docket passes.
+
+Service/SDK:
+
+- Browser SDK exposes docket dataset search, metadata, graph, and view calls.
+- Docket search, metadata, and graph calls publish docket sync events consistently.
+- Existing service tests continue to pass without changing docket dataset semantics.
+
+### Fourth Screenshot Review: Docket-To-Chat-To-Draft Journey
+
+Date: 2026-04-20
+
+After the first Docket lane implementation pass, Playwright captured a compact layperson journey:
+
+- `artifacts/ui-audit-docket-plan-review-20260420/screenshots/01-workspace-docket.png`
+- `artifacts/ui-audit-docket-plan-review-20260420/screenshots/02-document-chat-context.png`
+- `artifacts/ui-audit-docket-plan-review-20260420/screenshots/03-review-support.png`
+- `artifacts/ui-audit-docket-plan-review-20260420/screenshots/04-draft-response-context.png`
+
+The four-screenshot bundle was sent to the multimodal UI review workflow, but the bundle review exceeded the useful wait budget and had to be stopped. This confirms the earlier reliability finding: the screenshot review workflow must support bounded per-surface review, visible heartbeat/status, and partial artifacts so a hung bundle does not block planning.
+
+A single-screen review of the document chat screenshot succeeded:
+
+- artifact: `artifacts/ui-audit-docket-plan-review-20260420/reviews/iteration-02-chat-single-review.json`
+- strategy: `multimodal_router`
+- provider: `codex_cli`
+- model: `gpt-5.3-codex`
+
+Router summary:
+
+> The page communicates a document-scoped complaint chat, but key trust and workflow signals are weak for a layperson: source grounding is not inspectable, scope is easy to miss, stage/router state is ambiguous, and there is no clear save-to-annotation action.
+
+Human review and router review now agree on the next UX risks:
+
+1. **Docket is improved but still operator-leaning.** It shows document status, router/indexing status, source, labels, and the safer "Review Before Draft" action. It still needs a stronger "what this document affects" summary, explicit deadline extraction, and a visible annotation/label editor instead of a placeholder Add Label action.
+2. **Document chat has scope but not inspectable grounding.** The chat shows selected filing context and labels, but does not show the document text/page beside the answer, citation anchors, page/span targets, or confidence/source-support state per answer.
+3. **Chat lacks save actions.** The next chat slice must add Save Annotation, Save Deadline, Save Issue, Save Evidence Task, and Save Draft Note actions on assistant answers, with a confirmation showing where the saved item went.
+4. **Router path is not visible enough in chat.** The chat surface should show whether an answer used `llm_router`, `multimodal_router`, text fallback, or deterministic fallback, plus whether the answer had enough source support.
+5. **Raw technical IDs are too prominent.** Long DID/session identifiers should move into details/diagnostics. The first visible status should say "file attached," "answering from selected filing," "last synced," and "source support ready/not ready."
+6. **Review is still a long proof report.** It contains useful proof-readiness details, but the layperson needs a shorter top decision: gather more proof, ask about a document, fix intake/caption, or move to Draft with blockers visible.
+7. **Draft is still too dense.** Complaint drafting, response drafting, release-gate diagnostics, export controls, and operator controls compete on one page. Draft needs an intent selector and a simpler release-gate explanation before exposing full diagnostics.
+8. **Global navigation is still noisy.** Chat and workspace surfaces expose many routes at once. Advanced routes such as Trace, SDK, Dashboards, and operator tools should collapse behind an advanced menu in the layperson path.
+
+### Revised Next Implementation Slices
+
+Slice 2A: Document chat grounding.
+
+- Add a persistent scope banner above the chat composer: "Answering from selected filing only," file name, labels, and Change Scope.
+- Add a document/source side panel for the selected filing with citation jump targets.
+- Add per-answer citation chips such as document, page, paragraph, or selected span.
+- Add per-answer router metadata: `llm_router`, `multimodal_router`, fallback, confidence, and "not enough source support" state.
+- Add save actions for Annotation, Deadline, Issue, Evidence Task, and Draft Note.
+
+Slice 2B: Docket annotations and labels.
+
+- Replace Add Label placeholder with a real label editor.
+- Persist a lightweight annotation object with `docket_item_id`, label, note, source text/span, confidence, router path, and saved-as type.
+- Surface annotation count and the last saved annotation in the Docket list.
+- Extract or manually set deadlines from filings/orders and show them as first-class Docket chips.
+
+Slice 2C: Review compression.
+
+- Add a top "Decision Now" strip: Gather proof, Ask about document, Fix intake/caption, or Draft with blockers.
+- De-duplicate repeated proof cards below the fold.
+- Link each proof gap to a Docket item, chat question, or evidence upload action.
+
+Slice 2D: Draft intent split.
+
+- Add a first control for "I am drafting a complaint" vs "I am responding to a complaint/order/motion."
+- If responding, require a selected Docket item and show the exact document being answered.
+- Move full release-gate diagnostics behind details; keep the layperson explanation and primary blocker visible.
+
+Slice 2E: Router review reliability.
+
+- Run multimodal screenshot review one surface at a time by default.
+- Save partial artifacts when one page review succeeds and another hangs.
+- Show heartbeat/status in the UI review panel: pending, router, text fallback, deterministic fallback, timed out.
+- Treat bundle timeout as a review finding, not a hard stop.
+
+### Implementation Gate Before Slice 2
+
+Before starting the next code slice, use this gate to keep the implementation narrow and testable.
+
+Primary user story:
+
+> A layperson selects one docket document, asks a question about it, sees exactly what source the answer relies on, saves the answer as a label/annotation/deadline/issue/draft note, and sees that saved item reflected back in Docket, Review, and Draft.
+
+Required data contract:
+
+- `docket_item_id`
+- `document_title`
+- `document_type`
+- `source_ref`
+- `page_ref` or `span_ref`
+- `selected_text`
+- `label`
+- `plain_language_note`
+- `saved_as`: annotation, deadline, issue, evidence_task, or draft_note
+- `router_path`: `llm_router`, `multimodal_router`, text fallback, or deterministic fallback
+- `retrieval_method`: BM25, vector, graph, full_text, citation_resolver, manual, or unavailable
+- `confidence`
+- `source_support`: supported, partial, unsupported, or not_indexed
+- `created_at`
+
+Minimum UI contract:
+
+- Docket document list shows annotation count, deadline count, last saved label, and source-support state.
+- Selected document panel shows a source preview and primary action.
+- Chat composer shows persistent scope before send.
+- Chat answer card shows citations/source state before save actions.
+- Save action creates a visible item without leaving the current task.
+- Review links proof gaps to saved docket annotations where possible.
+- Draft shows whether the selected saved item is being used for a complaint or a response.
+
+Minimum Playwright contract:
+
+- Select document from Docket.
+- Add a label.
+- Ask about the selected document.
+- Assert `chat_context` is present and visible.
+- Render an answer card with router/source metadata, even when using a deterministic mocked response.
+- Save the answer as an annotation or deadline.
+- Return to Docket and assert annotation/deadline count changed.
+- Open Review and Draft and assert the saved item is referenced.
+
+Non-goals for Slice 2:
+
+- Full PDF editing.
+- Full multi-document RAG synthesis.
+- Perfect OCR repair.
+- Complete response pleading generation.
+- Moving operator packaging, CAR, or provenance controls into the layperson path.
+
 ## Workstream 1: Better questions
 
 Primary files:

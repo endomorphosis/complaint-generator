@@ -661,7 +661,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#chat-context-summary')).toContainText(/Jane Doe alleges retaliation/i);
     await expect(page.locator('#chat-form input')).toHaveValue(/Mediator, help turn this into testimony-ready narrative/i);
     await expect(page.locator('#chat-open-profile')).toHaveAttribute('href', /user_id=/);
-    await page.locator('#chat-open-profile').click();
+    await page.goto(await page.locator('#chat-open-profile').getAttribute('href'));
     await expect(page).toHaveURL(/\/profile\?/);
     await expect(page.locator('#profile-context-card')).toBeVisible();
     await expect(page.locator('#profile-context-summary')).toContainText(/did:key:workspace-flow-/);
@@ -708,6 +708,21 @@ test.describe('complaint generation workflow', () => {
 
     await expect(page.locator('#evidence-list')).toContainText(/Witness statement/i);
     await expect(page.locator('#evidence-list')).toContainText(/termination-timeline\.txt/i);
+    await page.getByRole('button', { name: 'Docket', exact: true }).click();
+    await expect(page.locator('[data-tab-panel="docket"]')).toHaveClass(/is-active/);
+    await expect(page.locator('#focus-rail-stage')).toContainText(/You are in Docket\./i);
+    await expect(page.locator('#focus-rail-title')).toContainText(/Docket stage:/i);
+    await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.view_docket_dataset/i);
+    await expect(page.locator('#docket-document-list')).toContainText(/Witness statement/i);
+    await expect(page.locator('#docket-document-list')).toContainText(/vectors:/i);
+    await expect(page.locator('#docket-selected-preview')).toContainText(/Next action:/i);
+    await expect(page.locator('#docket-selected-preview')).toContainText(/OCR:/i);
+    await expect(page.locator('#docket-selected-preview')).toContainText(/Vectors created:/i);
+    await expect(page.locator('#docket-selected-preview')).toContainText(/Bluebook citations:/i);
+    await expect(page.locator('#docket-ask-chat-link')).toHaveAttribute('href', /chat_context=/i);
+    await expect(page.locator('#docket-advanced-operations')).toContainText(/Advanced docket operations/i);
+    await page.locator('#docket-use-in-draft-button').click();
+    await expect(page.locator('[data-tab-panel="draft"]')).toHaveClass(/is-active/);
     await page.getByRole('button', { name: 'Review', exact: true }).click();
     await expect(page.locator('#focus-rail-stage')).toContainText(/You are in Review\./i);
     await expect(page.locator('#focus-rail-title')).toContainText(/Review stage:/i);

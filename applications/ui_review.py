@@ -1623,7 +1623,27 @@ def _resolve_ui_review_backend(
     return backend_kwargs
 
 
-def _call_with_timeout(fn, *, timeout_s: float):
+def _ui_review_heartbeat_seconds() -> float:
+    raw_value = str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_HEARTBEAT_SECONDS", "") or "").strip()
+    if not raw_value:
+        raw_value = str(os.getenv("COMPLAINT_UI_REVIEW_HEARTBEAT_SECONDS", "") or "").strip()
+    if not raw_value:
+        return 0.0
+    try:
+        return max(0.0, float(raw_value))
+    except Exception:
+        return 0.0
+
+
+def _emit_ui_review_heartbeat(label: str, *, elapsed_s: float, timeout_s: float) -> None:
+    safe_label = str(label or "ui_review").strip() or "ui_review"
+    print(
+        f"[ui_review] stage={safe_label} elapsed={elapsed_s:.1f}s timeout={timeout_s:g}s",
+        flush=True,
+    )
+
+
+def _call_with_timeout(fn, *, timeout_s: float, label: str = "ui_review"):
     result_queue: Queue[tuple[str, Any]] = Queue(maxsize=1)
 
     def _runner():
@@ -1634,9 +1654,23 @@ def _call_with_timeout(fn, *, timeout_s: float):
 
     worker = threading.Thread(target=_runner, name="ui-review-timeout-worker", daemon=True)
     worker.start()
-    worker.join(timeout=max(0.001, float(timeout_s)))
+    timeout_value = max(0.001, float(timeout_s))
+    heartbeat_s = _ui_review_heartbeat_seconds()
+    started_at = perf_counter()
+    next_heartbeat_at = heartbeat_s if heartbeat_s > 0 else timeout_value
+    while worker.is_alive():
+        elapsed_s = perf_counter() - started_at
+        remaining_s = timeout_value - elapsed_s
+        if remaining_s <= 0:
+            break
+        wait_s = min(remaining_s, max(0.001, next_heartbeat_at - elapsed_s))
+        worker.join(timeout=wait_s)
+        elapsed_s = perf_counter() - started_at
+        if heartbeat_s > 0 and worker.is_alive() and elapsed_s >= next_heartbeat_at:
+            _emit_ui_review_heartbeat(label, elapsed_s=elapsed_s, timeout_s=timeout_value)
+            next_heartbeat_at += heartbeat_s
     if worker.is_alive():
-        raise TimeoutError(f"UI review timed out after {float(timeout_s):g}s")
+        raise TimeoutError(f"{label} timed out after {float(timeout_s):g}s")
     status, payload = result_queue.get_nowait()
     if status == "err":
         raise payload
@@ -1668,6 +1702,16 @@ def _complaint_output_review_timeout_for_provider(provider: Optional[str]) -> fl
 
 def _ui_review_timeout_for_provider(provider: Optional[str]) -> float:
     normalized = str(provider or "").strip().lower()
+    provider_env = str(os.getenv(f"COMPLAINT_GENERATOR_UI_REVIEW_TIMEOUT_SECONDS_{normalized.upper()}", "") or "").strip()
+    global_env = str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_TIMEOUT_SECONDS", "") or "").strip()
+    legacy_env = str(os.getenv("COMPLAINT_UI_REVIEW_TIMEOUT_SECONDS", "") or "").strip()
+    for candidate in (provider_env, global_env, legacy_env):
+        if not candidate:
+            continue
+        try:
+            return max(1.0, float(candidate))
+        except Exception:
+            continue
     return float(_TEXT_UI_REVIEW_TIMEOUTS.get(normalized, DEFAULT_UI_REVIEW_TIMEOUT_S))
 
 
@@ -1757,6 +1801,7 @@ def _review_with_multimodal_router(
     )
     backend = MultimodalRouterBackend(**backend_kwargs)
     timeout_s = float(backend_kwargs.get("timeout") or DEFAULT_UI_REVIEW_TIMEOUT_S)
+    review_label = "multimodal_router:" + ",".join(path.stem for path in prepared_screenshots[:3])
     started_at = perf_counter()
     raw_response = _call_with_timeout(
         lambda: backend(
@@ -1768,6 +1813,7 @@ def _review_with_multimodal_router(
             ),
         ),
         timeout_s=timeout_s,
+        label=review_label,
     )
     elapsed_s = perf_counter() - started_at
     return (
@@ -1793,7 +1839,7 @@ def _review_with_text_router(
     backend = LLMRouterBackend(**backend_kwargs)
     timeout_s = float(backend_kwargs.get("timeout") or DEFAULT_UI_REVIEW_TIMEOUT_S)
     started_at = perf_counter()
-    raw_response = _call_with_timeout(lambda: backend(prompt), timeout_s=timeout_s)
+    raw_response = _call_with_timeout(lambda: backend(prompt), timeout_s=timeout_s, label="llm_router:text_ui_review")
     elapsed_s = perf_counter() - started_at
     return (
         _parse_json_response(raw_response),

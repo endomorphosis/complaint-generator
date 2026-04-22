@@ -322,6 +322,70 @@ window.ChatPage = (function() {
         readiness.classList.toggle('is-warning', false);
     }
 
+    function truncateForPreview(value, maxLength) {
+        const text = String(value || '').replace(/\s+/g, ' ').trim();
+        const limit = maxLength || 220;
+        if (text.length <= limit) {
+            return text;
+        }
+        return `${text.slice(0, limit - 3)}...`;
+    }
+
+    function updateGroundingPreview(handoff, chatContext) {
+        const preview = document.getElementById('chat-grounding-preview');
+        if (!preview) {
+            return;
+        }
+        const filing = chatContext && chatContext.filing ? chatContext.filing : {};
+        const hasFiling = Boolean(filing.title || filing.id);
+        const routerMode = String(
+            (chatContext && (chatContext.routerMode || chatContext.router_mode))
+            || (hasFiling ? 'multimodal_router / llm_router' : 'llm_router')
+        ).trim();
+        const sourceSurface = String(
+            (chatContext && (chatContext.sourceSurface || chatContext.source_surface))
+            || (handoff && handoff.source)
+            || 'workspace handoff'
+        ).trim();
+        const labels = chatContext && Array.isArray(chatContext.labels) ? chatContext.labels.filter(Boolean) : [];
+        const excerpt = truncateForPreview(
+            (chatContext && chatContext.excerpt)
+            || filing.excerpt
+            || filing.summary
+            || filing.text
+            || filing.preview
+            || ''
+        );
+        setTextForId('chat-grounding-route', hasFiling ? routerMode : 'general intake');
+        setTextForId('chat-grounding-document', filing.title || filing.id || 'none selected');
+        setTextForId('chat-grounding-labels', labels.length ? labels.join(', ') : (filing.use || 'none'));
+        setTextForId(
+            'chat-grounding-route-rationale',
+            hasFiling
+                ? 'Use document-aware routing because a filing is attached'
+                : 'Use intake routing because no filing is selected'
+        );
+        setTextForId('chat-grounding-source', sourceSurface || 'workspace handoff');
+        setTextForId(
+            'chat-grounding-excerpt',
+            excerpt
+                ? `Passage preview: ${excerpt}`
+                : (hasFiling
+                    ? 'This selected filing will be attached to the next router request. No passage excerpt was provided.'
+                    : 'Select a filing from the dashboard to preview the passage or summary that will guide the next answer.')
+        );
+        const returnTarget = (handoff && handoff.returnTo) || '/dashboards#docket-dataset-parquet-dashboard';
+        const changeLink = document.getElementById('chat-grounding-change-link');
+        const returnLink = document.getElementById('chat-grounding-return-link');
+        if (changeLink) {
+            changeLink.href = returnTarget.includes('#') ? returnTarget : `${returnTarget}#docket-dataset-parquet-dashboard`;
+        }
+        if (returnLink) {
+            returnLink.href = returnTarget;
+        }
+        preview.hidden = !hasFiling;
+    }
+
     function updateStageRail(handoff, chatContext) {
         const stage = describeChatStage(handoff, chatContext);
         const links = getCurrentLinks();
@@ -370,6 +434,7 @@ window.ChatPage = (function() {
         setStageItemState('chat-stage-review', stage === 'review' ? 'Current' : (stage === 'draft' ? 'Done' : 'Later'), stage === 'review');
         setStageItemState('chat-stage-draft', stage === 'draft' ? 'Current' : 'Later', stage === 'draft');
         updateActiveContextStrip(handoff, chatContext, stage);
+        updateGroundingPreview(handoff, chatContext);
         updateComposerReadiness(handoff, chatContext);
     }
 
@@ -509,6 +574,7 @@ window.ChatPage = (function() {
                 ? 'Intake question plan'
                 : (isFilingContext ? 'Active filing context' : 'Workspace handoff');
         }
+        contextCard.classList.toggle('is-secondary-context', Boolean(isFilingContext));
         if (intakeDenoiseCard) {
             intakeDenoiseCard.hidden = !isIntakeDenoising;
         }
@@ -536,8 +602,9 @@ window.ChatPage = (function() {
         if (chatContext && chatContext.labels && chatContext.labels.length) {
             contextDetails.push(`Labels: ${chatContext.labels.join(', ')}.`);
         }
-        if (chatContext && chatContext.routerMode) {
-            contextDetails.push(`Analysis route: ${chatContext.routerMode}.`);
+        const routerMode = chatContext && (chatContext.routerMode || chatContext.router_mode);
+        if (routerMode) {
+            contextDetails.push(`Analysis route: ${routerMode}.`);
         }
         if (chatContext && chatContext.excerpt) {
             contextDetails.push(`Excerpt: ${chatContext.excerpt}`);

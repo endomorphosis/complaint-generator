@@ -460,6 +460,31 @@ class ComplaintMcpClient {
         }, options || {}));
     }
 
+    viewDocketDataset(inputPath, options = {}) {
+        return this.callTool('complaint.view_docket_dataset', Object.assign({
+            input_path: inputPath,
+        }, options || {}));
+    }
+
+    searchDocketDataset(inputPath, query, options = {}) {
+        return this.callTool('complaint.search_docket_dataset', Object.assign({
+            input_path: inputPath,
+            query: query,
+        }, options || {}));
+    }
+
+    getDocketDatasetMetadata(inputPath, options = {}) {
+        return this.callTool('complaint.get_docket_dataset_metadata', Object.assign({
+            input_path: inputPath,
+        }, options || {}));
+    }
+
+    getDocketDatasetGraph(inputPath, options = {}) {
+        return this.callTool('complaint.get_docket_dataset_graph', Object.assign({
+            input_path: inputPath,
+        }, options || {}));
+    }
+
     getPackagedDocketOperatorDashboard(manifestPath) {
         return this.callTool('complaint.get_packaged_docket_operator_dashboard', {
             manifest_path: manifestPath,

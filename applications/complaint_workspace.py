@@ -3854,10 +3854,9 @@ class ComplaintWorkspaceService:
         }
 
     def get_provider_diagnostics(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        from applications import ui_review as ui_review_module
-        from ipfs_datasets_py import llm_router
-
         def _vault_value(*names: str) -> str:
+            if str(os.getenv("COMPLAINT_PROVIDER_DIAGNOSTICS_CHECK_SECRETS", "") or "").strip() != "1":
+                return ""
             try:
                 from ipfs_datasets_py.mcp_server.secrets_vault import get_secrets_vault
 
@@ -3871,6 +3870,8 @@ class ComplaintWorkspaceService:
             return ""
 
         def _keyring_value(*names: str) -> str:
+            if str(os.getenv("COMPLAINT_PROVIDER_DIAGNOSTICS_CHECK_SECRETS", "") or "").strip() != "1":
+                return ""
             try:
                 import keyring  # type: ignore
 
@@ -3896,25 +3897,9 @@ class ComplaintWorkspaceService:
                 return "vault"
             if _keyring_value("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN"):
                 return "keyring"
-            try:
-                from ipfs_datasets_py.utils.engine_env import _openai_key_from_common_files
-
-                if str(_openai_key_from_common_files() or "").strip():
-                    return "local_cli_config"
-            except Exception:
-                pass
             return "unavailable"
 
         def _resolve_openai_key() -> str:
-            resolver = getattr(llm_router, "_resolve_openai_api_key", None)
-            if callable(resolver):
-                try:
-                    resolved = str(resolver() or "").strip()
-                    if resolved:
-                        return resolved
-                except Exception:
-                    pass
-
             resolved = _first_env("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
             if resolved:
                 return resolved
@@ -3926,13 +3911,7 @@ class ComplaintWorkspaceService:
             resolved = _keyring_value("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
             if resolved:
                 return resolved
-
-            try:
-                from ipfs_datasets_py.utils.engine_env import _openai_key_from_common_files
-
-                return str(_openai_key_from_common_files() or "").strip()
-            except Exception:
-                return ""
+            return ""
 
         def _source_for_hf() -> str:
             if _first_env(
@@ -3965,21 +3944,93 @@ class ComplaintWorkspaceService:
                 "HF_API_TOKEN",
             ):
                 return "keyring"
-            if str(llm_router._resolve_hf_api_token() or "").strip():
-                return "huggingface_cli"
             return "unavailable"
 
-        default_order = list(getattr(llm_router, "_UNPINNED_OPTIONAL_PROVIDER_ORDER", []))
+        def _resolve_hf_token_for_diagnostics() -> str:
+            resolved = _first_env(
+                "IPFS_DATASETS_PY_HF_API_TOKEN",
+                "HUGGINGFACEHUB_API_TOKEN",
+                "HF_TOKEN",
+                "HUGGINGFACE_HUB_TOKEN",
+                "HUGGINGFACE_API_KEY",
+                "HUGGINGFACE_API_TOKEN",
+                "HF_API_TOKEN",
+            )
+            if resolved:
+                return resolved
+            resolved = _vault_value(
+                "IPFS_DATASETS_PY_HF_API_TOKEN",
+                "HUGGINGFACEHUB_API_TOKEN",
+                "HF_TOKEN",
+                "HUGGINGFACE_HUB_TOKEN",
+                "HUGGINGFACE_API_KEY",
+                "HUGGINGFACE_API_TOKEN",
+                "HF_API_TOKEN",
+            )
+            if resolved:
+                return resolved
+            return _keyring_value(
+                "IPFS_DATASETS_PY_HF_API_TOKEN",
+                "HUGGINGFACEHUB_API_TOKEN",
+                "HF_TOKEN",
+                "HUGGINGFACE_HUB_TOKEN",
+                "HUGGINGFACE_API_KEY",
+                "HUGGINGFACE_API_TOKEN",
+                "HF_API_TOKEN",
+            )
+
+        def _copilot_command_available(command: str) -> bool:
+            parts = str(command or "").strip().split()
+            if not parts:
+                return False
+            if parts[0] == "npx":
+                return True
+            return shutil.which(parts[0]) is not None
+
+        def _copilot_supports_image_inputs_for_diagnostics() -> bool:
+            explicit = str(os.getenv("IPFS_DATASETS_PY_COPILOT_CLI_SUPPORTS_IMAGE_INPUTS", "") or "").strip().lower()
+            if explicit:
+                return explicit in {"1", "true", "yes", "on"}
+            # Avoid running `copilot --help` or `npx ... --help` here; provider diagnostics
+            # must stay fast and should not spawn long-lived CLI probes from the browser UI.
+            return False
+
+        raw_default_order = [
+            "codex_cli",
+            "copilot_cli",
+            "openai",
+            "hf_inference_api",
+            "openrouter",
+            "gemini_cli",
+            "claude_code",
+            "claude_py",
+            "gemini_py",
+            "copilot_sdk",
+        ]
+        preferred_default_order = [
+            "codex_cli",
+            "copilot_cli",
+            "openai",
+            "hf_inference_api",
+        ]
+        default_order = [
+            item
+            for item in preferred_default_order
+            if item in set(raw_default_order) or item in {"codex_cli", "copilot_cli", "openai", "hf_inference_api"}
+        ]
+        default_order.extend(
+            item
+            for item in raw_default_order
+            if item and item not in default_order
+        )
         forced_provider = str(os.getenv("IPFS_DATASETS_PY_LLM_PROVIDER", "") or "").strip()
         codex_path = shutil.which("codex") or ""
         copilot_path = shutil.which("copilot") or ""
         openai_key = _resolve_openai_key()
-        hf_token = str(llm_router._resolve_hf_api_token() or "").strip()
-        copilot_provider = llm_router._builtin_provider_by_name("copilot_cli")
         copilot_command = os.getenv("IPFS_DATASETS_PY_COPILOT_CLI_CMD", "npx --yes @github/copilot -p {prompt}")
-        copilot_supports_image_inputs = bool(
-            getattr(llm_router, "_copilot_cli_supports_image_inputs", lambda _command: False)(copilot_command)
-        )
+        hf_token = _resolve_hf_token_for_diagnostics()
+        copilot_available = _copilot_command_available(copilot_command)
+        copilot_supports_image_inputs = _copilot_supports_image_inputs_for_diagnostics()
 
         providers = [
             {
@@ -4001,12 +4052,12 @@ class ComplaintWorkspaceService:
             },
             {
                 "name": "copilot_cli",
-                "available": copilot_provider is not None,
+                "available": copilot_available,
                 "reason": (
                     "Copilot CLI command template resolved and is available."
-                    if copilot_provider is not None and copilot_path
+                    if copilot_available and copilot_path
                     else "Copilot fallback is available through the configured command template."
-                    if copilot_provider is not None
+                    if copilot_available
                     else "Copilot CLI command is not currently available on this machine."
                 ),
                 "binary_path": copilot_path or None,
@@ -4014,9 +4065,9 @@ class ComplaintWorkspaceService:
                 "supports_multimodal_ui_review": copilot_supports_image_inputs,
                 "credential_source": (
                     "github_copilot_cli"
-                    if copilot_provider is not None and copilot_path
+                    if copilot_available and copilot_path
                     else "github_copilot_command_template"
-                    if copilot_provider is not None
+                    if copilot_available
                     else "unavailable"
                 ),
                 "draft_timeout_seconds": _llm_draft_timeout_for_provider("copilot_cli"),
@@ -4028,8 +4079,11 @@ class ComplaintWorkspaceService:
                 "credential_source": _source_for_hf(),
                 "base_url": str(os.getenv("IPFS_DATASETS_PY_HF_INFERENCE_BASE_URL", "https://router.huggingface.co/hf-inference/models")).rstrip("/"),
                 "draft_timeout_seconds": _llm_draft_timeout_for_provider("hf_inference_api"),
-                "ui_review_model": ui_review_module._ui_review_model_for_provider("hf_inference_api"),
-                "ui_review_timeout_seconds": ui_review_module._ui_review_timeout_for_provider("hf_inference_api"),
+                "ui_review_model": str(
+                    os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL_HF_INFERENCE_API", "") or ""
+                ).strip()
+                or "Qwen/Qwen2.5-VL-7B-Instruct",
+                "ui_review_timeout_seconds": _llm_draft_timeout_for_provider("hf_inference_api"),
             },
         ]
 
@@ -4044,20 +4098,24 @@ class ComplaintWorkspaceService:
                 str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "") or "").strip()
                 or DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN[0]
             ),
-            "ui_review_default_provider": ui_review_module.DEFAULT_UI_REVIEW_PROVIDER,
-            "ui_review_default_model": ui_review_module._ui_review_model_for_provider(
-                ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
-            ),
+            "ui_review_default_provider": str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_PROVIDER", "") or "").strip()
+            or "codex_cli",
+            "ui_review_default_model": str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL_CODEX_CLI", "") or "").strip()
+            or str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL", "") or "").strip()
+            or "gpt-5.3-codex",
             "ui_review_multimodal_rate_limit_fallbacks": {
-                "codex_cli": list(ui_review_module._multimodal_rate_limit_fallback_chain("codex_cli")),
-                "copilot_cli": list(ui_review_module._multimodal_rate_limit_fallback_chain("copilot_cli")),
+                "codex_cli": ["copilot_cli", "hf_inference_api"],
+                "copilot_cli": ["hf_inference_api"],
             },
-            "ui_review_hf_fallback_model": ui_review_module._ui_review_model_for_provider("hf_inference_api"),
+            "ui_review_hf_fallback_model": str(
+                os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL_HF_INFERENCE_API", "") or ""
+            ).strip()
+            or "Qwen/Qwen2.5-VL-7B-Instruct",
             "providers": providers,
             "summary": {
                 "codex_available": bool(codex_path),
                 "openai_available": bool(openai_key),
-                "copilot_available": copilot_provider is not None,
+                "copilot_available": copilot_available,
                 "huggingface_available": bool(hf_token),
             },
         }

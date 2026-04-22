@@ -970,7 +970,7 @@ function providerDiagnosticsPayload(userId = 'did:key:playwright-demo') {
   return {
     user_id: userId,
     forced_provider: null,
-    default_order: ['codex_cli', 'openai', 'copilot_cli', 'hf_inference_api'],
+    default_order: ['codex_cli', 'copilot_cli', 'openai', 'hf_inference_api'],
     effective_default_provider: 'codex_cli',
     complaint_draft_default_order: ['codex_cli', 'copilot_cli', 'hf_inference_api'],
     effective_complaint_draft_provider: 'codex_cli',
