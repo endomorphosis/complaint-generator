@@ -805,18 +805,16 @@ test.describe('website surface navigation', () => {
     await page.locator('[data-tab-target="docket"]').click();
     const docketPanel = page.locator('[data-tab-panel="docket"]');
     await expect(docketPanel).toHaveClass(/is-active/);
+    await expect(docketPanel).toHaveClass(/mobile-docket-view-documents/);
     await expect(page.locator('#docket-current-task-title')).toBeVisible();
+    await expect(page.locator('#docket-mobile-show-documents')).toBeVisible();
+    await expect(page.locator('#docket-mobile-show-documents')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#docket-mobile-show-selected')).toBeDisabled();
+    await expect(page.locator('#docket-selected-rail')).toBeHidden();
     await expect(page.locator('#docket-document-list')).toBeVisible();
-    await expect(page.locator('#docket-mobile-ask-chat-link')).toBeVisible();
-    await expect(page.locator('#docket-mobile-label-button')).toBeVisible();
-    await expect(page.locator('#docket-mobile-annotation-button')).toBeVisible();
-    await expect(page.locator('#docket-mobile-deadline-button')).toBeVisible();
-    await expect(page.locator('#docket-mobile-ask-chat-link')).toHaveAttribute('aria-disabled', 'true');
-    await expect(page.locator('#docket-mobile-label-button')).toBeDisabled();
-    await expect(page.locator('#docket-mobile-annotation-button')).toBeDisabled();
-    await expect(page.locator('#docket-mobile-deadline-button')).toBeDisabled();
-    await expect(page.locator('#docket-mobile-ask-chat-link')).toContainText(/Locked: Ask About Document/i);
-    await expect(page.locator('#docket-mobile-action-note')).toContainText(/Load a docket manifest or import evidence first/i);
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toBeHidden();
+    await expect(page.locator('#docket-mobile-action-note')).toBeHidden();
+    await expect(page.locator('.docket-selected-card')).toBeHidden();
     await expect(page.locator('.docket-action-bar.is-empty')).toBeHidden();
     await expect(page.locator('.docket-loader-card .readiness-list')).toBeHidden();
     await expect(page.locator('.docket-loader-card #docket-summary-chips')).toBeHidden();
@@ -833,15 +831,6 @@ test.describe('website surface navigation', () => {
     });
     expect(panelMetrics.scrollWidth).toBeLessThanOrEqual(panelMetrics.clientWidth + 2);
     expect(panelMetrics.rectWidth).toBeGreaterThanOrEqual(panelMetrics.viewportWidth - 56);
-
-    const actionMetrics = await page.locator('.docket-mobile-action-strip').evaluate((node) => {
-      const rect = node.getBoundingClientRect();
-      return {
-        width: rect.width,
-        viewportWidth: window.innerWidth,
-      };
-    });
-    expect(actionMetrics.width).toBeGreaterThanOrEqual(actionMetrics.viewportWidth - 110);
 
     const screenshotPath = testInfo.outputPath('workspace-docket-mobile.png');
     await docketPanel.screenshot({ path: screenshotPath });
@@ -872,36 +861,87 @@ test.describe('website surface navigation', () => {
     const docketPanel = page.locator('[data-tab-panel="docket"]');
     await expect(docketPanel).toHaveClass(/is-active/);
     await expect(docketPanel).toHaveClass(/has-docket-items/);
+    await expect(docketPanel).toHaveClass(/mobile-docket-view-selected/);
+    await expect(page.locator('#docket-mobile-show-documents')).toBeVisible();
+    await expect(page.locator('#docket-mobile-show-documents')).toContainText(/Back to Documents [(]1[)]/i);
+    await expect(page.locator('#docket-mobile-show-selected')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#docket-mobile-show-selected')).toContainText(/Viewing Selected/i);
+    await expect(page.locator('.docket-documents-card')).toBeHidden();
+    await expect(page.locator('[data-tab-panel="docket"] .stage-banner')).toBeHidden();
     await expect(page.locator('#docket-current-task-title')).toContainText(/Termination timeline email/i);
+    await expect(page.locator('#docket-selected-rail')).toBeVisible();
+    await expect(page.locator('#docket-selected-rail-label')).toContainText(/Selected document/i);
+    await expect(page.locator('#docket-selected-rail-title')).toContainText(/Termination timeline email/i);
+    await expect(page.locator('#docket-selected-rail-meta')).toContainText(/Inbox export/i);
+    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Review: Not reviewed/i);
+    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Draft: review first/i);
+    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/deadline: none/i);
     await expect(page.locator('#docket-mobile-ask-chat-link')).toBeVisible();
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toContainText(/1[.] Ask About Selected Document/i);
     await expect(page.locator('#docket-mobile-ask-chat-link')).not.toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toHaveClass(/docket-mobile-primary-action/);
+    await expect(page.locator('#docket-mobile-label-button')).toHaveClass(/docket-mobile-secondary-action/);
+    await expect(page.locator('#docket-mobile-annotation-button')).toHaveClass(/docket-mobile-secondary-action/);
+    await expect(page.locator('#docket-mobile-deadline-button')).toHaveClass(/docket-mobile-deadline-action/);
+    await expect(page.locator('#docket-mobile-ask-scope')).toContainText(/Chat scope: Termination timeline email only/i);
     await expect(page.locator('#docket-mobile-label-button')).toBeEnabled();
+    await expect(page.locator('#docket-mobile-label-button')).toContainText(/2[.] Label Document/i);
     await expect(page.locator('#docket-mobile-annotation-button')).toBeEnabled();
+    await expect(page.locator('#docket-mobile-annotation-button')).toContainText(/3[.] Add Annotation/i);
     await expect(page.locator('#docket-mobile-deadline-button')).toBeEnabled();
+    await expect(page.locator('#docket-mobile-deadline-button')).toContainText(/4[.] Mark Deadline To Confirm/i);
     await expect(page.locator('#docket-mobile-action-note')).toContainText(/Actions apply to the selected document/i);
     await expect(page.locator('.docket-loader-card')).toBeHidden();
     await expect(page.locator('.docket-action-bar')).toBeHidden();
     await expect(page.locator('#docket-selected-chips')).toBeHidden();
     await expect(page.locator('#docket-selected-title')).toContainText(/Termination timeline email/i);
+    await expect(page.locator('#docket-source-summary')).toBeVisible();
+    await expect(page.locator('#docket-source-summary-title')).toContainText(/Selected source summary/i);
+    await expect(page.locator('#docket-source-summary-next')).toContainText(/Review Before Draft is the next step/i);
+    await expect(page.locator('#docket-mobile-technical-details')).toBeVisible();
+    await expect(page.locator('#docket-mobile-technical-details')).not.toHaveAttribute('open', '');
 
     const metrics = await docketPanel.evaluate((node) => {
-      const preview = document.querySelector('.docket-selected-card .docket-preview');
+      const summary = document.querySelector('#docket-source-summary');
+      const rail = document.querySelector('#docket-selected-rail');
+      const actions = document.querySelector('.docket-mobile-action-strip');
       const rect = node.getBoundingClientRect();
-      const previewRect = preview.getBoundingClientRect();
+      const summaryRect = summary.getBoundingClientRect();
+      const railRect = rail.getBoundingClientRect();
+      const actionsRect = actions.getBoundingClientRect();
       const askStyle = getComputedStyle(document.querySelector('#docket-mobile-ask-chat-link'));
+      const previewDisplay = getComputedStyle(document.querySelector('#docket-selected-preview').closest('.docket-preview')).display;
       return {
         clientWidth: node.clientWidth,
         scrollWidth: node.scrollWidth,
         rectWidth: rect.width,
         viewportWidth: window.innerWidth,
-        previewHeight: previewRect.height,
+        summaryHeight: summaryRect.height,
+        railHeight: railRect.height,
+        railBottom: railRect.bottom,
+        actionsTop: actionsRect.top,
+        previewDisplay,
         askColor: askStyle.color,
       };
     });
     expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 2);
     expect(metrics.rectWidth).toBeGreaterThanOrEqual(metrics.viewportWidth - 56);
-    expect(metrics.previewHeight).toBeLessThanOrEqual(280);
+    expect(metrics.summaryHeight).toBeLessThanOrEqual(360);
+    expect(metrics.railHeight).toBeLessThanOrEqual(150);
+    expect(metrics.railBottom).toBeLessThanOrEqual(metrics.actionsTop);
+    expect(metrics.previewDisplay).toBe('none');
     expect(metrics.askColor).toBe('rgb(255, 255, 255)');
+
+    await page.locator('#docket-mobile-show-documents').click();
+    await expect(docketPanel).toHaveClass(/mobile-docket-view-documents/);
+    await expect(page.locator('.docket-documents-card')).toBeVisible();
+    await expect(page.locator('#docket-selected-rail')).toBeHidden();
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toBeHidden();
+
+    await page.locator('#docket-mobile-show-selected').click();
+    await expect(docketPanel).toHaveClass(/mobile-docket-view-selected/);
+    await expect(page.locator('.docket-documents-card')).toBeHidden();
+    await expect(page.locator('#docket-selected-rail')).toBeVisible();
 
     const screenshotPath = testInfo.outputPath('workspace-docket-mobile-loaded.png');
     await docketPanel.screenshot({ path: screenshotPath });

@@ -535,14 +535,17 @@ Implementation artifacts:
 - Final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/04-workspace-docket-mobile-final-empty-state.png`
 - Simplified locked-state screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/06-workspace-docket-mobile-locked-empty-state.png`
 - Loaded-document screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/09-workspace-docket-mobile-loaded-document-final.png`
+- Source-summary loaded-document screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/10-workspace-docket-mobile-source-summary-final.png`
 - Final screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshot-metadata-final-empty-state.json`
 - Locked-state screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshot-metadata-locked-empty-state.json`
 - Loaded-document screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshot-metadata-loaded-document-final.json`
+- Source-summary screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshot-metadata-source-summary-final.json`
 - Router reviews:
   - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-shell-repair.json`
   - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-action-strip.json`
   - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-disabled-empty-state.json`
   - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-loaded-document-final.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-source-summary-final.json`
 
 Changes made:
 
@@ -553,6 +556,7 @@ Changes made:
 - Made the empty selected-document action area static instead of sticky so it no longer overlays the empty preview.
 - Simplified the mobile empty state by hiding duplicate lower action/status panels, hiding the verbose three-step readiness list, and replacing ambiguous disabled buttons with explicit "Locked" labels plus an unlock instruction.
 - Simplified the loaded-document mobile state by hiding the load form after a document exists, keeping the top mobile action strip as the only mobile action area, making Ask visually primary, hiding duplicated selected-document chips, and capping the selected preview height.
+- Replaced the mobile selected-document wall with one source-summary card and moved technical/router details into a collapsed `Technical document status` disclosure.
 
 Verification:
 
@@ -564,4 +568,82 @@ Verification:
 
 Residual router finding:
 
-- The repaired screenshots fix the severe narrow-column/empty-viewport failure and make the core actions visible early. The loaded-document screenshot is substantially shorter and removes the mobile load form plus duplicate lower action bar. However, the final multimodal router pass still reports a hard warning about density, repeated document context, and ambiguous task flow, so the selected-document implementation gate should remain closed until the next slice redesigns the Docket mobile page around one source-summary card, one primary Ask action, and progressive disclosure for technical status.
+- The repaired screenshots fix the severe narrow-column/empty-viewport failure and make the core actions visible early. The loaded-document metadata confirms no horizontal overflow, a hidden mobile load form, a hidden duplicate lower action bar, a hidden desktop preview, and collapsed technical details. The loaded-document screenshot is substantially shorter, makes Ask primary, and uses one source-summary card for the selected document. However, the final multimodal router pass still reports a hard warning about density and unclear hierarchy, so the selected-document implementation gate should remain closed until the next slice moves Docket into a dedicated mobile-first route/section or removes the surrounding desktop stage/header chrome from the mobile capture.
+
+Focused gate review:
+
+- Gate review artifact: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-source-summary-gate-decision.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+- Screenshot reviewed: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/10-workspace-docket-mobile-source-summary-final.png`
+- Prepared image: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-source-summary-gate-decision-codex-diagnostics/prepared-images/10-workspace-docket-mobile-source-summary-final.review.jpg`
+
+Gate decision:
+
+- Do not start selected-document behavior yet. The mobile shell is mechanically repaired, but the router still sees high risk that a layperson could ask, label, annotate, or mark a deadline against the wrong document because the selected-document state is not unmistakable near the primary actions.
+- The router recommended a next slice with one persistent `Selected document` rail above the actions, one dominant `Ask About Selected Document` CTA, secondary Label/Annotate controls, and a lower-risk Deadline action with confirmation before any write.
+- Treat the router's `src/features/...` implementation path suggestions as framework-agnostic component names. In this codebase, the implementation target remains `templates/workspace.html`, the browser MCP SDK path, `tests/test_workspace_template_contract.py`, and `playwright/tests/navigation.spec.js`.
+
+Next implementation slice before deeper behavior:
+
+- Add a mobile selected-document rail immediately above the Docket action strip with title, source, status, and deadline/readiness badge.
+- In the empty state, make the same rail say `No document selected` and keep all document-scoped actions locked.
+- Split mobile actions by risk: primary Ask, secondary Label/Annotate, tertiary Deadline with a confirmation state before any persisted deadline change.
+- Standardize the selected-document status sentence to one user-facing state plus one next step, while keeping technical router/OCR/index state inside collapsed details.
+- Add Playwright assertions that the selected-document rail is visible before action controls and that action controls inherit the same selected document name.
+
+Selected-document rail implementation:
+
+- Final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-selected-rail/screenshots/03-workspace-docket-mobile-selected-rail-final.png`
+- Final screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-selected-rail/screenshot-metadata-selected-rail-final.json`
+- Final router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-selected-rail/router-review-mobile-selected-rail-final.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Changes made:
+
+- Added a mobile `Selected document` rail above the Docket action strip.
+- The rail now carries the selected title, source/type, compact review status, draft readiness, and deadline state.
+- Added a high-emphasis chat scope chip: `Chat scope: <document title> only.`
+- Converted the mobile action stack into ordered actions: Ask, Label, Annotate, Mark Deadline.
+- Hid the duplicate selected-document title in the mobile selected-card and renamed the source card title to `Selected source summary`.
+- Kept technical router/OCR/index detail collapsed and preserved the existing MCP SDK and router contracts.
+
+Verification:
+
+- `pytest tests/test_workspace_template_contract.py::test_workspace_template_defines_mobile_docket_shell_contract`
+- `npx playwright test playwright/tests/navigation.spec.js --grep 'workspace Docket .* mobile'`
+
+Final gate decision:
+
+- Playwright confirms the final mobile rail state has no horizontal overflow, a rail height under 150px, the rail before actions, hidden duplicate selected-card title, ordered action labels, and a document-specific chat scope chip.
+- The final multimodal router pass still does not clear the selected-document behavior gate. It reports that the mobile Docket view still reads as too compressed for lay legal use and specifically warns not to clip legal-critical metadata.
+- Treat the next prerequisite as a larger mobile architecture slice: Docket should become a single-active mobile surface where the user sees either the document list or the selected-document workbench, with an explicit back/change-document control. Status, deadline, and review-readiness fields must wrap instead of being line-clamped.
+
+Single-active mobile surface implementation:
+
+- Final selected-surface screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-single-surface/screenshots/02-workspace-docket-mobile-single-active-final.png`
+- Final selected-surface metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-single-surface/screenshot-metadata-single-active-final.json`
+- Final selected-surface router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-single-surface/router-review-mobile-single-active-final.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Changes made:
+
+- Added a mobile-only Docket view switch with `Back to Documents (n)` and `Viewing Selected`.
+- Empty mobile Docket defaults to the document list, disables the selected view, and hides selected-document actions.
+- Loaded mobile Docket defaults to the selected-document workbench, hides the document list, and keeps a clear path back to the document list.
+- Selected mobile Docket now hides the broad stage banner and long intro copy so the selected rail and actions become the first meaningful task area.
+- Legal-critical status/deadline text in the source summary is allowed to wrap instead of being line-clamped.
+- Preserved the existing selected document id, MCP SDK calls, `llm_router` / `multimodal_router` handoff shape, and desktop Docket layout.
+
+Verification:
+
+- `pytest tests/test_workspace_template_contract.py::test_workspace_template_defines_mobile_docket_shell_contract`
+- `npx playwright test playwright/tests/navigation.spec.js --grep 'workspace Docket .* mobile'`
+
+Updated gate decision:
+
+- Playwright confirms a single active mobile surface: in selected mode the document list is hidden, the stage banner is hidden, the selected workbench is visible, no horizontal overflow is present, and the switch state is explicit.
+- The router now recognizes the intended single-active selected-document surface, but still does not clear persistent selected-document behavior. Remaining blockers are action-state clarity and progressive enablement: Label, Annotate, and Deadline need explicit pending/done/blocked states before they become real write actions.
+- Next prerequisite before persistent selected-document writes: add a lightweight action-step state model and per-action helper copy derived from existing document metadata, without changing MCP contracts.

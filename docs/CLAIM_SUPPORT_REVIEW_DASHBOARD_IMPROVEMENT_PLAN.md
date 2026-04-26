@@ -984,7 +984,37 @@ April 26 mobile Docket shell repair note:
 - Simplified locked-state screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/06-workspace-docket-mobile-locked-empty-state.png`
 - Loaded-document screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/09-workspace-docket-mobile-loaded-document-final.png`
 - The loaded-document repair hides the mobile load form after a document exists, removes the duplicate lower action bar, makes Ask visually primary, hides duplicate selected-document chips, and caps the selected preview height.
-- Router follow-up still flags the Docket surface as dense and desktop-influenced, so this repair reduces the severe layout failure but does not clear the selected-document implementation gate by itself. The next gate should redesign the loaded-document mobile state around one source-summary card and progressive technical detail disclosure.
+- Source-summary screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/10-workspace-docket-mobile-source-summary-final.png`
+- Source-summary metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshot-metadata-source-summary-final.json`
+- Source-summary router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-source-summary-final.json`
+- The source-summary repair replaces the mobile selected-document status wall with one source card and collapsed technical detail disclosure.
+- Router follow-up still flags the Docket surface as dense and desktop-influenced, even though the Playwright metadata confirms no horizontal overflow, the mobile load form and lower duplicate action bar are hidden in the loaded-document state, and the technical status is collapsed. This repair reduces the severe layout failure but does not clear the selected-document implementation gate by itself. The next gate should move Docket into a dedicated mobile-first route or hide the surrounding desktop stage/header chrome from mobile captures.
+
+Focused mobile Docket gate review:
+
+- Gate review artifact: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/router-review-mobile-source-summary-gate-decision.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+- The router's actionable finding is that selected-document behavior should wait until the mobile shell makes the active document unmistakable near the actions. The next slice should add a persistent selected-document rail, keep Ask as the one primary CTA, move Label/Annotate into secondary actions, make Deadline lower-risk with confirmation, and keep router/OCR/index internals collapsed for laypersons.
+- The router suggested TypeScript component paths, but those are framework-generic suggestions. In this application, the relevant implementation files remain `templates/workspace.html`, the browser MCP SDK path, `tests/test_workspace_template_contract.py`, and `playwright/tests/navigation.spec.js`.
+
+Selected-document rail follow-up:
+
+- Final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-selected-rail/screenshots/03-workspace-docket-mobile-selected-rail-final.png`
+- Final metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-selected-rail/screenshot-metadata-selected-rail-final.json`
+- Final router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-selected-rail/router-review-mobile-selected-rail-final.json`
+- Implemented the mobile selected-document rail, compact review/draft/deadline badges, document-specific chat scope chip, ordered Ask/Label/Annotate/Deadline action labels, hidden duplicate mobile selected title, and source-summary title cleanup.
+- Playwright confirms no horizontal overflow, rail-before-actions ordering, scoped action text, hidden duplicate selected title, and compact rail/source-summary heights.
+- The final router review still does not clear the selected-document behavior gate. It flags the remaining mobile architecture risk: the Docket page should become a single-active mobile surface, with either the document list or selected-document workbench shown at one time, and legal-critical status/deadline fields must wrap instead of being clipped.
+
+Single-active mobile surface follow-up:
+
+- Screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-single-surface/screenshots/02-workspace-docket-mobile-single-active-final.png`
+- Metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-single-surface/screenshot-metadata-single-active-final.json`
+- Router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-single-surface/router-review-mobile-single-active-final.json`
+- Implemented a mobile-only `Back to Documents (n)` / `Viewing Selected` switch. Empty Docket shows only the document list, while loaded Docket opens the selected-document workbench and hides the document list. Selected mode also hides broad stage guidance and allows legal-critical source-summary status text to wrap.
+- Playwright confirms the single-active selected surface: document list hidden, selected workbench visible, stage banner hidden, no horizontal overflow, explicit switch state, selected rail before actions.
+- The router now acknowledges the intended single-active selected-document surface, but still holds the persistent selected-document behavior gate. The remaining prerequisite is action-state clarity: Label, Annotate, and Deadline need pending/done/blocked state and helper text before becoming real write actions.
 
 ## Workstream 1: Better questions
 

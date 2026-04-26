@@ -14,6 +14,32 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert "docket-current-task-detail" in content
     assert "Mobile Docket document actions" in content
     assert "docket-mobile-action-strip" in content
+    assert "docket-selected-rail" in content
+    assert "docket-selected-rail-label" in content
+    assert "docket-selected-rail-title" in content
+    assert "docket-selected-rail-meta" in content
+    assert "docket-selected-rail-badges" in content
+    assert "docket-mobile-view-switch" in content
+    assert "docket-mobile-show-documents" in content
+    assert "docket-mobile-show-selected" in content
+    assert "Back to Documents" in content
+    assert "Viewing Selected" in content
+    assert "mobile-docket-view-documents" in content
+    assert "mobile-docket-view-selected" in content
+    assert "setMobileDocketView" in content
+    assert "Select or load one docket document before opening the selected-document workbench." in content
+    assert "Selected Docket document" in content
+    assert "No document selected" in content
+    assert "Document-scoped actions stay locked until the active document is clear." in content
+    assert "docket-mobile-primary-action" in content
+    assert "docket-mobile-secondary-action" in content
+    assert "docket-mobile-deadline-action" in content
+    assert "docket-mobile-ask-scope" in content
+    assert "Actions for the selected document" in content
+    assert "Chat scope: selected document only." in content
+    assert "Selected source summary" in content
+    assert "Review: Not reviewed" in content
+    assert "Draft: review first" in content
     assert "docket-mobile-ask-chat-link" in content
     assert "docket-mobile-label-button" in content
     assert "docket-mobile-annotation-button" in content
@@ -31,9 +57,18 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert ".docket-selected-card .docket-preview" in content
     assert ".docket-mobile-action-strip:not(.is-empty) .surface-link" in content
     assert ".docket-selected-card #docket-selected-chips" in content
+    assert "docket-source-summary" in content
+    assert "docket-mobile-technical-details" in content
+    assert "docket-mobile-technical-preview" in content
+    assert "Technical document status" in content
     assert "Ask About Document" in content
     assert "Label Document" in content
     assert "Add Annotation" in content
+    assert "1. Ask About Selected Document" in content
+    assert "2. Label Document" in content
+    assert "3. Add Annotation" in content
+    assert "4. Mark Deadline To Confirm" in content
+    assert "Mark Deadline To Confirm" in content
     assert "Mark Deadline" in content
     assert "docket-add-annotation-button" in content
     assert "docket-mark-deadline-button" in content
