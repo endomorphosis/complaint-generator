@@ -73,6 +73,24 @@ _IPFS_DASHBOARD_ENTRIES = [
 ]
 
 _IPFS_DASHBOARD_MAP = {entry.slug: entry for entry in _IPFS_DASHBOARD_ENTRIES}
+_LAYPERSON_HUB_ADVANCED_DASHBOARD_SLUGS = {
+    "mcp",
+    "software-mcp",
+    "investigation",
+    "admin-index",
+    "admin-analytics",
+    "admin-rag-query",
+    "admin-investigation",
+    "admin-caselaw",
+    "admin-caselaw-mcp",
+    "admin-finance-mcp",
+    "admin-finance-workflow",
+    "admin-medicine-mcp",
+    "admin-patent",
+    "admin-discord",
+    "admin-graphrag",
+    "admin-mcp",
+}
 
 _CAPABILITY_CARDS = [
     {
@@ -814,6 +832,8 @@ def _render_dashboard_hub(
     )
     ipfs_sections: dict[str, list[DashboardEntry]] = {}
     for entry in _IPFS_DASHBOARD_ENTRIES:
+        if entry.slug not in _LAYPERSON_HUB_ADVANCED_DASHBOARD_SLUGS:
+            continue
         ipfs_sections.setdefault(entry.category, []).append(entry)
     ipfs_markup = "".join(
         f"<section><h2>{escape(category)}</h2><ul>" + "".join(
@@ -2023,7 +2043,7 @@ def _render_dashboard_hub(
     <header>
 	        <div class="header-copy">
 	            <div class="eyebrow">Complaint Operations Center</div>
-	            <h1>Complaint Dashboard</h1>
+	            <h1>Unified Dashboard Hub</h1>
 	            <p>Start, continue, organize, review, and draft a legal complaint or response from one guided workspace.</p>
 	        </div>
         <div class="surface-pills">{''.join(f'<a href="{escape(path)}">{escape(label)}</a>' for label, path in _COMPLAINT_DASHBOARD_LINKS)}</div>

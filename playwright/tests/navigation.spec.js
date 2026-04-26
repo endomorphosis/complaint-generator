@@ -217,10 +217,10 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#chat-context-card')).toBeVisible();
     await expect(page.locator('#chat-context-summary')).toContainText(/did:key:handoff-demo/i);
     await expect(page.locator('#chat-context-summary')).toContainText(/Jordan Example alleges retaliation/i);
-    await expect(page.locator('#chat-context-prefill')).toContainText(/Prepared mediator prompt/i);
+    await expect(page.locator('#chat-context-prefill')).toContainText(/Prepared question/i);
     await expect(page.locator('#chat-context-return-link')).toHaveAttribute('href', /\/workspace\?target_tab=review/);
     await expect(page.locator('#chat-form input')).toHaveValue(/Mediator, help turn this into testimony-ready narrative/i);
-    await expect(page.locator('[aria-label="Chat next steps"]')).toBeVisible();
+    await expect(page.locator('[aria-label="Additional chat destinations"]')).toBeVisible();
     await expect(page.locator('#chat-meta-workspace')).toHaveAttribute('href', /user_id=did%3Akey%3Ahandoff-demo/);
     await expect(page.locator('#chat-nav-profile')).toHaveAttribute('href', /user_id=did%3Akey%3Ahandoff-demo/);
     await expect(page.locator('#chat-nav-results')).toHaveAttribute('href', /user_id=did%3Akey%3Ahandoff-demo/);
@@ -250,7 +250,7 @@ test.describe('website surface navigation', () => {
       + '&return_to=%2Fworkspace%3Ftarget_tab%3Dreview';
 
     await page.goto(handoffUrl);
-    await expect(page.locator('[aria-label="Chat next steps"]')).toBeVisible();
+    await expect(page.locator('[aria-label="Additional chat destinations"]')).toBeVisible();
     await page.locator('#chat-open-profile').click();
     await expect(page).toHaveURL(/\/profile\?/);
     await expect(page.locator('#profile-context-card')).toBeVisible();
@@ -544,8 +544,40 @@ test.describe('website surface navigation', () => {
   });
 
   test('dashboard hub and every mounted shell route are reachable in the JS stub surface', async ({ page }) => {
-    await page.goto('/dashboards');
+    await page.goto('/dashboards?user_id=did:key:nav-dashboard-user');
     await expect(page.locator('body')).toContainText(/Unified Dashboard Hub/i);
+    await expect(page.getByRole('heading', { name: 'Start your complaint' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Continue your complaint' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Review a court docket or response' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Manage your profile' })).toBeVisible();
+    await expect(page.locator('#dashboard-recommended-action-panel')).toBeVisible();
+    await expect(page.locator('#dashboard-recommended-action-link')).toHaveText(/Explain what happened/i);
+    await expect(page.locator('#dashboard-stage-progress')).toContainText(/Intake/);
+    await expect(page.locator('#dashboard-stage-progress')).toContainText(/Evidence/);
+    await expect(page.locator('#dashboard-stage-progress')).toContainText(/Review/);
+    await expect(page.locator('#dashboard-stage-progress')).toContainText(/Draft/);
+    await expect(page.locator('#dashboard-stage-progress')).toContainText(/Ready/);
+    await expect(page.locator('#dashboard-stage-progress')).toContainText(/Later/);
+    await expect(page.locator('#dashboard-stage-progress')).not.toContainText(/Locked/);
+    await expect(page.locator('.entry-card').first()).toHaveAttribute('data-path-state', 'recommended');
+    await expect(page.locator('.entry-card').first()).toContainText(/Current/);
+    await expect(page.locator('.entry-card').first()).toContainText(/Stage: Intake/);
+    await expect(page.locator('.entry-card').nth(1)).toHaveAttribute('data-path-state', 'available');
+    await expect(page.locator('.entry-card').nth(1)).toContainText(/Stage: Evidence/);
+    await expect(page.locator('.entry-card').nth(2)).toContainText(/Stage: Review/);
+    await expect(page.locator('.entry-card').nth(3)).toHaveAttribute('data-path-state', 'utility');
+    await expect(page.locator('.entry-card').nth(3)).toContainText(/Optional/);
+    await expect(page.locator('.entry-card .primary-action')).toHaveCount(0);
+    await expect(page.locator('.entry-card').first().locator('.switch-action')).toHaveCount(1);
+    await expect(page.locator('.entry-card').first().locator('.card-action-row .jump-link')).toHaveCount(0);
+    await expect(page.locator('.entry-card').first().locator('summary')).toContainText(/See intake details/i);
+    await expect(page.getByText('4 tool groups', { exact: true })).toBeVisible();
+    await expect(page.getByText('5 admin consoles', { exact: true })).toBeVisible();
+    await expect(page.locator('#dashboard-recommended-action-link')).toHaveAttribute('href', /user_id=did%3Akey%3Anav-dashboard-user/);
+    await expect(page.locator('.entry-card').first().locator('.switch-action')).toHaveText(/Open intake path/i);
+    await expect(page.locator('body')).not.toContainText(/Admin Dashboard Error|IPFS Datasets MCP Dashboard Clean|IPFS Datasets MCP Dashboard Final/i);
+    await expect(page.locator('body')).not.toContainText(/31 MCP tools|did:key:nav-dashboard-user/i);
+    await expect(page.locator('#dashboard-advanced-tools > summary')).toContainText(/Advanced Operations/);
 
     for (const [route, heading] of dashboardRoutes) {
       await page.goto(route);
@@ -631,7 +663,7 @@ test.describe('website surface navigation', () => {
     await expect(page).toHaveURL(/\/chat\?/);
     await expect(page.locator('#chat-context-card')).toBeVisible();
     await expect(page.locator('#chat-context-summary')).toContainText(/Jane Doe alleges retaliation/i);
-    await expect(page.locator('#chat-context-prefill')).toContainText(/Prepared mediator prompt/i);
+    await expect(page.locator('#chat-context-prefill')).toContainText(/Prepared question/i);
     await expect(page.locator('#chat-form input')).toHaveValue(/Mediator, help turn this into testimony-ready narrative/i);
     await page.goto('/workspace');
     await expect(page.locator('#case-synopsis')).toHaveValue(/Jane Doe alleges retaliation/i);
@@ -757,6 +789,123 @@ test.describe('website surface navigation', () => {
     const screenshotPath = testInfo.outputPath('workspace-integrations-mobile.png');
     await page.locator('[data-tab-panel="integrations"]').screenshot({ path: screenshotPath });
     await testInfo.attach('workspace-integrations-mobile', {
+      path: screenshotPath,
+      contentType: 'image/png',
+    });
+  });
+
+  test('workspace Docket shell stays full-width and actionable on mobile', async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('complaintGenerator.did', 'did:key:nav-docket-mobile');
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/workspace');
+    await waitForWorkspaceReady(page);
+
+    await page.locator('[data-tab-target="docket"]').click();
+    const docketPanel = page.locator('[data-tab-panel="docket"]');
+    await expect(docketPanel).toHaveClass(/is-active/);
+    await expect(page.locator('#docket-current-task-title')).toBeVisible();
+    await expect(page.locator('#docket-document-list')).toBeVisible();
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toBeVisible();
+    await expect(page.locator('#docket-mobile-label-button')).toBeVisible();
+    await expect(page.locator('#docket-mobile-annotation-button')).toBeVisible();
+    await expect(page.locator('#docket-mobile-deadline-button')).toBeVisible();
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('#docket-mobile-label-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-annotation-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-deadline-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toContainText(/Locked: Ask About Document/i);
+    await expect(page.locator('#docket-mobile-action-note')).toContainText(/Load a docket manifest or import evidence first/i);
+    await expect(page.locator('.docket-action-bar.is-empty')).toBeHidden();
+    await expect(page.locator('.docket-loader-card .readiness-list')).toBeHidden();
+    await expect(page.locator('.docket-loader-card #docket-summary-chips')).toBeHidden();
+    await expect(page.locator('.docket-status-card')).toBeHidden();
+
+    const panelMetrics = await docketPanel.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        clientWidth: node.clientWidth,
+        scrollWidth: node.scrollWidth,
+        rectWidth: rect.width,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(panelMetrics.scrollWidth).toBeLessThanOrEqual(panelMetrics.clientWidth + 2);
+    expect(panelMetrics.rectWidth).toBeGreaterThanOrEqual(panelMetrics.viewportWidth - 56);
+
+    const actionMetrics = await page.locator('.docket-mobile-action-strip').evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        width: rect.width,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(actionMetrics.width).toBeGreaterThanOrEqual(actionMetrics.viewportWidth - 110);
+
+    const screenshotPath = testInfo.outputPath('workspace-docket-mobile.png');
+    await docketPanel.screenshot({ path: screenshotPath });
+    await testInfo.attach('workspace-docket-mobile', {
+      path: screenshotPath,
+      contentType: 'image/png',
+    });
+  });
+
+  test('workspace Docket loaded document stays concise and actionable on mobile', async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('complaintGenerator.did', 'did:key:nav-docket-mobile-loaded');
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/workspace');
+    await waitForWorkspaceReady(page);
+
+    await page.locator('[data-tab-target="evidence"]').click();
+    await page.locator('#evidence-kind').selectOption('document');
+    await page.locator('#evidence-claim-element').selectOption('causation');
+    await page.locator('#evidence-title').fill('Termination timeline email');
+    await page.locator('#evidence-source').fill('Inbox export');
+    await page.locator('#evidence-content').fill('Email records show the termination followed immediately after the HR complaint.');
+    await page.locator('#save-evidence-button').click();
+    await expect(page.locator('#workspace-status')).toContainText(/Evidence saved and support review refreshed/i, { timeout: 15000 });
+
+    await page.locator('[data-tab-target="docket"]').click();
+    const docketPanel = page.locator('[data-tab-panel="docket"]');
+    await expect(docketPanel).toHaveClass(/is-active/);
+    await expect(docketPanel).toHaveClass(/has-docket-items/);
+    await expect(page.locator('#docket-current-task-title')).toContainText(/Termination timeline email/i);
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toBeVisible();
+    await expect(page.locator('#docket-mobile-ask-chat-link')).not.toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('#docket-mobile-label-button')).toBeEnabled();
+    await expect(page.locator('#docket-mobile-annotation-button')).toBeEnabled();
+    await expect(page.locator('#docket-mobile-deadline-button')).toBeEnabled();
+    await expect(page.locator('#docket-mobile-action-note')).toContainText(/Actions apply to the selected document/i);
+    await expect(page.locator('.docket-loader-card')).toBeHidden();
+    await expect(page.locator('.docket-action-bar')).toBeHidden();
+    await expect(page.locator('#docket-selected-chips')).toBeHidden();
+    await expect(page.locator('#docket-selected-title')).toContainText(/Termination timeline email/i);
+
+    const metrics = await docketPanel.evaluate((node) => {
+      const preview = document.querySelector('.docket-selected-card .docket-preview');
+      const rect = node.getBoundingClientRect();
+      const previewRect = preview.getBoundingClientRect();
+      const askStyle = getComputedStyle(document.querySelector('#docket-mobile-ask-chat-link'));
+      return {
+        clientWidth: node.clientWidth,
+        scrollWidth: node.scrollWidth,
+        rectWidth: rect.width,
+        viewportWidth: window.innerWidth,
+        previewHeight: previewRect.height,
+        askColor: askStyle.color,
+      };
+    });
+    expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 2);
+    expect(metrics.rectWidth).toBeGreaterThanOrEqual(metrics.viewportWidth - 56);
+    expect(metrics.previewHeight).toBeLessThanOrEqual(280);
+    expect(metrics.askColor).toBe('rgb(255, 255, 255)');
+
+    const screenshotPath = testInfo.outputPath('workspace-docket-mobile-loaded.png');
+    await docketPanel.screenshot({ path: screenshotPath });
+    await testInfo.attach('workspace-docket-mobile-loaded', {
       path: screenshotPath,
       contentType: 'image/png',
     });

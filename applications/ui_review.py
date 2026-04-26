@@ -1358,7 +1358,8 @@ def build_ui_review_prompt(
             "Look at this complaint-generator page screenshot and return strict JSON.\n"
             "Focus only on visible UI/UX problems in this single page.\n"
             "Preserve the shared ComplaintMcpClient / MCP workflow when suggesting repairs.\n\n"
-            f"Screenshot file(s): {screenshot_names}\n"
+            "Screenshot artifacts:\n"
+            f"- Screenshot file(s): {screenshot_names}\n"
             f"Additional notes: {notes or 'None.'}\n"
             f"Complaint-output hints: {feedback_excerpt or 'None.'}\n\n"
             "Return strict JSON with this shape:\n"
@@ -1697,7 +1698,8 @@ def _complaint_output_review_timeout_for_provider(provider: Optional[str]) -> fl
                 return max(5.0, float(provider_override))
             except Exception:
                 pass
-    return max(float(DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S), _ui_review_timeout_for_provider(provider))
+        return max(float(DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S), _ui_review_timeout_for_provider(provider))
+    return float(DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S)
 
 
 def _ui_review_timeout_for_provider(provider: Optional[str]) -> float:

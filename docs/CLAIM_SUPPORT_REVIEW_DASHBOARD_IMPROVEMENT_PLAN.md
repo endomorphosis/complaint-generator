@@ -841,6 +841,151 @@ Updated Slice 2 acceptance checks:
 - Saving an answer updates Docket annotation/deadline counts and creates a visible Review/Draft reference.
 - Playwright captures and asserts Docket, document chat, Review, Draft, and UX review artifacts one surface at a time.
 
+### Sixth Screenshot Review: April 25 Desktop And Mobile Recheck
+
+Date: 2026-04-25
+
+A fresh Playwright pass captured the current Docket, document chat, Review, Draft, UX Review, and mobile Docket surfaces:
+
+- `artifacts/ui-audit-docket-plan-review-20260425/screenshots/01-docket-desktop.png`
+- `artifacts/ui-audit-docket-plan-review-20260425/screenshots/02-document-chat-desktop.png`
+- `artifacts/ui-audit-docket-plan-review-20260425/screenshots/03-review-desktop.png`
+- `artifacts/ui-audit-docket-plan-review-20260425/screenshots/04-draft-desktop.png`
+- `artifacts/ui-audit-docket-plan-review-20260425/screenshots/05-ux-review-desktop.png`
+- `artifacts/ui-audit-docket-plan-review-20260425/screenshots/06-docket-mobile.png`
+
+Three bounded single-surface multimodal reviews completed successfully:
+
+- `artifacts/ui-audit-docket-plan-review-20260425/reviews/iteration-04-docket-desktop-review.json`
+  - strategy: `multimodal_router`
+  - provider: `codex_cli`
+  - model: `gpt-5.3-codex`
+  - issues: 7
+- `artifacts/ui-audit-docket-plan-review-20260425/reviews/iteration-04-chat-desktop-review.json`
+  - strategy: `multimodal_router`
+  - provider: `codex_cli`
+  - model: `gpt-5.3-codex`
+  - issues: 6
+- `artifacts/ui-audit-docket-plan-review-20260425/reviews/iteration-04-docket-mobile-review.json`
+  - strategy: `multimodal_router`
+  - provider: `codex_cli`
+  - model: `gpt-5.3-codex`
+  - issues: 7
+
+The initial three-surface batch review prepared image diagnostics but exited before producing review summaries. The bounded one-surface review path completed and should remain the default until bundle execution has reliable timeouts and partial-result reporting.
+
+The April 25 review confirms the April 22 direction and adds a mobile-specific warning: the Docket lane is usable on desktop but becomes a long stack of repeated status cards, chip clusters, and competing CTAs on narrow screens.
+
+Refined findings:
+
+1. **Readiness hierarchy is still inverted.** OCR, BM25, vectors, knowledge graph, citations, and formal logic are as prominent as legal readiness signals. Enrichment status should become one plain-language readiness state with details collapsed.
+2. **Ready For Draft conflicts with not reviewed/not checked.** The page currently shows "Ready For Draft" while the selected document also says router not reviewed and technical checks not complete. Replace this with "Conditionally ready" or "Needs review before draft" until required criteria are satisfied.
+3. **Primary action is still ambiguous.** Docket presents Ask, Use In Draft Anyway, Review Before Draft, and Add Label in the same action group. The UI should choose one canonical CTA from document state and demote the rest.
+4. **Deadlines are still too weak.** Deadline visibility is a count, not a due-date decision. Selected documents need a pinned deadline/urgency block with due date, source sentence, confidence, and confirm/create action.
+5. **Label taxonomy is mixed.** Legal labels, workflow state, and technical markers currently appear together. Separate them into Legal Relevance, Workflow State, and Technical Processing groups.
+6. **Chat still lacks answer-level grounding.** Assistant outputs need per-claim citation chips, selected-document scope at answer time, router path, confidence, and save-to-workflow actions.
+7. **Mobile needs its own compact contract.** On mobile, show at most two or three high-priority chips, one sticky primary CTA, one canonical document card, and collapse technical details behind "More status."
+
+Mobile acceptance checks for Slice 2:
+
+- First mobile viewport shows selected document title, readiness state, and one primary next action.
+- Search/load controls are collapsed after a document is selected.
+- Repeated document cards are deduplicated by `docket_item_id` or source thread.
+- Mobile Docket shows at most three visible status chips before a disclosure.
+- Technical terms such as manifest, vectors, BM25, and formal logic have plain-language aliases or stay inside details.
+- Primary CTA remains reachable after scrolling through selected-document details.
+- Playwright captures mobile Docket before and after saving an annotation/deadline.
+
+Implementation gate before Slice 2:
+
+- Desktop and mobile Docket both show one primary next action within the first screen or first short scroll.
+- A document cannot display "Ready For Draft" while required review, deadline, source, or router checks are missing; use "Conditionally ready" or "Needs review before draft" with unmet requirements listed.
+- Technical enrichment status is collapsed by default into one plain-language readiness state.
+- The nearest known deadline date, source, and urgency state are visible near the primary CTA.
+- Mobile Docket shows one canonical selected-document card, with repeated document/status blocks deduplicated.
+- Document chat answer cards include citation chips, selected scope, router path, confidence/source-support state, and explicit save-to-workflow actions.
+- Playwright assertions cover desktop Docket, mobile Docket, document chat, and a saved annotation/deadline round trip before implementation is considered ready to merge.
+
+Cross-surface safety gate before Slice 2:
+
+- The first layperson screen is a case/workflow hub, not a raw internal route index. It should expose a small set of goal-based entries: start/resume complaint, respond to a docket document, review documents, and ask the case assistant.
+- The layperson view hides raw DID strings, MCP tool counts, backend IDs, gate versions, provider names, and queue internals unless the user opens Operations or Diagnostics.
+- First draft generation requires visible legal-safety framing: the tool organizes facts and drafts documents, but does not provide legal advice.
+- Internal gate states such as `NEEDS_CORROBORATION`, `workspace-gate-v1`, and `release gate is not passing yet` are translated into concrete proof tasks with examples of acceptable evidence.
+- Disabled actions explain why they are locked and provide a direct recovery path to Intake, Evidence, Docket, Review, or Draft.
+- Readiness scores such as `10/100` are replaced or paired with criteria chips tied to missing facts, documents, deadlines, citations, or source support.
+- Evidence and docket records expose provenance before draft insertion: source, date, who provided it, confidence, claim-element link, and page/span when available.
+
+April 25 refresh review note:
+
+- `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260425-refresh/router-review.json`
+- Reviewed pages: dashboard hub, intake chat, workspace Docket, claim-support Review, and document builder.
+- strategy: `page_reviews` with per-page `multimodal_router`
+- provider: `codex_cli`
+- verdict: `warning`
+
+The refresh confirms that the plan should not begin by adding more panels to already dense screens. The first implementation pass should create a clearer goal-based shell, then place Docket, annotation, Review, Draft, and chatbot work inside that shell with one visible next action per surface.
+
+Immediate implementation sequence:
+
+1. Align `/dashboards` between `applications/dashboard_ui.py` and `playwright/server.js` so both the real app and screenshot fixture show the same layperson-first goal hub.
+2. Hide technical identity/router/gate internals from standard mode in `templates/index.html` and `static/complaint_app_shell.js`; keep them available only in Operations/Diagnostics.
+3. Add legal-safety framing, proof-task translation, disabled-action reasons, and criteria chips before changing Docket behavior.
+4. Implement one trustworthy selected-document Docket flow in `templates/workspace.html`: canonical card, deadline/urgency panel, grouped labels, annotations, and one primary CTA.
+5. Ground `templates/chat.html` and `static/chat.js` around selected-document scope, citations, confidence/source-support state, and save-to-workflow actions.
+6. Add Playwright checks for dashboard hub, desktop Docket, mobile Docket, document chat, Review/Draft handoff, and multimodal review artifact completion.
+
+Slice 1 stop line:
+
+- Do not begin Docket document implementation until the real FastAPI `/dashboards` route and the Playwright fixture `/dashboards` route expose equivalent layperson-first primary cards.
+- Preserve legacy dashboard shell/raw route coverage while hiding those route catalogs from the default layperson first screen.
+- Run the focused dashboard/template tests plus `playwright/tests/navigation.spec.js` and `playwright/tests/complaint-flow.spec.js`.
+- Capture fresh desktop and mobile dashboard hub screenshots for multimodal review before starting the selected-document Docket work.
+
+### Seventh Screenshot Review: April 26 Post-Slice-1 Hub And Docket Recheck
+
+Date: 2026-04-26
+
+After the Slice 1 hub alignment pass, Playwright captured a fresh layperson scenario for a user reviewing a school-district due-process docket, response deadline, accommodation packet, document chat, claim-support Review, and document Builder.
+
+Artifacts:
+
+- Screenshots: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426/screenshots/`
+- Screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426/screenshot-metadata.json`
+- Hub/chat/review/builder router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426/router-review.json`
+- Docket-only router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426/router-review-docket-only.json`
+- Diagnostics:
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426/router-review-codex-diagnostics/pages/`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426/router-review-docket-only-codex-diagnostics/pages/`
+
+The first review used `page_reviews` with per-page `multimodal_router`, provider `codex_cli`, model `gpt-5.3-codex`, and selected dashboard hub desktop/mobile, document chat desktop, claim-support Review desktop, and document Builder desktop. It skipped Docket desktop/mobile because the page limit selected five other screenshots first. The second Docket-only review used the same router/provider/model path and selected both Docket desktop and Docket mobile with no skipped screenshots.
+
+Refined findings from the April 26 reviews:
+
+1. **The hub is improved but not ready to carry deeper Docket work.** The router found ambiguous primary next actions, locked stages without clear unlock criteria, small/low-contrast body copy, and too much technical tooling near layperson decisions.
+2. **Mobile hub still needs a true single-column contract.** The mobile screenshot still shows cramped parallel columns, weak hierarchy, and controls that look informational instead of actionable.
+3. **Document chat, Review, and Builder share the same layout weakness.** Large empty regions, narrow active work areas, tiny navigation, and fragmented panels make source grounding and next actions hard to scan.
+4. **Desktop Docket does not yet expose the core layperson task.** The Docket page communicates a workspace concept, but selected-document review, annotation/labeling, deadline extraction, and document-grounded Q&A are not visibly prominent.
+5. **Mobile Docket is now a hard blocker.** The mobile screenshot shows a severe responsive-layout failure: meaningful content is confined to a narrow top-left column while most of the viewport is empty. The router judged document selection, annotation, deadline extraction, and document-grounded Q&A unusable in that state.
+
+Revised gate before selected-document Docket implementation:
+
+- Do not begin selected-document Docket behavior until the mobile Docket shell renders as a full-width, single-column layperson workflow with no narrow-column/empty-viewport failure.
+- Mobile Docket first paint must show a current Docket task, a selected-document or document-list entry point, and visible Ask, Label, Annotate, and Deadline actions in plain language.
+- Desktop Docket must rebalance into a purposeful document workflow: document list/context, selected-document viewer/source panel, and assistant/actions. Technical function names stay behind Operations/Diagnostics.
+- Playwright must include explicit mobile Docket assertions for full-width layout, visible selected-document controls, and no critical controls stranded outside the first screen or first short scroll.
+- The screenshot review workflow must run a Docket-only router pass whenever the multi-page selector skips Docket screenshots.
+
+April 26 mobile Docket shell repair note:
+
+- Implemented a first mobile shell repair in `templates/workspace.html` and `playwright/tests/navigation.spec.js`.
+- Added a current-task module, mobile Ask/Label/Annotate/Deadline action strip, disabled empty-state actions, tighter mobile padding, no-horizontal-overflow assertions, and a static empty selected-document action area.
+- Final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/04-workspace-docket-mobile-final-empty-state.png`
+- Simplified locked-state screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/06-workspace-docket-mobile-locked-empty-state.png`
+- Loaded-document screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-shell-repair/screenshots/09-workspace-docket-mobile-loaded-document-final.png`
+- The loaded-document repair hides the mobile load form after a document exists, removes the duplicate lower action bar, makes Ask visually primary, hides duplicate selected-document chips, and caps the selected preview height.
+- Router follow-up still flags the Docket surface as dense and desktop-influenced, so this repair reduces the severe layout failure but does not clear the selected-document implementation gate by itself. The next gate should redesign the loaded-document mobile state around one source-summary card and progressive technical detail disclosure.
+
 ## Workstream 1: Better questions
 
 Primary files:

@@ -3069,312 +3069,563 @@
   },
   "ui_readiness": {
     "acceptance_checks": [
-      "Keep a Playwright flow that proves the release gate and filing-shape guidance stay visible before markdown/pdf/docx download."
+      "Add screenshot test asserting Intake \u2192 Evidence \u2192 Review stage chips render with active step highlighted.",
+      "Add UI assertion that each draft paragraph has an attached provenance marker or explicit 'Needs Evidence' label.",
+      "Add interaction assertion: clicking a draft sentence opens evidence drawer and highlights matching docket item.",
+      "Add assertion that regenerate button shows loading + success/error states and includes request id in DOM for observability.",
+      "Add accessibility assertion for router chat panel action buttons (aria-label, focus order, keyboard activation) to keep interactive controls discoverable.",
+      "Add screenshot and role-based assertions for router status bar visibility and expected toolchain badge states after draft generation.",
+      "Assert that \"Generate/Regenerate\" is disabled while an MCP request is pending and becomes enabled after completion.",
+      "Assert evidence cards expose source, confidence, and claim-mapping links for each high-priority assertion."
     ],
-    "actor_path_breaks": [
-      "The screenshot review loop can time out before returning page-specific UX findings."
-    ],
+    "actor_path_breaks": [],
     "broken_controls": [
       {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "control": "generate/regenerate complaint button",
+        "failure_mode": "If there is only a single action with no feedback state, users cannot tell whether routing/retrieval is still in progress or failed silently.",
         "page": "workspace-draft",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "repair": "Add explicit disabled/loading/error states and result status text tied to request ID and elapsed stage time.",
+        "surface": "Draft stage action bar"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "control": "label or annotation chips",
+        "failure_mode": "Controls can appear inert if not visibly tied to selected evidence units or if chip clicks do not persist visibly.",
         "page": "workspace-draft",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-draft"
+        "repair": "Show selected count, persist immediately with badge state, and expose Undo/Reset per sentence or evidence item.",
+        "surface": "Evidence/annotation toolbar"
       },
       {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "control": "send or ask-router button",
+        "failure_mode": "May appear like generic chat and not linked to complaint section context, causing users to ask follow-ups that do not apply to the active draft segment.",
+        "page": "workspace-draft",
+        "repair": "Bind button action to active section context; show context preview in panel header before submission.",
+        "surface": "Chat/Router panel"
+      },
+      {
+        "control": "Generate / Regenerate",
+        "failure_mode": "Control state looks active even while a previous generation request is still in-flight, allowing duplicate submissions.",
         "page": "workspace-evidence",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "repair": "Use a disabled/loading state derived from `ComplaintMcpClient` request promise and prevent duplicate in-flight calls with idempotency key.",
+        "surface": "Draft action bar"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "control": "Attach/Detach evidence links",
+        "failure_mode": "Attachment actions do not indicate whether changes are persisted to the active draft session.",
         "page": "workspace-evidence",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-evidence"
+        "repair": "Add explicit persisted/unsaved indicators and optimistic UI confirmation after MCP acknowledgment.",
+        "surface": "Evidence pane"
       },
       {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "control": "Export complaint",
+        "failure_mode": "Export control appears contextually useful but can be clicked before final review checks complete, with no warning.",
+        "page": "workspace-evidence",
+        "repair": "Add guardrail modal using MCP-verified checklist state, with clear warning and next-step prompt before export.",
+        "surface": "Review stage"
+      },
+      {
+        "control": "Run / Analyze / Refresh (any primary action)",
+        "failure_mode": "No clear status contract before execution (users cannot see whether action is blocked, queued, or already run).",
         "page": "workspace-homepage",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "repair": "Add deterministic disabled/loading/success states and inline helper text that maps control state to MCP job state.",
+        "surface": "Top action bar"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "control": "Evidence item action menu",
+        "failure_mode": "Likely no direct path to mark, dispute, or remove low-confidence items from the docket set.",
         "page": "workspace-homepage",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-homepage"
+        "repair": "Expose explicit buttons/icons for annotate, flag, and exclude with optimistic UI update.",
+        "surface": "Evidence list controls"
       },
       {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
-        "page": "workspace-intake",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "control": "Send / Submit query",
+        "failure_mode": "Ambiguous whether message goes to complaint router or general assistant path.",
+        "page": "workspace-homepage",
+        "repair": "Show route label in button copy and a selectable route picker adjacent to send.",
+        "surface": "Chat panel"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
-        "page": "workspace-intake",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-intake"
-      },
-      {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
-        "page": "workspace-integrations",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
-      },
-      {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
-        "page": "workspace-integrations",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-integrations"
-      },
-      {
-        "control": "UI review automation",
-        "failure_mode": "Live multimodal/text router review timed out for the screenshot set.",
+        "control": "Generate Draft / Start Draft button",
+        "failure_mode": "Control appears accessible before core evidence and intent checks are completed, which can produce incomplete complaints and rework.",
         "page": "workspace-review",
-        "repair": "Use export-artifact guidance as the immediate fallback and keep the actor/critic loop attached to the audited complaint packet.",
-        "surface": "draft/export"
+        "repair": "Disable until Intake + Evidence minimum required checks pass; show why with inline helper text and direct jump links to incomplete fields.",
+        "surface": "Top actions bar"
       },
       {
-        "control": "release gate / export guidance",
-        "failure_mode": "This surface needs a stronger visible handoff into filing-quality warnings when router review is slow.",
+        "control": "Send prompt / send message control",
+        "failure_mode": "No visible route/mode indicator makes it unclear whether message is routed through filing workflow, evidence-only analysis, or general chat.",
         "page": "workspace-review",
-        "repair": "Release gate: PASS",
-        "surface": "workspace-review"
+        "repair": "Expose route chips and last used router summary; add a selector for `Drafting`, `Review`, `Evidence-only` modes with default matching current stage.",
+        "surface": "Chat composer"
+      },
+      {
+        "control": "Download / Copy evidence / Export evidence link",
+        "failure_mode": "Links appear as static links with no context of what evidence set/version they represent.",
+        "page": "workspace-review",
+        "repair": "Attach version tags and timestamps, and disable old set actions once user edits evidence until it is re-synced through MCP.",
+        "surface": "Evidence list"
       }
     ],
     "carry_forward_assessment": {},
     "critic_verdict": "warning",
     "issue_counts": {
-      "high": 0,
-      "low": 0,
-      "medium": 6
+      "high": 8,
+      "low": 6,
+      "medium": 9
     },
     "issues": [
       {
         "page": "workspace-draft",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
+        "problem": "Single dense draft view appears to privilege final complaint text without adjacent evidence provenance, leaving non-lawyer users unsure which facts/phrases came from which source or router step.",
+        "recommended_fix": "Add a split-pane layout with claim section on left and source-linked evidence callouts on right; each sentence/paragraph should expose hover/focus provenance chips (document/date/docket field) tied to router output.",
+        "severity": "high",
+        "surface": "Draft workspace panel",
+        "user_impact": "Users may miss factual gaps, over-trust autogenerated language, and lose confidence in whether the draft is fully supported by their uploaded evidence."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Router-backed generation appears to be a single opaque action (e.g., llm_router) without clear status, rationale, or fallback path, which makes remediation hard when output quality drops.",
+        "recommended_fix": "Surface explicit router mode indicator, last-input hash/context summary, and a retriable action set (rerun with stricter evidence mode / safe mode / explain rationale) while keeping calls in the existing ComplaintMcpClient flow.",
+        "severity": "high",
+        "surface": "Routing/automation controls",
+        "user_impact": "Users cannot debug failures or trust routing decisions, and may repeatedly regenerate with no clear path to fix missing context."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "No clearly visible gating of high-risk layperson mistakes (e.g., legal conclusions versus observed facts, protected information placeholders, unsupported accusations).",
+        "recommended_fix": "Add inline safety rail components at intake and review stages: claim-type checklist, confidence tags, and warning banners for legal conclusion language that is not evidenced.",
         "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "surface": "Intake/Evidence transition",
+        "user_impact": "Retaliation complaints can be legally risky if unsupported wording is introduced too early; users may file materially weak or overreaching claims."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Docket/filing context appears under-emphasized relative to generated complaint content, so key filing metadata can be missed.",
+        "recommended_fix": "Introduce a compact docket summary strip with required fields (cause, court, filing number/status/date, parties) and require explicit acknowledgment before final export.",
+        "severity": "medium",
+        "surface": "Docket analysis card/list",
+        "user_impact": "Missing docket context increases chance of procedural errors and weakens evidentiary credibility in downstream complaint output."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Labeling/annotation affordances for fact checks and redaction risk likely not prominent, so users cannot quickly curate source-level evidence before drafting.",
+        "recommended_fix": "Add per-paragraph annotation controls (supports: evidence-confirmed / uncertain / needs source / legal-risk) and quick filter views for each label before export.",
+        "severity": "low",
+        "surface": "Annotation and review controls",
+        "user_impact": "Users spend extra cycles in final review and may export drafts with unresolved factual uncertainty."
+      },
+      {
+        "page": "workspace-draft",
+        "problem": "Complaint export appears to trust \u201cPASS\u201d status without exposing what was validated vs assumed.",
+        "recommended_fix": "Require a one-screen \u201cSubmission readiness checklist\u201d with pass/fail reasons and unresolved items; keep export disabled until checklist is reviewed.",
+        "severity": "low",
+        "surface": "Export/output section",
+        "user_impact": "Actors may conflate scoring metadata with evidentiary completeness and proceed too quickly."
       },
       {
         "page": "workspace-evidence",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
+        "problem": "The source/intent of the generated draft is not always visibly tied to the active MCP route (router choice, tool chain, or direct LLM path).",
+        "recommended_fix": "Add a persistent, always-visible router badge and tool-chain breadcrumb near the draft output (e.g., \"Router: llm_router | MCP tools: docket+evidence|No-op\").",
+        "severity": "high",
+        "surface": "Complaint workflow panel (Intake + Draft)",
+        "user_impact": "Users cannot verify whether the Draft came from `llm_router` or a fallback path, making it hard to trust reliability and diagnose why content changes when the same inputs are reused."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Docket/extracted evidence items are not visually grouped with direct relevance or confidence signals, and their provenance is not obvious at a glance.",
+        "recommended_fix": "Introduce compact evidence cards showing document source, relevance tag, timestamp, and confidence, with clear \u201csupports claim X / weak\u201d labels and one-click jump-to-evidence from each draft paragraph.",
+        "severity": "high",
+        "surface": "Evidence/attachments section",
+        "user_impact": "Actors may over-trust weak evidence or miss critical supporting items, reducing complaint defensibility and increasing remediation time in review."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Labeling/annotation affordances appear too subtle or inconsistent, making it unclear which sections are user-verified, disputed, or machine-attributed.",
+        "recommended_fix": "Add explicit annotation toggle chips (Verified / Flagged / Needs source) with inline helper text and keyboard-accessible controls next to each generated paragraph.",
         "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "surface": "Annotation and labeling controls",
+        "user_impact": "Reviewers cannot quickly correct misclassifications, and lay users may accidentally rely on auto-labels without understanding their provisional nature."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Safety and filing-readiness guidance appears sparse near action points and may look like legal guarantees.",
+        "recommended_fix": "Insert a concise safety strip with plain-language guardrails near Draft output: evidence completeness, jurisdiction checks, retaliation-specific red flags, and what remains \u201cuser-confirmation required.\u201d",
+        "severity": "medium",
+        "surface": "Safety / layperson guidance lane",
+        "user_impact": "Users may submit complaints with misunderstandings about legal standards or mandatory elements, creating risk and reducing trust."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "The page does not expose clear progress by stage (Intake \u2192 Evidence \u2192 Review \u2192 Draft \u2192 Integration Discovery), so users lose place and skip validation checkpoints.",
+        "recommended_fix": "Replace free-form step cues with a visible stage rail/status list and gate progression with lightweight checks (e.g., \"Evidence present\", \"Claim type confirmed\").",
+        "severity": "medium",
+        "surface": "Stage navigation and orientation",
+        "user_impact": "Users miss required review steps and may return with partially validated complaints, lowering consistency and quality."
+      },
+      {
+        "page": "workspace-evidence",
+        "problem": "Router-backed chat interactions do not show whether assistant turns are local clarification turns or MCP tool-invoked actions.",
+        "recommended_fix": "Show chat message metadata badges (\"suggestion\", \"tool call\", \"evidence fetch\") and disable irreversible actions until confirmation in the same bubble.",
+        "severity": "low",
+        "surface": "Chat-like assistance area",
+        "user_impact": "Non-technical users cannot distinguish conversational help from action-triggering operations, increasing accidental misuse."
       },
       {
         "page": "workspace-homepage",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
-        "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "problem": "Evidence cards appear visually dense and do not expose a fast, explicit annotation/label state for user-marked facts (e.g., supportive, disputed, unresolved), making docket-grounding hard to trust.",
+        "recommended_fix": "Add inline evidence controls per record (chips/toggles + confidence/label markers), with immediate visual feedback and a compact legend so users can tag and trust each fact source at a glance.",
+        "severity": "high",
+        "surface": "Evidence panel",
+        "user_impact": "Users may miss marking weak/critical passages, leading to weaker complaints, slower review, and lower confidence in MCP-produced drafts."
       },
       {
-        "page": "workspace-intake",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
-        "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "page": "workspace-homepage",
+        "problem": "The page does not clearly indicate current stage ownership (Intake vs. Evidence vs. Review vs. Draft), so users can lose where they are in the pipeline.",
+        "recommended_fix": "Introduce a persistent breadcrumb-like stage rail with current step highlighting, completion badges, and locked/disabled states for unavailable downstream actions.",
+        "severity": "high",
+        "surface": "Header/primary workflow toolbar",
+        "user_impact": "Actors may click actions out of order or repeat steps, increasing mistaken submissions and support friction."
       },
       {
-        "page": "workspace-integrations",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
+        "page": "workspace-homepage",
+        "problem": "Chat affordance appears present but not strongly linked to routing outcome or complaint stage; its output path is ambiguous.",
+        "recommended_fix": "Label chat input with active route context (e.g., \"Ask Router: Evidence / Draft\") and expose route chips for override, preserving defaults while making routing transparent.",
         "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "surface": "Router-aware chat affordance",
+        "user_impact": "Users cannot tell whether a prompt will use the complaint router, evidence router, or generic chat, reducing trust and increasing accidental misrouting."
+      },
+      {
+        "page": "workspace-homepage",
+        "problem": "Docket metadata and analysis confidence are presented but not broken down into layperson-safe summaries.",
+        "recommended_fix": "Add plain-language 'What this means for your complaint' summary lines and risk flags (time windows, missing docs, ambiguous claims) next to machine metrics.",
+        "severity": "medium",
+        "surface": "Docket analysis area",
+        "user_impact": "Non-legal users may struggle to interpret filing impact and may accept false assumptions from raw legal text."
+      },
+      {
+        "page": "workspace-homepage",
+        "problem": "The current status fields are technically correct but feel static, with limited affordance for what to do next.",
+        "recommended_fix": "Attach contextual CTA under each status metric (e.g., 'Review evidence links', 'Re-run docket check', 'Open draft rationale'), turning metrics into navigable actions.",
+        "severity": "low",
+        "surface": "Claim/draft status dashboard block",
+        "user_impact": "Users may misread a successful auto-draft as final and stop verifying source alignment."
+      },
+      {
+        "page": "workspace-homepage",
+        "problem": "The final complaint body is likely correct but lacks inline source map/line-to-evidence traceability.",
+        "recommended_fix": "Add collapsible citation chips that jump to source excerpts and allow jump-to-evidence navigation without leaving the draft.",
+        "severity": "low",
+        "surface": "Complaint output panel",
+        "user_impact": "Reviewers must manually cross-check each paragraph against evidence, which slows validation and increases error risk."
       },
       {
         "page": "workspace-review",
-        "problem": "Live screenshot critique timed out before the actor/critic loop could validate the final complaint surfaces.",
-        "recommended_fix": "Release gate: PASS",
+        "problem": "The stage progression is not visibly self-justifying (weak IA cues for where the user is in Intake, Evidence, Review, Draft).",
+        "recommended_fix": "Add explicit stage indicators with per-stage completion status, required-vs-optional checks, and a locked-forward progression model that can still be reviewed/edited.",
+        "severity": "high",
+        "surface": "Complaint generator workflow shell/header",
+        "user_impact": "Users can submit incomplete or mis-scoped input, assume wrong step, and lose confidence in whether the complaint output is fully validated."
+      },
+      {
+        "page": "workspace-review",
+        "problem": "Docket context appears to be treated as a passive blob rather than a structured analysis artifact.",
+        "recommended_fix": "Introduce a structured docket preview card (facts, timeline, claim flags, jurisdiction hints) with inline validation indicators and quick edit controls to correct extracted fields before drafting.",
+        "severity": "high",
+        "surface": "Evidence ingestion / docket section",
+        "user_impact": "Lay users cannot tell whether timeline, parties, dates, and claim elements were interpreted correctly, increasing wrong-fact risk in filings."
+      },
+      {
+        "page": "workspace-review",
+        "problem": "No obvious annotation/labeling affordance for attaching notes to specific evidence chunks (highlights, exhibit tags, trust labels).",
+        "recommended_fix": "Add per-segment actions in the evidence list: `Highlight`, `Flag as low-confidence`, `Attach label (witness statement, policy doc, log, exhibit)`, `Exclude from draft`.",
         "severity": "medium",
-        "surface": "draft/export",
-        "user_impact": "A complainant could move toward export without seeing the strongest filing-shape warnings or next-step guidance."
+        "surface": "Evidence annotation controls",
+        "user_impact": "Users cannot mark weak/uncertain or contested evidence, making the draft harder to audit and defend."
+      },
+      {
+        "page": "workspace-review",
+        "problem": "Chat actions appear generic and do not surface which MCP router/model path is handling the response.",
+        "recommended_fix": "Display active router label, response source badge, confidence/status indicators, and expose a compact fallback/repair action (`Regenerate via router`, `Switch to evidence-only mode`).",
+        "severity": "medium",
+        "surface": "Router-backed chat panel",
+        "user_impact": "Users cannot tell if they are getting legal-draft guidance, safety checks, or generic language-model output, reducing trust and controllability."
+      },
+      {
+        "page": "workspace-review",
+        "problem": "No visible layperson safety or privacy framing for legal content entry.",
+        "recommended_fix": "Add a concise safety banner with plain-language guidance and inline warning chips (sensitive identifiers, retaliation sensitivity, non-filing advice disclaimer) before generation.",
+        "severity": "low",
+        "surface": "Safety/guardrails panel near free-form input",
+        "user_impact": "Users may paste sensitive or defamatory content and receive harmful framing or legal-risky wording."
       }
     ],
     "latest_review_json_path": null,
     "latest_review_markdown_path": null,
     "optimization_targets": [],
     "playwright_followups": [
-      "Capture and assert the release gate, filing-shape score, and export guidance in the final draft/export view."
+      "Add screenshot test asserting Intake \u2192 Evidence \u2192 Review stage chips render with active step highlighted.",
+      "Add UI assertion that each draft paragraph has an attached provenance marker or explicit 'Needs Evidence' label.",
+      "Add interaction assertion: clicking a draft sentence opens evidence drawer and highlights matching docket item.",
+      "Add assertion that regenerate button shows loading + success/error states and includes request id in DOM for observability.",
+      "Add accessibility assertion for router chat panel action buttons (aria-label, focus order, keyboard activation) to keep interactive controls discoverable.",
+      "Add screenshot and role-based assertions for router status bar visibility and expected toolchain badge states after draft generation.",
+      "Assert that \"Generate/Regenerate\" is disabled while an MCP request is pending and becomes enabled after completion.",
+      "Assert evidence cards expose source, confidence, and claim-mapping links for each high-priority assertion.",
+      "Add focused test for annotation chips: each draft section can be marked Verified/Needs review and state persists across refresh within the same session token.",
+      "Add workflow-stage screenshot test that shows stage progression and required checklist completeness before enabling export.",
+      "Add assertions for chat message metadata badges: suggestions vs tool-invoked actions.",
+      "Add assertion: stage rail renders all 5 stages and highlights active stage based on session state.",
+      "Add screenshot diff: evidence card must display annotation controls and source-link chips in default viewport.",
+      "Add assertion: chat send control includes visible route label and selected route is reflected in network payload.",
+      "Add screenshot + assertion: high-confidence / low-confidence docket flags and layperson summary blocks are visible for any nontrivial docket result.",
+      "Add assertion: draft paragraph source-chip click opens evidence detail pane and highlights source excerpt.",
+      "Add screenshot diff assertions for stage rail state (e.g., Intake/Evidence/Review/Draft) after partial completion.",
+      "Add visibility and label assertions for docket summary fields (parties/date/claim type/urgency) after parse.",
+      "Assert evidence chips are rendered and serialized back in MCP payload when generating draft.",
+      "Assert router badge and rerun actions are shown in chat header and route metadata is updated after switching chat mode.",
+      "Assert primary CTA is disabled until required field checks pass and becomes enabled only after valid evidence selection."
     ],
     "recommended_changes": [
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "implementation_notes": "Introduce explicit stage rail (Intake, Evidence, Review, Draft, Integration Discovery) with sticky progress indicators and required checkpoints in each stage. Keep context persistence so users can jump between stages without data loss.",
         "page": "workspace-draft",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "sdk_considerations": "Do not change MCP invocation contracts; continue invoking ComplaintMcpClient stage transitions/events through existing endpoints and only enrich client state passed in state objects for UI rendering.",
+        "shared_code_path": "frontend/src/app/complaint-generator/page.tsx",
+        "title": "Add a stage-aware information architecture shell"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "implementation_notes": "Render citations inline (or side panel) for each drafted section, with expand/collapse and a claim-confidence meter aggregated to the section level.",
+        "page": "workspace-draft",
+        "sdk_considerations": "Store provenance IDs returned by MCP router responses in client-side map; no schema-breaking changes needed if existing ComplaintMcpClient already returns chunk IDs/trace tokens\u2014if not, pass through as optional metadata.",
+        "shared_code_path": "src/components/complaint/ClaimRenderer.tsx + src/features/compliance/provenance.ts",
+        "title": "Expose evidence provenance and confidence on every drafted claim"
+      },
+      {
+        "implementation_notes": "Add a pre-export safety checklist panel that highlights legal-conclusion phrases, missing evidence markers, and redaction flags. Use clear, plain-language copy and progressive disclosure for legal terms.",
+        "page": "workspace-draft",
+        "sdk_considerations": "The checklist should be purely client-side validation using metadata from MCP outputs; preserve request/response format with ComplaintMcpClient so router outputs remain source-of-truth.",
+        "shared_code_path": "src/components/safety/ClaimReadinessChecklist.tsx",
+        "title": "Build a safe-mode layer for layperson review"
+      },
+      {
+        "implementation_notes": "Place chat affordances with explicit context card: last selected section, attached evidence snippets, router reasoning summary, and action buttons for regeneration scopes (section-only / evidence-only / stricter safety).",
+        "page": "workspace-draft",
+        "sdk_considerations": "Keep calls through existing chat RPC path on ComplaintMcpClient; only add UI action parameters (e.g., scope, strictness) mapped to existing optional fields or harmless extras in request payload.",
+        "shared_code_path": "src/components/mcp/RouterChatPanel.tsx",
+        "title": "Enhance router-backed chat as an interactive debugger"
+      },
+      {
+        "implementation_notes": "Enable quick labels per evidence block (confirmed / disputed / missing source / sensitive) and surface filter toggles for export-mode review.",
+        "page": "workspace-draft",
+        "sdk_considerations": "Persist labels in UI state and sync labels with MCP state attachments where supported; avoid altering complaint generation payload shape unless MCP accepts an optional `annotations` field.",
+        "shared_code_path": "src/features/evidence/EvidenceAnnotator.tsx + src/state/evidenceStore.ts",
+        "title": "Add annotation/labeling workflow for evidence"
+      },
+      {
+        "implementation_notes": "Add a compact router status component in the header of Intake/Review/Draft that reads router decision and active MCP endpoints from existing client state and renders live updates with fallback text when unavailable.",
         "page": "workspace-evidence",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "sdk_considerations": "Keep calls through `ComplaintMcpClient` only; do not call MCP transport directly from UI. Populate status from existing `ComplaintMcpClient` route metadata/event stream.",
+        "shared_code_path": "src/components/complaint/RouterStatusBar.tsx, src/components/complaint/WorkflowScaffold.tsx, src/stores/complaintFlowStore.ts",
+        "title": "Expose MCP routing state in a non-intrusive status bar"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "implementation_notes": "Create per-claim evidence panes with source IDs, relevance score buckets, and clickable anchors into draft paragraphs; show unresolved evidence as warnings not hard failures.",
+        "page": "workspace-evidence",
+        "sdk_considerations": "Preserve MCP evidence payload shape; enrich UI only with non-blocking rendering fields returned by existing tool outputs. No schema changes to transport objects.",
+        "shared_code_path": "src/components/evidence/EvidencePanel.tsx, src/lib/evidence/attachEvidenceToDraft.ts, src/types/evidence.ts",
+        "title": "Add evidence cards with claim-to-text traceability"
+      },
+      {
+        "implementation_notes": "Add annotation controls per section: `verified`, `needs-legal-review`, `user-corrected`, `evidence-missing`. Persist as local draft metadata and include in export summary for review continuity.",
+        "page": "workspace-evidence",
+        "sdk_considerations": "Store annotations as client-side metadata attached to draft artifacts without altering MCP request/response contracts; if persistence is persisted server-side, serialize via existing ComplaintMCP metadata fields only.",
+        "shared_code_path": "src/components/draft/DraftSection.tsx, src/lib/draft/annotationStore.ts, src/services/draftSync.ts",
+        "title": "Introduce explicit annotation taxonomy for generated draft sections"
+      },
+      {
+        "implementation_notes": "Add a per-stage checklist card in each stage with copy like \"What this step requires\" and \"common mistakes\". Hard-stop only at Review/Draft handoff if critical evidence missing.",
+        "page": "workspace-evidence",
+        "sdk_considerations": "Use MCP-derived validation outputs from ComplaintMcpClient for check states; avoid duplicating business logic in UI. If check criteria change, consume it from MCP response metadata.",
+        "shared_code_path": "src/components/workflow/StageChecklist.tsx, src/app/complaint-generator/page.tsx, src/lib/workflow/checkers.ts",
+        "title": "Insert stage-aware safety rails with plain-language checks"
+      },
+      {
+        "implementation_notes": "Tag chat messages by type and action intent; show inline tool call badges and a small confirmation step before any non-read MCP action is executed through chat.",
+        "page": "workspace-evidence",
+        "sdk_considerations": "Continue to route messages through shared chat handlers in `ComplaintMcpClient`. Only wrap UI with transparent metadata rendering and confirmation gates.",
+        "shared_code_path": "src/components/chat/ComplaintChat.tsx, src/lib/chat/chatMessageType.ts, src/services/chatRouter.ts",
+        "title": "Improve router-backed chat controls and affordances"
+      },
+      {
+        "implementation_notes": "Implement a stage rail component with Intake, Evidence, Review, Draft, Integration Discovery states, each with explicit status, actionability, and next-step CTA; persist state from existing session model so users can resume mid-flow.",
         "page": "workspace-homepage",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "sdk_considerations": "Continue driving state transitions through existing `ComplaintMcpClient` methods; only change how state is rendered, not how tool invocations are issued.",
+        "shared_code_path": "frontend complaint generator page container and stage/state reducer (likely page-level store + route-based shell)",
+        "title": "Add stage-aware information architecture for the MCP pipeline"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
-        "page": "workspace-intake",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "implementation_notes": "Add per-item evidence labeling controls (supporting/disputed/questionable), confidence sliders, and mandatory linkage for generated complaint clauses; show label counts and unresolved items inline.",
+        "page": "workspace-homepage",
+        "sdk_considerations": "Persist labels via existing MCP tool calls (same resource identifiers and tool names) so annotation updates stay in the shared ComplaintMCP event stream used by all clients.",
+        "shared_code_path": "evidence list/record cards in complaint workspace components",
+        "title": "Make evidence annotation first-class in the same UI surface"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
-        "page": "workspace-integrations",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "implementation_notes": "Show selected router above chat input, and add route chips for quick switch (Docket / Evidence / Draft / Safety). Log and display the selected route for each exchange.",
+        "page": "workspace-homepage",
+        "sdk_considerations": "Route changes must invoke current `ComplaintMcpClient` chat path with explicit route parameter; keep payload shape and existing response handler intact.",
+        "shared_code_path": "chat input component + draft/review panel orchestration layer",
+        "title": "Expose router context in chat and tie prompts to MCP routes"
       },
       {
-        "implementation_notes": "When router-backed screenshot review is slow, surface filing-shape scores, release-gate verdicts, and export guidance directly in the UI review report instead of falling back to a generic timeout warning.",
+        "implementation_notes": "Add plain-language interpretation cards and safety prompts (deadlines, missing docs, overbroad claims, retaliation context clarifications) near each technical result metric.",
+        "page": "workspace-homepage",
+        "sdk_considerations": "Render safety copy from MCP-provided analysis fields, avoid re-prompting the MCP for raw legal evaluation logic unless needed.",
+        "shared_code_path": "docket analysis summary cards + filing guidance widget",
+        "title": "Improve layperson safety framing in docket and filing guidance"
+      },
+      {
+        "implementation_notes": "Render complaint paragraphs with tappable source tags; clicking highlights the originating evidence and opens a compact source pane with excerpt/time/scope.",
+        "page": "workspace-homepage",
+        "sdk_considerations": "Leverage evidence IDs already returned by MCP payloads; do not introduce a new evidence schema unless the SDK contract is already failing required traceability.",
+        "shared_code_path": "draft renderer module and evidence drawer component",
+        "title": "Add source traceability from draft text to evidence"
+      },
+      {
+        "implementation_notes": "Render a top-level pipeline component showing Intake, Evidence, Review, Draft, Discovery. Gate each stage with validation rules and inline errors; keep existing state schema but surface it in a sticky progress rail and per-section task cards. Persist partial progress in local state synced to session model.",
         "page": "workspace-review",
-        "sdk_considerations": "Preserve complaint.review_ui and complaint.optimize_ui so the browser SDK can still return actionable guidance.",
-        "shared_code_path": "applications/ui_review.py",
-        "title": "Use complaint-output signals as the first fallback UX critic"
+        "sdk_considerations": "Keep MCP calls unchanged at data boundaries; map existing `ComplaintMcpClient` payloads to stage validation status and only block transitions client-side for UX clarity while still allowing server-side re-validation.",
+        "shared_code_path": "src/features/complaint-generator/components/ComplaintWorkflow.tsx | src/features/complaint-generator/state/workflowState.ts",
+        "title": "Create explicit stage architecture with validation gates"
+      },
+      {
+        "implementation_notes": "Add a docket summary card with extracted fields (case number, parties, dates, allegations, response deadlines) and confidence markers. Allow edits with diff-tracked overrides that are re-routed through MCP before draft render.",
+        "page": "workspace-review",
+        "sdk_considerations": "Preserve `ComplaintMcpClient` command shape; call existing parse/draft endpoints with a normalized evidence payload plus user corrections, and pass an `overrides` object derived from UI edits.",
+        "shared_code_path": "src/features/complaint-generator/components/DocketPanel.tsx | src/features/complaint-generator/services/parseDocket.ts",
+        "title": "Docket analysis readability pass (claim-safe parsing)"
+      },
+      {
+        "implementation_notes": "Introduce an `AnnotationStrip` per evidence item with quick-label chips and severity flags; persist labels in UI state and include them in generated drafts as evidence rationale metadata.",
+        "page": "workspace-review",
+        "sdk_considerations": "Do not bypass MCP: send labels/tags as additional context in MCP request envelopes and maintain existing route names so downstream router behavior remains unchanged.",
+        "shared_code_path": "src/features/complaint-generator/components/EvidenceList.tsx | src/features/complaint-generator/state/evidenceState.ts",
+        "title": "Evidence annotation and label taxonomy"
+      },
+      {
+        "implementation_notes": "Enhance chat with explicit route chip (`router: llm_router`), request/response metadata chips, and recovery actions (`rerun`, `strict mode`, `citation-first`). Show disabled rationale if router rejects unsafe prompts.",
+        "page": "workspace-review",
+        "sdk_considerations": "Add pass-through metadata fields in response rendering only; keep RPC methods and tool invocation semantics identical so SDK session continuity and message threading stay intact.",
+        "shared_code_path": "src/features/complaint-generator/components/RouterChatPanel.tsx | src/lib/mcp/ComplaintMcpClient.ts",
+        "title": "Router-aware chat affordances"
+      },
+      {
+        "implementation_notes": "Add a concise, non-blocking safety strip at compose/submit points plus contextual microcopy on claims language, retaliation framing, and non-legal-advice disclaimers. Use consistent warning tones and avoid legal jargon.",
+        "page": "workspace-review",
+        "sdk_considerations": "Safety messages are UI-only; MCP draft generation stays as-is while adding pre-submit acknowledgement flag in the existing request payload to preserve compatibility.",
+        "shared_code_path": "src/features/complaint-generator/components/SafetyBanner.tsx | src/features/complaint-generator/components/ComposeInput.tsx",
+        "title": "Layperson safety and legal framing layer"
       }
     ],
-    "release_blockers": [
-      "Release gate: PASS"
-    ],
+    "release_blockers": [],
     "review_backend": {
-      "id": "llm-router",
-      "model": "multimodal_router",
+      "id": "llm-router-codex",
+      "model": "gpt-5.3-codex-spark",
       "page_review_backends": [
         {
-          "fallback_error": "llm_router_error: Unknown LLM provider: llm_router",
-          "id": "llm-router",
-          "model": "multimodal_router",
-          "multimodal_error": "Unknown LLM provider: llm_router",
+          "elapsed_seconds": 11.959,
+          "id": "llm-router-codex",
+          "model": "gpt-5.3-codex-spark",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 1,
+          "prepared_image_paths": [
+            "/home/barberb/HACC/complaint-generator/artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260425/router-review-backend-codex-codex-diagnostics/pages/prepared-images/workspace-draft.review.jpg"
+          ],
+          "prompt_chars": 1868,
           "prompt_mode": "compact",
-          "provider": "llm_router",
-          "strategy": "fallback"
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
         },
         {
-          "fallback_error": "llm_router_error: Unknown LLM provider: llm_router",
-          "id": "llm-router",
-          "model": "multimodal_router",
-          "multimodal_error": "Unknown LLM provider: llm_router",
+          "elapsed_seconds": 9.848,
+          "id": "llm-router-codex",
+          "model": "gpt-5.3-codex-spark",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 1,
+          "prepared_image_paths": [
+            "/home/barberb/HACC/complaint-generator/artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260425/router-review-backend-codex-codex-diagnostics/pages/prepared-images/workspace-evidence.review.jpg"
+          ],
+          "prompt_chars": 1871,
           "prompt_mode": "compact",
-          "provider": "llm_router",
-          "strategy": "fallback"
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
         },
         {
-          "fallback_error": "llm_router_error: Unknown LLM provider: llm_router",
-          "id": "llm-router",
-          "model": "multimodal_router",
-          "multimodal_error": "Unknown LLM provider: llm_router",
+          "elapsed_seconds": 9.574,
+          "id": "llm-router-codex",
+          "model": "gpt-5.3-codex-spark",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 0,
+          "prepared_image_paths": [],
+          "prompt_chars": 1871,
           "prompt_mode": "compact",
-          "provider": "llm_router",
-          "strategy": "fallback"
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
         },
         {
-          "fallback_error": "llm_router_error: Unknown LLM provider: llm_router",
-          "id": "llm-router",
-          "model": "multimodal_router",
-          "multimodal_error": "Unknown LLM provider: llm_router",
+          "elapsed_seconds": 12.051,
+          "id": "llm-router-codex",
+          "model": "gpt-5.3-codex-spark",
+          "original_screenshot_count": 1,
+          "prepared_image_count": 1,
+          "prepared_image_paths": [
+            "/home/barberb/HACC/complaint-generator/artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260425/router-review-backend-codex-codex-diagnostics/pages/prepared-images/workspace-review.review.jpg"
+          ],
+          "prompt_chars": 1869,
           "prompt_mode": "compact",
-          "provider": "llm_router",
-          "strategy": "fallback"
-        },
-        {
-          "fallback_error": "llm_router_error: Unknown LLM provider: llm_router",
-          "id": "llm-router",
-          "model": "multimodal_router",
-          "multimodal_error": "Unknown LLM provider: llm_router",
-          "prompt_mode": "compact",
-          "provider": "llm_router",
-          "strategy": "fallback"
-        },
-        {
-          "fallback_error": "llm_router_error: Unknown LLM provider: llm_router",
-          "id": "llm-router",
-          "model": "multimodal_router",
-          "multimodal_error": "Unknown LLM provider: llm_router",
-          "prompt_mode": "compact",
-          "provider": "llm_router",
-          "strategy": "fallback"
+          "provider": "codex_cli",
+          "screenshot_count": 1,
+          "strategy": "multimodal_router"
         }
       ],
-      "page_review_count": 6,
-      "page_review_executor": "process",
+      "page_review_count": 4,
+      "page_review_executor": "inline",
       "prompt_mode": "full",
-      "provider": "llm_router",
-      "selected_screenshot_count": 6,
+      "provider": "codex_cli",
+      "selected_screenshot_count": 4,
       "selected_screenshots": [
         "workspace-review.png",
         "workspace-draft.png",
         "workspace-evidence.png",
-        "workspace-homepage.png",
+        "workspace-homepage.png"
+      ],
+      "skipped_screenshot_count": 2,
+      "skipped_screenshots": [
         "workspace-intake.png",
         "workspace-integrations.png"
       ],
-      "skipped_screenshot_count": 0,
-      "skipped_screenshots": [],
       "strategy": "page_reviews"
     },
     "runs": [],
     "score": 0,
     "screenshot_findings": [],
-    "sdk_invocations": [
-      "complaint.review_ui",
-      "complaint.optimize_ui",
-      "complaint.run_browser_audit"
-    ],
+    "sdk_invocations": [],
     "stage_findings": {
-      "Draft": "workspace-draft: Release gate: PASS | workspace-evidence: Release gate: PASS | workspace-homepage: Release gate: PASS | workspace-intake: Release gate: PASS | workspace-integrations: Release gate: PASS | workspace-review: Release gate: PASS",
-      "Evidence": "workspace-draft: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-evidence: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-homepage: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-intake: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-integrations: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown. | workspace-review: Evidence capture appears connected in the browser audit; preserve that continuity when export warnings are shown.",
-      "Intake": "workspace-draft: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-evidence: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-homepage: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-intake: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-integrations: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings. | workspace-review: The intake route is covered by the browser audit, but live screenshot critique timed out before it could produce page-specific findings.",
-      "Integration Discovery": "workspace-draft: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-evidence: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-homepage: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-intake: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-integrations: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics. | workspace-review: Keep MCP/SDK tooling visibility tied to the same release-gate and export-quality diagnostics.",
-      "Review": "workspace-draft: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-evidence: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-homepage: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-intake: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-integrations: Support review should continue to surface claim gaps before users rely on the generated complaint. | workspace-review: Support review should continue to surface claim gaps before users rely on the generated complaint."
+      "Draft": "workspace-draft: The draft is strong in score but appears to hide process transparency, especially router rationale and source confidence. | workspace-homepage: Draft quality appears high (release gate and filing-shape alignment are strong), but traceability from claims to evidence is the major usability gap. | workspace-review: Draft generation looks high-quality, but lacks explicit gating and safety-aware confirmation before finalization.",
+      "Evidence": "workspace-draft: Evidence-to-draft linkage appears under-specified and should be made visually first-class to reduce unsupported allegations. | workspace-homepage: Evidence inspection exists but lacks actionable annotation labeling and unresolved-evidence surfacing. | workspace-review: Evidence entry exists but lacks labeling, confidence markers, and confidence-based remediation paths.",
+      "Intake": "workspace-draft: Need stronger pre-draft guidance for non-lawyers and explicit intake quality checks before moving forward. | workspace-homepage: Inputs are likely functional but stage discovery is weak; user needs explicit visual confirmation of what has been submitted and what is missing. | workspace-review: Intake inputs are not clearly bounded by required fields; users need stronger completion feedback and sequencing.",
+      "Integration Discovery": "workspace-draft: Discovery/integration path should surface where MCP workflow is acting versus local UI-only transforms to maintain trust and debuggability. | workspace-homepage: The page likely does not communicate integration handoff readiness as a distinct step with clear, clickable completion checks. | workspace-review: Router usage and MCP path visibility are insufficient for user trust and operational debugging; add transparent route metadata without changing backend contracts.",
+      "Review": "workspace-draft: Review currently reads as linear text review; introduce structured section-level checklists and risk labels to prevent blind acceptance. | workspace-homepage: Review visibility is mostly static metrics with limited next-step guidance and route transparency. | workspace-review: Draft review flow appears less evidence-traceable; needs stronger linkage and safer wording framing."
     },
-    "summary": "Aggregated 6 page-level screenshot reviews. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots. Router-driven UI review timed out, so an artifact-backed actor/critic fallback was created from the audited complaint exports and page screenshots.",
-    "tested_stages": [
-      "intake",
-      "evidence",
-      "review",
-      "draft",
-      "integrations",
-      "optimizer"
-    ],
-    "updated_at": "2026-04-22T05:17:17.301697+00:00",
+    "summary": "Aggregated 4 page-level screenshot reviews. The screenshot itself is not directly inspectable from this session (image helper and shell access are unavailable), so this review is constrained to the provided complaint-generator context and output metadata. The highest-priority fixes should harden workflow safety, reduce ambiguity in evidence-to-draft traceability, and make the MCP-backed drafting path observable without changing shared ComplaintMcpClient/MCP contracts. The page appears functionally usable and the complaint output quality hints suggest the generation pipeline is working, but the UI/UX introduces avoidable risk and confusion for non-technical users. The strongest opportunities are architectural clarity, visible safety boundaries, stronger evidence traceability, and explicit router/chat state so users can trust MCP-driven outputs and intervene without breaking the ComplaintMcpClient workflow. The screenshot review suggests the complaint-generator page is close to functional but still has UX friction where workflow context is not explicit enough across the Intake \u2192 Review \u2192 Draft chain. The highest-priority fixes are to tighten stage visibility, make evidence annotation/labeling directly actionable, and preserve a clearly discoverable router-driven chat path without breaking the existing shared MCP `ComplaintMcpClient` flow.",
+    "tested_stages": [],
+    "updated_at": "2026-04-25T22:51:04.642220+00:00",
     "verdict": "Do not send to clients yet",
     "workflow_type": "page_reviews"
   },
-  "updated_at": "2026-04-22T05:17:17.301713+00:00",
+  "updated_at": "2026-04-25T22:51:04.642239+00:00",
   "user_id": "demo-user",
   "workspace_annotation_index": {
     "by_claim_element": {},

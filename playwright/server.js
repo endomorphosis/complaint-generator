@@ -1884,9 +1884,152 @@ function ipfsTemplate(name) {
   return path.join(ipfsDatasetsTemplatesDir, name);
 }
 
-function renderDashboardHub() {
-  const links = dashboardEntries.map((entry) => (
-    `<li><a href="/dashboards/ipfs-datasets/${entry.slug}">${entry.title}</a><span>${entry.summary}</span></li>`
+const laypersonDashboardCards = [
+  {
+    stage: 'Path 1',
+    workflowStage: 'Intake',
+    title: 'Start your complaint',
+    description: 'Answer guided questions, describe what happened, and turn your story into a timeline, people, harms, possible claims, and proof tasks.',
+    primaryLabel: 'Open intake path',
+    primaryHref: '/chat',
+    detailLabel: 'See intake details',
+    links: [
+      ['Check proof gaps', '/claim-support-review'],
+      ['See next step', '#dashboard-start-here'],
+      ['Build a draft later', '/document'],
+    ],
+  },
+  {
+    stage: 'Path 2',
+    workflowStage: 'Evidence',
+    title: 'Continue your complaint',
+    description: 'Return to saved work, add documents or messages, organize evidence, add laws and court cases, and keep the record together for review.',
+    primaryLabel: 'Continue saved complaint',
+    primaryHref: '/workspace',
+    detailLabel: 'See evidence and saved-work details',
+    links: [
+      ['Add evidence', '/workspace?stage=evidence'],
+      ['Organize materials', '/workspace?stage=integrations'],
+      ['Review support', '/claim-support-review'],
+    ],
+  },
+  {
+    stage: 'Path 3',
+    workflowStage: 'Review',
+    title: 'Review a court docket or response',
+    description: 'Look through filings, deadlines, hearing dates, orders, or an existing complaint/response and bring useful facts back into the workspace.',
+    primaryLabel: 'Review docket or filing',
+    primaryHref: '/workspace?stage=docket&intent=review_docket',
+    detailLabel: 'See docket review details',
+    links: [
+      ['Ask about a filing', '/chat?chat_context=docket_document'],
+      ['Add labels or notes', '/workspace?stage=integrations&intent=annotate_documents'],
+      ['Open docket tools', '#dashboard-advanced-tools'],
+    ],
+  },
+  {
+    stage: 'Path 4',
+    workflowStage: 'Profile',
+    title: 'Manage your profile',
+    description: 'Review the personal and session information used to resume your work. Technical tools stay separate from the complaint path.',
+    primaryLabel: 'Open profile',
+    primaryHref: '/profile',
+    detailLabel: 'See profile and session details',
+    links: [
+      ['Cookies', '/cookies'],
+      ['Saved work', '/workspace'],
+      ['Technical tools', '#dashboard-advanced-tools'],
+    ],
+  },
+];
+
+const dashboardSubsectionCards = [
+  {
+    title: 'Start and Review',
+    description: 'Guided questions, proof checks, next recommended action, and draft handoff.',
+    links: [['Guided questions', '/chat'], ['Proof review', '/claim-support-review'], ['Build draft', '/document']],
+  },
+  {
+    title: 'Evidence, Laws, and Court Cases',
+    description: 'Resume work, upload files, organize source materials, find connections, and check duties or conflicts.',
+    links: [['Saved complaint', '/workspace'], ['Add evidence', '/workspace?stage=evidence'], ['Find connections', '/workspace?stage=integrations']],
+  },
+  {
+    title: 'Court Dockets and Responses',
+    description: 'Load docket records, search filings, preview calendar events, and save useful notes.',
+    links: [['Review docket', '/workspace?stage=docket'], ['Ask document question', '/chat?chat_context=docket_document'], ['Add notes', '/workspace?stage=integrations&intent=annotate_documents']],
+  },
+  {
+    title: 'Profile and Technical Tools',
+    description: 'Profile, cookies, session tools, and optional package consoles for administrators.',
+    links: [['Profile', '/profile'], ['Session tools', '/mcp'], ['Advanced consoles', '#dashboard-advanced-tools']],
+  },
+];
+
+const dashboardStageRail = [
+  ['Intake', 'Current', 'Explain what happened first.'],
+  ['Evidence', 'Ready', 'Add documents after the core story is saved.'],
+  ['Review', 'Ready', 'Check proof gaps when facts and documents are ready.'],
+  ['Draft', 'Later', 'Build after facts and sources are ready.'],
+];
+
+function withDashboardContext(href, searchParams) {
+  const userId = searchParams && searchParams.get('user_id');
+  if (!userId || href.startsWith('#') || href.startsWith('/cookies')) {
+    return href;
+  }
+  const separator = href.includes('?') ? '&' : '?';
+  return `${href}${separator}user_id=${encodeURIComponent(userId)}`;
+}
+
+function renderLinkRow(links, searchParams) {
+  return links.map(([label, href]) => (
+    `<a class="jump-link" href="${escapeXml(withDashboardContext(href, searchParams))}">${escapeXml(label)}</a>`
+  )).join('');
+}
+
+function renderDashboardHub(searchParams = new URLSearchParams()) {
+  const entryCards = laypersonDashboardCards.map((card, index) => {
+    const extraMarkup = card.links.length
+      ? `<details class="card-more-actions"><summary>${escapeXml(card.detailLabel)}</summary><div class="link-row">${renderLinkRow(card.links, searchParams)}</div></details>`
+      : '';
+    const cardState = index === 0 ? 'recommended' : (index === 3 ? 'utility' : 'available');
+    const stateLabel = index === 0 ? 'Current' : (index === 3 ? 'Optional' : 'Ready');
+    return `<article class="entry-card is-${cardState}" data-path-state="${cardState}">
+      <div class="stage-label">${escapeXml(card.stage)}</div>
+      <span class="path-state-label">${escapeXml(stateLabel)}</span>
+      <span class="path-stage-chip">Stage: ${escapeXml(card.workflowStage)}</span>
+      <h3>${escapeXml(card.title)}</h3>
+      <p>${escapeXml(card.description)}</p>
+      <div class="card-action-row">
+        <a class="switch-action" href="${escapeXml(withDashboardContext(card.primaryHref, searchParams))}">${escapeXml(card.primaryLabel)}</a>
+      </div>
+      ${extraMarkup}
+    </article>`;
+  }).join('');
+  const stageRail = dashboardStageRail.map(([stage, state, detail], index) => (
+    `<div class="stage-progress-card${index === 0 ? ' is-current' : ''}">
+      <span class="stage-progress-state">${escapeXml(state)}</span>
+      <strong>${escapeXml(stage)}</strong>
+      <span>${escapeXml(detail)}</span>
+    </div>`
+  )).join('');
+  const subsectionCards = dashboardSubsectionCards.map((card) => (
+    `<article class="subsection-card">
+      <h3>${escapeXml(card.title)}</h3>
+      <p>${escapeXml(card.description)}</p>
+      <div class="link-row">${renderLinkRow(card.links, searchParams)}</div>
+    </article>`
+  )).join('');
+  const advancedEntries = [
+    dashboardEntries.find((entry) => entry.slug === 'mcp'),
+    dashboardEntries.find((entry) => entry.slug === 'admin-caselaw'),
+    dashboardEntries.find((entry) => entry.slug === 'admin-caselaw-mcp'),
+    dashboardEntries.find((entry) => entry.slug === 'admin-graphrag'),
+    dashboardEntries.find((entry) => entry.slug === 'admin-mcp'),
+  ].filter(Boolean);
+  const advancedLinks = advancedEntries.map((entry) => (
+    `<li><a href="/dashboards/ipfs-datasets/${escapeXml(entry.slug)}">${escapeXml(entry.title)}</a><span>${escapeXml(entry.summary)}</span></li>`
   )).join('');
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1895,22 +2038,105 @@ function renderDashboardHub() {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Unified Dashboard Hub</title>
   <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #f7f7f2; color: #122033; }
-    main { max-width: 960px; margin: 0 auto; padding: 32px 24px 48px; }
-    .card { background: white; border-radius: 18px; padding: 24px; box-shadow: 0 12px 28px rgba(18, 32, 51, 0.08); }
-    ul { padding-left: 20px; }
-    li { margin: 12px 0; }
-    span { display: block; color: #536471; margin-top: 4px; }
-    a { color: #0a4f66; font-weight: 600; }
+    :root {
+      --bg: #f5f3ec;
+      --surface: #fffefa;
+      --ink: #172231;
+      --muted: #526271;
+      --line: rgba(23, 34, 49, 0.13);
+      --accent: #125c63;
+      --accent-strong: #0d4449;
+      --warn: #9a4b19;
+      --good: #226a4b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Arial, sans-serif; background: var(--bg); color: var(--ink); }
+    header { background: #18384f; color: white; padding: 28px 32px; }
+    header p { color: rgba(255,255,255,0.86); max-width: 76ch; }
+    main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 48px; display: grid; gap: 22px; }
+    h1, h2, h3, p { margin-top: 0; }
+    p, span { color: var(--muted); line-height: 1.45; }
+    a { color: var(--accent-strong); font-weight: 700; }
+    .hero, .section, details { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 22px; box-shadow: 0 12px 26px rgba(23, 34, 49, 0.07); }
+    .hero { display: grid; gap: 14px; }
+    .safety-note { border-left: 4px solid var(--warn); background: rgba(154, 75, 25, 0.08); border-radius: 8px; padding: 12px 14px; }
+    .recommended-action-panel { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; background: white; border: 2px solid rgba(18, 92, 99, 0.25); border-radius: 8px; padding: 16px; }
+    .recommended-action-panel h3 { margin: 0; }
+    .recommended-action-panel p { margin: 6px 0 0; }
+    .stage-progress-rail { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(150px, 1fr)); }
+    .stage-progress-card { display: grid; gap: 5px; background: rgba(23, 34, 49, 0.04); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+    .stage-progress-card.is-current { background: rgba(18, 92, 99, 0.08); border-color: rgba(18, 92, 99, 0.28); }
+    .stage-progress-card strong { color: var(--ink); }
+    .stage-progress-card span { font-size: 0.88rem; }
+    .stage-progress-state { width: fit-content; border-radius: 999px; padding: 3px 8px; background: white; color: var(--accent-strong); font-weight: 800; }
+    .entry-grid, .subsection-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(240px, 1fr)); }
+    .entry-card, .subsection-card { display: grid; gap: 10px; align-content: start; background: white; border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
+    .entry-card.is-recommended { border: 2px solid rgba(18, 92, 99, 0.35); background: rgba(18, 92, 99, 0.045); }
+    .entry-card.is-available, .entry-card.is-utility { background: rgba(255, 255, 255, 0.72); }
+    .path-state-label { width: fit-content; border-radius: 999px; padding: 4px 8px; background: rgba(23, 34, 49, 0.06); color: var(--ink); font-size: 0.78rem; font-weight: 800; }
+    .entry-card.is-recommended .path-state-label { background: rgba(18, 92, 99, 0.12); color: var(--accent-strong); }
+    .path-stage-chip { width: fit-content; color: var(--accent-strong); font-size: 0.86rem; font-weight: 800; }
+    .stage-label { color: var(--accent-strong); font-size: 0.76rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
+    .primary-action, .jump-link { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 999px; padding: 10px 14px; text-decoration: none; }
+    .primary-action { background: var(--accent); color: white; width: fit-content; }
+    .jump-link { background: rgba(18, 92, 99, 0.08); border: 1px solid rgba(18, 92, 99, 0.16); }
+    .switch-action { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 999px; padding: 10px 14px; text-decoration: none; background: white; border: 1px solid rgba(18, 92, 99, 0.28); color: var(--accent-strong); }
+    .link-row, .card-action-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .card-more-actions { padding: 0; border: 0; box-shadow: none; background: transparent; }
+    .card-more-actions > summary { font-size: 0.95rem; color: var(--accent-strong); min-height: 40px; border: 1px solid rgba(18, 92, 99, 0.16); border-radius: 999px; padding: 8px 12px; width: fit-content; background: rgba(18, 92, 99, 0.06); }
+    .card-more-actions .link-row { margin-top: 8px; }
+    details > summary { cursor: pointer; font-size: 1.08rem; font-weight: 800; color: var(--ink); min-height: 44px; display: flex; align-items: center; gap: 10px; }
+    .summary-count { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; background: rgba(18, 92, 99, 0.10); color: var(--accent-strong); font-size: 0.78rem; font-weight: 800; }
+    ul { margin-bottom: 0; padding-left: 20px; }
+    li { margin: 10px 0; }
+    li span { display: block; margin-top: 3px; }
+    .mode-chip { display: inline-flex; width: fit-content; border-radius: 999px; padding: 6px 10px; background: rgba(34, 106, 75, 0.11); color: var(--good); font-weight: 800; }
+    @media (max-width: 760px) {
+      header { padding: 22px 20px; }
+      main { padding: 18px 14px 34px; }
+      .entry-grid, .subsection-grid { grid-template-columns: 1fr; }
+      .stage-progress-rail { grid-template-columns: 1fr; }
+      .recommended-action-panel { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
+  <header>
+    <span class="mode-chip">Layperson complaint workspace</span>
+    <h1>Unified Dashboard Hub</h1>
+    <p>Choose the plain-language path that matches what you need to do next. Technical package consoles stay available in Advanced Operations, but the main page starts with complaint, docket, evidence, and profile work.</p>
+  </header>
   <main>
-    <section class="card">
-      <h1>Unified Dashboard Hub</h1>
-      <p>One complaint-generator website entry point for compatibility dashboard previews.</p>
-      <ul>${links}</ul>
+    <section class="hero" id="dashboard-start-here">
+      <h2>What are you trying to do right now?</h2>
+      <p>Start with the safest next step. The same saved complaint context can move between guided questions, workspace evidence, docket review, claim-support review, and drafting.</p>
+      <div class="safety-note"><strong>Important:</strong> This tool helps organize facts, documents, and draft text. It does not provide legal advice or decide whether you should file.</div>
+      <div class="recommended-action-panel" id="dashboard-recommended-action-panel" aria-label="Recommended next action">
+        <div>
+          <div class="stage-label">Recommended next step</div>
+          <h3 id="dashboard-recommended-action-title">Explain what happened</h3>
+          <p id="dashboard-recommended-action-reason">Begin with guided questions so the workspace has the story, people, dates, harms, and possible claims.</p>
+        </div>
+        <a class="primary-action" id="dashboard-recommended-action-link" href="${escapeXml(withDashboardContext('/chat', searchParams))}">Explain what happened</a>
+      </div>
+      <div class="stage-progress-rail" id="dashboard-stage-progress" aria-label="Complaint workflow progress">
+        ${stageRail}
+      </div>
     </section>
+    <section class="section" aria-label="Primary complaint paths">
+      <h2>Choose a path</h2>
+      <div class="entry-grid" id="dashboard-entry-paths">${entryCards}</div>
+    </section>
+    <details class="section" id="dashboard-subsection-index">
+      <summary>Find the right tool <span class="summary-count">4 tool groups</span></summary>
+      <p>Use these shortcuts when you already know which part of the complaint workflow needs attention.</p>
+      <div class="subsection-grid">${subsectionCards}</div>
+    </details>
+    <details id="dashboard-advanced-tools">
+      <summary>Advanced Operations <span class="summary-count">5 admin consoles</span></summary>
+      <p>These package consoles and MCP diagnostics are for administrators, developers, or operators. They are hidden from the default complaint path so users are not asked to choose between internal variants.</p>
+      <ul>${advancedLinks}</ul>
+    </details>
   </main>
 </body>
 </html>`;
@@ -2707,7 +2933,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && url.pathname === '/dashboards') {
-    return sendText(response, renderDashboardHub(), 'text/html; charset=utf-8');
+    return sendText(response, renderDashboardHub(url.searchParams), 'text/html; charset=utf-8');
   }
 
   if (request.method === 'GET' && url.pathname.startsWith('/dashboards/ipfs-datasets/')) {

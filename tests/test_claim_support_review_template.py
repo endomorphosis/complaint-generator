@@ -858,7 +858,7 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "complaint-mcp-server" in workspace_response.text
     assert "Complaint Editor Workshop" in wysiwyg_response.text
     assert "Unified Dashboard Hub" in dashboard_hub_response.text
-    assert "MCP Server Dashboard" in dashboard_hub_response.text
+    assert "MCP dashboard package capabilities overview" in dashboard_hub_response.text
     assert "Package Capability Map" in dashboard_hub_response.text
     assert "Intake Chat and Guided Advice" in dashboard_hub_response.text
     assert "Resume a Complaint and Marshal Evidence, Law, and Caselaw" in dashboard_hub_response.text
@@ -879,6 +879,9 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "Profile and Technical Tools" in dashboard_hub_response.text
     assert "Start, continue, organize, review, and draft legal complaints or responses." in dashboard_hub_response.text
     assert "This tool helps organize information and draft documents." in dashboard_hub_response.text
+    assert "Admin Dashboard Error" not in dashboard_hub_response.text
+    assert "IPFS Datasets MCP Dashboard Clean" not in dashboard_hub_response.text
+    assert "IPFS Datasets MCP Dashboard Final" not in dashboard_hub_response.text
     assert "dashboard-package-map" in dashboard_hub_response.text
     assert "Workspace Evidence and Authority" in dashboard_hub_response.text
     assert "Law, Caselaw, and Legal Graph" in dashboard_hub_response.text
@@ -933,7 +936,7 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "dashboard-subsection-nav" in dashboard_hub_response.text
     assert "Workspace subsections" in dashboard_hub_response.text
     assert "Material organization steps" in dashboard_hub_response.text
-    assert "Docket dataset subsections" in dashboard_hub_response.text
+    assert "Court Dockets and Responses" in dashboard_hub_response.text
     assert "Upload subsections" in dashboard_hub_response.text
     assert "Annotation subsections" in dashboard_hub_response.text
     assert "packaged-docket-dashboard" in dashboard_hub_response.text
@@ -952,7 +955,7 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "Evidence" in dashboard_hub_response.text
     assert "Rules and laws" in dashboard_hub_response.text
     assert "Court cases" in dashboard_hub_response.text
-    assert "What still needs proof" in dashboard_hub_response.text
+    assert "Check proof gaps" in dashboard_hub_response.text
     assert "data-workspace-dataset-preset" in dashboard_hub_response.text
     assert "applyWorkspaceDatasetPreset" in dashboard_hub_response.text
     assert "Start Here" in dashboard_hub_response.text
@@ -1010,7 +1013,7 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "Find connections before checking duties and conflicts." in dashboard_hub_response.text
     assert "Find connections" in dashboard_hub_response.text
     assert "Check duties and conflicts" in dashboard_hub_response.text
-    assert "aria-pressed=\"false\"" in dashboard_hub_response.text
+    assert "setAttribute('aria-pressed'" in dashboard_hub_response.text
     assert "What was required?" in dashboard_hub_response.text
     assert "What was prohibited?" in dashboard_hub_response.text
     assert "Which facts impose duties?" in dashboard_hub_response.text
@@ -1022,10 +1025,10 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "Chat Upload Modal" in dashboard_hub_response.text
     assert "Complaint Workspace Snapshot" in dashboard_hub_response.text
     assert "Heads-Up Display Dashboard" in dashboard_hub_response.text
-    assert "Docket Dataset Parquet Dashboard" in dashboard_hub_response.text
+    assert "Review Court Filings and Existing Complaints" in dashboard_hub_response.text
     assert "Organize Evidence, Laws, and Court Cases" in dashboard_hub_response.text
     assert "Load Saved Materials" in dashboard_hub_response.text
-    assert "Dataset Document Annotation" in dashboard_hub_response.text
+    assert "Send a Filing or Document Note to the Complaint Workspace" in dashboard_hub_response.text
     assert "/api/complaint-workspace/docket-dataset/view" in dashboard_hub_response.text
     assert "/api/complaint-workspace/workspace-dataset/view" in dashboard_hub_response.text
     assert "/api/complaint-workspace/document-annotations/tag" in dashboard_hub_response.text
@@ -1038,11 +1041,11 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "dashboard-load-docket-dataset" in dashboard_hub_response.text
     assert "dashboard-load-workspace-dataset" in dashboard_hub_response.text
     assert "dashboard-save-dataset-annotation" in dashboard_hub_response.text
-    assert "Case Calendar Preview" in dashboard_hub_response.text
+    assert "Important dates found" in dashboard_hub_response.text
     assert "Operator Queue" in dashboard_hub_response.text
     assert "Reset Workspace" in dashboard_hub_response.text
     assert "Unload Workspace" in dashboard_hub_response.text
-    assert "Unload Docket" in dashboard_hub_response.text
+    assert "Clear Package" in dashboard_hub_response.text
     assert "/static/complaint_mcp_sdk.js" in dashboard_hub_response.text
     assert "complaint-mcp-sync" in dashboard_hub_response.text
     assert "IPFS Datasets MCP Dashboard" in mcp_response.text

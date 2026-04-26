@@ -6,6 +6,44 @@ import pytest
 pytestmark = [pytest.mark.no_auto_llm]
 
 
+def test_workspace_template_defines_mobile_docket_shell_contract():
+    content = Path("templates/workspace.html").read_text()
+
+    assert "Current Docket task" in content
+    assert "docket-current-task-title" in content
+    assert "docket-current-task-detail" in content
+    assert "Mobile Docket document actions" in content
+    assert "docket-mobile-action-strip" in content
+    assert "docket-mobile-ask-chat-link" in content
+    assert "docket-mobile-label-button" in content
+    assert "docket-mobile-annotation-button" in content
+    assert "docket-mobile-deadline-button" in content
+    assert "docket-mobile-action-note" in content
+    assert "Load a docket manifest or import evidence first. Then select one document to unlock these actions." in content
+    assert "Locked until one document is loaded or selected" in content
+    assert "Locked: Ask About Document" in content
+    assert "docket-loader-card" in content
+    assert "docket-status-card" in content
+    assert ".docket-action-bar.is-empty" in content
+    assert ".docket-loader-card .readiness-list" in content
+    assert "has-docket-items" in content
+    assert '[data-tab-panel="docket"].has-docket-items .docket-loader-card' in content
+    assert ".docket-selected-card .docket-preview" in content
+    assert ".docket-mobile-action-strip:not(.is-empty) .surface-link" in content
+    assert ".docket-selected-card #docket-selected-chips" in content
+    assert "Ask About Document" in content
+    assert "Label Document" in content
+    assert "Add Annotation" in content
+    assert "Mark Deadline" in content
+    assert "docket-add-annotation-button" in content
+    assert "docket-mark-deadline-button" in content
+    assert "@media (max-width: 720px)" in content
+    assert ".docket-action-bar" in content
+    assert "position: sticky;" in content
+    assert ".docket-command-grid" in content
+    assert "grid-template-columns: 1fr;" in content
+
+
 def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     content = Path("templates/workspace.html").read_text()
 

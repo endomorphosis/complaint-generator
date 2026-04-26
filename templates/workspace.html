@@ -1446,6 +1446,33 @@
             align-items: start;
         }
 
+        .docket-current-task {
+            margin: 16px 0;
+            padding: 16px 18px;
+            border-radius: 22px;
+            border: 1px solid rgba(141, 61, 23, 0.18);
+            background: linear-gradient(180deg, rgba(255, 248, 241, 0.98), rgba(255, 244, 233, 0.92));
+        }
+
+        .docket-current-task strong,
+        .docket-current-task span {
+            display: block;
+        }
+
+        .docket-current-task span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.55;
+        }
+
+        .docket-mobile-action-strip {
+            display: none;
+        }
+
+        .docket-mobile-action-note {
+            display: none;
+        }
+
         .docket-document-list {
             display: grid;
             gap: 10px;
@@ -1497,6 +1524,16 @@
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
+        }
+
+        .docket-action-bar .surface-link,
+        .docket-action-bar button {
+            min-height: 46px;
+        }
+
+        .docket-action-bar.is-empty {
+            position: static;
+            box-shadow: none;
         }
 
         .docket-advanced {
@@ -1654,6 +1691,169 @@
 
             .button-row button {
                 width: 100%;
+            }
+        }
+
+        @media (max-width: 720px) {
+            html {
+                scroll-padding-top: 120px;
+            }
+
+            body {
+                min-width: 0;
+            }
+
+            .shell {
+                width: 100%;
+                max-width: none;
+                padding: 8px 6px 36px;
+            }
+
+            .topbar,
+            .surface-links,
+            .tab-row,
+            .chip-row,
+            .button-row,
+            .docket-action-bar {
+                display: grid;
+                grid-template-columns: 1fr;
+                width: 100%;
+            }
+
+            .docket-mobile-action-strip {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 8px;
+                margin: 10px 0 8px;
+                padding: 10px;
+                border-radius: 12px;
+                border: 1px solid rgba(141, 61, 23, 0.18);
+                background: rgba(255, 248, 241, 0.98);
+            }
+
+            .docket-mobile-action-strip.is-empty::before {
+                content: "Locked until one document is loaded or selected";
+                display: block;
+                color: var(--accent-strong);
+                font-size: 0.82rem;
+                font-weight: 800;
+                letter-spacing: 0.04em;
+                text-align: center;
+                text-transform: uppercase;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .surface-link {
+                background: linear-gradient(135deg, #9a3412, #c2410c);
+                border-color: transparent;
+                color: #ffffff;
+                font-weight: 800;
+            }
+
+            .docket-mobile-action-note {
+                display: block;
+                margin: 0 0 14px;
+                color: var(--muted);
+                font-size: 0.96rem;
+                line-height: 1.45;
+            }
+
+            .surface-link,
+            .tab-button,
+            button,
+            .docket-action-bar .surface-link,
+            .docket-mobile-action-strip .surface-link {
+                width: 100%;
+                min-height: 48px;
+                text-align: center;
+            }
+
+            .hero h1 {
+                max-width: none;
+                font-size: 2.6rem;
+                line-height: 0.96;
+            }
+
+            .panel,
+            .tool-card,
+            .summary-card,
+            .diagnostic-card,
+            .stage-banner,
+            .docket-current-task,
+            .docket-advanced,
+            .tab-panel {
+                border-radius: 12px;
+            }
+
+            .panel,
+            .tab-panel {
+                padding: 8px;
+            }
+
+            .tool-card,
+            .docket-current-task,
+            .stage-banner {
+                padding: 10px;
+            }
+
+            .layout,
+            .panel,
+            .tab-panel,
+            [data-tab-panel="docket"],
+            .docket-command-grid,
+            .docket-workbench,
+            .docket-viewer-shell,
+            .docket-document-list {
+                width: 100%;
+                max-width: none;
+                min-width: 0;
+            }
+
+            .docket-command-grid,
+            .docket-workbench {
+                gap: 12px;
+            }
+
+            .docket-document-list {
+                max-height: none;
+                overflow: visible;
+                padding-right: 0;
+            }
+
+            .docket-document-button {
+                min-height: auto;
+            }
+
+            .docket-preview {
+                min-height: 110px;
+            }
+
+            .docket-action-bar {
+                display: none;
+            }
+
+            .docket-action-bar.is-empty,
+            .docket-loader-card .readiness-list,
+            .docket-loader-card #docket-summary-chips,
+            .docket-status-card {
+                display: none;
+            }
+
+            [data-tab-panel="docket"].has-docket-items .docket-loader-card {
+                display: none;
+            }
+
+            .docket-selected-card .docket-preview {
+                max-height: 260px;
+                overflow: auto;
+            }
+
+            #docket-selected-chips .chip:nth-child(n+4),
+            .docket-document-button .chip-row .chip:nth-child(n+4) {
+                display: none;
+            }
+
+            .docket-selected-card #docket-selected-chips {
+                display: none;
             }
         }
     </style>
@@ -2536,8 +2736,19 @@
                     </div>
                     <h2>Docket Command Center</h2>
                     <p class="muted">Start with the documents that affect deadlines, claims, defenses, and source support. Advanced manifest paths and proof-revalidation queues stay below the main document workflow.</p>
+                    <section class="docket-current-task" aria-label="Current Docket task">
+                        <strong id="docket-current-task-title">Current task: choose one document to review.</strong>
+                        <span id="docket-current-task-detail">Select a filing, order, notice, exhibit, or imported evidence item. Then ask a document question, label what it affects, add an annotation, or mark a deadline before using it in Review or Draft.</span>
+                    </section>
+                    <nav class="docket-mobile-action-strip" aria-label="Mobile Docket document actions">
+                        <a class="surface-link" id="docket-mobile-ask-chat-link" href="/chat">Ask About Selected Document</a>
+                        <button class="secondary" id="docket-mobile-label-button" type="button">Label Document</button>
+                        <button class="secondary" id="docket-mobile-annotation-button" type="button">Add Annotation</button>
+                        <button class="secondary" id="docket-mobile-deadline-button" type="button">Mark Deadline</button>
+                    </nav>
+                    <p class="docket-mobile-action-note" id="docket-mobile-action-note">These actions unlock after you load or select one docket document.</p>
                     <div class="docket-command-grid">
-                        <div class="tool-card">
+                        <div class="tool-card docket-loader-card">
                             <h3>Load docket documents</h3>
                             <p class="muted">Use a packaged docket manifest or dataset path when available. If none is loaded, the lane shows the current evidence record as a working document list.</p>
                             <div class="readiness-list" aria-label="Docket steps">
@@ -2587,7 +2798,7 @@
                                 <span class="chip">documents: loading</span>
                             </div>
                         </div>
-                        <div class="tool-card">
+                        <div class="tool-card docket-status-card">
                             <h3>Document status</h3>
                             <div class="feature-grid" id="docket-status-grid">
                                 <div class="feature-item">
@@ -2603,7 +2814,7 @@
                         </div>
                     </div>
                     <div class="docket-workbench" style="margin-top: 16px;">
-                        <div class="tool-card">
+                        <div class="tool-card docket-documents-card">
                             <h3>Documents</h3>
                             <div class="docket-document-list" id="docket-document-list">
                                 <button class="docket-document-button" type="button">
@@ -2612,7 +2823,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="tool-card">
+                        <div class="tool-card docket-selected-card">
                             <h3 id="docket-selected-title">Select a document</h3>
                             <div class="chip-row" id="docket-selected-chips"></div>
                             <div class="docket-viewer-shell">
@@ -2622,9 +2833,11 @@
                                 </div>
                                 <div class="docket-action-bar">
                                     <a class="surface-link" id="docket-ask-chat-link" href="/chat">Ask About Document</a>
-                                    <button class="secondary" id="docket-use-in-draft-button" type="button">Use In Draft</button>
+                                    <button class="secondary" id="docket-add-label-button" type="button">Label Document</button>
+                                    <button class="secondary" id="docket-add-annotation-button" type="button">Add Annotation</button>
+                                    <button class="secondary" id="docket-mark-deadline-button" type="button">Mark Deadline</button>
                                     <button class="secondary" id="docket-open-review-button" type="button">Open Review</button>
-                                    <button class="secondary" id="docket-add-label-button" type="button">Add Label</button>
+                                    <button class="secondary" id="docket-use-in-draft-button" type="button">Use In Draft</button>
                                 </div>
                                 <div class="list" id="docket-annotation-list">
                                     <div class="item">
@@ -7781,8 +7994,14 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const chips = document.getElementById('docket-summary-chips');
             const statusGrid = document.getElementById('docket-status-grid');
             const routerStatus = document.getElementById('docket-router-status');
+            const currentTaskTitle = document.getElementById('docket-current-task-title');
+            const currentTaskDetail = document.getElementById('docket-current-task-detail');
+            const docketPanel = document.querySelector('[data-tab-panel="docket"]');
             if (!items.length) {
                 selectedDocketItemId = '';
+                docketPanel.classList.remove('has-docket-items');
+                currentTaskTitle.textContent = 'Current task: add or load one docket document.';
+                currentTaskDetail.textContent = 'Load a docket manifest, import local evidence, or save a document evidence item so this lane can show document questions, labels, annotations, and deadlines.';
                 chips.innerHTML = '<span class="chip warn">documents: 0</span><span class="chip">source: no docket loaded</span>';
                 list.innerHTML = `
                     <button class="docket-document-button" type="button">
@@ -7793,6 +8012,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 renderSelectedDocketItem(null);
                 return;
             }
+            docketPanel.classList.add('has-docket-items');
             const needsReviewCount = items.filter((item) => String(item.status || '').toLowerCase().includes('review')).length;
             const readyCount = items.filter((item) => String(item.status || '').toLowerCase().includes('ready')).length;
             const deadlineCount = items.filter((item) => item.deadline || String(item.document_type || '').toLowerCase().includes('order')).length;
@@ -7806,6 +8026,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 selectedDocketItemId = items[0].docket_item_id;
             }
             const selected = items.find((item) => item.docket_item_id === selectedDocketItemId) || items[0];
+            const selectedNeedsRouterReview = String(selected.router_status || '').toLowerCase().includes('not reviewed');
+            const selectedNextAction = selectedNeedsRouterReview ? 'Review Before Draft' : (selected.primary_action || 'Review');
+            currentTaskTitle.textContent = `Current task: ${selectedNextAction} for ${selected.title}.`;
+            currentTaskDetail.textContent = selected.deadline
+                ? `Deadline watch: ${selected.deadline}. Ask about the selected document, label what it affects, add an annotation, or confirm the deadline before drafting from it.`
+                : 'Ask about the selected document, label what it affects, add an annotation, or mark any response deadline before drafting from it.';
             chips.innerHTML = `
                 <span class="chip good">documents: ${escapeHtml(String(items.length))}</span>
                 <span class="chip">needs review: ${escapeHtml(String(needsReviewCount))}</span>
@@ -7841,8 +8067,6 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     </span>
                 </button>
             `).join('');
-            const selectedNeedsRouterReview = String(selected.router_status || '').toLowerCase().includes('not reviewed');
-            const selectedNextAction = selectedNeedsRouterReview ? 'Review Before Draft' : (selected.primary_action || 'Review');
             routerStatus.textContent = [
                 `Selected: ${selected.title}`,
                 `Router status: ${selected.router_status || 'not reviewed'}`,
@@ -7863,23 +8087,57 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const title = document.getElementById('docket-selected-title');
             const chips = document.getElementById('docket-selected-chips');
             const preview = document.getElementById('docket-selected-preview');
+            const actionBar = document.querySelector('.docket-action-bar');
             const chatLink = document.getElementById('docket-ask-chat-link');
+            const mobileChatLink = document.getElementById('docket-mobile-ask-chat-link');
             const chatScopeChips = document.getElementById('docket-chat-scope-chips');
             const draftButton = document.getElementById('docket-use-in-draft-button');
             const reviewButton = document.getElementById('docket-open-review-button');
+            const labelButton = document.getElementById('docket-add-label-button');
+            const annotationButton = document.getElementById('docket-add-annotation-button');
+            const deadlineButton = document.getElementById('docket-mark-deadline-button');
+            const mobileLabelButton = document.getElementById('docket-mobile-label-button');
+            const mobileAnnotationButton = document.getElementById('docket-mobile-annotation-button');
+            const mobileDeadlineButton = document.getElementById('docket-mobile-deadline-button');
+            const mobileActionNote = document.getElementById('docket-mobile-action-note');
+            const mobileActionStrip = document.querySelector('.docket-mobile-action-strip');
             const annotations = document.getElementById('docket-annotation-list');
             if (!item) {
+                actionBar.classList.add('is-empty');
+                mobileActionStrip.classList.add('is-empty');
                 title.textContent = 'Select a document';
                 chips.innerHTML = '<span class="chip warn">no document selected</span>';
                 preview.textContent = 'Choose a docket item to see its source, labels, next action, and chat/draft handoffs.';
                 chatScopeChips.innerHTML = '<span class="chip warn">chat scope: no document selected</span>';
                 chatLink.href = buildSurfaceUrl('/chat', { user_id: workspaceUserId || '', source: 'workspace-docket' });
+                chatLink.classList.add('is-disabled');
+                chatLink.setAttribute('aria-disabled', 'true');
+                mobileChatLink.href = chatLink.href;
+                mobileChatLink.classList.add('is-disabled');
+                mobileChatLink.setAttribute('aria-disabled', 'true');
                 draftButton.className = 'secondary';
                 reviewButton.className = 'secondary';
+                labelButton.className = 'secondary';
+                annotationButton.className = 'secondary';
+                deadlineButton.className = 'secondary';
+                mobileLabelButton.className = 'secondary';
+                mobileAnnotationButton.className = 'secondary';
+                mobileDeadlineButton.className = 'secondary';
+                [draftButton, reviewButton, labelButton, annotationButton, deadlineButton, mobileLabelButton, mobileAnnotationButton, mobileDeadlineButton].forEach((button) => {
+                    button.disabled = true;
+                });
+                mobileChatLink.textContent = 'Locked: Ask About Document';
+                mobileLabelButton.textContent = 'Locked: Label Document';
+                mobileAnnotationButton.textContent = 'Locked: Add Annotation';
+                mobileDeadlineButton.textContent = 'Mark Deadline';
+                mobileDeadlineButton.textContent = 'Locked: Mark Deadline';
+                mobileActionNote.textContent = 'Load a docket manifest or import evidence first. Then select one document to unlock these actions.';
                 annotations.innerHTML = '<div class="item"><strong>No annotations yet.</strong><div class="muted">Load or select a document before saving labels or asking questions.</div></div>';
                 return;
             }
             const needsRouterReview = String(item.router_status || '').toLowerCase().includes('not reviewed');
+            actionBar.classList.remove('is-empty');
+            mobileActionStrip.classList.remove('is-empty');
             title.textContent = item.title || 'Selected document';
             chips.innerHTML = `
                 <span class="chip good">${escapeHtml(item.document_type || 'document')}</span>
@@ -7917,8 +8175,27 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             ].filter((line) => line !== '').join('\n');
             reviewButton.className = needsRouterReview ? 'primary' : 'secondary';
             draftButton.className = needsRouterReview ? 'secondary' : 'primary';
+            labelButton.className = 'secondary';
+            annotationButton.className = 'secondary';
+            deadlineButton.className = item.deadline ? 'primary' : 'secondary';
+            mobileLabelButton.className = 'secondary';
+            mobileAnnotationButton.className = 'secondary';
+            mobileDeadlineButton.className = item.deadline ? 'primary' : 'secondary';
+            chatLink.classList.remove('is-disabled');
+            chatLink.removeAttribute('aria-disabled');
+            mobileChatLink.classList.remove('is-disabled');
+            mobileChatLink.removeAttribute('aria-disabled');
+            [draftButton, reviewButton, labelButton, annotationButton, deadlineButton, mobileLabelButton, mobileAnnotationButton, mobileDeadlineButton].forEach((button) => {
+                button.disabled = false;
+            });
             reviewButton.textContent = needsRouterReview ? 'Review Before Draft' : 'Open Review';
             draftButton.textContent = needsRouterReview ? 'Use In Draft Anyway' : 'Use In Draft';
+            mobileChatLink.textContent = 'Ask About Selected Document';
+            mobileLabelButton.textContent = 'Label Document';
+            mobileAnnotationButton.textContent = 'Add Annotation';
+            deadlineButton.textContent = item.deadline ? 'Confirm Deadline' : 'Mark Deadline';
+            mobileDeadlineButton.textContent = item.deadline ? 'Confirm Deadline' : 'Mark Deadline';
+            mobileActionNote.textContent = `Actions apply to the selected document: ${item.title || 'Untitled document'}.`;
             const chatContext = {
                 scope: 'selected_document',
                 docket_item_id: item.docket_item_id,
@@ -7939,6 +8216,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     status_message: 'Returned from docket-scoped chat.',
                 }),
             });
+            mobileChatLink.href = chatLink.href;
             annotations.innerHTML = `
                 <div class="item">
                     <strong>${escapeHtml(needsRouterReview ? 'Review Before Draft' : (item.primary_action || 'Review'))} is the next action.</strong>
@@ -10641,6 +10919,11 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('docket-use-in-draft-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Opened Draft with the selected docket item available as source context.'));
         document.getElementById('docket-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the selected docket document.'));
         document.getElementById('docket-add-label-button').addEventListener('click', () => setStatus('Docket label editing will save labels as annotations in the next implementation slice.'));
+        document.getElementById('docket-add-annotation-button').addEventListener('click', () => setStatus('Docket annotation capture will save page, span, confidence, and disputed-state notes in the next implementation slice.'));
+        document.getElementById('docket-mark-deadline-button').addEventListener('click', () => setStatus('Docket deadline marking will save date, source sentence, urgency, and confidence in the next implementation slice.'));
+        document.getElementById('docket-mobile-label-button').addEventListener('click', () => setStatus('Docket label editing will save labels as annotations in the next implementation slice.'));
+        document.getElementById('docket-mobile-annotation-button').addEventListener('click', () => setStatus('Docket annotation capture will save page, span, confidence, and disputed-state notes in the next implementation slice.'));
+        document.getElementById('docket-mobile-deadline-button').addEventListener('click', () => setStatus('Docket deadline marking will save date, source sentence, urgency, and confidence in the next implementation slice.'));
         document.getElementById('docket-open-advanced-tools-button').addEventListener('click', () => jumpToStage('integrations', '#packaged-docket-manifest-path', 'Opened CLI + MCP packaged docket controls from the Docket lane.'));
         document.getElementById('docket-load-operator-dashboard-button').addEventListener('click', async () => {
             const path = document.getElementById('docket-dataset-path').value.trim() || syncDocketDatasetPathFromSavedManifest();
