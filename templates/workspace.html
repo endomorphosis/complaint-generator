@@ -1739,9 +1739,9 @@
             .docket-mobile-action-strip {
                 display: grid;
                 grid-template-columns: 1fr;
-                gap: 8px;
+                gap: 6px;
                 margin: 8px 0;
-                padding: 10px;
+                padding: 8px;
                 border-radius: 12px;
                 border: 1px solid rgba(141, 61, 23, 0.18);
                 background: rgba(255, 248, 241, 0.98);
@@ -1759,8 +1759,8 @@
             }
 
             .docket-mobile-action-strip:not(.is-empty)::before {
-                content: "Actions for the selected document";
-                display: block;
+                content: "";
+                display: none;
                 color: var(--accent-strong);
                 font-size: 0.78rem;
                 font-weight: 900;
@@ -1783,7 +1783,7 @@
             .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step {
                 display: grid;
                 gap: 7px;
-                padding: 9px;
+                padding: 8px;
                 border-radius: 12px;
                 border: 1px solid rgba(141, 61, 23, 0.14);
                 background: rgba(255, 255, 255, 0.72);
@@ -1794,7 +1794,17 @@
                 border-width: 2px;
                 background: rgba(255, 247, 237, 1);
                 box-shadow: 0 14px 30px rgba(154, 52, 18, 0.16);
-                padding: 11px;
+                padding: 12px;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-current .docket-mobile-primary-action {
+                min-height: 50px;
+                justify-content: center;
+                font-size: 1rem;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-secondary.is-locked-accordion {
+                display: none;
             }
 
             .docket-mobile-step-label {
@@ -1803,6 +1813,23 @@
                 font-weight: 900;
                 letter-spacing: 0.05em;
                 text-transform: uppercase;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-current .docket-mobile-step-label {
+                display: none;
+            }
+
+            .docket-mobile-step-heading,
+            .docket-mobile-locked-summary {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step-heading {
+                display: block;
+                color: #27272a;
+                font-size: 1rem;
+                font-weight: 900;
+                line-height: 1.25;
             }
 
             .docket-mobile-ask-scope {
@@ -1835,10 +1862,14 @@
                 border-radius: 10px;
                 border: 1px solid rgba(141, 61, 23, 0.14);
                 background: rgba(255, 255, 255, 0.74);
-                color: var(--muted);
-                font-size: 0.88rem;
-                line-height: 1.32;
+                color: #3f3f46;
+                font-size: 0.92rem;
+                line-height: 1.36;
                 overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-current .docket-mobile-action-state {
+                display: none;
             }
 
             .docket-mobile-action-state strong {
@@ -1854,6 +1885,308 @@
                 font-weight: 900;
                 letter-spacing: 0;
                 text-transform: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-locked-accordion {
+                gap: 0;
+                padding: 0;
+                border-color: rgba(63, 63, 70, 0.2);
+                background: rgba(250, 250, 250, 0.96);
+                box-shadow: none;
+            }
+
+            .docket-mobile-step.is-locked-accordion summary {
+                display: grid;
+                grid-template-columns: auto 1fr;
+                gap: 4px 8px;
+                align-items: center;
+                min-height: 44px;
+                padding: 8px 10px;
+                cursor: pointer;
+                list-style: none;
+            }
+
+            .docket-mobile-step.is-locked-accordion summary::-webkit-details-marker {
+                display: none;
+            }
+
+            .docket-mobile-step.is-locked-accordion summary::after {
+                content: "Locked";
+                grid-column: 2;
+                justify-self: end;
+                color: #52525b;
+                font-size: 0.78rem;
+                font-weight: 900;
+                text-transform: uppercase;
+            }
+
+            .docket-mobile-step.is-locked-accordion[open] summary::after {
+                content: "Open";
+            }
+
+            .docket-mobile-step.is-locked-accordion[data-step-state="waiting"] summary,
+            .docket-mobile-step.is-locked-accordion[data-step-state="blocked"] summary {
+                cursor: default;
+                pointer-events: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-locked-accordion .docket-mobile-step-heading,
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-locked-accordion .docket-mobile-locked-summary {
+                display: block;
+            }
+
+            .docket-mobile-step.is-locked-accordion .docket-mobile-step-heading {
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-step.is-locked-accordion .docket-mobile-locked-summary {
+                grid-column: 1 / -1;
+                color: #52525b;
+                font-size: 0.88rem;
+                font-weight: 850;
+                line-height: 1.3;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-locked-accordion:not([open]) > button,
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-locked-accordion:not([open]) > .docket-mobile-action-state {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-locked-accordion[open] > button,
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-locked-accordion[open] > .docket-mobile-action-state {
+                margin: 0 10px 10px;
+            }
+
+            .docket-mobile-step-feedback {
+                display: none;
+            }
+
+            .docket-mobile-next-unlock {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-next-unlock {
+                display: block;
+                padding: 9px 10px;
+                border-radius: 10px;
+                border: 1px solid rgba(154, 52, 18, 0.18);
+                background: rgba(255, 247, 237, 0.92);
+                color: #7c2d12;
+                font-size: 0.94rem;
+                font-weight: 900;
+                line-height: 1.32;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step-feedback {
+                display: none;
+                margin: 0;
+                padding: 7px 9px;
+                border-radius: 10px;
+                border: 1px solid rgba(22, 101, 52, 0.22);
+                background: rgba(240, 253, 244, 0.92);
+                color: #14532d;
+                font-size: 0.9rem;
+                font-weight: 800;
+                line-height: 1.35;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-checklist {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-checklist {
+                display: grid;
+                gap: 5px;
+                margin: 0;
+                padding: 8px 9px;
+                border-radius: 10px;
+                border: 1px solid rgba(24, 34, 41, 0.14);
+                background: rgba(255, 255, 255, 0.9);
+                color: #27272a;
+                font-size: 0.9rem;
+                font-weight: 800;
+                line-height: 1.3;
+            }
+
+            .docket-mobile-checklist-item {
+                display: block;
+                min-height: 42px;
+                width: 100%;
+                padding: 8px 10px;
+                border: 1px solid rgba(124, 45, 18, 0.22);
+                border-radius: 9px;
+                background: rgba(255, 247, 237, 0.86);
+                color: #27272a;
+                text-align: left;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-checklist-item::before {
+                content: "Missing: ";
+                color: #7c2d12;
+                font-weight: 900;
+            }
+
+            .docket-mobile-checklist-item[data-check-state="complete"] {
+                border-color: rgba(22, 101, 52, 0.32);
+                background: rgba(240, 253, 244, 0.96);
+                color: #14532d;
+            }
+
+            .docket-mobile-checklist-item[data-check-state="complete"]::before {
+                content: "Done: ";
+                color: #166534;
+            }
+
+            .docket-mobile-checklist-item[data-check-state="blocked"] {
+                display: none;
+            }
+
+            .docket-mobile-checklist-item[data-check-state="blocked"]::before {
+                content: "Waiting: ";
+                color: #52525b;
+            }
+
+            .docket-mobile-save-chip {
+                display: none;
+            }
+
+            .docket-mobile-gate-summary {
+                display: none;
+            }
+
+            .docket-mobile-state-contract {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-state-contract {
+                display: grid;
+                gap: 0;
+                padding: 10px;
+                border-radius: 10px;
+                border: 1px solid rgba(154, 52, 18, 0.2);
+                background: rgba(255, 255, 255, 0.94);
+            }
+
+            .docket-mobile-state-contract-row {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 3px;
+                color: #27272a;
+                font-size: 0.95rem;
+                line-height: 1.35;
+                padding: 8px 0;
+                border-bottom: 1px solid rgba(24, 34, 41, 0.1);
+            }
+
+            .docket-mobile-state-contract-row[data-contract-row="current"],
+            .docket-mobile-state-contract-row[data-contract-row="next"],
+            .docket-mobile-state-contract-row[data-contract-row="mode"] {
+                display: none;
+            }
+
+            .docket-mobile-state-contract-row:first-child {
+                padding-top: 0;
+            }
+
+            .docket-mobile-state-contract-row:last-child {
+                padding-bottom: 0;
+                border-bottom: 0;
+            }
+
+            .docket-mobile-state-contract-row strong {
+                color: #52525b;
+                font-size: 0.74rem;
+                font-weight: 900;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+            }
+
+            .docket-mobile-state-contract-row span {
+                font-weight: 850;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-gate-summary {
+                display: none;
+                padding: 7px 9px;
+                border-radius: 10px;
+                border: 1px solid rgba(124, 45, 18, 0.24);
+                background: rgba(255, 247, 237, 0.96);
+                color: #7c2d12;
+                font-size: 0.92rem;
+                font-weight: 900;
+                line-height: 1.3;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-save-chip {
+                display: block;
+                width: 100%;
+                max-width: 100%;
+                padding: 0;
+                border: 0;
+                background: transparent;
+                color: #27272a;
+                font-size: 0.88rem;
+                font-weight: 850;
+                line-height: 1.3;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-disabled-reason {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-disabled-reason {
+                display: block;
+                color: #7c2d12;
+                font-size: 0.92rem;
+                font-weight: 900;
+                line-height: 1.3;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-ready-action {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-ready-action {
+                display: block;
+                min-height: 44px;
+                border-style: solid;
+                border-color: rgba(124, 45, 18, 0.22);
+                background: rgba(255, 247, 237, 0.92);
+                color: #7c2d12;
+                opacity: 1;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-ready-action[disabled] {
+                border-color: rgba(124, 45, 18, 0.26);
+                background: rgba(255, 247, 237, 0.84);
+                color: #7c2d12;
+                cursor: not-allowed;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-ready-action[disabled][data-ready-visibility="hidden"] {
+                display: none;
+            }
+
+            .docket-mobile-save-row {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-save-row {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 7px;
+                padding: 10px;
+                border-radius: 10px;
+                border-left: 4px solid rgba(154, 52, 18, 0.45);
+                background: rgba(255, 247, 237, 0.7);
             }
 
             .docket-mobile-step[data-step-state="active"] .docket-mobile-action-state strong {
@@ -1892,11 +2225,38 @@
             }
 
             .docket-mobile-step[data-step-state="waiting"] .docket-mobile-secondary-action,
-            .docket-mobile-step[data-step-state="blocked"] .docket-mobile-secondary-action {
-                border-color: rgba(82, 82, 91, 0.18);
-                background: rgba(244, 244, 245, 0.82);
-                color: #52525b;
+            .docket-mobile-step[data-step-state="blocked"] .docket-mobile-secondary-action,
+            .docket-mobile-step[data-step-state="blocked"] .docket-mobile-deadline-action {
+                display: block;
+                border-color: rgba(63, 63, 70, 0.34);
+                background: rgba(244, 244, 245, 0.98);
+                color: #27272a;
                 box-shadow: none;
+            }
+
+            .docket-mobile-step[data-step-state="waiting"] .docket-mobile-action-state,
+            .docket-mobile-step[data-step-state="blocked"] .docket-mobile-action-state {
+                border-color: rgba(63, 63, 70, 0.24);
+                background: rgba(250, 250, 250, 0.96);
+                color: #27272a;
+                font-weight: 750;
+            }
+
+            .docket-mobile-locked-label {
+                display: none;
+            }
+
+            .docket-mobile-step[data-step-state="waiting"] .docket-mobile-locked-label,
+            .docket-mobile-step[data-step-state="blocked"] .docket-mobile-locked-label {
+                display: block;
+                padding: 6px 9px;
+                border-radius: 10px;
+                border: 1px solid rgba(63, 63, 70, 0.24);
+                background: rgba(250, 250, 250, 0.96);
+                color: #27272a;
+                font-size: 0.88rem;
+                font-weight: 850;
+                line-height: 1.32;
             }
 
             .docket-mobile-action-strip:not(.is-empty) .docket-mobile-deadline-action {
@@ -1941,7 +2301,11 @@
             .docket-selected-rail-badges {
                 display: grid;
                 gap: 6px;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            [data-tab-panel="docket"].mobile-docket-view-selected .docket-selected-rail-badges {
+                display: none;
             }
 
             .docket-selected-rail-badge {
@@ -2011,6 +2375,19 @@
                 padding: 0;
                 border: 0;
                 background: transparent;
+            }
+
+            [data-tab-panel="docket"].mobile-docket-view-selected #docket-mobile-show-documents {
+                justify-self: start;
+                min-height: 44px;
+                padding: 8px 12px;
+                border: 1px solid rgba(88, 101, 110, 0.24);
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.9);
+                box-shadow: none;
+                color: var(--ink);
+                font-size: 0.9rem;
+                text-decoration: none;
             }
 
             [data-tab-panel="docket"].mobile-docket-view-selected #docket-mobile-show-selected {
@@ -3124,25 +3501,70 @@
                     <nav class="docket-mobile-action-strip" aria-label="Mobile Docket document actions">
                         <div class="docket-mobile-step is-current" id="docket-mobile-step-ask" data-step-state="active" aria-current="step">
                             <span class="docket-mobile-step-label">Step 1</span>
-                            <a class="surface-link docket-mobile-primary-action" id="docket-mobile-ask-chat-link" href="/chat">Ask What This Document Changes</a>
+                            <span class="docket-mobile-step-heading">Step 1: Start document chat</span>
+                            <a class="surface-link docket-mobile-primary-action" id="docket-mobile-ask-chat-link" href="/chat">Start Document Chat</a>
                             <span class="docket-mobile-ask-scope" id="docket-mobile-ask-scope">Questions will apply only to this document.</span>
-                            <span class="docket-mobile-action-state" id="docket-mobile-ask-state"><strong>Do this now</strong> Ask what this document changes.</span>
+                            <span class="docket-mobile-action-state" id="docket-mobile-ask-state"><strong>Not started</strong> Start chat, get an impact summary, then mark ready to label.</span>
+                            <span class="docket-mobile-next-unlock" id="docket-mobile-next-unlock">Complete one document-chat question to unlock Step 2.</span>
+                            <div class="docket-mobile-state-contract" id="docket-mobile-step1-state-contract" aria-label="Step 1 state contract">
+                                <div class="docket-mobile-state-contract-row" data-contract-row="current">
+                                    <strong>Current</strong>
+                                    <span id="docket-mobile-step1-current-state">not_started</span>
+                                </div>
+                                <div class="docket-mobile-state-contract-row" data-contract-row="next">
+                                    <strong>Next</strong>
+                                    <span id="docket-mobile-step1-first-unmet">ask one document-specific question first</span>
+                                </div>
+                                <div class="docket-mobile-state-contract-row" data-contract-row="mode">
+                                    <strong>Mode</strong>
+                                    <span id="docket-mobile-step1-persistence-mode">local_until_ready</span>
+                                </div>
+                                <div class="docket-mobile-state-contract-row" data-contract-row="writes">
+                                    <strong>Writes</strong>
+                                    <span id="docket-mobile-step1-write-count">selected-document writes: 0</span>
+                                </div>
+                            </div>
+                            <span class="docket-mobile-gate-summary" id="docket-mobile-gate-summary">Requirements: 0 of 2 complete.</span>
+                            <div class="docket-mobile-checklist" id="docket-mobile-step1-checklist" aria-label="Step 1 readiness checklist">
+                                <button class="docket-mobile-checklist-item" id="docket-mobile-check-question" type="button">Ask one question in Document Chat.</button>
+                                <button class="docket-mobile-checklist-item" id="docket-mobile-check-impact" type="button" disabled>Create impact summary from chat.</button>
+                                <button class="docket-mobile-checklist-item" id="docket-mobile-check-ready" type="button" disabled>Confirm ready to label.</button>
+                            </div>
+                            <span class="docket-mobile-step-feedback" id="docket-mobile-ask-feedback">Complete after both checklist items pass.</span>
+                            <span class="docket-mobile-step-feedback" id="docket-mobile-ask-persistence">First save: only after Step 1 is marked complete.</span>
+                            <div class="docket-mobile-save-row">
+                                <button class="secondary docket-mobile-ready-action" id="docket-mobile-ready-label-button" type="button" aria-describedby="docket-mobile-ready-disabled-reason" disabled>Mark Ready To Label</button>
+                                <span class="docket-mobile-disabled-reason" id="docket-mobile-ready-disabled-reason">Disabled: ask one document-specific question first.</span>
+                                <span class="docket-mobile-save-chip" id="docket-mobile-save-status" data-save-state="idle" data-persistence-mode="local_until_ready">Save: idle - no server write yet.</span>
+                            </div>
                         </div>
-                        <div class="docket-mobile-step is-secondary" id="docket-mobile-step-label" data-step-state="ready">
-                            <span class="docket-mobile-step-label">Step 2</span>
+                        <details class="docket-mobile-step is-secondary is-locked-accordion" id="docket-mobile-step-label" data-step-state="ready">
+                            <summary>
+                                <span class="docket-mobile-step-label">Step 2</span>
+                                <span class="docket-mobile-step-heading">Label Document</span>
+                                <span class="docket-mobile-locked-summary" id="docket-mobile-label-summary">Locked: finish Step 1 first.</span>
+                            </summary>
                             <button class="secondary docket-mobile-secondary-action" id="docket-mobile-label-button" type="button">Label Document</button>
-                            <span class="docket-mobile-action-state" id="docket-mobile-label-state"><strong>Available next</strong> No saved label yet.</span>
-                        </div>
-                        <div class="docket-mobile-step is-secondary" id="docket-mobile-step-annotation" data-step-state="waiting">
-                            <span class="docket-mobile-step-label">Step 3</span>
+                            <span class="docket-mobile-action-state" id="docket-mobile-label-state"><strong>Locked</strong> Unlocks when Step 1 has an impact summary and ready-to-label confirmation.</span>
+                        </details>
+                        <details class="docket-mobile-step is-secondary is-locked-accordion" id="docket-mobile-step-annotation" data-step-state="waiting">
+                            <summary>
+                                <span class="docket-mobile-step-label">Step 3</span>
+                                <span class="docket-mobile-step-heading">Add Note or Date</span>
+                                <span class="docket-mobile-locked-summary" id="docket-mobile-annotation-summary">Locked: label the document in Step 2 first.</span>
+                            </summary>
                             <button class="secondary docket-mobile-secondary-action" id="docket-mobile-annotation-button" type="button">Add Note or Date</button>
-                            <span class="docket-mobile-action-state" id="docket-mobile-annotation-state"><strong>Waiting on prior step</strong> Confirm the label first, then save a note or response date.</span>
-                        </div>
-                        <div class="docket-mobile-step is-secondary" id="docket-mobile-step-deadline" data-step-state="blocked">
-                            <span class="docket-mobile-step-label">Step 4</span>
+                            <span class="docket-mobile-action-state" id="docket-mobile-annotation-state"><strong>Locked</strong> Unlocks when Step 2 label is saved.</span>
+                        </details>
+                        <details class="docket-mobile-step is-secondary is-locked-accordion" id="docket-mobile-step-deadline" data-step-state="blocked">
+                            <summary>
+                                <span class="docket-mobile-step-label">Step 4</span>
+                                <span class="docket-mobile-step-heading">Mark Deadline</span>
+                                <span class="docket-mobile-locked-summary" id="docket-mobile-deadline-summary">Locked: add a response date in Step 3 first.</span>
+                            </summary>
                             <button class="secondary docket-mobile-deadline-action" id="docket-mobile-deadline-button" type="button">Mark Deadline</button>
-                            <span class="docket-mobile-action-state" id="docket-mobile-deadline-state"><strong>Cannot continue yet</strong> Add a response date in Step 3 to set a deadline.</span>
-                        </div>
+                            <span class="docket-mobile-action-state" id="docket-mobile-deadline-state"><strong>Locked</strong> Unlocks when Step 3 saves a response date.</span>
+                        </details>
                     </nav>
                     <p class="docket-mobile-action-note" id="docket-mobile-action-note">These actions unlock after you load or select one docket document.</p>
                     <div class="docket-command-grid">
@@ -4625,28 +5047,35 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         const mobileDocketStepCopy = {
             ask: {
                 title: 'Step 1',
-                cta: 'Ask What This Document Changes',
+                cta: 'Start Document Chat',
                 active: 'Ask what this document changes.',
+                outcome: 'Next: ask at least one document-specific question.',
+                readyGateSummary: '0 of 2 complete: chat impact summary needed, then ready confirmation.',
+                answeredGateSummary: '1 of 2 complete: confirm ready to label before anything is saved.',
+                readyFeedback: 'Mark Ready To Label is disabled until the first unmet checklist item is complete.',
+                answeredFeedback: 'Asked before: review the saved question count, then continue when ready.',
+                readyPersistence: 'Persistence mode: local draft only until Mark Ready.',
+                answeredPersistence: 'Persistence mode: chat progress is local; ready confirmation is the first selected-document write.',
                 scopeFallback: 'Questions will apply only to this document.',
             },
             label: {
                 title: 'Step 2',
                 cta: 'Label Document',
-                locked: 'Complete Step 1: ask what this document changes to unlock.',
+                locked: 'Unlocks when Step 1 has an impact summary and ready-to-label confirmation.',
                 ready: 'Choose what this document affects.',
             },
             annotation: {
                 title: 'Step 3',
                 cta: 'Add Note or Date',
-                lockedBeforeAsk: 'Complete Step 1: ask what this document changes to unlock.',
-                lockedBeforeLabel: 'Complete Step 2: choose what this document affects to unlock.',
+                lockedBeforeAsk: 'Unlocks when Step 1 has an impact summary and ready-to-label confirmation.',
+                lockedBeforeLabel: 'Unlocks when Step 2 label is saved.',
                 ready: 'Save a note or response date from this document.',
             },
             deadline: {
                 title: 'Step 4',
                 cta: 'Deadline Needs Date',
                 readyCta: 'Confirm Deadline',
-                locked: 'Complete Step 3: save a response date to unlock.',
+                locked: 'Unlocks when Step 3 saves a response date.',
             },
         };
 
@@ -8376,6 +8805,31 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 labels,
                 annotation_count: Number((item && item.annotation_count) || metadata.annotation_count || 0),
                 question_count: Number((item && item.question_count) || metadata.question_count || 0),
+                impact_summary: String(
+                    (item && (item.impact_summary || item.document_impact_summary || item.step1_impact_summary))
+                    || metadata.impact_summary
+                    || metadata.document_impact_summary
+                    || metadata.step1_impact_summary
+                    || ''
+                ).trim(),
+                ready_to_label_saved: Boolean(
+                    (item && (item.ready_to_label_saved || item.ready_to_label || item.step1_ready_to_label_saved))
+                    || metadata.ready_to_label_saved
+                    || metadata.ready_to_label
+                    || metadata.step1_ready_to_label_saved
+                ),
+                selected_document_write_status: String(
+                    (item && (item.selected_document_write_status || item.ready_to_label_write_status))
+                    || metadata.selected_document_write_status
+                    || metadata.ready_to_label_write_status
+                    || 'not_started'
+                ).trim(),
+                selected_document_write_count: Number(
+                    (item && (item.selected_document_write_count || item.ready_to_label_write_count))
+                    || metadata.selected_document_write_count
+                    || metadata.ready_to_label_write_count
+                    || 0
+                ),
                 router_status: String((item && item.router_status) || metadata.router_status || 'not reviewed'),
                 page_count: numericValue(item && (item.page_count || item.pages), 'page_count', 'page_count'),
                 vector_count: numericValue(item && (item.vector_count || item.embedding_count), 'vector_count', 'vector_count'),
@@ -8427,6 +8881,85 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     ? 'docket dataset'
                     : 'current evidence';
             return rawItems.map((item, index) => normalizeDocketDocumentItem(item, index, sourceLabel));
+        }
+
+        function buildMobileDocketStep1State(item) {
+            const questionCount = Math.max(0, Number((item && item.question_count) || 0));
+            const hasQuestion = questionCount > 0;
+            const hasImpactSummary = Boolean(String((item && item.impact_summary) || '').trim());
+            const readySaved = Boolean(item && item.ready_to_label_saved);
+            const writeStatus = String((item && item.selected_document_write_status) || 'not_started').trim() || 'not_started';
+            const selectedDocumentWriteCount = Math.max(0, Number((item && item.selected_document_write_count) || (readySaved ? 1 : 0) || 0));
+            const checklist = [
+                {
+                    id: 'question',
+                    complete: hasQuestion,
+                    blocked: false,
+                    text: hasQuestion
+                        ? `Question asked: Yes (${questionCount}).`
+                        : 'Question asked: No.',
+                    unmetReason: 'ask one document-specific question first',
+                },
+                {
+                    id: 'impact',
+                    complete: hasImpactSummary,
+                    blocked: !hasQuestion,
+                    text: hasImpactSummary
+                        ? 'Impact summary is ready.'
+                        : hasQuestion
+                            ? 'Create impact summary from chat.'
+                            : 'Create impact summary after the first chat question.',
+                    unmetReason: 'create the impact summary from chat',
+                },
+                {
+                    id: 'ready',
+                    complete: readySaved,
+                    blocked: !hasQuestion || !hasImpactSummary,
+                    text: readySaved
+                        ? 'Ready-to-label confirmation saved.'
+                        : 'Confirm ready to label.',
+                    unmetReason: 'confirm ready to label',
+                },
+            ];
+            const completedCount = checklist.filter((entry) => entry.complete).length;
+            const firstUnmet = checklist.find((entry) => !entry.complete) || null;
+            const readyWriteAllowed = hasQuestion && hasImpactSummary && !readySaved;
+            const persistenceMode = readySaved ? 'server_saved' : 'local_until_ready';
+            const currentState = readySaved
+                ? 'ready_confirmation_saved'
+                : hasImpactSummary
+                    ? 'impact_summary_ready'
+                    : hasQuestion
+                        ? 'chat_started'
+                        : 'not_started';
+            return {
+                checklist,
+                completedCount,
+                totalCount: checklist.length,
+                firstUnmet,
+                questionCount,
+                hasQuestion,
+                hasImpactSummary,
+                readySaved,
+                readyWriteAllowed,
+                writeStatus,
+                selectedDocumentWriteCount,
+                persistenceMode,
+                currentState,
+                gateSummary: `${completedCount} of ${checklist.length} complete: ${firstUnmet ? firstUnmet.unmetReason : 'Step 1 ready confirmation saved'}.`,
+                disabledReason: readyWriteAllowed
+                    ? 'Enabled: Step 1 can save ready confirmation.'
+                    : firstUnmet && firstUnmet.id === 'question'
+                        ? 'After you use Open Chat and ask one document question, Mark Ready To Label appears here.'
+                        : firstUnmet && firstUnmet.id === 'impact'
+                            ? 'Waiting for the chat impact summary before Mark Ready To Label can save.'
+                            : firstUnmet && firstUnmet.id === 'ready'
+                                ? 'Mark Ready To Label is ready. This will be the first selected-document update.'
+                                : `Disabled: ${firstUnmet ? firstUnmet.unmetReason : 'ready confirmation already saved'}.`,
+                saveStatus: readySaved
+                    ? 'Persistence: ready confirmation saved.'
+                    : 'Persistence: local draft only until Mark Ready.',
+            };
         }
 
         function setMobileDocketView(view) {
@@ -8603,9 +9136,26 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const mobileActionStrip = document.querySelector('.docket-mobile-action-strip');
             const mobileAskScope = document.getElementById('docket-mobile-ask-scope');
             const mobileAskState = document.getElementById('docket-mobile-ask-state');
+            const mobileNextUnlock = document.getElementById('docket-mobile-next-unlock');
+            const mobileAskFeedback = document.getElementById('docket-mobile-ask-feedback');
+            const mobileAskPersistence = document.getElementById('docket-mobile-ask-persistence');
+            const mobileReadyLabelButton = document.getElementById('docket-mobile-ready-label-button');
+            const mobileSaveStatus = document.getElementById('docket-mobile-save-status');
+            const mobileGateSummary = document.getElementById('docket-mobile-gate-summary');
+            const mobileStep1CurrentState = document.getElementById('docket-mobile-step1-current-state');
+            const mobileStep1FirstUnmet = document.getElementById('docket-mobile-step1-first-unmet');
+            const mobileStep1PersistenceMode = document.getElementById('docket-mobile-step1-persistence-mode');
+            const mobileStep1WriteCount = document.getElementById('docket-mobile-step1-write-count');
+            const mobileCheckQuestion = document.getElementById('docket-mobile-check-question');
+            const mobileCheckImpact = document.getElementById('docket-mobile-check-impact');
+            const mobileCheckReady = document.getElementById('docket-mobile-check-ready');
+            const mobileReadyDisabledReason = document.getElementById('docket-mobile-ready-disabled-reason');
             const mobileLabelState = document.getElementById('docket-mobile-label-state');
             const mobileAnnotationState = document.getElementById('docket-mobile-annotation-state');
             const mobileDeadlineState = document.getElementById('docket-mobile-deadline-state');
+            const mobileLabelSummary = document.getElementById('docket-mobile-label-summary');
+            const mobileAnnotationSummary = document.getElementById('docket-mobile-annotation-summary');
+            const mobileDeadlineSummary = document.getElementById('docket-mobile-deadline-summary');
             const mobileStepAsk = document.getElementById('docket-mobile-step-ask');
             const mobileStepLabel = document.getElementById('docket-mobile-step-label');
             const mobileStepAnnotation = document.getElementById('docket-mobile-step-annotation');
@@ -8660,18 +9210,50 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 mobileChatLink.textContent = 'Locked: Ask About Document';
                 mobileAskScope.textContent = 'Select a document before asking the chatbot.';
                 mobileAskState.innerHTML = '<strong>Cannot continue yet</strong> Select one document first.';
+                mobileNextUnlock.textContent = 'Select one document to unlock Step 1.';
+                mobileAskFeedback.textContent = 'Locked: select one document before opening document chat.';
+                mobileAskPersistence.textContent = 'Persistence: nothing saved yet.';
+                mobileReadyLabelButton.disabled = true;
+                mobileReadyLabelButton.dataset.readyVisibility = 'hidden';
+                mobileReadyLabelButton.textContent = 'Mark Ready To Label';
+                mobileSaveStatus.textContent = 'Persistence: no document selected.';
+                mobileSaveStatus.dataset.saveState = 'idle';
+                mobileSaveStatus.dataset.persistenceMode = 'none';
+                mobileGateSummary.textContent = '0 of 3 complete: select one document first.';
+                mobileStep1CurrentState.textContent = 'no_document_selected';
+                mobileStep1FirstUnmet.textContent = 'select one document first';
+                mobileStep1PersistenceMode.textContent = 'none';
+                mobileStep1WriteCount.textContent = 'Document updates captured: 0';
+                mobileCheckQuestion.textContent = 'Ask one question in Document Chat.';
+                mobileCheckQuestion.dataset.checkState = 'blocked';
+                mobileCheckQuestion.disabled = true;
+                mobileCheckImpact.textContent = 'Create impact summary after the first chat question.';
+                mobileCheckImpact.dataset.checkState = 'blocked';
+                mobileCheckImpact.disabled = true;
+                mobileCheckReady.textContent = 'Confirm ready to label.';
+                mobileCheckReady.dataset.checkState = 'blocked';
+                mobileCheckReady.disabled = true;
+                mobileReadyDisabledReason.textContent = 'Disabled: select one document first.';
                 mobileLabelButton.textContent = 'Locked: Label Document';
                 mobileLabelState.innerHTML = '<strong>Cannot continue yet</strong> Select one document first.';
+                mobileLabelSummary.textContent = 'Locked: select one document first.';
                 mobileAnnotationButton.textContent = 'Locked: Add Note or Date';
                 mobileAnnotationState.innerHTML = '<strong>Cannot continue yet</strong> Select one document first.';
+                mobileAnnotationSummary.textContent = 'Locked: select one document first.';
                 mobileDeadlineButton.textContent = 'Mark Deadline';
                 mobileDeadlineButton.textContent = 'Locked: Mark Deadline';
                 mobileDeadlineState.innerHTML = '<strong>Cannot continue yet</strong> Select one document first.';
+                mobileDeadlineSummary.textContent = 'Locked: select one document first.';
                 mobileDeadlineButton.setAttribute('aria-describedby', 'docket-mobile-deadline-state');
                 [mobileStepAsk, mobileStepLabel, mobileStepAnnotation, mobileStepDeadline].forEach((step) => {
-                    step.className = 'docket-mobile-step is-secondary';
+                    step.className = step.id === 'docket-mobile-step-ask'
+                        ? 'docket-mobile-step is-secondary'
+                        : 'docket-mobile-step is-secondary is-locked-accordion';
                     step.dataset.stepState = 'locked';
                     step.removeAttribute('aria-current');
+                    if (step.tagName === 'DETAILS') {
+                        step.open = false;
+                    }
                 });
                 mobileActionNote.textContent = 'Load a docket manifest or import evidence first. Then select one document to unlock these actions.';
                 annotations.innerHTML = '<div class="item"><strong>No annotations yet.</strong><div class="muted">Load or select a document before saving labels or asking questions.</div></div>';
@@ -8681,19 +9263,23 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const labelCount = Math.max(0, Number((item.labels || []).length || 0));
             const annotationCount = Math.max(0, Number(item.annotation_count || 0));
             const questionCount = Math.max(0, Number(item.question_count || 0));
-            const reviewStatusLabel = questionCount > 0 ? 'Step 1 done' : 'Step 1 active';
-            const draftReadinessLabel = labelCount > 0 ? 'Step 2 labeled' : 'Step 2 waiting';
-            const deadlineStatusLabel = item.deadline ? `Deadline: ${item.deadline}` : 'Step 4 locked: no deadline';
+            const step1State = buildMobileDocketStep1State(item);
+            const step1Complete = step1State.readySaved;
+            const reviewStatusLabel = step1Complete ? 'Step 1: Complete' : 'Step 1: Current';
+            const draftReadinessLabel = step1Complete ? 'Step 2: Ready' : 'Step 2: Locked';
+            const annotationStatusLabel = (step1Complete && labelCount > 0) ? 'Step 3: Ready' : 'Step 3: Locked';
+            const deadlineStatusLabel = item.deadline ? 'Step 4: Ready' : 'Step 4: Locked';
             actionBar.classList.remove('is-empty');
             mobileActionStrip.classList.remove('is-empty');
             selectedRail.classList.remove('is-empty');
             title.textContent = item.title || 'Selected document';
             selectedRailLabel.textContent = 'Selected document';
             selectedRailTitle.textContent = item.title || 'Selected document';
-            selectedRailMeta.textContent = `${item.source || 'source unknown'}${item.document_type ? ` | ${item.document_type}` : ''}`;
+            selectedRailMeta.textContent = `Source: ${item.source || 'source unknown'}${item.document_type ? ` • Type: ${item.document_type.charAt(0).toUpperCase()}${item.document_type.slice(1)}` : ''}`;
             selectedRailBadges.innerHTML = `
                 <span class="docket-selected-rail-badge">${escapeHtml(reviewStatusLabel)}</span>
                 <span class="docket-selected-rail-badge">${escapeHtml(draftReadinessLabel)}</span>
+                <span class="docket-selected-rail-badge">${escapeHtml(annotationStatusLabel)}</span>
                 <span class="docket-selected-rail-badge">${escapeHtml(deadlineStatusLabel)}</span>
             `;
             chips.innerHTML = `
@@ -8766,35 +9352,97 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             });
             reviewButton.textContent = needsRouterReview ? 'Review Before Draft' : 'Open Review';
             draftButton.textContent = needsRouterReview ? 'Use In Draft Anyway' : 'Use In Draft';
-            mobileChatLink.textContent = mobileDocketStepCopy.ask.cta;
-            mobileAskScope.textContent = `Questions will apply only to ${item.title || 'this document'}.`;
+            mobileChatLink.textContent = 'Open Chat';
+            mobileAskScope.textContent = `Chatting about: ${item.title || 'this document'}. Questions will apply only to this document.`;
             mobileAskState.innerHTML = questionCount > 0
-                ? `<strong>Available next</strong> Review ${escapeHtml(String(questionCount))} question(s).`
-                : `<strong>Do this now</strong> ${escapeHtml(mobileDocketStepCopy.ask.active)}`;
+                ? `<strong>Available next</strong> ${escapeHtml(step1State.firstUnmet ? step1State.firstUnmet.text : 'Step 1 is complete.')}`
+                : `<strong>Not started</strong> ${escapeHtml(mobileDocketStepCopy.ask.outcome)}`;
+            mobileNextUnlock.textContent = step1State.firstUnmet && step1State.firstUnmet.id === 'question'
+                ? 'Ask your first document-specific question to show Mark Ready To Label.'
+                : step1State.firstUnmet && step1State.firstUnmet.id === 'impact'
+                    ? 'Review the chat impact summary to turn on Mark Ready To Label.'
+                    : step1State.firstUnmet && step1State.firstUnmet.id === 'ready'
+                        ? 'Mark Ready To Label is ready. This will be the first document update.'
+                        : 'Step 1 complete. Step 2 is unlocked.';
+            mobileAskFeedback.textContent = questionCount > 0
+                ? `Next unmet item: ${step1State.firstUnmet ? step1State.firstUnmet.unmetReason : 'none'}.`
+                : mobileDocketStepCopy.ask.readyFeedback;
+            mobileAskPersistence.textContent = questionCount > 0
+                ? mobileDocketStepCopy.ask.answeredPersistence
+                : mobileDocketStepCopy.ask.readyPersistence;
+            mobileReadyLabelButton.disabled = !step1State.readyWriteAllowed;
+            mobileReadyLabelButton.dataset.readyVisibility = step1State.hasQuestion || step1State.readyWriteAllowed || step1State.readySaved
+                ? 'guided'
+                : 'hidden';
+            mobileReadyLabelButton.textContent = step1State.readySaved
+                ? 'Ready To Label Saved'
+                : step1State.readyWriteAllowed
+                    ? 'Mark Ready To Label'
+                    : step1State.hasQuestion
+                        ? 'Mark Ready To Label'
+                        : 'Next After Chat: Mark Ready To Label';
+            mobileReadyDisabledReason.textContent = step1State.disabledReason;
+            mobileSaveStatus.textContent = step1State.saveStatus;
+            mobileSaveStatus.dataset.saveState = step1State.readySaved ? 'saved' : 'idle';
+            mobileSaveStatus.dataset.persistenceMode = step1State.persistenceMode;
+            mobileGateSummary.textContent = step1State.gateSummary;
+            mobileStep1CurrentState.textContent = step1State.currentState;
+            mobileStep1FirstUnmet.textContent = step1State.firstUnmet ? step1State.firstUnmet.unmetReason : 'none';
+            mobileStep1PersistenceMode.textContent = step1State.persistenceMode;
+            mobileStep1WriteCount.textContent = `Document updates captured: ${step1State.selectedDocumentWriteCount}`;
+            const checklistNodes = {
+                question: mobileCheckQuestion,
+                impact: mobileCheckImpact,
+                ready: mobileCheckReady,
+            };
+            step1State.checklist.forEach((entry) => {
+                const node = checklistNodes[entry.id];
+                if (!node) {
+                    return;
+                }
+                node.textContent = entry.text;
+                node.dataset.checkState = entry.complete ? 'complete' : entry.blocked ? 'blocked' : 'missing';
+                node.disabled = entry.id === 'question' ? false : entry.blocked || entry.complete;
+            });
             mobileLabelButton.textContent = mobileDocketStepCopy.label.cta;
-            mobileLabelState.innerHTML = questionCount === 0
-                ? `<strong>Waiting on prior step</strong> ${escapeHtml(mobileDocketStepCopy.label.locked)}`
+            mobileLabelState.innerHTML = !step1Complete
+                ? `<strong>Locked</strong> ${escapeHtml(mobileDocketStepCopy.label.locked)}`
                 : labelCount > 0
                 ? `<strong>Available next</strong> Review ${escapeHtml(String(labelCount))} suggested label(s).`
                 : `<strong>Available next</strong> ${escapeHtml(mobileDocketStepCopy.label.ready)}`;
+            mobileLabelSummary.textContent = !step1Complete
+                ? 'Locked: complete Step 1 first.'
+                : labelCount > 0
+                ? 'Available: review saved labels.'
+                : 'Available next: choose what this document affects.';
             mobileAnnotationButton.textContent = mobileDocketStepCopy.annotation.cta;
-            mobileAnnotationState.innerHTML = questionCount === 0
-                ? `<strong>Waiting on prior step</strong> ${escapeHtml(mobileDocketStepCopy.annotation.lockedBeforeAsk)}`
+            mobileAnnotationState.innerHTML = !step1Complete
+                ? `<strong>Locked</strong> ${escapeHtml(mobileDocketStepCopy.annotation.lockedBeforeAsk)}`
                 : labelCount === 0
-                ? `<strong>Waiting on prior step</strong> ${escapeHtml(mobileDocketStepCopy.annotation.lockedBeforeLabel)}`
+                ? `<strong>Locked</strong> ${escapeHtml(mobileDocketStepCopy.annotation.lockedBeforeLabel)}`
                 : annotationCount > 0
                 ? `<strong>Available next</strong> Review ${escapeHtml(String(annotationCount))} annotation(s).`
                 : `<strong>Available next</strong> ${escapeHtml(mobileDocketStepCopy.annotation.ready)}`;
+            mobileAnnotationSummary.textContent = !step1Complete
+                ? 'Locked: complete Step 1 first.'
+                : labelCount === 0
+                ? 'Locked: save a Step 2 label first.'
+                : annotationCount > 0
+                ? 'Available: review saved notes and dates.'
+                : 'Available next: add a note or response date.';
             deadlineButton.textContent = item.deadline ? 'Confirm Deadline' : 'Mark Deadline';
             mobileDeadlineButton.textContent = item.deadline ? mobileDocketStepCopy.deadline.readyCta : mobileDocketStepCopy.deadline.cta;
             mobileDeadlineState.innerHTML = item.deadline
                 ? `<strong>Available next</strong> Confirm ${escapeHtml(item.deadline)}.`
-                : `<strong>Cannot continue yet</strong> ${escapeHtml(mobileDocketStepCopy.deadline.locked)}`;
+                : `<strong>Locked</strong> ${escapeHtml(mobileDocketStepCopy.deadline.locked)}`;
+            mobileDeadlineSummary.textContent = item.deadline
+                ? `Available: confirm ${item.deadline}.`
+                : 'Locked: add a response date in Step 3 first.';
             mobileDeadlineButton.disabled = !item.deadline;
-            mobileLabelButton.disabled = questionCount === 0;
-            mobileAnnotationButton.disabled = questionCount === 0 || labelCount === 0;
+            mobileLabelButton.disabled = !step1Complete;
+            mobileAnnotationButton.disabled = !step1Complete || labelCount === 0;
             mobileDeadlineButton.setAttribute('aria-describedby', 'docket-mobile-deadline-state');
-            const currentMobileStep = questionCount === 0
+            const currentMobileStep = !step1Complete
                 ? 'ask'
                 : labelCount === 0
                     ? 'label'
@@ -8809,25 +9457,28 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             if (currentMobileStep === 'ask') {
                 mobileStepAsk.setAttribute('aria-current', 'step');
             }
-            mobileStepLabel.className = currentMobileStep === 'label' ? 'docket-mobile-step is-current' : 'docket-mobile-step is-secondary';
-            mobileStepLabel.dataset.stepState = currentMobileStep === 'label' ? 'active' : questionCount > 0 ? 'ready' : 'waiting';
+            mobileStepLabel.className = currentMobileStep === 'label' ? 'docket-mobile-step is-current is-locked-accordion' : 'docket-mobile-step is-secondary is-locked-accordion';
+            mobileStepLabel.dataset.stepState = currentMobileStep === 'label' ? 'active' : step1Complete ? 'ready' : 'waiting';
             mobileStepLabel.toggleAttribute('aria-current', currentMobileStep === 'label');
+            mobileStepLabel.open = currentMobileStep === 'label';
             if (currentMobileStep === 'label') {
                 mobileStepLabel.setAttribute('aria-current', 'step');
             }
-            mobileStepAnnotation.className = currentMobileStep === 'annotation' ? 'docket-mobile-step is-current' : 'docket-mobile-step is-secondary';
-            mobileStepAnnotation.dataset.stepState = currentMobileStep === 'annotation' ? 'active' : (questionCount > 0 && labelCount > 0) ? 'ready' : 'waiting';
+            mobileStepAnnotation.className = currentMobileStep === 'annotation' ? 'docket-mobile-step is-current is-locked-accordion' : 'docket-mobile-step is-secondary is-locked-accordion';
+            mobileStepAnnotation.dataset.stepState = currentMobileStep === 'annotation' ? 'active' : (step1Complete && labelCount > 0) ? 'ready' : 'waiting';
             mobileStepAnnotation.toggleAttribute('aria-current', currentMobileStep === 'annotation');
+            mobileStepAnnotation.open = currentMobileStep === 'annotation';
             if (currentMobileStep === 'annotation') {
                 mobileStepAnnotation.setAttribute('aria-current', 'step');
             }
             mobileStepDeadline.className = currentMobileStep === 'deadline'
-                ? 'docket-mobile-step is-current'
+                ? 'docket-mobile-step is-current is-locked-accordion'
                 : item.deadline
-                    ? 'docket-mobile-step is-secondary'
-                    : 'docket-mobile-step is-secondary is-blocked';
+                    ? 'docket-mobile-step is-secondary is-locked-accordion'
+                    : 'docket-mobile-step is-secondary is-blocked is-locked-accordion';
             mobileStepDeadline.dataset.stepState = currentMobileStep === 'deadline' ? 'active' : item.deadline ? 'ready' : 'blocked';
             mobileStepDeadline.toggleAttribute('aria-current', currentMobileStep === 'deadline');
+            mobileStepDeadline.open = currentMobileStep === 'deadline';
             if (currentMobileStep === 'deadline') {
                 mobileStepDeadline.setAttribute('aria-current', 'step');
             }

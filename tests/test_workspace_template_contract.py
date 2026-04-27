@@ -46,6 +46,9 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert "docket-mobile-label-state" in content
     assert "docket-mobile-annotation-state" in content
     assert "docket-mobile-deadline-state" in content
+    assert "docket-mobile-label-summary" in content
+    assert "docket-mobile-annotation-summary" in content
+    assert "docket-mobile-deadline-summary" in content
     assert "docket-mobile-action-state" in content
     assert "docket-mobile-step-ask" in content
     assert "docket-mobile-step-label" in content
@@ -58,22 +61,80 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert 'data-step-state="ready"' in content
     assert 'data-step-state="waiting"' in content
     assert 'data-step-state="blocked"' in content
-    assert "<strong>Do this now</strong>" in content
+    assert "<strong>Not started</strong>" in content
     assert "<strong>Available next</strong>" in content
-    assert "<strong>Waiting on prior step</strong>" in content
+    assert "<strong>Locked</strong>" in content
     assert "<strong>Cannot continue yet</strong>" in content
-    assert "Actions for the selected document" in content
+    assert "docket-mobile-ask-feedback" in content
+    assert "docket-mobile-ask-persistence" in content
+    assert "docket-mobile-ready-label-button" in content
+    assert "docket-mobile-save-status" in content
+    assert "docket-mobile-step1-checklist" in content
+    assert "docket-mobile-check-question" in content
+    assert "docket-mobile-check-impact" in content
+    assert "docket-mobile-check-ready" in content
+    assert "docket-mobile-ready-disabled-reason" in content
+    assert "Step 1: Start document chat" in content
+    assert "docket-mobile-save-row" in content
+    assert "docket-mobile-step-heading" in content
+    assert "docket-mobile-locked-summary" in content
+    assert "docket-mobile-state-contract" in content
+    assert "docket-mobile-step1-state-contract" in content
+    assert "docket-mobile-step1-current-state" in content
+    assert "docket-mobile-step1-first-unmet" in content
+    assert "docket-mobile-step1-persistence-mode" in content
+    assert "docket-mobile-step1-write-count" in content
+    assert "is-locked-accordion" in content
+    assert "data-save-state=\"idle\"" in content
     assert "Questions will apply only to this document." in content
+    assert "Chatting about:" in content
     assert "Questions will apply only to" in content
-    assert "Ask What This Document Changes" in content
-    assert "Complete Step 1: ask what this document changes to unlock" in content
-    assert "Complete Step 2: choose what this document affects to unlock" in content
-    assert "Complete Step 3: save a response date to unlock" in content
+    assert "Start Document Chat" in content
+    assert "Ask one question in Document Chat" in content
+    assert "Open Chat" in content
+    assert "Question asked: No" in content
+    assert "Document updates captured: 0" in content
+    assert "Ask your first document-specific question to show Mark Ready To Label" in content
+    assert 'aria-describedby="docket-mobile-ready-disabled-reason"' in content
+    assert "Next After Chat: Mark Ready To Label" in content
+    assert "After you use Open Chat and ask one document question, Mark Ready To Label appears here" in content
+    assert "Waiting for the chat impact summary before Mark Ready To Label can save" in content
+    assert "Review the chat impact summary to turn on Mark Ready To Label" in content
+    assert "data-ready-visibility" in content
+    assert "Source:" in content
+    assert "Type:" in content
+    assert "Create impact summary after the first chat question" in content
+    assert "Confirm ready to label" in content
+    assert "Next: ask at least one document-specific question" in content
+    assert "0 of 3 complete: select one document first" in content
+    assert "Mark Ready To Label is disabled until the first unmet checklist item is complete" in content
+    assert "Persistence mode: local draft only until Mark Ready" in content
+    assert "Persistence mode: chat progress is local; ready confirmation is the first selected-document write" in content
+    assert "buildMobileDocketStep1State" in content
+    assert "selected_document_write_status" in content
+    assert "selected_document_write_count" in content
+    assert "ready_to_label_saved" in content
+    assert "selectedDocumentWriteCount" in content
+    assert "currentState" in content
+    assert "data-check-state" in content
+    assert "data-persistence-mode" in content
+    assert "local_until_ready" in content
+    assert "Mark Ready To Label" in content
+    assert "Persistence: local draft only until Mark Ready" in content
+    assert "Locked: complete Step 1 first" in content
+    assert "Locked: save a Step 2 label first" in content
+    assert "Locked: add a response date in Step 3 first" in content
+    assert 'content: "Locked";' in content
+    assert "pointer-events: none;" in content
+    assert "Unlocks when Step 1 has an impact summary and ready-to-label confirmation" in content
+    assert "Unlocks when Step 2 label is saved" in content
+    assert "Unlocks when Step 3 saves a response date" in content
     assert "aria-describedby', 'docket-mobile-deadline-state'" in content
     assert "Selected source summary" in content
-    assert "Step 1 active" in content
-    assert "Step 2 waiting" in content
-    assert "Step 4 locked: no deadline" in content
+    assert "Step 1: Current" in content
+    assert "Step 2: Locked" in content
+    assert "Step 3: Locked" in content
+    assert "Step 4: Locked" in content
     assert "docket-mobile-ask-chat-link" in content
     assert "docket-mobile-label-button" in content
     assert "docket-mobile-annotation-button" in content
@@ -95,10 +156,10 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert "docket-mobile-technical-details" in content
     assert "docket-mobile-technical-preview" in content
     assert "Technical document status" in content
-    assert "Ask What This Document Changes" in content
+    assert "Start Document Chat" in content
     assert "Label Document" in content
     assert "Add Note or Date" in content
-    assert "Ask What This Document Changes" in content
+    assert "Start Document Chat" in content
     assert "Label Document" in content
     assert "Add Note or Date" in content
     assert "Deadline Needs Date" in content

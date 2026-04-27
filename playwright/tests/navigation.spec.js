@@ -876,36 +876,85 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#docket-selected-rail')).toBeVisible();
     await expect(page.locator('#docket-selected-rail-label')).toContainText(/Selected document/i);
     await expect(page.locator('#docket-selected-rail-title')).toContainText(/Termination timeline email/i);
-    await expect(page.locator('#docket-selected-rail-meta')).toContainText(/Inbox export/i);
-    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Step 1 active/i);
-    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Step 2 labeled/i);
-    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Step 4 locked: no deadline/i);
+    await expect(page.locator('#docket-selected-rail-meta')).toContainText(/Source: Inbox export/i);
+    await expect(page.locator('#docket-selected-rail-meta')).toContainText(/Type: Document/i);
+    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Step 1: Current/i);
+    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Step 2: Locked/i);
+    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Step 3: Locked/i);
+    await expect(page.locator('#docket-selected-rail-badges')).toContainText(/Step 4: Locked/i);
+    await expect(page.locator('#docket-selected-rail-badges')).toBeHidden();
     await expect(page.locator('#docket-mobile-ask-chat-link')).toBeVisible();
     await expect(page.locator('#docket-mobile-step-ask')).toHaveClass(/is-current/);
+    await expect(page.locator('#docket-mobile-step-ask')).toHaveCount(1);
     await expect(page.locator('#docket-mobile-step-ask')).toHaveAttribute('aria-current', 'step');
     await expect(page.locator('#docket-mobile-step-ask')).toHaveAttribute('data-step-state', 'active');
     await expect(page.locator('#docket-mobile-step-label')).toHaveAttribute('data-step-state', 'waiting');
     await expect(page.locator('#docket-mobile-step-annotation')).toHaveAttribute('data-step-state', 'waiting');
     await expect(page.locator('#docket-mobile-step-deadline')).toHaveAttribute('data-step-state', 'blocked');
+    await expect(page.locator('#docket-mobile-step-label')).toHaveClass(/is-locked-accordion/);
+    await expect(page.locator('#docket-mobile-step-annotation')).toHaveClass(/is-locked-accordion/);
+    await expect(page.locator('#docket-mobile-step-deadline')).toHaveClass(/is-locked-accordion/);
     await expect(page.locator('#docket-mobile-step-deadline')).toHaveClass(/is-blocked/);
-    await expect(page.locator('#docket-mobile-ask-chat-link')).toContainText(/Ask What This Document Changes/i);
+    await expect(page.locator('#docket-mobile-step-ask .docket-mobile-step-heading')).toContainText(/Step 1: Start document chat/i);
+    await expect(page.locator('#docket-mobile-ask-chat-link')).toContainText(/^Open Chat$/i);
     await expect(page.locator('#docket-mobile-ask-chat-link')).not.toHaveAttribute('aria-disabled', 'true');
     await expect(page.locator('#docket-mobile-ask-chat-link')).toHaveClass(/docket-mobile-primary-action/);
     await expect(page.locator('#docket-mobile-label-button')).toHaveClass(/docket-mobile-secondary-action/);
     await expect(page.locator('#docket-mobile-annotation-button')).toHaveClass(/docket-mobile-secondary-action/);
     await expect(page.locator('#docket-mobile-deadline-button')).toHaveClass(/docket-mobile-deadline-action/);
-    await expect(page.locator('#docket-mobile-ask-scope')).toContainText(/Questions will apply only to Termination timeline email/i);
-    await expect(page.locator('#docket-mobile-ask-state')).toContainText(/Do this now Ask what this document changes/i);
+    await expect(page.locator('#docket-mobile-ask-scope')).toContainText(/Chatting about: Termination timeline email/i);
+    await expect(page.locator('#docket-mobile-ask-scope')).toContainText(/Questions will apply only to this document/i);
+    await expect(page.locator('#docket-mobile-ask-state')).toContainText(/Not started Next: ask at least one document-specific question/i);
+    await expect(page.locator('#docket-mobile-step1-state-contract')).toBeVisible();
+    await expect(page.locator('#docket-mobile-step1-current-state')).toContainText(/^not_started$/i);
+    await expect(page.locator('#docket-mobile-step1-first-unmet')).toContainText(/^ask one document-specific question first$/i);
+    await expect(page.locator('#docket-mobile-step1-persistence-mode')).toContainText(/^local_until_ready$/i);
+    await expect(page.locator('#docket-mobile-next-unlock')).toContainText(/Ask your first document-specific question to show Mark Ready To Label/i);
+    await expect(page.locator('#docket-mobile-step1-write-count')).toContainText(/Document updates captured: 0/i);
+    await expect(page.locator('#docket-mobile-step1-checklist')).toContainText(/Question asked: No/i);
+    await expect(page.locator('#docket-mobile-step1-checklist')).toContainText(/Create impact summary after the first chat question/i);
+    await expect(page.locator('#docket-mobile-step1-checklist')).toContainText(/Confirm ready to label/i);
+    await expect(page.locator('#docket-mobile-gate-summary')).toBeHidden();
+    await expect(page.locator('#docket-mobile-gate-summary')).toContainText(/0 of 3 complete: ask one document-specific question first/i);
+    await expect(page.locator('#docket-mobile-check-question')).toContainText(/Question asked: No/i);
+    await expect(page.locator('#docket-mobile-check-question')).toHaveAttribute('data-check-state', 'missing');
+    await expect(page.locator('#docket-mobile-check-impact')).toContainText(/Create impact summary after the first chat question/i);
+    await expect(page.locator('#docket-mobile-check-impact')).toBeHidden();
+    await expect(page.locator('#docket-mobile-check-impact')).toHaveAttribute('data-check-state', 'blocked');
+    await expect(page.locator('#docket-mobile-check-ready')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-check-ready')).toBeHidden();
+    await expect(page.locator('#docket-mobile-check-ready')).toHaveAttribute('data-check-state', 'blocked');
+    await expect(page.locator('#docket-mobile-ask-feedback')).toBeHidden();
+    await expect(page.locator('#docket-mobile-ask-feedback')).toContainText(/Mark Ready To Label is disabled until the first unmet checklist item is complete/i);
+    await expect(page.locator('#docket-mobile-ask-persistence')).toBeHidden();
+    await expect(page.locator('#docket-mobile-ask-persistence')).toContainText(/Persistence mode: local draft only until Mark Ready/i);
+    await expect(page.locator('#docket-mobile-ready-label-button')).toBeHidden();
+    await expect(page.locator('#docket-mobile-ready-label-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-ready-label-button')).toHaveAttribute('aria-describedby', 'docket-mobile-ready-disabled-reason');
+    await expect(page.locator('#docket-mobile-ready-label-button')).toContainText(/Next After Chat: Mark Ready To Label/i);
+    await expect(page.locator('#docket-mobile-ready-disabled-reason')).toContainText(/After you use Open Chat and ask one document question, Mark Ready To Label appears here/i);
+    await expect(page.locator('#docket-mobile-save-status')).toContainText(/Persistence: local draft only until Mark Ready/i);
+    await expect(page.locator('#docket-mobile-save-status')).toHaveAttribute('data-save-state', 'idle');
+    await expect(page.locator('#docket-mobile-save-status')).toHaveAttribute('data-persistence-mode', 'local_until_ready');
     await expect(page.locator('#docket-mobile-label-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-label-button')).toBeHidden();
     await expect(page.locator('#docket-mobile-label-button')).toContainText(/^Label Document$/i);
-    await expect(page.locator('#docket-mobile-label-state')).toContainText(/Waiting on prior step Complete Step 1: ask what this document changes to unlock/i);
+    await expect(page.locator('#docket-mobile-label-summary')).toBeHidden();
+    await expect(page.locator('#docket-mobile-label-summary')).toContainText(/Locked: complete Step 1 first/i);
+    await expect(page.locator('#docket-mobile-label-state')).toContainText(/Locked Unlocks when Step 1 has an impact summary and ready-to-label confirmation/i);
     await expect(page.locator('#docket-mobile-annotation-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-annotation-button')).toBeHidden();
     await expect(page.locator('#docket-mobile-annotation-button')).toContainText(/^Add Note or Date$/i);
-    await expect(page.locator('#docket-mobile-annotation-state')).toContainText(/Waiting on prior step Complete Step 1: ask what this document changes to unlock/i);
+    await expect(page.locator('#docket-mobile-annotation-summary')).toBeHidden();
+    await expect(page.locator('#docket-mobile-annotation-summary')).toContainText(/Locked: complete Step 1 first/i);
+    await expect(page.locator('#docket-mobile-annotation-state')).toContainText(/Locked Unlocks when Step 1 has an impact summary and ready-to-label confirmation/i);
     await expect(page.locator('#docket-mobile-deadline-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-deadline-button')).toBeHidden();
     await expect(page.locator('#docket-mobile-deadline-button')).toContainText(/^Deadline Needs Date$/i);
     await expect(page.locator('#docket-mobile-deadline-button')).toHaveAttribute('aria-describedby', 'docket-mobile-deadline-state');
-    await expect(page.locator('#docket-mobile-deadline-state')).toContainText(/Cannot continue yet Complete Step 3: save a response date to unlock/i);
+    await expect(page.locator('#docket-mobile-deadline-summary')).toBeHidden();
+    await expect(page.locator('#docket-mobile-deadline-summary')).toContainText(/Locked: add a response date in Step 3 first/i);
+    await expect(page.locator('#docket-mobile-deadline-state')).toContainText(/Locked Unlocks when Step 3 saves a response date/i);
     await expect(page.locator('#docket-mobile-action-note')).toBeHidden();
     await expect(page.locator('.docket-loader-card')).toBeHidden();
     await expect(page.locator('.docket-action-bar')).toBeHidden();
@@ -921,6 +970,14 @@ test.describe('website surface navigation', () => {
       const actionsRect = actions.getBoundingClientRect();
       const askStyle = getComputedStyle(document.querySelector('#docket-mobile-ask-chat-link'));
       const selectedCardDisplay = getComputedStyle(document.querySelector('.docket-selected-card')).display;
+      const labelButtonDisplay = getComputedStyle(document.querySelector('#docket-mobile-label-button')).display;
+      const labelSummaryAfter = getComputedStyle(document.querySelector('#docket-mobile-step-label summary'), '::after').content;
+      const labelSummaryPointerEvents = getComputedStyle(document.querySelector('#docket-mobile-step-label summary')).pointerEvents;
+      const lockedAccordionCount = document.querySelectorAll('.docket-mobile-step.is-locked-accordion:not([open])').length;
+      const visibleStep1PanelCount = [...document.querySelectorAll('#docket-mobile-step-ask')]
+        .filter((node) => getComputedStyle(node).display !== 'none').length;
+      const selectedWriteRequestCount = performance.getEntriesByType('resource')
+        .filter((entry) => /ready_to_label|selected_document|docket.*write/i.test(entry.name)).length;
       const visibleHeaderButtons = [...document.querySelectorAll('.docket-mobile-view-switch button')]
         .filter((button) => getComputedStyle(button).display !== 'none');
       return {
@@ -932,6 +989,12 @@ test.describe('website surface navigation', () => {
         railBottom: railRect.bottom,
         actionsTop: actionsRect.top,
         selectedCardDisplay,
+        labelButtonDisplay,
+        labelSummaryAfter,
+        labelSummaryPointerEvents,
+        lockedAccordionCount,
+        visibleStep1PanelCount,
+        selectedWriteRequestCount,
         askColor: askStyle.color,
         visibleHeaderButtonCount: visibleHeaderButtons.length,
       };
@@ -941,8 +1004,61 @@ test.describe('website surface navigation', () => {
     expect(metrics.railHeight).toBeLessThanOrEqual(150);
     expect(metrics.railBottom).toBeLessThanOrEqual(metrics.actionsTop);
     expect(metrics.selectedCardDisplay).toBe('none');
+    expect(metrics.labelButtonDisplay).toBe('none');
+    expect(metrics.labelSummaryAfter).toContain('Locked');
+    expect(metrics.labelSummaryPointerEvents).toBe('none');
+    expect(metrics.lockedAccordionCount).toBeGreaterThanOrEqual(3);
+    expect(metrics.visibleStep1PanelCount).toBe(1);
+    expect(metrics.selectedWriteRequestCount).toBe(0);
     expect(metrics.askColor).toBe('rgb(255, 255, 255)');
     expect(metrics.visibleHeaderButtonCount).toBe(1);
+
+    await page.evaluate(() => {
+      const documents = (((workspaceSession || {}).review || {}).documents || []);
+      const firstDocument = documents[0];
+      if (firstDocument) {
+        firstDocument.question_count = 1;
+        firstDocument.impact_summary = '';
+        firstDocument.ready_to_label_saved = false;
+        firstDocument.selected_document_write_count = 0;
+      }
+      renderDocketLane(workspaceSession || {});
+    });
+    await expect(page.locator('#docket-mobile-step-ask')).toHaveClass(/is-current/);
+    await expect(page.locator('#docket-mobile-step-ask')).toHaveAttribute('data-step-state', 'active');
+    await expect(page.locator('#docket-mobile-step-label')).toHaveAttribute('data-step-state', 'waiting');
+    await expect(page.locator('#docket-mobile-step-annotation')).toHaveAttribute('data-step-state', 'waiting');
+    await expect(page.locator('#docket-mobile-step1-current-state')).toContainText(/^chat_started$/i);
+    await expect(page.locator('#docket-mobile-step1-first-unmet')).toContainText(/^create the impact summary from chat$/i);
+    await expect(page.locator('#docket-mobile-next-unlock')).toContainText(/Review the chat impact summary to turn on Mark Ready To Label/i);
+    await expect(page.locator('#docket-mobile-check-question')).toContainText(/Question asked: Yes \(1\)/i);
+    await expect(page.locator('#docket-mobile-check-question')).toHaveAttribute('data-check-state', 'complete');
+    await expect(page.locator('#docket-mobile-check-impact')).toBeVisible();
+    await expect(page.locator('#docket-mobile-check-impact')).toContainText(/Create impact summary from chat/i);
+    await expect(page.locator('#docket-mobile-check-impact')).toHaveAttribute('data-check-state', 'missing');
+    await expect(page.locator('#docket-mobile-check-ready')).toBeHidden();
+    await expect(page.locator('#docket-mobile-ready-label-button')).toBeVisible();
+    await expect(page.locator('#docket-mobile-ready-label-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-ready-label-button')).toHaveAttribute('data-ready-visibility', 'guided');
+    await expect(page.locator('#docket-mobile-ready-label-button')).toContainText(/^Mark Ready To Label$/i);
+    await expect(page.locator('#docket-mobile-ready-disabled-reason')).toContainText(/Waiting for the chat impact summary before Mark Ready To Label can save/i);
+    await expect(page.locator('#docket-mobile-step1-write-count')).toContainText(/Document updates captured: 0/i);
+    await expect(page.locator('#docket-mobile-label-button')).toBeDisabled();
+    await expect(page.locator('#docket-mobile-annotation-button')).toBeDisabled();
+    const postChatMetrics = await docketPanel.evaluate((node) => {
+      const selectedWriteRequestCount = performance.getEntriesByType('resource')
+        .filter((entry) => /ready_to_label|selected_document|docket.*write/i.test(entry.name)).length;
+      const readyRect = document.querySelector('#docket-mobile-ready-label-button').getBoundingClientRect();
+      return {
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+        selectedWriteRequestCount,
+        readyButtonHeight: readyRect.height,
+      };
+    });
+    expect(postChatMetrics.scrollWidth).toBeLessThanOrEqual(postChatMetrics.clientWidth + 2);
+    expect(postChatMetrics.readyButtonHeight).toBeGreaterThanOrEqual(40);
+    expect(postChatMetrics.selectedWriteRequestCount).toBe(0);
 
     await page.locator('#docket-mobile-show-documents').click();
     await expect(docketPanel).toHaveClass(/mobile-docket-view-documents/);

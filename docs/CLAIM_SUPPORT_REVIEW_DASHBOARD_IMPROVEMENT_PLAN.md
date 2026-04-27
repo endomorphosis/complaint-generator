@@ -1051,6 +1051,31 @@ Mobile layperson stepper follow-up:
 - Playwright confirms no horizontal overflow and deterministic mobile selected-document gating.
 - The router still holds the persistent-write gate. The next prerequisite is to unify Step 1 wording around one expected output, add explicit `Complete Step X to unlock` prerequisite lines for disabled steps, align card status chips with stepper states, and then implement the first persistent selected-document write boundary behind the clarified gate.
 
+Mobile explicit gate review:
+
+- Screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-explicit-gates/screenshots/01-workspace-docket-mobile-explicit-gates.png`
+- Metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-explicit-gates/screenshot-metadata-explicit-gates.json`
+- Router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-explicit-gates/router-review-mobile-explicit-gates.json`
+- Implemented the explicit-gate pass: Step 1 is `Start Document Chat`, the active step explains chat opens before anything is saved, Step 1 exposes a `Not started -> Chat started -> Ready to label` progression, Steps 2-4 are disabled action rows with locked labels, and top chips use `Current` / `Locked` state vocabulary.
+- Playwright confirms the selected-document mobile state remains scoped, deterministic, and free of horizontal overflow.
+- The router still holds the persistent-write gate. Remaining prerequisite: define explicit completion criteria and persistence states before real selected-document writes, then compact locked rows so the mobile screen does not read like a wall of requirements.
+
+Mobile ready-to-label control review:
+
+- Screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-ready-label-control/screenshots/01-workspace-docket-mobile-ready-label-control.png`
+- Metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-ready-label-control/screenshot-metadata-ready-label-control.json`
+- Router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-ready-label-control/router-review-mobile-ready-label-control.json`
+- Implemented the visible first-write boundary preview: Step 1 completion criteria, disabled `Mark Ready To Label`, `Save status: not saved yet`, ordered `Current` / `Locked` chips, and locked Step 2-4 controls.
+- The router still holds the persistent-write gate. The remaining prerequisite is a checklist-driven Step 1 gate and write lifecycle chip before wiring the first MCP-backed selected-document mutation.
+
+Mobile actionable checklist review:
+
+- Screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-actionable-checklist/screenshots/01-workspace-docket-mobile-actionable-checklist.png`
+- Metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-actionable-checklist/screenshot-metadata-actionable-checklist.json`
+- Router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-actionable-checklist/router-review-mobile-actionable-checklist.json`
+- Added `Requirements: 0 of 2 complete`, actionable Step 1 checklist rows, and `Save: idle - no server write yet`.
+- The router still holds the persistent-write gate. The next prerequisite is a mobile-first Step 1 action panel and collapsed locked Step 2-4 accordions before the first MCP-backed selected-document write is wired.
+
 ## Workstream 1: Better questions
 
 Primary files:
@@ -1475,3 +1500,146 @@ This plan should be considered successful when:
 3. The review payload can trace each claim-element decision back to facts, documents, and authorities.
 4. The logic layer can distinguish missing support from contradictions and rule failures.
 5. `/document` consumes the same validated support state to improve drafting readiness and final complaint quality.
+
+## April 27 Mobile Docket Gate Update
+
+Focused selected-document mobile artifacts:
+
+- Initial focused screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-focused-step1/screenshots/01-workspace-docket-mobile-focused-step1.png`
+- Initial focused metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-focused-step1/screenshot-metadata-focused-step1.json`
+- Initial focused router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-focused-step1/router-review-mobile-focused-step1.json`
+- Lock-refinement screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-focused-step1/screenshots/02-workspace-docket-mobile-focused-step1-lock-refinement.png`
+- Lock-refinement metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-focused-step1/screenshot-metadata-focused-step1-lock-refinement.json`
+- Lock-refinement router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-focused-step1/router-review-mobile-focused-step1-lock-refinement.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Changes reviewed:
+
+- Step 1 now renders as the focused mobile action panel with one primary `Start Document Chat` CTA.
+- The selected-document scope is reinforced as `Chatting about: Termination timeline email. Questions will apply only to this document.`
+- `Mark Ready To Label` and the save-state chip live together in the Step 1 footer.
+- Steps 2-4 are compact locked rows with write controls hidden until eligible.
+- Locked row headers now say `Locked`, do not use the prior plus affordance, and have no pointer interaction while locked.
+
+Gate decision:
+
+- Playwright confirms no horizontal overflow and verifies the compact locked rows, hidden future write controls, focused Step 1 panel, and non-interactive locked headers.
+- The router still holds the persistent-write gate. The remaining blocker is the state contract for first write behavior: the UI needs to distinguish ephemeral document-chat progress from the first server-backed selected-document write.
+- Before adding the first selected-document write, implement one authoritative Step 1 checklist with live pass/fail state, disabled-button reason text tied to the first unmet item, and explicit persistence mode such as `Local draft only until Mark Ready` versus `Ready confirmation saved`.
+- Add Playwright network assertions that no selected-document write mutation fires before Step 1 passes.
+
+Follow-up state-contract review:
+
+- Initial state-contract screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-state-contract/screenshots/01-workspace-docket-mobile-step1-state-contract.png`
+- Visible-contract screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-state-contract/screenshots/02-workspace-docket-mobile-step1-state-contract-visible.png`
+- Reduced-density screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-state-contract/screenshots/03-workspace-docket-mobile-step1-state-contract-reduced.png`
+- Reduced-density metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-state-contract/screenshot-metadata-step1-state-contract-reduced.json`
+- Reduced-density router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-state-contract/router-review-mobile-step1-state-contract-reduced.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+State-contract changes:
+
+- Added the derived mobile Step 1 state model with `current_state`, `first_unmet`, `persistence_mode`, `selected_document_write_count`, and `canMarkReady`.
+- Added a visible state-contract block and a three-item Step 1 checklist.
+- Changed the primary CTA to `Open Chat And Ask First Question`.
+- Added Playwright assertions that the pre-gate selected-document write count is zero and no selected-document write request fires before Step 1 passes.
+
+Current gate:
+
+- The state contract is now technically explicit and tested.
+- The router still holds the first-write implementation gate because the mobile screen is too dense for a layperson to scan confidently.
+- Next prerequisite is a visual simplification pass: keep one compact progress sentence, one readable state/checklist module, one primary CTA, and demote top chips plus locked future steps until Step 1 is complete.
+
+Step 1 simplification follow-up:
+
+- Initial simplified screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/screenshots/01-workspace-docket-mobile-step1-simplified.png`
+- Copy-final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/screenshots/02-workspace-docket-mobile-step1-simplified-copy-final.png`
+- Hierarchy-final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/screenshots/03-workspace-docket-mobile-step1-simplified-hierarchy-final.png`
+- Hierarchy-final metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/screenshot-metadata-step1-simplified-hierarchy-final.json`
+- Hierarchy-final router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/router-review-mobile-step1-simplified-hierarchy-final.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Changes reviewed:
+
+- Hid top step chips and future locked rows while Step 1 is current.
+- Shortened the primary CTA to `Open Chat`.
+- Kept one visible unlock sentence and one compact question status token.
+- Renamed the write counter to `Document updates captured: 0`.
+- Normalized selected-document metadata and attached the disabled ready reason through `aria-describedby`.
+
+Current gate:
+
+- Playwright confirms one visible Step 1 panel, no horizontal overflow, no visible future locked rows, no visible blocked checklist rows, and zero selected-document write requests before Step 1 passes.
+- The router still holds the implementation gate. Remaining blockers are now presentation/state-mapping issues only: the disabled ready action should feel more guided, and Step 1 should use flatter styling with an obvious enabled-after-chat progression state.
+- Do not add the first persistent selected-document write until that visual progression state is clear; keep `ComplaintMcpClient` event/gating behavior unchanged.
+
+Guided-ready follow-up:
+
+- Guided-ready screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/screenshots/04-workspace-docket-mobile-step1-guided-ready-final.png`
+- Chat-only pre-gate screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/screenshots/05-workspace-docket-mobile-step1-chat-only-final.png`
+- Chat-only pre-gate metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/screenshot-metadata-step1-chat-only-final.json`
+- Chat-only pre-gate router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-simplified/router-review-mobile-step1-chat-only-final.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Current gate:
+
+- Pre-gate mobile Docket now shows only one visible action, `Open Chat`; the future ready action is hidden until it can become actionable.
+- Playwright confirms zero selected-document write requests before Step 1 passes.
+- The router still holds the first-write gate. It considers the pre-gate state functionally coherent but too status-heavy.
+- Next prerequisite is to review the post-chat visual state: after one document-specific question is recorded, the screen should make `Mark Ready To Label` appear as the guided next action while still preserving the MCP write gate.
+
+Post-chat visual-state follow-up:
+
+- Post-chat screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-post-chat/screenshots/01-workspace-docket-mobile-step1-post-chat.png`
+- Post-chat metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-post-chat/screenshot-metadata-step1-post-chat.json`
+- Post-chat router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-step1-post-chat/router-review-mobile-step1-post-chat.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Current gate:
+
+- The post-chat UI now keeps Step 1 current after one question, shows `Mark Ready To Label` as a guided disabled next action, and keeps selected-document write count/request count at zero.
+- The router still holds the first-write gate on layperson comprehension grounds. Its concrete next prerequisite is to make `Generate Impact Summary` the primary post-chat action, demote `Open Chat`, and collapse the current Done/Missing/Waiting/Persistence blocks into one three-step progress tracker.
+- Do not wire the first selected-document mutation until the post-chat state has one obvious required action and the ready-to-label control only becomes prominent once the impact summary exists.
+
+Comprehensive pre-implementation bundle:
+
+- Mobile pre-chat screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-plan-before-implementation/screenshots/01-mobile-pre-chat-current.png`
+- Mobile post-chat screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-plan-before-implementation/screenshots/02-mobile-post-chat-current.png`
+- Desktop Docket screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-plan-before-implementation/screenshots/03-desktop-docket-current.png`
+- Metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-plan-before-implementation/screenshot-metadata-plan-before-implementation.json`
+- Router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-plan-before-implementation/router-review-plan-before-implementation.json`
+- Strategy: `page_reviews` across three `multimodal_router` page reviews
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Current gate:
+
+- The router keeps the selected-document write gate closed. It specifically calls out confusing readiness hierarchy, too many equal-weight status boxes, and unclear distinction between read-only review/chat actions and draft-affecting write actions.
+- The implementation plan should now start with a shared Docket gate presenter: one state object, one progress component, one scope/safety pill, and one primary next action per state.
+- The post-chat state should promote `Generate Impact Summary` as the primary action, demote `Open Chat`, and keep `Mark Ready To Label` disabled or visually locked until the impact summary exists.
+- Desktop should mirror the same state vocabulary and group actions into `Read-only review` versus `Draft-affecting` controls so lay users do not treat `Use In Draft Anyway` as a safe equivalent to review.
+- Verification should include Playwright checks that no selected-document write/resource request fires before the ready gate and that the post-chat primary CTA changes without emitting a write.
+
+Broader workflow pre-implementation bundle:
+
+- Mobile Evidence screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-broader-workflow-before-implementation/screenshots/01-mobile-evidence-after-document.png`
+- Mobile Docket post-chat screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-broader-workflow-before-implementation/screenshots/02-mobile-docket-post-chat-gate.png`
+- Mobile document-chat context screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-broader-workflow-before-implementation/screenshots/03-mobile-document-chat-context.png`
+- Desktop Review proof-map screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-broader-workflow-before-implementation/screenshots/04-desktop-review-proof-map.png`
+- Desktop Draft readiness/export screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-broader-workflow-before-implementation/screenshots/05-desktop-draft-readiness-and-export.png`
+- Metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-broader-workflow-before-implementation/screenshot-metadata-broader-workflow-before-implementation.json`
+- Router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-broader-workflow-before-implementation/router-review-broader-workflow-before-implementation.json`
+- Strategy: `page_reviews`; Evidence, Docket, Chat, and Draft were selected as highest-signal pages.
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Current gate:
+
+- The broader workflow review keeps the selected-document write gate closed and adds prerequisites outside the Docket card itself.
+- Evidence intake must be mobile-readable before downstream label/annotation writes are introduced: one column, no duplicate `EVIDENCE KIND` controls, required claim-element mapping, and a clear save/import hierarchy.
+- Document-scoped Chat must put selected filing context above generic navigation and diagnostics. For answer-save and annotation behavior to be safe, the first viewport must say which filing is attached, what question is being asked, and whether the answer will be saved or only drafted locally.
+- Draft readiness/export needs a single canonical gate verdict and clearer blocked/enabled controls, otherwise Docket writes may appear to unlock filing actions prematurely.
+- The implementation sequence should therefore be: mobile Evidence cleanup, document-scoped Chat first-viewport cleanup, Docket gate presenter, then selected-document persistence.
