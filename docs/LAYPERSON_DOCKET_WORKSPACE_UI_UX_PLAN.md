@@ -1001,3 +1001,137 @@ Additional acceptance checks before implementation:
 - Document-scoped Chat first viewport shows `Selected filing attached` with the document title/source and does not begin with a generic surface index.
 - The Docket post-chat state shows one consolidated gate status and one summary-related primary CTA.
 - Draft readiness/export shows one canonical gate verdict and does not render enabled-looking controls for blocked/risky actions.
+
+Standalone surface pre-implementation review:
+
+- Mobile Review before-load screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/screenshots/01-mobile-review-before-load.png`
+- Mobile Review loaded screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/screenshots/02-mobile-review-loaded.png`
+- Mobile Builder empty screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/screenshots/03-mobile-document-builder-empty.png`
+- Mobile Builder generated screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/screenshots/04-mobile-document-builder-generated.png`
+- Desktop Builder generated screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/screenshots/05-desktop-document-builder-generated.png`
+- Desktop Optimization Trace screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/screenshots/06-desktop-optimization-trace.png`
+- Desktop Editor Workshop screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/screenshots/07-desktop-editor-workshop.png`
+- Metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/screenshot-metadata-standalone-surfaces-before-implementation.json`
+- Router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-standalone-surfaces-before-implementation/router-review-standalone-surfaces-before-implementation.json`
+- Strategy: `page_reviews`; the router selected Builder empty/generated, Desktop Builder, and Optimization Trace as the highest-signal pages.
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Plan refinements from standalone surfaces:
+
+- Add an explicit `Guided` versus `Advanced` presentation mode before selected-document persistence. Layperson mode should expose Intake, Evidence, Review, Docket, Chat, and Draft; Trace, SDK, Editor Workshop, raw router settings, and optimization internals should live behind `Advanced tools`.
+- Formal Complaint Builder should not be the default place where lay users manage docket-document facts. The plan should keep Docket document analysis/annotation as the source-support workflow and make Builder a later Draft step with one clear `Generate Draft` path.
+- Mobile Builder needs a stepper before it can be a layperson-safe continuation: `Case facts -> Court details -> Review support -> Generate draft`. Hide output actions until generation succeeds.
+- Advanced optimization fields such as router URL, timeout, JSON LLM config, IPFS trace, request IDs, and trace internals must be collapsed by default and role-gated.
+- Builder empty states must be actionable: when no draft exists, show prerequisites and one primary `Generate Draft` CTA; after generation, promote the pleading preview and source/exhibit verification.
+- Optimization Trace should be operator-only by default. If linked from layperson flows, it should open as a plain-language readiness summary with a single next action, not raw trace telemetry.
+- The Docket implementation sequence remains gated behind the broader shell cleanup: Guided/Advanced split, mobile Evidence cleanup, document-scoped Chat first viewport, Docket gate presenter, then selected-document persistence.
+
+Standalone acceptance checks before implementation:
+
+- In layperson mode, mobile/global navigation hides Trace, SDK, Editor Workshop, Dashboards, router settings, and raw diagnostics behind `Advanced tools`.
+- Mobile Builder idle state shows one primary CTA and does not show generated-output controls before a draft exists.
+- Mobile Builder generated state shows the pleading preview and supporting exhibits above advanced settings.
+- Optimization Trace is not presented as a normal next step for lay users; any link to it is labeled as advanced/operator diagnostics.
+- Existing MCP/ComplaintMcpClient payloads remain unchanged; the mode split is presentation/routing only.
+
+## Consolidated Implementation Readiness Roadmap
+
+Date: 2026-04-27
+
+The screenshot/router reviews now converge on one decision: do not start selected-document persistence yet. The next work should be a UI/state-readiness sequence that makes layperson navigation, evidence capture, document-scoped chat, and Docket readiness understandable before any new label, annotation, answer-save, or ready-confirmation mutation is wired.
+
+Implementation order:
+
+1. Guided versus Advanced shell split.
+   - Default layperson mode exposes only Intake, Evidence, Review, Docket, Chat, and Draft.
+   - Advanced tools contains Trace, SDK, Editor Workshop, Dashboards, raw router settings, raw JSON, model config, IPFS trace, and optimization telemetry.
+   - Existing MCP/ComplaintMcpClient routes stay available; only default presentation and navigation weight change.
+
+2. Mobile Evidence cleanup.
+   - Convert Evidence to a single-column mobile flow with one primary save action.
+   - Remove or rename duplicate `EVIDENCE KIND` controls.
+   - Put claim-element mapping directly next to evidence save requirements.
+   - Block save locally until required metadata and claim-element mapping are present.
+
+3. Document-scoped Chat first viewport.
+   - When opened from Docket, the first visible region must show selected filing title, source/type, prepared question, scope badge, and `Return to workspace`.
+   - Generic navigation and diagnostics move below the selected-document chat context or behind advanced disclosure.
+   - Asking and saving remain separate concepts: chat may draft an answer, but no annotation/label/write happens without an explicit later action.
+
+4. Shared Docket gate presenter.
+   - One derived UI state drives mobile and desktop: `questionAsked`, `impactSummaryReady`, `readyEligible`, `readySaved`, `writesCaptured`, and `persistenceMode`.
+   - Pre-chat: primary CTA is `Open Chat`.
+   - Post-chat without summary: primary CTA is `Generate Impact Summary`, with `Open Chat` demoted.
+   - Summary ready: `Mark Ready To Label` becomes the explicit confirmation boundary.
+   - Until that point, selected-document write count and resource requests must remain zero.
+
+5. Draft/readiness affordance cleanup.
+   - Draft and export surfaces show one canonical verdict banner with blockers and one primary next action.
+   - Draft-affecting actions are visually distinct from read-only review/chat actions.
+   - Builder is a later Draft step, not the default place to manage docket-document facts.
+
+6. First selected-document persistence slice.
+   - Only after the above pass should the app wire the first write: ready confirmation for the selected document.
+   - Labels, annotations, answer-save, and deadline-save remain later slices behind the same state/persistence pattern.
+
+Release gate for starting selected-document persistence:
+
+- Mobile screenshots pass for Evidence, document-scoped Chat, Docket pre-chat, Docket post-chat, and Draft readiness.
+- Router review no longer reports high-severity layperson comprehension blockers on the selected-document gate.
+- Playwright confirms no selected-document write/resource request before `readyEligible=true`.
+- Playwright confirms post-chat primary CTA is `Generate Impact Summary` and `Open Chat` is secondary.
+- Playwright confirms advanced/operator surfaces are hidden behind `Advanced tools` in layperson mode.
+
+First prerequisite implementation note:
+
+- Started the Guided versus Advanced shell split for Builder, Review, and Chat.
+- Primary navigation on these surfaces now keeps the guided path visible: Landing/Secure Intake, Workspace where available, Chat, Review, and Builder.
+- Profile, Results, Trace, Editor Workshop, SDK, and Dashboards remain available through `Advanced tools` disclosures instead of appearing as equal-weight layperson next steps.
+- Existing href/session wiring remains intact, including trace and builder/review handoffs; this is a presentation hierarchy change only.
+- Selected-document persistence remains gated.
+
+Second prerequisite implementation note:
+
+- Completed the first mobile Evidence cleanup pass.
+- The normal Evidence composer now uses clearer layperson labels: `Evidence Type` and `Claim Element This Supports`.
+- Gmail and local import drawers now use distinct labels: `Imported Emails Support`, `Imported Items Support`, and `Imported Item Type`, avoiding the duplicate `Evidence Kind` presentation called out in the broader review.
+- `Save Evidence Item` now sits inside the primary composer before optional Gmail/local import tools, with helper copy that tells the user to map the item to one claim element before using imports.
+- Mobile Evidence CSS now explicitly collapses Evidence banners, decision cards, metrics, guidance, and form fields into a single-column flow.
+- Screenshot artifact: `artifacts/mcp-dashboard-ui-review/evidence-mobile-cleanup-20260427/mobile-evidence-cleanup.png`
+- Router review artifact: `artifacts/mcp-dashboard-ui-review/evidence-mobile-cleanup-20260427/router-review-evidence-mobile-cleanup.json`
+- Selected-document persistence remains gated. The next prerequisite is document-scoped Chat first viewport cleanup.
+
+Third prerequisite implementation note:
+
+- Completed the document-scoped Chat first-viewport cleanup.
+- Chat now normalizes Docket handoff payloads that provide root-level `title`, `source`, `document_type`, and `docket_item_id`, so selected filings are named reliably even without a nested `filing` object.
+- When Chat is opened with a Docket/document `chat_context`, the generic shared app shell and primary nav are suppressed, and the first content card is `Selected filing attached`.
+- The selected filing card shows title, source/type, router scope, prepared question, `Ask About This Filing`, `Return to workspace`, and a persistence warning that no label, annotation, deadline, or answer is saved until the user confirms it back in Docket.
+- Generic intake Chat handoffs still keep their normal hero and shared shell behavior.
+- Screenshot artifact: `artifacts/mcp-dashboard-ui-review/document-chat-first-viewport-20260427/mobile-document-chat-first-viewport.png`
+- Router review artifact: `artifacts/mcp-dashboard-ui-review/document-chat-first-viewport-20260427/router-review-document-chat-first-viewport.json`
+- Selected-document persistence remains gated. The next prerequisite is the shared Docket gate presenter.
+
+Fourth prerequisite implementation note:
+
+- Completed the first shared Docket gate presenter pass.
+- `buildSharedDocketGatePresenter` now derives the selected-document gate from one Step 1 state object, and desktop/mobile views consume the same current state, first unmet item, ready eligibility, ready-saved flag, persistence mode, and selected-document write count.
+- Desktop Docket now shows `Selected document gate` with the same phase sequence used on mobile: pre-chat `Open Chat`, post-chat `Generate Impact Summary` primary with `Open Chat` secondary, impact-ready `Mark Ready To Label`, and saved-ready confirmation.
+- `Generate Impact Summary` currently drafts the impact summary locally and explicitly reports that no selected-document write has been sent.
+- `Mark Ready To Label` remains a visible confirmation boundary, but persistence is intentionally gated; clicking it reports that no selected-document write has been sent.
+- Mobile Docket still shows one current Step 1 panel and keeps label, annotation, and deadline controls locked until the gate state allows later slices.
+- Screenshot artifacts: `artifacts/mcp-dashboard-ui-review/docket-gate-presenter-20260427/mobile-docket-gate-post-chat.png` and `artifacts/mcp-dashboard-ui-review/docket-gate-presenter-20260427/desktop-docket-gate-post-chat.png`
+- Router review artifact: `artifacts/mcp-dashboard-ui-review/docket-gate-presenter-20260427/router-review-docket-gate-presenter.json`
+- Selected-document persistence remains gated. The next prerequisite is Draft/readiness affordance cleanup before the first selected-document ready-confirmation write.
+
+Fifth prerequisite implementation note:
+
+- Completed the Draft/readiness affordance cleanup.
+- The upper Draft gate is now a secondary summary (`data-gate-role="secondary-summary"`) instead of a competing authoritative banner.
+- The lower Draft rail is now the primary `Canonical filing verdict` (`data-canonical-gate="primary"`) and owns the visible download state.
+- The download group now has an explicit `data-download-state` boundary, a plain-language blocker note, and `aria-disabled` state on complaint file download buttons.
+- Desktop and mobile screenshots both confirmed the intended blocked state: canonical gate `primary`, download state `blocked`, and blocker text explaining that support, party/court specificity, and the release gate still need work.
+- Screenshot artifacts: `artifacts/mcp-dashboard-ui-review/draft-readiness-cleanup-20260427/desktop-draft-readiness.png` and `artifacts/mcp-dashboard-ui-review/draft-readiness-cleanup-20260427/mobile-draft-readiness.png`
+- Router review artifact: `artifacts/mcp-dashboard-ui-review/draft-readiness-cleanup-20260427/draft-readiness-router-review.json`
+- Router caveat: the `complaint.review_ui` run attempted `llm_router / multimodal_router`, but this local route fell back with `Unknown LLM provider: llm_router`. Treat router-route repair as a prerequisite to trusting automated screenshot review as a release gate.
+- Selected-document persistence remains gated. The next implementation slice should either repair the router alias/config first or proceed to the first selected-document ready-confirmation write with the router caveat explicitly tracked.

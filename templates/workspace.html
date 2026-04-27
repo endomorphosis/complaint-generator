@@ -869,6 +869,33 @@
             background: rgba(255, 255, 255, 0.72);
         }
 
+        .evidence-composer-shell {
+            border-color: rgba(141, 61, 23, 0.28);
+            background: rgba(255, 250, 245, 0.92);
+        }
+
+        .evidence-save-block {
+            display: grid;
+            gap: 10px;
+            margin-top: 16px;
+            padding-top: 14px;
+            border-top: 1px solid rgba(141, 61, 23, 0.18);
+        }
+
+        .evidence-primary-action-row {
+            align-items: center;
+        }
+
+        .evidence-import-shell {
+            border-style: dashed;
+            background: rgba(255, 255, 255, 0.62);
+        }
+
+        .evidence-import-shell .section-intro strong::before {
+            content: "Optional: ";
+            color: var(--accent-strong);
+        }
+
         .review-board {
             display: grid;
             grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
@@ -965,6 +992,20 @@
             background: rgba(255, 255, 255, 0.82);
         }
 
+        .draft-gate-summary-secondary {
+            box-shadow: none;
+            background: rgba(255, 255, 255, 0.78);
+        }
+
+        .draft-gate-summary-secondary h3 {
+            margin-bottom: 6px;
+        }
+
+        .draft-gate-summary-secondary .list {
+            max-height: 140px;
+            overflow: auto;
+        }
+
         .draft-action-groups {
             display: grid;
             gap: 12px;
@@ -993,6 +1034,34 @@
         .draft-action-group .button-row,
         .draft-action-card .button-row {
             margin-top: 12px;
+        }
+
+        #draft-download-boundary[data-download-state="blocked"] {
+            border-color: rgba(154, 52, 18, 0.34);
+            background: rgba(255, 249, 243, 0.92);
+        }
+
+        #draft-download-boundary[data-download-state="ready"] {
+            border-color: rgba(22, 101, 52, 0.28);
+            background: rgba(240, 253, 244, 0.72);
+        }
+
+        #draft-download-blocker-note[data-download-state="blocked"] {
+            color: var(--accent-strong);
+            font-weight: 700;
+        }
+
+        #draft-release-gate-card[data-canonical-gate="primary"] {
+            border-color: rgba(154, 52, 18, 0.28);
+        }
+
+        #draft-release-gate-card[data-download-state="blocked"] {
+            box-shadow: inset 4px 0 0 rgba(154, 52, 18, 0.52), 0 16px 34px rgba(154, 52, 18, 0.08);
+        }
+
+        #draft-release-gate-card[data-download-state="ready"] {
+            border-color: rgba(22, 101, 52, 0.28);
+            box-shadow: inset 4px 0 0 rgba(22, 101, 52, 0.42), 0 16px 34px rgba(22, 101, 52, 0.08);
         }
 
         .decision-strip {
@@ -1550,6 +1619,85 @@
         .docket-action-bar.is-empty {
             position: static;
             box-shadow: none;
+        }
+
+        .docket-gate-presenter {
+            display: grid;
+            gap: 12px;
+            margin: 14px 0;
+            padding: 16px;
+            border-radius: 18px;
+            border: 2px solid rgba(141, 61, 23, 0.18);
+            background: rgba(255, 248, 241, 0.9);
+        }
+
+        .docket-gate-presenter[hidden] {
+            display: none;
+        }
+
+        .docket-gate-presenter strong,
+        .docket-gate-presenter span {
+            display: block;
+        }
+
+        .docket-gate-presenter-title {
+            color: var(--accent-strong);
+            font-size: 0.78rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .docket-gate-presenter-heading {
+            color: var(--ink);
+            font-size: 1.08rem;
+            font-weight: 900;
+            line-height: 1.25;
+        }
+
+        .docket-gate-presenter-detail,
+        .docket-gate-presenter-note {
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .docket-gate-presenter-grid {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .docket-gate-presenter-item {
+            padding: 10px 12px;
+            border-radius: 14px;
+            border: 1px solid rgba(141, 61, 23, 0.14);
+            background: rgba(255, 255, 255, 0.74);
+        }
+
+        .docket-gate-presenter-item b {
+            display: block;
+            color: var(--accent-strong);
+            font-size: 0.72rem;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .docket-gate-presenter-item span {
+            margin-top: 4px;
+            color: var(--ink);
+            font-weight: 760;
+            overflow-wrap: anywhere;
+        }
+
+        .docket-gate-presenter-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .docket-gate-presenter-actions [hidden] {
+            display: none;
         }
 
         .docket-advanced {
@@ -2424,6 +2572,41 @@
                 display: none;
             }
 
+            [data-tab-panel="evidence"] .stage-banner,
+            [data-tab-panel="evidence"] .priority-rail,
+            [data-tab-panel="evidence"] .decision-strip,
+            [data-tab-panel="evidence"] .panel-split,
+            [data-tab-panel="evidence"] .workbench-metrics,
+            [data-tab-panel="evidence"] .guidance-grid,
+            [data-tab-panel="evidence"] .field-grid,
+            [data-tab-panel="evidence"] .field-row {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            [data-tab-panel="evidence"] .priority-sidecard,
+            [data-tab-panel="evidence"] .decision-card,
+            [data-tab-panel="evidence"] .workbench-card,
+            [data-tab-panel="evidence"] .evidence-form-shell {
+                border-radius: 12px;
+                padding: 10px;
+            }
+
+            [data-tab-panel="evidence"] .evidence-save-block {
+                margin-top: 12px;
+                padding-top: 12px;
+            }
+
+            [data-tab-panel="evidence"] .evidence-import-shell {
+                margin-top: 12px !important;
+            }
+
+            [data-tab-panel="evidence"] textarea,
+            [data-tab-panel="evidence"] input,
+            [data-tab-panel="evidence"] select {
+                max-width: 100%;
+            }
+
             .docket-mobile-action-note {
                 display: block;
                 margin: 0 0 14px;
@@ -3152,18 +3335,18 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="evidence-form-shell">
+                        <div class="evidence-form-shell evidence-composer-shell">
                             <div class="field-grid">
                                 <div class="field-row">
                                     <div>
-                                        <label for="evidence-kind">Evidence Kind</label>
+                                        <label for="evidence-kind">Evidence Type</label>
                                         <select id="evidence-kind">
                                             <option value="testimony">Testimony</option>
                                             <option value="document">Document</option>
                                         </select>
                                     </div>
                                     <div>
-                                        <label for="evidence-claim-element">Claim Element</label>
+                                        <label for="evidence-claim-element">Claim Element This Supports</label>
                                         <select id="evidence-claim-element">
                                             <option value="protected_activity">Protected activity</option>
                                             <option value="employer_knowledge">Employer knowledge</option>
@@ -3195,8 +3378,14 @@
                                     <div class="helper-text">Attach the supporting file when you have it so the saved evidence record carries the uploaded file name forward.</div>
                                 </div>
                             </div>
+                            <div class="evidence-save-block" aria-label="Save evidence item">
+                                <div class="button-row evidence-primary-action-row">
+                                    <button class="primary" id="save-evidence-button" type="button">Save Evidence Item</button>
+                                </div>
+                                <div class="soft-note" id="evidence-soft-note">Map this item to one claim element, summarize why it matters, then save it before using the optional import tools below.</div>
+                            </div>
                         </div>
-                        <div class="evidence-form-shell" style="margin-top: 18px;">
+                        <div class="evidence-form-shell evidence-import-shell" style="margin-top: 18px;">
                             <div class="section-intro">
                                 <strong>Import Gmail evidence</strong>
                                 <span>Pull matching emails and their attachments straight into the evidence workspace. Use a Gmail app password for quick imports, or switch to Gmail OAuth plus UID checkpoints for broader, resumable mailbox collection.</span>
@@ -3209,7 +3398,7 @@
                                         <div class="helper-text">One address per line. Messages are imported if any address appears in From, To, or Cc.</div>
                                     </div>
                                     <div>
-                                        <label for="gmail-import-claim-element">Claim Element</label>
+                                        <label for="gmail-import-claim-element">Imported Emails Support</label>
                                         <select id="gmail-import-claim-element">
                                             <option value="protected_activity">Protected activity</option>
                                             <option value="employer_knowledge">Employer knowledge</option>
@@ -3416,7 +3605,7 @@
                                 <div class="status draft-preview-shell"><pre id="email-duckdb-search-preview">No DuckDB email search has been run in this browser session yet.</pre></div>
                             </div>
                         </div>
-                        <div class="evidence-form-shell" style="margin-top: 18px;">
+                        <div class="evidence-form-shell evidence-import-shell" style="margin-top: 18px;">
                             <div class="section-intro">
                                 <strong>Import local evidence artifacts</strong>
                                 <span>Bring local PDFs, screenshots, text exports, mailbox files, or whole directories into the complaint evidence workspace by path.</span>
@@ -3429,7 +3618,7 @@
                                         <div class="helper-text">One local path per line. Directories are scanned recursively for files.</div>
                                     </div>
                                     <div>
-                                        <label for="local-evidence-claim-element">Claim Element</label>
+                                        <label for="local-evidence-claim-element">Imported Items Support</label>
                                         <select id="local-evidence-claim-element">
                                             <option value="auto">Auto-suggest from content</option>
                                             <option value="protected_activity">Protected activity</option>
@@ -3442,7 +3631,7 @@
                                 </div>
                                 <div class="field-row">
                                     <div>
-                                        <label for="local-evidence-kind">Evidence Kind</label>
+                                        <label for="local-evidence-kind">Imported Item Type</label>
                                         <select id="local-evidence-kind">
                                             <option value="document" selected>Document</option>
                                             <option value="testimony">Testimony</option>
@@ -3460,10 +3649,6 @@
                             </div>
                         </div>
                     </div>
-                    <div class="button-row">
-                        <button class="primary" id="save-evidence-button" type="button">Save Evidence Item</button>
-                    </div>
-                    <div class="soft-note" id="evidence-soft-note">A short, specific summary is usually more useful than pasting an entire record without context.</div>
                     <div class="list" id="evidence-list"></div>
                 </section>
 
@@ -3665,6 +3850,32 @@
                                 <div class="chip-row" id="docket-chat-scope-chips">
                                     <span class="chip warn">chat scope: no document selected</span>
                                 </div>
+                                <section class="docket-gate-presenter" id="docket-gate-presenter" data-current-state="no_document_selected" data-ready-eligible="false" data-ready-saved="false" data-persistence-mode="none" aria-label="Selected document readiness gate">
+                                    <span class="docket-gate-presenter-title">Selected document gate</span>
+                                    <strong class="docket-gate-presenter-heading" id="docket-gate-heading">Select one document to begin.</strong>
+                                    <span class="docket-gate-presenter-detail" id="docket-gate-detail">Ask about the selected document before labels, annotations, deadlines, or draft use become available.</span>
+                                    <div class="docket-gate-presenter-grid" id="docket-gate-state-grid">
+                                        <div class="docket-gate-presenter-item">
+                                            <b>Current</b>
+                                            <span id="docket-gate-current-state">no_document_selected</span>
+                                        </div>
+                                        <div class="docket-gate-presenter-item">
+                                            <b>Next</b>
+                                            <span id="docket-gate-primary-next">select one document first</span>
+                                        </div>
+                                        <div class="docket-gate-presenter-item">
+                                            <b>Writes</b>
+                                            <span id="docket-gate-write-count">Document updates captured: 0</span>
+                                        </div>
+                                    </div>
+                                    <span class="docket-gate-presenter-note" id="docket-gate-note">Persistence mode: no selected document.</span>
+                                    <div class="docket-gate-presenter-actions" id="docket-gate-actions">
+                                        <a class="surface-link" id="docket-gate-primary-chat-link" href="/chat">Open Chat</a>
+                                        <button class="primary" id="docket-gate-primary-action" type="button" hidden>Generate Impact Summary</button>
+                                        <button class="secondary" id="docket-gate-ready-action" type="button" hidden disabled>Mark Ready To Label</button>
+                                        <a class="surface-link" id="docket-gate-secondary-chat-link" href="/chat" hidden>Open Chat</a>
+                                    </div>
+                                </section>
                                 <div class="docket-action-bar">
                                     <a class="surface-link" id="docket-ask-chat-link" href="/chat">Ask About Document</a>
                                     <button class="secondary" id="docket-add-label-button" type="button">Label Document</button>
@@ -3799,8 +4010,9 @@
                         <strong>What to do here</strong>
                         <span>Generate a first draft once the timeline, protected activity, adverse action, and harm feel stable. Then refine clarity, tone, and requested relief before treating it as final.</span>
                     </div>
-                    <div class="tool-card canonical-release-gate" id="draft-canonical-release-gate" style="margin-bottom: 14px;">
-                        <h3>Draft gate banner</h3>
+                    <div class="tool-card canonical-release-gate draft-gate-summary-secondary" id="draft-canonical-release-gate" style="margin-bottom: 14px;" data-gate-role="secondary-summary">
+                        <h3>Draft gate summary</h3>
+                        <p class="muted">Same canonical verdict; the filing decision rail below is the authoritative download boundary.</p>
                         <div class="chip-row">
                             <span class="chip warn" id="draft-canonical-release-gate-verdict">verdict: BLOCKED</span>
                             <span class="chip" id="draft-canonical-corroboration-chip">corroboration: loading</span>
@@ -4008,22 +4220,22 @@
                                         <button class="secondary" id="export-packet-diagnostic-button" type="button" data-export-mode="diagnostic">Export Diagnostic Packet</button>
                                     </div>
                                 </div>
-                                <div class="draft-action-group">
+                                <div class="draft-action-group" id="draft-download-boundary" data-download-state="blocked">
                                     <strong>3. Download when cleared</strong>
-                                    <span>Downloads stay available here, but they remain subordinate to the visible release-gate and record-strength checks above.</span>
-                                    <div class="soft-note" id="draft-download-blocker-note">Why blocked + exact fix will appear here when download controls are disabled.</div>
+                                    <span>Downloads stay subordinate to the canonical filing verdict and only become active when this boundary says cleared.</span>
+                                    <div class="soft-note" id="draft-download-blocker-note" data-download-state="blocked">Download is blocked until release-gate and record-strength checks are cleared.</div>
                                     <div class="button-row">
-                                        <button class="secondary" id="download-packet-markdown-button" type="button" data-output-format="markdown" disabled>Download Markdown</button>
-                                        <button class="secondary" id="download-packet-docx-button" type="button" data-output-format="docx" disabled>Download DOCX</button>
-                                        <button class="secondary" id="download-packet-pdf-button" type="button" data-output-format="pdf" disabled>Download PDF</button>
+                                        <button class="secondary" id="download-packet-markdown-button" type="button" data-output-format="markdown" aria-disabled="true" disabled>Download Markdown</button>
+                                        <button class="secondary" id="download-packet-docx-button" type="button" data-output-format="docx" aria-disabled="true" disabled>Download DOCX</button>
+                                        <button class="secondary" id="download-packet-pdf-button" type="button" data-output-format="pdf" aria-disabled="true" disabled>Download PDF</button>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         <div class="draft-action-stack">
-                            <div class="draft-action-card release-gate-callout" id="draft-release-gate-card">
-                                <strong>Canonical verdict rail</strong>
-                                <span>This rail mirrors the workspace canonical gate so Review, Draft, and Export stay on one shared verdict and one shared blocker list.</span>
+                            <div class="draft-action-card release-gate-callout" id="draft-release-gate-card" data-canonical-gate="primary" data-download-state="blocked" data-primary-next-action="add_corroboration">
+                                <strong>Canonical filing verdict</strong>
+                                <span>This is the decision point for generation, packet review, and download. Downloads stay subordinate until this card says cleared.</span>
                                 <div class="chip-row" id="draft-release-gate-chip-row">
                                     <span class="chip warn" id="draft-release-gate-chip">verdict: BLOCKED</span>
                                     <span class="chip warn" id="draft-can-review-chip">Can Review</span>
@@ -7087,6 +7299,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const confidenceUnsupportedNode = document.getElementById('draft-confidence-unsupported');
             const releaseGateSummaryNode = document.getElementById('draft-release-gate-summary');
             const releaseGateNextStepNode = document.getElementById('draft-release-gate-next-step');
+            const draftSummaryGateNode = document.getElementById('draft-canonical-release-gate');
+            const releaseGateCardNode = document.getElementById('draft-release-gate-card');
+            const draftDownloadBoundaryNode = document.getElementById('draft-download-boundary');
+            const draftDownloadBlockerNoteNode = document.getElementById('draft-download-blocker-note');
+            const draftReleasePrimaryCtaNode = document.getElementById('draft-release-primary-cta');
             const workflowState = deriveWorkflowState(sessionPayload || {});
             const contractLines = [
                 `Claim type: ${draftClaimTypeLabel(selectedClaimType)}`,
@@ -7130,6 +7347,34 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             });
             renderCanonicalGateBanner('review', canonicalReadiness);
             renderCanonicalGateBanner('draft', canonicalReadiness);
+            const primaryFixAction = canonicalFixAction(exportHardBlockers.concat(downloadBlockers));
+            const packetReadyForDownload = Boolean(latestPacketExport);
+            const downloadState = downloadAllowed && packetReadyForDownload ? 'ready' : 'blocked';
+            const blockerText = exportHardBlockers.concat(downloadBlockers);
+            if (!packetReadyForDownload) {
+                blockerText.push('the complaint packet has not been exported yet');
+            }
+            if (draftSummaryGateNode) {
+                draftSummaryGateNode.dataset.gateRole = 'secondary-summary';
+            }
+            if (releaseGateCardNode) {
+                releaseGateCardNode.dataset.canonicalGate = 'primary';
+                releaseGateCardNode.dataset.downloadState = downloadState;
+                releaseGateCardNode.dataset.primaryNextAction = primaryFixAction.targetTab || 'review';
+            }
+            if (draftDownloadBoundaryNode) {
+                draftDownloadBoundaryNode.dataset.downloadState = downloadState;
+            }
+            if (draftDownloadBlockerNoteNode) {
+                draftDownloadBlockerNoteNode.dataset.downloadState = downloadState;
+                draftDownloadBlockerNoteNode.textContent = downloadState === 'ready'
+                    ? 'Downloads are cleared by the canonical filing verdict. Review the packet one last time before relying on it.'
+                    : `Download is blocked until ${blockerText.length ? blockerText.join('; ') : 'the canonical filing verdict clears the packet'}.`;
+            }
+            if (draftReleasePrimaryCtaNode) {
+                draftReleasePrimaryCtaNode.dataset.action = primaryFixAction.targetTab || 'review';
+                draftReleasePrimaryCtaNode.textContent = primaryFixAction.label;
+            }
             document.getElementById('draft-status-gate').textContent = `${canonicalReadiness.formAssessment.label.toUpperCase()} form • ${canonicalReadiness.supportAssessment.label.toUpperCase()} support • ${downloadAllowed ? 'downloads available' : 'downloads blocked'}`;
             document.getElementById('draft-readiness-preview').textContent = canonicalReadiness.summaryLines.join('\n');
             if (confidenceGroundedNode) {
@@ -7220,6 +7465,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             if (exportPacketButton) {
                 exportPacketButton.classList.remove('primary');
                 exportPacketButton.classList.add('secondary');
+                exportPacketButton.dataset.releaseGateState = exportAllowed ? 'packet-review-available' : 'blockers-visible';
+                exportPacketButton.setAttribute('aria-describedby', 'draft-artifact-quality-warning draft-caption-gate-summary');
             }
             downloadButtons.forEach((button) => {
                 button.classList.remove('primary');
@@ -7281,7 +7528,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             if (releaseGateSummaryNode) {
                 releaseGateSummaryNode.textContent = [
                     'Keep this gate visible before download',
-                    `${String((canonicalReadiness.gate || {}).status || (exportAllowed ? 'READY' : 'BLOCKED'))} | ${(canonicalReadiness.gate && canonicalReadiness.gate.blocking_reasons && canonicalReadiness.gate.blocking_reasons[0]) || 'No blocker detected.'} | Fix now: ${canonicalFixAction(exportHardBlockers).label}`,
+                    `${String((canonicalReadiness.gate || {}).status || (exportAllowed ? 'READY' : 'BLOCKED'))} | ${(canonicalReadiness.gate && canonicalReadiness.gate.blocking_reasons && canonicalReadiness.gate.blocking_reasons[0]) || 'No blocker detected.'} | Fix now: ${primaryFixAction.label}`,
                     `Release gate verdict: ${releaseVerdict ? releaseVerdict.toUpperCase() : 'UNKNOWN'}`,
                     `Primary action: ${canonicalReadiness.primaryAction}`,
                     exportHardBlockers.length ? `Export blockers: ${exportHardBlockers.join('; ')}` : 'Export blockers: none',
@@ -7318,7 +7565,6 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                         button.title = `Packet export will refresh the packet review, but downloads stay blocked until ${exportHardBlockers.join('; ')}.`;
                 }
             });
-            const packetReadyForDownload = Boolean(latestPacketExport);
             [
                 document.getElementById('download-packet-markdown-button'),
                 document.getElementById('download-packet-docx-button'),
@@ -7335,13 +7581,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 document.getElementById('download-packet-tool-docx-button'),
                 document.getElementById('download-packet-tool-pdf-button'),
             ].filter(Boolean).forEach((button) => {
-                button.disabled = !packetReadyForDownload;
-                button.setAttribute('aria-disabled', packetReadyForDownload ? 'false' : 'true');
-                button.title = packetReadyForDownload
-                    ? (downloadAllowed
+                button.disabled = !downloadAllowed || !packetReadyForDownload;
+                button.setAttribute('aria-disabled', (!downloadAllowed || !packetReadyForDownload) ? 'true' : 'false');
+                button.title = downloadAllowed
+                    ? (packetReadyForDownload
                         ? 'Download the exported complaint packet.'
-                        : `Download the exported packet artifact while the workspace keeps these blockers visible: ${downloadBlockers.join('; ')}.`)
-                    : 'Download is blocked until the complaint packet is exported.';
+                        : 'Download is blocked until the complaint packet is exported.')
+                    : `Download is blocked until ${blockerText.length ? blockerText.join('; ') : 'the canonical filing verdict clears the packet'}.`;
             });
             renderDraftExportIntegrity(sessionPayload);
         }
@@ -8962,6 +9208,114 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             };
         }
 
+        function buildSharedDocketGatePresenter(item) {
+            if (!item) {
+                return {
+                    state: buildMobileDocketStep1State(null),
+                    heading: 'Select one document to begin.',
+                    detail: 'Ask about the selected document before labels, annotations, deadlines, or draft use become available.',
+                    primaryAction: 'Open Chat',
+                    primaryActionKind: 'chat',
+                    secondaryAction: '',
+                    note: 'Persistence mode: no selected document.',
+                    readyEligible: false,
+                    readySaved: false,
+                };
+            }
+            const state = buildMobileDocketStep1State(item);
+            const firstUnmetId = state.firstUnmet ? state.firstUnmet.id : '';
+            const heading = state.readySaved
+                ? 'Ready confirmation saved.'
+                : firstUnmetId === 'question'
+                    ? 'Ask one document question first.'
+                    : firstUnmetId === 'impact'
+                        ? 'Generate the impact summary next.'
+                        : firstUnmetId === 'ready'
+                            ? 'Ready to confirm for labeling.'
+                            : 'Step 1 complete.';
+            const detail = state.readySaved
+                ? 'This selected document is ready for label work. Later writes for labels, annotations, deadlines, and answer saves remain separate.'
+                : firstUnmetId === 'question'
+                    ? 'Open document-scoped Chat and ask one question before any selected-document write is allowed.'
+                    : firstUnmetId === 'impact'
+                        ? 'A document question has been asked. Generate an impact summary before the ready confirmation can save.'
+                        : firstUnmetId === 'ready'
+                            ? 'The question and impact summary are present. Mark Ready To Label is the first selected-document write boundary.'
+                            : 'All Step 1 requirements are complete.';
+            const primaryActionKind = state.readySaved
+                ? 'none'
+                : firstUnmetId === 'question'
+                    ? 'chat'
+                    : firstUnmetId === 'impact'
+                        ? 'impact'
+                        : firstUnmetId === 'ready'
+                            ? 'ready'
+                            : 'none';
+            const primaryAction = primaryActionKind === 'chat'
+                ? 'Open Chat'
+                : primaryActionKind === 'impact'
+                    ? 'Generate Impact Summary'
+                    : primaryActionKind === 'ready'
+                        ? 'Mark Ready To Label'
+                        : 'Step 1 Complete';
+            return {
+                state,
+                heading,
+                detail,
+                primaryAction,
+                primaryActionKind,
+                secondaryAction: primaryActionKind === 'impact' ? 'Open Chat' : '',
+                note: state.readySaved
+                    ? 'Persistence mode: ready confirmation saved. Additional document writes stay locked behind later explicit controls.'
+                    : 'Persistence mode: chat progress is local; ready confirmation is the first selected-document write.',
+                readyEligible: state.readyWriteAllowed,
+                readySaved: state.readySaved,
+            };
+        }
+
+        function renderDocketGatePresenter(presenter, chatHref) {
+            const gate = document.getElementById('docket-gate-presenter');
+            if (!gate || !presenter) {
+                return;
+            }
+            const state = presenter.state || {};
+            const firstUnmet = state.firstUnmet || {};
+            const primaryChatLink = document.getElementById('docket-gate-primary-chat-link');
+            const primaryButton = document.getElementById('docket-gate-primary-action');
+            const readyButton = document.getElementById('docket-gate-ready-action');
+            const secondaryChatLink = document.getElementById('docket-gate-secondary-chat-link');
+            gate.dataset.currentState = state.currentState || 'no_document_selected';
+            gate.dataset.readyEligible = presenter.readyEligible ? 'true' : 'false';
+            gate.dataset.readySaved = presenter.readySaved ? 'true' : 'false';
+            gate.dataset.persistenceMode = state.persistenceMode || 'none';
+            document.getElementById('docket-gate-heading').textContent = presenter.heading;
+            document.getElementById('docket-gate-detail').textContent = presenter.detail;
+            document.getElementById('docket-gate-current-state').textContent = state.currentState || 'no_document_selected';
+            document.getElementById('docket-gate-primary-next').textContent = firstUnmet.unmetReason || 'none';
+            document.getElementById('docket-gate-write-count').textContent = `Document updates captured: ${state.selectedDocumentWriteCount || 0}`;
+            document.getElementById('docket-gate-note').textContent = presenter.note;
+            if (primaryChatLink) {
+                primaryChatLink.href = chatHref || '/chat';
+                primaryChatLink.textContent = presenter.primaryActionKind === 'chat' ? presenter.primaryAction : 'Open Chat';
+                primaryChatLink.hidden = presenter.primaryActionKind !== 'chat';
+            }
+            if (primaryButton) {
+                primaryButton.textContent = presenter.primaryActionKind === 'impact' ? 'Generate Impact Summary' : presenter.primaryAction;
+                primaryButton.hidden = presenter.primaryActionKind !== 'impact';
+                primaryButton.disabled = presenter.primaryActionKind !== 'impact';
+            }
+            if (readyButton) {
+                readyButton.textContent = presenter.primaryActionKind === 'ready' ? 'Mark Ready To Label' : 'Mark Ready To Label';
+                readyButton.hidden = presenter.primaryActionKind !== 'ready';
+                readyButton.disabled = !presenter.readyEligible;
+            }
+            if (secondaryChatLink) {
+                secondaryChatLink.href = chatHref || '/chat';
+                secondaryChatLink.hidden = !presenter.secondaryAction;
+                secondaryChatLink.textContent = presenter.secondaryAction || 'Open Chat';
+            }
+        }
+
         function setMobileDocketView(view) {
             mobileDocketView = view === 'selected' ? 'selected' : 'documents';
             const docketPanel = document.querySelector('[data-tab-panel="docket"]');
@@ -9196,6 +9550,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 mobileChatLink.href = chatLink.href;
                 mobileChatLink.classList.add('is-disabled');
                 mobileChatLink.setAttribute('aria-disabled', 'true');
+                renderDocketGatePresenter(buildSharedDocketGatePresenter(null), chatLink.href);
                 draftButton.className = 'secondary';
                 reviewButton.className = 'secondary';
                 labelButton.className = 'secondary';
@@ -9263,7 +9618,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const labelCount = Math.max(0, Number((item.labels || []).length || 0));
             const annotationCount = Math.max(0, Number(item.annotation_count || 0));
             const questionCount = Math.max(0, Number(item.question_count || 0));
-            const step1State = buildMobileDocketStep1State(item);
+            const gatePresenter = buildSharedDocketGatePresenter(item);
+            const step1State = gatePresenter.state;
             const step1Complete = step1State.readySaved;
             const reviewStatusLabel = step1Complete ? 'Step 1: Complete' : 'Step 1: Current';
             const draftReadinessLabel = step1Complete ? 'Step 2: Ready' : 'Step 2: Locked';
@@ -9492,7 +9848,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 labels: item.labels,
                 router_status: item.router_status,
             };
-            chatLink.href = buildSurfaceUrl('/chat', {
+            const selectedChatHref = buildSurfaceUrl('/chat', {
                 user_id: workspaceUserId || '',
                 source: 'workspace-docket',
                 prefill_message: `Review this docket document and explain what it affects: ${item.title}`,
@@ -9503,7 +9859,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     status_message: 'Returned from docket-scoped chat.',
                 }),
             });
+            chatLink.href = selectedChatHref;
             mobileChatLink.href = chatLink.href;
+            renderDocketGatePresenter(gatePresenter, selectedChatHref);
             annotations.innerHTML = `
                 <div class="item">
                     <strong>${escapeHtml(needsRouterReview ? 'Review Before Draft' : (item.primary_action || 'Review'))} is the next action.</strong>
@@ -12400,6 +12758,27 @@ function extractComplaintOutputSignals(result) {
             if (gatedSurfaceLink) {
                 event.preventDefault();
                 setBusyStatus(gatedSurfaceLink.dataset.disabledReason || 'That surface is intentionally gated until the case reaches the next phase.');
+                return;
+            }
+            const docketImpactButton = event.target.closest('#docket-gate-primary-action');
+            if (docketImpactButton) {
+                const documents = (((workspaceSession || {}).review || {}).documents || []);
+                const testimony = (((workspaceSession || {}).review || {}).testimony || []);
+                const sourceItems = documents.concat(testimony);
+                const matched = sourceItems.find((candidate, index) => (
+                    normalizeDocketDocumentItem(candidate, index, 'current evidence').docket_item_id === selectedDocketItemId
+                ));
+                if (matched) {
+                    matched.impact_summary = matched.impact_summary || 'Local impact summary drafted from the document-scoped chat. Review before saving any selected-document update.';
+                    matched.question_count = Math.max(1, Number(matched.question_count || 0));
+                    renderDocketLane(workspaceSession || {});
+                    setBusyStatus('Impact summary generated locally. No selected-document write has been sent.');
+                }
+                return;
+            }
+            const docketReadyButton = event.target.closest('#docket-gate-ready-action, #docket-mobile-ready-label-button');
+            if (docketReadyButton) {
+                setBusyStatus('Ready-to-label persistence is still gated. No selected-document write has been sent.');
                 return;
             }
             const handoffButton = event.target.closest('.surface-handoff-button');

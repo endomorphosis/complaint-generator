@@ -144,6 +144,9 @@ test.describe('website surface navigation', () => {
     await page.goto('/chat');
     await expect(page.locator('#chat-nav-builder')).toBeVisible();
     await expect(page.locator('#chat-nav-review')).toBeVisible();
+    await expect(page.locator('#chat-nav-workspace')).toBeVisible();
+    await expect(page.locator('[data-surface-nav="primary"]')).not.toContainText(/Trace|SDK|Dashboards/i);
+    await expect(page.locator('#chat-advanced-nav')).toContainText(/Advanced tools/i);
 
     await page.goto('/results');
     await expect(page.locator('#results-nav-builder')).toBeVisible();
@@ -152,15 +155,16 @@ test.describe('website surface navigation', () => {
     await page.goto('/document');
     await expect(page.locator('#builder-nav-review')).toBeVisible();
     await expect(page.locator('#builder-nav-workspace')).toBeVisible();
-    await expect(page.locator('#cg-app-shell a[href*="/mlwysiwyg"]').first()).toBeVisible();
-    await expect(page.locator('a[href="/ipfs-datasets/sdk-playground"]').first()).toBeVisible();
+    await expect(page.locator('[data-surface-nav="primary"]')).not.toContainText(/Profile|Trace|SDK|Dashboards/i);
+    await expect(page.locator('#builder-advanced-nav')).toContainText(/Advanced tools/i);
+    await expect(page.locator('#builder-nav-trace')).toHaveAttribute('href', /\/document\/optimization-trace/);
 
     await page.goto('/claim-support-review');
     await expect(page.locator('#review-nav-builder')).toBeVisible();
     await expect(page.locator('#review-nav-workspace')).toBeVisible();
-    await expect(page.locator('#cg-app-shell a[href*="/mlwysiwyg"]').first()).toBeVisible();
-    await expect(page.locator('a[href="/ipfs-datasets/sdk-playground"]').first()).toBeVisible();
-    await expect(page.locator('a[href="/dashboards"]').first()).toBeVisible();
+    await expect(page.locator('[data-surface-nav="primary"]')).not.toContainText(/Profile|Trace|SDK|Dashboards/i);
+    await expect(page.locator('#review-advanced-nav')).toContainText(/Advanced tools/i);
+    await expect(page.locator('#review-nav-trace')).toHaveAttribute('href', /\/document\/optimization-trace/);
   });
 
   test('profile and results surfaces explain stored complaint state clearly', async ({ page }, testInfo) => {
@@ -212,7 +216,7 @@ test.describe('website surface navigation', () => {
     await page.goto(handoffUrl);
 
     await expect(page).toHaveTitle(/Lex Publicus Chat App/i);
-    await expect(page.locator('h1').first()).toContainText(/Tell the story before the pleading/i);
+    await expect(page.locator('.hero h1')).toContainText(/Tell the story before the pleading/i);
     await expect(page.locator('body')).toContainText(/What to focus on in the interview|Complaint narrative chat/i);
     await expect(page.locator('#chat-context-card')).toBeVisible();
     await expect(page.locator('#chat-context-summary')).toContainText(/did:key:handoff-demo/i);
@@ -240,6 +244,44 @@ test.describe('website surface navigation', () => {
       path: screenshotPath,
       contentType: 'image/png',
     });
+  });
+
+  test('document-scoped chat puts the selected filing context first', async ({ page }) => {
+    const context = {
+      scope: 'selected_document',
+      docket_item_id: 'doc-termination-notice',
+      title: 'Termination notice filed March 10',
+      document_type: 'order',
+      source: 'Docket import',
+      labels: ['Adverse action', 'Deadline'],
+      router_mode: 'llm_router / multimodal_router',
+    };
+    const params = new URLSearchParams({
+      source: 'workspace-docket',
+      user_id: 'did:key:docket-chat-demo',
+      prefill_message: 'What deadline or response does this order create?',
+      chat_context: JSON.stringify(context),
+      return_to: '/workspace?target_tab=docket',
+    });
+
+    await page.goto(`/chat?${params.toString()}`);
+
+    await expect(page.locator('#cg-app-shell')).toHaveCount(0);
+    await expect(page.locator('[data-surface-nav="primary"]')).toBeHidden();
+    await expect(page.locator('#chat-selected-filing-hero')).toBeVisible();
+    await expect(page.locator('#chat-selected-filing-badge')).toContainText(/Selected filing attached/i);
+    await expect(page.locator('#chat-selected-filing-title')).toContainText(/Termination notice filed March 10/i);
+    await expect(page.locator('#chat-selected-filing-source')).toContainText(/Docket import/i);
+    await expect(page.locator('#chat-selected-filing-type')).toContainText(/order/i);
+    await expect(page.locator('#chat-selected-filing-scope')).toContainText(/llm_router \/ multimodal_router/i);
+    await expect(page.locator('#chat-selected-filing-question')).toContainText(/What deadline or response does this order create/i);
+    await expect(page.locator('#chat-selected-filing-persistence')).toContainText(/nothing is saved as a label, annotation, deadline, or answer/i);
+    await expect(page.locator('#chat-selected-filing-return-link')).toHaveAttribute('href', /\/workspace\?target_tab=docket/);
+    await expect(page.locator('.hero')).toBeHidden();
+    await expect(page.locator('#chat-active-context-title')).toContainText(/Termination notice filed March 10/i);
+    await expect(page.locator('#chat-grounding-preview')).toBeVisible();
+    await expect(page.locator('#chat-grounding-document')).toContainText(/Termination notice filed March 10/i);
+    await expect(page.locator('#chat-form input')).toHaveValue(/What deadline or response does this order create/i);
   });
 
   test('chat next-step actions preserve complaint context across workflow handoffs', async ({ page }) => {
@@ -1030,6 +1072,11 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#docket-mobile-step-annotation')).toHaveAttribute('data-step-state', 'waiting');
     await expect(page.locator('#docket-mobile-step1-current-state')).toContainText(/^chat_started$/i);
     await expect(page.locator('#docket-mobile-step1-first-unmet')).toContainText(/^create the impact summary from chat$/i);
+    await expect(page.locator('#docket-gate-presenter')).toHaveAttribute('data-current-state', 'chat_started');
+    await expect(page.locator('#docket-gate-presenter')).toHaveAttribute('data-ready-eligible', 'false');
+    await expect(page.locator('#docket-gate-primary-action')).toContainText(/Generate Impact Summary/i);
+    await expect(page.locator('#docket-gate-secondary-chat-link')).toContainText(/Open Chat/i);
+    await expect(page.locator('#docket-gate-write-count')).toContainText(/Document updates captured: 0/i);
     await expect(page.locator('#docket-mobile-next-unlock')).toContainText(/Review the chat impact summary to turn on Mark Ready To Label/i);
     await expect(page.locator('#docket-mobile-check-question')).toContainText(/Question asked: Yes \(1\)/i);
     await expect(page.locator('#docket-mobile-check-question')).toHaveAttribute('data-check-state', 'complete');
@@ -1059,6 +1106,13 @@ test.describe('website surface navigation', () => {
     expect(postChatMetrics.scrollWidth).toBeLessThanOrEqual(postChatMetrics.clientWidth + 2);
     expect(postChatMetrics.readyButtonHeight).toBeGreaterThanOrEqual(40);
     expect(postChatMetrics.selectedWriteRequestCount).toBe(0);
+
+    await page.evaluate(() => document.getElementById('docket-gate-primary-action').click());
+    await expect(page.locator('#workspace-status')).toContainText(/Impact summary generated locally\. No selected-document write has been sent\./i);
+    await expect(page.locator('#docket-gate-presenter')).toHaveAttribute('data-current-state', 'impact_summary_ready');
+    await expect(page.locator('#docket-gate-presenter')).toHaveAttribute('data-ready-eligible', 'true');
+    await expect(page.locator('#docket-gate-ready-action')).toContainText(/Mark Ready To Label/i);
+    await expect(page.locator('#docket-gate-write-count')).toContainText(/Document updates captured: 0/i);
 
     await page.locator('#docket-mobile-show-documents').click();
     await expect(docketPanel).toHaveClass(/mobile-docket-view-documents/);

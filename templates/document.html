@@ -151,6 +151,23 @@
             text-decoration: none;
         }
 
+        .surface-nav-disclosure {
+            margin-top: 12px;
+        }
+
+        .surface-nav-summary {
+            cursor: pointer;
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .surface-nav-disclosure .surface-links {
+            margin-top: 10px;
+        }
+
         .metric {
             border-radius: 18px;
             padding: 18px;
@@ -942,18 +959,23 @@
                 </p>
                 <div class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation">
                     <a class="surface-link" href="/">Landing</a>
-                    <a class="surface-link" href="/home">Account</a>
+                    <a class="surface-link" href="/home">Secure Intake</a>
                     <a class="surface-link" id="builder-nav-chat" href="/chat">Chat</a>
-                    <a class="surface-link" id="builder-nav-profile" href="/profile">Profile</a>
-                    <a class="surface-link" id="builder-nav-results" href="/results">Results</a>
                     <a class="surface-link" id="builder-nav-workspace" href="/workspace">Workspace</a>
                     <a class="surface-link" id="builder-nav-review" href="/claim-support-review">Review</a>
                     <a class="surface-link" id="builder-nav-builder" href="/document">Builder</a>
-                    <a class="surface-link" id="builder-nav-trace" href="/document/optimization-trace">Trace</a>
-                    <a class="surface-link" href="/mlwysiwyg">Editor</a>
-                    <a class="surface-link" href="/ipfs-datasets/sdk-playground">SDK</a>
-                    <a class="surface-link" href="/dashboards">Dashboards</a>
                 </div>
+                <details class="surface-nav-disclosure" id="builder-advanced-nav">
+                    <summary class="surface-nav-summary">Advanced tools</summary>
+                    <div class="surface-links" aria-label="Advanced tools">
+                        <a class="surface-link" id="builder-nav-profile" href="/profile">Profile</a>
+                        <a class="surface-link" id="builder-nav-results" href="/results">Results</a>
+                        <a class="surface-link" id="builder-nav-trace" href="/document/optimization-trace">Trace</a>
+                        <a class="surface-link" href="/mlwysiwyg">Editor</a>
+                        <a class="surface-link" href="/ipfs-datasets/sdk-playground">SDK</a>
+                        <a class="surface-link" href="/dashboards">Dashboards</a>
+                    </div>
+                </details>
                 <div class="hero-guidance">
                     <div class="hero-guidance-card">
                         <strong>Use this page when the record is organized</strong>

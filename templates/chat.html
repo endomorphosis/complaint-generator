@@ -7,6 +7,15 @@
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <link rel="stylesheet" href="/static/complaint_app_shell.css">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <script>
+        (function() {
+            const params = new URLSearchParams(window.location.search || '');
+            const source = String(params.get('source') || '');
+            if (params.get('chat_context') && /docket|filing|document/i.test(source)) {
+                window.__complaintAppShellDisabled = true;
+            }
+        })();
+    </script>
     <style>
         :root {
             --bg-top: #f7efe3;
@@ -130,11 +139,41 @@
             font-weight: 700;
         }
 
+        .surface-nav-disclosure {
+            margin-top: 12px;
+        }
+
+        .surface-nav-summary {
+            cursor: pointer;
+            color: var(--muted);
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .surface-nav-disclosure .surface-links {
+            margin-top: 10px;
+        }
+
         .hero {
             margin-top: 16px;
             display: grid;
             grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
             gap: 18px;
+        }
+
+        body.has-selected-filing-chat .hero {
+            display: none;
+        }
+
+        body.has-selected-filing-chat .topbar-links,
+        body.has-selected-filing-chat .masthead > .surface-links {
+            display: none;
+        }
+
+        body.has-selected-filing-chat .masthead {
+            padding-bottom: 16px;
         }
 
         .hero-card,
@@ -217,6 +256,90 @@
             display: block;
             margin-bottom: 8px;
             font-size: 1.02rem;
+        }
+
+        .selected-filing-hero {
+            display: grid;
+            gap: 18px;
+            grid-template-columns: minmax(0, 1.12fr) minmax(300px, 0.88fr);
+            margin-top: 16px;
+            padding: 24px;
+            border-radius: var(--radius-xl);
+            border: 2px solid rgba(33, 77, 60, 0.22);
+            background: rgba(244, 250, 246, 0.98);
+            box-shadow: var(--shadow);
+        }
+
+        .selected-filing-hero[hidden] {
+            display: none;
+        }
+
+        .selected-filing-copy,
+        .selected-filing-side {
+            display: grid;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .selected-filing-title {
+            margin: 0;
+            color: var(--forest);
+            font: 800 clamp(1.7rem, 2.5vw, 2.45rem)/1.06 "Newsreader", Georgia, serif;
+        }
+
+        .selected-filing-detail,
+        .selected-filing-question {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .selected-filing-question {
+            padding: 12px 14px;
+            border-left: 4px solid rgba(33, 77, 60, 0.44);
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.72);
+            color: var(--ink);
+            font-weight: 760;
+        }
+
+        .selected-filing-meta {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .selected-filing-meta-item {
+            padding: 12px;
+            border-radius: 14px;
+            border: 1px solid rgba(33, 77, 60, 0.14);
+            background: rgba(255, 255, 255, 0.76);
+        }
+
+        .selected-filing-meta-item b,
+        .selected-filing-meta-item span {
+            display: block;
+        }
+
+        .selected-filing-meta-item b {
+            color: var(--forest);
+            font-size: 0.72rem;
+            font-weight: 900;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .selected-filing-meta-item span {
+            margin-top: 4px;
+            color: var(--ink);
+            font-weight: 760;
+            overflow-wrap: anywhere;
+        }
+
+        .selected-filing-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
         }
 
 	        .workspace-grid {
@@ -707,7 +830,8 @@
 
         @media (max-width: 1120px) {
             .hero,
-            .workspace-grid {
+            .workspace-grid,
+            .selected-filing-hero {
                 grid-template-columns: 1fr;
             }
 
@@ -737,6 +861,19 @@
 
             .summary-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .selected-filing-hero {
+                padding: 18px;
+                border-radius: 18px;
+            }
+
+            .selected-filing-meta {
+                grid-template-columns: 1fr;
+            }
+
+            .selected-filing-actions {
+                flex-direction: column;
             }
 
             #chat-form {
@@ -795,18 +932,57 @@
 
             <nav class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation">
                 <a class="surface-link" href="/">Landing</a>
-                <a class="surface-link" href="/home">Account</a>
+                <a class="surface-link" href="/home">Secure Intake</a>
                 <a class="surface-link" id="chat-nav-chat" href="/chat">Chat</a>
-                <a class="surface-link" id="chat-nav-profile" href="/profile">Profile</a>
-                <a class="surface-link" id="chat-nav-results" href="/results">Results</a>
+                <a class="surface-link" id="chat-nav-workspace" href="/workspace">Workspace</a>
                 <a class="surface-link" id="chat-nav-review" href="/claim-support-review">Review</a>
                 <a class="surface-link" id="chat-nav-builder" href="/document">Builder</a>
-                <a class="surface-link" id="chat-nav-trace" href="/document/optimization-trace">Trace</a>
-                <a class="surface-link" href="/mlwysiwyg">Editor</a>
-                <a class="surface-link" href="/ipfs-datasets/sdk-playground">SDK</a>
-                <a class="surface-link" href="/dashboards">Dashboards</a>
             </nav>
+            <details class="surface-nav-disclosure" id="chat-advanced-nav">
+                <summary class="surface-nav-summary">Advanced tools</summary>
+                <div class="surface-links" aria-label="Advanced tools">
+                    <a class="surface-link" id="chat-nav-profile" href="/profile">Profile</a>
+                    <a class="surface-link" id="chat-nav-results" href="/results">Results</a>
+                    <a class="surface-link" id="chat-nav-trace" href="/document/optimization-trace">Trace</a>
+                    <a class="surface-link" href="/mlwysiwyg">Editor</a>
+                    <a class="surface-link" href="/ipfs-datasets/sdk-playground">SDK</a>
+                    <a class="surface-link" href="/dashboards">Dashboards</a>
+                </div>
+            </details>
         </header>
+
+        <section class="selected-filing-hero" id="chat-selected-filing-hero" hidden aria-label="Selected filing chat context">
+            <div class="selected-filing-copy">
+                <span class="eyebrow" id="chat-selected-filing-badge">Selected filing attached</span>
+                <h1 class="selected-filing-title" id="chat-selected-filing-title">Selected filing attached</h1>
+                <p class="selected-filing-detail" id="chat-selected-filing-detail">This document will stay attached to the next chatbot question.</p>
+                <p class="selected-filing-question" id="chat-selected-filing-question">Prepared question will appear here.</p>
+                <div class="selected-filing-actions">
+                    <a class="cta-primary" href="#chat-form" id="chat-selected-filing-ask-link">Ask About This Filing</a>
+                    <a class="cta-secondary" href="/workspace" id="chat-selected-filing-return-link">Return to workspace</a>
+                </div>
+            </div>
+            <aside class="selected-filing-side" aria-label="Selected filing details">
+                <div class="selected-filing-meta">
+                    <div class="selected-filing-meta-item">
+                        <b>Source</b>
+                        <span id="chat-selected-filing-source">workspace handoff</span>
+                    </div>
+                    <div class="selected-filing-meta-item">
+                        <b>Type</b>
+                        <span id="chat-selected-filing-type">document</span>
+                    </div>
+                    <div class="selected-filing-meta-item">
+                        <b>Scope</b>
+                        <span id="chat-selected-filing-scope">document-aware Q&amp;A</span>
+                    </div>
+                    <div class="selected-filing-meta-item">
+                        <b>Persistence</b>
+                        <span id="chat-selected-filing-persistence">Answer is drafted here only until you explicitly save in Docket.</span>
+                    </div>
+                </div>
+            </aside>
+        </section>
 
         <section class="hero">
             <article class="hero-card">

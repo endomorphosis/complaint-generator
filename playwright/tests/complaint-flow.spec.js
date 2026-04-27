@@ -562,12 +562,14 @@ test.describe('complaint generation workflow', () => {
 
     await page.goto('/document');
     await expect(page.locator('#builder-nav-trace')).toHaveAttribute('href', /\/document\/optimization-trace/);
+    await page.locator('#builder-advanced-nav').evaluate((node) => { node.open = true; });
     await page.locator('#builder-nav-trace').click();
     await expect(page).toHaveURL(/\/document\/optimization-trace/);
     await expect(page.locator('body')).toContainText(/Optimization Trace Viewer/i);
 
     await page.goto('/claim-support-review');
     await expect(page.locator('#review-nav-trace')).toHaveAttribute('href', /\/document\/optimization-trace/);
+    await expect(page.locator('#review-advanced-nav')).toContainText(/Advanced tools/i);
     await expect(page.locator('#review-nav-builder')).toHaveAttribute('href', /\/document/);
     await page.locator('#review-nav-builder').click();
     await expect(page).toHaveURL(/\/document/);
@@ -682,6 +684,13 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('[data-tab-panel="evidence"]')).toHaveClass(/is-active/);
     await expect(page.locator('#evidence-kind')).toHaveValue('document');
     await expect(page.locator('#evidence-claim-element')).toHaveValue(/.+/);
+    await expect(page.locator('label[for="evidence-kind"]')).toContainText(/Evidence Type/i);
+    await expect(page.locator('label[for="evidence-claim-element"]')).toContainText(/Claim Element This Supports/i);
+    await expect(page.locator('label[for="gmail-import-claim-element"]')).toContainText(/Imported Emails Support/i);
+    await expect(page.locator('label[for="local-evidence-kind"]')).toContainText(/Imported Item Type/i);
+    await expect(page.locator('#evidence-soft-note')).toContainText(/Map this item to one claim element/i);
+    await expect(page.locator('#save-evidence-button')).toHaveClass(/primary/);
+    await expect(page.locator('#import-local-evidence-button')).toHaveClass(/secondary/);
     await expect(page.locator('#evidence-add-testimony-button')).toContainText(/Add testimony for/i);
     await expect(page.locator('#evidence-add-document-button')).toContainText(/Attach document for/i);
 
@@ -719,6 +728,11 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#docket-selected-preview')).toContainText(/OCR:/i);
     await expect(page.locator('#docket-selected-preview')).toContainText(/Vectors created:/i);
     await expect(page.locator('#docket-selected-preview')).toContainText(/Bluebook citations:/i);
+    await expect(page.locator('#docket-gate-presenter')).toBeVisible();
+    await expect(page.locator('#docket-gate-heading')).toContainText(/Ask one document question first/i);
+    await expect(page.locator('#docket-gate-primary-chat-link')).toContainText(/Open Chat/i);
+    await expect(page.locator('#docket-gate-write-count')).toContainText(/Document updates captured: 0/i);
+    await expect(page.locator('#docket-gate-note')).toContainText(/ready confirmation is the first selected-document write/i);
     await expect(page.locator('#docket-ask-chat-link')).toHaveAttribute('href', /chat_context=/i);
     await expect(page.locator('#docket-advanced-operations')).toContainText(/Advanced docket operations/i);
     await page.locator('#docket-use-in-draft-button').click();
@@ -812,10 +826,16 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Release gate verdict:/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Top defect:/i);
     await expect(page.locator('#draft-export-safety-preview')).toContainText(/Canonical filing readiness/i);
+    await expect(page.locator('#draft-canonical-release-gate')).toHaveAttribute('data-gate-role', 'secondary-summary');
     await expect(page.locator('#draft-release-gate-card')).toBeVisible();
+    await expect(page.locator('#draft-release-gate-card')).toHaveAttribute('data-canonical-gate', 'primary');
+    await expect(page.locator('#draft-release-gate-card')).toHaveAttribute('data-download-state', /(blocked|ready)/);
     await expect(page.locator('#draft-release-gate-summary')).toContainText(/Keep this gate visible before download/i);
     await expect(page.locator('#draft-release-gate-summary')).toContainText(/Release gate verdict:/i);
     await expect(page.locator('#draft-release-gate-next-step')).toContainText(/Next safest move:/i);
+    await expect(page.locator('#draft-download-boundary')).toHaveAttribute('data-download-state', /(blocked|ready)/);
+    await expect(page.locator('#draft-download-blocker-note')).toContainText(/Download is blocked until|Downloads are cleared/i);
+    await expect(page.locator('#download-packet-markdown-button')).toHaveAttribute('aria-disabled', /(true|false)/);
     await expect(page.locator('#draft-release-open-review-button')).toBeVisible();
     await expect(page.locator('#draft-release-open-integrations-button')).toBeVisible();
 

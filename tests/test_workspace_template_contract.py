@@ -153,6 +153,14 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert ".docket-mobile-action-strip:not(.is-empty) .surface-link" in content
     assert ".docket-selected-card #docket-selected-chips" in content
     assert "docket-source-summary" in content
+    assert "docket-gate-presenter" in content
+    assert "Selected document gate" in content
+    assert "buildSharedDocketGatePresenter" in content
+    assert "renderDocketGatePresenter" in content
+    assert "Generate Impact Summary" in content
+    assert "Impact summary generated locally. No selected-document write has been sent." in content
+    assert "Ready-to-label persistence is still gated. No selected-document write has been sent." in content
+    assert "data-ready-eligible" in content
     assert "docket-mobile-technical-details" in content
     assert "docket-mobile-technical-preview" in content
     assert "Technical document status" in content
@@ -232,6 +240,14 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "broaden collection beyond a single inbox pass" in content
     assert "resumable mailbox collection" in content
     assert "UID checkpoints" in content
+    assert "Evidence Type" in content
+    assert "Claim Element This Supports" in content
+    assert "Imported Emails Support" in content
+    assert "Imported Items Support" in content
+    assert "Imported Item Type" in content
+    assert "Map this item to one claim element" in content
+    assert "evidence-composer-shell" in content
+    assert "evidence-import-shell" in content
     assert "Describe the dispute in plain language" in content
     assert "Optional keyword phrases, one per line" in content
     assert "local-evidence-paths" in content
@@ -747,6 +763,18 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "Pleading form quality:" in content
     assert "Evidence support strength:" in content
     assert "Download complaint files:" in content
+    assert "draft-gate-summary-secondary" in content
+    assert 'data-gate-role="secondary-summary"' in content
+    assert "Same canonical verdict; the filing decision rail below is the authoritative download boundary." in content
+    assert 'id="draft-download-boundary" data-download-state="blocked"' in content
+    assert 'id="draft-download-blocker-note" data-download-state="blocked"' in content
+    assert "Download is blocked until release-gate and record-strength checks are cleared." in content
+    assert 'data-canonical-gate="primary"' in content
+    assert "Canonical filing verdict" in content
+    assert "Downloads stay subordinate until this card says cleared." in content
+    assert "draftDownloadBoundaryNode.dataset.downloadState" in content
+    assert "releaseGateCardNode.dataset.downloadState" in content
+    assert "button.setAttribute('aria-disabled'" in content
     assert "activateEvidenceComposer" in content
     assert "screenshot findings:" in content
     assert "optimization targets:" in content

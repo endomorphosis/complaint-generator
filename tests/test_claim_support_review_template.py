@@ -688,6 +688,10 @@ def test_chat_and_results_templates_link_to_document_workflow():
     assert "/document" in chat_content
     assert "href=\"/document\"" in chat_content
     assert "/claim-support-review" in chat_content
+    assert "chat-selected-filing-hero" in chat_content
+    assert "Selected filing attached" in chat_content
+    assert "Answer is drafted here only until you explicitly save in Docket." in chat_content
+    assert "__complaintAppShellDisabled" in chat_content
     assert "/document" in results_content
     assert "href=\"/document\"" in results_content
     assert "/claim-support-review" in results_content

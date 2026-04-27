@@ -78,10 +78,12 @@ window.ChatPage = (function() {
             routerMode: stringValue(context.router_mode || context.routerMode || ''),
             status: stringValue(context.status || ''),
             filing: {
-                id: stringValue(filing.id || filing.document_id || filing.documentId || context.filing_id || context.document_id),
-                title: stringValue(filing.title || filing.document_title || filing.documentTitle || context.filing_title || context.document_title),
+                id: stringValue(filing.id || filing.document_id || filing.documentId || context.filing_id || context.document_id || context.docket_item_id),
+                title: stringValue(filing.title || filing.document_title || filing.documentTitle || context.filing_title || context.document_title || context.title),
                 date: stringValue(filing.date || filing.date_filed || filing.dateFiled || context.filing_date),
-                use: stringValue(filing.use || filing.suggested_use || filing.suggestedUse || context.suggested_use),
+                use: stringValue(filing.use || filing.suggested_use || filing.suggestedUse || context.suggested_use || context.document_type),
+                source: stringValue(filing.source || filing.source_ref || filing.sourceRef || context.source || context.source_ref),
+                documentType: stringValue(filing.document_type || filing.documentType || context.document_type || context.type),
             },
             labels: labels.map((label) => stringValue(label)).filter(Boolean).slice(0, 8),
             note: stringValue(context.note || context.annotation_note || context.annotationNote || ''),
@@ -386,6 +388,46 @@ window.ChatPage = (function() {
         preview.hidden = !hasFiling;
     }
 
+    function updateSelectedFilingHero(handoff, chatContext) {
+        const hero = document.getElementById('chat-selected-filing-hero');
+        if (!hero) {
+            return;
+        }
+        const filing = chatContext && chatContext.filing ? chatContext.filing : {};
+        const hasFiling = Boolean(filing.title || filing.id);
+        document.body.classList.toggle('has-selected-filing-chat', hasFiling);
+        hero.hidden = !hasFiling;
+        if (!hasFiling) {
+            return;
+        }
+        const routerMode = String(
+            (chatContext && (chatContext.routerMode || chatContext.router_mode))
+            || 'llm_router / multimodal_router'
+        ).trim();
+        const returnTarget = (handoff && handoff.returnTo) || '/workspace?target_tab=docket';
+        const preparedQuestion = String((handoff && handoff.prefillMessage) || '').trim()
+            || `Ask what this document affects and whether it supports the complaint: ${filing.title || filing.id}`;
+        setTextForId('chat-selected-filing-badge', 'Selected filing attached');
+        setTextForId('chat-selected-filing-title', filing.title || filing.id || 'Selected filing attached');
+        setTextForId(
+            'chat-selected-filing-detail',
+            `Chat will answer with this ${filing.documentType || filing.use || 'document'} in scope. Source: ${filing.source || 'workspace handoff'}.`
+        );
+        setTextForId('chat-selected-filing-question', `Prepared question: ${preparedQuestion}`);
+        setTextForId('chat-selected-filing-source', filing.source || 'workspace handoff');
+        setTextForId('chat-selected-filing-type', filing.documentType || filing.use || 'document');
+        setTextForId('chat-selected-filing-scope', routerMode);
+        setTextForId('chat-selected-filing-persistence', 'Draft only: nothing is saved as a label, annotation, deadline, or answer until you confirm it back in Docket.');
+        const returnLink = document.getElementById('chat-selected-filing-return-link');
+        if (returnLink) {
+            returnLink.href = returnTarget;
+        }
+        const askLink = document.getElementById('chat-selected-filing-ask-link');
+        if (askLink) {
+            askLink.href = '#chat-form';
+        }
+    }
+
     function updateStageRail(handoff, chatContext) {
         const stage = describeChatStage(handoff, chatContext);
         const links = getCurrentLinks();
@@ -435,6 +477,7 @@ window.ChatPage = (function() {
         setStageItemState('chat-stage-draft', stage === 'draft' ? 'Current' : 'Later', stage === 'draft');
         updateActiveContextStrip(handoff, chatContext, stage);
         updateGroundingPreview(handoff, chatContext);
+        updateSelectedFilingHero(handoff, chatContext);
         updateComposerReadiness(handoff, chatContext);
     }
 

@@ -472,6 +472,9 @@
     }
 
     async function bootShell() {
+        if (window.__complaintAppShellDisabled) {
+            return;
+        }
         if (document.body && document.body.dataset.complaintShell === 'off') {
             return;
         }
