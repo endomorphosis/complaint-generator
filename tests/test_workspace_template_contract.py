@@ -775,6 +775,12 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "draftDownloadBoundaryNode.dataset.downloadState" in content
     assert "releaseGateCardNode.dataset.downloadState" in content
     assert "button.setAttribute('aria-disabled'" in content
+    assert "[data-tab-panel=\"draft\"] .draft-action-rail" in content
+    assert "[data-tab-panel=\"draft\"] .confidence-strip" in content
+    assert "grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));" in content
+    assert "#draft-release-gate-card[data-canonical-gate=\"primary\"] > strong" in content
+    assert "max-height: 70vh;" in content
+    assert "[data-tab-panel=\"draft\"] #draft-body" in content
     assert "activateEvidenceComposer" in content
     assert "screenshot findings:" in content
     assert "optimization targets:" in content

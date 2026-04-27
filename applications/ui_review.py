@@ -47,6 +47,8 @@ _UI_REVIEW_PROVIDER_IMAGE_LIMITS = {
     "codex": {"max_bytes": 1_800_000, "max_dimension": 1600, "jpeg_quality": 78},
     "codex_cli": {"max_bytes": 1_800_000, "max_dimension": 1600, "jpeg_quality": 78},
 }
+_UI_REVIEW_ROUTE_PROVIDER_ALIASES = {"llm_router", "multimodal_router"}
+_UI_REVIEW_ROUTE_MODEL_ALIASES = {"llm_router", "multimodal_router"}
 
 
 def _format_router_backend_path(backend: Dict[str, Any]) -> str:
@@ -1595,8 +1597,21 @@ def _resolve_ui_review_backend(
 
     requested_provider = str(provider or "").strip()
     requested_model = str(model or "").strip()
+    requested_provider_key = requested_provider.lower()
+    requested_model_key = requested_model.lower()
 
-    if requested_provider:
+    if requested_provider_key in _UI_REVIEW_ROUTE_PROVIDER_ALIASES:
+        configured_provider = str(backend_kwargs.get("provider") or "").strip()
+        if configured_provider.lower() in _UI_REVIEW_ROUTE_PROVIDER_ALIASES:
+            configured_provider = ""
+        backend_kwargs["provider"] = (
+            configured_provider
+            or str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_ROUTER_PROVIDER", "") or "").strip()
+            or str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_PROVIDER", "") or "").strip()
+            or DEFAULT_UI_REVIEW_PROVIDER
+        )
+        backend_kwargs["_requested_provider_alias"] = requested_provider
+    elif requested_provider:
         backend_kwargs["provider"] = requested_provider
     else:
         backend_kwargs.setdefault(
@@ -1605,7 +1620,15 @@ def _resolve_ui_review_backend(
         )
 
     provider_name = str(backend_kwargs.get("provider") or "").strip().lower()
-    if requested_model:
+    if requested_model_key in _UI_REVIEW_ROUTE_MODEL_ALIASES:
+        backend_kwargs["_requested_model_alias"] = requested_model
+        backend_kwargs.pop("model", None)
+        backend_kwargs["model"] = (
+            str(os.getenv(f"COMPLAINT_GENERATOR_UI_REVIEW_MODEL_{provider_name.upper()}", "") or "").strip()
+            or str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL", "") or "").strip()
+            or DEFAULT_UI_REVIEW_MODELS_BY_PROVIDER.get(provider_name)
+        )
+    elif requested_model:
         backend_kwargs["model"] = requested_model
     else:
         backend_kwargs.setdefault(
@@ -1622,6 +1645,27 @@ def _resolve_ui_review_backend(
     backend_kwargs.setdefault("retry_max_attempts", 1)
     backend_kwargs.setdefault("allow_local_fallback", False)
     return backend_kwargs
+
+
+def _backend_runtime_kwargs(backend_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        key: value
+        for key, value in dict(backend_kwargs or {}).items()
+        if not str(key).startswith("_")
+    }
+
+
+def _router_alias_metadata(backend_kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    provider_alias = str((backend_kwargs or {}).get("_requested_provider_alias") or "").strip()
+    model_alias = str((backend_kwargs or {}).get("_requested_model_alias") or "").strip()
+    if provider_alias:
+        metadata["requested_provider_alias"] = provider_alias
+    if model_alias:
+        metadata["requested_model_alias"] = model_alias
+    if provider_alias or model_alias:
+        metadata["route_alias_resolved"] = True
+    return metadata
 
 
 def _ui_review_heartbeat_seconds() -> float:
@@ -1801,7 +1845,7 @@ def _review_with_multimodal_router(
         provider=backend_kwargs.get("provider"),
         diagnostics_dir=diagnostics_dir,
     )
-    backend = MultimodalRouterBackend(**backend_kwargs)
+    backend = MultimodalRouterBackend(**_backend_runtime_kwargs(backend_kwargs))
     timeout_s = float(backend_kwargs.get("timeout") or DEFAULT_UI_REVIEW_TIMEOUT_S)
     review_label = "multimodal_router:" + ",".join(path.stem for path in prepared_screenshots[:3])
     started_at = perf_counter()
@@ -1829,6 +1873,7 @@ def _review_with_multimodal_router(
             "prompt_chars": len(prompt),
             "screenshot_count": len(prepared_screenshots),
             **preparation_metadata,
+            **_router_alias_metadata(backend_kwargs),
         },
     )
 
@@ -1838,7 +1883,7 @@ def _review_with_text_router(
     prompt: str,
     backend_kwargs: Dict[str, Any],
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
-    backend = LLMRouterBackend(**backend_kwargs)
+    backend = LLMRouterBackend(**_backend_runtime_kwargs(backend_kwargs))
     timeout_s = float(backend_kwargs.get("timeout") or DEFAULT_UI_REVIEW_TIMEOUT_S)
     started_at = perf_counter()
     raw_response = _call_with_timeout(lambda: backend(prompt), timeout_s=timeout_s, label="llm_router:text_ui_review")
@@ -1853,6 +1898,7 @@ def _review_with_text_router(
             "elapsed_seconds": round(float(elapsed_s), 3),
             "prompt_chars": len(prompt),
             "screenshot_count": 0,
+            **_router_alias_metadata(backend_kwargs),
         },
     )
 
@@ -1965,6 +2011,7 @@ def create_ui_review_report(
             "page_review_executor": executor_mode,
             "prompt_mode": "compact" if use_compact_prompt else "full",
             "page_review_backends": [dict(item.get("backend") or {}) for item in page_reports],
+            **_router_alias_metadata(backend_kwargs),
             **selection_metadata,
         }
         report = {
@@ -2068,6 +2115,7 @@ def create_ui_review_report(
                     "strategy": "fallback",
                     "multimodal_error": str(multimodal_exc),
                     "fallback_error": str(exc),
+                    **_router_alias_metadata(backend_kwargs),
                 }
                 if fallback_attempts:
                     backend_metadata["fallback_attempts"] = list(fallback_attempts)

@@ -940,9 +940,9 @@
 
         .draft-action-rail {
             display: grid;
-            gap: 14px;
+            gap: 16px;
             margin: 18px 0 20px;
-            grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
+            grid-template-columns: minmax(0, 1fr);
         }
 
         .draft-action-card {
@@ -966,6 +966,7 @@
         .draft-action-stack {
             display: grid;
             gap: 14px;
+            order: -1;
         }
 
         .canonical-release-gate {
@@ -1009,7 +1010,7 @@
         .draft-action-groups {
             display: grid;
             gap: 12px;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             margin-top: 14px;
         }
 
@@ -1053,6 +1054,22 @@
 
         #draft-release-gate-card[data-canonical-gate="primary"] {
             border-color: rgba(154, 52, 18, 0.28);
+            background: linear-gradient(180deg, rgba(255, 252, 248, 0.98), rgba(255, 244, 233, 0.9));
+        }
+
+        #draft-release-gate-card[data-canonical-gate="primary"] > strong {
+            color: var(--accent-strong);
+            font-size: 1.18rem;
+            line-height: 1.25;
+        }
+
+        #draft-release-gate-card[data-canonical-gate="primary"] .draft-preview-shell {
+            pointer-events: auto;
+        }
+
+        #draft-release-gate-card[data-canonical-gate="primary"] pre {
+            font-size: 1rem;
+            line-height: 1.75;
         }
 
         #draft-release-gate-card[data-download-state="blocked"] {
@@ -1360,9 +1377,11 @@
         }
 
         #draft-body {
-            min-height: 980px;
+            min-height: 520px;
+            max-height: 70vh;
             font-size: 1rem;
             line-height: 1.75;
+            overflow: auto;
         }
 
         .tool-card {
@@ -2605,6 +2624,54 @@
             [data-tab-panel="evidence"] input,
             [data-tab-panel="evidence"] select {
                 max-width: 100%;
+            }
+
+            [data-tab-panel="draft"] .stage-banner,
+            [data-tab-panel="draft"] .draft-layout,
+            [data-tab-panel="draft"] .field-grid,
+            [data-tab-panel="draft"] .field-row,
+            [data-tab-panel="draft"] .draft-status-scan,
+            [data-tab-panel="draft"] .draft-action-rail,
+            [data-tab-panel="draft"] .draft-action-groups,
+            [data-tab-panel="draft"] .confidence-strip,
+            [data-tab-panel="draft"] .button-row {
+                grid-template-columns: minmax(0, 1fr) !important;
+            }
+
+            [data-tab-panel="draft"] .draft-action-stack {
+                order: -1;
+            }
+
+            [data-tab-panel="draft"] .draft-gate-summary-secondary {
+                padding: 10px;
+            }
+
+            [data-tab-panel="draft"] .draft-gate-summary-secondary .status,
+            [data-tab-panel="draft"] .draft-gate-summary-secondary .list {
+                display: none;
+            }
+
+            [data-tab-panel="draft"] #draft-release-gate-card {
+                margin-top: 0;
+            }
+
+            [data-tab-panel="draft"] #draft-release-gate-card pre,
+            [data-tab-panel="draft"] .soft-note,
+            [data-tab-panel="draft"] .draft-action-group span {
+                font-size: 0.98rem;
+                line-height: 1.55;
+            }
+
+            [data-tab-panel="draft"] textarea,
+            [data-tab-panel="draft"] input,
+            [data-tab-panel="draft"] select,
+            [data-tab-panel="draft"] pre {
+                max-width: 100%;
+            }
+
+            [data-tab-panel="draft"] #draft-body {
+                min-height: 360px;
+                max-height: 62vh;
             }
 
             .docket-mobile-action-note {
