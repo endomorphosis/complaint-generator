@@ -779,8 +779,16 @@ def test_workspace_template_exposes_gmail_import_browser_session_helpers():
     assert "[data-tab-panel=\"draft\"] .confidence-strip" in content
     assert "grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));" in content
     assert "#draft-release-gate-card[data-canonical-gate=\"primary\"] > strong" in content
+    assert "draft-gate-primary-row" in content
+    assert "draft-secondary-action-row" in content
+    assert "Filing verdict: BLOCKED" in content
+    assert "Downloads blocked" in content
+    assert "formalPleadingChecksNode" in content
+    assert "Fix now: ${primaryFixAction.label}" in content
+    assert "Keep packet export secondary until the canonical filing verdict clears download." in content
     assert "max-height: 70vh;" in content
     assert "[data-tab-panel=\"draft\"] #draft-body" in content
+    assert content.index('id="draft-release-gate-card"') < content.index('class="draft-layout"')
     assert "activateEvidenceComposer" in content
     assert "screenshot findings:" in content
     assert "optimization targets:" in content

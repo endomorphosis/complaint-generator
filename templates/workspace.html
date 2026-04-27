@@ -1037,6 +1037,42 @@
             margin-top: 12px;
         }
 
+        .draft-secondary-action-row {
+            align-items: center;
+            gap: 8px;
+        }
+
+        .draft-secondary-action-row .secondary,
+        .draft-secondary-action-row .surface-link {
+            min-height: 38px;
+            padding: 8px 12px;
+            font-size: 0.92rem;
+        }
+
+        .draft-gate-primary-row {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: minmax(180px, auto) minmax(0, 1fr);
+            align-items: center;
+        }
+
+        .draft-gate-primary-row .primary {
+            min-width: min(100%, 220px);
+        }
+
+        .draft-gate-secondary-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: flex-start;
+        }
+
+        .draft-gate-secondary-links .secondary {
+            min-height: 36px;
+            padding: 7px 12px;
+            font-size: 0.9rem;
+        }
+
         #draft-download-boundary[data-download-state="blocked"] {
             border-color: rgba(154, 52, 18, 0.34);
             background: rgba(255, 249, 243, 0.92);
@@ -1079,6 +1115,25 @@
         #draft-release-gate-card[data-download-state="ready"] {
             border-color: rgba(22, 101, 52, 0.28);
             box-shadow: inset 4px 0 0 rgba(22, 101, 52, 0.42), 0 16px 34px rgba(22, 101, 52, 0.08);
+        }
+
+        #draft-release-gate-chip {
+            font-weight: 950;
+        }
+
+        #draft-release-gate-chip[data-verdict-state="blocked"],
+        #draft-can-download-chip[data-capability-state="blocked"] {
+            background: rgba(154, 52, 18, 0.14);
+            border-color: rgba(154, 52, 18, 0.34);
+            color: #7c2d12;
+        }
+
+        #draft-can-review-chip[data-capability-state="open"],
+        #draft-can-draft-chip[data-capability-state="open"],
+        #draft-can-download-chip[data-capability-state="open"] {
+            background: rgba(240, 253, 244, 0.92);
+            border-color: rgba(22, 101, 52, 0.28);
+            color: #14532d;
         }
 
         .decision-strip {
@@ -4108,6 +4163,56 @@
                             <button class="secondary" id="draft-evidence-before-export-button" type="button">Attach corroboration for Employer knowledge</button>
                         </div>
                     </div>
+                    <div class="draft-action-stack">
+                        <div class="draft-action-card release-gate-callout" id="draft-release-gate-card" data-canonical-gate="primary" data-download-state="blocked" data-primary-next-action="add_corroboration">
+                            <strong>Canonical filing verdict</strong>
+                            <span>This is the decision point for generation, packet review, and download. Downloads stay subordinate until this card says cleared.</span>
+                            <div class="chip-row" id="draft-release-gate-chip-row">
+                                <span class="chip warn" id="draft-release-gate-chip">verdict: BLOCKED</span>
+                                <span class="chip warn" id="draft-can-review-chip">Can Review</span>
+                                <span class="chip warn" id="draft-can-draft-chip">Can Draft</span>
+                                <span class="chip warn" id="draft-can-download-chip">Can Download</span>
+                            </div>
+                            <div class="confidence-strip" id="draft-confidence-card">
+                                <div class="confidence-card">
+                                    <strong>Grounded</strong>
+                                    <span id="draft-confidence-grounded">0 elements are backed by mixed or documentary proof.</span>
+                                </div>
+                                <div class="confidence-card">
+                                    <strong>Thin</strong>
+                                    <span id="draft-confidence-thin">0 elements still need corroboration before export confidence should rise.</span>
+                                </div>
+                                <div class="confidence-card">
+                                    <strong>Unsupported</strong>
+                                    <span id="draft-confidence-unsupported">0 elements still need direct targeted proof before filing confidence should rise.</span>
+                                </div>
+                            </div>
+                            <div class="status draft-preview-shell"><pre id="draft-release-gate-summary">Verdict: BLOCKED
+Blocker reasons: waiting for readiness signals.</pre></div>
+                            <div class="soft-note" id="draft-release-gate-next-step">Primary CTA guidance will appear here after the workspace reviews the current draft and record.</div>
+                            <div class="tool-card" style="margin-top: 10px;">
+                                <h3 style="margin: 0 0 8px;">Formal pleading checks</h3>
+                                <div class="list" id="draft-formal-pleading-checks-list">
+                                    <div class="item"><strong>Checks will appear after draft readiness loads.</strong></div>
+                                </div>
+                            </div>
+                            <div class="button-row draft-gate-primary-row">
+                                <button class="primary" id="draft-release-primary-cta" type="button" data-action="add_corroboration">Add corroboration</button>
+                                <div class="draft-gate-secondary-links" aria-label="Secondary release gate destinations">
+                                    <button class="secondary" id="draft-release-open-review-button" type="button">Open Review</button>
+                                    <button class="secondary" id="draft-release-open-evidence-button" type="button">Open Evidence</button>
+                                    <button class="secondary" id="draft-release-open-integrations-button" type="button">Open CLI + MCP</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="draft-action-card">
+                            <strong>Operator controls</strong>
+                            <span>Use the safety rail above when the filing posture is getting ahead of the record. Reset the shared session here only when you truly need a clean complaint run.</span>
+                            <div class="button-row">
+                                <button class="secondary" id="reset-session-button" type="button">Reset Workspace</button>
+                            </div>
+                        </div>
+                    </div>
                     <div class="draft-layout">
                         <div class="draft-sidebar-card">
                             <strong>Filing editor checklist</strong>
@@ -4204,7 +4309,7 @@
                                 <div class="list" id="unsupported-thin-blocker-reasons">
                                     <div class="item"><strong>Waiting for support matrix and release-gate signals.</strong></div>
                                 </div>
-                                <div class="button-row">
+                                <div class="button-row draft-secondary-action-row">
                                     <button class="primary" id="unsupported-thin-go-evidence-button" type="button">Go to Evidence</button>
                                     <button class="secondary" id="unsupported-thin-go-review-button" type="button">Go to Review</button>
                                     <a class="surface-link" id="unsupported-thin-add-evidence-link" href="/workspace?target_tab=evidence">Add Evidence (Session Link)</a>
@@ -4296,54 +4401,6 @@
                                         <button class="secondary" id="download-packet-docx-button" type="button" data-output-format="docx" aria-disabled="true" disabled>Download DOCX</button>
                                         <button class="secondary" id="download-packet-pdf-button" type="button" data-output-format="pdf" aria-disabled="true" disabled>Download PDF</button>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="draft-action-stack">
-                            <div class="draft-action-card release-gate-callout" id="draft-release-gate-card" data-canonical-gate="primary" data-download-state="blocked" data-primary-next-action="add_corroboration">
-                                <strong>Canonical filing verdict</strong>
-                                <span>This is the decision point for generation, packet review, and download. Downloads stay subordinate until this card says cleared.</span>
-                                <div class="chip-row" id="draft-release-gate-chip-row">
-                                    <span class="chip warn" id="draft-release-gate-chip">verdict: BLOCKED</span>
-                                    <span class="chip warn" id="draft-can-review-chip">Can Review</span>
-                                    <span class="chip warn" id="draft-can-draft-chip">Can Draft</span>
-                                    <span class="chip warn" id="draft-can-download-chip">Can Download</span>
-                                </div>
-                                <div class="confidence-strip" id="draft-confidence-card">
-                                    <div class="confidence-card">
-                                        <strong>Grounded</strong>
-                                        <span id="draft-confidence-grounded">0 elements are backed by mixed or documentary proof.</span>
-                                    </div>
-                                    <div class="confidence-card">
-                                        <strong>Thin</strong>
-                                        <span id="draft-confidence-thin">0 elements still need corroboration before export confidence should rise.</span>
-                                    </div>
-                                    <div class="confidence-card">
-                                        <strong>Unsupported</strong>
-                                        <span id="draft-confidence-unsupported">0 elements still need direct targeted proof before filing confidence should rise.</span>
-                                    </div>
-                                </div>
-                                <div class="status draft-preview-shell"><pre id="draft-release-gate-summary">Verdict: BLOCKED
-Blocker reasons: waiting for readiness signals.</pre></div>
-                                <div class="soft-note" id="draft-release-gate-next-step">Primary CTA guidance will appear here after the workspace reviews the current draft and record.</div>
-                                <div class="tool-card" style="margin-top: 10px;">
-                                    <h3 style="margin: 0 0 8px;">Formal pleading checks</h3>
-                                    <div class="list" id="draft-formal-pleading-checks-list">
-                                        <div class="item"><strong>Checks will appear after draft readiness loads.</strong></div>
-                                    </div>
-                                </div>
-                                <div class="button-row">
-                                    <button class="primary" id="draft-release-primary-cta" type="button" data-action="add_corroboration">Add corroboration</button>
-                                    <button class="secondary" id="draft-release-open-review-button" type="button">Open Review</button>
-                                    <button class="secondary" id="draft-release-open-evidence-button" type="button">Add Support</button>
-                                    <button class="secondary" id="draft-release-open-integrations-button" type="button">Open CLI + MCP</button>
-                                </div>
-                            </div>
-                            <div class="draft-action-card">
-                                <strong>Operator controls</strong>
-                                <span>Use the safety rail above when the filing posture is getting ahead of the record. Reset the shared session here only when you truly need a clean complaint run.</span>
-                                <div class="button-row">
-                                    <button class="secondary" id="reset-session-button" type="button">Reset Workspace</button>
                                 </div>
                             </div>
                         </div>
@@ -7366,6 +7423,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const confidenceUnsupportedNode = document.getElementById('draft-confidence-unsupported');
             const releaseGateSummaryNode = document.getElementById('draft-release-gate-summary');
             const releaseGateNextStepNode = document.getElementById('draft-release-gate-next-step');
+            const formalPleadingChecksNode = document.getElementById('draft-formal-pleading-checks-list');
             const draftSummaryGateNode = document.getElementById('draft-canonical-release-gate');
             const releaseGateCardNode = document.getElementById('draft-release-gate-card');
             const draftDownloadBoundaryNode = document.getElementById('draft-download-boundary');
@@ -7440,7 +7498,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             if (draftReleasePrimaryCtaNode) {
                 draftReleasePrimaryCtaNode.dataset.action = primaryFixAction.targetTab || 'review';
-                draftReleasePrimaryCtaNode.textContent = primaryFixAction.label;
+                draftReleasePrimaryCtaNode.textContent = `Fix now: ${primaryFixAction.label}`;
+                draftReleasePrimaryCtaNode.title = blockerText.length
+                    ? `Primary next step because ${blockerText[0]}.`
+                    : 'Primary next step from the canonical filing verdict.';
             }
             document.getElementById('draft-status-gate').textContent = `${canonicalReadiness.formAssessment.label.toUpperCase()} form • ${canonicalReadiness.supportAssessment.label.toUpperCase()} support • ${downloadAllowed ? 'downloads available' : 'downloads blocked'}`;
             document.getElementById('draft-readiness-preview').textContent = canonicalReadiness.summaryLines.join('\n');
@@ -7505,6 +7566,30 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 }
                 artifactQualityWarningNode.innerHTML = qualityWarnings.join(' ');
             }
+            if (formalPleadingChecksNode) {
+                const formalChecks = [];
+                if (placeholderPartyNames) {
+                    formalChecks.push('Fix party names so the caption and body do not rely on placeholders.');
+                }
+                if (hasGenericCourtField) {
+                    formalChecks.push('Add the court or district before treating the complaint as filing-ready.');
+                }
+                if (draftTitleText.length < 8) {
+                    formalChecks.push('Strengthen the caption/title before export review.');
+                }
+                if (hasCivilActionPlaceholder) {
+                    formalChecks.push('Remove Civil Action No. placeholder text from the draft body.');
+                }
+                if (!currentDraftBody.trim()) {
+                    formalChecks.push('Generate or paste a complaint draft before formal pleading checks can pass.');
+                }
+                if (!formalChecks.length && issueItems.length) {
+                    formalChecks.push(...issueItems.slice(0, 3).map((item) => String((item || {}).finding || item || '').trim()).filter(Boolean));
+                }
+                formalPleadingChecksNode.innerHTML = formalChecks.length
+                    ? formalChecks.map((item) => `<div class="item"><strong>${escapeHtml(item)}</strong></div>`).join('')
+                    : '<div class="item"><strong>Formal pleading checks are clear for the current draft snapshot.</strong></div>';
+            }
             document.getElementById('draft-export-safety-preview').textContent = [
                 canonicalReadiness.summaryLines[0],
                 `Primary action right now: ${canonicalReadiness.primaryAction}`,
@@ -7547,7 +7632,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 if (primaryActionNoteNode) {
                     primaryActionNoteNode.textContent = 'Primary action now: generate a formal complaint draft first. Keep the release-gate summary visible before moving to export.';
                 }
-            } else if (!latestPacketExport) {
+            } else if (!latestPacketExport && exportAllowed) {
                 if (exportPacketButton) {
                     exportPacketButton.classList.remove('secondary');
                     exportPacketButton.classList.add('primary');
@@ -7556,12 +7641,8 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     primaryActionNoteNode.textContent = 'Primary action now: export and review the complaint packet so release-gate warnings and complaint-output defects stay visible before download.';
                 }
             } else if (!downloadAllowed) {
-                if (exportPacketButton) {
-                    exportPacketButton.classList.remove('secondary');
-                    exportPacketButton.classList.add('primary');
-                }
                 if (primaryActionNoteNode) {
-                    primaryActionNoteNode.textContent = 'Primary action now: keep packet review fresh while downloads stay blocked. Use Review or Evidence next if blockers remain.';
+                    primaryActionNoteNode.textContent = `Primary action now: ${primaryFixAction.label}. Keep packet export secondary until the canonical filing verdict clears download.`;
                 }
             } else {
                 if (downloadButtons[0]) {
@@ -7574,22 +7655,28 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             if (releaseGateChip) {
                 releaseGateChip.className = `chip ${downloadAllowed ? 'good' : 'warn'}`;
-                releaseGateChip.textContent = `status: ${String((canonicalReadiness.gate || {}).status || 'BLOCKED')}`;
+                releaseGateChip.dataset.verdictState = downloadAllowed ? 'ready' : 'blocked';
+                releaseGateChip.textContent = downloadAllowed
+                    ? 'Filing verdict: CLEARED'
+                    : 'Filing verdict: BLOCKED';
             }
             if (canReviewChip) {
                 canReviewChip.className = `chip ${workflowState.reviewReady ? 'good' : 'warn'}`;
-                canReviewChip.textContent = 'Can Review';
+                canReviewChip.dataset.capabilityState = workflowState.reviewReady ? 'open' : 'blocked';
+                canReviewChip.textContent = workflowState.reviewReady ? 'Review open' : 'Review needs intake';
                 canReviewChip.title = workflowState.reviewReady ? 'Review stage is available.' : workflowState.reviewGateReason;
             }
             if (canDraftChip) {
                 const canDraft = Boolean(workflowState.builderReady || currentDraftBody.trim());
                 canDraftChip.className = `chip ${canDraft ? 'good' : 'warn'}`;
-                canDraftChip.textContent = 'Can Draft';
+                canDraftChip.dataset.capabilityState = canDraft ? 'open' : 'blocked';
+                canDraftChip.textContent = canDraft ? 'Draft open' : 'Draft gated';
                 canDraftChip.title = canDraft ? 'Draft editing/generation is currently available.' : workflowState.builderGateReason;
             }
             if (canDownloadChip) {
                 canDownloadChip.className = `chip ${downloadAllowed ? 'good' : 'warn'}`;
-                canDownloadChip.textContent = 'Can Download';
+                canDownloadChip.dataset.capabilityState = downloadAllowed ? 'open' : 'blocked';
+                canDownloadChip.textContent = downloadAllowed ? 'Downloads cleared' : 'Downloads blocked';
                 canDownloadChip.title = downloadAllowed ? 'Downloads are currently available.' : `Blocked: ${(downloadBlockers[0] || exportHardBlockers[0] || 'Release blockers are still open.')}`;
             }
             if (releaseGateSummaryNode) {
