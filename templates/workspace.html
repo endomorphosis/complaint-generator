@@ -1776,6 +1776,35 @@
                 font-weight: 800;
             }
 
+            .docket-mobile-step {
+                display: none;
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step {
+                display: grid;
+                gap: 7px;
+                padding: 9px;
+                border-radius: 12px;
+                border: 1px solid rgba(141, 61, 23, 0.14);
+                background: rgba(255, 255, 255, 0.72);
+            }
+
+            .docket-mobile-action-strip:not(.is-empty) .docket-mobile-step.is-current {
+                border-color: rgba(154, 52, 18, 0.5);
+                border-width: 2px;
+                background: rgba(255, 247, 237, 1);
+                box-shadow: 0 14px 30px rgba(154, 52, 18, 0.16);
+                padding: 11px;
+            }
+
+            .docket-mobile-step-label {
+                color: var(--accent-strong);
+                font-size: 0.78rem;
+                font-weight: 900;
+                letter-spacing: 0.05em;
+                text-transform: uppercase;
+            }
+
             .docket-mobile-ask-scope {
                 display: none;
             }
@@ -1813,11 +1842,61 @@
             }
 
             .docket-mobile-action-state strong {
-                color: var(--accent-strong);
+                display: inline-block;
+                margin-right: 4px;
+                min-height: 22px;
+                padding: 3px 8px;
+                border-radius: 999px;
+                border: 1px solid rgba(154, 52, 18, 0.28);
+                background: rgba(154, 52, 18, 0.18);
+                color: #7c2d12;
+                font-size: 0.8rem;
+                font-weight: 900;
+                letter-spacing: 0;
+                text-transform: none;
+            }
+
+            .docket-mobile-step[data-step-state="active"] .docket-mobile-action-state strong {
+                background: #9a3412;
+                border-color: #9a3412;
+                color: #ffffff;
+            }
+
+            .docket-mobile-step[data-step-state="ready"] .docket-mobile-action-state strong {
+                background: rgba(22, 101, 52, 0.14);
+                border-color: rgba(22, 101, 52, 0.32);
+                color: #166534;
+            }
+
+            .docket-mobile-step[data-step-state="waiting"] .docket-mobile-action-state strong {
+                background: rgba(82, 82, 91, 0.12);
+                border-color: rgba(82, 82, 91, 0.26);
+                color: #3f3f46;
+            }
+
+            .docket-mobile-step[data-step-state="blocked"] .docket-mobile-action-state strong {
+                background: rgba(185, 28, 28, 0.12);
+                border-color: rgba(185, 28, 28, 0.3);
+                color: #991b1b;
             }
 
             .docket-mobile-action-strip:not(.is-empty) .docket-mobile-secondary-action {
                 background: rgba(255, 255, 255, 0.9);
+            }
+
+            .docket-mobile-step[data-step-state="ready"] .docket-mobile-secondary-action {
+                border-color: rgba(22, 101, 52, 0.34);
+                background: rgba(240, 253, 244, 0.96);
+                color: #14532d;
+                box-shadow: 0 8px 18px rgba(22, 101, 52, 0.08);
+            }
+
+            .docket-mobile-step[data-step-state="waiting"] .docket-mobile-secondary-action,
+            .docket-mobile-step[data-step-state="blocked"] .docket-mobile-secondary-action {
+                border-color: rgba(82, 82, 91, 0.18);
+                background: rgba(244, 244, 245, 0.82);
+                color: #52525b;
+                box-shadow: none;
             }
 
             .docket-mobile-action-strip:not(.is-empty) .docket-mobile-deadline-action {
@@ -1828,9 +1907,9 @@
 
             .docket-selected-rail {
                 display: grid;
-                gap: 6px;
-                margin: 10px 0 8px;
-                padding: 10px;
+                gap: 5px;
+                margin: 8px 0 7px;
+                padding: 8px;
                 border-radius: 12px;
                 border: 1px solid rgba(141, 61, 23, 0.2);
                 background: rgba(255, 255, 255, 0.94);
@@ -1861,17 +1940,17 @@
 
             .docket-selected-rail-badges {
                 display: grid;
-                gap: 8px;
+                gap: 6px;
                 grid-template-columns: repeat(3, minmax(0, 1fr));
             }
 
             .docket-selected-rail-badge {
-                padding: 6px 8px;
-                border-radius: 12px;
+                padding: 5px 6px;
+                border-radius: 10px;
                 border: 1px solid var(--line);
                 background: rgba(255, 248, 241, 0.72);
                 color: var(--accent-strong);
-                font-size: 0.82rem;
+                font-size: 0.78rem;
                 font-weight: 800;
                 overflow-wrap: anywhere;
             }
@@ -1882,7 +1961,7 @@
                 gap: 8px;
                 margin: 8px 0 10px;
                 padding: 6px;
-                border-radius: 999px;
+                border-radius: 14px;
                 border: 1px solid rgba(141, 61, 23, 0.16);
                 background: rgba(255, 248, 241, 0.92);
             }
@@ -1898,8 +1977,58 @@
                 box-shadow: 0 8px 20px rgba(154, 52, 18, 0.18);
             }
 
+            .docket-mobile-view-button[disabled] {
+                cursor: default;
+                opacity: 1;
+                border-style: solid;
+                background: rgba(255, 255, 255, 0.78);
+                box-shadow: none;
+                color: var(--muted);
+            }
+
+            .docket-mobile-context-status {
+                display: none;
+                min-height: 42px;
+                padding: 2px 0 2px 11px;
+                border-left: 3px solid rgba(141, 61, 23, 0.42);
+                background: transparent;
+                color: var(--accent-strong);
+                font-size: 0.86rem;
+                font-weight: 800;
+                line-height: 1.25;
+                overflow-wrap: anywhere;
+            }
+
+            .docket-mobile-document-count {
+                display: block;
+                color: var(--muted);
+                font-size: 0.76rem;
+                font-weight: 700;
+            }
+
+            [data-tab-panel="docket"].mobile-docket-view-selected .docket-mobile-view-switch {
+                grid-template-columns: 1fr;
+                padding: 0;
+                border: 0;
+                background: transparent;
+            }
+
+            [data-tab-panel="docket"].mobile-docket-view-selected #docket-mobile-show-selected {
+                display: none;
+            }
+
+            [data-tab-panel="docket"].mobile-docket-view-selected .docket-mobile-context-status {
+                display: block;
+            }
+
+            [data-tab-panel="docket"].mobile-docket-view-documents .docket-mobile-context-status {
+                display: none;
+            }
+
             [data-tab-panel="docket"].mobile-docket-view-selected .stage-banner,
-            [data-tab-panel="docket"].mobile-docket-view-selected > p.muted {
+            [data-tab-panel="docket"].mobile-docket-view-selected > p.muted,
+            [data-tab-panel="docket"].mobile-docket-view-selected .docket-current-task,
+            [data-tab-panel="docket"].mobile-docket-view-selected .docket-mobile-action-note {
                 display: none;
             }
 
@@ -1911,6 +2040,10 @@
             }
 
             [data-tab-panel="docket"].mobile-docket-view-selected .docket-documents-card {
+                display: none;
+            }
+
+            [data-tab-panel="docket"].mobile-docket-view-selected .docket-selected-card {
                 display: none;
             }
 
@@ -2987,16 +3120,29 @@
                         <button class="secondary docket-mobile-view-button" id="docket-mobile-show-documents" type="button">Documents</button>
                         <button class="primary docket-mobile-view-button" id="docket-mobile-show-selected" type="button">Selected Document</button>
                     </div>
+                    <p class="docket-mobile-context-status" id="docket-mobile-context-status" aria-live="polite">Working on: no document selected.</p>
                     <nav class="docket-mobile-action-strip" aria-label="Mobile Docket document actions">
-                        <a class="surface-link docket-mobile-primary-action" id="docket-mobile-ask-chat-link" href="/chat">Ask About Selected Document</a>
-                        <span class="docket-mobile-ask-scope" id="docket-mobile-ask-scope">Chat scope: selected document only.</span>
-                        <span class="docket-mobile-action-state" id="docket-mobile-ask-state"><strong>Next:</strong> Ask what this document changes.</span>
-                        <button class="secondary docket-mobile-secondary-action" id="docket-mobile-label-button" type="button">2. Label Document</button>
-                        <span class="docket-mobile-action-state" id="docket-mobile-label-state"><strong>Pending:</strong> no saved label yet.</span>
-                        <button class="secondary docket-mobile-secondary-action" id="docket-mobile-annotation-button" type="button">3. Add Annotation</button>
-                        <span class="docket-mobile-action-state" id="docket-mobile-annotation-state"><strong>Pending:</strong> no saved annotation yet.</span>
-                        <button class="secondary docket-mobile-deadline-action" id="docket-mobile-deadline-button" type="button">4. Mark Deadline</button>
-                        <span class="docket-mobile-action-state" id="docket-mobile-deadline-state"><strong>Blocked:</strong> confirm a date in the document first.</span>
+                        <div class="docket-mobile-step is-current" id="docket-mobile-step-ask" data-step-state="active" aria-current="step">
+                            <span class="docket-mobile-step-label">Step 1</span>
+                            <a class="surface-link docket-mobile-primary-action" id="docket-mobile-ask-chat-link" href="/chat">Ask What This Document Changes</a>
+                            <span class="docket-mobile-ask-scope" id="docket-mobile-ask-scope">Questions will apply only to this document.</span>
+                            <span class="docket-mobile-action-state" id="docket-mobile-ask-state"><strong>Do this now</strong> Ask what this document changes.</span>
+                        </div>
+                        <div class="docket-mobile-step is-secondary" id="docket-mobile-step-label" data-step-state="ready">
+                            <span class="docket-mobile-step-label">Step 2</span>
+                            <button class="secondary docket-mobile-secondary-action" id="docket-mobile-label-button" type="button">Label Document</button>
+                            <span class="docket-mobile-action-state" id="docket-mobile-label-state"><strong>Available next</strong> No saved label yet.</span>
+                        </div>
+                        <div class="docket-mobile-step is-secondary" id="docket-mobile-step-annotation" data-step-state="waiting">
+                            <span class="docket-mobile-step-label">Step 3</span>
+                            <button class="secondary docket-mobile-secondary-action" id="docket-mobile-annotation-button" type="button">Add Note or Date</button>
+                            <span class="docket-mobile-action-state" id="docket-mobile-annotation-state"><strong>Waiting on prior step</strong> Confirm the label first, then save a note or response date.</span>
+                        </div>
+                        <div class="docket-mobile-step is-secondary" id="docket-mobile-step-deadline" data-step-state="blocked">
+                            <span class="docket-mobile-step-label">Step 4</span>
+                            <button class="secondary docket-mobile-deadline-action" id="docket-mobile-deadline-button" type="button">Mark Deadline</button>
+                            <span class="docket-mobile-action-state" id="docket-mobile-deadline-state"><strong>Cannot continue yet</strong> Add a response date in Step 3 to set a deadline.</span>
+                        </div>
                     </nav>
                     <p class="docket-mobile-action-note" id="docket-mobile-action-note">These actions unlock after you load or select one docket document.</p>
                     <div class="docket-command-grid">
@@ -4475,6 +4621,34 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#39;');
         }
+
+        const mobileDocketStepCopy = {
+            ask: {
+                title: 'Step 1',
+                cta: 'Ask What This Document Changes',
+                active: 'Ask what this document changes.',
+                scopeFallback: 'Questions will apply only to this document.',
+            },
+            label: {
+                title: 'Step 2',
+                cta: 'Label Document',
+                locked: 'Complete Step 1: ask what this document changes to unlock.',
+                ready: 'Choose what this document affects.',
+            },
+            annotation: {
+                title: 'Step 3',
+                cta: 'Add Note or Date',
+                lockedBeforeAsk: 'Complete Step 1: ask what this document changes to unlock.',
+                lockedBeforeLabel: 'Complete Step 2: choose what this document affects to unlock.',
+                ready: 'Save a note or response date from this document.',
+            },
+            deadline: {
+                title: 'Step 4',
+                cta: 'Deadline Needs Date',
+                readyCta: 'Confirm Deadline',
+                locked: 'Complete Step 3: save a response date to unlock.',
+            },
+        };
 
         function slugifyFilename(value) {
             return String(value || 'complaint-packet')
@@ -8267,9 +8441,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const selectedButton = document.getElementById('docket-mobile-show-selected');
             if (documentsButton && selectedButton) {
                 documentsButton.className = mobileDocketView === 'documents' ? 'primary docket-mobile-view-button' : 'secondary docket-mobile-view-button';
-                selectedButton.className = mobileDocketView === 'selected' ? 'primary docket-mobile-view-button' : 'secondary docket-mobile-view-button';
+                selectedButton.className = mobileDocketView === 'selected' ? 'secondary docket-mobile-view-button' : 'secondary docket-mobile-view-button';
                 documentsButton.setAttribute('aria-pressed', mobileDocketView === 'documents' ? 'true' : 'false');
                 selectedButton.setAttribute('aria-pressed', mobileDocketView === 'selected' ? 'true' : 'false');
+                selectedButton.disabled = mobileDocketView === 'selected';
             }
         }
 
@@ -8281,6 +8456,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const routerStatus = document.getElementById('docket-router-status');
             const currentTaskTitle = document.getElementById('docket-current-task-title');
             const currentTaskDetail = document.getElementById('docket-current-task-detail');
+            const mobileContextStatus = document.getElementById('docket-mobile-context-status');
             const docketPanel = document.querySelector('[data-tab-panel="docket"]');
             if (!items.length) {
                 selectedDocketItemId = '';
@@ -8292,8 +8468,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     documentsViewButton.textContent = 'Documents';
                 }
                 if (selectedViewButton) {
-                    selectedViewButton.textContent = 'Viewing Selected';
+                    selectedViewButton.textContent = 'View Selected Document';
                     selectedViewButton.disabled = true;
+                }
+                if (mobileContextStatus) {
+                    mobileContextStatus.textContent = 'Working on: no document selected.';
                 }
                 currentTaskTitle.textContent = 'Current task: add or load one docket document.';
                 currentTaskDetail.textContent = 'Load a docket manifest, import local evidence, or save a document evidence item so this lane can show document questions, labels, annotations, and deadlines.';
@@ -8332,10 +8511,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const documentsViewButton = document.getElementById('docket-mobile-show-documents');
             const selectedViewButtonWithLabel = document.getElementById('docket-mobile-show-selected');
             if (documentsViewButton) {
-                documentsViewButton.textContent = `Back to Documents (${items.length})`;
+                documentsViewButton.textContent = 'Back to Documents';
             }
             if (selectedViewButtonWithLabel) {
-                selectedViewButtonWithLabel.textContent = 'Viewing Selected';
+                selectedViewButtonWithLabel.textContent = 'View Selected Document';
+            }
+            if (mobileContextStatus) {
+                mobileContextStatus.innerHTML = `
+                    Working on: ${escapeHtml(selected.title || 'selected document')}
+                    <span class="docket-mobile-document-count">${escapeHtml(String(items.length))} document${items.length === 1 ? '' : 's'} in this list</span>
+                `;
             }
             const selectedNeedsRouterReview = String(selected.router_status || '').toLowerCase().includes('not reviewed');
             const selectedNextAction = selectedNeedsRouterReview ? 'Review Before Draft' : (selected.primary_action || 'Review');
@@ -8421,6 +8606,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const mobileLabelState = document.getElementById('docket-mobile-label-state');
             const mobileAnnotationState = document.getElementById('docket-mobile-annotation-state');
             const mobileDeadlineState = document.getElementById('docket-mobile-deadline-state');
+            const mobileStepAsk = document.getElementById('docket-mobile-step-ask');
+            const mobileStepLabel = document.getElementById('docket-mobile-step-label');
+            const mobileStepAnnotation = document.getElementById('docket-mobile-step-annotation');
+            const mobileStepDeadline = document.getElementById('docket-mobile-step-deadline');
             const selectedRail = document.getElementById('docket-selected-rail');
             const selectedRailLabel = document.getElementById('docket-selected-rail-label');
             const selectedRailTitle = document.getElementById('docket-selected-rail-title');
@@ -8470,25 +8659,31 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 });
                 mobileChatLink.textContent = 'Locked: Ask About Document';
                 mobileAskScope.textContent = 'Select a document before asking the chatbot.';
-                mobileAskState.innerHTML = '<strong>Locked:</strong> select one document first.';
-                mobileLabelButton.textContent = 'Locked: 2. Label Document';
-                mobileLabelState.innerHTML = '<strong>Locked:</strong> select one document first.';
-                mobileAnnotationButton.textContent = 'Locked: 3. Add Annotation';
-                mobileAnnotationState.innerHTML = '<strong>Locked:</strong> select one document first.';
+                mobileAskState.innerHTML = '<strong>Cannot continue yet</strong> Select one document first.';
+                mobileLabelButton.textContent = 'Locked: Label Document';
+                mobileLabelState.innerHTML = '<strong>Cannot continue yet</strong> Select one document first.';
+                mobileAnnotationButton.textContent = 'Locked: Add Note or Date';
+                mobileAnnotationState.innerHTML = '<strong>Cannot continue yet</strong> Select one document first.';
                 mobileDeadlineButton.textContent = 'Mark Deadline';
-                mobileDeadlineButton.textContent = 'Locked: 4. Mark Deadline';
-                mobileDeadlineState.innerHTML = '<strong>Locked:</strong> select one document first.';
+                mobileDeadlineButton.textContent = 'Locked: Mark Deadline';
+                mobileDeadlineState.innerHTML = '<strong>Cannot continue yet</strong> Select one document first.';
+                mobileDeadlineButton.setAttribute('aria-describedby', 'docket-mobile-deadline-state');
+                [mobileStepAsk, mobileStepLabel, mobileStepAnnotation, mobileStepDeadline].forEach((step) => {
+                    step.className = 'docket-mobile-step is-secondary';
+                    step.dataset.stepState = 'locked';
+                    step.removeAttribute('aria-current');
+                });
                 mobileActionNote.textContent = 'Load a docket manifest or import evidence first. Then select one document to unlock these actions.';
                 annotations.innerHTML = '<div class="item"><strong>No annotations yet.</strong><div class="muted">Load or select a document before saving labels or asking questions.</div></div>';
                 return;
             }
             const needsRouterReview = String(item.router_status || '').toLowerCase().includes('not reviewed');
-            const reviewStatusLabel = needsRouterReview ? 'Review: Not reviewed' : `Review: ${item.router_status || 'Reviewed'}`;
-            const draftReadinessLabel = needsRouterReview ? 'Draft: review first' : `Draft: ${item.status || 'Ready'}`;
-            const deadlineStatusLabel = `Deadline: ${item.deadline || 'none'}`;
             const labelCount = Math.max(0, Number((item.labels || []).length || 0));
             const annotationCount = Math.max(0, Number(item.annotation_count || 0));
             const questionCount = Math.max(0, Number(item.question_count || 0));
+            const reviewStatusLabel = questionCount > 0 ? 'Step 1 done' : 'Step 1 active';
+            const draftReadinessLabel = labelCount > 0 ? 'Step 2 labeled' : 'Step 2 waiting';
+            const deadlineStatusLabel = item.deadline ? `Deadline: ${item.deadline}` : 'Step 4 locked: no deadline';
             actionBar.classList.remove('is-empty');
             mobileActionStrip.classList.remove('is-empty');
             selectedRail.classList.remove('is-empty');
@@ -8571,25 +8766,71 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             });
             reviewButton.textContent = needsRouterReview ? 'Review Before Draft' : 'Open Review';
             draftButton.textContent = needsRouterReview ? 'Use In Draft Anyway' : 'Use In Draft';
-            mobileChatLink.textContent = '1. Ask About Selected Document';
-            mobileAskScope.textContent = `Chat scope: ${item.title || 'selected document'} only.`;
+            mobileChatLink.textContent = mobileDocketStepCopy.ask.cta;
+            mobileAskScope.textContent = `Questions will apply only to ${item.title || 'this document'}.`;
             mobileAskState.innerHTML = questionCount > 0
-                ? `<strong>Done:</strong> ${escapeHtml(String(questionCount))} question(s) already asked.`
-                : '<strong>Next:</strong> ask what this document changes before labeling.';
-            mobileLabelButton.textContent = '2. Label Document';
-            mobileLabelState.innerHTML = labelCount > 0
-                ? `<strong>Needs review:</strong> ${escapeHtml(String(labelCount))} suggested label(s), save or adjust next.`
-                : '<strong>Pending:</strong> save what claim, defense, or deadline this affects.';
-            mobileAnnotationButton.textContent = '3. Add Annotation';
-            mobileAnnotationState.innerHTML = annotationCount > 0
-                ? `<strong>Done:</strong> ${escapeHtml(String(annotationCount))} annotation(s) tied to this document.`
-                : '<strong>Pending:</strong> save the sentence or page that supports the label.';
+                ? `<strong>Available next</strong> Review ${escapeHtml(String(questionCount))} question(s).`
+                : `<strong>Do this now</strong> ${escapeHtml(mobileDocketStepCopy.ask.active)}`;
+            mobileLabelButton.textContent = mobileDocketStepCopy.label.cta;
+            mobileLabelState.innerHTML = questionCount === 0
+                ? `<strong>Waiting on prior step</strong> ${escapeHtml(mobileDocketStepCopy.label.locked)}`
+                : labelCount > 0
+                ? `<strong>Available next</strong> Review ${escapeHtml(String(labelCount))} suggested label(s).`
+                : `<strong>Available next</strong> ${escapeHtml(mobileDocketStepCopy.label.ready)}`;
+            mobileAnnotationButton.textContent = mobileDocketStepCopy.annotation.cta;
+            mobileAnnotationState.innerHTML = questionCount === 0
+                ? `<strong>Waiting on prior step</strong> ${escapeHtml(mobileDocketStepCopy.annotation.lockedBeforeAsk)}`
+                : labelCount === 0
+                ? `<strong>Waiting on prior step</strong> ${escapeHtml(mobileDocketStepCopy.annotation.lockedBeforeLabel)}`
+                : annotationCount > 0
+                ? `<strong>Available next</strong> Review ${escapeHtml(String(annotationCount))} annotation(s).`
+                : `<strong>Available next</strong> ${escapeHtml(mobileDocketStepCopy.annotation.ready)}`;
             deadlineButton.textContent = item.deadline ? 'Confirm Deadline' : 'Mark Deadline';
-            mobileDeadlineButton.textContent = item.deadline ? '4. Confirm Deadline' : '4. Deadline Needs Date';
+            mobileDeadlineButton.textContent = item.deadline ? mobileDocketStepCopy.deadline.readyCta : mobileDocketStepCopy.deadline.cta;
             mobileDeadlineState.innerHTML = item.deadline
-                ? `<strong>Needs review:</strong> confirm ${escapeHtml(item.deadline)} before drafting.`
-                : '<strong>Blocked:</strong> find or enter a response date before saving a deadline.';
+                ? `<strong>Available next</strong> Confirm ${escapeHtml(item.deadline)}.`
+                : `<strong>Cannot continue yet</strong> ${escapeHtml(mobileDocketStepCopy.deadline.locked)}`;
             mobileDeadlineButton.disabled = !item.deadline;
+            mobileLabelButton.disabled = questionCount === 0;
+            mobileAnnotationButton.disabled = questionCount === 0 || labelCount === 0;
+            mobileDeadlineButton.setAttribute('aria-describedby', 'docket-mobile-deadline-state');
+            const currentMobileStep = questionCount === 0
+                ? 'ask'
+                : labelCount === 0
+                    ? 'label'
+                    : annotationCount === 0
+                        ? 'annotation'
+                        : item.deadline
+                            ? 'deadline'
+                            : 'ask';
+            mobileStepAsk.className = currentMobileStep === 'ask' ? 'docket-mobile-step is-current' : 'docket-mobile-step is-secondary';
+            mobileStepAsk.dataset.stepState = currentMobileStep === 'ask' ? 'active' : 'ready';
+            mobileStepAsk.toggleAttribute('aria-current', currentMobileStep === 'ask');
+            if (currentMobileStep === 'ask') {
+                mobileStepAsk.setAttribute('aria-current', 'step');
+            }
+            mobileStepLabel.className = currentMobileStep === 'label' ? 'docket-mobile-step is-current' : 'docket-mobile-step is-secondary';
+            mobileStepLabel.dataset.stepState = currentMobileStep === 'label' ? 'active' : questionCount > 0 ? 'ready' : 'waiting';
+            mobileStepLabel.toggleAttribute('aria-current', currentMobileStep === 'label');
+            if (currentMobileStep === 'label') {
+                mobileStepLabel.setAttribute('aria-current', 'step');
+            }
+            mobileStepAnnotation.className = currentMobileStep === 'annotation' ? 'docket-mobile-step is-current' : 'docket-mobile-step is-secondary';
+            mobileStepAnnotation.dataset.stepState = currentMobileStep === 'annotation' ? 'active' : (questionCount > 0 && labelCount > 0) ? 'ready' : 'waiting';
+            mobileStepAnnotation.toggleAttribute('aria-current', currentMobileStep === 'annotation');
+            if (currentMobileStep === 'annotation') {
+                mobileStepAnnotation.setAttribute('aria-current', 'step');
+            }
+            mobileStepDeadline.className = currentMobileStep === 'deadline'
+                ? 'docket-mobile-step is-current'
+                : item.deadline
+                    ? 'docket-mobile-step is-secondary'
+                    : 'docket-mobile-step is-secondary is-blocked';
+            mobileStepDeadline.dataset.stepState = currentMobileStep === 'deadline' ? 'active' : item.deadline ? 'ready' : 'blocked';
+            mobileStepDeadline.toggleAttribute('aria-current', currentMobileStep === 'deadline');
+            if (currentMobileStep === 'deadline') {
+                mobileStepDeadline.setAttribute('aria-current', 'step');
+            }
             mobileActionNote.textContent = `Actions apply to the selected document: ${item.title || 'Untitled document'}.`;
             const chatContext = {
                 scope: 'selected_document',

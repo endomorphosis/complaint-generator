@@ -647,3 +647,101 @@ Updated gate decision:
 - Playwright confirms a single active mobile surface: in selected mode the document list is hidden, the stage banner is hidden, the selected workbench is visible, no horizontal overflow is present, and the switch state is explicit.
 - The router now recognizes the intended single-active selected-document surface, but still does not clear persistent selected-document behavior. Remaining blockers are action-state clarity and progressive enablement: Label, Annotate, and Deadline need explicit pending/done/blocked states before they become real write actions.
 - Next prerequisite before persistent selected-document writes: add a lightweight action-step state model and per-action helper copy derived from existing document metadata, without changing MCP contracts.
+
+Mobile action-state implementation:
+
+- Final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-action-state/screenshots/02-workspace-docket-mobile-action-state-final.png`
+- Final screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-action-state/screenshot-metadata-action-state-final.json`
+- Final router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-action-state/router-review-mobile-action-state-final.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Changes made:
+
+- Added mobile action-state rows for Ask, Label, Annotate, and Deadline.
+- Rendered action-state labels as high-contrast chips: `Next`, `Needs review`, `Pending`, and `Blocked`.
+- Kept Ask as the active first step, derived label/annotation state from existing metadata, and disabled Deadline when no response date/deadline exists.
+- Added `aria-describedby` from the disabled Deadline button to its unblock helper: `enable after a response date is captured in Annotation`.
+- Preserved MCP SDK, selected-document id, and `llm_router` / `multimodal_router` request shapes.
+
+Verification:
+
+- `pytest tests/test_workspace_template_contract.py::test_workspace_template_defines_mobile_docket_shell_contract`
+- `npx playwright test playwright/tests/navigation.spec.js --grep 'workspace Docket .* mobile'`
+
+Updated gate decision:
+
+- Playwright confirms explicit action-state text, disabled Deadline semantics, and no horizontal overflow.
+- The final router review still does not clear persistent selected-document writes. It says the surface is functionally close, but the next implementation should make the ordered action rail a single canonical stepper with one current step expanded and future steps collapsed or clearly secondary.
+- Next prerequisite before real writes: convert the current action-state presentation into a canonical stepper and then implement the first persistent write path, likely Label, behind that stepper.
+
+Mobile canonical stepper implementation:
+
+- Final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-stepper/screenshots/02-workspace-docket-mobile-stepper-final.png`
+- Final screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-stepper/screenshot-metadata-stepper-final.json`
+- Final router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-stepper/router-review-mobile-stepper-final.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Changes made:
+
+- Converted the mobile selected-document action rail into explicit step cards.
+- Marked Ask as the single current step with `aria-current="step"` and `data-step-state="current"`.
+- Marked Label, Annotation, and Deadline as secondary/blocked steps with state attributes.
+- Hid the extra current-task banner and action-note copy in selected mobile mode so the selected rail plus one stepper is the canonical mobile path.
+- Preserved MCP SDK, router contracts, selected-document id flow, and desktop layout.
+
+Verification:
+
+- `pytest tests/test_workspace_template_contract.py::test_workspace_template_defines_mobile_docket_shell_contract`
+- `npx playwright test playwright/tests/navigation.spec.js --grep 'workspace Docket .* mobile'`
+
+Updated gate decision:
+
+- Playwright confirms one current step, secondary future steps, no overflow, and hidden duplicate selected-mode framing.
+- The final router review still does not clear persistent selected-document writes. It now asks for a stricter status vocabulary and stronger visual dominance for the current task card.
+- Next prerequisite before the first real write path: normalize mobile step statuses to `Active`, `Ready`, `Waiting`, and `Blocked`, and visually promote the current step as the one dominant CTA.
+
+Mobile stepper status and microcopy follow-up:
+
+- Final screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-stepper-status/screenshots/04-workspace-docket-mobile-stepper-status-microcopy-final.png`
+- Final screenshot metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-stepper-status/screenshot-metadata-stepper-status-microcopy-final.json`
+- Final router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260426-mobile-stepper-status/router-review-mobile-stepper-status-microcopy-final.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Changes reviewed:
+
+- Normalized internal mobile step states to `Active`, `Ready`, `Waiting`, and `Blocked`.
+- Replaced the selected-mode toggle label with `Current context: Selected`, disabled it in selected mode, and kept `Back to Documents - 1 item` as the only active header navigation control.
+- Shortened the primary Ask CTA to `Ask About Document`.
+- Added explicit helper prefixes: `Next:`, `Pending:`, and `Blocked by:`.
+- Preserved the existing selected-document id flow and `llm_router` / `multimodal_router` chat/action contract.
+
+Updated gate decision:
+
+- Playwright confirms the microcopy state, selected-document scope, disabled Deadline semantics, and no horizontal overflow.
+- The router still holds the persistent-write gate. It says the action order is understandable, but the selected-context control still looks too button-like, the state words are still internal-facing, and the blocked/scope copy should be written as direct layperson instructions.
+- Next prerequisite before implementation: make the header one true navigation control plus a read-only selected-document banner such as `Working on: Termination timeline email`; move the document count out of the Back button; map internal state enums to plain-language labels such as `Do this now`, `Available next`, `Waiting on prior step`, and `Cannot continue yet`; rewrite Deadline copy as `Add a response date in Step 3 to set a deadline`; and promote the chat scope helper to `Questions will apply only to this document.`
+
+Mobile layperson stepper follow-up:
+
+- Final polished screenshot: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-layperson-stepper/screenshots/03-workspace-docket-mobile-layperson-stepper-polished.png`
+- Final polished metadata: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-layperson-stepper/screenshot-metadata-layperson-stepper-polished.json`
+- Final polished router review: `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260427-mobile-layperson-stepper/router-review-mobile-layperson-stepper-polished.json`
+- Strategy: `multimodal_router`
+- Provider/model: `codex_cli / gpt-5.3-codex`
+
+Changes reviewed:
+
+- Moved the selected context out of the active view-switch affordance and kept `Back to Documents` as the only visible header button in selected mode.
+- Rendered `Working on: Termination timeline email` as static context with the document count in nearby metadata.
+- Converted step-state copy to layperson action language: `Do this now`, `Waiting on prior step`, and `Cannot continue yet`.
+- Disabled Step 2 and Step 3 while Step 1 is current, and kept Step 4 blocked until a response date is saved through Step 3.
+- Removed duplicate numbering from action labels so the card header carries the step number and the button carries only the action.
+
+Updated gate decision:
+
+- Playwright confirms one header action, no horizontal overflow, selected-document chat scope, disabled Step 2/3/4 controls, and deterministic step order.
+- The router still holds the persistent-write gate. It says the flow is close, but Step 1 uses two related intents (`Ask About Document` versus `Ask what this document changes`), disabled steps need explicit `Complete Step X to unlock` prerequisite lines, and card status chips should better align with the stepper.
+- Next prerequisite before selected-document writes: normalize every step from one step config source (title, CTA, helper, lock reason, success text), make Step 1 use one intent such as `Ask What This Document Changes`, render explicit unlock lines for Steps 2-4, and then implement the first persistent write boundary behind that clarified gate.

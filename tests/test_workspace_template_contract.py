@@ -22,8 +22,15 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert "docket-mobile-view-switch" in content
     assert "docket-mobile-show-documents" in content
     assert "docket-mobile-show-selected" in content
+    assert "docket-mobile-context-status" in content
     assert "Back to Documents" in content
-    assert "Viewing Selected" in content
+    assert "View Selected Document" in content
+    assert "Working on:" in content
+    assert "docket-mobile-document-count" in content
+    assert "Step 1" in content
+    assert "Step 2" in content
+    assert "Step 3" in content
+    assert "Step 4" in content
     assert "mobile-docket-view-documents" in content
     assert "mobile-docket-view-selected" in content
     assert "setMobileDocketView" in content
@@ -35,11 +42,38 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert "docket-mobile-secondary-action" in content
     assert "docket-mobile-deadline-action" in content
     assert "docket-mobile-ask-scope" in content
+    assert "docket-mobile-ask-state" in content
+    assert "docket-mobile-label-state" in content
+    assert "docket-mobile-annotation-state" in content
+    assert "docket-mobile-deadline-state" in content
+    assert "docket-mobile-action-state" in content
+    assert "docket-mobile-step-ask" in content
+    assert "docket-mobile-step-label" in content
+    assert "docket-mobile-step-annotation" in content
+    assert "docket-mobile-step-deadline" in content
+    assert "aria-current=\"step\"" in content
+    assert "data-step-state" in content
+    assert "currentMobileStep" in content
+    assert 'data-step-state="active"' in content
+    assert 'data-step-state="ready"' in content
+    assert 'data-step-state="waiting"' in content
+    assert 'data-step-state="blocked"' in content
+    assert "<strong>Do this now</strong>" in content
+    assert "<strong>Available next</strong>" in content
+    assert "<strong>Waiting on prior step</strong>" in content
+    assert "<strong>Cannot continue yet</strong>" in content
     assert "Actions for the selected document" in content
-    assert "Chat scope: selected document only." in content
+    assert "Questions will apply only to this document." in content
+    assert "Questions will apply only to" in content
+    assert "Ask What This Document Changes" in content
+    assert "Complete Step 1: ask what this document changes to unlock" in content
+    assert "Complete Step 2: choose what this document affects to unlock" in content
+    assert "Complete Step 3: save a response date to unlock" in content
+    assert "aria-describedby', 'docket-mobile-deadline-state'" in content
     assert "Selected source summary" in content
-    assert "Review: Not reviewed" in content
-    assert "Draft: review first" in content
+    assert "Step 1 active" in content
+    assert "Step 2 waiting" in content
+    assert "Step 4 locked: no deadline" in content
     assert "docket-mobile-ask-chat-link" in content
     assert "docket-mobile-label-button" in content
     assert "docket-mobile-annotation-button" in content
@@ -61,14 +95,13 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert "docket-mobile-technical-details" in content
     assert "docket-mobile-technical-preview" in content
     assert "Technical document status" in content
-    assert "Ask About Document" in content
+    assert "Ask What This Document Changes" in content
     assert "Label Document" in content
-    assert "Add Annotation" in content
-    assert "1. Ask About Selected Document" in content
-    assert "2. Label Document" in content
-    assert "3. Add Annotation" in content
-    assert "4. Mark Deadline To Confirm" in content
-    assert "Mark Deadline To Confirm" in content
+    assert "Add Note or Date" in content
+    assert "Ask What This Document Changes" in content
+    assert "Label Document" in content
+    assert "Add Note or Date" in content
+    assert "Deadline Needs Date" in content
     assert "Mark Deadline" in content
     assert "docket-add-annotation-button" in content
     assert "docket-mark-deadline-button" in content
