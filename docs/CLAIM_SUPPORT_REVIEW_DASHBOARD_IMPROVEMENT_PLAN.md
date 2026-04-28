@@ -1765,3 +1765,42 @@ Fifth prerequisite implementation note:
 - Viewport-scoped Draft screenshots narrowed the issue to decision hierarchy: the page no longer fails as a blank layout, but the canonical verdict still showed conflicting peer chips and too many equal-weight actions.
 - Follow-up hierarchy repair: the Draft verdict now says `Filing verdict: BLOCKED`, `Review open`, `Draft open`, and `Downloads blocked`; only the blocker-specific `Fix now: ...` action is primary; secondary destinations are grouped as smaller Review/Evidence/CLI options; packet export is not promoted while the filing verdict is blocked; and formal pleading checks show concrete blocker lines.
 - The selected-document write gate remains closed; rerun the scoped screenshot/router review before starting the first selected-document ready-confirmation write with network assertions.
+
+Sixth prerequisite review note:
+
+- Reviewed the Dashboard Hub prerequisite pass with Playwright desktop/mobile screenshots routed through `llm_router` / `multimodal_router`.
+- Screenshot artifacts: `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-desktop.png` and `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-mobile.png`
+- Router review artifact: `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-router-review.json`
+- Partial repair in the JS stub hub: one dominant `Start intake questions` CTA, returning-user links separated from the primary card, clearer saved-work/docket labels, lower-density prerequisite status lines, and updated navigation tests.
+- Verification: `npx playwright test playwright/tests/navigation.spec.js --grep 'dashboard|document and dashboard'` passes.
+- The router still holds the dashboard gate. Remaining high findings are structural: secondary actions need unmistakable button affordance plus eligibility state, and the hub should either use one unified Intake/Evidence/Review card model or more clearly separate first-time intake from returning-user paths.
+- The selected-document write gate remains closed until this dashboard entry model is resolved and rerun through scoped screenshot review.
+
+Dashboard gate continuation:
+
+- The JS stub dashboard now uses a Step 1/2/3 complaint-flow model with Step 2 and Step 3 guarded as waiting/disabled states.
+- Refreshed desktop/mobile screenshots and reran the `llm_router` / `multimodal_router` review at `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-router-review.json`.
+- Verification: `npx playwright test playwright/tests/navigation.spec.js --grep 'dashboard|document and dashboard'` passes on rerun.
+- The router still holds the gate. Remaining high findings: use one shared step-state render model across the top stepper and lower cards, make mobile Step 1 the clear primary button, and make locked Evidence/Review controls plainly disabled with one unlock reason.
+- The selected-document write gate remains closed.
+
+Dashboard gate continuation, second review:
+
+- Reworked the hub toward the shared state model requested by the router: Intake is the current first action, Evidence and Review share the same `Locked` state vocabulary in the stepper and locked cards, and the locked cards no longer expose navigation links as primary actions.
+- Refreshed `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-desktop.png`, `dashboard-hub-mobile.png`, and `dashboard-hub-router-review.json`.
+- Router path: `page_reviews` through `codex_cli / gpt-5.3-codex`; requested aliases `llm_router` / `multimodal_router`; `route_alias_resolved: true`; selected both screenshots; skipped `0`.
+- Verification: `npx playwright test playwright/tests/navigation.spec.js --grep 'dashboard|document and dashboard'` passes.
+- The router still holds the dashboard gate. Remaining high findings are not backend blockers; they are UI hierarchy blockers: locked cards still look too active, prerequisite text repeats in competing locations, and the mobile locked-step affordance is not strong enough for layperson confidence.
+- The next plan improvement should simplify the Dashboard Hub before persistence work: one obvious Intake CTA, one compact stage-status strip, and a clearly secondary locked-state explanation that cannot be mistaken for enabled navigation.
+
+Selected-document and Docket Chat cross-reference:
+
+- The fuller April 28 selected-document/Docket Chat addendum now lives in `docs/LAYPERSON_DOCKET_WORKSPACE_UI_UX_PLAN.md`.
+- It uses these screenshot-router artifacts as the current planning baseline:
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review/router-review-general.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review/router-review-docket-only.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review-v2/router-review-selected-document-states.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review-v2/router-review-impact-summary-ready.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review-v3/router-review-docket-chat-before-after.json`
+- Claim-support Review and Draft work must not treat selected-document Docket readiness as filing/export readiness. Docket readiness should remain a document-level state until OCR, router, citation, support-review, and human-review gates are explicitly satisfied.
+- Selected-document persistence remains closed until the Docket plan clears contradictory readiness copy, visible Docket-scoped Chat scope, router failure recovery, citation gating, and explicit save-back destinations.

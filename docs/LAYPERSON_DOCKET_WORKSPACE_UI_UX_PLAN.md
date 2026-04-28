@@ -1138,3 +1138,97 @@ Fifth prerequisite implementation note:
 - Viewport-scoped follow-up review narrowed the remaining Draft/readiness issues to hierarchy rather than layout: capability chips looked like conflicting peer statuses, the canonical verdict had several equal-weight actions, and packet export still looked primary while downloads were blocked.
 - Follow-up hierarchy repair: the Draft verdict now uses explicit labels such as `Filing verdict: BLOCKED`, `Review open`, `Draft open`, and `Downloads blocked`; the canonical card has one `Fix now: ...` primary CTA; secondary Review/Evidence/CLI destinations are visually demoted; packet export stays secondary while the filing verdict is blocked; and formal pleading checks render concrete blocker lines instead of a placeholder.
 - Selected-document persistence remains gated. The next implementation slice should rerun the scoped screenshot/router review and only then consider the first selected-document ready-confirmation write with network assertions.
+
+Sixth prerequisite review note:
+
+- Reviewed the Dashboard Hub prerequisite pass with fresh desktop/mobile screenshots and `llm_router` / `multimodal_router` route aliases.
+- Screenshot artifacts: `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-desktop.png` and `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-mobile.png`
+- Router review artifact: `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-router-review.json`
+- Implemented a partial hierarchy cleanup in the JS stub dashboard hub: one primary `Start intake questions` CTA, returning-user links separated from the primary action card, clearer saved-work/docket labels, and prerequisite status lines instead of dense chips.
+- Playwright navigation coverage confirms the hub remains reachable, advanced dashboard routes remain available, and Builder Trace navigation opens through the advanced disclosure.
+- The router did not clear the dashboard gate. Remaining high findings ask for a more structural decision: either use one unified Intake/Evidence/Review card system with explicit current/available/locked states, or keep intake separate while making resume/docket/profile controls visually secondary but unmistakably interactive with real eligibility state.
+- Selected-document persistence remains gated. Do not start the first selected-document write until the dashboard entry model and the Draft/readiness gate both clear scoped screenshot review.
+
+Dashboard gate continuation:
+
+- Converted the JS stub dashboard toward a Step 1/2/3 complaint model and added explicit waiting/disabled guards for later steps.
+- Refreshed `dashboard-hub-desktop.png`, `dashboard-hub-mobile.png`, and `dashboard-hub-router-review.json`.
+- Playwright navigation checks pass after the change, including the dashboard hub and mounted dashboard routes.
+- The router still does not clear the dashboard gate. Remaining high findings now focus on consistency rather than missing structure: the top stepper and lower cards need one shared state vocabulary and render model; the mobile Step 1 row should be the clear primary button; Evidence and Review should be unmistakably disabled with one unlock reason.
+- Selected-document persistence remains gated.
+
+Dashboard gate continuation, second review:
+
+- Reworked the JS stub hub again around a shared Step 1/2/3 state object: Intake is `Current`, Evidence and Review are `Locked`, the top stepper and lower cards consume the same labels, and locked cards use a non-navigation status affordance with one unlock reason.
+- Refreshed the desktop/mobile screenshots and reran the alias-resolved review at `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/dashboard-hub-router-review.json`.
+- Router path: `page_reviews`, provider `codex_cli`, model `gpt-5.3-codex`, requested aliases `llm_router` / `multimodal_router`, `route_alias_resolved: true`, selected both dashboard screenshots, skipped `0`.
+- Verification: `npx playwright test playwright/tests/navigation.spec.js --grep 'dashboard|document and dashboard'` passes.
+- The router still does not clear the dashboard gate. Current high findings are all presentation/state-signaling issues: locked cards still read too active, prerequisite text is duplicated, and mobile Step 2 lock affordance is weak.
+- Planning decision: do not start selected-document persistence. The next prerequisite should simplify the hub into one visible first-action panel and one lower-priority locked-state explanation, with no duplicate Step 1 card and no active-looking locked controls.
+
+April 28 selected-document and Docket Chat review addendum:
+
+- Reviewed the broader Dashboard, Docket, selected-document, readiness, and Docket-scoped Chat states with Playwright screenshots routed through the `multimodal_router` alias. The alias resolved to `page_reviews` through `codex_cli / gpt-5.3-codex`, with `route_alias_resolved: true`.
+- Review artifacts:
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review/router-review-general.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review/router-review-docket-only.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review-v2/router-review-selected-document-states.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review-v2/router-review-impact-summary-ready.json`
+  - `artifacts/mcp-dashboard-ui-review/layperson-docket-chatbot-20260428-plan-review-v3/router-review-docket-chat-before-after.json`
+- The newest router passes agree with the prior dashboard gate: do not start selected-document persistence yet. The blocker is no longer whether the feature exists; it is whether lay users can reliably tell what document is in scope, what state the document is in, what router/fallback state occurred, and what will be written back to the docket.
+
+Refined prerequisite order before the first selected-document write:
+
+1. Dashboard gate simplification.
+   - Render one obvious `Start intake questions` action as the first visible next step.
+   - Use one compact stage-status strip for Intake, Evidence, and Review.
+   - Present Evidence and Review as clearly locked or waiting, with one unlock reason and no active-looking locked controls.
+
+2. Docket selected-document state machine.
+   - Drive desktop and mobile Docket from one canonical readiness state.
+   - Remove contradictory combinations such as `Mark Ready To Label is ready` next to `Missing: Confirm ready to label`.
+   - Do not show `Ready For Draft` while router checks, OCR checks, citation checks, or human review are incomplete. Use `Conditionally ready` or `Needs review before draft` instead.
+
+3. Citation and annotation preflight.
+   - Block `Mark Ready` until the selected document has at least one source-supported item: cited excerpt, annotation, or citation-grounded answer.
+   - Show the preflight result next to the confirmation action, not in a separate diagnostic region.
+   - Distinguish document labeling readiness from filing/export readiness.
+
+4. Docket-scoped Chat contract.
+   - Keep a persistent, high-contrast scope banner above the composer before send, during loading, after failure, and after answer: `Answering from: [selected document title]`.
+   - Show source/type, selected-document id or docket item id, and the prepared question near the composer.
+   - Render answer cards with citation chips or an explicit `No document citation found` state.
+   - Add visible router states: `Analyzing selected filing`, `Router retrying`, `Fallback model used`, and actionable failure controls for retry, ask generally, return to Docket, and reselect document.
+
+5. Save-back model.
+   - Saving an answer must require an explicit destination: label, annotation, deadline, issue, evidence task, or draft note.
+   - After save, Docket must show the selected document id/title, destination, and timestamp.
+   - Uncited answers may be saved only as general notes, not as grounded evidence or citation-backed labels.
+
+6. Only then first selected-document ready-confirmation write.
+   - The first persistence slice should be ready confirmation only.
+   - Label, annotation, answer-save, deadline-save, and draft-note writes remain separate later slices behind the same state and router-failure patterns.
+
+Stop lines for implementation:
+
+- No `Ready For Draft` state may appear while any underlying OCR, router, citation, or review checks are unchecked.
+- No readiness card may show both ready and missing/blocked copy at the same time.
+- No chat answer may offer a grounded-evidence save unless selected document, citation/source status, destination, and persistence status are all visible.
+- No label, annotation, deadline, answer-save, or draft-note persistence should ship until router timeout/failure states have retry and fallback controls.
+
+Playwright acceptance for the next implementation pass:
+
+- Assert that ready and missing readiness messages never coexist on the selected-document gate.
+- Assert that `Mark Ready` is disabled until citation, annotation, or source-supported answer preflight passes.
+- Assert that the selected-document scope banner remains visible before send, during loading, after router failure, and after answer.
+- Simulate router timeout/failure and assert retry, ask generally, return to Docket, and reselect controls.
+- Assert that a cited answer can be saved to an explicit destination and that an uncited answer cannot be saved as grounded evidence.
+- Assert that save-back updates the Docket selected-document status with document id/title and timestamp.
+- Assert that mobile Docket Chat keeps the selected document and composer in the same first working viewport.
+- Assert that desktop Docket does not show `Ready For Draft` when OCR, router, citation, or review checks are incomplete.
+
+Definition of done for plan clearance:
+
+- Fresh screenshots cover mobile Docket pre-chat, mobile Docket chat-started, mobile impact-summary-ready, desktop selected-document Docket, and desktop/mobile Docket Chat before-send, failure, cited-answer, and saved states.
+- Router review reports no high-severity findings for contradictory readiness, hidden document scope, missing router recovery, or missing citation gating.
+- Selected-document persistence remains closed until that screenshot/router review clears.

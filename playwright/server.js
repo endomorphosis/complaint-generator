@@ -1886,27 +1886,49 @@ function ipfsTemplate(name) {
 
 const laypersonDashboardCards = [
   {
-    stage: 'Path 1',
+    stepNumber: 1,
+    stage: 'Step 1',
     workflowStage: 'Intake',
+    stepLabel: 'Step 1: Intake',
     title: 'Start your complaint',
-    description: 'Answer guided questions, describe what happened, and turn your story into a timeline, people, harms, possible claims, and proof tasks.',
-    primaryLabel: 'Open intake path',
+    description: 'Answer guided questions so the workspace has the story, people, dates, harms, and possible claims.',
+    primaryLabel: 'Start Intake Questions',
     primaryHref: '/chat',
     detailLabel: 'See intake details',
+    stateLabel: 'Current',
+    stateKind: 'current',
+    stepperText: 'Step 1: Intake',
+    statusText: 'Current: start here',
+    unlockReason: 'Ready now',
+    prerequisites: [
+      ['Current', 'Ready now'],
+      ['Next', 'Save facts before evidence or draft work'],
+    ],
     links: [
-      ['Check proof gaps', '/claim-support-review'],
-      ['See next step', '#dashboard-start-here'],
+      ['Check proof gaps later', '/claim-support-review'],
       ['Build a draft later', '/document'],
     ],
   },
   {
-    stage: 'Path 2',
+    stepNumber: 2,
+    stage: 'Step 2',
     workflowStage: 'Evidence',
+    stepLabel: 'Step 2: Evidence',
     title: 'Continue your complaint',
-    description: 'Return to saved work, add documents or messages, organize evidence, add laws and court cases, and keep the record together for review.',
-    primaryLabel: 'Continue saved complaint',
+    description: 'Resume saved work and add documents, laws, or court cases.',
+    primaryLabel: 'Resume evidence workspace',
     primaryHref: '/workspace',
     detailLabel: 'See evidence and saved-work details',
+    stateLabel: 'Locked',
+    stateKind: 'locked',
+    stepperText: 'Step 2: Evidence',
+    statusText: 'Locked: complete Step 1 first',
+    locked: true,
+    lockedLabel: 'Locked',
+    unlockReason: 'Complete Step 1: Intake to unlock Evidence',
+    prerequisites: [
+      ['Locked', 'Complete Step 1: Intake to unlock Evidence'],
+    ],
     links: [
       ['Add evidence', '/workspace?stage=evidence'],
       ['Organize materials', '/workspace?stage=integrations'],
@@ -1914,27 +1936,48 @@ const laypersonDashboardCards = [
     ],
   },
   {
-    stage: 'Path 3',
+    stepNumber: 3,
+    stage: 'Step 3',
     workflowStage: 'Review',
+    stepLabel: 'Step 3: Review',
     title: 'Review a court docket or response',
-    description: 'Look through filings, deadlines, hearing dates, orders, or an existing complaint/response and bring useful facts back into the workspace.',
-    primaryLabel: 'Review docket or filing',
+    description: 'Inspect filings, deadlines, orders, or a response document.',
+    primaryLabel: 'Open docket review',
     primaryHref: '/workspace?stage=docket&intent=review_docket',
     detailLabel: 'See docket review details',
+    stateLabel: 'Locked',
+    stateKind: 'locked',
+    stepperText: 'Step 3: Review',
+    statusText: 'Locked: add a docket file',
+    locked: true,
+    lockedLabel: 'Locked',
+    unlockReason: 'Add a docket file to unlock Review',
+    prerequisites: [
+      ['Locked', 'Add a docket file to unlock Review'],
+    ],
     links: [
       ['Ask about a filing', '/chat?chat_context=docket_document'],
       ['Add labels or notes', '/workspace?stage=integrations&intent=annotate_documents'],
       ['Open docket tools', '#dashboard-advanced-tools'],
     ],
   },
+];
+
+const dashboardUtilityCards = [
   {
-    stage: 'Path 4',
+    stage: 'Utility',
     workflowStage: 'Profile',
     title: 'Manage your profile',
-    description: 'Review the personal and session information used to resume your work. Technical tools stay separate from the complaint path.',
+    description: 'Check personal and session information used to resume work.',
     primaryLabel: 'Open profile',
     primaryHref: '/profile',
     detailLabel: 'See profile and session details',
+    stateLabel: 'Optional',
+    stateKind: 'utility',
+    prerequisites: [
+      ['Optional', 'Use for identity and saved context'],
+      ['Next', 'Check session information'],
+    ],
     links: [
       ['Cookies', '/cookies'],
       ['Saved work', '/workspace'],
@@ -1966,13 +2009,6 @@ const dashboardSubsectionCards = [
   },
 ];
 
-const dashboardStageRail = [
-  ['Intake', 'Current', 'Explain what happened first.'],
-  ['Evidence', 'Ready', 'Add documents after the core story is saved.'],
-  ['Review', 'Ready', 'Check proof gaps when facts and documents are ready.'],
-  ['Draft', 'Later', 'Build after facts and sources are ready.'],
-];
-
 function withDashboardContext(href, searchParams) {
   const userId = searchParams && searchParams.get('user_id');
   if (!userId || href.startsWith('#') || href.startsWith('/cookies')) {
@@ -1989,31 +2025,33 @@ function renderLinkRow(links, searchParams) {
 }
 
 function renderDashboardHub(searchParams = new URLSearchParams()) {
-  const entryCards = laypersonDashboardCards.map((card, index) => {
+  const currentStep = laypersonDashboardCards.find((card) => card.stateKind === 'current') || laypersonDashboardCards[0];
+  const entryCards = laypersonDashboardCards.filter((card) => card.stateKind !== 'current').map((card) => {
+    return `<li class="unlock-row" data-path-state="${escapeXml(card.stateKind || 'locked')}">
+      <strong>${escapeXml(card.stepLabel)} locked:</strong>
+      <span>${escapeXml(card.unlockReason || card.statusText || 'Locked')}</span>
+    </li>`;
+  }).join('');
+  const utilityCards = dashboardUtilityCards.map((card) => {
+    const prerequisiteMarkup = (card.prerequisites || []).map(([label, text]) => (
+      `<div class="prerequisite-next-line"><strong>${escapeXml(label)}</strong>${escapeXml(text)}</div>`
+    )).join('');
     const extraMarkup = card.links.length
-      ? `<details class="card-more-actions"><summary>${escapeXml(card.detailLabel)}</summary><div class="link-row">${renderLinkRow(card.links, searchParams)}</div></details>`
+      ? `<details class="card-more-actions"><summary><span>${escapeXml(card.detailLabel)}</span><span class="disclosure-cue">Expand</span></summary><div class="link-row">${renderLinkRow(card.links, searchParams)}</div></details>`
       : '';
-    const cardState = index === 0 ? 'recommended' : (index === 3 ? 'utility' : 'available');
-    const stateLabel = index === 0 ? 'Current' : (index === 3 ? 'Optional' : 'Ready');
-    return `<article class="entry-card is-${cardState}" data-path-state="${cardState}">
+    return `<article class="entry-card is-utility" data-path-state="utility">
       <div class="stage-label">${escapeXml(card.stage)}</div>
-      <span class="path-state-label">${escapeXml(stateLabel)}</span>
+      <span class="path-state-label">${escapeXml(card.stateLabel || 'Optional')}</span>
       <span class="path-stage-chip">Stage: ${escapeXml(card.workflowStage)}</span>
       <h3>${escapeXml(card.title)}</h3>
       <p>${escapeXml(card.description)}</p>
+      <div class="prerequisite-row" aria-label="${escapeXml(card.title)} prerequisites">${prerequisiteMarkup}</div>
       <div class="card-action-row">
         <a class="switch-action" href="${escapeXml(withDashboardContext(card.primaryHref, searchParams))}">${escapeXml(card.primaryLabel)}</a>
       </div>
       ${extraMarkup}
     </article>`;
   }).join('');
-  const stageRail = dashboardStageRail.map(([stage, state, detail], index) => (
-    `<div class="stage-progress-card${index === 0 ? ' is-current' : ''}">
-      <span class="stage-progress-state">${escapeXml(state)}</span>
-      <strong>${escapeXml(stage)}</strong>
-      <span>${escapeXml(detail)}</span>
-    </div>`
-  )).join('');
   const subsectionCards = dashboardSubsectionCards.map((card) => (
     `<article class="subsection-card">
       <h3>${escapeXml(card.title)}</h3>
@@ -2042,7 +2080,7 @@ function renderDashboardHub(searchParams = new URLSearchParams()) {
       --bg: #f5f3ec;
       --surface: #fffefa;
       --ink: #172231;
-      --muted: #526271;
+      --muted: #394958;
       --line: rgba(23, 34, 49, 0.13);
       --accent: #125c63;
       --accent-strong: #0d4449;
@@ -2051,52 +2089,84 @@ function renderDashboardHub(searchParams = new URLSearchParams()) {
     }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: Arial, sans-serif; background: var(--bg); color: var(--ink); }
-    header { background: #18384f; color: white; padding: 28px 32px; }
-    header p { color: rgba(255,255,255,0.86); max-width: 76ch; }
+    header { background: #18384f; color: white; padding: 22px 32px; }
+    header p { color: rgba(255,255,255,0.9); max-width: 58ch; }
     main { max-width: 1240px; margin: 0 auto; padding: 28px 24px 48px; display: grid; gap: 22px; }
     h1, h2, h3, p { margin-top: 0; }
     p, span { color: var(--muted); line-height: 1.45; }
     a { color: var(--accent-strong); font-weight: 700; }
-    .hero, .section, details { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 22px; box-shadow: 0 12px 26px rgba(23, 34, 49, 0.07); }
-    .hero { display: grid; gap: 14px; }
-    .safety-note { border-left: 4px solid var(--warn); background: rgba(154, 75, 25, 0.08); border-radius: 8px; padding: 12px 14px; }
-    .recommended-action-panel { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; background: white; border: 2px solid rgba(18, 92, 99, 0.25); border-radius: 8px; padding: 16px; }
+    .section, details { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 22px; box-shadow: 0 12px 26px rgba(23, 34, 49, 0.07); }
+    .hero { display: grid; gap: 14px; padding: 0; background: transparent; border: 0; box-shadow: none; }
+    .safety-note { border-left: 4px solid rgba(154, 75, 25, 0.70); background: rgba(154, 75, 25, 0.07); border-radius: 8px; padding: 10px 12px; font-size: 0.94rem; color: var(--ink); }
+    .recommended-action-panel { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; background: white; border: 3px solid rgba(18, 92, 99, 0.45); border-radius: 8px; padding: 20px; box-shadow: 0 14px 30px rgba(18, 92, 99, 0.13); }
     .recommended-action-panel h3 { margin: 0; }
     .recommended-action-panel p { margin: 6px 0 0; }
-    .stage-progress-rail { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(150px, 1fr)); }
-    .stage-progress-card { display: grid; gap: 5px; background: rgba(23, 34, 49, 0.04); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
-    .stage-progress-card.is-current { background: rgba(18, 92, 99, 0.08); border-color: rgba(18, 92, 99, 0.28); }
-    .stage-progress-card strong { color: var(--ink); }
-    .stage-progress-card span { font-size: 0.88rem; }
-    .stage-progress-state { width: fit-content; border-radius: 999px; padding: 3px 8px; background: white; color: var(--accent-strong); font-weight: 800; }
-    .entry-grid, .subsection-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(240px, 1fr)); }
+    .entry-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(260px, 1fr)); }
+    .unlock-list { display: grid; gap: 8px; padding: 12px 14px; border-left: 4px solid rgba(82, 82, 91, 0.44); background: rgba(255, 255, 255, 0.62); }
+    .unlock-list-title { margin: 0; color: var(--ink); font-weight: 900; }
+    .unlock-action-note { margin: 0; color: var(--ink); font-weight: 800; }
+    .unlock-list ul { margin: 0; padding-left: 20px; }
+    .unlock-row { margin: 6px 0; color: #52525b; }
+    .unlock-row strong { color: #3f3f46; }
+    .unlock-row span { color: #52525b; font-size: 0.92rem; font-weight: 800; }
+    .subsection-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(240px, 1fr)); }
     .entry-card, .subsection-card { display: grid; gap: 10px; align-content: start; background: white; border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
-    .entry-card.is-recommended { border: 2px solid rgba(18, 92, 99, 0.35); background: rgba(18, 92, 99, 0.045); }
-    .entry-card.is-available, .entry-card.is-utility { background: rgba(255, 255, 255, 0.72); }
-    .path-state-label { width: fit-content; border-radius: 999px; padding: 4px 8px; background: rgba(23, 34, 49, 0.06); color: var(--ink); font-size: 0.78rem; font-weight: 800; }
-    .entry-card.is-recommended .path-state-label { background: rgba(18, 92, 99, 0.12); color: var(--accent-strong); }
-    .path-stage-chip { width: fit-content; color: var(--accent-strong); font-size: 0.86rem; font-weight: 800; }
+    .entry-card.is-current { border: 2px solid rgba(18, 92, 99, 0.34); background: rgba(18, 92, 99, 0.045); }
+    .entry-card.is-available, .entry-card.is-utility, .entry-card.is-waiting, .entry-card.is-locked { background: rgba(255, 255, 255, 0.72); }
+    .entry-card.is-waiting { border-color: rgba(82, 82, 91, 0.18); background: rgba(250, 250, 250, 0.72); box-shadow: none; }
+    .entry-card.is-waiting h3,
+    .entry-card.is-waiting .path-stage-chip { color: #3f3f46; }
+    .entry-card.is-waiting .path-state-label { background: rgba(82, 82, 91, 0.12); color: #3f3f46; }
+    .entry-card.is-locked { border-color: rgba(82, 82, 91, 0.20); background: rgba(250, 250, 250, 0.72); box-shadow: none; }
+    .entry-card.later-step { opacity: 0.82; }
+    .entry-card.is-locked h3,
+    .entry-card.is-locked .path-stage-chip { color: #3f3f46; }
+    .entry-card.is-locked .path-state-label { background: rgba(82, 82, 91, 0.12); color: #3f3f46; }
+    .path-state-label { width: fit-content; border-radius: 999px; padding: 5px 9px; background: rgba(23, 34, 49, 0.10); color: var(--ink); font-size: 0.84rem; font-weight: 900; }
+    .entry-card.is-current .path-state-label { background: rgba(18, 92, 99, 0.12); color: var(--accent-strong); }
+    .path-stage-chip { width: fit-content; border-radius: 999px; padding: 4px 8px; background: rgba(18, 92, 99, 0.09); color: var(--accent-strong); font-size: 0.88rem; font-weight: 900; }
+    .prerequisite-row { display: grid; gap: 5px; }
+    .prerequisite-status-line, .prerequisite-next-line { display: block; color: var(--ink); font-size: 0.95rem; line-height: 1.35; }
+    .prerequisite-status-line { padding: 10px 12px; border-radius: 8px; background: rgba(18, 92, 99, 0.11); border: 2px solid rgba(18, 92, 99, 0.20); font-weight: 700; }
+    .entry-card.is-waiting .prerequisite-status-line { background: rgba(244, 244, 245, 0.95); border-color: rgba(82, 82, 91, 0.16); }
+    .prerequisite-next-line { color: var(--muted); }
+    .prerequisite-status-line strong, .prerequisite-next-line strong { color: var(--accent-strong); margin-right: 6px; }
+    .entry-card.is-locked .prerequisite-status-line strong { color: #7c2d12; }
+    .card-status-copy { color: var(--ink); font-weight: 800; margin: 0; }
     .stage-label { color: var(--accent-strong); font-size: 0.76rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
     .primary-action, .jump-link { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 999px; padding: 10px 14px; text-decoration: none; }
-    .primary-action { background: var(--accent); color: white; width: fit-content; }
+    .primary-action { background: var(--accent-strong); color: white; width: fit-content; min-width: 270px; min-height: 54px; font-size: 1.05rem; box-shadow: 0 16px 28px rgba(13, 68, 73, 0.30); }
+    .primary-action-stack { display: grid; justify-items: end; gap: 7px; }
+    .primary-action-note { color: var(--accent-strong); font-size: 0.9rem; font-weight: 800; }
     .jump-link { background: rgba(18, 92, 99, 0.08); border: 1px solid rgba(18, 92, 99, 0.16); }
-    .switch-action { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 999px; padding: 10px 14px; text-decoration: none; background: white; border: 1px solid rgba(18, 92, 99, 0.28); color: var(--accent-strong); }
+    .switch-action { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; border-radius: 999px; padding: 10px 14px; text-decoration: none; background: white; border: 1px solid rgba(18, 92, 99, 0.34); color: var(--accent-strong); width: fit-content; }
+    .switch-action.is-disabled { border-color: rgba(82, 82, 91, 0.24); background: rgba(244, 244, 245, 0.96); color: #52525b; cursor: not-allowed; font-weight: 800; }
+    .locked-action { margin: 0; color: #52525b; font-size: 0.9rem; font-weight: 900; }
+    .locked-action::before { content: 'Locked: '; }
+    .unlock-line { flex-basis: 100%; color: #7c2d12; font-size: 0.9rem; font-weight: 800; line-height: 1.35; }
     .link-row, .card-action-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .card-more-actions { padding: 0; border: 0; box-shadow: none; background: transparent; }
-    .card-more-actions > summary { font-size: 0.95rem; color: var(--accent-strong); min-height: 40px; border: 1px solid rgba(18, 92, 99, 0.16); border-radius: 999px; padding: 8px 12px; width: fit-content; background: rgba(18, 92, 99, 0.06); }
+    .card-more-actions > summary { justify-content: space-between; font-size: 0.95rem; color: var(--accent-strong); min-height: 44px; border: 2px solid rgba(18, 92, 99, 0.22); border-radius: 8px; padding: 8px 12px; width: 100%; background: rgba(18, 92, 99, 0.07); }
+    .card-more-actions > summary::before, #dashboard-subsection-index > summary::before, #dashboard-advanced-tools > summary::before { content: '>'; font-weight: 900; color: var(--accent-strong); }
+    .card-more-actions[open] > summary::before, #dashboard-subsection-index[open] > summary::before, #dashboard-advanced-tools[open] > summary::before { transform: rotate(90deg); }
     .card-more-actions .link-row { margin-top: 8px; }
-    details > summary { cursor: pointer; font-size: 1.08rem; font-weight: 800; color: var(--ink); min-height: 44px; display: flex; align-items: center; gap: 10px; }
+    details > summary { cursor: pointer; font-size: 1.08rem; font-weight: 900; color: var(--ink); min-height: 48px; display: flex; align-items: center; gap: 10px; }
+    details > summary:hover, details > summary:focus-visible { outline: 2px solid rgba(18, 92, 99, 0.28); outline-offset: 2px; }
+    .disclosure-cue { margin-left: auto; border-radius: 999px; padding: 3px 8px; background: white; border: 1px solid rgba(18, 92, 99, 0.18); color: var(--accent-strong); font-size: 0.78rem; font-weight: 900; }
     .summary-count { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; background: rgba(18, 92, 99, 0.10); color: var(--accent-strong); font-size: 0.78rem; font-weight: 800; }
+    .summary-preview { margin: 0 0 14px; max-width: 76ch; }
     ul { margin-bottom: 0; padding-left: 20px; }
     li { margin: 10px 0; }
     li span { display: block; margin-top: 3px; }
-    .mode-chip { display: inline-flex; width: fit-content; border-radius: 999px; padding: 6px 10px; background: rgba(34, 106, 75, 0.11); color: var(--good); font-weight: 800; }
+    .mode-chip { display: inline-flex; width: fit-content; border-radius: 999px; padding: 6px 10px; background: rgba(240, 253, 244, 0.18); color: #d7ffe9; font-weight: 900; }
     @media (max-width: 760px) {
       header { padding: 22px 20px; }
       main { padding: 18px 14px 34px; }
       .entry-grid, .subsection-grid { grid-template-columns: 1fr; }
-      .stage-progress-rail { grid-template-columns: 1fr; }
       .recommended-action-panel { grid-template-columns: 1fr; }
+      .primary-action-stack { justify-items: stretch; }
+      .primary-action { width: 100%; }
+      .progress-rule-strip { display: grid; grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -2104,32 +2174,36 @@ function renderDashboardHub(searchParams = new URLSearchParams()) {
   <header>
     <span class="mode-chip">Layperson complaint workspace</span>
     <h1>Unified Dashboard Hub</h1>
-    <p>Choose the plain-language path that matches what you need to do next. Technical package consoles stay available in Advanced Operations, but the main page starts with complaint, docket, evidence, and profile work.</p>
+    <p>Start Intake, then unlock Evidence and Review.</p>
   </header>
   <main>
     <section class="hero" id="dashboard-start-here">
-      <h2>What are you trying to do right now?</h2>
-      <p>Start with the safest next step. The same saved complaint context can move between guided questions, workspace evidence, docket review, claim-support review, and drafting.</p>
-      <div class="safety-note"><strong>Important:</strong> This tool helps organize facts, documents, and draft text. It does not provide legal advice or decide whether you should file.</div>
+      <h2>Start your complaint</h2>
       <div class="recommended-action-panel" id="dashboard-recommended-action-panel" aria-label="Recommended next action">
         <div>
-          <div class="stage-label">Recommended next step</div>
+          <div class="stage-label">${escapeXml(currentStep.stepLabel || 'Step 1: Intake')}</div>
           <h3 id="dashboard-recommended-action-title">Explain what happened</h3>
-          <p id="dashboard-recommended-action-reason">Begin with guided questions so the workspace has the story, people, dates, harms, and possible claims.</p>
+          <p id="dashboard-recommended-action-reason">${escapeXml(currentStep.description)}</p>
         </div>
-        <a class="primary-action" id="dashboard-recommended-action-link" href="${escapeXml(withDashboardContext('/chat', searchParams))}">Explain what happened</a>
+        <div class="primary-action-stack">
+          <a class="primary-action" id="dashboard-recommended-action-link" href="${escapeXml(withDashboardContext(currentStep.primaryHref, searchParams))}">${escapeXml(currentStep.primaryLabel)}</a>
+          <span class="primary-action-note">Opens guided questions and creates your workspace session</span>
+        </div>
       </div>
-      <div class="stage-progress-rail" id="dashboard-stage-progress" aria-label="Complaint workflow progress">
-        ${stageRail}
+      <div class="unlock-list" id="dashboard-entry-paths" aria-label="Locked later steps">
+        <p class="unlock-list-title">What unlocks after Intake</p>
+        <p class="unlock-action-note">Use the Start Intake Questions button above to unlock the next workspace steps.</p>
+        <ul>${entryCards}</ul>
       </div>
+      <div class="safety-note"><strong>Important:</strong> This tool helps organize facts, documents, and draft text. It does not provide legal advice or decide whether you should file.</div>
     </section>
-    <section class="section" aria-label="Primary complaint paths">
-      <h2>Choose a path</h2>
-      <div class="entry-grid" id="dashboard-entry-paths">${entryCards}</div>
+    <section class="section" aria-label="Profile and saved context">
+      <h2>Profile and saved context</h2>
+      <div class="entry-grid utility-grid" id="dashboard-utility-paths">${utilityCards}</div>
     </section>
-    <details class="section" id="dashboard-subsection-index">
+    <details class="section" id="dashboard-subsection-index" open>
       <summary>Find the right tool <span class="summary-count">4 tool groups</span></summary>
-      <p>Use these shortcuts when you already know which part of the complaint workflow needs attention.</p>
+      <p class="summary-preview">Use these shortcuts when you already know which part of the complaint workflow needs attention, including AI-assisted questions about docket documents.</p>
       <div class="subsection-grid">${subsectionCards}</div>
     </details>
     <details id="dashboard-advanced-tools">
