@@ -1166,6 +1166,16 @@ Dashboard gate continuation, second review:
 - The router still does not clear the dashboard gate. Current high findings are all presentation/state-signaling issues: locked cards still read too active, prerequisite text is duplicated, and mobile Step 2 lock affordance is weak.
 - Planning decision: do not start selected-document persistence. The next prerequisite should simplify the hub into one visible first-action panel and one lower-priority locked-state explanation, with no duplicate Step 1 card and no active-looking locked controls.
 
+Dashboard gate continuation, third review:
+
+- Reworked the hub into one explicit Intake/Evidence/Review stage-control grid. Intake is the only enabled action (`Start Intake Questions`); Evidence and Review render as disabled stage controls with inline `To unlock:` text and disabled button labels.
+- Tightened the mobile spacing so the disabled controls take less vertical room, and fixed the desktop Intake text squeeze by stacking the active card content.
+- Refreshed `dashboard-hub-desktop.png`, `dashboard-hub-mobile.png`, and `dashboard-hub-router-review.json` in `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/`.
+- Router path: `page_reviews`, provider `codex_cli`, model `gpt-5.3-codex`, aliases `llm_router` / `multimodal_router`, `route_alias_resolved: true`, selected both dashboard screenshots, skipped `0`.
+- Verification: `npx playwright test playwright/tests/navigation.spec.js --grep 'dashboard|document and dashboard'` passes.
+- The router still does not clear the dashboard gate. Remaining high findings: disabled Evidence/Review controls still read too much like primary actions, the Profile section creates large empty whitespace, and mobile still needs clearer unlock timing/action guidance.
+- Selected-document persistence remains gated. The next prerequisite should demote or collapse Profile on the hub and redesign locked stages as secondary progress/status rows that still expose explicit disabled semantics.
+
 April 28 selected-document and Docket Chat review addendum:
 
 - Reviewed the broader Dashboard, Docket, selected-document, readiness, and Docket-scoped Chat states with Playwright screenshots routed through the `multimodal_router` alias. The alias resolved to `page_reviews` through `codex_cli / gpt-5.3-codex`, with `route_alias_resolved: true`.

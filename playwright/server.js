@@ -1925,6 +1925,7 @@ const laypersonDashboardCards = [
     statusText: 'Locked: complete Step 1 first',
     locked: true,
     lockedLabel: 'Locked',
+    lockedActionLabel: 'Disabled: complete Step 1 first',
     unlockReason: 'Complete Step 1: Intake to unlock Evidence',
     prerequisites: [
       ['Locked', 'Complete Step 1: Intake to unlock Evidence'],
@@ -1951,6 +1952,7 @@ const laypersonDashboardCards = [
     statusText: 'Locked: add a docket file',
     locked: true,
     lockedLabel: 'Locked',
+    lockedActionLabel: 'Disabled: add a docket file',
     unlockReason: 'Add a docket file to unlock Review',
     prerequisites: [
       ['Locked', 'Add a docket file to unlock Review'],
@@ -2025,12 +2027,26 @@ function renderLinkRow(links, searchParams) {
 }
 
 function renderDashboardHub(searchParams = new URLSearchParams()) {
-  const currentStep = laypersonDashboardCards.find((card) => card.stateKind === 'current') || laypersonDashboardCards[0];
-  const entryCards = laypersonDashboardCards.filter((card) => card.stateKind !== 'current').map((card) => {
-    return `<li class="unlock-row" data-path-state="${escapeXml(card.stateKind || 'locked')}">
-      <strong>${escapeXml(card.stepLabel)} locked:</strong>
-      <span>${escapeXml(card.unlockReason || card.statusText || 'Locked')}</span>
-    </li>`;
+  const stageControls = laypersonDashboardCards.map((card) => {
+    if (card.locked) {
+      return `<article class="stage-control is-locked" data-path-state="${escapeXml(card.stateKind || 'locked')}" aria-label="${escapeXml(card.stepLabel)} locked">
+        <div class="stage-label">${escapeXml(card.stepLabel)}</div>
+        <h3>${escapeXml(card.workflowStage)}</h3>
+        <p><strong>To unlock:</strong> ${escapeXml(card.unlockReason || card.statusText || 'Locked')}</p>
+        <button class="stage-control-action" type="button" disabled aria-disabled="true">${escapeXml(card.lockedActionLabel || 'Disabled until prerequisite is complete')}</button>
+      </article>`;
+    }
+    return `<article class="stage-control is-current recommended-action-panel" id="dashboard-recommended-action-panel" data-path-state="${escapeXml(card.stateKind || 'current')}" aria-label="Recommended next action">
+      <div>
+        <div class="stage-label">${escapeXml(card.stepLabel || 'Step 1: Intake')}</div>
+        <h3 id="dashboard-recommended-action-title">Explain what happened</h3>
+        <p id="dashboard-recommended-action-reason">${escapeXml(card.description)}</p>
+      </div>
+      <div class="primary-action-stack">
+        <a class="primary-action" id="dashboard-recommended-action-link" href="${escapeXml(withDashboardContext(card.primaryHref, searchParams))}">${escapeXml(card.primaryLabel)}</a>
+        <span class="primary-action-note">Opens guided questions and creates your workspace session</span>
+      </div>
+    </article>`;
   }).join('');
   const utilityCards = dashboardUtilityCards.map((card) => {
     const prerequisiteMarkup = (card.prerequisites || []).map(([label, text]) => (
@@ -2098,17 +2114,19 @@ function renderDashboardHub(searchParams = new URLSearchParams()) {
     .section, details { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 22px; box-shadow: 0 12px 26px rgba(23, 34, 49, 0.07); }
     .hero { display: grid; gap: 14px; padding: 0; background: transparent; border: 0; box-shadow: none; }
     .safety-note { border-left: 4px solid rgba(154, 75, 25, 0.70); background: rgba(154, 75, 25, 0.07); border-radius: 8px; padding: 10px 12px; font-size: 0.94rem; color: var(--ink); }
-    .recommended-action-panel { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; background: white; border: 3px solid rgba(18, 92, 99, 0.45); border-radius: 8px; padding: 20px; box-shadow: 0 14px 30px rgba(18, 92, 99, 0.13); }
+    .recommended-action-panel { display: grid; gap: 14px; grid-template-columns: 1fr; align-items: start; background: white; border: 3px solid rgba(18, 92, 99, 0.45); border-radius: 8px; padding: 20px; box-shadow: 0 14px 30px rgba(18, 92, 99, 0.13); }
     .recommended-action-panel h3 { margin: 0; }
     .recommended-action-panel p { margin: 6px 0 0; }
+    .stage-control-grid { display: grid; gap: 12px; grid-template-columns: minmax(320px, 1.3fr) repeat(2, minmax(220px, 0.85fr)); align-items: stretch; }
+    .stage-control { display: grid; gap: 10px; align-content: start; border-radius: 8px; padding: 18px; border: 1px solid var(--line); background: white; }
+    .stage-control h3 { margin: 0; }
+    .stage-control p { margin: 0; }
+    .stage-control.is-locked { background: rgba(244, 244, 245, 0.82); color: #52525b; border-color: rgba(82, 82, 91, 0.28); box-shadow: none; }
+    .stage-control.is-locked h3,
+    .stage-control.is-locked p,
+    .stage-control.is-locked .stage-label { color: #52525b; }
+    .stage-control-action { width: 100%; min-height: 38px; border-radius: 999px; padding: 8px 12px; border: 1px solid rgba(82, 82, 91, 0.32); background: #e4e4e7; color: #3f3f46; font-weight: 900; cursor: not-allowed; }
     .entry-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(260px, 1fr)); }
-    .unlock-list { display: grid; gap: 8px; padding: 12px 14px; border-left: 4px solid rgba(82, 82, 91, 0.44); background: rgba(255, 255, 255, 0.62); }
-    .unlock-list-title { margin: 0; color: var(--ink); font-weight: 900; }
-    .unlock-action-note { margin: 0; color: var(--ink); font-weight: 800; }
-    .unlock-list ul { margin: 0; padding-left: 20px; }
-    .unlock-row { margin: 6px 0; color: #52525b; }
-    .unlock-row strong { color: #3f3f46; }
-    .unlock-row span { color: #52525b; font-size: 0.92rem; font-weight: 800; }
     .subsection-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(240px, 1fr)); }
     .entry-card, .subsection-card { display: grid; gap: 10px; align-content: start; background: white; border: 1px solid var(--line); border-radius: 8px; padding: 18px; }
     .entry-card.is-current { border: 2px solid rgba(18, 92, 99, 0.34); background: rgba(18, 92, 99, 0.045); }
@@ -2161,11 +2179,17 @@ function renderDashboardHub(searchParams = new URLSearchParams()) {
     .mode-chip { display: inline-flex; width: fit-content; border-radius: 999px; padding: 6px 10px; background: rgba(240, 253, 244, 0.18); color: #d7ffe9; font-weight: 900; }
     @media (max-width: 760px) {
       header { padding: 22px 20px; }
-      main { padding: 18px 14px 34px; }
+      main { padding: 14px 12px 30px; gap: 14px; }
       .entry-grid, .subsection-grid { grid-template-columns: 1fr; }
-      .recommended-action-panel { grid-template-columns: 1fr; }
+      .stage-control-grid { grid-template-columns: 1fr; }
+      .recommended-action-panel { grid-template-columns: 1fr; padding: 14px; gap: 10px; }
+      .stage-control { padding: 12px; gap: 7px; }
+      .stage-control.is-locked { gap: 6px; }
+      .stage-control h3 { font-size: 1rem; }
+      .stage-control p { font-size: 0.92rem; line-height: 1.32; }
+      .stage-control-action { min-height: 34px; padding: 6px 10px; border-radius: 8px; }
       .primary-action-stack { justify-items: stretch; }
-      .primary-action { width: 100%; }
+      .primary-action { width: 100%; min-height: 46px; }
       .progress-rule-strip { display: grid; grid-template-columns: 1fr; }
     }
   </style>
@@ -2179,22 +2203,7 @@ function renderDashboardHub(searchParams = new URLSearchParams()) {
   <main>
     <section class="hero" id="dashboard-start-here">
       <h2>Start your complaint</h2>
-      <div class="recommended-action-panel" id="dashboard-recommended-action-panel" aria-label="Recommended next action">
-        <div>
-          <div class="stage-label">${escapeXml(currentStep.stepLabel || 'Step 1: Intake')}</div>
-          <h3 id="dashboard-recommended-action-title">Explain what happened</h3>
-          <p id="dashboard-recommended-action-reason">${escapeXml(currentStep.description)}</p>
-        </div>
-        <div class="primary-action-stack">
-          <a class="primary-action" id="dashboard-recommended-action-link" href="${escapeXml(withDashboardContext(currentStep.primaryHref, searchParams))}">${escapeXml(currentStep.primaryLabel)}</a>
-          <span class="primary-action-note">Opens guided questions and creates your workspace session</span>
-        </div>
-      </div>
-      <div class="unlock-list" id="dashboard-entry-paths" aria-label="Locked later steps">
-        <p class="unlock-list-title">What unlocks after Intake</p>
-        <p class="unlock-action-note">Use the Start Intake Questions button above to unlock the next workspace steps.</p>
-        <ul>${entryCards}</ul>
-      </div>
+      <div class="stage-control-grid" id="dashboard-entry-paths" aria-label="Complaint stage controls">${stageControls}</div>
       <div class="safety-note"><strong>Important:</strong> This tool helps organize facts, documents, and draft text. It does not provide legal advice or decide whether you should file.</div>
     </section>
     <section class="section" aria-label="Profile and saved context">

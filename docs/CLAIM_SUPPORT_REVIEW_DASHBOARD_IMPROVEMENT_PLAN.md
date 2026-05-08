@@ -1793,6 +1793,16 @@ Dashboard gate continuation, second review:
 - The router still holds the dashboard gate. Remaining high findings are not backend blockers; they are UI hierarchy blockers: locked cards still look too active, prerequisite text repeats in competing locations, and the mobile locked-step affordance is not strong enough for layperson confidence.
 - The next plan improvement should simplify the Dashboard Hub before persistence work: one obvious Intake CTA, one compact stage-status strip, and a clearly secondary locked-state explanation that cannot be mistaken for enabled navigation.
 
+Dashboard gate continuation, third review:
+
+- Reworked the hub into a single stateful stage-control grid: Step 1 Intake is enabled, while Step 2 Evidence and Step 3 Review are disabled controls with inline unlock text.
+- Fixed the desktop Intake text squeeze by stacking the active card content, and compacted the mobile stage cards so the locked controls are less likely to be stranded below the first viewport.
+- Refreshed `dashboard-hub-desktop.png`, `dashboard-hub-mobile.png`, and `dashboard-hub-router-review.json` under `artifacts/mcp-dashboard-ui-review/dashboard-hub-prerequisites-20260428/`.
+- Router path: `page_reviews` through `codex_cli / gpt-5.3-codex`; requested aliases `llm_router` / `multimodal_router`; `route_alias_resolved: true`; selected both screenshots; skipped `0`.
+- Verification: `npx playwright test playwright/tests/navigation.spec.js --grep 'dashboard|document and dashboard'` passes.
+- The router still holds the gate. Remaining high findings: Evidence/Review still visually compete with Intake as disabled primary actions, the Profile utility section looks like empty/missing content, and mobile needs clearer unlock timing/action guidance after Step 1.
+- The selected-document write gate remains closed. The next dashboard prerequisite is to demote Profile and recast locked stages as secondary progress/status rows with explicit disabled semantics but less primary-action weight.
+
 Selected-document and Docket Chat cross-reference:
 
 - The fuller April 28 selected-document/Docket Chat addendum now lives in `docs/LAYPERSON_DOCKET_WORKSPACE_UI_UX_PLAN.md`.
