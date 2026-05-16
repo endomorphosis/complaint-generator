@@ -114,7 +114,7 @@ Operator workflow for testimony capture, document intake, and legal sufficiency 
 
 ### 📝 Mike Legal Document Editing Interface
 
-This repository now includes the `endomorphosis/mike` application as a submodule at `mike/` to provide a stronger legal-document editing interface:
+This repository now includes the `endomorphosis/mike` application as a submodule at `mike/` to provide a stronger legal document editing interface:
 
 - `mike/frontend` - Next.js editor and document workflow UI
 - `mike/backend` - Express API for document processing and persistence
@@ -158,9 +158,10 @@ export BRAVE_SEARCH_API_KEY="your-key"
 
 ### Mike Interface Setup
 
-After initializing submodules, install and run the Mike services:
+Initialize the submodule, then install and run the Mike services:
 
 ```bash
+git submodule update --init --recursive
 npm install --prefix mike/backend
 npm install --prefix mike/frontend
 npm run dev --prefix mike/backend
