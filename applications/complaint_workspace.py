@@ -5202,8 +5202,17 @@ class ComplaintWorkspaceService:
             ],
         }
 
-    def _check_mike_citation_links(self, state: Dict[str, Any], citation_links: List[Dict[str, Any]]) -> Dict[str, Any]:
-        support_matrix = list((self._build_review(state) or {}).get("support_matrix") or [])
+    def _check_mike_citation_links(
+        self,
+        state: Dict[str, Any],
+        citation_links: List[Dict[str, Any]],
+        *,
+        review: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        review_payload = dict(review or {})
+        if not review_payload:
+            review_payload = self._build_review(state)
+        support_matrix = list((review_payload or {}).get("support_matrix") or [])
 
         def _extract_claim_element_id(item: Mapping[str, Any]) -> str:
             return str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
@@ -5221,13 +5230,13 @@ class ComplaintWorkspaceService:
                 unknown_claim_element_ids.add(claim_element_id)
         citation_to_elements: Dict[str, Set[str]] = {}
         for item in normalized_links:
-            citation_key = str(
-                item.get("citation_id")
-                or item.get("id")
-                or item.get("source_id")
-                or item.get("url")
-                or ""
-            ).strip()
+            # Precedence keeps explicit citation IDs stable before looser source/url fallback keys.
+            citation_key = ""
+            for field in ("citation_id", "id", "source_id", "url"):
+                candidate = str(item.get(field) or "").strip()
+                if candidate:
+                    citation_key = candidate
+                    break
             claim_element_id = _extract_claim_element_id(item)
             if not citation_key or not claim_element_id:
                 continue
@@ -5374,7 +5383,14 @@ class ComplaintWorkspaceService:
             draft["requested_relief"] = [str(item).strip() for item in list(requested_relief or []) if str(item).strip()]
         synced_at = _utc_now()
         normalized_citation_links = [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
-        citation_link_check = self._check_mike_citation_links(state, normalized_citation_links)
+        review_payload = dict(state.get("support_review") or {})
+        if not review_payload:
+            review_payload = self._build_review(state)
+        citation_link_check = self._check_mike_citation_links(
+            state,
+            normalized_citation_links,
+            review=review_payload,
+        )
         draft["updated_at"] = synced_at
         draft["sync_source"] = "mike"
         draft["sync_metadata"] = {

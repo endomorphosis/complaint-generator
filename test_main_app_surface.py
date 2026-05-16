@@ -40,6 +40,8 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     handoff_payload = handoff.json()
     assert handoff_payload["handoff_id"].startswith("mike-handoff-")
     assert handoff_payload["mike"]["launch_url"]
+    claim_element_ids = list((handoff_payload["handoff_payload"]["evidence_context"]["elements"] or {}).keys())
+    assert len(claim_element_ids) >= 2
     mike_status_after_handoff = client.get(
         "/api/complaint-workspace/mike/status",
         params={"user_id": payload["session"]["user_id"]},
@@ -56,8 +58,8 @@ def test_main_app_exposes_unified_complaint_surface_routes():
             "title": "Synced Draft",
             "body": synced_body,
             "citation_links": [
-                {"citation_id": "doc-100", "claim_element_id": "causation"},
-                {"citation_id": "doc-100", "claim_element_id": "harm"},
+                {"citation_id": "doc-100", "claim_element_id": claim_element_ids[0]},
+                {"citation_id": "doc-100", "claim_element_id": claim_element_ids[1]},
                 {"citation_id": "doc-200", "claim_element_id": "unknown"},
             ],
         },
@@ -71,8 +73,9 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert sync_payload["sync_record"]["citation_link_conflict_count"] == 1
     assert sync_payload["sync_record"]["citation_link_has_conflicts"] is True
     assert sync_payload["citation_link_check"]["unknown_claim_element_ids"] == ["unknown"]
+    expected_conflict_elements = sorted([claim_element_ids[0], claim_element_ids[1]])
     assert sync_payload["citation_link_check"]["conflicts"] == [
-        {"citation_id": "doc-100", "claim_element_ids": ["causation", "harm"]}
+        {"citation_id": "doc-100", "claim_element_ids": expected_conflict_elements}
     ]
     mike_status_after_sync = client.get(
         "/api/complaint-workspace/mike/status",
