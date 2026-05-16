@@ -42,6 +42,7 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert handoff_payload["mike"]["launch_url"]
     handoff_data = handoff_payload.get("handoff_payload") or {}
     evidence_context = handoff_data.get("evidence_context") or {}
+    assert evidence_context.get("elements")
     claim_element_ids = list((evidence_context.get("elements") or {}).keys())
     assert len(claim_element_ids) >= 2
     mike_status_after_handoff = client.get(

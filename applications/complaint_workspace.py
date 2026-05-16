@@ -5270,6 +5270,7 @@ class ComplaintWorkspaceService:
         conflicts = [
             {
                 "citation_id": citation_id,
+                # Keep deterministic claim-element ordering for tests and downstream diffs.
                 "claim_element_ids": sorted(element_ids),
             }
             for citation_id, element_ids in sorted(citation_to_elements.items())
