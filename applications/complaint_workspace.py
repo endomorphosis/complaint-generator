@@ -3302,7 +3302,7 @@ class ComplaintWorkspaceService:
                 "label": "Mike editor handoff and draft sync",
                 "available": True,
                 "detail": str(mike_status.get("recommended_action") or "").strip()
-                or "Drafts and evidence context can be handed off to Mike, then synced back into the complaint workspace.",
+                or "No Mike integration activity yet. Start with complaint.build_mike_handoff.",
             },
         ]
         workspace_data_schema = self.get_workspace_data_schema(session["session"]["user_id"])
@@ -5380,6 +5380,7 @@ class ComplaintWorkspaceService:
         has_mike_synced_draft = draft_sync_source == "mike" and bool(str(draft.get("body") or "").strip())
         latest_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
         latest_sync_handoff_id = str(last_sync.get("handoff_id") or "").strip()
+        # When latest_sync_handoff_id is empty, no Mike sync has been persisted yet for this session.
         pending_sync = bool(latest_handoff_id) and latest_handoff_id != latest_sync_handoff_id
         if pending_sync:
             recommended_action = "Latest Mike handoff has not been synced yet. Import the edited draft with complaint.sync_mike_final_draft."
