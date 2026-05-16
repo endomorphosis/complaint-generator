@@ -5206,8 +5206,25 @@ class ComplaintWorkspaceService:
 
     @staticmethod
     def _normalize_mike_citation_links(citation_links: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        """Normalize citation links to a list of shallow-copied dict entries."""
+        """Normalize Mike citation links to mutable dict rows.
+
+        Non-dict inputs are ignored and dict entries are shallow-copied so downstream
+        mutation cannot alter caller-provided payload objects.
+        """
         return [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
+
+    @staticmethod
+    def _extract_mike_claim_element_id(item: Mapping[str, Any]) -> str:
+        # Support both Mike payload conventions while preferring claim_element_id.
+        return str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
+
+    @staticmethod
+    def _extract_mike_citation_key(item: Mapping[str, Any]) -> str:
+        for field in MIKE_CITATION_KEY_FIELD_PRECEDENCE:
+            candidate = str(item.get(field) or "").strip()
+            if candidate:
+                return candidate
+        return ""
 
     def _check_mike_citation_links(
         self,
@@ -5232,10 +5249,6 @@ class ComplaintWorkspaceService:
             review_payload = self._build_review(state)
         support_matrix = list((review_payload or {}).get("support_matrix") or [])
 
-        def _extract_claim_element_id(item: Mapping[str, Any]) -> str:
-            # Support both Mike payload conventions while preferring claim_element_id.
-            return str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
-
         known_element_ids: Set[str] = set()
         for item in support_matrix:
             element_id = str((item or {}).get("id") or "").strip()
@@ -5244,18 +5257,13 @@ class ComplaintWorkspaceService:
         normalized_links = self._normalize_mike_citation_links(citation_links)
         unknown_claim_element_ids: Set[str] = set()
         for item in normalized_links:
-            claim_element_id = _extract_claim_element_id(item)
+            claim_element_id = self._extract_mike_claim_element_id(item)
             if claim_element_id and claim_element_id not in known_element_ids:
                 unknown_claim_element_ids.add(claim_element_id)
         citation_to_elements: Dict[str, Set[str]] = {}
         for item in normalized_links:
-            citation_key = ""
-            for field in MIKE_CITATION_KEY_FIELD_PRECEDENCE:
-                candidate = str(item.get(field) or "").strip()
-                if candidate:
-                    citation_key = candidate
-                    break
-            claim_element_id = _extract_claim_element_id(item)
+            citation_key = self._extract_mike_citation_key(item)
+            claim_element_id = self._extract_mike_claim_element_id(item)
             if not citation_key or not claim_element_id:
                 continue
             citation_to_elements.setdefault(citation_key, set()).add(claim_element_id)
