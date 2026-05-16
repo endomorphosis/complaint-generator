@@ -164,6 +164,8 @@ pip install -r requirements.txt
 # (Optional) Configure API keys
 export OPENAI_API_KEY="your-key"
 export BRAVE_SEARCH_API_KEY="your-key"
+# (Optional) Override Mike editor launch base URL used by handoff payloads
+export COMPLAINT_MIKE_BASE_URL="http://localhost:3000"
 ```
 
 ### Mike Interface Setup

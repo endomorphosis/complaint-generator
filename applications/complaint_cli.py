@@ -668,7 +668,7 @@ def build_mike_handoff(
 @app.command("sync-mike-draft")
 def sync_mike_draft(
     user_id: str = "demo-user",
-    body: str = "",
+    body: Optional[str] = typer.Option(None, "--body"),
     title: Optional[str] = None,
     requested_relief: str = "",
     handoff_id: Optional[str] = None,
@@ -678,11 +678,14 @@ def sync_mike_draft(
     redline_summary: Optional[str] = None,
     source_updated_at: Optional[str] = None,
 ) -> None:
+    normalized_body = str(body or "").strip()
+    if not normalized_body:
+        raise SystemExit("--body is required and cannot be empty.")
     relief_items = [line.strip() for line in requested_relief.split("|") if line.strip()]
     _print(
         service.sync_mike_final_draft(
             user_id,
-            body=body,
+            body=normalized_body,
             title=title,
             requested_relief=relief_items or None,
             handoff_id=handoff_id,

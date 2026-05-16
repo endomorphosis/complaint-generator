@@ -631,7 +631,7 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             project_id=request.project_id,
             workspace_id=request.workspace_id,
             mike_document_id=request.mike_document_id,
-            citation_links=list(request.citation_links or []),
+            citation_links=request.citation_links,
             redline_summary=request.redline_summary,
             source_updated_at=request.source_updated_at,
         )

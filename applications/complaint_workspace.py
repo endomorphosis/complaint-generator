@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
 from complaint_phases.legal_document import parse_legal_document
@@ -5126,18 +5126,47 @@ class ComplaintWorkspaceService:
         return candidate.rstrip("/")
 
     @staticmethod
+    def _build_mike_launch_url(base_url: str, query: Mapping[str, str]) -> str:
+        parsed = urlsplit(str(base_url or "").strip())
+        path = parsed.path or "/"
+        return urlunsplit((parsed.scheme, parsed.netloc, path, urlencode(dict(query)), parsed.fragment))
+
+    @staticmethod
+    def _mike_transport_warning(base_url: str) -> Optional[str]:
+        parsed = urlsplit(str(base_url or "").strip())
+        hostname = str(parsed.hostname or "").strip().lower()
+        if parsed.scheme == "http" and hostname not in {"localhost", "127.0.0.1", "::1"}:
+            return (
+                "Mike launch URL is using plain HTTP on a non-localhost host. "
+                "Prefer HTTPS for production deployments."
+            )
+        return None
+
+    @staticmethod
     def _summarize_mike_evidence_context(state: Dict[str, Any], review: Dict[str, Any]) -> Dict[str, Any]:
         evidence = dict(state.get("evidence") or {})
         testimony = list(evidence.get("testimony") or [])
         documents = list(evidence.get("documents") or [])
         support_matrix = list((review or {}).get("support_matrix") or [])
+        testimony_by_element: Dict[str, List[Dict[str, Any]]] = {}
+        for item in testimony:
+            element_id = str((item or {}).get("claim_element_id") or "").strip()
+            if not element_id:
+                continue
+            testimony_by_element.setdefault(element_id, []).append(item)
+        documents_by_element: Dict[str, List[Dict[str, Any]]] = {}
+        for item in documents:
+            element_id = str((item or {}).get("claim_element_id") or "").strip()
+            if not element_id:
+                continue
+            documents_by_element.setdefault(element_id, []).append(item)
         evidence_by_element: Dict[str, Dict[str, Any]] = {}
         for element in support_matrix:
             element_id = str((element or {}).get("id") or "").strip()
             if not element_id:
                 continue
-            matching_testimony = [item for item in testimony if str((item or {}).get("claim_element_id") or "") == element_id]
-            matching_documents = [item for item in documents if str((item or {}).get("claim_element_id") or "") == element_id]
+            matching_testimony = list(testimony_by_element.get(element_id) or [])
+            matching_documents = list(documents_by_element.get(element_id) or [])
             samples = [
                 str((item or {}).get("title") or "").strip()
                 for item in (matching_testimony + matching_documents)
@@ -5189,7 +5218,8 @@ class ComplaintWorkspaceService:
             launch_query["project_id"] = normalized_project_id
         if normalized_workspace_id:
             launch_query["workspace_id"] = normalized_workspace_id
-        launch_url = f"{resolved_base_url}?{urlencode(launch_query)}"
+        launch_url = self._build_mike_launch_url(resolved_base_url, launch_query)
+        transport_warning = self._mike_transport_warning(resolved_base_url)
         handoff_payload = {
             "version": "complaint-mike-handoff-v1",
             "user_id": resolved_user_id,
@@ -5227,6 +5257,7 @@ class ComplaintWorkspaceService:
                 "launch_url": launch_url,
                 "project_id": normalized_project_id or None,
                 "workspace_id": normalized_workspace_id or None,
+                "transport_warning": transport_warning,
             },
             "handoff_payload": handoff_payload,
             "sync_contract": {
@@ -5244,7 +5275,14 @@ class ComplaintWorkspaceService:
                     "source_updated_at",
                 ],
             },
-            "session": deepcopy(state),
+            "session_snapshot": {
+                "user_id": str(state.get("user_id") or resolved_user_id),
+                "claim_type": str(state.get("claim_type") or "retaliation"),
+                "has_draft": bool(state.get("draft")),
+                "testimony_count": len(list((state.get("evidence") or {}).get("testimony") or [])),
+                "document_count": len(list((state.get("evidence") or {}).get("documents") or [])),
+                "updated_at": str(state.get("updated_at") or ""),
+            },
             "review": deepcopy(review),
             "case_synopsis": self._build_case_synopsis(state),
         }
@@ -5253,7 +5291,7 @@ class ComplaintWorkspaceService:
         self,
         user_id: Optional[str],
         *,
-        body: Optional[str],
+        body: str,
         title: Optional[str] = None,
         requested_relief: Optional[List[str]] = None,
         handoff_id: Optional[str] = None,
@@ -5266,11 +5304,13 @@ class ComplaintWorkspaceService:
     ) -> Dict[str, Any]:
         synced_body = str(body or "").strip()
         if not synced_body:
-            raise ValueError("complaint.sync_mike_final_draft requires a non-empty body.")
+            raise ValueError("The draft body content is required and cannot be empty.")
         state = self._load_state(str(user_id or DEFAULT_USER_ID))
         draft = deepcopy(state.get("draft") or self._build_draft(state))
+        existing_title = str(draft.get("title") or "").strip()
         if title is not None:
-            draft["title"] = str(title or "").strip() or draft.get("title") or "Complaint Draft"
+            normalized_title = str(title or "").strip()
+            draft["title"] = normalized_title or existing_title or "Complaint Draft"
         draft["body"] = synced_body
         if requested_relief is not None:
             draft["requested_relief"] = [str(item).strip() for item in list(requested_relief or []) if str(item).strip()]
@@ -5308,7 +5348,7 @@ class ComplaintWorkspaceService:
         return {
             "user_id": session["session"]["user_id"],
             "draft": deepcopy(session["session"].get("draft") or {}),
-            "sync": sync_record,
+            "sync_record": sync_record,
             "review": session["review"],
             "session": session["session"],
             "questions": session["questions"],
@@ -7056,7 +7096,7 @@ class ComplaintWorkspaceService:
                 mike_base_url=args.get("mike_base_url"),
                 project_id=args.get("project_id"),
                 workspace_id=args.get("workspace_id"),
-                generate_draft_if_missing=bool(True if args.get("generate_draft_if_missing") is None else args.get("generate_draft_if_missing")),
+                generate_draft_if_missing=bool(args.get("generate_draft_if_missing", True)),
             )
         if tool_name == "complaint.sync_mike_final_draft":
             requested_relief = args.get("requested_relief")

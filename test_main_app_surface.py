@@ -41,16 +41,19 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert handoff_payload["handoff_id"].startswith("mike-handoff-")
     assert handoff_payload["mike"]["launch_url"]
 
+    synced_body = "This draft body was synced from Mike."
     sync = client.post(
         "/api/complaint-workspace/mike/sync",
         json={
             "user_id": payload["session"]["user_id"],
             "handoff_id": handoff_payload["handoff_id"],
             "title": "Synced Draft",
-            "body": "This draft body was synced from Mike.",
+            "body": synced_body,
         },
     )
     assert sync.status_code == 200
     sync_payload = sync.json()
     assert sync_payload["draft"]["title"] == "Synced Draft"
-    assert "synced from mike" in sync_payload["draft"]["body"].lower()
+    assert sync_payload["draft"]["sync_source"] == "mike"
+    assert sync_payload["sync_record"]["handoff_id"] == handoff_payload["handoff_id"]
+    assert sync_payload["sync_record"]["body_chars"] == len(synced_body)
