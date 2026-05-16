@@ -5204,18 +5204,21 @@ class ComplaintWorkspaceService:
 
     def _check_mike_citation_links(self, state: Dict[str, Any], citation_links: List[Dict[str, Any]]) -> Dict[str, Any]:
         support_matrix = list((self._build_review(state) or {}).get("support_matrix") or [])
-        known_element_ids = {
-            str((item or {}).get("id") or "").strip()
-            for item in support_matrix
-            if str((item or {}).get("id") or "").strip()
-        }
+
+        def _element_id_from_link(item: Mapping[str, Any]) -> str:
+            return str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
+
+        known_element_ids: Set[str] = set()
+        for item in support_matrix:
+            element_id = str((item or {}).get("id") or "").strip()
+            if element_id:
+                known_element_ids.add(element_id)
         normalized_links = [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
-        unknown_claim_element_ids = {
-            str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
-            for item in normalized_links
-            if str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
-            and str((item.get("claim_element_id") or item.get("element_id") or "")).strip() not in known_element_ids
-        }
+        unknown_claim_element_ids: Set[str] = set()
+        for item in normalized_links:
+            claim_element_id = _element_id_from_link(item)
+            if claim_element_id and claim_element_id not in known_element_ids:
+                unknown_claim_element_ids.add(claim_element_id)
         citation_to_elements: Dict[str, Set[str]] = {}
         for item in normalized_links:
             citation_key = str(
@@ -5225,7 +5228,7 @@ class ComplaintWorkspaceService:
                 or item.get("url")
                 or ""
             ).strip()
-            claim_element_id = str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
+            claim_element_id = _element_id_from_link(item)
             if not citation_key or not claim_element_id:
                 continue
             citation_to_elements.setdefault(citation_key, set()).add(claim_element_id)
