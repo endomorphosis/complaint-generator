@@ -76,6 +76,7 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert sync_payload["sync_record"]["citation_link_conflict_count"] == 1
     assert sync_payload["sync_record"]["citation_link_has_conflicts"] is True
     assert sync_payload["citation_link_check"]["unknown_claim_element_ids"] == ["unknown"]
+    # We intentionally conflict the first two known element IDs with the same citation ID.
     expected_conflict_elements = sorted([claim_element_ids[0], claim_element_ids[1]])
     assert sync_payload["citation_link_check"]["conflicts"] == [
         {"citation_id": "doc-100", "claim_element_ids": expected_conflict_elements}

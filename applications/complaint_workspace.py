@@ -5271,10 +5271,10 @@ class ComplaintWorkspaceService:
             {
                 "citation_id": citation_id,
                 # Keep deterministic claim-element ordering for tests and downstream diffs.
-                "claim_element_ids": sorted(element_ids),
+                "claim_element_ids": sorted(claim_element_ids),
             }
-            for citation_id, element_ids in sorted(citation_to_elements.items())
-            if len(element_ids) > 1
+            for citation_id, claim_element_ids in sorted(citation_to_elements.items())
+            if len(claim_element_ids) > 1
         ]
         return {
             "total_links": len(normalized_links),
