@@ -231,5 +231,8 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     assert mike_sync["result"]["structuredContent"]["draft"]["sync_source"] == "mike"
     assert mike_sync["result"]["structuredContent"]["sync_record"]["citation_link_conflict_count"] == 1
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["has_conflicts"] is True
+    assert mike_sync["result"]["structuredContent"]["citation_link_check"]["conflicts"] == [
+        {"citation_id": "cite-1", "claim_element_ids": ["causation", "harm"]}
+    ]
     assert mike_status_after_sync["result"]["structuredContent"]["pending_sync"] is False
     assert mike_status_after_sync["result"]["structuredContent"]["latest_sync_handoff_id"] == handoff_id

@@ -5205,7 +5205,7 @@ class ComplaintWorkspaceService:
     def _check_mike_citation_links(self, state: Dict[str, Any], citation_links: List[Dict[str, Any]]) -> Dict[str, Any]:
         support_matrix = list((self._build_review(state) or {}).get("support_matrix") or [])
 
-        def _element_id_from_link(item: Mapping[str, Any]) -> str:
+        def _extract_claim_element_id(item: Mapping[str, Any]) -> str:
             return str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
 
         known_element_ids: Set[str] = set()
@@ -5216,7 +5216,7 @@ class ComplaintWorkspaceService:
         normalized_links = [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
         unknown_claim_element_ids: Set[str] = set()
         for item in normalized_links:
-            claim_element_id = _element_id_from_link(item)
+            claim_element_id = _extract_claim_element_id(item)
             if claim_element_id and claim_element_id not in known_element_ids:
                 unknown_claim_element_ids.add(claim_element_id)
         citation_to_elements: Dict[str, Set[str]] = {}
@@ -5228,7 +5228,7 @@ class ComplaintWorkspaceService:
                 or item.get("url")
                 or ""
             ).strip()
-            claim_element_id = _element_id_from_link(item)
+            claim_element_id = _extract_claim_element_id(item)
             if not citation_key or not claim_element_id:
                 continue
             citation_to_elements.setdefault(citation_key, set()).add(claim_element_id)
