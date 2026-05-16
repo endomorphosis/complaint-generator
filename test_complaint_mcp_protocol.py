@@ -143,6 +143,40 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
             },
         },
     )
+    mike_handoff = handle_jsonrpc_message(
+        service,
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "complaint.build_mike_handoff",
+                "arguments": {
+                    "user_id": "demo-user",
+                    "project_id": "project-demo",
+                    "workspace_id": "workspace-demo",
+                },
+            },
+        },
+    )
+    handoff_id = mike_handoff["result"]["structuredContent"]["handoff_id"]
+    mike_sync = handle_jsonrpc_message(
+        service,
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "complaint.sync_mike_final_draft",
+                "arguments": {
+                    "user_id": "demo-user",
+                    "handoff_id": handoff_id,
+                    "title": "Mike Synced Draft",
+                    "body": "This draft was synced from Mike.",
+                },
+            },
+        },
+    )
 
     assert "Mediator, help turn this into testimony-ready narrative" in mediator_response["result"]["structuredContent"]["prefill_message"]
     assert export_response["result"]["structuredContent"]["packet"]["draft"]["body"]
@@ -163,3 +197,6 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
         "warning",
         "blocked",
     }
+    assert handoff_id.startswith("mike-handoff-")
+    assert mike_handoff["result"]["structuredContent"]["mike"]["launch_url"]
+    assert mike_sync["result"]["structuredContent"]["draft"]["sync_source"] == "mike"

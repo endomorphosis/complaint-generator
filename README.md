@@ -122,6 +122,13 @@ This repository now includes the `endomorphosis/mike` application as a submodule
 - `mike/backend/migrations` - incremental updates for existing databases
 - `mike/docs` - product and implementation documentation
 
+Complaint workspace now also includes a Mike handoff/sync bridge:
+
+- `POST /api/complaint-workspace/mike/handoff` builds a prefilled Mike launch payload from intake, evidence, review, and draft state
+- `POST /api/complaint-workspace/mike/sync` writes Mike-edited draft content back into the complaint workspace session
+
+[Mike Integration Operator Playbook →](docs/MIKE_INTEGRATION_PLAYBOOK.md)
+
 ### 🧠 GraphRAG Ontology Optimization
 
 Knowledge-graph-powered document analysis and reasoning:

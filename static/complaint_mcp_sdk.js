@@ -136,6 +136,8 @@ class ComplaintMcpClient {
             'complaint.review_case',
             'complaint.generate_complaint',
             'complaint.update_draft',
+            'complaint.build_mike_handoff',
+            'complaint.sync_mike_final_draft',
             'complaint.update_claim_type',
             'complaint.update_case_synopsis',
             'complaint.reset_session',
@@ -612,6 +614,14 @@ class ComplaintMcpClient {
         return this.callTool('complaint.update_draft', Object.assign({
             user_id: userId,
         }, payload || {}));
+    }
+
+    buildMikeHandoff(payload) {
+        return this.callTool('complaint.build_mike_handoff', payload || {});
+    }
+
+    syncMikeFinalDraft(payload) {
+        return this.callTool('complaint.sync_mike_final_draft', payload || {});
     }
 
     exportComplaintPacket(userId) {

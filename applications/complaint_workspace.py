@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
+from urllib.parse import urlencode
 from xml.sax.saxutils import escape
 
 from complaint_phases.legal_document import parse_legal_document
@@ -161,6 +162,8 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "migrate_legacy_workspace_data",
     "search_workspace_dataset",
     "view_workspace_dataset",
+    "build_mike_handoff",
+    "sync_mike_final_draft",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -202,6 +205,8 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "migrate-legacy-workspace-data",
     "search-workspace-data",
     "view-workspace-data",
+    "build-mike-handoff",
+    "sync-mike-draft",
     "generate",
     "export-packet",
     "export-markdown",
@@ -244,6 +249,8 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "migrateLegacyWorkspaceData",
     "searchWorkspaceDataset",
     "viewWorkspaceDataset",
+    "buildMikeHandoff",
+    "syncMikeFinalDraft",
     "generateComplaint",
     "exportComplaintPacket",
     "exportComplaintMarkdown",
@@ -415,6 +422,18 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "view-workspace-data",
         "mcp_tool": "complaint.view_workspace_dataset",
         "browser_sdk_method": "viewWorkspaceDataset",
+    },
+    "mike_editor_handoff": {
+        "package_export": "build_mike_handoff",
+        "cli_command": "build-mike-handoff",
+        "mcp_tool": "complaint.build_mike_handoff",
+        "browser_sdk_method": "buildMikeHandoff",
+    },
+    "mike_editor_sync": {
+        "package_export": "sync_mike_final_draft",
+        "cli_command": "sync-mike-draft",
+        "mcp_tool": "complaint.sync_mike_final_draft",
+        "browser_sdk_method": "syncMikeFinalDraft",
     },
     "export_critic": {
         "package_export": "review_generated_exports",
@@ -1578,6 +1597,12 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "latest_packet_export": None,
         "latest_export_critic": None,
         "ui_readiness": None,
+        "mike_integration": {
+            "last_handoff": None,
+            "last_sync": None,
+            "handoff_history": [],
+            "sync_history": [],
+        },
     }
 
 
@@ -1615,6 +1640,15 @@ class ComplaintWorkspaceService:
         payload.setdefault("latest_packet_export", None)
         payload.setdefault("latest_export_critic", None)
         payload.setdefault("ui_readiness", None)
+        payload.setdefault(
+            "mike_integration",
+            {
+                "last_handoff": None,
+                "last_sync": None,
+                "handoff_history": [],
+                "sync_history": [],
+            },
+        )
         return payload
 
     def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -3252,6 +3286,12 @@ class ComplaintWorkspaceService:
                 "label": "Complaint packet export",
                 "available": True,
                 "detail": "The lawsuit packet can be exported as a structured browser, CLI, or MCP artifact.",
+            },
+            {
+                "id": "mike_editor_handoff",
+                "label": "Mike editor handoff and draft sync",
+                "available": True,
+                "detail": "Drafts and evidence context can be handed off to Mike, then synced back into the complaint workspace.",
             },
         ]
         workspace_data_schema = self.get_workspace_data_schema(session["session"]["user_id"])
@@ -5078,6 +5118,204 @@ class ComplaintWorkspaceService:
             "case_synopsis": session["case_synopsis"],
         }
 
+    @staticmethod
+    def _resolve_mike_base_url(override: Optional[str] = None) -> str:
+        candidate = str(override or os.getenv("COMPLAINT_MIKE_BASE_URL") or "").strip()
+        if not candidate:
+            candidate = "http://localhost:3000"
+        return candidate.rstrip("/")
+
+    @staticmethod
+    def _summarize_mike_evidence_context(state: Dict[str, Any], review: Dict[str, Any]) -> Dict[str, Any]:
+        evidence = dict(state.get("evidence") or {})
+        testimony = list(evidence.get("testimony") or [])
+        documents = list(evidence.get("documents") or [])
+        support_matrix = list((review or {}).get("support_matrix") or [])
+        evidence_by_element: Dict[str, Dict[str, Any]] = {}
+        for element in support_matrix:
+            element_id = str((element or {}).get("id") or "").strip()
+            if not element_id:
+                continue
+            matching_testimony = [item for item in testimony if str((item or {}).get("claim_element_id") or "") == element_id]
+            matching_documents = [item for item in documents if str((item or {}).get("claim_element_id") or "") == element_id]
+            samples = [
+                str((item or {}).get("title") or "").strip()
+                for item in (matching_testimony + matching_documents)
+                if str((item or {}).get("title") or "").strip()
+            ][:3]
+            evidence_by_element[element_id] = {
+                "label": str((element or {}).get("label") or element_id),
+                "supported": bool((element or {}).get("supported")),
+                "testimony_count": len(matching_testimony),
+                "document_count": len(matching_documents),
+                "sample_titles": samples,
+            }
+        return {
+            "testimony_count": len(testimony),
+            "document_count": len(documents),
+            "elements": evidence_by_element,
+            "missing_element_ids": [
+                str((element or {}).get("id") or "").strip()
+                for element in support_matrix
+                if not bool((element or {}).get("supported"))
+            ],
+        }
+
+    def build_mike_handoff(
+        self,
+        user_id: Optional[str],
+        *,
+        mike_base_url: Optional[str] = None,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        generate_draft_if_missing: bool = True,
+    ) -> Dict[str, Any]:
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        generated_draft = False
+        if generate_draft_if_missing and not state.get("draft"):
+            state["draft"] = self._build_draft(state)
+            generated_draft = True
+        review = self._build_review(state)
+        handoff_id = f"mike-handoff-{uuid.uuid4().hex[:12]}"
+        resolved_base_url = self._resolve_mike_base_url(mike_base_url)
+        launch_query: Dict[str, str] = {
+            "user_id": resolved_user_id,
+            "handoff_id": handoff_id,
+        }
+        normalized_project_id = str(project_id or "").strip()
+        normalized_workspace_id = str(workspace_id or "").strip()
+        if normalized_project_id:
+            launch_query["project_id"] = normalized_project_id
+        if normalized_workspace_id:
+            launch_query["workspace_id"] = normalized_workspace_id
+        launch_url = f"{resolved_base_url}?{urlencode(launch_query)}"
+        handoff_payload = {
+            "version": "complaint-mike-handoff-v1",
+            "user_id": resolved_user_id,
+            "project_id": normalized_project_id or None,
+            "workspace_id": normalized_workspace_id or None,
+            "handoff_id": handoff_id,
+            "created_at": _utc_now(),
+            "case_synopsis": self._build_case_synopsis(state),
+            "claim_type": str(state.get("claim_type") or "retaliation"),
+            "draft": deepcopy(state.get("draft") or {}),
+            "review": deepcopy(review),
+            "evidence_context": self._summarize_mike_evidence_context(state, review),
+        }
+        mike_integration = dict(state.get("mike_integration") or {})
+        handoff_history = [dict(item) for item in list(mike_integration.get("handoff_history") or []) if isinstance(item, dict)]
+        handoff_record = {
+            "handoff_id": handoff_id,
+            "created_at": handoff_payload["created_at"],
+            "project_id": normalized_project_id or None,
+            "workspace_id": normalized_workspace_id or None,
+            "generated_draft": generated_draft,
+            "launch_url": launch_url,
+        }
+        handoff_history.insert(0, handoff_record)
+        mike_integration["last_handoff"] = handoff_record
+        mike_integration["handoff_history"] = handoff_history[:25]
+        state["mike_integration"] = mike_integration
+        self._save_state(state)
+        return {
+            "user_id": resolved_user_id,
+            "handoff_id": handoff_id,
+            "generated_draft": generated_draft,
+            "mike": {
+                "base_url": resolved_base_url,
+                "launch_url": launch_url,
+                "project_id": normalized_project_id or None,
+                "workspace_id": normalized_workspace_id or None,
+            },
+            "handoff_payload": handoff_payload,
+            "sync_contract": {
+                "tool_name": "complaint.sync_mike_final_draft",
+                "required_fields": ["user_id", "body"],
+                "optional_fields": [
+                    "handoff_id",
+                    "project_id",
+                    "workspace_id",
+                    "title",
+                    "requested_relief",
+                    "mike_document_id",
+                    "citation_links",
+                    "redline_summary",
+                    "source_updated_at",
+                ],
+            },
+            "session": deepcopy(state),
+            "review": deepcopy(review),
+            "case_synopsis": self._build_case_synopsis(state),
+        }
+
+    def sync_mike_final_draft(
+        self,
+        user_id: Optional[str],
+        *,
+        body: Optional[str],
+        title: Optional[str] = None,
+        requested_relief: Optional[List[str]] = None,
+        handoff_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        mike_document_id: Optional[str] = None,
+        citation_links: Optional[List[Dict[str, Any]]] = None,
+        redline_summary: Optional[str] = None,
+        source_updated_at: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        synced_body = str(body or "").strip()
+        if not synced_body:
+            raise ValueError("complaint.sync_mike_final_draft requires a non-empty body.")
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        draft = deepcopy(state.get("draft") or self._build_draft(state))
+        if title is not None:
+            draft["title"] = str(title or "").strip() or draft.get("title") or "Complaint Draft"
+        draft["body"] = synced_body
+        if requested_relief is not None:
+            draft["requested_relief"] = [str(item).strip() for item in list(requested_relief or []) if str(item).strip()]
+        synced_at = _utc_now()
+        draft["updated_at"] = synced_at
+        draft["sync_source"] = "mike"
+        draft["sync_metadata"] = {
+            "handoff_id": str(handoff_id or "").strip() or None,
+            "project_id": str(project_id or "").strip() or None,
+            "workspace_id": str(workspace_id or "").strip() or None,
+            "mike_document_id": str(mike_document_id or "").strip() or None,
+            "citation_links": [dict(item) for item in list(citation_links or []) if isinstance(item, dict)],
+            "redline_summary": str(redline_summary or "").strip() or None,
+            "source_updated_at": str(source_updated_at or "").strip() or None,
+            "synced_at": synced_at,
+        }
+        state["draft"] = draft
+        mike_integration = dict(state.get("mike_integration") or {})
+        sync_history = [dict(item) for item in list(mike_integration.get("sync_history") or []) if isinstance(item, dict)]
+        sync_record = {
+            "synced_at": synced_at,
+            "handoff_id": draft["sync_metadata"]["handoff_id"],
+            "project_id": draft["sync_metadata"]["project_id"],
+            "workspace_id": draft["sync_metadata"]["workspace_id"],
+            "mike_document_id": draft["sync_metadata"]["mike_document_id"],
+            "body_chars": len(synced_body),
+            "title": str(draft.get("title") or "").strip(),
+        }
+        sync_history.insert(0, sync_record)
+        mike_integration["last_sync"] = sync_record
+        mike_integration["sync_history"] = sync_history[:25]
+        state["mike_integration"] = mike_integration
+        self._save_state(state)
+        session = self.get_session(str(state.get("user_id")))
+        return {
+            "user_id": session["session"]["user_id"],
+            "draft": deepcopy(session["session"].get("draft") or {}),
+            "sync": sync_record,
+            "review": session["review"],
+            "session": session["session"],
+            "questions": session["questions"],
+            "next_question": session["next_question"],
+            "case_synopsis": session["case_synopsis"],
+        }
+
     def update_filing_metadata(
         self,
         user_id: Optional[str],
@@ -6561,6 +6799,8 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.view_workspace_dataset", "description": "Browse a packaged or single-file workspace dataset with schema-aligned filters and filtered document previews."},
                 {"name": "complaint.search_workspace_dataset", "description": "Search a packaged or single-file workspace dataset using BM25 or vector retrieval plus schema-aligned filters."},
                 {"name": "complaint.get_workspace_dataset_graph", "description": "Explore workspace dataset knowledge-graph entities, relationships, deontic logic flow, formulas, conflicts, and proof links."},
+                {"name": "complaint.build_mike_handoff", "description": "Build a Mike editor handoff payload with prefilled complaint draft, review state, and evidence context."},
+                {"name": "complaint.sync_mike_final_draft", "description": "Sync an edited draft from Mike back into the complaint workspace and persist the merged draft state."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
                 {"name": "complaint.export_complaint_packet", "description": "Export the current lawsuit complaint packet with intake, evidence, review, and draft content."},
@@ -6809,6 +7049,31 @@ class ComplaintWorkspaceService:
                 document_id=str(args.get("document_id") or ""),
                 modality=str(args.get("modality") or args.get("deontic_status") or ""),
                 limit=int(args.get("limit") or 50),
+            )
+        if tool_name == "complaint.build_mike_handoff":
+            return self.build_mike_handoff(
+                args.get("user_id"),
+                mike_base_url=args.get("mike_base_url"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                generate_draft_if_missing=bool(True if args.get("generate_draft_if_missing") is None else args.get("generate_draft_if_missing")),
+            )
+        if tool_name == "complaint.sync_mike_final_draft":
+            requested_relief = args.get("requested_relief")
+            if isinstance(requested_relief, str):
+                requested_relief = _split_lines(requested_relief)
+            return self.sync_mike_final_draft(
+                args.get("user_id"),
+                body=args.get("body"),
+                title=args.get("title"),
+                requested_relief=requested_relief,
+                handoff_id=args.get("handoff_id"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                mike_document_id=args.get("mike_document_id"),
+                citation_links=args.get("citation_links"),
+                redline_summary=args.get("redline_summary"),
+                source_updated_at=args.get("source_updated_at"),
             )
         if tool_name == "complaint.generate_complaint":
             return self.generate_complaint(

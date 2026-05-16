@@ -277,6 +277,28 @@ class DraftUpdateRequest(BaseModel):
     requested_relief: Optional[List[str]] = None
 
 
+class MikeHandoffRequest(BaseModel):
+    user_id: Optional[str] = None
+    mike_base_url: Optional[str] = None
+    project_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    generate_draft_if_missing: bool = True
+
+
+class MikeDraftSyncRequest(BaseModel):
+    user_id: Optional[str] = None
+    body: str
+    title: Optional[str] = None
+    requested_relief: Optional[List[str]] = None
+    handoff_id: Optional[str] = None
+    project_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    mike_document_id: Optional[str] = None
+    citation_links: List[Dict[str, Any]] = Field(default_factory=list)
+    redline_summary: Optional[str] = None
+    source_updated_at: Optional[str] = None
+
+
 class SynopsisUpdateRequest(BaseModel):
     user_id: Optional[str] = None
     synopsis: str
@@ -586,6 +608,32 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             title=request.title,
             body=request.body,
             requested_relief=request.requested_relief,
+        )
+
+    @router.post("/api/complaint-workspace/mike/handoff")
+    async def build_mike_handoff(request: MikeHandoffRequest) -> Dict[str, Any]:
+        return workspace.build_mike_handoff(
+            request.user_id,
+            mike_base_url=request.mike_base_url,
+            project_id=request.project_id,
+            workspace_id=request.workspace_id,
+            generate_draft_if_missing=request.generate_draft_if_missing,
+        )
+
+    @router.post("/api/complaint-workspace/mike/sync")
+    async def sync_mike_final_draft(request: MikeDraftSyncRequest) -> Dict[str, Any]:
+        return workspace.sync_mike_final_draft(
+            request.user_id,
+            body=request.body,
+            title=request.title,
+            requested_relief=request.requested_relief,
+            handoff_id=request.handoff_id,
+            project_id=request.project_id,
+            workspace_id=request.workspace_id,
+            mike_document_id=request.mike_document_id,
+            citation_links=list(request.citation_links or []),
+            redline_summary=request.redline_summary,
+            source_updated_at=request.source_updated_at,
         )
 
     @router.post("/api/complaint-workspace/update-synopsis")

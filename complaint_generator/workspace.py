@@ -481,6 +481,56 @@ def update_draft(
     )
 
 
+def build_mike_handoff(
+    user_id: Optional[str],
+    *,
+    mike_base_url: Optional[str] = None,
+    project_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    generate_draft_if_missing: bool = True,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).build_mike_handoff(
+        user_id,
+        mike_base_url=mike_base_url,
+        project_id=project_id,
+        workspace_id=workspace_id,
+        generate_draft_if_missing=generate_draft_if_missing,
+    )
+
+
+def sync_mike_final_draft(
+    user_id: Optional[str],
+    *,
+    body: str,
+    title: Optional[str] = None,
+    requested_relief: Optional[list[str]] = None,
+    handoff_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    mike_document_id: Optional[str] = None,
+    citation_links: Optional[list[dict[str, Any]]] = None,
+    redline_summary: Optional[str] = None,
+    source_updated_at: Optional[str] = None,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).sync_mike_final_draft(
+        user_id,
+        body=body,
+        title=title,
+        requested_relief=requested_relief,
+        handoff_id=handoff_id,
+        project_id=project_id,
+        workspace_id=workspace_id,
+        mike_document_id=mike_document_id,
+        citation_links=citation_links,
+        redline_summary=redline_summary,
+        source_updated_at=source_updated_at,
+    )
+
+
 def export_complaint_packet(
     user_id: Optional[str],
     *,
@@ -891,6 +941,7 @@ __all__ = [
     "update_claim_type",
     "generate_decentralized_id",
     "generate_complaint",
+    "build_mike_handoff",
     "get_workflow_capabilities",
     "migrate_legacy_workspace_data",
     "search_workspace_dataset",
@@ -913,6 +964,7 @@ __all__ = [
     "search_email_duckdb_corpus",
     "start_session",
     "submit_intake_answers",
+    "sync_mike_final_draft",
     "update_case_synopsis",
     "update_draft",
 ]

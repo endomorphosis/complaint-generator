@@ -523,6 +523,14 @@ class ComplaintMcpClient {
         }, payload || {}));
     }
 
+    buildMikeHandoff(payload) {
+        return this.callTool('complaint.build_mike_handoff', payload || {});
+    }
+
+    syncMikeFinalDraft(payload) {
+        return this.callTool('complaint.sync_mike_final_draft', payload || {});
+    }
+
     exportComplaintPacket(userId) {
         return this.callTool('complaint.export_complaint_packet', {
             user_id: userId,

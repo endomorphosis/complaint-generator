@@ -646,6 +646,55 @@ def update_draft(
     _print(service.update_draft(user_id, title=title, body=body, requested_relief=relief_items or None))
 
 
+@app.command("build-mike-handoff")
+def build_mike_handoff(
+    user_id: str = "demo-user",
+    mike_base_url: Optional[str] = None,
+    project_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    generate_draft_if_missing: bool = True,
+) -> None:
+    _print(
+        service.build_mike_handoff(
+            user_id,
+            mike_base_url=mike_base_url,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            generate_draft_if_missing=generate_draft_if_missing,
+        )
+    )
+
+
+@app.command("sync-mike-draft")
+def sync_mike_draft(
+    user_id: str = "demo-user",
+    body: str = "",
+    title: Optional[str] = None,
+    requested_relief: str = "",
+    handoff_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    mike_document_id: Optional[str] = None,
+    redline_summary: Optional[str] = None,
+    source_updated_at: Optional[str] = None,
+) -> None:
+    relief_items = [line.strip() for line in requested_relief.split("|") if line.strip()]
+    _print(
+        service.sync_mike_final_draft(
+            user_id,
+            body=body,
+            title=title,
+            requested_relief=relief_items or None,
+            handoff_id=handoff_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            mike_document_id=mike_document_id,
+            redline_summary=redline_summary,
+            source_updated_at=source_updated_at,
+        )
+    )
+
+
 @app.command("export-packet")
 def export_packet(user_id: str = "demo-user") -> None:
     _print(service.export_complaint_packet(user_id))
