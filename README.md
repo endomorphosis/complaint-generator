@@ -118,6 +118,9 @@ This repository now includes the `endomorphosis/mike` application as a submodule
 
 - `mike/frontend` - Next.js editor and document workflow UI
 - `mike/backend` - Express API for document processing and persistence
+- `mike/backend/schema.sql` - one-shot Supabase schema for fresh databases
+- `mike/backend/migrations` - incremental updates for existing databases
+- `mike/docs` - product and implementation documentation
 
 ### 🧠 GraphRAG Ontology Optimization
 
