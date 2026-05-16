@@ -71,6 +71,8 @@ DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER: Dict[str, int] = {
     "hf_inference": 30,
     "hf_api": 30,
 }
+# Citation-link identity precedence keeps explicit IDs stable before looser source/url fallback keys.
+MIKE_CITATION_KEY_FIELD_PRECEDENCE: tuple[str, ...] = ("citation_id", "id", "source_id", "url")
 DEFAULT_UI_UX_SCREENSHOT_TARGET = (
     "tests/test_website_cohesion_playwright.py::"
     "test_homepage_navigation_can_drive_a_full_complaint_journey_with_real_handoffs"
@@ -5230,9 +5232,8 @@ class ComplaintWorkspaceService:
                 unknown_claim_element_ids.add(claim_element_id)
         citation_to_elements: Dict[str, Set[str]] = {}
         for item in normalized_links:
-            # Precedence keeps explicit citation IDs stable before looser source/url fallback keys.
             citation_key = ""
-            for field in ("citation_id", "id", "source_id", "url"):
+            for field in MIKE_CITATION_KEY_FIELD_PRECEDENCE:
                 candidate = str(item.get(field) or "").strip()
                 if candidate:
                     citation_key = candidate

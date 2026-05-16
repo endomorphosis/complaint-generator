@@ -40,7 +40,9 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     handoff_payload = handoff.json()
     assert handoff_payload["handoff_id"].startswith("mike-handoff-")
     assert handoff_payload["mike"]["launch_url"]
-    claim_element_ids = list((handoff_payload["handoff_payload"]["evidence_context"]["elements"] or {}).keys())
+    handoff_payload_body = handoff_payload.get("handoff_payload") or {}
+    evidence_context = handoff_payload_body.get("evidence_context") or {}
+    claim_element_ids = list((evidence_context.get("elements") or {}).keys())
     assert len(claim_element_ids) >= 2
     mike_status_after_handoff = client.get(
         "/api/complaint-workspace/mike/status",
