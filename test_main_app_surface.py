@@ -58,7 +58,7 @@ def test_main_app_exposes_unified_complaint_surface_routes():
             "citation_links": [
                 {"citation_id": "doc-100", "claim_element_id": "causation"},
                 {"citation_id": "doc-100", "claim_element_id": "harm"},
-                {"citation_id": "doc-200", "claim_element_id": "nonexistent-element"},
+                {"citation_id": "doc-200", "claim_element_id": "unknown"},
             ],
         },
     )
@@ -70,7 +70,7 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert sync_payload["sync_record"]["body_chars"] == len(synced_body)
     assert sync_payload["sync_record"]["citation_link_conflict_count"] == 1
     assert sync_payload["sync_record"]["citation_link_has_conflicts"] is True
-    assert sync_payload["citation_link_check"]["unknown_claim_element_ids"] == ["nonexistent-element"]
+    assert sync_payload["citation_link_check"]["unknown_claim_element_ids"] == ["unknown"]
     assert sync_payload["citation_link_check"]["conflicts"] == [
         {"citation_id": "doc-100", "claim_element_ids": ["causation", "harm"]}
     ]

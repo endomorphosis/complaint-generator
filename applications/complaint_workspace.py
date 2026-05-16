@@ -14,7 +14,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Set
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
@@ -5216,7 +5216,7 @@ class ComplaintWorkspaceService:
             if str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
             and str((item.get("claim_element_id") or item.get("element_id") or "")).strip() not in known_element_ids
         }
-        citation_to_elements: Dict[str, set[str]] = {}
+        citation_to_elements: Dict[str, Set[str]] = {}
         for item in normalized_links:
             citation_key = str(
                 item.get("citation_id")
