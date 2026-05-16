@@ -112,6 +112,13 @@ Operator workflow for testimony capture, document intake, and legal sufficiency 
 
 [Dashboard Improvement Plan →](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_IMPROVEMENT_PLAN.md) | [Execution Backlog →](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md)
 
+### 📝 Mike Legal Document Editing Interface
+
+This repository now includes the `endomorphosis/mike` application as a submodule at `mike/` to provide a stronger legal-document editing interface:
+
+- `mike/frontend` - Next.js editor and document workflow UI
+- `mike/backend` - Express API for document processing and persistence
+
 ### 🧠 GraphRAG Ontology Optimization
 
 Knowledge-graph-powered document analysis and reasoning:
@@ -148,6 +155,19 @@ pip install -r requirements.txt
 export OPENAI_API_KEY="your-key"
 export BRAVE_SEARCH_API_KEY="your-key"
 ```
+
+### Mike Interface Setup
+
+After initializing submodules, install and run the Mike services:
+
+```bash
+npm install --prefix mike/backend
+npm install --prefix mike/frontend
+npm run dev --prefix mike/backend
+npm run dev --prefix mike/frontend
+```
+
+Then open `http://localhost:3000` for the Mike interface.
 
 ### Package, CLI, MCP, and SDK Surfaces
 
