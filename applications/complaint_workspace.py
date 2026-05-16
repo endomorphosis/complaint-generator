@@ -5204,6 +5204,10 @@ class ComplaintWorkspaceService:
             ],
         }
 
+    @staticmethod
+    def _normalize_mike_citation_links(citation_links: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        return [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
+
     def _check_mike_citation_links(
         self,
         state: Dict[str, Any],
@@ -5235,7 +5239,7 @@ class ComplaintWorkspaceService:
             element_id = str((item or {}).get("id") or "").strip()
             if element_id:
                 known_element_ids.add(element_id)
-        normalized_links = [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
+        normalized_links = self._normalize_mike_citation_links(citation_links)
         unknown_claim_element_ids: Set[str] = set()
         for item in normalized_links:
             claim_element_id = _extract_claim_element_id(item)
@@ -5394,7 +5398,7 @@ class ComplaintWorkspaceService:
         if requested_relief is not None:
             draft["requested_relief"] = [str(item).strip() for item in list(requested_relief or []) if str(item).strip()]
         synced_at = _utc_now()
-        normalized_citation_links = [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
+        normalized_citation_links = self._normalize_mike_citation_links(citation_links)
         review_payload = dict(state.get("support_review") or {})
         if not review_payload:
             review_payload = self._build_review(state)
