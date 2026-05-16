@@ -5206,6 +5206,7 @@ class ComplaintWorkspaceService:
 
     @staticmethod
     def _normalize_mike_citation_links(citation_links: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize citation links to a list of shallow-copied dict entries."""
         return [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
 
     def _check_mike_citation_links(
@@ -5232,6 +5233,7 @@ class ComplaintWorkspaceService:
         support_matrix = list((review_payload or {}).get("support_matrix") or [])
 
         def _extract_claim_element_id(item: Mapping[str, Any]) -> str:
+            # Support both Mike payload conventions while preferring claim_element_id.
             return str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
 
         known_element_ids: Set[str] = set()
