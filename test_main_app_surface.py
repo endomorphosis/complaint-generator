@@ -55,6 +55,11 @@ def test_main_app_exposes_unified_complaint_surface_routes():
             "handoff_id": handoff_payload["handoff_id"],
             "title": "Synced Draft",
             "body": synced_body,
+            "citation_links": [
+                {"citation_id": "doc-100", "claim_element_id": "causation"},
+                {"citation_id": "doc-100", "claim_element_id": "harm"},
+                {"citation_id": "doc-200", "claim_element_id": "nonexistent-element"},
+            ],
         },
     )
     assert sync.status_code == 200
@@ -63,6 +68,12 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert sync_payload["draft"]["sync_source"] == "mike"
     assert sync_payload["sync_record"]["handoff_id"] == handoff_payload["handoff_id"]
     assert sync_payload["sync_record"]["body_chars"] == len(synced_body)
+    assert sync_payload["sync_record"]["citation_link_conflict_count"] == 1
+    assert sync_payload["sync_record"]["citation_link_has_conflicts"] is True
+    assert sync_payload["citation_link_check"]["unknown_claim_element_ids"] == ["nonexistent-element"]
+    assert sync_payload["citation_link_check"]["conflicts"] == [
+        {"citation_id": "doc-100", "claim_element_ids": ["causation", "harm"]}
+    ]
     mike_status_after_sync = client.get(
         "/api/complaint-workspace/mike/status",
         params={"user_id": payload["session"]["user_id"]},

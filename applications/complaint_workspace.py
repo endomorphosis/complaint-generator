@@ -5202,6 +5202,49 @@ class ComplaintWorkspaceService:
             ],
         }
 
+    def _check_mike_citation_links(self, state: Dict[str, Any], citation_links: List[Dict[str, Any]]) -> Dict[str, Any]:
+        support_matrix = list((self._build_review(state) or {}).get("support_matrix") or [])
+        known_element_ids = {
+            str((item or {}).get("id") or "").strip()
+            for item in support_matrix
+            if str((item or {}).get("id") or "").strip()
+        }
+        normalized_links = [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
+        unknown_claim_element_ids = {
+            str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
+            for item in normalized_links
+            if str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
+            and str((item.get("claim_element_id") or item.get("element_id") or "")).strip() not in known_element_ids
+        }
+        citation_to_elements: Dict[str, set[str]] = {}
+        for item in normalized_links:
+            citation_key = str(
+                item.get("citation_id")
+                or item.get("id")
+                or item.get("source_id")
+                or item.get("url")
+                or ""
+            ).strip()
+            claim_element_id = str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
+            if not citation_key or not claim_element_id:
+                continue
+            citation_to_elements.setdefault(citation_key, set()).add(claim_element_id)
+        conflicts = [
+            {
+                "citation_id": citation_id,
+                "claim_element_ids": sorted(element_ids),
+            }
+            for citation_id, element_ids in citation_to_elements.items()
+            if len(element_ids) > 1
+        ]
+        return {
+            "total_links": len(normalized_links),
+            "known_claim_element_ids": sorted(known_element_ids),
+            "unknown_claim_element_ids": sorted(unknown_claim_element_ids),
+            "conflicts": conflicts,
+            "has_conflicts": bool(conflicts or unknown_claim_element_ids),
+        }
+
     def build_mike_handoff(
         self,
         user_id: Optional[str],
@@ -5327,6 +5370,8 @@ class ComplaintWorkspaceService:
         if requested_relief is not None:
             draft["requested_relief"] = [str(item).strip() for item in list(requested_relief or []) if str(item).strip()]
         synced_at = _utc_now()
+        normalized_citation_links = [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
+        citation_link_check = self._check_mike_citation_links(state, normalized_citation_links)
         draft["updated_at"] = synced_at
         draft["sync_source"] = "mike"
         draft["sync_metadata"] = {
@@ -5334,7 +5379,8 @@ class ComplaintWorkspaceService:
             "project_id": str(project_id or "").strip() or None,
             "workspace_id": str(workspace_id or "").strip() or None,
             "mike_document_id": str(mike_document_id or "").strip() or None,
-            "citation_links": [dict(item) for item in list(citation_links or []) if isinstance(item, dict)],
+            "citation_links": normalized_citation_links,
+            "citation_link_check": citation_link_check,
             "redline_summary": str(redline_summary or "").strip() or None,
             "source_updated_at": str(source_updated_at or "").strip() or None,
             "synced_at": synced_at,
@@ -5350,6 +5396,9 @@ class ComplaintWorkspaceService:
             "mike_document_id": draft["sync_metadata"]["mike_document_id"],
             "body_chars": len(synced_body),
             "title": str(draft.get("title") or "").strip(),
+            "citation_link_count": citation_link_check["total_links"],
+            "citation_link_conflict_count": len(citation_link_check["conflicts"]),
+            "citation_link_has_conflicts": citation_link_check["has_conflicts"],
         }
         sync_history.insert(0, sync_record)
         mike_integration["last_sync"] = sync_record
@@ -5361,6 +5410,7 @@ class ComplaintWorkspaceService:
             "user_id": session["session"]["user_id"],
             "draft": deepcopy(session["session"].get("draft") or {}),
             "sync_record": sync_record,
+            "citation_link_check": citation_link_check,
             "review": session["review"],
             "session": session["session"],
             "questions": session["questions"],

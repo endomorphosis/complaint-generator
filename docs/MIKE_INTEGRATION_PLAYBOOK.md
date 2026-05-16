@@ -95,6 +95,7 @@ Use one of the aligned surfaces below:
 
 - Persists draft text into the complaint workspace session.
 - Marks `draft.sync_source = "mike"` with `draft.sync_metadata`.
+- Runs citation-link integrity checks and returns conflict metadata (`citation_link_check`) in the sync response.
 - Updates Mike integration history (`last_handoff`, `last_sync`).
 - Returns refreshed session/review payload for downstream release-gate checks.
 
