@@ -500,6 +500,15 @@ def build_mike_handoff(
     )
 
 
+def get_mike_integration_status(
+    user_id: Optional[str],
+    *,
+    service: Optional[ComplaintWorkspaceService] = None,
+    root_dir: Optional[str | Path] = None,
+) -> dict[str, Any]:
+    return _resolve_service(service, root_dir=root_dir).get_mike_integration_status(user_id)
+
+
 def sync_mike_final_draft(
     user_id: Optional[str],
     *,
@@ -942,6 +951,7 @@ __all__ = [
     "generate_decentralized_id",
     "generate_complaint",
     "build_mike_handoff",
+    "get_mike_integration_status",
     "get_workflow_capabilities",
     "migrate_legacy_workspace_data",
     "search_workspace_dataset",

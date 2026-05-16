@@ -40,6 +40,12 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     handoff_payload = handoff.json()
     assert handoff_payload["handoff_id"].startswith("mike-handoff-")
     assert handoff_payload["mike"]["launch_url"]
+    mike_status_after_handoff = client.get(
+        "/api/complaint-workspace/mike/status",
+        params={"user_id": payload["session"]["user_id"]},
+    )
+    assert mike_status_after_handoff.status_code == 200
+    assert mike_status_after_handoff.json()["pending_sync"] is True
 
     synced_body = "This draft body was synced from Mike."
     sync = client.post(
@@ -57,3 +63,9 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert sync_payload["draft"]["sync_source"] == "mike"
     assert sync_payload["sync_record"]["handoff_id"] == handoff_payload["handoff_id"]
     assert sync_payload["sync_record"]["body_chars"] == len(synced_body)
+    mike_status_after_sync = client.get(
+        "/api/complaint-workspace/mike/status",
+        params={"user_id": payload["session"]["user_id"]},
+    )
+    assert mike_status_after_sync.status_code == 200
+    assert mike_status_after_sync.json()["pending_sync"] is False

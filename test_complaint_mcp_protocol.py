@@ -160,11 +160,23 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
         },
     )
     handoff_id = mike_handoff["result"]["structuredContent"]["handoff_id"]
-    mike_sync = handle_jsonrpc_message(
+    mike_status_after_handoff = handle_jsonrpc_message(
         service,
         {
             "jsonrpc": "2.0",
             "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "complaint.get_mike_integration_status",
+                "arguments": {"user_id": "demo-user"},
+            },
+        },
+    )
+    mike_sync = handle_jsonrpc_message(
+        service,
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
             "method": "tools/call",
             "params": {
                 "name": "complaint.sync_mike_final_draft",
@@ -174,6 +186,18 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
                     "title": "Mike Synced Draft",
                     "body": "This draft was synced from Mike.",
                 },
+            },
+        },
+    )
+    mike_status_after_sync = handle_jsonrpc_message(
+        service,
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "complaint.get_mike_integration_status",
+                "arguments": {"user_id": "demo-user"},
             },
         },
     )
@@ -199,4 +223,7 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     }
     assert handoff_id.startswith("mike-handoff-")
     assert mike_handoff["result"]["structuredContent"]["mike"]["launch_url"]
+    assert mike_status_after_handoff["result"]["structuredContent"]["pending_sync"] is True
     assert mike_sync["result"]["structuredContent"]["draft"]["sync_source"] == "mike"
+    assert mike_status_after_sync["result"]["structuredContent"]["pending_sync"] is False
+    assert mike_status_after_sync["result"]["structuredContent"]["latest_sync_handoff_id"] == handoff_id

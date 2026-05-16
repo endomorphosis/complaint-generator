@@ -163,6 +163,7 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "search_workspace_dataset",
     "view_workspace_dataset",
     "build_mike_handoff",
+    "get_mike_integration_status",
     "sync_mike_final_draft",
     "generate_complaint",
     "export_complaint_packet",
@@ -206,6 +207,7 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "search-workspace-data",
     "view-workspace-data",
     "build-mike-handoff",
+    "mike-status",
     "sync-mike-draft",
     "generate",
     "export-packet",
@@ -250,6 +252,7 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "searchWorkspaceDataset",
     "viewWorkspaceDataset",
     "buildMikeHandoff",
+    "getMikeIntegrationStatus",
     "syncMikeFinalDraft",
     "generateComplaint",
     "exportComplaintPacket",
@@ -428,6 +431,12 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "build-mike-handoff",
         "mcp_tool": "complaint.build_mike_handoff",
         "browser_sdk_method": "buildMikeHandoff",
+    },
+    "mike_editor_status": {
+        "package_export": "get_mike_integration_status",
+        "cli_command": "mike-status",
+        "mcp_tool": "complaint.get_mike_integration_status",
+        "browser_sdk_method": "getMikeIntegrationStatus",
     },
     "mike_editor_sync": {
         "package_export": "sync_mike_final_draft",
@@ -3234,6 +3243,7 @@ class ComplaintWorkspaceService:
         answered_count = len([item for item in questions if item.get("is_answered")])
         total_questions = len(questions)
         readiness = self.get_complaint_readiness(user_id)
+        mike_status = self.get_mike_integration_status(user_id)
         capabilities = [
             {
                 "id": "intake_questions",
@@ -3291,7 +3301,8 @@ class ComplaintWorkspaceService:
                 "id": "mike_editor_handoff",
                 "label": "Mike editor handoff and draft sync",
                 "available": True,
-                "detail": "Drafts and evidence context can be handed off to Mike, then synced back into the complaint workspace.",
+                "detail": str(mike_status.get("recommended_action") or "").strip()
+                or "Drafts and evidence context can be handed off to Mike, then synced back into the complaint workspace.",
             },
         ]
         workspace_data_schema = self.get_workspace_data_schema(session["session"]["user_id"])
@@ -3305,6 +3316,7 @@ class ComplaintWorkspaceService:
             "complaint_readiness": readiness,
             "ui_readiness": self.get_ui_readiness(user_id),
             "client_release_gate": self.get_client_release_gate(user_id),
+            "mike_integration_status": mike_status,
             "tooling_contract": self.get_tooling_contract(user_id),
             "workspace_data_schema": workspace_data_schema,
             "schema_guided_recommendations": _build_schema_guided_tooling_recommendations(workspace_data_schema),
@@ -5356,6 +5368,42 @@ class ComplaintWorkspaceService:
             "case_synopsis": session["case_synopsis"],
         }
 
+    def get_mike_integration_status(self, user_id: Optional[str]) -> Dict[str, Any]:
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        mike_integration = dict(state.get("mike_integration") or {})
+        last_handoff = dict(mike_integration.get("last_handoff") or {})
+        last_sync = dict(mike_integration.get("last_sync") or {})
+        handoff_history = [dict(item) for item in list(mike_integration.get("handoff_history") or []) if isinstance(item, dict)]
+        sync_history = [dict(item) for item in list(mike_integration.get("sync_history") or []) if isinstance(item, dict)]
+        draft = dict(state.get("draft") or {})
+        draft_sync_source = str(draft.get("sync_source") or "").strip().lower()
+        has_mike_synced_draft = draft_sync_source == "mike" and bool(str(draft.get("body") or "").strip())
+        latest_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
+        latest_sync_handoff_id = str(last_sync.get("handoff_id") or "").strip()
+        pending_sync = bool(latest_handoff_id) and latest_handoff_id != latest_sync_handoff_id
+        if pending_sync:
+            recommended_action = "Latest Mike handoff has not been synced yet. Import the edited draft with complaint.sync_mike_final_draft."
+        elif not latest_handoff_id:
+            recommended_action = "Start with complaint.build_mike_handoff to open Mike with the current draft and evidence context."
+        elif has_mike_synced_draft:
+            recommended_action = "Mike sync is current. Continue export review and release-gate checks for filing readiness."
+        else:
+            recommended_action = "A handoff exists. Sync the finalized Mike draft back into complaint-generator before export."
+        return {
+            "user_id": str(state.get("user_id") or DEFAULT_USER_ID),
+            "status": "ok",
+            "last_handoff": last_handoff or None,
+            "last_sync": last_sync or None,
+            "handoff_history_count": len(handoff_history),
+            "sync_history_count": len(sync_history),
+            "latest_handoff_id": latest_handoff_id or None,
+            "latest_sync_handoff_id": latest_sync_handoff_id or None,
+            "pending_sync": pending_sync,
+            "has_mike_synced_draft": has_mike_synced_draft,
+            "draft_sync_source": draft_sync_source or None,
+            "recommended_action": recommended_action,
+        }
+
     def update_filing_metadata(
         self,
         user_id: Optional[str],
@@ -6840,6 +6888,7 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.search_workspace_dataset", "description": "Search a packaged or single-file workspace dataset using BM25 or vector retrieval plus schema-aligned filters."},
                 {"name": "complaint.get_workspace_dataset_graph", "description": "Explore workspace dataset knowledge-graph entities, relationships, deontic logic flow, formulas, conflicts, and proof links."},
                 {"name": "complaint.build_mike_handoff", "description": "Build a Mike editor handoff payload with prefilled complaint draft, review state, and evidence context."},
+                {"name": "complaint.get_mike_integration_status", "description": "Return Mike handoff/sync status, correlation IDs, and recommended next integration action."},
                 {"name": "complaint.sync_mike_final_draft", "description": "Sync an edited draft from Mike back into the complaint workspace and persist the merged draft state."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
@@ -7098,6 +7147,8 @@ class ComplaintWorkspaceService:
                 workspace_id=args.get("workspace_id"),
                 generate_draft_if_missing=bool(args.get("generate_draft_if_missing", True)),
             )
+        if tool_name == "complaint.get_mike_integration_status":
+            return self.get_mike_integration_status(args.get("user_id"))
         if tool_name == "complaint.sync_mike_final_draft":
             requested_relief = args.get("requested_relief")
             if isinstance(requested_relief, str):

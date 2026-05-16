@@ -620,6 +620,10 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             generate_draft_if_missing=request.generate_draft_if_missing,
         )
 
+    @router.get("/api/complaint-workspace/mike/status")
+    async def get_mike_integration_status(user_id: Optional[str] = None) -> Dict[str, Any]:
+        return workspace.get_mike_integration_status(user_id)
+
     @router.post("/api/complaint-workspace/mike/sync")
     async def sync_mike_final_draft(request: MikeDraftSyncRequest) -> Dict[str, Any]:
         return workspace.sync_mike_final_draft(

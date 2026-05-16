@@ -39,6 +39,22 @@ Use one of the aligned surfaces below:
   - support review
   - summarized evidence context by claim element
 
+## 2.5) Check integration status and next action
+
+Use one of the aligned surfaces below:
+
+- MCP tool: `complaint.get_mike_integration_status`
+- HTTP route: `GET /api/complaint-workspace/mike/status?user_id=...`
+- Browser SDK: `client.getMikeIntegrationStatus(userId)`
+- CLI: `complaint-generator mike-status`
+
+The status payload reports:
+
+- `latest_handoff_id`, `latest_sync_handoff_id`
+- `pending_sync`
+- `has_mike_synced_draft`
+- `recommended_action`
+
 ## 3) Edit and refine in Mike
 
 Use `handoff_payload` as the source-of-truth seed for Mike editing.

@@ -125,6 +125,7 @@ This repository now includes the `endomorphosis/mike` application as a submodule
 Complaint workspace now also includes a Mike handoff/sync bridge:
 
 - `POST /api/complaint-workspace/mike/handoff` builds a prefilled Mike launch payload from intake, evidence, review, and draft state
+- `GET /api/complaint-workspace/mike/status` returns handoff/sync correlation status and next recommended action
 - `POST /api/complaint-workspace/mike/sync` writes Mike-edited draft content back into the complaint workspace session
 
 [Mike Integration Operator Playbook →](docs/MIKE_INTEGRATION_PLAYBOOK.md)

@@ -665,6 +665,11 @@ def build_mike_handoff(
     )
 
 
+@app.command("mike-status")
+def mike_status(user_id: str = "demo-user") -> None:
+    _print(service.get_mike_integration_status(user_id))
+
+
 @app.command("sync-mike-draft")
 def sync_mike_draft(
     user_id: str = "demo-user",
