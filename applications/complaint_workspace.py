@@ -5211,6 +5211,17 @@ class ComplaintWorkspaceService:
         *,
         review: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        """Validate Mike citation links against claim elements and detect citation conflicts.
+
+        Args:
+            state: Current workspace state payload.
+            citation_links: Citation-link objects supplied on Mike sync.
+            review: Optional precomputed review payload to avoid recomputing support_matrix.
+
+        Returns:
+            Dict with total link count, known/unknown claim elements, per-citation conflicts,
+            and an aggregate has_conflicts boolean.
+        """
         review_payload = dict(review or {})
         if not review_payload:
             review_payload = self._build_review(state)
@@ -5247,7 +5258,7 @@ class ComplaintWorkspaceService:
                 "citation_id": citation_id,
                 "claim_element_ids": sorted(element_ids),
             }
-            for citation_id, element_ids in citation_to_elements.items()
+            for citation_id, element_ids in sorted(citation_to_elements.items())
             if len(element_ids) > 1
         ]
         return {
