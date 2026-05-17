@@ -3539,62 +3539,57 @@
             const workflowState = status.workflow_state && typeof status.workflow_state === 'object'
                 ? status.workflow_state
                 : null;
-            if (workflowState && String(workflowState.key || '').trim()) {
-                return {
-                    key: String(workflowState.key || '').trim(),
-                    label: String(workflowState.label || '').trim() || 'Unknown',
-                    severity: String(workflowState.severity || '').trim() === 'good' ? 'ready' : 'warning',
-                    summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
-                        || 'Mike status is available.',
-                    sequenceHint: 'Prepare draft → Send to Mike → Confirm sync back → Resolve conflicts if present → Continue export checks.',
-                };
-            }
             const pendingSync = Boolean(status.pending_sync);
             const hasSyncedDraft = Boolean(status.has_mike_synced_draft);
             const hasConflicts = Boolean(status.has_citation_link_conflicts);
             const latestHandoffId = String(status.latest_handoff_id || '').trim();
-            if (!latestHandoffId) {
-                return {
-                    key: 'not_handed_off',
-                    label: 'Not handed off',
-                    severity: 'warning',
-                    summary: 'Start by sending this draft context to Mike before expecting a synced draft.',
-                    sequenceHint: 'Prepare draft → Send to Mike → Confirm sync back → Resolve conflicts if present → Continue export checks.',
-                };
-            }
-            if (pendingSync) {
-                return {
-                    key: 'handoff_pending_sync',
-                    label: 'Handoff pending sync',
-                    severity: 'warning',
-                    summary: 'A Mike handoff exists, but the latest edited draft has not been synced back yet.',
-                    sequenceHint: 'Prepare draft → Send to Mike → Confirm sync back → Resolve conflicts if present → Continue export checks.',
-                };
-            }
-            if (hasSyncedDraft && hasConflicts) {
-                return {
-                    key: 'synced_with_conflicts',
-                    label: 'Synced with conflicts',
-                    severity: 'warning',
-                    summary: 'Mike sync is current, but citation-link conflicts were detected.',
-                    sequenceHint: 'Resolve conflicts in Mike and sync again before export.',
-                };
-            }
-            if (hasSyncedDraft) {
-                return {
-                    key: 'synced_clean',
-                    label: 'Synced clean',
-                    severity: 'ready',
-                    summary: 'Mike sync is current and no citation-link conflicts were reported.',
-                    sequenceHint: 'Continue export checks with the current synced draft.',
-                };
-            }
+            const workflowStateKey = String((workflowState || {}).key || '').trim();
+            const derivedKey = !latestHandoffId
+                ? 'not_handed_off'
+                : (pendingSync
+                    ? 'handoff_pending_sync'
+                    : ((hasSyncedDraft && hasConflicts)
+                        ? 'synced_with_conflicts'
+                        : (hasSyncedDraft ? 'synced_clean' : 'handoff_pending_sync')));
+            const key = workflowState && workflowStateKey
+                ? workflowStateKey
+                : derivedKey;
+            const labelByKey = {
+                not_handed_off: 'Not handed off',
+                handoff_pending_sync: 'Handoff pending sync',
+                synced_with_conflicts: 'Synced with conflicts',
+                synced_clean: 'Synced clean',
+            };
+            const severityByKey = {
+                not_handed_off: 'warning',
+                handoff_pending_sync: 'warning',
+                synced_with_conflicts: 'warning',
+                synced_clean: 'ready',
+            };
+            const summaryByKey = {
+                not_handed_off: 'Start by sending this draft context to Mike before expecting a synced draft.',
+                handoff_pending_sync: 'A Mike handoff exists, but the latest edited draft has not been synced back yet.',
+                synced_with_conflicts: 'Mike sync is current, but citation-link conflicts were detected.',
+                synced_clean: 'Mike sync is current and no citation-link conflicts were reported.',
+            };
             return {
-                key: 'handoff_pending_sync',
-                label: 'Handoff pending sync',
-                severity: 'warning',
-                summary: 'A Mike handoff exists. Sync the finalized Mike draft back before export.',
-                sequenceHint: 'Prepare draft → Send to Mike → Confirm sync back → Resolve conflicts if present → Continue export checks.',
+                key,
+                label: String((workflowState || {}).label || '').trim() || (labelByKey[key] || 'Unknown'),
+                severity: (() => {
+                    const workflowSeverity = String((workflowState || {}).severity || '').trim().toLowerCase();
+                    if (workflowSeverity === 'good') {
+                        return 'ready';
+                    }
+                    if (workflowSeverity === 'warn' || workflowSeverity === 'warning') {
+                        return 'warning';
+                    }
+                    return severityByKey[key] || 'warning';
+                })(),
+                summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
+                    || (summaryByKey[key] || 'Mike status is available.'),
+                sequenceHint: key === 'synced_with_conflicts'
+                    ? 'Resolve conflicts in Mike and sync again before export.'
+                    : 'Prepare draft → Send to Mike → Confirm sync back → Resolve conflicts if present → Continue export checks.',
             };
         }
 

@@ -10,6 +10,7 @@ import threading
 import uuid
 import zipfile
 import hashlib
+import hmac
 from base64 import b64encode
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -77,6 +78,9 @@ MIKE_CITATION_KEY_FIELD_PRECEDENCE: tuple[str, ...] = ("citation_id", "id", "sou
 MIKE_STATUS_CONTRACT_VERSION = "complaint-mike-status-v2"
 MIKE_HANDOFF_CONTRACT_VERSION = "complaint-mike-handoff-v2"
 MIKE_SYNC_CONTRACT_VERSION = "complaint-mike-sync-v2"
+MAX_MIKE_HANDOFF_PARAGRAPHS = 80
+MAX_MIKE_WEAK_LINKS_DISPLAY = 3
+VALID_MIKE_STRUCTURED_DELTA_OPS: Set[str] = {"insert", "delete", "replace", "edit", "move"}
 MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
     "not_handed_off": "Not handed off",
     "handoff_pending_sync": "Handoff pending sync",
@@ -5350,8 +5354,9 @@ class ComplaintWorkspaceService:
     ) -> Dict[str, Any]:
         draft_body = str((draft or {}).get("body") or "")
         paragraphs = [line.strip() for line in draft_body.splitlines() if line.strip()]
+        paragraph_count_truncated = len(paragraphs) > MAX_MIKE_HANDOFF_PARAGRAPHS
         section_cards: List[Dict[str, Any]] = []
-        for index, paragraph in enumerate(paragraphs[:80], start=1):
+        for index, paragraph in enumerate(paragraphs[:MAX_MIKE_HANDOFF_PARAGRAPHS], start=1):
             section_cards.append(
                 {
                     "section_id": f"section-{index:03d}",
@@ -5379,6 +5384,8 @@ class ComplaintWorkspaceService:
         return {
             "section_cards": section_cards,
             "claim_elements": claim_elements,
+            "total_paragraph_count": len(paragraphs),
+            "paragraph_count_truncated": paragraph_count_truncated,
             "stable_id_rules": {
                 "sections": "section-###",
                 "paragraphs": "paragraph-###",
@@ -5402,7 +5409,7 @@ class ComplaintWorkspaceService:
         ]
         return {
             "unsupported_claim_elements": unsupported_ids,
-            "weak_evidentiary_links": unsupported_ids[:3],
+            "weak_evidentiary_links": unsupported_ids[:MAX_MIKE_WEAK_LINKS_DISPLAY],
             "proof_readiness_flags": {
                 "missing_support_count": len(unsupported_ids),
                 "supported_count": len(support_matrix) - len(unsupported_ids),
@@ -5412,21 +5419,26 @@ class ComplaintWorkspaceService:
 
     @staticmethod
     def _validate_mike_structured_deltas(structured_deltas: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize structured deltas while intentionally ignoring malformed rows."""
         normalized: List[Dict[str, Any]] = []
         for item in list(structured_deltas or []):
             if not isinstance(item, dict):
                 continue
             op = str(item.get("op") or "").strip().lower() or "edit"
             target = str(item.get("target") or "").strip()
-            if op not in {"insert", "delete", "replace", "edit", "move"}:
+            normalized_from_invalid_op = op not in VALID_MIKE_STRUCTURED_DELTA_OPS
+            if op not in VALID_MIKE_STRUCTURED_DELTA_OPS:
                 op = "edit"
+            metadata = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}
+            if normalized_from_invalid_op:
+                metadata["normalized_from_invalid_op"] = True
             normalized.append(
                 {
                     "op": op,
                     "target": target or "draft.body",
                     "before": item.get("before"),
                     "after": item.get("after"),
-                    "metadata": dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {},
+                    "metadata": metadata,
                 }
             )
         return normalized
@@ -5489,11 +5501,17 @@ class ComplaintWorkspaceService:
                 "remediation": "Run complaint.review_case and complaint.get_client_release_gate before filing.",
             },
         ]
+        normalized_invalid_op_count = sum(
+            1
+            for item in structured_deltas
+            if bool(dict(item.get("metadata") or {}).get("normalized_from_invalid_op"))
+        )
         return {
             "severity": "error" if (conflict_count or unknown_count) else ("warning" if missing_count else "info"),
             "has_blockers": bool(conflict_count or unknown_count),
             "checks": diagnostics,
             "structured_delta_count": len(structured_deltas),
+            "normalized_invalid_op_count": normalized_invalid_op_count,
         }
 
     def build_mike_handoff(
@@ -5658,20 +5676,26 @@ class ComplaintWorkspaceService:
             review_payload=review_payload,
             structured_deltas=normalized_structured_deltas,
         )
-        sync_integrity_hash = hashlib.sha256(
-            json.dumps(
-                {
-                    "handoff_id": str(handoff_id or "").strip(),
-                    "body": synced_body,
-                    "citation_links": normalized_citation_links,
-                    "structured_deltas": normalized_structured_deltas,
-                    "source_updated_at": str(source_updated_at or "").strip(),
-                    "editor_metadata": normalized_editor_metadata,
-                },
-                sort_keys=True,
-                default=str,
-            ).encode("utf-8")
-        ).hexdigest()
+        sync_integrity_payload_bytes = json.dumps(
+            {
+                "handoff_id": str(handoff_id or "").strip(),
+                "body": synced_body,
+                "synced_at": synced_at,
+                "citation_links": normalized_citation_links,
+                "structured_deltas": normalized_structured_deltas,
+                "source_updated_at": str(source_updated_at or "").strip(),
+                "editor_metadata": normalized_editor_metadata,
+            },
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        sync_hash_secret = str(os.getenv("COMPLAINT_MIKE_SYNC_HASH_SECRET") or "").strip()
+        if sync_hash_secret:
+            sync_integrity_hash = hmac.new(sync_hash_secret.encode("utf-8"), sync_integrity_payload_bytes, hashlib.sha256).hexdigest()
+            sync_integrity_hash_mode = "hmac_sha256"
+        else:
+            sync_integrity_hash = hashlib.sha256(sync_integrity_payload_bytes).hexdigest()
+            sync_integrity_hash_mode = "sha256_unkeyed"
         draft["updated_at"] = synced_at
         draft["sync_source"] = "mike"
         draft["sync_metadata"] = {
@@ -5688,6 +5712,7 @@ class ComplaintWorkspaceService:
             "source_updated_at": str(source_updated_at or "").strip() or None,
             "editor_metadata": normalized_editor_metadata,
             "sync_integrity_hash": sync_integrity_hash,
+            "sync_integrity_hash_mode": sync_integrity_hash_mode,
             "synced_at": synced_at,
         }
         state["draft"] = draft
@@ -5709,6 +5734,7 @@ class ComplaintWorkspaceService:
             "sync_diagnostics_severity": str(sync_diagnostics.get("severity") or "info"),
             "editor_user_id": normalized_editor_metadata.get("editor_user_id"),
             "sync_integrity_hash": sync_integrity_hash,
+            "sync_integrity_hash_mode": sync_integrity_hash_mode,
         }
         sync_history.insert(0, sync_record)
         mike_integration["last_sync"] = sync_record
@@ -5776,8 +5802,11 @@ class ComplaintWorkspaceService:
             workflow_state_key=workflow_state["key"],
             has_citation_link_conflicts=has_citation_link_conflicts,
         )
-        pending_sync_matches_handoff_sync_ids = pending_sync == (
-            bool(latest_handoff_id) and latest_handoff_id != latest_sync_handoff_id
+        pending_sync_implies_handoff = (not pending_sync) or bool(latest_handoff_id)
+        synced_handoff_never_pending = not (
+            bool(latest_handoff_id)
+            and latest_handoff_id == latest_sync_handoff_id
+            and pending_sync
         )
         conflict_count_non_null = isinstance(citation_link_conflict_count, int) and citation_link_conflict_count >= 0
         unknown_count_non_null = isinstance(citation_link_unknown_element_count, int) and citation_link_unknown_element_count >= 0
@@ -5822,7 +5851,8 @@ class ComplaintWorkspaceService:
             "draft_sync_source": draft_sync_source or None,
             "recommended_action": recommended_action,
             "invariants": {
-                "pending_sync_matches_handoff_sync_ids": pending_sync_matches_handoff_sync_ids,
+                "pending_sync_implies_handoff": pending_sync_implies_handoff,
+                "synced_handoff_never_pending": synced_handoff_never_pending,
                 "conflict_counters_non_null_numeric": bool(conflict_count_non_null and unknown_count_non_null),
                 "recommended_action_present": recommended_action_valid,
             },

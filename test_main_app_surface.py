@@ -113,5 +113,6 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert status_payload["citation_link_conflict_count"] == 1
     assert status_payload["citation_link_unknown_element_count"] == 1
     assert status_payload["conflict_component"]["conflict_count"] == 1
-    assert status_payload["invariants"]["pending_sync_matches_handoff_sync_ids"] is True
+    assert status_payload["invariants"]["pending_sync_implies_handoff"] is True
+    assert status_payload["invariants"]["synced_handoff_never_pending"] is True
     assert "Resolve conflicts in Mike and sync again before export." in status_payload["recommended_action"]

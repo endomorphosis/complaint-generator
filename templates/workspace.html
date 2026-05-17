@@ -6353,56 +6353,53 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const workflowState = status.workflow_state && typeof status.workflow_state === 'object'
                 ? status.workflow_state
                 : null;
-            if (workflowState && String(workflowState.key || '').trim()) {
-                return {
-                    key: String(workflowState.key || '').trim(),
-                    label: String(workflowState.label || '').trim() || 'Unknown',
-                    severity: String(workflowState.severity || '').trim() || 'warn',
-                    summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
-                        || 'Mike integration status is available from the canonical status endpoint.',
-                };
-            }
             const pendingSync = Boolean(status.pending_sync);
             const hasSyncedDraft = Boolean(status.has_mike_synced_draft);
             const hasConflicts = Boolean(status.has_citation_link_conflicts);
             const latestHandoffId = String(status.latest_handoff_id || '').trim();
-            if (!latestHandoffId) {
-                return {
-                    key: 'not_handed_off',
-                    label: 'Not handed off',
-                    severity: 'warn',
-                    summary: 'No Mike handoff has been created for this complaint session yet.',
-                };
+            const workflowStateKey = String((workflowState || {}).key || '').trim();
+            const derivedKey = !latestHandoffId
+                ? 'not_handed_off'
+                : (pendingSync
+                    ? 'handoff_pending_sync'
+                    : ((hasSyncedDraft && hasConflicts)
+                        ? 'synced_with_conflicts'
+                        : (hasSyncedDraft ? 'synced_clean' : 'handoff_pending_sync')));
+            const key = workflowState && workflowStateKey
+                ? workflowStateKey
+                : derivedKey;
+            if (workflowStateKey && workflowStateKey !== derivedKey && typeof console !== 'undefined' && typeof console.warn === 'function') {
+                console.warn('Mike status contract drift detected: workflow_state key mismatches derived state.', {
+                    workflowStateKey,
+                    derivedKey,
+                    latestHandoffId,
+                    pendingSync,
+                });
             }
-            if (pendingSync) {
-                return {
-                    key: 'handoff_pending_sync',
-                    label: 'Handoff pending sync',
-                    severity: 'warn',
-                    summary: 'A Mike handoff exists, but the latest Mike edits have not been synced back yet.',
-                };
-            }
-            if (hasSyncedDraft && hasConflicts) {
-                return {
-                    key: 'synced_with_conflicts',
-                    label: 'Synced with conflicts',
-                    severity: 'warn',
-                    summary: 'Mike sync completed, but citation-link conflicts were detected and should be resolved before export.',
-                };
-            }
-            if (hasSyncedDraft) {
-                return {
-                    key: 'synced_clean',
-                    label: 'Synced clean',
-                    severity: 'good',
-                    summary: 'Mike sync is current and no citation-link conflicts were reported.',
-                };
-            }
+            const labelByKey = {
+                not_handed_off: 'Not handed off',
+                handoff_pending_sync: 'Handoff pending sync',
+                synced_with_conflicts: 'Synced with conflicts',
+                synced_clean: 'Synced clean',
+            };
+            const severityByKey = {
+                not_handed_off: 'warn',
+                handoff_pending_sync: 'warn',
+                synced_with_conflicts: 'warn',
+                synced_clean: 'good',
+            };
+            const summaryByKey = {
+                not_handed_off: 'No Mike handoff has been created for this complaint session yet.',
+                handoff_pending_sync: 'A Mike handoff exists, but the latest Mike edits have not been synced back yet.',
+                synced_with_conflicts: 'Mike sync completed, but citation-link conflicts were detected and should be resolved before export.',
+                synced_clean: 'Mike sync is current and no citation-link conflicts were reported.',
+            };
             return {
-                key: 'handoff_pending_sync',
-                label: 'Handoff pending sync',
-                severity: 'warn',
-                summary: 'A Mike handoff exists, and the final draft still needs to be synced back.',
+                key,
+                label: String((workflowState || {}).label || '').trim() || (labelByKey[key] || 'Unknown'),
+                severity: String((workflowState || {}).severity || '').trim() || (severityByKey[key] || 'warn'),
+                summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
+                    || (summaryByKey[key] || 'Mike integration status is available from the canonical status endpoint.'),
             };
         }
 

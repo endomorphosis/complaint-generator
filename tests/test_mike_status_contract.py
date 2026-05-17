@@ -49,7 +49,8 @@ def test_mike_status_contract_state_transitions_and_invariants(tmp_path):
     assert after_conflict_sync["has_citation_link_conflicts"] is True
     assert after_conflict_sync["conflict_component"]["conflict_count"] == 1
     assert after_conflict_sync["conflict_component"]["unknown_element_count"] == 1
-    assert after_conflict_sync["invariants"]["pending_sync_matches_handoff_sync_ids"] is True
+    assert after_conflict_sync["invariants"]["pending_sync_implies_handoff"] is True
+    assert after_conflict_sync["invariants"]["synced_handoff_never_pending"] is True
 
 
 def test_mike_ui_state_contract_keys_are_shared_across_surfaces():
