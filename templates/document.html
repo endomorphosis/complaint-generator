@@ -1348,6 +1348,7 @@
         const REVIEW_INTENT_STORAGE_KEY = 'formalComplaintReviewIntent';
         const SYNC_EVENT_NAME = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.SYNC_EVENT_NAME) || 'complaint-mcp-sync';
         const SYNC_EVENT_STORAGE_KEY = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.DEFAULT_SYNC_EVENT_STORAGE_KEY) || 'complaintGenerator.sdkSyncEvent';
+        const MIKE_STATUS_STALE_MS = 5 * 60 * 1000;
         const state = {
             userId: null,
             generatedPayload: null,
@@ -1424,6 +1425,19 @@
             }
             const diffDays = Math.round(diffHours / 24);
             return diffDays === 1 ? 'updated 1 day ago' : `updated ${diffDays} days ago`;
+        }
+
+        function isTimestampStale(value, maxAgeMs) {
+            const raw = String(value || '').trim();
+            if (!raw) {
+                return false;
+            }
+            const timestamp = Date.parse(raw);
+            if (!Number.isFinite(timestamp)) {
+                return false;
+            }
+            const ageMs = Date.now() - timestamp;
+            return Number.isFinite(ageMs) && ageMs > (Number(maxAgeMs) || MIKE_STATUS_STALE_MS);
         }
 
         function resolveBuilderCaseSynopsis(userId) {
@@ -2194,8 +2208,20 @@
             if (!values.length) {
                 return '';
             }
+            const mikeStatus = state.mikeIntegrationStatus && typeof state.mikeIntegrationStatus === 'object'
+                ? state.mikeIntegrationStatus
+                : {};
+            const mikeState = deriveMikeUiState(mikeStatus);
+            const mikeStatusContractVersion = String(mikeStatus.status_contract_version || '').trim();
+            const mikeStatusStale = isTimestampStale(state.mikeStatusUpdatedAt, MIKE_STATUS_STALE_MS);
+            const downloadsGuardedByMike = mikeStatusStale
+                || !mikeStatusContractVersion
+                || mikeState.key === 'handoff_pending_sync'
+                || mikeState.key === 'synced_with_conflicts';
             const cards = values.map(([format, artifact]) => {
-                const link = artifact.download_url
+                const link = downloadsGuardedByMike
+                    ? `<span class="preview-meta">Download withheld until Mike sync is current and conflict-free (${escapeHtml(mikeState.label)}).</span>`
+                    : artifact.download_url
                     ? `<a href="${encodeURI(artifact.download_url)}">Download ${escapeHtml(format.toUpperCase())}</a>`
                     : '<span class="preview-meta">Download unavailable for this artifact</span>';
                 return `
@@ -2208,7 +2234,10 @@
                     </article>
                 `;
             }).join('');
-            return `<section><h2>Artifacts</h2><div class="artifact-grid">${cards}</div></section>`;
+            const gateNote = downloadsGuardedByMike
+                ? `<div class="preview-meta"><strong>Export gate note:</strong> Refresh Mike status and resolve sync blockers before treating artifact downloads as the next action.</div>`
+                : '';
+            return `<section><h2>Artifacts</h2>${gateNote}<div class="artifact-grid">${cards}</div></section>`;
         }
 
         function renderClaims(claims, readinessClaims = []) {
@@ -3543,6 +3572,7 @@
             const hasSyncedDraft = Boolean(status.has_mike_synced_draft);
             const hasConflicts = Boolean(status.has_citation_link_conflicts);
             const latestHandoffId = String(status.latest_handoff_id || '').trim();
+            const statusContractVersion = String(status.status_contract_version || '').trim();
             const workflowStateKey = String((workflowState || {}).key || '').trim();
             const derivedKey = !latestHandoffId
                 ? 'not_handed_off'
@@ -3590,6 +3620,7 @@
                 sequenceHint: key === 'synced_with_conflicts'
                     ? 'Resolve conflicts in Mike and sync again before export.'
                     : 'Prepare draft → Send to Mike → Confirm sync back → Resolve conflicts if present → Continue export checks.',
+                statusContractVersion,
             };
         }
 
@@ -3605,8 +3636,10 @@
                 : {};
             const recommendedAction = String(conflictComponent.required_next_action || mikeStatus.recommended_action || '').trim()
                 || 'Use Mike handoff and sync tools to keep this draft aligned.';
+            const statusTimestampStale = isTimestampStale(state.mikeStatusUpdatedAt, MIKE_STATUS_STALE_MS);
+            const statusContractVersion = String(mikeStatus.status_contract_version || '').trim();
             const statusFreshness = state.mikeStatusUpdatedAt
-                ? `Status ${formatRelativeTimestamp(state.mikeStatusUpdatedAt)}`
+                ? `Status ${formatRelativeTimestamp(state.mikeStatusUpdatedAt)}${statusTimestampStale ? ' (stale — refresh before export)' : ''}`
                 : 'Status pending refresh.';
             const workspaceUrl = buildBuilderSurfaceUrl('/workspace', {
                 user_id: userId || '',
@@ -3620,15 +3653,18 @@
                 focus: 'tool-list',
                 status_message: 'Opened CLI + MCP from the builder for Mike sync follow-up.',
             });
-            const conflictBlockerText = mikeState.key === 'synced_with_conflicts'
+            const conflictBlockerText = (statusTimestampStale || !statusContractVersion)
+                ? 'Export readiness is blocked until canonical Mike status is refreshed and contract metadata is present.'
+                : (mikeState.key === 'synced_with_conflicts'
                 ? (String(conflictComponent.impact_statement || '').trim()
                     || 'Export readiness is blocked until Mike citation-link conflicts are resolved and synced again')
-                : 'Export readiness follows the same Mike sync state shown here.';
+                : 'Export readiness follows the same Mike sync state shown here.');
             return `
                 <section class="mike-workflow-journey" id="mike-workflow-journey" data-severity="${escapeHtml(mikeState.severity)}" aria-label="Mike workflow journey" role="status">
                     <div class="readiness-subtitle">Mike workflow journey</div>
-                    <div class="preview-meta"><strong>State:</strong> ${escapeHtml(mikeState.label)} | <strong>Sync:</strong> ${mikeStatus.pending_sync ? 'pending' : 'current'}</div>
+                    <div class="preview-meta"><strong>State:</strong> ${escapeHtml(mikeState.label)} | <strong>Sync:</strong> ${statusTimestampStale ? 'stale' : (mikeStatus.pending_sync ? 'pending' : 'current')}</div>
                     <div class="preview-meta"><strong>Latest handoff:</strong> ${escapeHtml(String(mikeStatus.latest_handoff_id || 'none'))} | <strong>Latest synced handoff:</strong> ${escapeHtml(String(mikeStatus.latest_sync_handoff_id || 'none'))}</div>
+                    <div class="preview-meta"><strong>Contract:</strong> ${escapeHtml(statusContractVersion || 'missing')}</div>
                     <div class="preview-meta"><strong>Conflict summary:</strong> conflicts=${escapeHtml(String(conflictCount))} | unknown links=${escapeHtml(String(unknownCount))}</div>
                     <div class="preview-meta"><strong>Sequence:</strong> ${escapeHtml(mikeState.sequenceHint)}</div>
                     <div class="preview-meta"><strong>Recommended action:</strong> ${escapeHtml(recommendedAction)}</div>

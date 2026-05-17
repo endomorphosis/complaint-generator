@@ -70,3 +70,17 @@ def test_mike_ui_state_contract_keys_are_shared_across_surfaces():
         assert key in workspace_content
         assert key in document_content
         assert key in dashboard_content
+
+
+def test_mike_status_guardrail_copy_mentions_stale_or_missing_contract_across_surfaces():
+    repo_root = Path(__file__).resolve().parent.parent
+    workspace_content = (repo_root / "templates" / "workspace.html").read_text()
+    document_content = (repo_root / "templates" / "document.html").read_text()
+    dashboard_content = (repo_root / "applications" / "dashboard_ui.py").read_text()
+
+    assert "status_contract_version" in workspace_content
+    assert "status_contract_version" in document_content
+    assert "status_contract_version" in dashboard_content
+    assert "stale — refresh before export" in workspace_content
+    assert "stale — refresh before export" in document_content
+    assert "stale or missing contract metadata" in dashboard_content

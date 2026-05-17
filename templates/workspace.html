@@ -5058,6 +5058,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let latestEmailDuckdbSearchResult = null;
         let workspaceMikeIntegrationStatus = null;
         let workspaceMikeStatusUpdatedAt = null;
+        const MIKE_STATUS_STALE_MS = 5 * 60 * 1000;
         let sdkPrimitiveSnapshot = null;
         let latestSdkToolActivity = null;
         let gmailImportDetectedAddresses = [];
@@ -6358,6 +6359,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const hasConflicts = Boolean(status.has_citation_link_conflicts);
             const latestHandoffId = String(status.latest_handoff_id || '').trim();
             const workflowStateKey = String((workflowState || {}).key || '').trim();
+            const statusContractVersion = String(status.status_contract_version || '').trim();
             const derivedKey = !latestHandoffId
                 ? 'not_handed_off'
                 : (pendingSync
@@ -6394,12 +6396,16 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 synced_with_conflicts: 'Mike sync completed, but citation-link conflicts were detected and should be resolved before export.',
                 synced_clean: 'Mike sync is current and no citation-link conflicts were reported.',
             };
+            if (!statusContractVersion && typeof console !== 'undefined' && typeof console.warn === 'function') {
+                console.warn('Mike status contract version missing from canonical status payload.');
+            }
             return {
                 key,
                 label: String((workflowState || {}).label || '').trim() || (labelByKey[key] || 'Unknown'),
                 severity: String((workflowState || {}).severity || '').trim() || (severityByKey[key] || 'warn'),
                 summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
                     || (summaryByKey[key] || 'Mike integration status is available from the canonical status endpoint.'),
+                statusContractVersion,
             };
         }
 
@@ -6418,6 +6424,14 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const updatedNode = document.getElementById('mike-integration-updated-at');
             const conflictCount = Number(status.citation_link_conflict_count || 0);
             const unknownCount = Number(status.citation_link_unknown_element_count || 0);
+            const statusContractVersion = String(status.status_contract_version || '').trim();
+            const statusTimestampStale = (() => {
+                const parsed = workspaceMikeStatusUpdatedAt ? Date.parse(String(workspaceMikeStatusUpdatedAt)) : NaN;
+                if (!Number.isFinite(parsed)) {
+                    return false;
+                }
+                return (Date.now() - parsed) > MIKE_STATUS_STALE_MS;
+            })();
             const latestHandoffId = String(status.latest_handoff_id || '').trim();
             const latestSyncHandoffId = String(status.latest_sync_handoff_id || '').trim();
             const conflictComponent = status.conflict_component && typeof status.conflict_component === 'object'
@@ -6425,18 +6439,22 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : {};
 
             stateTitle.textContent = `Mike state: ${stateModel.label}`;
-            summaryNode.textContent = stateModel.summary;
+            summaryNode.textContent = statusTimestampStale || !statusContractVersion
+                ? `${stateModel.summary} Refresh Mike status before relying on cross-surface export guidance.`
+                : stateModel.summary;
             stateChip.className = `chip ${stateModel.severity}`;
             stateChip.textContent = `state: ${stateModel.label}`;
-            syncChip.className = `chip ${status.pending_sync ? 'warn' : 'good'}`;
-            syncChip.textContent = status.pending_sync ? 'sync: pending' : 'sync: current';
+            syncChip.className = `chip ${(status.pending_sync || statusTimestampStale || !statusContractVersion) ? 'warn' : 'good'}`;
+            syncChip.textContent = statusTimestampStale
+                ? 'sync: stale'
+                : (!statusContractVersion ? 'sync: contract missing' : (status.pending_sync ? 'sync: pending' : 'sync: current'));
             conflictChip.className = `chip ${conflictCount > 0 || unknownCount > 0 ? 'warn' : 'good'}`;
             conflictChip.textContent = `conflicts: ${conflictCount} | unknown links: ${unknownCount}`;
-            idsNode.textContent = `latest handoff: ${latestHandoffId || 'none'} | latest synced handoff: ${latestSyncHandoffId || 'none'}`;
+            idsNode.textContent = `latest handoff: ${latestHandoffId || 'none'} | latest synced handoff: ${latestSyncHandoffId || 'none'} | contract: ${statusContractVersion || 'missing'}`;
             actionNode.textContent = String(conflictComponent.required_next_action || status.recommended_action || '').trim()
                 || 'Use the Mike handoff and sync tools to keep drafting state aligned before export.';
             updatedNode.textContent = workspaceMikeStatusUpdatedAt
-                ? `Status ${formatRelativeTimestamp(workspaceMikeStatusUpdatedAt)}`
+                ? `Status ${formatRelativeTimestamp(workspaceMikeStatusUpdatedAt)}${statusTimestampStale ? ' (stale — refresh before export)' : ''}`
                 : 'Status has not been refreshed yet.';
         }
 

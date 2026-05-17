@@ -2946,6 +2946,10 @@ def _render_dashboard_hub(
             const syncEventStorageKey = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.DEFAULT_SYNC_EVENT_STORAGE_KEY) || 'complaintGenerator.sdkSyncEvent';
             const dashboardState = {{
 	                workspacePayload: null,
+                    workspaceMikeStatusUpdatedAt: null,
+                    workspaceMikeRouteHint: '',
+                    workspaceMikeStale: false,
+                    workspaceMikeStatusContractVersion: '',
 	                docketPayload: null,
 	                docketViewPayload: null,
 	                selectedDatasetDocument: null,
@@ -2968,6 +2972,20 @@ def _render_dashboard_hub(
             function parseCount(value, fallback) {{
                 const numeric = Number(value);
                 return Number.isFinite(numeric) ? numeric : fallback;
+            }}
+
+            const MIKE_STATUS_STALE_MS = 5 * 60 * 1000;
+
+            function isTimestampStale(isoValue, maxAgeMs) {{
+                if (!isoValue) {{
+                    return false;
+                }}
+                const parsed = Date.parse(String(isoValue));
+                if (!Number.isFinite(parsed)) {{
+                    return false;
+                }}
+                const ageMs = Date.now() - parsed;
+                return Number.isFinite(ageMs) && ageMs > (Number(maxAgeMs) || MIKE_STATUS_STALE_MS);
             }}
 
             async function fetchJson(url, options) {{
@@ -4303,6 +4321,8 @@ def _render_dashboard_hub(
                 const mikeState = deriveMikeUiState(mike);
                 const mikeConflictCount = parseCount(mike.citation_link_conflict_count, 0);
                 const mikeUnknownCount = parseCount(mike.citation_link_unknown_element_count, 0);
+                const mikeStatusContractVersion = String(mike.status_contract_version || '').trim();
+                const staleMikeStatus = isTimestampStale(dashboardState.workspaceMikeStatusUpdatedAt, MIKE_STATUS_STALE_MS);
                 setText('dashboard-workspace-answered', String(answers));
                 setText('dashboard-workspace-evidence', String(evidenceCount));
                 setText('dashboard-workspace-missing', String(parseCount(overview.missing_elements, 0)));
@@ -4311,11 +4331,18 @@ def _render_dashboard_hub(
                 const readiness = payload && payload.complaint_readiness ? payload.complaint_readiness : {{}};
                 const mikeRecommendedAction = String(mike.recommended_action || '').trim();
                 let mikeRouteHint = String(readiness.recommended_route || '/workspace');
-                if (mikeState.key === 'synced_with_conflicts') {{
+                if (staleMikeStatus || !mikeStatusContractVersion) {{
+                    mikeRouteHint = '/workspace?target_tab=draft&focus=mike-integration-card';
+                }} else if (mikeState.key === 'synced_with_conflicts') {{
                     mikeRouteHint = '/workspace?target_tab=draft&focus=mike-integration-card';
                 }} else if (mikeState.key === 'handoff_pending_sync') {{
                     mikeRouteHint = '/document?focus=mike-workflow-journey';
+                }} else if (mikeState.key === 'not_handed_off') {{
+                    mikeRouteHint = '/document?focus=mike-workflow-journey';
                 }}
+                dashboardState.workspaceMikeRouteHint = mikeRouteHint;
+                dashboardState.workspaceMikeStale = staleMikeStatus;
+                dashboardState.workspaceMikeStatusContractVersion = mikeStatusContractVersion;
                 setText('dashboard-workspace-route-chip', `next route: ${{mikeRouteHint}}`);
                 const mikeStateChip = document.getElementById('dashboard-workspace-mike-state-chip');
                 if (mikeStateChip) {{
@@ -4329,7 +4356,9 @@ def _render_dashboard_hub(
                 setText('dashboard-workspace-mike-conflict-chip', `mike conflicts: ${{mikeConflictCount}} | unknown links: ${{mikeUnknownCount}}`);
                 setText(
                     'dashboard-workspace-status',
-                    mikeState.key === 'synced_with_conflicts'
+                    staleMikeStatus || !mikeStatusContractVersion
+                        ? `Loaded workspace session for ${{String(session.user_id || 'default user')}}. Mike status is stale or missing contract metadata, so refresh the workspace Mike panel before export.`
+                        : mikeState.key === 'synced_with_conflicts'
                         ? `Loaded workspace session for ${{String(session.user_id || 'default user')}}. High-priority: resolve Mike citation-link conflicts and sync again before export.`
                         : `Loaded workspace session for ${{String(session.user_id || 'default user')}}.`
                 );
@@ -4344,6 +4373,9 @@ def _render_dashboard_hub(
                         review_overview: overview,
                         complaint_readiness: readiness,
                         mike_integration_status: mike,
+                        mike_status_updated_at: dashboardState.workspaceMikeStatusUpdatedAt,
+                        mike_status_stale: staleMikeStatus,
+                        mike_status_contract_version: mikeStatusContractVersion || null,
                         mike_recommended_action: mikeRecommendedAction,
                     }}, null, 2)
                 );
@@ -4354,6 +4386,10 @@ def _render_dashboard_hub(
 
             function clearWorkspaceCard(reason) {{
                 dashboardState.workspacePayload = null;
+                dashboardState.workspaceMikeStatusUpdatedAt = null;
+                dashboardState.workspaceMikeRouteHint = '';
+                dashboardState.workspaceMikeStale = false;
+                dashboardState.workspaceMikeStatusContractVersion = '';
                 setText('dashboard-workspace-answered', '0');
                 setText('dashboard-workspace-evidence', '0');
                 setText('dashboard-workspace-missing', '0');
@@ -5042,6 +5078,8 @@ def _render_dashboard_hub(
                     operatorQueue.push('Re-open the draft and prepare the next filing or export step.');
                 }}
                 const routeHint = String(readiness.recommended_route || '/workspace');
+                const mikeRouteHint = String(dashboardState.workspaceMikeRouteHint || '').trim();
+                const effectiveRouteHint = mikeRouteHint || routeHint;
                 const workflowState = userId
                     ? (hasDraft ? 'Draft active' : (missingCount > 0 ? 'Support building' : 'Workspace loaded'))
                     : 'No workspace loaded';
@@ -5053,7 +5091,7 @@ def _render_dashboard_hub(
                 setText(
                     'dashboard-heads-up-status',
                     userId
-                        ? `Next action: ${{nextAction}}. Recommended route: ${{routeHint}}.`
+                        ? `Next action: ${{nextAction}}. Recommended route: ${{effectiveRouteHint}}.`
                         : 'Load the workspace session to get a live action recommendation.'
                 );
                 renderChipList(
@@ -5066,7 +5104,9 @@ def _render_dashboard_hub(
                     JSON.stringify({{
                         next_action: nextAction,
                         focus,
-                        recommended_route: routeHint,
+                        recommended_route: effectiveRouteHint,
+                        mike_status_stale: Boolean(dashboardState.workspaceMikeStale),
+                        mike_status_contract_version: dashboardState.workspaceMikeStatusContractVersion || null,
                         claim_type: claimType,
                         case_synopsis: synopsis,
                         first_calendar_event: calendarEvents.length ? calendarSummary : null,
@@ -5118,6 +5158,7 @@ def _render_dashboard_hub(
                         fetchJson(`/api/complaint-workspace/session${{query}}`),
                         fetchMikeIntegrationStatus(userId).catch(() => null),
                     ]);
+                    dashboardState.workspaceMikeStatusUpdatedAt = new Date().toISOString();
                     renderWorkspaceCard(payload, mikeStatus);
                     const modalUser = document.getElementById('dashboard-chat-upload-user-id');
                     if (modalUser && !String(modalUser.value || '').trim()) {{
