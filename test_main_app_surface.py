@@ -50,7 +50,11 @@ def test_main_app_exposes_unified_complaint_surface_routes():
         params={"user_id": payload["session"]["user_id"]},
     )
     assert mike_status_after_handoff.status_code == 200
-    assert mike_status_after_handoff.json()["pending_sync"] is True
+    handoff_status_payload = mike_status_after_handoff.json()
+    assert handoff_status_payload["pending_sync"] is True
+    assert isinstance(handoff_status_payload["has_citation_link_conflicts"], bool)
+    assert isinstance(handoff_status_payload["citation_link_conflict_count"], int)
+    assert isinstance(handoff_status_payload["citation_link_unknown_element_count"], int)
 
     synced_body = "This draft body was synced from Mike."
     sync = client.post(
