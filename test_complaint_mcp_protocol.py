@@ -230,9 +230,14 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     assert mike_handoff["result"]["structuredContent"]["mike"]["launch_url"]
     handoff_status_payload = mike_status_after_handoff["result"]["structuredContent"]
     assert handoff_status_payload["pending_sync"] is True
+    assert handoff_status_payload["latest_sync_handoff_id"] is None
     assert handoff_status_payload["has_citation_link_conflicts"] is False
     assert handoff_status_payload["citation_link_conflict_count"] == 0
     assert handoff_status_payload["citation_link_unknown_element_count"] == 0
+    assert (
+        "Latest Mike handoff has not been synced yet."
+        in handoff_status_payload["recommended_action"]
+    )
     assert mike_sync["result"]["structuredContent"]["draft"]["sync_source"] == "mike"
     assert mike_sync["result"]["structuredContent"]["sync_record"]["citation_link_conflict_count"] == 1
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["has_conflicts"] is True
