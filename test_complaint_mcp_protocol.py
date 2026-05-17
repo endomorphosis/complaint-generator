@@ -188,6 +188,7 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
                     "citation_links": [
                         {"citation_id": "cite-1", "claim_element_id": "causation"},
                         {"citation_id": "cite-1", "claim_element_id": "harm"},
+                        {"citation_id": "cite-2", "claim_element_id": "unknown"},
                     ],
                 },
             },
@@ -231,6 +232,7 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     assert mike_sync["result"]["structuredContent"]["draft"]["sync_source"] == "mike"
     assert mike_sync["result"]["structuredContent"]["sync_record"]["citation_link_conflict_count"] == 1
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["has_conflicts"] is True
+    assert mike_sync["result"]["structuredContent"]["citation_link_check"]["unknown_claim_element_ids"] == ["unknown"]
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["conflicts"] == [
         {"citation_id": "cite-1", "claim_element_ids": ["causation", "harm"]}
     ]
@@ -238,3 +240,8 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     assert mike_status_after_sync["result"]["structuredContent"]["latest_sync_handoff_id"] == handoff_id
     assert mike_status_after_sync["result"]["structuredContent"]["has_citation_link_conflicts"] is True
     assert mike_status_after_sync["result"]["structuredContent"]["citation_link_conflict_count"] == 1
+    assert mike_status_after_sync["result"]["structuredContent"]["citation_link_unknown_element_count"] == 1
+    assert (
+        "Resolve conflicts in Mike and sync again before export."
+        in mike_status_after_sync["result"]["structuredContent"]["recommended_action"]
+    )

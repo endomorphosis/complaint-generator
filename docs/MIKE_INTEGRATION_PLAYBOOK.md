@@ -113,6 +113,5 @@ If blocked, iterate in Mike and sync again using the same `handoff_id`.
 ## 6) Improvement backlog (next increments)
 
 1. Add live evidence side-panel linking in Mike using `evidence_context.elements`.
-2. Add explicit citation-link conflict checks at sync time.
-3. Add redline-aware acceptance checks in release-gate scoring.
-4. Add signed webhooks for push-based sync from Mike to complaint-generator.
+2. Add redline-aware acceptance checks in release-gate scoring.
+3. Add signed webhooks for push-based sync from Mike to complaint-generator.
