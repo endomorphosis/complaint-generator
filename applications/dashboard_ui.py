@@ -4322,7 +4322,7 @@ def _render_dashboard_hub(
                 const mikeConflictCount = parseCount(mike.citation_link_conflict_count, 0);
                 const mikeUnknownCount = parseCount(mike.citation_link_unknown_element_count, 0);
                 const mikeStatusContractVersion = String(mike.status_contract_version || '').trim();
-                const staleMikeStatus = isTimestampStale(dashboardState.workspaceMikeStatusUpdatedAt, MIKE_STATUS_STALE_MS);
+                const isMikeStatusStale = isTimestampStale(dashboardState.workspaceMikeStatusUpdatedAt, MIKE_STATUS_STALE_MS);
                 setText('dashboard-workspace-answered', String(answers));
                 setText('dashboard-workspace-evidence', String(evidenceCount));
                 setText('dashboard-workspace-missing', String(parseCount(overview.missing_elements, 0)));
@@ -4331,7 +4331,7 @@ def _render_dashboard_hub(
                 const readiness = payload && payload.complaint_readiness ? payload.complaint_readiness : {{}};
                 const mikeRecommendedAction = String(mike.recommended_action || '').trim();
                 let mikeRouteHint = String(readiness.recommended_route || '/workspace');
-                if (staleMikeStatus || !mikeStatusContractVersion) {{
+                if (isMikeStatusStale || !mikeStatusContractVersion) {{
                     mikeRouteHint = '/workspace?target_tab=draft&focus=mike-integration-card';
                 }} else if (mikeState.key === 'synced_with_conflicts') {{
                     mikeRouteHint = '/workspace?target_tab=draft&focus=mike-integration-card';
@@ -4341,7 +4341,7 @@ def _render_dashboard_hub(
                     mikeRouteHint = '/document?focus=mike-workflow-journey';
                 }}
                 dashboardState.workspaceMikeRouteHint = mikeRouteHint;
-                dashboardState.workspaceMikeStale = staleMikeStatus;
+                dashboardState.workspaceMikeStale = isMikeStatusStale;
                 dashboardState.workspaceMikeStatusContractVersion = mikeStatusContractVersion;
                 setText('dashboard-workspace-route-chip', `next route: ${{mikeRouteHint}}`);
                 const mikeStateChip = document.getElementById('dashboard-workspace-mike-state-chip');
@@ -4356,7 +4356,7 @@ def _render_dashboard_hub(
                 setText('dashboard-workspace-mike-conflict-chip', `mike conflicts: ${{mikeConflictCount}} | unknown links: ${{mikeUnknownCount}}`);
                 setText(
                     'dashboard-workspace-status',
-                    staleMikeStatus || !mikeStatusContractVersion
+                    isMikeStatusStale || !mikeStatusContractVersion
                         ? `Loaded workspace session for ${{String(session.user_id || 'default user')}}. Mike status is stale or missing contract metadata, so refresh the workspace Mike panel before export.`
                         : mikeState.key === 'synced_with_conflicts'
                         ? `Loaded workspace session for ${{String(session.user_id || 'default user')}}. High-priority: resolve Mike citation-link conflicts and sync again before export.`
@@ -4374,7 +4374,7 @@ def _render_dashboard_hub(
                         complaint_readiness: readiness,
                         mike_integration_status: mike,
                         mike_status_updated_at: dashboardState.workspaceMikeStatusUpdatedAt,
-                        mike_status_stale: staleMikeStatus,
+                        mike_status_stale: isMikeStatusStale,
                         mike_status_contract_version: mikeStatusContractVersion || null,
                         mike_recommended_action: mikeRecommendedAction,
                     }}, null, 2)

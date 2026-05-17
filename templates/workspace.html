@@ -6359,7 +6359,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const hasConflicts = Boolean(status.has_citation_link_conflicts);
             const latestHandoffId = String(status.latest_handoff_id || '').trim();
             const workflowStateKey = String((workflowState || {}).key || '').trim();
-            const statusContractVersion = String(status.status_contract_version || '').trim();
+            const mikeStatusContractVersion = String(status.status_contract_version || '').trim();
             const derivedKey = !latestHandoffId
                 ? 'not_handed_off'
                 : (pendingSync
@@ -6396,7 +6396,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 synced_with_conflicts: 'Mike sync completed, but citation-link conflicts were detected and should be resolved before export.',
                 synced_clean: 'Mike sync is current and no citation-link conflicts were reported.',
             };
-            if (!statusContractVersion && typeof console !== 'undefined' && typeof console.warn === 'function') {
+            if (!mikeStatusContractVersion && typeof console !== 'undefined' && typeof console.warn === 'function') {
                 console.warn('Mike status contract version missing from canonical status payload.');
             }
             return {
@@ -6405,7 +6405,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 severity: String((workflowState || {}).severity || '').trim() || (severityByKey[key] || 'warn'),
                 summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
                     || (summaryByKey[key] || 'Mike integration status is available from the canonical status endpoint.'),
-                statusContractVersion,
+                statusContractVersion: mikeStatusContractVersion,
             };
         }
 

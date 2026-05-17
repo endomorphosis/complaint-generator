@@ -1427,8 +1427,8 @@
             return diffDays === 1 ? 'updated 1 day ago' : `updated ${diffDays} days ago`;
         }
 
-        function isTimestampStale(value, maxAgeMs) {
-            const raw = String(value || '').trim();
+        function isTimestampStale(isoTimestamp, maxAgeMs) {
+            const raw = String(isoTimestamp || '').trim();
             if (!raw) {
                 return false;
             }
