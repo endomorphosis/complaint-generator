@@ -2291,6 +2291,8 @@ def _render_dashboard_hub(
                 <div class="chip-row" style="margin-top: 14px;">
                     <span class="chip" id="dashboard-workspace-session-chip">session: waiting</span>
                     <span class="chip" id="dashboard-workspace-route-chip">next route: waiting</span>
+                    <span class="chip" id="dashboard-workspace-mike-state-chip">mike: loading</span>
+                    <span class="chip" id="dashboard-workspace-mike-conflict-chip">mike conflicts: n/a</span>
                 </div>
                 <div class="status-line" id="dashboard-workspace-status">Ready to load the complaint workspace session.</div>
                 <pre id="dashboard-workspace-preview">Workspace session details will appear here.</pre>
@@ -4258,7 +4260,28 @@ def _render_dashboard_hub(
                 updateDocumentContextBar();
             }}
 
-            function renderWorkspaceCard(payload) {{
+            function deriveMikeUiState(mikeStatus) {{
+                const status = mikeStatus && typeof mikeStatus === 'object' ? mikeStatus : {{}};
+                const pendingSync = Boolean(status.pending_sync);
+                const hasSyncedDraft = Boolean(status.has_mike_synced_draft);
+                const hasConflicts = Boolean(status.has_citation_link_conflicts);
+                const latestHandoffId = String(status.latest_handoff_id || '').trim();
+                if (!latestHandoffId) {{
+                    return {{ key: 'not_handed_off', label: 'not handed off', severity: 'warn' }};
+                }}
+                if (pendingSync) {{
+                    return {{ key: 'handoff_pending_sync', label: 'handoff pending sync', severity: 'warn' }};
+                }}
+                if (hasSyncedDraft && hasConflicts) {{
+                    return {{ key: 'synced_with_conflicts', label: 'synced with conflicts', severity: 'warn' }};
+                }}
+                if (hasSyncedDraft) {{
+                    return {{ key: 'synced_clean', label: 'synced clean', severity: 'good' }};
+                }}
+                return {{ key: 'handoff_pending_sync', label: 'handoff pending sync', severity: 'warn' }};
+            }}
+
+            function renderWorkspaceCard(payload, mikeStatus) {{
                 const session = payload && payload.session ? payload.session : {{}};
                 const review = payload && payload.review ? payload.review : {{}};
                 const overview = review && review.overview ? review.overview : {{}};
@@ -4266,14 +4289,39 @@ def _render_dashboard_hub(
                 const evidence = session && session.evidence ? session.evidence : {{}};
                 const evidenceCount = parseCount((evidence.testimony || []).length, 0) + parseCount((evidence.documents || []).length, 0);
                 const hasDraft = Boolean(payload && payload.draft) || Boolean(session && session.draft);
+                const mike = mikeStatus && typeof mikeStatus === 'object' ? mikeStatus : {{}};
+                const mikeState = deriveMikeUiState(mike);
+                const mikeConflictCount = parseCount(mike.citation_link_conflict_count, 0);
+                const mikeUnknownCount = parseCount(mike.citation_link_unknown_element_count, 0);
                 setText('dashboard-workspace-answered', String(answers));
                 setText('dashboard-workspace-evidence', String(evidenceCount));
                 setText('dashboard-workspace-missing', String(parseCount(overview.missing_elements, 0)));
                 setText('dashboard-workspace-draft', hasDraft ? 'Yes' : 'No');
                 setText('dashboard-workspace-session-chip', `session: ${{String(session.user_id || 'unknown')}}`);
                 const readiness = payload && payload.complaint_readiness ? payload.complaint_readiness : {{}};
-                setText('dashboard-workspace-route-chip', `next route: ${{String(readiness.recommended_route || '/workspace')}}`);
-                setText('dashboard-workspace-status', `Loaded workspace session for ${{String(session.user_id || 'default user')}}.`);
+                const mikeRecommendedAction = String(mike.recommended_action || '').trim();
+                const mikeRouteHint = mikeState.key === 'synced_with_conflicts'
+                    ? '/workspace?target_tab=draft&focus=mike-integration-card'
+                    : mikeState.key === 'handoff_pending_sync'
+                        ? '/document?focus=mike-workflow-journey'
+                        : String(readiness.recommended_route || '/workspace');
+                setText('dashboard-workspace-route-chip', `next route: ${{mikeRouteHint}}`);
+                const mikeStateChip = document.getElementById('dashboard-workspace-mike-state-chip');
+                if (mikeStateChip) {{
+                    mikeStateChip.className = `chip ${{mikeState.severity}}`;
+                }}
+                setText('dashboard-workspace-mike-state-chip', `mike: ${{mikeState.label}}`);
+                const mikeConflictChip = document.getElementById('dashboard-workspace-mike-conflict-chip');
+                if (mikeConflictChip) {{
+                    mikeConflictChip.className = `chip ${{mikeConflictCount > 0 || mikeUnknownCount > 0 ? 'warn' : 'good'}}`;
+                }}
+                setText('dashboard-workspace-mike-conflict-chip', `mike conflicts: ${{mikeConflictCount}} | unknown links: ${{mikeUnknownCount}}`);
+                setText(
+                    'dashboard-workspace-status',
+                    mikeState.key === 'synced_with_conflicts'
+                        ? `Loaded workspace session for ${{String(session.user_id || 'default user')}}. High-priority: resolve Mike citation-link conflicts and sync again before export.`
+                        : `Loaded workspace session for ${{String(session.user_id || 'default user')}}.`
+                );
                 setText(
                     'dashboard-workspace-preview',
                     JSON.stringify({{
@@ -4284,6 +4332,8 @@ def _render_dashboard_hub(
                         }},
                         review_overview: overview,
                         complaint_readiness: readiness,
+                        mike_integration_status: mike,
+                        mike_recommended_action: mikeRecommendedAction,
                     }}, null, 2)
                 );
                 dashboardState.workspacePayload = payload || null;
@@ -4299,10 +4349,25 @@ def _render_dashboard_hub(
                 setText('dashboard-workspace-draft', 'No');
                 setText('dashboard-workspace-session-chip', 'session: not loaded');
                 setText('dashboard-workspace-route-chip', 'next route: waiting');
+                const mikeStateChip = document.getElementById('dashboard-workspace-mike-state-chip');
+                if (mikeStateChip) {{
+                    mikeStateChip.className = 'chip';
+                }}
+                setText('dashboard-workspace-mike-state-chip', 'mike: waiting');
+                const mikeConflictChip = document.getElementById('dashboard-workspace-mike-conflict-chip');
+                if (mikeConflictChip) {{
+                    mikeConflictChip.className = 'chip';
+                }}
+                setText('dashboard-workspace-mike-conflict-chip', 'mike conflicts: waiting');
                 setText('dashboard-workspace-status', reason || 'Workspace session unloaded.');
                 setText('dashboard-workspace-preview', 'Workspace session details will appear here.');
                 clearWorkspaceContextBar();
                 renderHeadsUpCard();
+            }}
+
+            async function fetchMikeIntegrationStatus(userId) {{
+                const query = userId ? `?user_id=${{encodeURIComponent(userId)}}` : '';
+                return fetchJson(`/api/complaint-workspace/mike/status${{query}}`);
             }}
 
             function deriveDocketStats(payload) {{
@@ -5038,8 +5103,11 @@ def _render_dashboard_hub(
                 setText('dashboard-workspace-status', 'Loading workspace session...');
                 const query = userId ? `?user_id=${{encodeURIComponent(userId)}}` : '';
                 try {{
-                    const payload = await fetchJson(`/api/complaint-workspace/session${{query}}`);
-                    renderWorkspaceCard(payload);
+                    const [payload, mikeStatus] = await Promise.all([
+                        fetchJson(`/api/complaint-workspace/session${{query}}`),
+                        fetchMikeIntegrationStatus(userId).catch(() => null),
+                    ]);
+                    renderWorkspaceCard(payload, mikeStatus);
                     const modalUser = document.getElementById('dashboard-chat-upload-user-id');
                     if (modalUser && !String(modalUser.value || '').trim()) {{
                         modalUser.value = String(((payload || {{}}).session || {{}}).user_id || userId || '');
@@ -5160,11 +5228,7 @@ def _render_dashboard_hub(
                     const incomingUserId = String(syncDetail.user_id || (((syncDetail.payload || {{}}).session || {{}}).user_id) || '').trim();
                     const currentUserId = String((document.getElementById('dashboard-workspace-user-id').value || '')).trim();
                     if (!currentUserId || !incomingUserId || incomingUserId === currentUserId) {{
-                        if (syncDetail.payload && syncDetail.payload.session) {{
-                            renderWorkspaceCard(syncDetail.payload);
-                        }} else {{
-                            await loadWorkspaceDashboard();
-                        }}
+                        await loadWorkspaceDashboard();
                     }}
                 }}
                 if (eventType === 'docket.updated' || eventType === 'docket.persisted') {{
