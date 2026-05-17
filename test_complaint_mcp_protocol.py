@@ -236,3 +236,5 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     ]
     assert mike_status_after_sync["result"]["structuredContent"]["pending_sync"] is False
     assert mike_status_after_sync["result"]["structuredContent"]["latest_sync_handoff_id"] == handoff_id
+    assert mike_status_after_sync["result"]["structuredContent"]["has_citation_link_conflicts"] is True
+    assert mike_status_after_sync["result"]["structuredContent"]["citation_link_conflict_count"] == 1

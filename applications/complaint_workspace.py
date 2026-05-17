@@ -5474,11 +5474,21 @@ class ComplaintWorkspaceService:
         draft = dict(state.get("draft") or {})
         draft_sync_source = str(draft.get("sync_source") or "").strip().lower()
         has_mike_synced_draft = draft_sync_source == "mike" and bool(str(draft.get("body") or "").strip())
+        draft_sync_metadata = dict(draft.get("sync_metadata") or {})
+        raw_citation_link_check = dict(draft_sync_metadata.get("citation_link_check") or {})
+        has_citation_link_conflicts = bool(raw_citation_link_check.get("has_conflicts"))
+        citation_link_conflict_count = len(list(raw_citation_link_check.get("conflicts") or []))
+        citation_link_unknown_element_count = len(list(raw_citation_link_check.get("unknown_claim_element_ids") or []))
         latest_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
         latest_sync_handoff_id = str(last_sync.get("handoff_id") or "").strip()
         # When latest_sync_handoff_id is empty, no Mike sync has been persisted yet for this session.
         pending_sync = bool(latest_handoff_id) and latest_handoff_id != latest_sync_handoff_id
-        if pending_sync:
+        if has_mike_synced_draft and has_citation_link_conflicts:
+            recommended_action = (
+                "Mike sync is current but citation-link conflicts were detected. "
+                "Resolve conflicts in Mike and sync again before export."
+            )
+        elif pending_sync:
             recommended_action = "Latest Mike handoff has not been synced yet. Import the edited draft with complaint.sync_mike_final_draft."
         elif not latest_handoff_id:
             recommended_action = "Start with complaint.build_mike_handoff to open Mike with the current draft and evidence context."
@@ -5497,6 +5507,9 @@ class ComplaintWorkspaceService:
             "latest_sync_handoff_id": latest_sync_handoff_id or None,
             "pending_sync": pending_sync,
             "has_mike_synced_draft": has_mike_synced_draft,
+            "has_citation_link_conflicts": has_citation_link_conflicts,
+            "citation_link_conflict_count": citation_link_conflict_count,
+            "citation_link_unknown_element_count": citation_link_unknown_element_count,
             "draft_sync_source": draft_sync_source or None,
             "recommended_action": recommended_action,
         }

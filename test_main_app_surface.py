@@ -86,4 +86,9 @@ def test_main_app_exposes_unified_complaint_surface_routes():
         params={"user_id": payload["session"]["user_id"]},
     )
     assert mike_status_after_sync.status_code == 200
-    assert mike_status_after_sync.json()["pending_sync"] is False
+    status_payload = mike_status_after_sync.json()
+    assert status_payload["pending_sync"] is False
+    assert status_payload["has_citation_link_conflicts"] is True
+    assert status_payload["citation_link_conflict_count"] == 1
+    assert status_payload["citation_link_unknown_element_count"] == 1
+    assert "Resolve conflicts in Mike and sync again before export." in status_payload["recommended_action"]

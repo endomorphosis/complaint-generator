@@ -53,6 +53,7 @@ The status payload reports:
 - `latest_handoff_id`, `latest_sync_handoff_id`
 - `pending_sync`
 - `has_mike_synced_draft`
+- `has_citation_link_conflicts`, `citation_link_conflict_count`, `citation_link_unknown_element_count`
 - `recommended_action`
 
 ## 3) Edit and refine in Mike
