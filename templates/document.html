@@ -3536,6 +3536,19 @@
 
         function deriveMikeUiState(mikeStatus) {
             const status = mikeStatus && typeof mikeStatus === 'object' ? mikeStatus : {};
+            const workflowState = status.workflow_state && typeof status.workflow_state === 'object'
+                ? status.workflow_state
+                : null;
+            if (workflowState && String(workflowState.key || '').trim()) {
+                return {
+                    key: String(workflowState.key || '').trim(),
+                    label: String(workflowState.label || '').trim() || 'Unknown',
+                    severity: String(workflowState.severity || '').trim() === 'good' ? 'ready' : 'warning',
+                    summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
+                        || 'Mike status is available.',
+                    sequenceHint: 'Prepare draft → Send to Mike → Confirm sync back → Resolve conflicts if present → Continue export checks.',
+                };
+            }
             const pendingSync = Boolean(status.pending_sync);
             const hasSyncedDraft = Boolean(status.has_mike_synced_draft);
             const hasConflicts = Boolean(status.has_citation_link_conflicts);
@@ -3592,7 +3605,10 @@
             const mikeState = deriveMikeUiState(mikeStatus);
             const conflictCount = Number(mikeStatus.citation_link_conflict_count || 0);
             const unknownCount = Number(mikeStatus.citation_link_unknown_element_count || 0);
-            const recommendedAction = String(mikeStatus.recommended_action || '').trim()
+            const conflictComponent = mikeStatus.conflict_component && typeof mikeStatus.conflict_component === 'object'
+                ? mikeStatus.conflict_component
+                : {};
+            const recommendedAction = String(conflictComponent.required_next_action || mikeStatus.recommended_action || '').trim()
                 || 'Use Mike handoff and sync tools to keep this draft aligned.';
             const statusFreshness = state.mikeStatusUpdatedAt
                 ? `Status ${formatRelativeTimestamp(state.mikeStatusUpdatedAt)}`
@@ -3610,7 +3626,8 @@
                 status_message: 'Opened CLI + MCP from the builder for Mike sync follow-up.',
             });
             const conflictBlockerText = mikeState.key === 'synced_with_conflicts'
-                ? 'Export readiness is blocked until Mike citation-link conflicts are resolved and synced again'
+                ? (String(conflictComponent.impact_statement || '').trim()
+                    || 'Export readiness is blocked until Mike citation-link conflicts are resolved and synced again')
                 : 'Export readiness follows the same Mike sync state shown here.';
             return `
                 <section class="mike-workflow-journey" id="mike-workflow-journey" data-severity="${escapeHtml(mikeState.severity)}" aria-label="Mike workflow journey" role="status">

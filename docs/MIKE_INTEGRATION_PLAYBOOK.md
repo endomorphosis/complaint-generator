@@ -38,6 +38,9 @@ Use one of the aligned surfaces below:
   - draft body/title/relief
   - support review
   - summarized evidence context by claim element
+  - `structured_legal_packet_context` with stable section/paragraph/claim IDs
+  - `editor_guardrails` with unsupported elements, weak links, and contradiction hotspots
+  - `non_negotiable_constraints` machine-readable must-hold legal/proof invariants
 
 ## 2.5) Check integration status and next action
 
@@ -50,10 +53,13 @@ Use one of the aligned surfaces below:
 
 The status payload reports:
 
+- `status_contract_version`, `status_contract`, `workflow_state`
 - `latest_handoff_id`, `latest_sync_handoff_id`
 - `pending_sync`
 - `has_mike_synced_draft`
 - `has_citation_link_conflicts`, `citation_link_conflict_count`, `citation_link_unknown_element_count`
+- `conflict_component` (conflict count, unknown element count, impact statement, required next action)
+- `invariants` (pending-sync ID correlation, numeric conflict counters, required action presence)
 - `recommended_action`
 
 ## 3) Edit and refine in Mike
@@ -91,12 +97,16 @@ Use one of the aligned surfaces below:
 - `citation_links`
 - `redline_summary`
 - `source_updated_at`
+- `structured_deltas` (paragraph/citation/claim/relief/metadata edit operations)
+- `editor_metadata` (editor attribution/session/source transport metadata)
 
 ### Sync behavior
 
 - Persists draft text into the complaint workspace session.
 - Marks `draft.sync_source = "mike"` with `draft.sync_metadata`.
 - Runs citation-link integrity checks and returns conflict metadata (`citation_link_check`) in the sync response.
+- Stores sync diagnostics (`sync_diagnostics`) with severity tiers and remediation guidance.
+- Stores tamper-evident `sync_integrity_hash` in sync metadata and sync history.
 - Updates Mike integration history (`last_handoff`, `last_sync`).
 - Returns refreshed session/review payload for downstream release-gate checks.
 

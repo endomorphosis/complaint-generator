@@ -4262,6 +4262,16 @@ def _render_dashboard_hub(
 
             function deriveMikeUiState(mikeStatus) {{
                 const status = mikeStatus && typeof mikeStatus === 'object' ? mikeStatus : {{}};
+                const workflowState = status.workflow_state && typeof status.workflow_state === 'object'
+                    ? status.workflow_state
+                    : null;
+                if (workflowState && String(workflowState.key || '').trim()) {{
+                    return {{
+                        key: String(workflowState.key || '').trim(),
+                        label: String(workflowState.label || '').trim() || 'unknown',
+                        severity: String(workflowState.severity || '').trim() || 'warn',
+                    }};
+                }}
                 const pendingSync = Boolean(status.pending_sync);
                 const hasSyncedDraft = Boolean(status.has_mike_synced_draft);
                 const hasConflicts = Boolean(status.has_citation_link_conflicts);

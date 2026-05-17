@@ -190,6 +190,13 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
                         {"citation_id": "cite-1", "claim_element_id": "harm"},
                         {"citation_id": "cite-2", "claim_element_id": "unknown"},
                     ],
+                    "structured_deltas": [
+                        {"op": "replace", "target": "paragraph-001", "before": "old", "after": "new"},
+                    ],
+                    "editor_metadata": {
+                        "editor_user_id": "editor-mcp",
+                        "editor_session_id": "session-mcp",
+                    },
                 },
             },
         },
@@ -230,6 +237,8 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     assert mike_handoff["result"]["structuredContent"]["mike"]["launch_url"]
     handoff_status_payload = mike_status_after_handoff["result"]["structuredContent"]
     assert handoff_status_payload["pending_sync"] is True
+    assert handoff_status_payload["status_contract_version"] == "complaint-mike-status-v2"
+    assert handoff_status_payload["workflow_state"]["key"] == "handoff_pending_sync"
     assert handoff_status_payload["latest_sync_handoff_id"] is None
     assert handoff_status_payload["has_citation_link_conflicts"] is False
     assert handoff_status_payload["citation_link_conflict_count"] == 0
@@ -240,12 +249,16 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     )
     assert mike_sync["result"]["structuredContent"]["draft"]["sync_source"] == "mike"
     assert mike_sync["result"]["structuredContent"]["sync_record"]["citation_link_conflict_count"] == 1
+    assert mike_sync["result"]["structuredContent"]["sync_record"]["structured_delta_count"] == 1
+    assert mike_sync["result"]["structuredContent"]["sync_record"]["editor_user_id"] == "editor-mcp"
+    assert mike_sync["result"]["structuredContent"]["sync_diagnostics"]["severity"] == "error"
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["has_conflicts"] is True
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["unknown_claim_element_ids"] == ["unknown"]
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["conflicts"] == [
         {"citation_id": "cite-1", "claim_element_ids": ["causation", "harm"]}
     ]
     assert mike_status_after_sync["result"]["structuredContent"]["pending_sync"] is False
+    assert mike_status_after_sync["result"]["structuredContent"]["workflow_state"]["key"] == "synced_with_conflicts"
     assert mike_status_after_sync["result"]["structuredContent"]["latest_sync_handoff_id"] == handoff_id
     assert mike_status_after_sync["result"]["structuredContent"]["has_citation_link_conflicts"] is True
     assert mike_status_after_sync["result"]["structuredContent"]["citation_link_conflict_count"] == 1

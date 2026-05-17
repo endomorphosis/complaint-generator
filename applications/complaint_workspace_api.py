@@ -297,6 +297,8 @@ class MikeDraftSyncRequest(BaseModel):
     citation_links: List[Dict[str, Any]] = Field(default_factory=list)
     redline_summary: Optional[str] = None
     source_updated_at: Optional[str] = None
+    structured_deltas: List[Dict[str, Any]] = Field(default_factory=list)
+    editor_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SynopsisUpdateRequest(BaseModel):
@@ -638,6 +640,8 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
             citation_links=request.citation_links,
             redline_summary=request.redline_summary,
             source_updated_at=request.source_updated_at,
+            structured_deltas=request.structured_deltas,
+            editor_metadata=request.editor_metadata,
         )
 
     @router.post("/api/complaint-workspace/update-synopsis")

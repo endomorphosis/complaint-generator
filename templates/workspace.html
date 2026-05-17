@@ -6350,6 +6350,18 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
 
         function deriveMikeIntegrationUiState(mikeStatus) {
             const status = mikeStatus && typeof mikeStatus === 'object' ? mikeStatus : {};
+            const workflowState = status.workflow_state && typeof status.workflow_state === 'object'
+                ? status.workflow_state
+                : null;
+            if (workflowState && String(workflowState.key || '').trim()) {
+                return {
+                    key: String(workflowState.key || '').trim(),
+                    label: String(workflowState.label || '').trim() || 'Unknown',
+                    severity: String(workflowState.severity || '').trim() || 'warn',
+                    summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
+                        || 'Mike integration status is available from the canonical status endpoint.',
+                };
+            }
             const pendingSync = Boolean(status.pending_sync);
             const hasSyncedDraft = Boolean(status.has_mike_synced_draft);
             const hasConflicts = Boolean(status.has_citation_link_conflicts);
@@ -6411,6 +6423,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const unknownCount = Number(status.citation_link_unknown_element_count || 0);
             const latestHandoffId = String(status.latest_handoff_id || '').trim();
             const latestSyncHandoffId = String(status.latest_sync_handoff_id || '').trim();
+            const conflictComponent = status.conflict_component && typeof status.conflict_component === 'object'
+                ? status.conflict_component
+                : {};
 
             stateTitle.textContent = `Mike state: ${stateModel.label}`;
             summaryNode.textContent = stateModel.summary;
@@ -6421,7 +6436,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             conflictChip.className = `chip ${conflictCount > 0 || unknownCount > 0 ? 'warn' : 'good'}`;
             conflictChip.textContent = `conflicts: ${conflictCount} | unknown links: ${unknownCount}`;
             idsNode.textContent = `latest handoff: ${latestHandoffId || 'none'} | latest synced handoff: ${latestSyncHandoffId || 'none'}`;
-            actionNode.textContent = String(status.recommended_action || '').trim()
+            actionNode.textContent = String(conflictComponent.required_next_action || status.recommended_action || '').trim()
                 || 'Use the Mike handoff and sync tools to keep drafting state aligned before export.';
             updatedNode.textContent = workspaceMikeStatusUpdatedAt
                 ? `Status ${formatRelativeTimestamp(workspaceMikeStatusUpdatedAt)}`
