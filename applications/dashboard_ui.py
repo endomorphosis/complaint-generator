@@ -4335,9 +4335,7 @@ def _render_dashboard_hub(
                     mikeRouteHint = '/workspace?target_tab=draft&focus=mike-integration-card';
                 }} else if (mikeState.key === 'synced_with_conflicts') {{
                     mikeRouteHint = '/workspace?target_tab=draft&focus=mike-integration-card';
-                }} else if (mikeState.key === 'handoff_pending_sync') {{
-                    mikeRouteHint = '/document?focus=mike-workflow-journey';
-                }} else if (mikeState.key === 'not_handed_off') {{
+                }} else if (mikeState.key === 'handoff_pending_sync' || mikeState.key === 'not_handed_off') {{
                     mikeRouteHint = '/document?focus=mike-workflow-journey';
                 }}
                 dashboardState.workspaceMikeRouteHint = mikeRouteHint;
@@ -5078,8 +5076,7 @@ def _render_dashboard_hub(
                     operatorQueue.push('Re-open the draft and prepare the next filing or export step.');
                 }}
                 const routeHint = String(readiness.recommended_route || '/workspace');
-                const mikeRouteHint = String(dashboardState.workspaceMikeRouteHint || '').trim();
-                const effectiveRouteHint = mikeRouteHint || routeHint;
+                const effectiveRouteHint = String(dashboardState.workspaceMikeRouteHint || '').trim() || routeHint;
                 const workflowState = userId
                     ? (hasDraft ? 'Draft active' : (missingCount > 0 ? 'Support building' : 'Workspace loaded'))
                     : 'No workspace loaded';
