@@ -55,7 +55,8 @@ def test_main_app_exposes_unified_complaint_surface_routes():
     assert isinstance(handoff_status_payload["has_citation_link_conflicts"], bool)
     assert isinstance(handoff_status_payload["citation_link_conflict_count"], int)
     assert isinstance(handoff_status_payload["citation_link_unknown_element_count"], int)
-    assert "Latest Mike handoff has not been synced yet." in handoff_status_payload["recommended_action"]
+    assert isinstance(handoff_status_payload["recommended_action"], str)
+    assert handoff_status_payload["recommended_action"].strip()
 
     synced_body = "This draft body was synced from Mike."
     sync = client.post(

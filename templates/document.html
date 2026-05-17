@@ -1395,6 +1395,37 @@
             return query ? `${path}?${query}` : path;
         }
 
+        function formatRelativeTimestamp(value) {
+            const raw = String(value || '').trim();
+            if (!raw) {
+                return '';
+            }
+            const timestamp = Date.parse(raw);
+            if (!Number.isFinite(timestamp)) {
+                return raw;
+            }
+            const diffMs = Date.now() - timestamp;
+            const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+            if (diffMinutes < 1) {
+                return 'updated just now';
+            }
+            if (diffMinutes === 1) {
+                return 'updated 1 minute ago';
+            }
+            if (diffMinutes < 60) {
+                return `updated ${diffMinutes} minutes ago`;
+            }
+            const diffHours = Math.round(diffMinutes / 60);
+            if (diffHours === 1) {
+                return 'updated 1 hour ago';
+            }
+            if (diffHours < 48) {
+                return `updated ${diffHours} hours ago`;
+            }
+            const diffDays = Math.round(diffHours / 24);
+            return diffDays === 1 ? 'updated 1 day ago' : `updated ${diffDays} days ago`;
+        }
+
         function resolveBuilderCaseSynopsis(userId) {
             try {
                 if (!userId) {
@@ -3563,7 +3594,9 @@
             const unknownCount = Number(mikeStatus.citation_link_unknown_element_count || 0);
             const recommendedAction = String(mikeStatus.recommended_action || '').trim()
                 || 'Use Mike handoff and sync tools to keep this draft aligned.';
-            const statusFreshness = state.mikeStatusUpdatedAt ? `Status ${state.mikeStatusUpdatedAt}` : 'Status pending refresh.';
+            const statusFreshness = state.mikeStatusUpdatedAt
+                ? `Status ${formatRelativeTimestamp(state.mikeStatusUpdatedAt)}`
+                : 'Status pending refresh.';
             const workspaceUrl = buildBuilderSurfaceUrl('/workspace', {
                 user_id: userId || '',
                 target_tab: 'draft',
@@ -3577,10 +3610,10 @@
                 status_message: 'Opened CLI + MCP from the builder for Mike sync follow-up.',
             });
             const conflictBlockerText = mikeState.key === 'synced_with_conflicts'
-                ? 'Export readiness is blocked until Mike citation-link conflicts are resolved and synced again.'
+                ? 'Export readiness is blocked until Mike citation-link conflicts are resolved and synced again'
                 : 'Export readiness follows the same Mike sync state shown here.';
             return `
-                <section class="mike-workflow-journey" id="mike-workflow-journey" data-severity="${escapeHtml(mikeState.severity)}" aria-label="Mike workflow journey" role="status" aria-live="polite">
+                <section class="mike-workflow-journey" id="mike-workflow-journey" data-severity="${escapeHtml(mikeState.severity)}" aria-label="Mike workflow journey" role="status">
                     <div class="readiness-subtitle">Mike workflow journey</div>
                     <div class="preview-meta"><strong>State:</strong> ${escapeHtml(mikeState.label)} | <strong>Sync:</strong> ${mikeStatus.pending_sync ? 'pending' : 'current'}</div>
                     <div class="preview-meta"><strong>Latest handoff:</strong> ${escapeHtml(String(mikeStatus.latest_handoff_id || 'none'))} | <strong>Latest synced handoff:</strong> ${escapeHtml(String(mikeStatus.latest_sync_handoff_id || 'none'))}</div>
@@ -5068,7 +5101,7 @@
             try {
                 handleBuilderSyncEvent(JSON.parse(event.newValue));
             } catch (error) {
-                // Ignore malformed sync payloads.
+                console.warn('Failed to parse sync event:', error);
             }
         });
         bootstrap();

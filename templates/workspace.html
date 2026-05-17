@@ -3223,7 +3223,7 @@
                                 <span class="chip" id="mike-integration-conflict-chip">conflicts: loading</span>
                             </div>
                             <div class="helper-text" id="mike-integration-ids">Latest handoff/sync IDs will appear here after status loads.</div>
-                            <div class="helper-text" id="mike-integration-recommended-action" role="status" aria-live="polite">Recommended Mike action will appear here after status loads.</div>
+                            <div class="helper-text" id="mike-integration-recommended-action" role="status">Recommended Mike action will appear here after status loads.</div>
                             <div class="button-row" style="margin-top: 10px;">
                                 <button class="secondary" id="mike-refresh-status-button" type="button">Refresh Mike Status</button>
                                 <button class="secondary" id="mike-open-draft-workflow-button" type="button">Prepare Handoff In Draft</button>
@@ -13208,7 +13208,7 @@ function extractComplaintOutputSignals(result) {
             try {
                 handleWorkspaceSharedSyncEvent(JSON.parse(event.newValue));
             } catch (error) {
-                // Ignore malformed shared sync payloads.
+                console.warn('Failed to parse workspace sync event:', error);
             }
         });
 

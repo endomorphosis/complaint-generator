@@ -4300,11 +4300,12 @@ def _render_dashboard_hub(
                 setText('dashboard-workspace-session-chip', `session: ${{String(session.user_id || 'unknown')}}`);
                 const readiness = payload && payload.complaint_readiness ? payload.complaint_readiness : {{}};
                 const mikeRecommendedAction = String(mike.recommended_action || '').trim();
-                const mikeRouteHint = mikeState.key === 'synced_with_conflicts'
-                    ? '/workspace?target_tab=draft&focus=mike-integration-card'
-                    : mikeState.key === 'handoff_pending_sync'
-                        ? '/document?focus=mike-workflow-journey'
-                        : String(readiness.recommended_route || '/workspace');
+                let mikeRouteHint = String(readiness.recommended_route || '/workspace');
+                if (mikeState.key === 'synced_with_conflicts') {{
+                    mikeRouteHint = '/workspace?target_tab=draft&focus=mike-integration-card';
+                }} else if (mikeState.key === 'handoff_pending_sync') {{
+                    mikeRouteHint = '/document?focus=mike-workflow-journey';
+                }}
                 setText('dashboard-workspace-route-chip', `next route: ${{mikeRouteHint}}`);
                 const mikeStateChip = document.getElementById('dashboard-workspace-mike-state-chip');
                 if (mikeStateChip) {{
