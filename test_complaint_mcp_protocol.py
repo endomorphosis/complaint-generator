@@ -25,6 +25,9 @@ def test_tools_list_uses_jsonrpc_shape(tmp_path):
     assert "result" in response
     assert response["result"]["tools"]
     assert response["result"]["tools"][0]["name"].startswith("complaint.")
+    tools_by_name = {tool["name"]: tool for tool in response["result"]["tools"]}
+    assert tools_by_name["complaint.build_mike_handoff"]["inputSchema"]["properties"]["generate_draft_if_missing"]["type"] == "boolean"
+    assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["required"] == ["body"]
 
 
 def test_public_package_exports_workspace_service():

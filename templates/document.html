@@ -5085,7 +5085,6 @@
                 }
                 return state.mikeIntegrationStatus;
             } catch (error) {
-                state.mikeStatusUpdatedAt = new Date().toISOString();
                 if (state.generatedPayload) {
                     renderPreview(state.generatedPayload);
                 }

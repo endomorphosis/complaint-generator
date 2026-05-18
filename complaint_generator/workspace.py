@@ -522,6 +522,8 @@ def sync_mike_final_draft(
     citation_links: Optional[list[dict[str, Any]]] = None,
     redline_summary: Optional[str] = None,
     source_updated_at: Optional[str] = None,
+    structured_deltas: Optional[list[dict[str, Any]]] = None,
+    editor_metadata: Optional[dict[str, Any]] = None,
     service: Optional[ComplaintWorkspaceService] = None,
     root_dir: Optional[str | Path] = None,
 ) -> dict[str, Any]:
@@ -537,6 +539,8 @@ def sync_mike_final_draft(
         citation_links=citation_links,
         redline_summary=redline_summary,
         source_updated_at=source_updated_at,
+        structured_deltas=structured_deltas,
+        editor_metadata=editor_metadata,
     )
 
 

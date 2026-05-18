@@ -230,6 +230,9 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.migrate_legacy_workspace_data",
         "complaint.view_workspace_dataset",
         "complaint.search_workspace_dataset",
+        "complaint.build_mike_handoff",
+        "complaint.get_mike_integration_status",
+        "complaint.sync_mike_final_draft",
         "complaint.generate_complaint",
         "complaint.update_draft",
         "complaint.export_complaint_packet",
@@ -261,6 +264,9 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     assert all("inputSchema" in tool for tool in payload["tools"])
     assert tools_by_name["complaint.get_tooling_contract"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
     assert tools_by_name["complaint.get_filing_provenance"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.build_mike_handoff"]["inputSchema"]["properties"]["generate_draft_if_missing"]["type"] == "boolean"
+    assert tools_by_name["complaint.get_mike_integration_status"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["required"] == ["body"]
     assert tools_by_name["complaint.tag_document_annotation"]["inputSchema"]["required"] == ["document_id", "note"]
     assert tools_by_name["complaint.tag_workspace_dataset_document"]["inputSchema"]["required"] == ["document_id", "note"]
     assert tools_by_name["complaint.get_packaged_docket_operator_dashboard"]["inputSchema"]["required"] == ["manifest_path"]

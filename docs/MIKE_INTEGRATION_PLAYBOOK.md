@@ -15,7 +15,7 @@ Use one of the aligned surfaces below:
 - MCP tool: `complaint.build_mike_handoff`
 - HTTP route: `POST /api/complaint-workspace/mike/handoff`
 - Browser SDK: `client.buildMikeHandoff(payload)`
-- CLI: `complaint-generator build-mike-handoff`
+- CLI: `complaint-workspace build-mike-handoff`
 
 ### Required handoff inputs
 
@@ -49,7 +49,7 @@ Use one of the aligned surfaces below:
 - MCP tool: `complaint.get_mike_integration_status`
 - HTTP route: `GET /api/complaint-workspace/mike/status?user_id=...`
 - Browser SDK: `client.getMikeIntegrationStatus(userId)`
-- CLI: `complaint-generator mike-status`
+- CLI: `complaint-workspace mike-status`
 
 The status payload reports:
 
@@ -79,7 +79,7 @@ Use one of the aligned surfaces below:
 - MCP tool: `complaint.sync_mike_final_draft`
 - HTTP route: `POST /api/complaint-workspace/mike/sync`
 - Browser SDK: `client.syncMikeFinalDraft(payload)`
-- CLI: `complaint-generator sync-mike-draft`
+- CLI: `complaint-workspace sync-mike-draft`
 
 ### Required sync inputs
 

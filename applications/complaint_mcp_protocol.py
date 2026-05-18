@@ -284,6 +284,41 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "source_type": {"type": "string"},
         },
     },
+    "complaint.build_mike_handoff": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "mike_base_url": {"type": "string"},
+            "project_id": {"type": "string"},
+            "workspace_id": {"type": "string"},
+            "generate_draft_if_missing": {"type": "boolean"},
+        },
+    },
+    "complaint.get_mike_integration_status": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+        },
+    },
+    "complaint.sync_mike_final_draft": {
+        "type": "object",
+        "properties": {
+            "user_id": {"type": "string"},
+            "body": {"type": "string"},
+            "title": {"type": "string"},
+            "requested_relief": {"type": "array", "items": {"type": "string"}},
+            "handoff_id": {"type": "string"},
+            "project_id": {"type": "string"},
+            "workspace_id": {"type": "string"},
+            "mike_document_id": {"type": "string"},
+            "citation_links": {"type": "array", "items": {"type": "object"}},
+            "redline_summary": {"type": "string"},
+            "source_updated_at": {"type": "string"},
+            "structured_deltas": {"type": "array", "items": {"type": "object"}},
+            "editor_metadata": {"type": "object"},
+        },
+        "required": ["body"],
+    },
     "complaint.generate_complaint": {
         "type": "object",
         "properties": {

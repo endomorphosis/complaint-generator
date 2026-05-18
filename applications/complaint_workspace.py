@@ -5647,16 +5647,21 @@ class ComplaintWorkspaceService:
         structured_deltas: Optional[List[Dict[str, Any]]] = None,
         editor_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        synced_body = str(body or "").strip()
-        if not synced_body:
+        raw_body = str(body or "")
+        if not raw_body.strip():
             raise ValueError("The draft body content is required and cannot be empty.")
         state = self._load_state(str(user_id or DEFAULT_USER_ID))
         draft = deepcopy(state.get("draft") or self._build_draft(state))
+        mike_integration = dict(state.get("mike_integration") or {})
+        last_handoff = dict(mike_integration.get("last_handoff") or {})
+        provided_handoff_id = str(handoff_id or "").strip()
+        fallback_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
+        resolved_handoff_id = provided_handoff_id or fallback_handoff_id or None
         existing_title = str(draft.get("title") or "").strip()
         if title is not None:
             normalized_title = str(title or "").strip()
             draft["title"] = normalized_title or existing_title or "Complaint Draft"
-        draft["body"] = synced_body
+        draft["body"] = raw_body
         if requested_relief is not None:
             draft["requested_relief"] = [str(item).strip() for item in list(requested_relief or []) if str(item).strip()]
         synced_at = _utc_now()
@@ -5678,8 +5683,8 @@ class ComplaintWorkspaceService:
         )
         sync_integrity_payload_bytes = json.dumps(
             {
-                "handoff_id": str(handoff_id or "").strip(),
-                "body": synced_body,
+                "handoff_id": resolved_handoff_id,
+                "body": raw_body,
                 "synced_at": synced_at,
                 "citation_links": normalized_citation_links,
                 "structured_deltas": normalized_structured_deltas,
@@ -5700,7 +5705,7 @@ class ComplaintWorkspaceService:
         draft["sync_source"] = "mike"
         draft["sync_metadata"] = {
             "contract_version": MIKE_SYNC_CONTRACT_VERSION,
-            "handoff_id": str(handoff_id or "").strip() or None,
+            "handoff_id": resolved_handoff_id,
             "project_id": str(project_id or "").strip() or None,
             "workspace_id": str(workspace_id or "").strip() or None,
             "mike_document_id": str(mike_document_id or "").strip() or None,
@@ -5716,7 +5721,6 @@ class ComplaintWorkspaceService:
             "synced_at": synced_at,
         }
         state["draft"] = draft
-        mike_integration = dict(state.get("mike_integration") or {})
         sync_history = [dict(item) for item in list(mike_integration.get("sync_history") or []) if isinstance(item, dict)]
         sync_record = {
             "synced_at": synced_at,
@@ -5724,7 +5728,7 @@ class ComplaintWorkspaceService:
             "project_id": draft["sync_metadata"]["project_id"],
             "workspace_id": draft["sync_metadata"]["workspace_id"],
             "mike_document_id": draft["sync_metadata"]["mike_document_id"],
-            "body_chars": len(synced_body),
+            "body_chars": len(raw_body),
             "title": str(draft.get("title") or "").strip(),
             "citation_link_count": citation_link_check["total_links"],
             "citation_link_conflict_count": len(citation_link_check["conflicts"]),
@@ -5783,6 +5787,17 @@ class ComplaintWorkspaceService:
         draft = dict(state.get("draft") or {})
         draft_sync_source = str(draft.get("sync_source") or "").strip().lower()
         has_mike_synced_draft = draft_sync_source == "mike" and bool(str(draft.get("body") or "").strip())
+        draft_updated_at_raw = str(draft.get("updated_at") or "").strip()
+        latest_sync_timestamp_raw = str(last_sync.get("synced_at") or "").strip()
+        if has_mike_synced_draft and draft_updated_at_raw and latest_sync_timestamp_raw:
+            try:
+                draft_updated_at = datetime.fromisoformat(draft_updated_at_raw)
+                latest_sync_timestamp = datetime.fromisoformat(latest_sync_timestamp_raw)
+                # Equality is intentional because Mike sync writes both timestamps in one operation.
+                # If they differ, the draft changed after sync and should no longer be treated as current.
+                has_mike_synced_draft = draft_updated_at == latest_sync_timestamp
+            except ValueError:
+                has_mike_synced_draft = draft_updated_at_raw == latest_sync_timestamp_raw
         draft_sync_metadata = dict(draft.get("sync_metadata") or {})
         raw_citation_link_check = dict(draft_sync_metadata.get("citation_link_check") or {})
         has_citation_link_conflicts = bool(raw_citation_link_check.get("has_conflicts"))

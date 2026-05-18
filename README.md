@@ -177,6 +177,7 @@ Initialize the submodule, then install and run the Mike services:
 git submodule update --init --recursive
 npm install --prefix mike/backend
 npm install --prefix mike/frontend
+# Run these in separate terminals
 npm run dev --prefix mike/backend
 npm run dev --prefix mike/frontend
 ```

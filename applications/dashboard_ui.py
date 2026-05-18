@@ -5276,8 +5276,22 @@ def _render_dashboard_hub(
                 if (eventType === 'workspace.updated' || eventType === 'workspace.reset') {{
                     const incomingUserId = String(syncDetail.user_id || (((syncDetail.payload || {{}}).session || {{}}).user_id) || '').trim();
                     const currentUserId = String((document.getElementById('dashboard-workspace-user-id').value || '')).trim();
+                    const payload = syncDetail.payload && typeof syncDetail.payload === 'object' ? syncDetail.payload : null;
+                    const payloadSession = payload && payload.session && typeof payload.session === 'object' ? payload.session : null;
                     if (!currentUserId || !incomingUserId || incomingUserId === currentUserId) {{
-                        await loadWorkspaceDashboard();
+                        if (payloadSession) {{
+                            const userInput = document.getElementById('dashboard-workspace-user-id');
+                            if (userInput && !String(userInput.value || '').trim() && incomingUserId) {{
+                                userInput.value = incomingUserId;
+                            }}
+                            const mikeStatus = payload && payload.mike_integration_status && typeof payload.mike_integration_status === 'object'
+                                ? payload.mike_integration_status
+                                : await fetchMikeIntegrationStatus(incomingUserId || currentUserId).catch(() => null);
+                            dashboardState.workspaceMikeStatusUpdatedAt = new Date().toISOString();
+                            renderWorkspaceCard(payload, mikeStatus);
+                        }} else {{
+                            await loadWorkspaceDashboard();
+                        }}
                     }}
                 }}
                 if (eventType === 'docket.updated' || eventType === 'docket.persisted') {{

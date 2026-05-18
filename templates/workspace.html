@@ -10686,7 +10686,6 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     setStatus('Mike integration status refreshed from the canonical status feed.');
                 }
             } catch (error) {
-                workspaceMikeStatusUpdatedAt = new Date().toISOString();
                 renderMikeIntegrationPanel();
                 if (!silent) {
                     setStatus(`Unable to refresh Mike status: ${String((error && error.message) || error || 'Unknown error')}`);
