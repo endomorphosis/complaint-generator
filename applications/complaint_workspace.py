@@ -9,12 +9,15 @@ import sys
 import threading
 import uuid
 import zipfile
+import hashlib
+import hmac
 from base64 import b64encode
 from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Set
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
 from complaint_phases.legal_document import parse_legal_document
@@ -69,6 +72,20 @@ DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER: Dict[str, int] = {
     "hf_inference_api": 30,
     "hf_inference": 30,
     "hf_api": 30,
+}
+# Citation-link identity precedence keeps explicit IDs stable before looser source/url fallback keys.
+MIKE_CITATION_KEY_FIELD_PRECEDENCE: tuple[str, ...] = ("citation_id", "id", "source_id", "url")
+MIKE_STATUS_CONTRACT_VERSION = "complaint-mike-status-v2"
+MIKE_HANDOFF_CONTRACT_VERSION = "complaint-mike-handoff-v2"
+MIKE_SYNC_CONTRACT_VERSION = "complaint-mike-sync-v2"
+MAX_MIKE_HANDOFF_PARAGRAPHS = 80
+MAX_MIKE_WEAK_LINKS_DISPLAY = 3
+VALID_MIKE_STRUCTURED_DELTA_OPS: Set[str] = {"insert", "delete", "replace", "edit", "move"}
+MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
+    "not_handed_off": "Not handed off",
+    "handoff_pending_sync": "Handoff pending sync",
+    "synced_clean": "Synced clean",
+    "synced_with_conflicts": "Synced with conflicts",
 }
 DEFAULT_UI_UX_SCREENSHOT_TARGET = (
     "tests/test_website_cohesion_playwright.py::"
@@ -161,6 +178,9 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "migrate_legacy_workspace_data",
     "search_workspace_dataset",
     "view_workspace_dataset",
+    "build_mike_handoff",
+    "get_mike_integration_status",
+    "sync_mike_final_draft",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -202,6 +222,9 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "migrate-legacy-workspace-data",
     "search-workspace-data",
     "view-workspace-data",
+    "build-mike-handoff",
+    "mike-status",
+    "sync-mike-draft",
     "generate",
     "export-packet",
     "export-markdown",
@@ -244,6 +267,9 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "migrateLegacyWorkspaceData",
     "searchWorkspaceDataset",
     "viewWorkspaceDataset",
+    "buildMikeHandoff",
+    "getMikeIntegrationStatus",
+    "syncMikeFinalDraft",
     "generateComplaint",
     "exportComplaintPacket",
     "exportComplaintMarkdown",
@@ -415,6 +441,24 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "view-workspace-data",
         "mcp_tool": "complaint.view_workspace_dataset",
         "browser_sdk_method": "viewWorkspaceDataset",
+    },
+    "mike_editor_handoff": {
+        "package_export": "build_mike_handoff",
+        "cli_command": "build-mike-handoff",
+        "mcp_tool": "complaint.build_mike_handoff",
+        "browser_sdk_method": "buildMikeHandoff",
+    },
+    "mike_editor_status": {
+        "package_export": "get_mike_integration_status",
+        "cli_command": "mike-status",
+        "mcp_tool": "complaint.get_mike_integration_status",
+        "browser_sdk_method": "getMikeIntegrationStatus",
+    },
+    "mike_editor_sync": {
+        "package_export": "sync_mike_final_draft",
+        "cli_command": "sync-mike-draft",
+        "mcp_tool": "complaint.sync_mike_final_draft",
+        "browser_sdk_method": "syncMikeFinalDraft",
     },
     "export_critic": {
         "package_export": "review_generated_exports",
@@ -1578,6 +1622,13 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "latest_packet_export": None,
         "latest_export_critic": None,
         "ui_readiness": None,
+        "mike_integration": {
+            "last_handoff": None,
+            "last_sync": None,
+            "handoff_history": [],
+            "sync_history": [],
+            "audit_trail": [],
+        },
     }
 
 
@@ -1615,6 +1666,18 @@ class ComplaintWorkspaceService:
         payload.setdefault("latest_packet_export", None)
         payload.setdefault("latest_export_critic", None)
         payload.setdefault("ui_readiness", None)
+        payload.setdefault(
+            "mike_integration",
+            {
+                "last_handoff": None,
+                "last_sync": None,
+                "handoff_history": [],
+                "sync_history": [],
+                "audit_trail": [],
+            },
+        )
+        if isinstance(payload.get("mike_integration"), dict):
+            payload["mike_integration"].setdefault("audit_trail", [])
         return payload
 
     def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -3200,6 +3263,7 @@ class ComplaintWorkspaceService:
         answered_count = len([item for item in questions if item.get("is_answered")])
         total_questions = len(questions)
         readiness = self.get_complaint_readiness(user_id)
+        mike_status = self.get_mike_integration_status(user_id)
         capabilities = [
             {
                 "id": "intake_questions",
@@ -3253,6 +3317,13 @@ class ComplaintWorkspaceService:
                 "available": True,
                 "detail": "The lawsuit packet can be exported as a structured browser, CLI, or MCP artifact.",
             },
+            {
+                "id": "mike_editor_handoff",
+                "label": "Mike editor handoff and draft sync",
+                "available": True,
+                "detail": str(mike_status.get("recommended_action") or "").strip()
+                or "No Mike integration activity yet. Start with complaint.build_mike_handoff.",
+            },
         ]
         workspace_data_schema = self.get_workspace_data_schema(session["session"]["user_id"])
         return {
@@ -3265,6 +3336,7 @@ class ComplaintWorkspaceService:
             "complaint_readiness": readiness,
             "ui_readiness": self.get_ui_readiness(user_id),
             "client_release_gate": self.get_client_release_gate(user_id),
+            "mike_integration_status": mike_status,
             "tooling_contract": self.get_tooling_contract(user_id),
             "workspace_data_schema": workspace_data_schema,
             "schema_guided_recommendations": _build_schema_guided_tooling_recommendations(workspace_data_schema),
@@ -5078,6 +5150,734 @@ class ComplaintWorkspaceService:
             "case_synopsis": session["case_synopsis"],
         }
 
+    @staticmethod
+    def _resolve_mike_base_url(override: Optional[str] = None) -> str:
+        candidate = str(override or os.getenv("COMPLAINT_MIKE_BASE_URL") or "").strip()
+        if not candidate:
+            candidate = "http://localhost:3000"
+        return candidate.rstrip("/")
+
+    @staticmethod
+    def _build_mike_launch_url(base_url: str, query: Mapping[str, str]) -> str:
+        parsed = urlsplit(str(base_url or "").strip())
+        path = parsed.path or "/"
+        return urlunsplit((parsed.scheme, parsed.netloc, path, urlencode(dict(query)), parsed.fragment))
+
+    @staticmethod
+    def _mike_transport_warning(base_url: str) -> Optional[str]:
+        parsed = urlsplit(str(base_url or "").strip())
+        hostname = str(parsed.hostname or "").strip().lower()
+        if parsed.scheme == "http" and hostname not in {"localhost", "127.0.0.1", "::1"}:
+            return (
+                "Mike launch URL is using plain HTTP on a non-localhost host. "
+                "Prefer HTTPS for production deployments."
+            )
+        return None
+
+    @staticmethod
+    def _summarize_mike_evidence_context(state: Dict[str, Any], review: Dict[str, Any]) -> Dict[str, Any]:
+        evidence = dict(state.get("evidence") or {})
+        testimony = list(evidence.get("testimony") or [])
+        documents = list(evidence.get("documents") or [])
+        support_matrix = list((review or {}).get("support_matrix") or [])
+        testimony_by_element: Dict[str, List[Dict[str, Any]]] = {}
+        for item in testimony:
+            element_id = str((item or {}).get("claim_element_id") or "").strip()
+            if not element_id:
+                continue
+            testimony_by_element.setdefault(element_id, []).append(item)
+        documents_by_element: Dict[str, List[Dict[str, Any]]] = {}
+        for item in documents:
+            element_id = str((item or {}).get("claim_element_id") or "").strip()
+            if not element_id:
+                continue
+            documents_by_element.setdefault(element_id, []).append(item)
+        evidence_by_element: Dict[str, Dict[str, Any]] = {}
+        for element in support_matrix:
+            element_id = str((element or {}).get("id") or "").strip()
+            if not element_id:
+                continue
+            matching_testimony = list(testimony_by_element.get(element_id) or [])
+            matching_documents = list(documents_by_element.get(element_id) or [])
+            samples = [
+                str((item or {}).get("title") or "").strip()
+                for item in (matching_testimony + matching_documents)
+                if str((item or {}).get("title") or "").strip()
+            ][:3]
+            evidence_by_element[element_id] = {
+                "label": str((element or {}).get("label") or element_id),
+                "supported": bool((element or {}).get("supported")),
+                "testimony_count": len(matching_testimony),
+                "document_count": len(matching_documents),
+                "sample_titles": samples,
+            }
+        return {
+            "testimony_count": len(testimony),
+            "document_count": len(documents),
+            "elements": evidence_by_element,
+            "missing_element_ids": [
+                str((element or {}).get("id") or "").strip()
+                for element in support_matrix
+                if not bool((element or {}).get("supported"))
+            ],
+        }
+
+    @staticmethod
+    def _normalize_mike_citation_links(citation_links: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize Mike citation links to mutable dict rows.
+
+        Non-dict inputs are ignored and dict entries are shallow-copied so downstream
+        mutation cannot alter caller-provided payload objects.
+        """
+        return [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
+
+    @staticmethod
+    def _extract_mike_claim_element_id(item: Mapping[str, Any]) -> str:
+        # Support both Mike payload conventions while preferring claim_element_id.
+        return str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
+
+    @staticmethod
+    def _extract_mike_citation_key(item: Mapping[str, Any]) -> str:
+        for field in MIKE_CITATION_KEY_FIELD_PRECEDENCE:
+            candidate = str(item.get(field) or "").strip()
+            if candidate:
+                return candidate
+        return ""
+
+    def _check_mike_citation_links(
+        self,
+        state: Dict[str, Any],
+        citation_links: List[Dict[str, Any]],
+        *,
+        review: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Validate Mike citation links against claim elements and detect citation conflicts.
+
+        Args:
+            state: Current workspace state payload.
+            citation_links: Citation-link objects supplied on Mike sync.
+            review: Optional precomputed review payload to avoid recomputing support_matrix.
+
+        Returns:
+            Dict with total link count, known/unknown claim elements, per-citation conflicts,
+            and an aggregate has_conflicts boolean.
+        """
+        review_payload = dict(review or {})
+        if not review_payload:
+            review_payload = self._build_review(state)
+        support_matrix = list((review_payload or {}).get("support_matrix") or [])
+
+        known_element_ids: Set[str] = set()
+        for item in support_matrix:
+            element_id = str((item or {}).get("id") or "").strip()
+            if element_id:
+                known_element_ids.add(element_id)
+        normalized_links = self._normalize_mike_citation_links(citation_links)
+        unknown_claim_element_ids: Set[str] = set()
+        for item in normalized_links:
+            claim_element_id = self._extract_mike_claim_element_id(item)
+            if claim_element_id and claim_element_id not in known_element_ids:
+                unknown_claim_element_ids.add(claim_element_id)
+        citation_to_elements: Dict[str, Set[str]] = {}
+        for item in normalized_links:
+            citation_key = self._extract_mike_citation_key(item)
+            claim_element_id = self._extract_mike_claim_element_id(item)
+            if not citation_key or not claim_element_id:
+                continue
+            citation_to_elements.setdefault(citation_key, set()).add(claim_element_id)
+        conflicts = [
+            {
+                "citation_id": citation_id,
+                # Keep deterministic claim-element ordering for tests and downstream diffs.
+                "claim_element_ids": sorted(claim_element_ids),
+            }
+            for citation_id, claim_element_ids in sorted(citation_to_elements.items())
+            if len(claim_element_ids) > 1
+        ]
+        return {
+            "total_links": len(normalized_links),
+            "known_claim_element_ids": sorted(known_element_ids),
+            "unknown_claim_element_ids": sorted(unknown_claim_element_ids),
+            "conflicts": conflicts,
+            "has_conflicts": bool(conflicts or unknown_claim_element_ids),
+        }
+
+    @staticmethod
+    def _build_mike_workflow_state(
+        *,
+        latest_handoff_id: str,
+        pending_sync: bool,
+        has_mike_synced_draft: bool,
+        has_citation_link_conflicts: bool,
+    ) -> Dict[str, str]:
+        if not latest_handoff_id:
+            key = "not_handed_off"
+            severity = "warn"
+        elif pending_sync:
+            key = "handoff_pending_sync"
+            severity = "warn"
+        elif has_mike_synced_draft and has_citation_link_conflicts:
+            key = "synced_with_conflicts"
+            severity = "warn"
+        elif has_mike_synced_draft:
+            key = "synced_clean"
+            severity = "good"
+        else:
+            key = "handoff_pending_sync"
+            severity = "warn"
+        return {
+            "key": key,
+            "label": MIKE_WORKFLOW_STATE_LABELS.get(key, "Unknown"),
+            "severity": severity,
+        }
+
+    @staticmethod
+    def _derive_mike_recommended_action(
+        *,
+        workflow_state_key: str,
+        has_citation_link_conflicts: bool,
+    ) -> str:
+        if workflow_state_key == "synced_with_conflicts" and has_citation_link_conflicts:
+            return "Resolve conflicts in Mike and sync again before export."
+        if workflow_state_key == "handoff_pending_sync":
+            return "Latest Mike handoff has not been synced yet. Import the edited draft with complaint.sync_mike_final_draft."
+        if workflow_state_key == "not_handed_off":
+            return "Start with complaint.build_mike_handoff to open Mike with the current draft and evidence context."
+        if workflow_state_key == "synced_clean":
+            return "Mike sync is current. Continue export review and release-gate checks for filing readiness."
+        return "A handoff exists. Sync the finalized Mike draft back into complaint-generator before export."
+
+    @staticmethod
+    def _build_mike_structured_packet_context(
+        draft: Mapping[str, Any],
+        review: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        draft_body = str((draft or {}).get("body") or "")
+        paragraphs = [line.strip() for line in draft_body.splitlines() if line.strip()]
+        paragraph_count_truncated = len(paragraphs) > MAX_MIKE_HANDOFF_PARAGRAPHS
+        section_cards: List[Dict[str, Any]] = []
+        for index, paragraph in enumerate(paragraphs[:MAX_MIKE_HANDOFF_PARAGRAPHS], start=1):
+            section_cards.append(
+                {
+                    "section_id": f"section-{index:03d}",
+                    "section_type": "draft_paragraph",
+                    "paragraph_ids": [f"paragraph-{index:03d}"],
+                    "paragraphs": [
+                        {
+                            "paragraph_id": f"paragraph-{index:03d}",
+                            "text": paragraph,
+                        }
+                    ],
+                }
+            )
+        support_matrix = list((review or {}).get("support_matrix") or [])
+        claim_elements = [
+            {
+                "claim_element_id": str((item or {}).get("id") or "").strip(),
+                "label": str((item or {}).get("label") or "").strip(),
+                "supported": bool((item or {}).get("supported")),
+                "stable_claim_id": f"claim-element-{idx:03d}",
+            }
+            for idx, item in enumerate(support_matrix, start=1)
+            if str((item or {}).get("id") or "").strip()
+        ]
+        return {
+            "section_cards": section_cards,
+            "claim_elements": claim_elements,
+            "total_paragraph_count": len(paragraphs),
+            "paragraph_count_truncated": paragraph_count_truncated,
+            "stable_id_rules": {
+                "sections": "section-###",
+                "paragraphs": "paragraph-###",
+                "claim_elements": "claim-element-###",
+            },
+        }
+
+    @staticmethod
+    def _build_mike_editor_guardrails(review: Mapping[str, Any]) -> Dict[str, Any]:
+        support_matrix = list((review or {}).get("support_matrix") or [])
+        unsupported_ids = [
+            str((item or {}).get("id") or "").strip()
+            for item in support_matrix
+            if str((item or {}).get("id") or "").strip() and not bool((item or {}).get("supported"))
+        ]
+        contradiction_candidates = list((review or {}).get("contradiction_candidates") or [])
+        contradiction_ids = [
+            str((item or {}).get("id") or item or "").strip()
+            for item in contradiction_candidates
+            if str((item or {}).get("id") or item or "").strip()
+        ]
+        return {
+            "unsupported_claim_elements": unsupported_ids,
+            "weak_evidentiary_links": unsupported_ids[:MAX_MIKE_WEAK_LINKS_DISPLAY],
+            "proof_readiness_flags": {
+                "missing_support_count": len(unsupported_ids),
+                "supported_count": len(support_matrix) - len(unsupported_ids),
+            },
+            "contradiction_hotspots": contradiction_ids,
+        }
+
+    @staticmethod
+    def _validate_mike_structured_deltas(structured_deltas: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize structured deltas while intentionally ignoring malformed rows."""
+        normalized: List[Dict[str, Any]] = []
+        for item in list(structured_deltas or []):
+            if not isinstance(item, dict):
+                continue
+            op = str(item.get("op") or "").strip().lower() or "edit"
+            target = str(item.get("target") or "").strip()
+            normalized_from_invalid_op = op not in VALID_MIKE_STRUCTURED_DELTA_OPS
+            if op not in VALID_MIKE_STRUCTURED_DELTA_OPS:
+                op = "edit"
+            metadata = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}
+            if normalized_from_invalid_op:
+                metadata["normalized_from_invalid_op"] = True
+            normalized.append(
+                {
+                    "op": op,
+                    "target": target or "draft.body",
+                    "before": item.get("before"),
+                    "after": item.get("after"),
+                    "metadata": metadata,
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _normalize_mike_editor_metadata(editor_metadata: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        payload = dict(editor_metadata or {})
+        return {
+            "editor_user_id": str(payload.get("editor_user_id") or "").strip() or None,
+            "editor_session_id": str(payload.get("editor_session_id") or "").strip() or None,
+            "source_updated_at": str(payload.get("source_updated_at") or "").strip() or None,
+            "source_transport": str(payload.get("source_transport") or "").strip() or None,
+        }
+
+    @staticmethod
+    def _build_mike_sync_diagnostics(
+        *,
+        citation_link_check: Mapping[str, Any],
+        review_payload: Mapping[str, Any],
+        structured_deltas: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        conflict_count = len(list((citation_link_check or {}).get("conflicts") or []))
+        unknown_count = len(list((citation_link_check or {}).get("unknown_claim_element_ids") or []))
+        overview = dict((review_payload or {}).get("overview") or {})
+        missing_count = int(overview.get("missing_elements") or 0)
+        diagnostics = [
+            {
+                "id": "citation_link_integrity",
+                "severity": "error" if (conflict_count or unknown_count) else "info",
+                "status": "failed" if (conflict_count or unknown_count) else "passed",
+                "message": (
+                    f"Detected {conflict_count} citation-link conflict(s) and {unknown_count} unknown claim element link(s)."
+                    if (conflict_count or unknown_count)
+                    else "Citation-link integrity check passed."
+                ),
+                "remediation": "Resolve conflicts in Mike and sync again."
+                if (conflict_count or unknown_count)
+                else "No action required.",
+            },
+            {
+                "id": "claim_proof_coverage",
+                "severity": "warning" if missing_count else "info",
+                "status": "needs_review" if missing_count else "passed",
+                "message": (
+                    f"Support review still reports {missing_count} missing claim element(s)."
+                    if missing_count
+                    else "Support review reports complete claim-element coverage."
+                ),
+                "remediation": "Collect additional corroboration before export." if missing_count else "No action required.",
+            },
+            {
+                "id": "theorem_export_compatibility",
+                "severity": "warning" if missing_count else "info",
+                "status": "needs_review" if missing_count else "passed",
+                "message": (
+                    "Theorem/export compatibility should be re-checked after this sync because unresolved proof gaps remain."
+                    if missing_count
+                    else "No proof-gap regressions detected for theorem/export compatibility."
+                ),
+                "remediation": "Run complaint.review_case and complaint.get_client_release_gate before filing.",
+            },
+        ]
+        normalized_invalid_op_count = sum(
+            1
+            for item in structured_deltas
+            if bool(dict(item.get("metadata") or {}).get("normalized_from_invalid_op"))
+        )
+        return {
+            "severity": "error" if (conflict_count or unknown_count) else ("warning" if missing_count else "info"),
+            "has_blockers": bool(conflict_count or unknown_count),
+            "checks": diagnostics,
+            "structured_delta_count": len(structured_deltas),
+            "normalized_invalid_op_count": normalized_invalid_op_count,
+        }
+
+    def build_mike_handoff(
+        self,
+        user_id: Optional[str],
+        *,
+        mike_base_url: Optional[str] = None,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        generate_draft_if_missing: bool = True,
+    ) -> Dict[str, Any]:
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        generated_draft = False
+        if generate_draft_if_missing and not state.get("draft"):
+            state["draft"] = self._build_draft(state)
+            generated_draft = True
+        review = self._build_review(state)
+        handoff_id = f"mike-handoff-{uuid.uuid4().hex[:12]}"
+        resolved_base_url = self._resolve_mike_base_url(mike_base_url)
+        launch_query: Dict[str, str] = {
+            "user_id": resolved_user_id,
+            "handoff_id": handoff_id,
+        }
+        normalized_project_id = str(project_id or "").strip()
+        normalized_workspace_id = str(workspace_id or "").strip()
+        if normalized_project_id:
+            launch_query["project_id"] = normalized_project_id
+        if normalized_workspace_id:
+            launch_query["workspace_id"] = normalized_workspace_id
+        launch_url = self._build_mike_launch_url(resolved_base_url, launch_query)
+        transport_warning = self._mike_transport_warning(resolved_base_url)
+        handoff_payload = {
+            "version": MIKE_HANDOFF_CONTRACT_VERSION,
+            "user_id": resolved_user_id,
+            "project_id": normalized_project_id or None,
+            "workspace_id": normalized_workspace_id or None,
+            "handoff_id": handoff_id,
+            "created_at": _utc_now(),
+            "case_synopsis": self._build_case_synopsis(state),
+            "claim_type": str(state.get("claim_type") or "retaliation"),
+            "draft": deepcopy(state.get("draft") or {}),
+            "review": deepcopy(review),
+            "evidence_context": self._summarize_mike_evidence_context(state, review),
+            "structured_legal_packet_context": self._build_mike_structured_packet_context(
+                dict(state.get("draft") or {}),
+                review,
+            ),
+            "editor_guardrails": self._build_mike_editor_guardrails(review),
+            "non_negotiable_constraints": {
+                "must_preserve_claim_element_references": True,
+                "must_return_sync_handoff_id": True,
+                "must_run_citation_link_integrity_checks": True,
+                "must_include_source_timestamps": True,
+            },
+        }
+        mike_integration = dict(state.get("mike_integration") or {})
+        handoff_history = [dict(item) for item in list(mike_integration.get("handoff_history") or []) if isinstance(item, dict)]
+        handoff_record = {
+            "handoff_id": handoff_id,
+            "created_at": handoff_payload["created_at"],
+            "project_id": normalized_project_id or None,
+            "workspace_id": normalized_workspace_id or None,
+            "generated_draft": generated_draft,
+            "launch_url": launch_url,
+        }
+        handoff_history.insert(0, handoff_record)
+        mike_integration["last_handoff"] = handoff_record
+        mike_integration["handoff_history"] = handoff_history[:25]
+        state["mike_integration"] = mike_integration
+        self._save_state(state)
+        return {
+            "user_id": resolved_user_id,
+            "handoff_id": handoff_id,
+            "generated_draft": generated_draft,
+            "mike": {
+                "base_url": resolved_base_url,
+                "launch_url": launch_url,
+                "project_id": normalized_project_id or None,
+                "workspace_id": normalized_workspace_id or None,
+                "transport_warning": transport_warning,
+            },
+            "handoff_payload": handoff_payload,
+            "sync_contract": {
+                "tool_name": "complaint.sync_mike_final_draft",
+                "contract_version": MIKE_SYNC_CONTRACT_VERSION,
+                "required_fields": ["user_id", "body"],
+                "optional_fields": [
+                    "handoff_id",
+                    "project_id",
+                    "workspace_id",
+                    "title",
+                    "requested_relief",
+                    "mike_document_id",
+                    "citation_links",
+                    "redline_summary",
+                    "source_updated_at",
+                    "structured_deltas",
+                    "editor_metadata",
+                ],
+            },
+            "session_snapshot": {
+                "user_id": str(state.get("user_id") or resolved_user_id),
+                "claim_type": str(state.get("claim_type") or "retaliation"),
+                "has_draft": bool(state.get("draft")),
+                "testimony_count": len(list((state.get("evidence") or {}).get("testimony") or [])),
+                "document_count": len(list((state.get("evidence") or {}).get("documents") or [])),
+                "updated_at": str(state.get("updated_at") or ""),
+            },
+            "review": deepcopy(review),
+            "case_synopsis": self._build_case_synopsis(state),
+            "contract_versions": {
+                "handoff": MIKE_HANDOFF_CONTRACT_VERSION,
+                "sync": MIKE_SYNC_CONTRACT_VERSION,
+                "status": MIKE_STATUS_CONTRACT_VERSION,
+            },
+        }
+
+    def sync_mike_final_draft(
+        self,
+        user_id: Optional[str],
+        *,
+        body: str,
+        title: Optional[str] = None,
+        requested_relief: Optional[List[str]] = None,
+        handoff_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        mike_document_id: Optional[str] = None,
+        citation_links: Optional[List[Dict[str, Any]]] = None,
+        redline_summary: Optional[str] = None,
+        source_updated_at: Optional[str] = None,
+        structured_deltas: Optional[List[Dict[str, Any]]] = None,
+        editor_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        raw_body = str(body or "")
+        if not raw_body.strip():
+            raise ValueError("The draft body content is required and cannot be empty.")
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        draft = deepcopy(state.get("draft") or self._build_draft(state))
+        mike_integration = dict(state.get("mike_integration") or {})
+        last_handoff = dict(mike_integration.get("last_handoff") or {})
+        provided_handoff_id = str(handoff_id or "").strip()
+        fallback_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
+        resolved_handoff_id = provided_handoff_id or fallback_handoff_id or None
+        existing_title = str(draft.get("title") or "").strip()
+        if title is not None:
+            normalized_title = str(title or "").strip()
+            draft["title"] = normalized_title or existing_title or "Complaint Draft"
+        draft["body"] = raw_body
+        if requested_relief is not None:
+            draft["requested_relief"] = [str(item).strip() for item in list(requested_relief or []) if str(item).strip()]
+        synced_at = _utc_now()
+        normalized_citation_links = self._normalize_mike_citation_links(citation_links)
+        normalized_structured_deltas = self._validate_mike_structured_deltas(structured_deltas)
+        normalized_editor_metadata = self._normalize_mike_editor_metadata(editor_metadata)
+        review_payload = dict(state.get("support_review") or {})
+        if not review_payload:
+            review_payload = self._build_review(state)
+        citation_link_check = self._check_mike_citation_links(
+            state,
+            normalized_citation_links,
+            review=review_payload,
+        )
+        sync_diagnostics = self._build_mike_sync_diagnostics(
+            citation_link_check=citation_link_check,
+            review_payload=review_payload,
+            structured_deltas=normalized_structured_deltas,
+        )
+        sync_integrity_payload_bytes = json.dumps(
+            {
+                "handoff_id": resolved_handoff_id,
+                "body": raw_body,
+                "synced_at": synced_at,
+                "citation_links": normalized_citation_links,
+                "structured_deltas": normalized_structured_deltas,
+                "source_updated_at": str(source_updated_at or "").strip(),
+                "editor_metadata": normalized_editor_metadata,
+            },
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        sync_hash_secret = str(os.getenv("COMPLAINT_MIKE_SYNC_HASH_SECRET") or "").strip()
+        if sync_hash_secret:
+            sync_integrity_hash = hmac.new(sync_hash_secret.encode("utf-8"), sync_integrity_payload_bytes, hashlib.sha256).hexdigest()
+            sync_integrity_hash_mode = "hmac_sha256"
+        else:
+            sync_integrity_hash = hashlib.sha256(sync_integrity_payload_bytes).hexdigest()
+            sync_integrity_hash_mode = "sha256_unkeyed"
+        draft["updated_at"] = synced_at
+        draft["sync_source"] = "mike"
+        draft["sync_metadata"] = {
+            "contract_version": MIKE_SYNC_CONTRACT_VERSION,
+            "handoff_id": resolved_handoff_id,
+            "project_id": str(project_id or "").strip() or None,
+            "workspace_id": str(workspace_id or "").strip() or None,
+            "mike_document_id": str(mike_document_id or "").strip() or None,
+            "citation_links": normalized_citation_links,
+            "structured_deltas": normalized_structured_deltas,
+            "citation_link_check": citation_link_check,
+            "sync_diagnostics": sync_diagnostics,
+            "redline_summary": str(redline_summary or "").strip() or None,
+            "source_updated_at": str(source_updated_at or "").strip() or None,
+            "editor_metadata": normalized_editor_metadata,
+            "sync_integrity_hash": sync_integrity_hash,
+            "sync_integrity_hash_mode": sync_integrity_hash_mode,
+            "synced_at": synced_at,
+        }
+        state["draft"] = draft
+        sync_history = [dict(item) for item in list(mike_integration.get("sync_history") or []) if isinstance(item, dict)]
+        sync_record = {
+            "synced_at": synced_at,
+            "handoff_id": draft["sync_metadata"]["handoff_id"],
+            "project_id": draft["sync_metadata"]["project_id"],
+            "workspace_id": draft["sync_metadata"]["workspace_id"],
+            "mike_document_id": draft["sync_metadata"]["mike_document_id"],
+            "body_chars": len(raw_body),
+            "title": str(draft.get("title") or "").strip(),
+            "citation_link_count": citation_link_check["total_links"],
+            "citation_link_conflict_count": len(citation_link_check["conflicts"]),
+            "citation_link_has_conflicts": citation_link_check["has_conflicts"],
+            "citation_link_unknown_element_count": len(list(citation_link_check.get("unknown_claim_element_ids") or [])),
+            "structured_delta_count": len(normalized_structured_deltas),
+            "sync_diagnostics_severity": str(sync_diagnostics.get("severity") or "info"),
+            "editor_user_id": normalized_editor_metadata.get("editor_user_id"),
+            "sync_integrity_hash": sync_integrity_hash,
+            "sync_integrity_hash_mode": sync_integrity_hash_mode,
+        }
+        sync_history.insert(0, sync_record)
+        mike_integration["last_sync"] = sync_record
+        mike_integration["sync_history"] = sync_history[:25]
+        audit_trail = [dict(item) for item in list(mike_integration.get("audit_trail") or []) if isinstance(item, dict)]
+        audit_trail.insert(
+            0,
+            {
+                "audit_id": f"mike-sync-audit-{uuid.uuid4().hex[:12]}",
+                "synced_at": synced_at,
+                "handoff_id": sync_record.get("handoff_id"),
+                "editor_user_id": normalized_editor_metadata.get("editor_user_id"),
+                "severity": sync_diagnostics.get("severity"),
+                "has_blockers": bool(sync_diagnostics.get("has_blockers")),
+                "sync_integrity_hash": sync_integrity_hash,
+            },
+        )
+        mike_integration["audit_trail"] = audit_trail[:50]
+        state["mike_integration"] = mike_integration
+        self._save_state(state)
+        session = self.get_session(str(state.get("user_id")))
+        return {
+            "user_id": session["session"]["user_id"],
+            "draft": deepcopy(session["session"].get("draft") or {}),
+            "sync_record": sync_record,
+            "citation_link_check": citation_link_check,
+            "sync_diagnostics": sync_diagnostics,
+            "contract_versions": {
+                "sync": MIKE_SYNC_CONTRACT_VERSION,
+                "status": MIKE_STATUS_CONTRACT_VERSION,
+            },
+            "review": session["review"],
+            "session": session["session"],
+            "questions": session["questions"],
+            "next_question": session["next_question"],
+            "case_synopsis": session["case_synopsis"],
+        }
+
+    def get_mike_integration_status(self, user_id: Optional[str]) -> Dict[str, Any]:
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        mike_integration = dict(state.get("mike_integration") or {})
+        last_handoff = dict(mike_integration.get("last_handoff") or {})
+        last_sync = dict(mike_integration.get("last_sync") or {})
+        handoff_history = [dict(item) for item in list(mike_integration.get("handoff_history") or []) if isinstance(item, dict)]
+        sync_history = [dict(item) for item in list(mike_integration.get("sync_history") or []) if isinstance(item, dict)]
+        draft = dict(state.get("draft") or {})
+        draft_sync_source = str(draft.get("sync_source") or "").strip().lower()
+        has_mike_synced_draft = draft_sync_source == "mike" and bool(str(draft.get("body") or "").strip())
+        draft_updated_at_raw = str(draft.get("updated_at") or "").strip()
+        latest_sync_timestamp_raw = str(last_sync.get("synced_at") or "").strip()
+        if has_mike_synced_draft and draft_updated_at_raw and latest_sync_timestamp_raw:
+            try:
+                draft_updated_at = datetime.fromisoformat(draft_updated_at_raw)
+                latest_sync_timestamp = datetime.fromisoformat(latest_sync_timestamp_raw)
+                # Equality is intentional because Mike sync writes both timestamps in one operation.
+                # If they differ, the draft changed after sync and should no longer be treated as current.
+                has_mike_synced_draft = draft_updated_at == latest_sync_timestamp
+            except ValueError:
+                has_mike_synced_draft = draft_updated_at_raw == latest_sync_timestamp_raw
+        draft_sync_metadata = dict(draft.get("sync_metadata") or {})
+        raw_citation_link_check = dict(draft_sync_metadata.get("citation_link_check") or {})
+        has_citation_link_conflicts = bool(raw_citation_link_check.get("has_conflicts"))
+        citation_link_conflict_count = len(list(raw_citation_link_check.get("conflicts") or []))
+        citation_link_unknown_element_count = len(list(raw_citation_link_check.get("unknown_claim_element_ids") or []))
+        latest_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
+        latest_sync_handoff_id = str(last_sync.get("handoff_id") or "").strip()
+        # When latest_sync_handoff_id is empty, no Mike sync has been persisted yet for this session.
+        pending_sync = bool(latest_handoff_id) and latest_handoff_id != latest_sync_handoff_id
+        workflow_state = self._build_mike_workflow_state(
+            latest_handoff_id=latest_handoff_id,
+            pending_sync=pending_sync,
+            has_mike_synced_draft=has_mike_synced_draft,
+            has_citation_link_conflicts=has_citation_link_conflicts,
+        )
+        recommended_action = self._derive_mike_recommended_action(
+            workflow_state_key=workflow_state["key"],
+            has_citation_link_conflicts=has_citation_link_conflicts,
+        )
+        pending_sync_implies_handoff = (not pending_sync) or bool(latest_handoff_id)
+        synced_handoff_never_pending = not (
+            bool(latest_handoff_id)
+            and latest_handoff_id == latest_sync_handoff_id
+            and pending_sync
+        )
+        conflict_count_non_null = isinstance(citation_link_conflict_count, int) and citation_link_conflict_count >= 0
+        unknown_count_non_null = isinstance(citation_link_unknown_element_count, int) and citation_link_unknown_element_count >= 0
+        recommended_action_valid = bool(str(recommended_action or "").strip())
+        conflict_component = {
+            "conflict_count": int(citation_link_conflict_count),
+            "unknown_element_count": int(citation_link_unknown_element_count),
+            "impact_statement": (
+                "Export readiness is blocked until Mike citation-link conflicts are resolved and synced again."
+                if has_citation_link_conflicts
+                else "No citation-link blockers are currently reported."
+            ),
+            "required_next_action": recommended_action,
+            "why_blocked": (
+                "Citation-link integrity checks found conflicts or unknown claim elements."
+                if has_citation_link_conflicts
+                else ""
+            ),
+        }
+        return {
+            "user_id": str(state.get("user_id") or DEFAULT_USER_ID),
+            "status": "ok",
+            "status_contract_version": MIKE_STATUS_CONTRACT_VERSION,
+            "status_contract": {
+                "version": MIKE_STATUS_CONTRACT_VERSION,
+                "canonical_source": "/api/complaint-workspace/mike/status",
+                "state_mapping": deepcopy(MIKE_WORKFLOW_STATE_LABELS),
+            },
+            "last_handoff": last_handoff or None,
+            "last_sync": last_sync or None,
+            "handoff_history_count": len(handoff_history),
+            "sync_history_count": len(sync_history),
+            "latest_handoff_id": latest_handoff_id or None,
+            "latest_sync_handoff_id": latest_sync_handoff_id or None,
+            "pending_sync": pending_sync,
+            "workflow_state": workflow_state,
+            "has_mike_synced_draft": has_mike_synced_draft,
+            "has_citation_link_conflicts": has_citation_link_conflicts,
+            "citation_link_conflict_count": citation_link_conflict_count,
+            "citation_link_unknown_element_count": citation_link_unknown_element_count,
+            "conflict_component": conflict_component,
+            "draft_sync_source": draft_sync_source or None,
+            "recommended_action": recommended_action,
+            "invariants": {
+                "pending_sync_implies_handoff": pending_sync_implies_handoff,
+                "synced_handoff_never_pending": synced_handoff_never_pending,
+                "conflict_counters_non_null_numeric": bool(conflict_count_non_null and unknown_count_non_null),
+                "recommended_action_present": recommended_action_valid,
+            },
+            "status_freshness": {
+                "last_handoff_at": str(last_handoff.get("created_at") or "").strip() or None,
+                "last_sync_at": str(last_sync.get("synced_at") or "").strip() or None,
+                "latest_status_observed_at": _utc_now(),
+            },
+        }
+
     def update_filing_metadata(
         self,
         user_id: Optional[str],
@@ -6561,6 +7361,9 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.view_workspace_dataset", "description": "Browse a packaged or single-file workspace dataset with schema-aligned filters and filtered document previews."},
                 {"name": "complaint.search_workspace_dataset", "description": "Search a packaged or single-file workspace dataset using BM25 or vector retrieval plus schema-aligned filters."},
                 {"name": "complaint.get_workspace_dataset_graph", "description": "Explore workspace dataset knowledge-graph entities, relationships, deontic logic flow, formulas, conflicts, and proof links."},
+                {"name": "complaint.build_mike_handoff", "description": "Build a Mike editor handoff payload with prefilled complaint draft, review state, and evidence context."},
+                {"name": "complaint.get_mike_integration_status", "description": "Return Mike handoff/sync status, correlation IDs, and recommended next integration action."},
+                {"name": "complaint.sync_mike_final_draft", "description": "Sync an edited draft from Mike back into the complaint workspace and persist the merged draft state."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
                 {"name": "complaint.export_complaint_packet", "description": "Export the current lawsuit complaint packet with intake, evidence, review, and draft content."},
@@ -6809,6 +7612,35 @@ class ComplaintWorkspaceService:
                 document_id=str(args.get("document_id") or ""),
                 modality=str(args.get("modality") or args.get("deontic_status") or ""),
                 limit=int(args.get("limit") or 50),
+            )
+        if tool_name == "complaint.build_mike_handoff":
+            return self.build_mike_handoff(
+                args.get("user_id"),
+                mike_base_url=args.get("mike_base_url"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                generate_draft_if_missing=bool(args.get("generate_draft_if_missing", True)),
+            )
+        if tool_name == "complaint.get_mike_integration_status":
+            return self.get_mike_integration_status(args.get("user_id"))
+        if tool_name == "complaint.sync_mike_final_draft":
+            requested_relief = args.get("requested_relief")
+            if isinstance(requested_relief, str):
+                requested_relief = _split_lines(requested_relief)
+            return self.sync_mike_final_draft(
+                args.get("user_id"),
+                body=args.get("body"),
+                title=args.get("title"),
+                requested_relief=requested_relief,
+                handoff_id=args.get("handoff_id"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                mike_document_id=args.get("mike_document_id"),
+                citation_links=args.get("citation_links"),
+                redline_summary=args.get("redline_summary"),
+                source_updated_at=args.get("source_updated_at"),
+                structured_deltas=args.get("structured_deltas"),
+                editor_metadata=args.get("editor_metadata"),
             )
         if tool_name == "complaint.generate_complaint":
             return self.generate_complaint(

@@ -136,6 +136,8 @@ class ComplaintMcpClient {
             'complaint.review_case',
             'complaint.generate_complaint',
             'complaint.update_draft',
+            'complaint.build_mike_handoff',
+            'complaint.sync_mike_final_draft',
             'complaint.update_claim_type',
             'complaint.update_case_synopsis',
             'complaint.reset_session',
@@ -211,16 +213,18 @@ class ComplaintMcpClient {
     }
 
     async getWorkflowOperationSnapshot(userId) {
-        const [releaseGate, workflowCapabilities, toolingContract] = await Promise.all([
+        const [releaseGate, workflowCapabilities, toolingContract, mikeIntegrationStatus] = await Promise.all([
             this.getCanonicalReleaseGate(userId),
             this.getWorkflowCapabilities(userId),
             this.getToolingContract(userId),
+            this.getMikeIntegrationStatus(userId),
         ]);
         return {
             tool_impact_summary: this.getToolImpactSummary(),
             canonical_release_gate: releaseGate,
             workflow_capabilities: workflowCapabilities,
             tooling_contract: toolingContract,
+            mike_integration_status: mikeIntegrationStatus,
         };
     }
 
@@ -612,6 +616,20 @@ class ComplaintMcpClient {
         return this.callTool('complaint.update_draft', Object.assign({
             user_id: userId,
         }, payload || {}));
+    }
+
+    buildMikeHandoff(payload) {
+        return this.callTool('complaint.build_mike_handoff', payload || {});
+    }
+
+    getMikeIntegrationStatus(userId) {
+        return this.callTool('complaint.get_mike_integration_status', {
+            user_id: userId,
+        });
+    }
+
+    syncMikeFinalDraft(payload) {
+        return this.callTool('complaint.sync_mike_final_draft', payload || {});
     }
 
     exportComplaintPacket(userId) {

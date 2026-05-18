@@ -480,6 +480,14 @@ def test_document_template_exists_and_targets_document_endpoints():
     assert "Service Date" in content
     assert "Draft Preview" in content
     assert "Drafting Readiness" in content
+    assert "Mike workflow journey" in content
+    assert "mike-workflow-journey" in content
+    assert "Resolve conflicts in Mike and sync again before export." in content
+    assert "Open workspace Mike panel" in content
+    assert "Open sync workflow" in content
+    assert "/api/complaint-workspace/mike/status" in content
+    assert "refreshMikeIntegrationStatus" in content
+    assert "SYNC_EVENT_NAME" in content
     assert "Pre-Filing Checklist" in content
     assert "Open Checklist Review" in content
     assert "Section Readiness" in content
@@ -1042,6 +1050,10 @@ def test_review_surface_serves_legacy_pages_with_operator_links():
     assert "dashboard-workspace-dataset-vectors" in dashboard_hub_response.text
     assert "dashboard-workspace-dataset-logic" in dashboard_hub_response.text
     assert "dashboard-workspace-dataset-proofs" in dashboard_hub_response.text
+    assert "dashboard-workspace-mike-state-chip" in dashboard_hub_response.text
+    assert "dashboard-workspace-mike-conflict-chip" in dashboard_hub_response.text
+    assert "deriveMikeUiState" in dashboard_hub_response.text
+    assert "/api/complaint-workspace/mike/status" in dashboard_hub_response.text
     assert "dashboard-load-docket-dataset" in dashboard_hub_response.text
     assert "dashboard-load-workspace-dataset" in dashboard_hub_response.text
     assert "dashboard-save-dataset-annotation" in dashboard_hub_response.text

@@ -230,6 +230,9 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
         "complaint.migrate_legacy_workspace_data",
         "complaint.view_workspace_dataset",
         "complaint.search_workspace_dataset",
+        "complaint.build_mike_handoff",
+        "complaint.get_mike_integration_status",
+        "complaint.sync_mike_final_draft",
         "complaint.generate_complaint",
         "complaint.update_draft",
         "complaint.export_complaint_packet",
@@ -261,6 +264,9 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     assert all("inputSchema" in tool for tool in payload["tools"])
     assert tools_by_name["complaint.get_tooling_contract"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
     assert tools_by_name["complaint.get_filing_provenance"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.build_mike_handoff"]["inputSchema"]["properties"]["generate_draft_if_missing"]["type"] == "boolean"
+    assert tools_by_name["complaint.get_mike_integration_status"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
+    assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["required"] == ["body"]
     assert tools_by_name["complaint.tag_document_annotation"]["inputSchema"]["required"] == ["document_id", "note"]
     assert tools_by_name["complaint.tag_workspace_dataset_document"]["inputSchema"]["required"] == ["document_id", "note"]
     assert tools_by_name["complaint.get_packaged_docket_operator_dashboard"]["inputSchema"]["required"] == ["manifest_path"]
@@ -374,6 +380,9 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "tooling-contract" in cli_payload["cli_commands"]
     assert "workspace-data-schema" in cli_payload["cli_commands"]
     assert "migrate-legacy-workspace-data" in cli_payload["cli_commands"]
+    assert "build-mike-handoff" in cli_payload["cli_commands"]
+    assert "mike-status" in cli_payload["cli_commands"]
+    assert "sync-mike-draft" in cli_payload["cli_commands"]
     assert "set-claim-type" in cli_payload["cli_commands"]
     assert "update-synopsis" in cli_payload["cli_commands"]
 
@@ -385,6 +394,9 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert any(step["id"] == "tooling_contract" for step in mcp_payload["core_flow_steps"])
     assert any(step["id"] == "workspace_data_schema" for step in mcp_payload["core_flow_steps"])
     assert any(step["id"] == "workspace_data_migration" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "mike_editor_handoff" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "mike_editor_status" for step in mcp_payload["core_flow_steps"])
+    assert any(step["id"] == "mike_editor_sync" for step in mcp_payload["core_flow_steps"])
 
     package_payload = get_tooling_contract("contract-user", service=service)
     assert package_payload["all_core_flow_steps_exposed"] is True
@@ -398,6 +410,9 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "update_case_synopsis" in package_payload["package_exports"]
     assert "get_workspace_data_schema" in package_payload["package_exports"]
     assert "migrate_legacy_workspace_data" in package_payload["package_exports"]
+    assert "build_mike_handoff" in package_payload["package_exports"]
+    assert "get_mike_integration_status" in package_payload["package_exports"]
+    assert "sync_mike_final_draft" in package_payload["package_exports"]
     assert "importGmailEvidence" in package_payload["browser_sdk_methods"]
     assert "importLocalEvidence" in package_payload["browser_sdk_methods"]
     assert "runGmailDuckdbPipeline" in package_payload["browser_sdk_methods"]
@@ -408,6 +423,9 @@ def test_tooling_contract_is_exposed_across_package_cli_and_mcp(monkeypatch, tmp
     assert "getToolingContract" in package_payload["browser_sdk_methods"]
     assert "getWorkspaceDataSchema" in package_payload["browser_sdk_methods"]
     assert "migrateLegacyWorkspaceData" in package_payload["browser_sdk_methods"]
+    assert "buildMikeHandoff" in package_payload["browser_sdk_methods"]
+    assert "getMikeIntegrationStatus" in package_payload["browser_sdk_methods"]
+    assert "syncMikeFinalDraft" in package_payload["browser_sdk_methods"]
     assert any(step["id"] == "gmail_duckdb_pipeline" for step in package_payload["core_flow_steps"])
     assert any(step["id"] == "email_duckdb_search" for step in package_payload["core_flow_steps"])
     assert any(step["id"] == "intake_chat" for step in package_payload["core_flow_steps"])

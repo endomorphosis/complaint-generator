@@ -179,6 +179,15 @@ def test_workspace_template_defines_mobile_docket_shell_contract():
     assert "position: sticky;" in content
     assert ".docket-command-grid" in content
     assert "grid-template-columns: 1fr;" in content
+    assert "Mike integration status" in content
+    assert "mike-integration-card" in content
+    assert "/api/complaint-workspace/mike/status" in content
+    assert "Refresh Mike Status" in content
+    assert "Prepare Handoff In Draft" in content
+    assert "Open Sync Workflow" in content
+    assert "deriveMikeIntegrationUiState" in content
+    assert "renderMikeIntegrationPanel" in content
+    assert "refreshMikeIntegrationStatus" in content
 
 
 def test_workspace_template_exposes_gmail_import_browser_session_helpers():

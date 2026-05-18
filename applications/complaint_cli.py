@@ -109,6 +109,26 @@ def _split_multiline_values(raw_value: Optional[str]) -> Optional[list[str]]:
     return values or None
 
 
+def _parse_json_option(raw_value: Optional[str], *, option_name: str, expected_json_type: type):
+    if raw_value is None:
+        return None
+    candidate = str(raw_value).strip()
+    if not candidate:
+        return None
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError as error:
+        preview = candidate[:100]
+        if len(candidate) > 100:
+            preview += "..."
+        raise SystemExit(f"{option_name} must be valid JSON: {error.msg}. Input: {preview}") from error
+    if not isinstance(parsed, expected_json_type):
+        expected_labels = {list: "array", dict: "object"}
+        expected_label = expected_labels.get(expected_json_type, expected_json_type.__name__)
+        raise SystemExit(f"{option_name} must decode to a JSON {expected_label}.")
+    return parsed
+
+
 @app.command("session")
 def session(user_id: str = "demo-user") -> None:
     _print(service.get_session(user_id))
@@ -644,6 +664,75 @@ def update_draft(
 ) -> None:
     relief_items = [line.strip() for line in requested_relief.split("|") if line.strip()]
     _print(service.update_draft(user_id, title=title, body=body, requested_relief=relief_items or None))
+
+
+@app.command("build-mike-handoff")
+def build_mike_handoff(
+    user_id: str = "demo-user",
+    mike_base_url: Optional[str] = None,
+    project_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    generate_draft_if_missing: bool = True,
+) -> None:
+    _print(
+        service.build_mike_handoff(
+            user_id,
+            mike_base_url=mike_base_url,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            generate_draft_if_missing=generate_draft_if_missing,
+        )
+    )
+
+
+@app.command("mike-status")
+def mike_status(user_id: str = "demo-user") -> None:
+    _print(service.get_mike_integration_status(user_id))
+
+
+@app.command("sync-mike-draft")
+def sync_mike_draft(
+    user_id: str = "demo-user",
+    body: Optional[str] = typer.Option(None, "--body"),
+    title: Optional[str] = None,
+    requested_relief: str = "",
+    handoff_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    mike_document_id: Optional[str] = None,
+    citation_links_json: Optional[str] = typer.Option(None, "--citation-links-json"),
+    structured_deltas_json: Optional[str] = typer.Option(None, "--structured-deltas-json"),
+    editor_metadata_json: Optional[str] = typer.Option(None, "--editor-metadata-json"),
+    redline_summary: Optional[str] = None,
+    source_updated_at: Optional[str] = None,
+) -> None:
+    raw_body = str(body or "")
+    if not raw_body.strip():
+        raise SystemExit(
+            "--body is required and cannot be empty or contain only whitespace. "
+            "Intentional leading/trailing whitespace in non-empty bodies is preserved."
+        )
+    relief_items = [line.strip() for line in requested_relief.split("|") if line.strip()]
+    citation_links = _parse_json_option(citation_links_json, option_name="--citation-links-json", expected_json_type=list)
+    structured_deltas = _parse_json_option(structured_deltas_json, option_name="--structured-deltas-json", expected_json_type=list)
+    editor_metadata = _parse_json_option(editor_metadata_json, option_name="--editor-metadata-json", expected_json_type=dict)
+    _print(
+        service.sync_mike_final_draft(
+            user_id,
+            body=raw_body,
+            title=title,
+            requested_relief=relief_items or None,
+            handoff_id=handoff_id,
+            project_id=project_id,
+            workspace_id=workspace_id,
+            mike_document_id=mike_document_id,
+            citation_links=citation_links,
+            redline_summary=redline_summary,
+            source_updated_at=source_updated_at,
+            structured_deltas=structured_deltas,
+            editor_metadata=editor_metadata,
+        )
+    )
 
 
 @app.command("export-packet")

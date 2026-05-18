@@ -3210,6 +3210,30 @@
                     </div>
                 </section>
 
+                <section class="section-intro" aria-label="Mike integration status">
+                    <strong>Mike integration status</strong>
+                    <span>Use this panel to track the canonical Mike sync contract from <code>/api/complaint-workspace/mike/status</code>: not handed off, handoff pending sync, synced clean, or synced with conflicts.</span>
+                    <div class="shortcut-grid">
+                        <div class="shortcut-card" id="mike-integration-card">
+                            <strong id="mike-integration-state-title">Mike state: loading…</strong>
+                            <span id="mike-integration-summary">Loading Mike handoff/sync status from the shared complaint session.</span>
+                            <div class="chip-row" style="margin-top: 8px;">
+                                <span class="chip" id="mike-integration-state-chip">state: loading</span>
+                                <span class="chip" id="mike-integration-sync-chip">sync: loading</span>
+                                <span class="chip" id="mike-integration-conflict-chip">conflicts: loading</span>
+                            </div>
+                            <div class="helper-text" id="mike-integration-ids">Latest handoff/sync IDs will appear here after status loads.</div>
+                            <div class="helper-text" id="mike-integration-recommended-action" role="status">Recommended Mike action will appear here after status loads.</div>
+                            <div class="button-row" style="margin-top: 10px;">
+                                <button class="secondary" id="mike-refresh-status-button" type="button">Refresh Mike Status</button>
+                                <button class="secondary" id="mike-open-draft-workflow-button" type="button">Prepare Handoff In Draft</button>
+                                <button class="secondary" id="mike-open-sync-workflow-button" type="button">Open Sync Workflow</button>
+                            </div>
+                            <div class="helper-text" id="mike-integration-updated-at">Status freshness will appear here.</div>
+                        </div>
+                    </div>
+                </section>
+
                 <section class="section-intro" aria-label="Session sync and tool activity">
                     <strong>Session sync and tool activity</strong>
                     <span>Use this readout to confirm the browser is still acting on the same complaint session and to see which MCP action last changed the shared state.</span>
@@ -5032,6 +5056,9 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let latestGmailImportResult = null;
         let latestGmailDuckdbPipelineResult = null;
         let latestEmailDuckdbSearchResult = null;
+        let workspaceMikeIntegrationStatus = null;
+        let workspaceMikeStatusUpdatedAt = null;
+        const MIKE_STATUS_STALE_MS = 5 * 60 * 1000;
         let sdkPrimitiveSnapshot = null;
         let latestSdkToolActivity = null;
         let gmailImportDetectedAddresses = [];
@@ -6320,6 +6347,115 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             setLinkGateState(document.getElementById('handoff-builder-button'), state.builderReady, state.builderGateReason);
             setLinkGateState(document.getElementById('workspace-nav-review'), state.reviewReady, state.reviewGateReason);
             setLinkGateState(document.getElementById('workspace-nav-builder'), state.builderReady, state.builderGateReason);
+        }
+
+        function deriveMikeIntegrationUiState(mikeStatus) {
+            const status = mikeStatus && typeof mikeStatus === 'object' ? mikeStatus : {};
+            const workflowState = status.workflow_state && typeof status.workflow_state === 'object'
+                ? status.workflow_state
+                : null;
+            const pendingSync = Boolean(status.pending_sync);
+            const hasSyncedDraft = Boolean(status.has_mike_synced_draft);
+            const hasConflicts = Boolean(status.has_citation_link_conflicts);
+            const latestHandoffId = String(status.latest_handoff_id || '').trim();
+            const workflowStateKey = String((workflowState || {}).key || '').trim();
+            const mikeStatusContractVersion = String(status.status_contract_version || '').trim();
+            const derivedKey = !latestHandoffId
+                ? 'not_handed_off'
+                : (pendingSync
+                    ? 'handoff_pending_sync'
+                    : ((hasSyncedDraft && hasConflicts)
+                        ? 'synced_with_conflicts'
+                        : (hasSyncedDraft ? 'synced_clean' : 'handoff_pending_sync')));
+            const key = workflowState && workflowStateKey
+                ? workflowStateKey
+                : derivedKey;
+            if (workflowStateKey && workflowStateKey !== derivedKey && typeof console !== 'undefined' && typeof console.warn === 'function') {
+                console.warn('Mike status contract drift detected: workflow_state key mismatches derived state.', {
+                    workflowStateKey,
+                    derivedKey,
+                    latestHandoffId,
+                    pendingSync,
+                });
+            }
+            const labelByKey = {
+                not_handed_off: 'Not handed off',
+                handoff_pending_sync: 'Handoff pending sync',
+                synced_with_conflicts: 'Synced with conflicts',
+                synced_clean: 'Synced clean',
+            };
+            const severityByKey = {
+                not_handed_off: 'warn',
+                handoff_pending_sync: 'warn',
+                synced_with_conflicts: 'warn',
+                synced_clean: 'good',
+            };
+            const summaryByKey = {
+                not_handed_off: 'No Mike handoff has been created for this complaint session yet.',
+                handoff_pending_sync: 'A Mike handoff exists, but the latest Mike edits have not been synced back yet.',
+                synced_with_conflicts: 'Mike sync completed, but citation-link conflicts were detected and should be resolved before export.',
+                synced_clean: 'Mike sync is current and no citation-link conflicts were reported.',
+            };
+            if (!mikeStatusContractVersion && typeof console !== 'undefined' && typeof console.warn === 'function') {
+                console.warn('Mike status contract version missing from canonical status payload.');
+            }
+            return {
+                key,
+                label: String((workflowState || {}).label || '').trim() || (labelByKey[key] || 'Unknown'),
+                severity: String((workflowState || {}).severity || '').trim() || (severityByKey[key] || 'warn'),
+                summary: String((status.conflict_component || {}).impact_statement || status.recommended_action || '').trim()
+                    || (summaryByKey[key] || 'Mike integration status is available from the canonical status endpoint.'),
+                statusContractVersion: mikeStatusContractVersion,
+            };
+        }
+
+        function renderMikeIntegrationPanel() {
+            const status = workspaceMikeIntegrationStatus && typeof workspaceMikeIntegrationStatus === 'object'
+                ? workspaceMikeIntegrationStatus
+                : {};
+            const stateModel = deriveMikeIntegrationUiState(status);
+            const stateTitle = document.getElementById('mike-integration-state-title');
+            const summaryNode = document.getElementById('mike-integration-summary');
+            const stateChip = document.getElementById('mike-integration-state-chip');
+            const syncChip = document.getElementById('mike-integration-sync-chip');
+            const conflictChip = document.getElementById('mike-integration-conflict-chip');
+            const idsNode = document.getElementById('mike-integration-ids');
+            const actionNode = document.getElementById('mike-integration-recommended-action');
+            const updatedNode = document.getElementById('mike-integration-updated-at');
+            const conflictCount = Number(status.citation_link_conflict_count || 0);
+            const unknownCount = Number(status.citation_link_unknown_element_count || 0);
+            const statusContractVersion = String(status.status_contract_version || '').trim();
+            const statusTimestampStale = (() => {
+                const parsed = workspaceMikeStatusUpdatedAt ? Date.parse(String(workspaceMikeStatusUpdatedAt)) : NaN;
+                if (!Number.isFinite(parsed)) {
+                    return false;
+                }
+                return (Date.now() - parsed) > MIKE_STATUS_STALE_MS;
+            })();
+            const latestHandoffId = String(status.latest_handoff_id || '').trim();
+            const latestSyncHandoffId = String(status.latest_sync_handoff_id || '').trim();
+            const conflictComponent = status.conflict_component && typeof status.conflict_component === 'object'
+                ? status.conflict_component
+                : {};
+
+            stateTitle.textContent = `Mike state: ${stateModel.label}`;
+            summaryNode.textContent = statusTimestampStale || !statusContractVersion
+                ? `${stateModel.summary} Refresh Mike status before relying on cross-surface export guidance.`
+                : stateModel.summary;
+            stateChip.className = `chip ${stateModel.severity}`;
+            stateChip.textContent = `state: ${stateModel.label}`;
+            syncChip.className = `chip ${(status.pending_sync || statusTimestampStale || !statusContractVersion) ? 'warn' : 'good'}`;
+            syncChip.textContent = statusTimestampStale
+                ? 'sync: stale'
+                : (!statusContractVersion ? 'sync: contract missing' : (status.pending_sync ? 'sync: pending' : 'sync: current'));
+            conflictChip.className = `chip ${conflictCount > 0 || unknownCount > 0 ? 'warn' : 'good'}`;
+            conflictChip.textContent = `conflicts: ${conflictCount} | unknown links: ${unknownCount}`;
+            idsNode.textContent = `latest handoff: ${latestHandoffId || 'none'} | latest synced handoff: ${latestSyncHandoffId || 'none'} | contract: ${statusContractVersion || 'missing'}`;
+            actionNode.textContent = String(conflictComponent.required_next_action || status.recommended_action || '').trim()
+                || 'Use the Mike handoff and sync tools to keep drafting state aligned before export.';
+            updatedNode.textContent = workspaceMikeStatusUpdatedAt
+                ? `Status ${formatRelativeTimestamp(workspaceMikeStatusUpdatedAt)}${statusTimestampStale ? ' (stale — refresh before export)' : ''}`
+                : 'Status has not been refreshed yet.';
         }
 
         function renderIntake(sessionPayload) {
@@ -10496,6 +10632,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             renderOperationalToolLane(sessionPayload, workspaceSessionTools || []);
             renderQuickActions(sessionPayload, workspaceSessionTools || []);
             renderConnectedHandoffs(sessionPayload);
+            renderMikeIntegrationPanel();
             renderSessionSyncStatus(sessionPayload);
             renderWorkflowOperations();
             renderSdkDiagnostics();
@@ -10511,6 +10648,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
 
         async function loadSharedCapabilities() {
             workspaceCapabilities = await client.getWorkflowCapabilities(workspaceUserId);
+            workspaceMikeIntegrationStatus = workspaceCapabilities && workspaceCapabilities.mike_integration_status
+                ? workspaceCapabilities.mike_integration_status
+                : workspaceMikeIntegrationStatus;
+            workspaceMikeStatusUpdatedAt = new Date().toISOString();
             workspaceToolingContract = workspaceCapabilities && workspaceCapabilities.tooling_contract
                 ? workspaceCapabilities.tooling_contract
                 : workspaceToolingContract;
@@ -10534,6 +10675,22 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             syncPacketDownloadState();
             renderWorkflowOperations();
+        }
+
+        async function refreshMikeIntegrationStatus(silent) {
+            try {
+                workspaceMikeIntegrationStatus = await client.getMikeIntegrationStatus(workspaceUserId);
+                workspaceMikeStatusUpdatedAt = new Date().toISOString();
+                renderMikeIntegrationPanel();
+                if (!silent) {
+                    setStatus('Mike integration status refreshed from the canonical status feed.');
+                }
+            } catch (error) {
+                renderMikeIntegrationPanel();
+                if (!silent) {
+                    setStatus(`Unable to refresh Mike status: ${String((error && error.message) || error || 'Unknown error')}`);
+                }
+            }
         }
 
         async function loadSdkPrimitives() {
@@ -13051,6 +13208,38 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('run-ux-snapshot-button').addEventListener('click', () => runUiReview(false));
         document.getElementById('run-ux-closed-loop-button').addEventListener('click', runClosedLoopUiOptimization);
         document.getElementById('run-browser-audit-button').addEventListener('click', runBrowserAudit);
+        document.getElementById('mike-refresh-status-button').addEventListener('click', () => refreshMikeIntegrationStatus(false));
+        document.getElementById('mike-open-draft-workflow-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Opened Draft to prepare or refine the Mike handoff payload.'));
+        document.getElementById('mike-open-sync-workflow-button').addEventListener('click', () => jumpToStage('integrations', '#tool-list', 'Opened CLI + MCP to run Mike sync follow-up and verify status.'));
+
+        const workspaceSyncEventName = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.SYNC_EVENT_NAME) || 'complaint-mcp-sync';
+        const workspaceSyncStorageKey = (window.ComplaintMcpSdk && window.ComplaintMcpSdk.DEFAULT_SYNC_EVENT_STORAGE_KEY) || 'complaintGenerator.sdkSyncEvent';
+        async function handleWorkspaceSharedSyncEvent(detail) {
+            const syncDetail = detail && typeof detail === 'object' ? detail : {};
+            const eventType = String(syncDetail.event_type || '').trim();
+            const incomingUserId = String(syncDetail.user_id || (((syncDetail.payload || {}).session || {}).user_id) || '').trim();
+            const currentUserId = String(workspaceUserId || (((workspaceSession || {}).session || {}).user_id) || '').trim();
+            if (!eventType || (currentUserId && incomingUserId && currentUserId !== incomingUserId)) {
+                return;
+            }
+            if (eventType === 'workspace.updated' || eventType === 'workspace.reset') {
+                await refreshMikeIntegrationStatus(true);
+                renderSessionSyncStatus(workspaceSession || {});
+            }
+        }
+        window.addEventListener(workspaceSyncEventName, (event) => {
+            handleWorkspaceSharedSyncEvent(event && event.detail);
+        });
+        window.addEventListener('storage', (event) => {
+            if (!event || event.key !== workspaceSyncStorageKey || !event.newValue) {
+                return;
+            }
+            try {
+                handleWorkspaceSharedSyncEvent(JSON.parse(event.newValue));
+            } catch (error) {
+                console.warn('Failed to parse workspace sync event:', error);
+            }
+        });
 
         client.bootstrapWorkspace(workspaceUserId).then(async (bootstrap) => {
             setWorkspaceHydrationState('loading');
@@ -13082,6 +13271,7 @@ function extractComplaintOutputSignals(result) {
             const followOnLoads = await Promise.allSettled([
                 loadSharedCapabilities(),
                 loadSdkPrimitives(),
+                refreshMikeIntegrationStatus(true),
             ]);
             if (workspaceSession) {
                 renderWorkspace(workspaceSession);
