@@ -18,13 +18,14 @@
   "latest_export_critic": null,
   "latest_packet_export": null,
   "mike_integration": {
+    "audit_trail": [],
     "handoff_history": [],
     "last_handoff": null,
     "last_sync": null,
     "sync_history": []
   },
   "ui_readiness": null,
-  "updated_at": "2026-05-17T14:53:40.080683+00:00",
+  "updated_at": "2026-05-19T17:38:59.816130+00:00",
   "user_id": "template-user",
   "workspace_annotation_index": {
     "by_collection": {},

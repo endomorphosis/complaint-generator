@@ -11,6 +11,31 @@ const ipfsDatasetsTemplatesDir = path.join(root, 'ipfs_datasets_py', 'ipfs_datas
 const ipfsDatasetsStaticDir = path.join(root, 'ipfs_datasets_py', 'ipfs_datasets_py', 'static');
 const port = Number(process.env.PLAYWRIGHT_TEST_PORT || 19030);
 
+function pathDiagnostics(filePath) {
+  const exists = fs.existsSync(filePath);
+  return {
+    path: filePath,
+    exists,
+    state: exists ? 'present' : 'missing',
+  };
+}
+
+function buildEnvironmentPreflight() {
+  const sdkPreview = pathDiagnostics(sdkPreviewPath);
+  const ipfsTemplates = pathDiagnostics(ipfsDatasetsTemplatesDir);
+  const ipfsStatic = pathDiagnostics(ipfsDatasetsStaticDir);
+  const allReady = sdkPreview.exists && ipfsTemplates.exists && ipfsStatic.exists;
+  return {
+    status: allReady ? 'ready' : 'degraded',
+    all_ready: allReady,
+    checks: {
+      sdk_playground_preview: sdkPreview,
+      ipfs_templates_dir: ipfsTemplates,
+      ipfs_static_dir: ipfsStatic,
+    },
+  };
+}
+
 function slugifyFilename(value) {
   return String(value || 'complaint-packet')
     .toLowerCase()
@@ -2256,6 +2281,10 @@ function renderDashboardShell(entry) {
 }
 
 function renderSdkPlaygroundShell() {
+  const preflight = buildEnvironmentPreflight();
+  if (!preflight.checks.sdk_playground_preview.exists) {
+    return renderSdkPlaygroundFallback(preflight);
+  }
   const rawHtml = fs.readFileSync(sdkPreviewPath, 'utf-8');
   const nav = `
     <nav class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation" style="display:flex;flex-wrap:wrap;gap:12px;margin:16px auto 0;max-width:1200px;padding:0 20px;">
@@ -2289,6 +2318,106 @@ function renderSdkPlaygroundShell() {
     : `${bodyWithNav}\n${scripts}`;
 }
 
+function renderSdkPlaygroundFallback(preflight) {
+  const sdkState = preflight && preflight.checks && preflight.checks.sdk_playground_preview
+    ? preflight.checks.sdk_playground_preview
+    : { path: sdkPreviewPath, state: 'missing' };
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SDK Playground Unavailable</title>
+  <link rel="stylesheet" href="/static/complaint_app_shell.css">
+  <style>
+    :root {
+      --bg: #f7f2e8;
+      --card: #fffdf8;
+      --ink: #1c1f24;
+      --muted: #505760;
+      --line: rgba(28, 31, 36, 0.16);
+      --warn: #8f3c16;
+      --warn-bg: #fde8dd;
+      --ok: #1f6f4a;
+      --ok-bg: #e6f6ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px 18px 40px;
+      display: grid;
+      gap: 16px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--card);
+      padding: 18px;
+    }
+    .banner {
+      border-color: rgba(143, 60, 22, 0.36);
+      background: var(--warn-bg);
+      color: var(--warn);
+      font-weight: 700;
+    }
+    h1, h2, p { margin: 0 0 10px; }
+    p { color: var(--muted); line-height: 1.5; }
+    pre {
+      margin: 8px 0 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .state-ok {
+      border-color: rgba(31, 111, 74, 0.26);
+      background: var(--ok-bg);
+      color: var(--ok);
+      font-weight: 700;
+    }
+    a {
+      color: #0d4f63;
+      font-weight: 700;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card banner">
+      SDK playground preview is unavailable. The server stayed online and returned this fallback page so other complaint routes continue to work.
+    </section>
+    <section class="card">
+      <h1>Missing Submodule Asset</h1>
+      <p>The SDK preview file was not found at runtime. This usually means the submodule or preview artifact was not initialized in this workspace.</p>
+      <pre>${escapeXml(String(sdkState.path || sdkPreviewPath))}</pre>
+    </section>
+    <section class="card">
+      <h2>Recommended Setup</h2>
+      <pre>git submodule update --init --recursive
+# then make sure SDK_PLAYGROUND_PREVIEW.html is generated in ipfs_datasets_py/ipfs_accelerate_py/</pre>
+      <p>Diagnostics endpoint: <a href="/api/environment/preflight">/api/environment/preflight</a></p>
+    </section>
+    <section class="card state-ok">
+      Other complaint surfaces remain available: /workspace, /chat, /profile, /results, /document, /claim-support-review.
+    </section>
+  </main>
+  <script src="/static/complaint_mcp_sdk.js"></script>
+  <script src="/static/complaint_app_shell.js"></script>
+</body>
+</html>`;
+}
+
 const routes = new Map([
   ['/', template('index.html')],
   ['/home', template('home.html')],
@@ -2308,7 +2437,14 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://localhost:${port}`);
 
   if (request.method === 'GET' && url.pathname === '/health') {
-    return sendJson(response, { status: 'healthy' });
+    return sendJson(response, {
+      status: 'healthy',
+      preflight: buildEnvironmentPreflight(),
+    });
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/environment/preflight') {
+    return sendJson(response, buildEnvironmentPreflight());
   }
 
   if (request.method === 'GET' && url.pathname === '/cookies') {
