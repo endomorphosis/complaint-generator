@@ -46,6 +46,17 @@ async function waitForWorkspaceReady(page) {
   }
 }
 
+async function revealAllIntakeFields(page) {
+  const toggle = page.locator('#intake-show-all-button');
+  if (await toggle.count()) {
+    const pressed = await toggle.getAttribute('aria-pressed');
+    if (pressed !== 'true') {
+      await toggle.click();
+    }
+  }
+  await expect(page.locator('#intake-party_name')).toBeVisible({ timeout: 10000 });
+}
+
 test.describe('website surface navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
@@ -58,7 +69,7 @@ test.describe('website surface navigation', () => {
 
     await expect(page.locator('h1').first()).toContainText(/Lex Publicus Complaint Generator/i);
     await expect(page.locator('body')).toContainText(/Build your complaint one step at a time/i);
-    await expect(page.locator('body')).toContainText(/Resume an existing complaint/i);
+    await expect(page.locator('body')).toContainText(/Your next safest step/i);
     await expect(page.locator('body')).toContainText(/Three Simple Steps/i);
     await expect(page.locator('body')).toContainText(/Choose Your Next Step/i);
     await expect(page.locator('#homepage-nav-workspace')).toBeVisible();
@@ -175,6 +186,8 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('body')).toContainText(/Connected workflow/i);
     await expect(page.locator('#profile_data')).toBeVisible();
     await expect(page.locator('#chat_history')).toBeVisible();
+    await expect(page.locator('#profile_data')).not.toContainText(/demo-password|playwright-token/i);
+    await expect(page.locator('#profile_data')).toContainText(/\[redacted\]/i);
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Profile/i);
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Results/i);
     await expect(page.locator('#profile-open-chat')).toHaveAttribute('href', '/chat');
@@ -193,6 +206,8 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('body')).toContainText(/stored complaint data/i);
     await expect(page.locator('body')).toContainText(/Stored complaint results/i);
     await expect(page.locator('#profile_data')).toBeVisible();
+    await expect(page.locator('#profile_data')).not.toContainText(/demo-password|playwright-token/i);
+    await expect(page.locator('#profile_data')).toContainText(/\[redacted\]/i);
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Review/i);
     await expect(page.locator('[data-surface-nav="primary"]')).toContainText(/Builder/i);
     await expect(page.locator('#results-open-chat')).toHaveAttribute('href', '/chat');
@@ -224,6 +239,15 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#chat-context-prefill')).toContainText(/Prepared question/i);
     await expect(page.locator('#chat-context-return-link')).toHaveAttribute('href', /\/workspace\?target_tab=review/);
     await expect(page.locator('#chat-form input')).toHaveValue(/Mediator, help turn this into testimony-ready narrative/i);
+    const chatLayoutOrder = await page.evaluate(() => {
+      const form = document.querySelector('#chat-form');
+      const guidance = document.querySelector('.hero');
+      return {
+        formTop: form ? form.getBoundingClientRect().top : 0,
+        guidanceTop: guidance ? guidance.getBoundingClientRect().top : 0,
+      };
+    });
+    expect(chatLayoutOrder.formTop).toBeLessThan(chatLayoutOrder.guidanceTop);
     await expect(page.locator('[aria-label="Additional chat destinations"]')).toBeVisible();
     await expect(page.locator('#chat-meta-workspace')).toHaveAttribute('href', /user_id=did%3Akey%3Ahandoff-demo/);
     await expect(page.locator('#chat-nav-profile')).toHaveAttribute('href', /user_id=did%3Akey%3Ahandoff-demo/);
@@ -354,6 +378,7 @@ test.describe('website surface navigation', () => {
     await page.goto('/workspace');
     await waitForWorkspaceReady(page);
 
+    await revealAllIntakeFields(page);
     await page.locator('#intake-party_name').fill('Jordan Example');
     await page.locator('#intake-opposing_party').fill('Acme Corporation');
     await page.locator('#intake-protected_activity').fill('Reported discrimination to HR');
@@ -537,6 +562,7 @@ test.describe('website surface navigation', () => {
     await page.goto('/workspace');
     await waitForWorkspaceReady(page);
 
+    await revealAllIntakeFields(page);
     await page.locator('#intake-party_name').fill('Jane Doe');
     await page.locator('#intake-opposing_party').fill('Acme Corporation');
     await page.locator('#intake-protected_activity').fill('Reported discrimination to HR');
@@ -695,6 +721,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#shortcut-review-button')).toBeDisabled();
     await expect(page.locator('#shortcut-review-button')).toHaveAttribute('title', /Finish more intake and save at least one targeted evidence item/i);
 
+    await revealAllIntakeFields(page);
     await page.locator('#intake-party_name').fill('Jane Doe');
     await page.locator('#intake-opposing_party').fill('Acme Corporation');
     await page.locator('#intake-protected_activity').fill('Reported discrimination to HR');
@@ -828,6 +855,9 @@ test.describe('website surface navigation', () => {
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
     await expect(page.locator('#integrations-start-readiness-button')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('#integrations-start-export-button')).toBeVisible();
+    await expect(page.locator('#integrations-technical-reference summary')).toContainText(/Advanced package, CLI, MCP, and browser SDK reference/i);
+    await expect(page.locator('#integrations-technical-reference')).not.toHaveAttribute('open', '');
+    await expect(page.locator('#integrations-operator-panels')).not.toHaveAttribute('open', '');
     await expect(page.locator('#feature-coverage-list')).toContainText(/Actor\/Critic UI optimizer/i);
     await expect(page.locator('#tool-list')).toContainText(/complaint\.optimize_ui/i);
 
@@ -960,7 +990,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#docket-mobile-step1-current-state')).toContainText(/^not_started$/i);
     await expect(page.locator('#docket-mobile-step1-first-unmet')).toContainText(/^ask one document-specific question first$/i);
     await expect(page.locator('#docket-mobile-step1-persistence-mode')).toContainText(/^local_until_ready$/i);
-    await expect(page.locator('#docket-mobile-next-unlock')).toContainText(/Ask your first document-specific question to show Mark Ready To Label/i);
+    await expect(page.locator('#docket-mobile-next-unlock')).toContainText(/Ask your first document-specific question to show Confirm this document is ready to label/i);
     await expect(page.locator('#docket-mobile-step1-write-count')).toContainText(/Document updates captured: 0/i);
     await expect(page.locator('#docket-mobile-step1-checklist')).toContainText(/Question asked: No/i);
     await expect(page.locator('#docket-mobile-step1-checklist')).toContainText(/Create impact summary after the first chat question/i);
@@ -976,15 +1006,15 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#docket-mobile-check-ready')).toBeHidden();
     await expect(page.locator('#docket-mobile-check-ready')).toHaveAttribute('data-check-state', 'blocked');
     await expect(page.locator('#docket-mobile-ask-feedback')).toBeHidden();
-    await expect(page.locator('#docket-mobile-ask-feedback')).toContainText(/Mark Ready To Label is disabled until the first unmet checklist item is complete/i);
+    await expect(page.locator('#docket-mobile-ask-feedback')).toContainText(/The ready-to-label confirmation is disabled until the first unmet checklist item is complete/i);
     await expect(page.locator('#docket-mobile-ask-persistence')).toBeHidden();
-    await expect(page.locator('#docket-mobile-ask-persistence')).toContainText(/Persistence mode: local draft only until Mark Ready/i);
+    await expect(page.locator('#docket-mobile-ask-persistence')).toContainText(/Persistence mode: local draft only until ready confirmation/i);
     await expect(page.locator('#docket-mobile-ready-label-button')).toBeHidden();
     await expect(page.locator('#docket-mobile-ready-label-button')).toBeDisabled();
     await expect(page.locator('#docket-mobile-ready-label-button')).toHaveAttribute('aria-describedby', 'docket-mobile-ready-disabled-reason');
-    await expect(page.locator('#docket-mobile-ready-label-button')).toContainText(/Next After Chat: Mark Ready To Label/i);
-    await expect(page.locator('#docket-mobile-ready-disabled-reason')).toContainText(/After you use Open Chat and ask one document question, Mark Ready To Label appears here/i);
-    await expect(page.locator('#docket-mobile-save-status')).toContainText(/Persistence: local draft only until Mark Ready/i);
+    await expect(page.locator('#docket-mobile-ready-label-button')).toContainText(/Next after chat: Confirm this document is ready to label/i);
+    await expect(page.locator('#docket-mobile-ready-disabled-reason')).toContainText(/After you use Open Chat and ask one document question, the ready-to-label confirmation appears here/i);
+    await expect(page.locator('#docket-mobile-save-status')).toContainText(/Persistence: local draft only until ready confirmation/i);
     await expect(page.locator('#docket-mobile-save-status')).toHaveAttribute('data-save-state', 'idle');
     await expect(page.locator('#docket-mobile-save-status')).toHaveAttribute('data-persistence-mode', 'local_until_ready');
     await expect(page.locator('#docket-mobile-label-button')).toBeDisabled();
@@ -1086,7 +1116,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#docket-gate-primary-action')).toContainText(/Generate Impact Summary/i);
     await expect(page.locator('#docket-gate-secondary-chat-link')).toContainText(/Open Chat/i);
     await expect(page.locator('#docket-gate-write-count')).toContainText(/Document updates captured: 0/i);
-    await expect(page.locator('#docket-mobile-next-unlock')).toContainText(/Review the chat impact summary to turn on Mark Ready To Label/i);
+    await expect(page.locator('#docket-mobile-next-unlock')).toContainText(/Review the chat impact summary to turn on Confirm this document is ready to label/i);
     await expect(page.locator('#docket-mobile-check-question')).toContainText(/Question asked: Yes \(1\)/i);
     await expect(page.locator('#docket-mobile-check-question')).toHaveAttribute('data-check-state', 'complete');
     await expect(page.locator('#docket-mobile-check-impact')).toBeVisible();
@@ -1096,8 +1126,8 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#docket-mobile-ready-label-button')).toBeVisible();
     await expect(page.locator('#docket-mobile-ready-label-button')).toBeDisabled();
     await expect(page.locator('#docket-mobile-ready-label-button')).toHaveAttribute('data-ready-visibility', 'guided');
-    await expect(page.locator('#docket-mobile-ready-label-button')).toContainText(/^Mark Ready To Label$/i);
-    await expect(page.locator('#docket-mobile-ready-disabled-reason')).toContainText(/Waiting for the chat impact summary before Mark Ready To Label can save/i);
+    await expect(page.locator('#docket-mobile-ready-label-button')).toContainText(/^Confirm this document is ready to label$/i);
+    await expect(page.locator('#docket-mobile-ready-disabled-reason')).toContainText(/Waiting for the chat impact summary before the ready-to-label confirmation can save/i);
     await expect(page.locator('#docket-mobile-step1-write-count')).toContainText(/Document updates captured: 0/i);
     await expect(page.locator('#docket-mobile-label-button')).toBeDisabled();
     await expect(page.locator('#docket-mobile-annotation-button')).toBeDisabled();
@@ -1120,7 +1150,7 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#workspace-status')).toContainText(/Impact summary generated locally\. No selected-document write has been sent\./i);
     await expect(page.locator('#docket-gate-presenter')).toHaveAttribute('data-current-state', 'impact_summary_ready');
     await expect(page.locator('#docket-gate-presenter')).toHaveAttribute('data-ready-eligible', 'true');
-    await expect(page.locator('#docket-gate-ready-action')).toContainText(/Mark Ready To Label/i);
+    await expect(page.locator('#docket-gate-ready-action')).toContainText(/Confirm this document is ready to label/i);
     await expect(page.locator('#docket-gate-write-count')).toContainText(/Document updates captured: 0/i);
 
     await page.locator('#docket-mobile-show-documents').click();

@@ -909,6 +909,27 @@ function buildWorkspaceCapabilities(state) {
     user_id: state.user_id,
     case_synopsis: sessionPayload.case_synopsis,
     overview: clone(overview),
+    environment_preflight: {
+      status: 'degraded',
+      all_ready: false,
+      checks: {
+        sdk_playground_preview: {
+          path: 'ipfs_datasets_py/ipfs_accelerate_py/SDK_PLAYGROUND_PREVIEW.html',
+          exists: false,
+          state: 'missing',
+        },
+        ipfs_templates_dir: {
+          path: 'ipfs_datasets_py/ipfs_datasets_py/templates',
+          exists: false,
+          state: 'missing',
+        },
+        ipfs_static_dir: {
+          path: 'ipfs_datasets_py/ipfs_datasets_py/static',
+          exists: false,
+          state: 'missing',
+        },
+      },
+    },
     capabilities: [
       {
         id: 'intake_questions',
@@ -945,6 +966,12 @@ function buildWorkspaceCapabilities(state) {
         label: 'Complaint packet export',
         available: true,
         detail: 'The lawsuit packet can be exported as a structured browser, CLI, or MCP artifact.',
+      },
+      {
+        id: 'ipfs_datasets_py_trace',
+        label: 'Neurosymbolic IPFS trace',
+        available: false,
+        detail: 'ipfs_datasets_py trace surfaces are missing; route-safe fallback guidance should stay visible.',
       },
     ],
     tooling_contract: buildWorkspaceToolingContract(state.user_id),

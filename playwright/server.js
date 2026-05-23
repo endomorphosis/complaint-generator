@@ -380,6 +380,21 @@ const profileData = {
   },
 };
 
+function sanitizeProfileDataForClient(value) {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeProfileDataForClient);
+  }
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+  return Object.fromEntries(Object.entries(value).map(([key, nestedValue]) => [
+    key,
+    /(^|_)(password|hashed_password|password_hash|credential|secret|token|api_key|session_key|private_key)($|_)/i.test(String(key || ''))
+      ? '[redacted]'
+      : sanitizeProfileDataForClient(nestedValue),
+  ]));
+}
+
 const workspaceQuestions = [
   { id: 'party_name', label: 'Your name', prompt: 'Who is bringing the complaint?', placeholder: 'Jane Doe' },
   { id: 'opposing_party', label: 'Opposing party', prompt: 'Who are you filing against?', placeholder: 'Acme Corporation' },
@@ -745,6 +760,7 @@ function workflowCapabilitiesPayload(userId = 'did:key:playwright-demo') {
   const answeredCount = questions.filter((item) => item.is_answered).length;
   const claimType = String(((sessionPayload.session || {}).claim_type) || 'retaliation');
   const draftStrategy = String(((sessionPayload.draft || {}).draft_strategy) || 'template');
+  const environmentPreflight = buildEnvironmentPreflight();
   return {
     user_id: userId,
     case_synopsis: String(sessionPayload.case_synopsis || '').trim(),
@@ -756,6 +772,7 @@ function workflowCapabilitiesPayload(userId = 'did:key:playwright-demo') {
     ui_readiness: uiReadinessPayload(userId),
     client_release_gate: clientReleaseGatePayload(userId),
     tooling_contract: toolingContractPayload(userId),
+    environment_preflight: environmentPreflight,
     capabilities: [
       { id: 'intake_questions', label: 'Complaint intake questions', available: questions.length > 0, detail: `${answeredCount} of ${questions.length} intake questions answered.` },
       { id: 'mediator_prompt', label: 'Chat mediator handoff', available: true, detail: 'A testimony-ready mediator prompt can be generated from the shared case synopsis and support gaps.' },
@@ -765,6 +782,7 @@ function workflowCapabilitiesPayload(userId = 'did:key:playwright-demo') {
       { id: 'claim_type_alignment', label: 'Claim-type drafting alignment', available: true, detail: `The current complaint type is ${claimType.replace(/_/g, ' ')}.` },
       { id: 'formal_complaint_generation', label: 'Formal complaint generation', available: true, detail: draftStrategy === 'llm_router' ? 'The current draft uses llm_router-backed formal complaint generation.' : 'The current draft is using the deterministic template fallback.' },
       { id: 'complaint_packet', label: 'Complaint packet export', available: true, detail: 'The lawsuit packet can be exported as a structured browser, CLI, or MCP artifact.' },
+      { id: 'ipfs_datasets_py_trace', label: 'Neurosymbolic IPFS trace', available: environmentPreflight.all_ready, detail: environmentPreflight.all_ready ? 'ipfs_datasets_py dashboard and static trace surfaces are present.' : 'ipfs_datasets_py trace surfaces are missing; route-safe fallback guidance should stay visible.' },
     ],
   };
 }
@@ -2462,7 +2480,7 @@ const server = http.createServer(async (request, response) => {
     const result = {
       hashed_username: reqPayload.hashed_username || profileData.hashed_username,
       hashed_password: reqPayload.hashed_password || profileData.hashed_password,
-      data: JSON.stringify(profileData),
+      data: JSON.stringify(sanitizeProfileDataForClient(profileData)),
     };
     return sendJson(response, reqPayload.username ? { results: result } : result);
   }

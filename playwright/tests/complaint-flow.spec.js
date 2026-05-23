@@ -31,6 +31,34 @@ async function waitForWorkspaceReady(page, { requireIntakeVisible = true } = {})
   }
 }
 
+async function revealAllIntakeFields(page) {
+  const toggle = page.locator('#intake-show-all-button');
+  if (await toggle.count()) {
+    const pressed = await toggle.getAttribute('aria-pressed');
+    if (pressed !== 'true') {
+      await toggle.click();
+    }
+  }
+  await expect(page.locator('#intake-party_name')).toBeVisible({ timeout: 10000 });
+}
+
+async function fillIntakeWizardField(page, questionId, value) {
+  if (questionId === 'court_header') {
+    const courtDetails = page.locator('#intake-court-details');
+    if (await courtDetails.count()) {
+      await courtDetails.evaluate((node) => {
+        node.open = true;
+      });
+    }
+  } else {
+    const step = page.locator(`[data-intake-step-target="${questionId}"]`);
+    if (await step.count()) {
+      await step.click();
+    }
+  }
+  await page.locator(`#intake-${questionId}`).fill(value);
+}
+
 async function writeComplaintExportArtifact({
   routeUrl,
   markdownFilename,
@@ -451,10 +479,13 @@ test.describe('complaint generation workflow', () => {
     await page.goto('/profile');
     await expect(page.locator('#chat_history')).toContainText(/I need help drafting a retaliation complaint\./i);
     await expect(page.locator('#profile_data')).toContainText(/demo-user/i);
+    await expect(page.locator('#profile_data')).not.toContainText(/demo-password/i);
+    await expect(page.locator('#profile_data')).toContainText(/\[redacted\]/i);
 
     await page.goto('/results');
     await expect(page.locator('#profile_data')).toContainText(/retaliation/i);
     await expect(page.locator('#profile_data')).toContainText(/chat_history/i);
+    await expect(page.locator('#profile_data')).not.toContainText(/demo-password/i);
   });
 
   test('user can review, modify, regenerate, and reset the final complaint draft', async ({ page }) => {
@@ -639,6 +670,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#focus-rail-title')).toContainText(/Intake stage:/i);
     await expect(page.locator('#action-sdk-chip')).toContainText(/complaint\.submit_intake/i);
 
+    await revealAllIntakeFields(page);
     await page.locator('#intake-party_name').fill('Jane Doe');
     await page.locator('#intake-opposing_party').fill('Acme Corporation');
     await page.locator('#intake-protected_activity').fill('Reported discrimination to HR');
@@ -735,6 +767,7 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#docket-gate-note')).toContainText(/ready confirmation is the first selected-document write/i);
     await expect(page.locator('#docket-ask-chat-link')).toHaveAttribute('href', /chat_context=/i);
     await expect(page.locator('#docket-advanced-operations')).toContainText(/Advanced docket operations/i);
+    await expect(page.locator('#docket-advanced-operations')).toBeHidden();
     await page.locator('#docket-use-in-draft-button').click();
     await expect(page.locator('[data-tab-panel="draft"]')).toHaveClass(/is-active/);
     await page.getByRole('button', { name: 'Review', exact: true }).click();
@@ -810,6 +843,8 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#tooling-parity-preview')).toContainText(/Inspect this session/i);
     await expect(page.locator('#tooling-parity-preview')).toContainText(/complaint-workspace session --user-id did:key:workspace-flow-/i);
     await expect(page.locator('#tooling-parity-preview')).toContainText(/complaint\.export_complaint_packet/i);
+    await expect(page.locator('#integrations-start-attorney-handoff-button')).toBeVisible();
+    await expect(page.locator('#integrations-start-attorney-handoff-button')).toContainText(/Build Handoff Packet/i);
 
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
 
@@ -826,11 +861,11 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Release gate verdict:/i);
     await expect(page.locator('#draft-readiness-preview')).toContainText(/Top defect:/i);
     await expect(page.locator('#draft-export-safety-preview')).toContainText(/Canonical filing readiness/i);
-    await expect(page.locator('#draft-canonical-release-gate')).toHaveAttribute('data-gate-role', 'secondary-summary');
+    await expect(page.locator('#draft-canonical-release-gate')).toHaveAttribute('data-gate-role', 'primary-summary');
     await expect(page.locator('#draft-release-gate-card')).toBeVisible();
-    await expect(page.locator('#draft-release-gate-card')).toHaveAttribute('data-canonical-gate', 'primary');
+    await expect(page.locator('#draft-release-gate-card')).toHaveAttribute('data-canonical-gate', 'action-boundary');
     await expect(page.locator('#draft-release-gate-card')).toHaveAttribute('data-download-state', /(blocked|ready)/);
-    await expect(page.locator('#draft-release-gate-summary')).toContainText(/Keep this gate visible before download/i);
+    await expect(page.locator('#draft-release-gate-summary')).toContainText(/Action boundary mirrors the pinned filing-readiness gate above/i);
     await expect(page.locator('#draft-release-gate-summary')).toContainText(/Release gate verdict:/i);
     await expect(page.locator('#draft-release-gate-next-step')).toContainText(/Next safest move:/i);
     await expect(page.locator('#draft-download-boundary')).toHaveAttribute('data-download-state', /(blocked|ready)/);
@@ -838,6 +873,23 @@ test.describe('complaint generation workflow', () => {
     await expect(page.locator('#download-packet-markdown-button')).toHaveAttribute('aria-disabled', /(true|false)/);
     await expect(page.locator('#draft-release-open-review-button')).toBeVisible();
     await expect(page.locator('#draft-release-open-integrations-button')).toBeVisible();
+    await expect(page.locator('#attorney-handoff-card')).toBeVisible();
+    await expect(page.locator('#attorney-handoff-checklist')).toContainText(/Complaint draft/i);
+    await expect(page.locator('#attorney-handoff-checklist')).toContainText(/Release gate/i);
+    await expect(page.locator('#attorney-handoff-ipfs-chip')).toContainText(/ipfs_datasets_py/i);
+    await expect(page.locator('#attorney-handoff-send-button')).toBeDisabled();
+    await page.locator('#attorney-handoff-build-button').click();
+    await expect(page.locator('#attorney-handoff-preview')).toContainText(/Attorney Handoff Packet/i);
+    await expect(page.locator('#attorney-handoff-preview')).toContainText(/Neurosymbolic trace/i);
+    await expect(page.locator('#attorney-handoff-preview')).toContainText(/ipfs_datasets_py/i);
+    await expect(page.locator('#attorney-handoff-preview')).toContainText(/fallback: git submodule update|ipfs_datasets_py: ready/i);
+    await expect(page.locator('#attorney-handoff-status')).toContainText(/blocked|ready/i);
+    await page.locator('#attorney-handoff-override-reason').fill('Attorney requested early review while evidence and trace blockers remain visible.');
+    await expect(page.locator('#attorney-handoff-send-button')).toBeEnabled();
+    await page.locator('#attorney-handoff-send-button').click();
+    await expect(page.locator('#attorney-handoff-preview')).toContainText(/Attorney review packet staged/i);
+    await expect(page.locator('#workspace-status')).toContainText(/Attorney review packet staged/i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-attorney-handoff', title: 'Workspace Attorney Handoff', locator: '#attorney-handoff-card' });
 
     await page.getByRole('button', { name: 'UX Audit', exact: true }).click();
     await expect(page.locator('#focus-rail-stage')).toContainText(/You are in UX Audit\./i);
@@ -969,6 +1021,7 @@ test.describe('complaint generation workflow', () => {
 
     await page.getByRole('button', { name: 'Evidence', exact: true }).click();
     await expect(page.locator('[data-tab-panel="evidence"]')).toHaveClass(/is-active/);
+    await page.locator('#evidence-advanced-imports summary').click();
     await expect(page.locator('#run-gmail-duckdb-pipeline-button')).toBeVisible();
     await expect(page.locator('#search-email-duckdb-button')).toBeVisible();
     await expect(page.locator('#gmail-import-cli-command')).toContainText(/import-gmail-evidence/i);
@@ -1036,15 +1089,15 @@ test.describe('complaint generation workflow', () => {
     await expect.poll(async () => page.locator('#intake-question-grid textarea').count()).toBeGreaterThan(0);
     await expect(page.locator('#intake-party_name')).toBeVisible();
 
-    await page.locator('#intake-party_name').fill('Taylor Smith');
-    await page.locator('#intake-opposing_party').fill('Acme Logistics');
-    await page.locator('#intake-protected_activity').fill('Reported wage-and-hour violations to HR');
-    await page.locator('#intake-adverse_action').fill('Was terminated three days later');
-    await page.locator('#intake-timeline').fill('Report on April 2, termination on April 5');
-    await page.locator('#intake-harm').fill('Lost wages, benefits, and housing stability');
-    await expect(page.locator('[data-tab-panel="intake"]')).toContainText(/optional court-caption field helps the complaint open with a more realistic court header/i);
-    await expect(page.locator('#intake-question-grid')).toContainText(/optional\. if you know the correct district, enter it here/i);
-    await page.locator('#intake-court_header').fill('FOR THE NORTHERN DISTRICT OF CALIFORNIA');
+    await fillIntakeWizardField(page, 'party_name', 'Taylor Smith');
+    await fillIntakeWizardField(page, 'opposing_party', 'Acme Logistics');
+    await fillIntakeWizardField(page, 'protected_activity', 'Reported wage-and-hour violations to HR');
+    await fillIntakeWizardField(page, 'adverse_action', 'Was terminated three days later');
+    await fillIntakeWizardField(page, 'timeline', 'Report on April 2, termination on April 5');
+    await fillIntakeWizardField(page, 'harm', 'Lost wages, benefits, and housing stability');
+    await expect(page.locator('[data-tab-panel="intake"]')).toContainText(/Court details are optional and can wait until the story is clear/i);
+    await expect(page.locator('#intake-court-details')).toContainText(/Court details \(optional\)/i);
+    await fillIntakeWizardField(page, 'court_header', 'FOR THE NORTHERN DISTRICT OF CALIFORNIA');
     await expect(page.locator('#intake-caption-preview')).toContainText(/Taylor Smith, Plaintiff,/i);
     await expect(page.locator('#intake-caption-preview')).toContainText(/Acme Logistics, Defendant\./i);
     await expect(page.locator('#intake-caption-preview')).toContainText(/FOR THE NORTHERN DISTRICT OF CALIFORNIA/i);
@@ -1091,11 +1144,13 @@ test.describe('complaint generation workflow', () => {
     await page.locator('#save-evidence-button').click();
     await expect(page.locator('#evidence-list')).toContainText(/Termination timeline email/i);
     await expect(page.locator('#evidence-list')).toContainText(/termination-email\.txt/i);
+    await expect(page.locator('#evidence-advanced-imports summary')).toContainText(/Advanced imports and operator tools/i);
+    await writeUiScreenshotArtifact(page, { name: 'workspace-evidence', title: 'Workspace Evidence', locator: '[data-tab-panel="evidence"]' });
+    await page.locator('#evidence-advanced-imports summary').click();
     await expect(page.locator('#gmail-import-cli-command')).toContainText(/import-gmail-evidence/i);
     await expect(page.locator('#gmail-import-mcp-command')).toContainText(/complaint\.import_gmail_evidence/i);
     await expect(page.locator('#import-gmail-evidence-button')).toBeVisible();
     await expect(page.locator('#gmail-import-cli-help')).toContainText(/keyring-backed Gmail app password reuse/i);
-    await writeUiScreenshotArtifact(page, { name: 'workspace-evidence', title: 'Workspace Evidence', locator: '[data-tab-panel="evidence"]' });
 
     await page.getByRole('button', { name: 'Review', exact: true }).click();
     await expect(page.locator('#support-grid')).toContainText(/Protected activity/i);
@@ -1103,7 +1158,12 @@ test.describe('complaint generation workflow', () => {
     await writeUiScreenshotArtifact(page, { name: 'workspace-review', title: 'Workspace Review', locator: '[data-tab-panel="review"]' });
 
     await page.getByRole('button', { name: 'Draft', exact: true }).click();
+    await expect(page.locator('.draft-section-nav')).toContainText(/Caption/i);
+    await expect(page.locator('#draft-placeholder-resolver')).toContainText(/Resolve filing placeholders/i);
     await page.locator('#requested-relief').fill('Back pay\nFront pay\nAttorney fees');
+    await page.locator('#draft-civil-action-number').fill('25-cv-1234');
+    await expect(page.locator('#draft-caption-preview')).toContainText(/Civil Action No\. 25-cv-1234/i);
+    await page.locator('#draft-clear-civil-action-button').click();
     await expect(page.locator('#draft-caption-preview')).toContainText(/PRAYER FOR RELIEF/i);
     await expect(page.locator('#draft-caption-preview')).toContainText(/1\. Back pay/i);
     await expect(page.locator('#draft-caption-preview')).toContainText(/2\. Front pay/i);
@@ -1308,6 +1368,7 @@ test.describe('complaint generation workflow', () => {
     await page.goto('/workspace');
     await waitForWorkspaceReady(page);
 
+    await revealAllIntakeFields(page);
     await page.locator('#intake-party_name').fill('Morgan Lee');
     await page.locator('#intake-opposing_party').fill('Acme Housing Authority');
     await page.locator('#intake-protected_activity').fill('Requested a disability accommodation and complained about discriminatory housing treatment');

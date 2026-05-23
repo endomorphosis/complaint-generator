@@ -783,6 +783,48 @@
             grid-column: 1 / -1;
         }
 
+        .integration-stage-tiles {
+            display: grid;
+            gap: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            margin-top: 14px;
+        }
+
+        .integration-stage-tile {
+            display: grid;
+            gap: 8px;
+            align-content: start;
+            padding: 14px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+        }
+
+        .integration-stage-tile strong,
+        .integration-stage-tile span {
+            display: block;
+        }
+
+        .integration-stage-tile span {
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        .integrations-disclosure {
+            margin-top: 16px;
+            border: 1px solid var(--line);
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.72);
+            padding: 12px;
+        }
+
+        .integrations-disclosure > summary {
+            cursor: pointer;
+            color: var(--accent-strong);
+            font-weight: 800;
+            list-style-position: inside;
+        }
+
         .integrations-stack-label {
             display: block;
             margin-bottom: 8px;
@@ -800,6 +842,99 @@
 
         .intake-interview {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .intake-wizard-shell {
+            display: grid;
+            gap: 14px;
+        }
+
+        .intake-step-list {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .intake-step-button {
+            min-height: 46px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+            color: var(--muted);
+            font-weight: 800;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .intake-step-button.is-active {
+            border-color: rgba(141, 61, 23, 0.38);
+            background: rgba(255, 247, 238, 0.96);
+            color: var(--accent-strong);
+        }
+
+        .intake-step-button.is-complete::after {
+            content: "saved";
+            display: inline-flex;
+            margin-left: 8px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(34, 197, 94, 0.14);
+            color: #166534;
+            font-size: 0.68rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .intake-progress-line {
+            color: var(--muted);
+            font-size: 0.92rem;
+            line-height: 1.5;
+        }
+
+        .intake-interview.is-wizard {
+            display: block;
+        }
+
+        .intake-step-card {
+            display: none;
+        }
+
+        .intake-step-card.is-active,
+        .intake-interview.show-all .intake-step-card {
+            display: block;
+        }
+
+        .intake-interview.show-all {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .intake-court-details {
+            border-radius: 18px;
+            border: 1px dashed rgba(84, 59, 37, 0.22);
+            background: rgba(255, 255, 255, 0.58);
+        }
+
+        .intake-court-details summary {
+            cursor: pointer;
+            padding: 14px 16px;
+            color: var(--accent-strong);
+            font-weight: 850;
+        }
+
+        .intake-court-details .interview-card {
+            margin: 0 14px 14px;
+        }
+
+        .intake-court-details .intake-step-card {
+            display: block;
+        }
+
+        .intake-wizard-controls {
+            justify-content: space-between;
+            margin-top: 0;
         }
 
         .interview-card,
@@ -896,6 +1031,72 @@
             color: var(--accent-strong);
         }
 
+        .evidence-element-examples {
+            margin-top: 10px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(141, 61, 23, 0.18);
+            background: rgba(255, 247, 238, 0.9);
+        }
+
+        .evidence-element-examples strong,
+        .evidence-element-examples span {
+            display: block;
+        }
+
+        .evidence-element-examples strong {
+            color: var(--accent-strong);
+        }
+
+        .evidence-element-examples span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .advanced-evidence-tools {
+            grid-column: 1 / -1;
+            border-radius: 22px;
+            border: 1px dashed rgba(84, 59, 37, 0.22);
+            background: rgba(255, 255, 255, 0.56);
+        }
+
+        .advanced-evidence-tools summary {
+            cursor: pointer;
+            padding: 16px 18px;
+            color: var(--accent-strong);
+            font-weight: 850;
+        }
+
+        .advanced-evidence-tools summary span,
+        .advanced-evidence-tools summary small {
+            display: block;
+        }
+
+        .advanced-evidence-tools summary small {
+            margin-top: 5px;
+            color: var(--muted);
+            font-size: 0.86rem;
+            font-weight: 500;
+            line-height: 1.45;
+        }
+
+        .advanced-evidence-body {
+            padding: 0 18px 18px;
+        }
+
+        .review-coverage-note {
+            margin: 12px 0 0;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(29, 78, 216, 0.14);
+            background: rgba(239, 246, 255, 0.88);
+        }
+
+        .support-state-actions {
+            margin-top: 12px;
+        }
+
         .review-board {
             display: grid;
             grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
@@ -936,6 +1137,51 @@
             margin-top: 4px;
             color: var(--muted);
             line-height: 1.45;
+        }
+
+        .draft-section-nav {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 14px 0;
+            padding: 12px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.68);
+        }
+
+        .draft-section-nav button {
+            min-height: 38px;
+            padding: 0 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(84, 59, 37, 0.14);
+            background: rgba(255, 247, 238, 0.9);
+            color: var(--accent-strong);
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .draft-placeholder-resolver {
+            margin: 14px 0;
+            padding: 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(141, 61, 23, 0.2);
+            background: linear-gradient(180deg, rgba(255, 250, 245, 0.94), rgba(255, 255, 255, 0.78));
+        }
+
+        .draft-placeholder-resolver strong,
+        .draft-placeholder-resolver span {
+            display: block;
+        }
+
+        .draft-placeholder-resolver span {
+            margin-top: 6px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .draft-placeholder-resolver .field-row {
+            margin-top: 12px;
         }
 
         .draft-action-rail {
@@ -998,13 +1244,32 @@
             background: rgba(255, 255, 255, 0.78);
         }
 
+        #draft-canonical-release-gate {
+            position: sticky;
+            top: 12px;
+        }
+
+        .draft-gate-summary-primary {
+            border-color: rgba(154, 52, 18, 0.28);
+        }
+
+        .draft-gate-summary-primary h3,
         .draft-gate-summary-secondary h3 {
             margin-bottom: 6px;
         }
 
+        .draft-gate-summary-primary .list,
         .draft-gate-summary-secondary .list {
             max-height: 140px;
             overflow: auto;
+        }
+
+        #draft-release-gate-card[data-canonical-gate="action-boundary"] {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(251, 244, 236, 0.86));
+        }
+
+        body:not([data-workspace-shell-mode="operator"]) #docket-advanced-operations {
+            display: none;
         }
 
         .draft-action-groups {
@@ -1035,6 +1300,30 @@
         .draft-action-group .button-row,
         .draft-action-card .button-row {
             margin-top: 12px;
+        }
+
+        .attorney-handoff-card {
+            border-color: rgba(30, 92, 71, 0.28);
+            background: linear-gradient(180deg, rgba(244, 252, 246, 0.94), rgba(255, 255, 255, 0.82));
+        }
+
+        .attorney-handoff-card[data-handoff-state="blocked"] {
+            border-color: rgba(145, 91, 38, 0.38);
+            background: linear-gradient(180deg, rgba(255, 249, 240, 0.96), rgba(255, 255, 255, 0.82));
+        }
+
+        .attorney-handoff-checklist {
+            margin-top: 12px;
+        }
+
+        .attorney-handoff-checklist .item[data-check-state="complete"] {
+            border-color: rgba(30, 92, 71, 0.24);
+            background: rgba(235, 248, 239, 0.72);
+        }
+
+        .attorney-handoff-checklist .item[data-check-state="blocked"] {
+            border-color: rgba(145, 91, 38, 0.28);
+            background: rgba(255, 247, 236, 0.78);
         }
 
         .draft-secondary-action-row {
@@ -1088,22 +1377,22 @@
             font-weight: 700;
         }
 
-        #draft-release-gate-card[data-canonical-gate="primary"] {
+        #draft-release-gate-card[data-canonical-gate="action-boundary"] {
             border-color: rgba(154, 52, 18, 0.28);
             background: linear-gradient(180deg, rgba(255, 252, 248, 0.98), rgba(255, 244, 233, 0.9));
         }
 
-        #draft-release-gate-card[data-canonical-gate="primary"] > strong {
+        #draft-release-gate-card[data-canonical-gate="action-boundary"] > strong {
             color: var(--accent-strong);
             font-size: 1.18rem;
             line-height: 1.25;
         }
 
-        #draft-release-gate-card[data-canonical-gate="primary"] .draft-preview-shell {
+        #draft-release-gate-card[data-canonical-gate="action-boundary"] .draft-preview-shell {
             pointer-events: auto;
         }
 
-        #draft-release-gate-card[data-canonical-gate="primary"] pre {
+        #draft-release-gate-card[data-canonical-gate="action-boundary"] pre {
             font-size: 1rem;
             line-height: 1.75;
         }
@@ -1892,14 +2181,18 @@
             .field-row,
             .support-grid,
             .integration-grid,
+            .integration-stage-tiles,
+            .integration-live-grid,
             .stage-banner,
             .stage-grid,
             .action-grid,
             .guidance-grid,
+            .intake-step-list,
             .progress-steps,
             .journey-strip,
             .panel-split,
             .intake-interview,
+            .intake-interview.show-all,
             .review-board,
             .draft-layout,
             .draft-action-rail,
@@ -2710,6 +3003,10 @@
                 margin-top: 0;
             }
 
+            [data-tab-panel="draft"] #draft-canonical-release-gate {
+                position: static;
+            }
+
             [data-tab-panel="draft"] #draft-release-gate-card pre,
             [data-tab-panel="draft"] .soft-note,
             [data-tab-panel="draft"] .draft-action-group span {
@@ -3355,7 +3652,7 @@
                         </div>
                     </div>
                     <h2>Intake Questions</h2>
-                    <p class="muted">Capture the facts once, then reuse them everywhere else in the workflow. The optional court-caption field helps the complaint open with a more realistic court header when you know the right district.</p>
+                    <p class="muted">Capture the facts once, then reuse them everywhere else in the workflow. Court details are optional and can wait until the story is clear.</p>
                     <div class="section-intro">
                         <strong>What to do here</strong>
                         <span>Focus on who was involved, what happened, when it happened, and how it affected the complainant. If the exact date or wording is uncertain, save the best current version and improve it later.</span>
@@ -3381,7 +3678,16 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="intake-interview" id="intake-question-grid"></div>
+                        <div class="intake-wizard-shell">
+                            <div class="intake-progress-line" id="intake-step-progress">Step 1 of intake will appear here.</div>
+                            <div class="intake-step-list" id="intake-step-list" aria-label="Intake question steps"></div>
+                            <div class="intake-interview is-wizard" id="intake-question-grid"></div>
+                            <div class="button-row intake-wizard-controls">
+                                <button class="secondary" id="intake-back-button" type="button">Back</button>
+                                <button class="secondary" id="intake-show-all-button" type="button" aria-pressed="false">Show all intake fields</button>
+                                <button class="primary" id="intake-next-button" type="button">Next</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="button-row">
                         <button class="primary" id="save-intake-button" type="button">Save and Continue</button>
@@ -3500,6 +3806,10 @@
                                             <option value="causation">Causal link</option>
                                             <option value="harm">Damages</option>
                                         </select>
+                                        <div class="evidence-element-examples" id="evidence-claim-element-examples" aria-live="polite">
+                                            <strong>What proves protected activity?</strong>
+                                            <span>Examples will update when you choose a claim element.</span>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="field-row">
@@ -3531,12 +3841,18 @@
                                 <div class="soft-note" id="evidence-soft-note">Map this item to one claim element, summarize why it matters, then save it before using the optional import tools below.</div>
                             </div>
                         </div>
-                        <div class="evidence-form-shell evidence-import-shell" style="margin-top: 18px;">
-                            <div class="section-intro">
-                                <strong>Import Gmail evidence</strong>
-                                <span>Pull matching emails and their attachments straight into the evidence workspace. Use a Gmail app password for quick imports, or switch to Gmail OAuth plus UID checkpoints for broader, resumable mailbox collection.</span>
-                            </div>
-                            <div class="field-grid">
+                        <details class="advanced-evidence-tools" id="evidence-advanced-imports">
+                            <summary>
+                                <span>Advanced imports and operator tools</span>
+                                <small>Open only when you need Gmail, DuckDB, CLI/MCP examples, or local path imports. The basic evidence form above is enough for most users.</small>
+                            </summary>
+                            <div class="advanced-evidence-body">
+                                <div class="evidence-form-shell evidence-import-shell" style="margin-top: 0;">
+                                    <div class="section-intro">
+                                        <strong>Import Gmail evidence</strong>
+                                        <span>Pull matching emails and their attachments straight into the evidence workspace. Use a Gmail app password for quick imports, or switch to Gmail OAuth plus UID checkpoints for broader, resumable mailbox collection.</span>
+                                    </div>
+                                    <div class="field-grid">
                                 <div class="field-row">
                                     <div>
                                         <label for="gmail-import-addresses">Addresses To Match</label>
@@ -3751,7 +4067,7 @@
                                 <div class="status draft-preview-shell"><pre id="email-duckdb-search-preview">No DuckDB email search has been run in this browser session yet.</pre></div>
                             </div>
                         </div>
-                        <div class="evidence-form-shell evidence-import-shell" style="margin-top: 18px;">
+                                <div class="evidence-form-shell evidence-import-shell" style="margin-top: 18px;">
                             <div class="section-intro">
                                 <strong>Import local evidence artifacts</strong>
                                 <span>Bring local PDFs, screenshots, text exports, mailbox files, or whole directories into the complaint evidence workspace by path.</span>
@@ -3793,7 +4109,9 @@
                             <div class="button-row" style="margin-top: 16px;">
                                 <button class="secondary" id="import-local-evidence-button" type="button">Import Local Evidence</button>
                             </div>
-                        </div>
+                                </div>
+                            </div>
+                        </details>
                     </div>
                     <div class="list" id="evidence-list"></div>
                 </section>
@@ -3835,7 +4153,7 @@
                             <span class="docket-mobile-step-heading">Step 1: Start document chat</span>
                             <a class="surface-link docket-mobile-primary-action" id="docket-mobile-ask-chat-link" href="/chat">Start Document Chat</a>
                             <span class="docket-mobile-ask-scope" id="docket-mobile-ask-scope">Questions will apply only to this document.</span>
-                            <span class="docket-mobile-action-state" id="docket-mobile-ask-state"><strong>Not started</strong> Start chat, get an impact summary, then mark ready to label.</span>
+                            <span class="docket-mobile-action-state" id="docket-mobile-ask-state"><strong>Not started</strong> Start chat, get an impact summary, then confirm this document is ready to label.</span>
                             <span class="docket-mobile-next-unlock" id="docket-mobile-next-unlock">Complete one document-chat question to unlock Step 2.</span>
                             <div class="docket-mobile-state-contract" id="docket-mobile-step1-state-contract" aria-label="Step 1 state contract">
                                 <div class="docket-mobile-state-contract-row" data-contract-row="current">
@@ -3864,7 +4182,7 @@
                             <span class="docket-mobile-step-feedback" id="docket-mobile-ask-feedback">Complete after both checklist items pass.</span>
                             <span class="docket-mobile-step-feedback" id="docket-mobile-ask-persistence">First save: only after Step 1 is marked complete.</span>
                             <div class="docket-mobile-save-row">
-                                <button class="secondary docket-mobile-ready-action" id="docket-mobile-ready-label-button" type="button" aria-describedby="docket-mobile-ready-disabled-reason" disabled>Mark Ready To Label</button>
+                                <button class="secondary docket-mobile-ready-action" id="docket-mobile-ready-label-button" type="button" aria-describedby="docket-mobile-ready-disabled-reason" disabled>Confirm this document is ready to label</button>
                                 <span class="docket-mobile-disabled-reason" id="docket-mobile-ready-disabled-reason">Disabled: ask one document-specific question first.</span>
                                 <span class="docket-mobile-save-chip" id="docket-mobile-save-status" data-save-state="idle" data-persistence-mode="local_until_ready">Save: idle - no server write yet.</span>
                             </div>
@@ -4018,7 +4336,7 @@
                                     <div class="docket-gate-presenter-actions" id="docket-gate-actions">
                                         <a class="surface-link" id="docket-gate-primary-chat-link" href="/chat">Open Chat</a>
                                         <button class="primary" id="docket-gate-primary-action" type="button" hidden>Generate Impact Summary</button>
-                                        <button class="secondary" id="docket-gate-ready-action" type="button" hidden disabled>Mark Ready To Label</button>
+                                        <button class="secondary" id="docket-gate-ready-action" type="button" hidden disabled>Confirm this document is ready to label</button>
                                         <a class="surface-link" id="docket-gate-secondary-chat-link" href="/chat" hidden>Open Chat</a>
                                     </div>
                                 </section>
@@ -4078,6 +4396,9 @@
                             <span class="chip" id="review-canonical-timestamp-chip">updated: loading</span>
                         </div>
                         <div class="status draft-preview-shell"><pre id="review-canonical-release-gate-summary">Verdict: BLOCKED | Blocking reason: loading | Next action: loading | Source timestamp: loading</pre></div>
+                        <p class="muted review-coverage-note">
+                            Coverage means each required claim element has some support; corroboration means that support is strong, source-backed, and consistent enough to trust before filing.
+                        </p>
                         <div class="list" id="review-canonical-release-gate-reasons">
                             <div class="item"><strong>Review blockers will appear here once support and release-gate signals load.</strong></div>
                         </div>
@@ -4156,9 +4477,36 @@
                         <strong>What to do here</strong>
                         <span>Generate a first draft once the timeline, protected activity, adverse action, and harm feel stable. Then refine clarity, tone, and requested relief before treating it as final.</span>
                     </div>
-                    <div class="tool-card canonical-release-gate draft-gate-summary-secondary" id="draft-canonical-release-gate" style="margin-bottom: 14px;" data-gate-role="secondary-summary">
-                        <h3>Draft gate summary</h3>
-                        <p class="muted">Same canonical verdict; the filing decision rail below is the authoritative download boundary.</p>
+                    <nav class="draft-section-nav" aria-label="Draft section navigator">
+                        <button type="button" data-draft-jump-target="#draft-caption-preview">Caption</button>
+                        <button type="button" data-draft-jump-target="#draft-title">Title and relief</button>
+                        <button type="button" data-draft-jump-target="#draft-body">Draft text</button>
+                        <button type="button" data-draft-jump-target="#count-composer-card">Count composer</button>
+                        <button type="button" data-draft-jump-target="#attorney-handoff-card">Attorney packet</button>
+                        <button type="button" data-draft-jump-target="#draft-download-boundary">Downloads</button>
+                    </nav>
+                    <div class="draft-placeholder-resolver" id="draft-placeholder-resolver">
+                        <strong>Resolve filing placeholders before export</strong>
+                        <span id="draft-placeholder-resolver-note">Civil Action No. is still blank. You can leave it blank for attorney review, but it should stay visible as unresolved filing text.</span>
+                        <div class="field-row">
+                            <div>
+                                <label for="draft-civil-action-number">Civil Action Number</label>
+                                <input id="draft-civil-action-number" type="text" placeholder="Leave blank until assigned, or enter the known case number">
+                                <div class="helper-text">This updates the live caption preview. If a generated draft already contains placeholder underscores, use the apply button to replace them in the draft body.</div>
+                            </div>
+                            <div>
+                                <label>Placeholder Action</label>
+                                <div class="button-row">
+                                    <button class="secondary" id="draft-apply-civil-action-button" type="button">Apply To Draft Body</button>
+                                    <button class="secondary" id="draft-clear-civil-action-button" type="button">Keep As Placeholder</button>
+                                </div>
+                                <div class="helper-text" id="draft-civil-action-status">No civil action number has been entered yet.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="tool-card canonical-release-gate draft-gate-summary-primary" id="draft-canonical-release-gate" style="margin-bottom: 14px;" data-gate-role="primary-summary">
+                        <h3>Filing readiness gate</h3>
+                        <p class="muted">Use this one pinned verdict before export: status, blocker, and next action stay together while the draft is edited.</p>
                         <div class="chip-row">
                             <span class="chip warn" id="draft-canonical-release-gate-verdict">verdict: BLOCKED</span>
                             <span class="chip" id="draft-canonical-corroboration-chip">corroboration: loading</span>
@@ -4188,9 +4536,9 @@
                         </div>
                     </div>
                     <div class="draft-action-stack">
-                        <div class="draft-action-card release-gate-callout" id="draft-release-gate-card" data-canonical-gate="primary" data-download-state="blocked" data-primary-next-action="add_corroboration">
-                            <strong>Canonical filing verdict</strong>
-                            <span>This is the decision point for generation, packet review, and download. Downloads stay subordinate until this card says cleared.</span>
+                        <div class="draft-action-card release-gate-callout" id="draft-release-gate-card" data-canonical-gate="action-boundary" data-download-state="blocked" data-primary-next-action="add_corroboration">
+                            <strong>Gate actions and download boundary</strong>
+                            <span>The pinned filing-readiness gate above is the verdict. Use this action panel to repair the blocker, refresh Review or Evidence, and keep downloads subordinate until the verdict clears.</span>
                             <div class="chip-row" id="draft-release-gate-chip-row">
                                 <span class="chip warn" id="draft-release-gate-chip">verdict: BLOCKED</span>
                                 <span class="chip warn" id="draft-can-review-chip">Can Review</span>
@@ -4416,8 +4764,30 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                                         <button class="secondary" id="export-packet-diagnostic-button" type="button" data-export-mode="diagnostic">Export Diagnostic Packet</button>
                                     </div>
                                 </div>
+                                <div class="draft-action-group attorney-handoff-card" id="attorney-handoff-card" data-handoff-state="blocked" tabindex="-1">
+                                    <strong>3. Attorney handoff packet</strong>
+                                    <span>Build one review-ready bundle for counsel: complaint draft, evidence map, support matrix, release-gate verdict, and the neurosymbolic/IPFS trace from <code>ipfs_datasets_py</code>.</span>
+                                    <div class="chip-row" id="attorney-handoff-chips">
+                                        <span class="chip warn" id="attorney-handoff-state-chip">handoff: blocked</span>
+                                        <span class="chip" id="attorney-handoff-release-chip">release gate: loading</span>
+                                        <span class="chip" id="attorney-handoff-ipfs-chip">ipfs_datasets_py: checking</span>
+                                    </div>
+                                    <div class="list attorney-handoff-checklist" id="attorney-handoff-checklist">
+                                        <div class="item" data-check-state="blocked"><strong>Handoff checks will appear after the draft and packet review load.</strong></div>
+                                    </div>
+                                    <label for="attorney-handoff-override-reason" class="helper-text" style="display: block; margin-top: 8px;">
+                                        Attorney-review override reason, if sending before every filing-readiness check is clear
+                                    </label>
+                                    <textarea id="attorney-handoff-override-reason" placeholder="Example: Attorney requested early review of open evidence gaps and release-gate blockers."></textarea>
+                                    <div class="button-row">
+                                        <button class="secondary" id="attorney-handoff-build-button" type="button">Build Attorney Handoff Packet</button>
+                                        <button class="secondary" id="attorney-handoff-send-button" type="button" disabled aria-disabled="true">Send to Attorney Review</button>
+                                    </div>
+                                    <div class="soft-note" id="attorney-handoff-status">Attorney handoff is blocked until the complaint packet, support posture, release gate, and trace are visible.</div>
+                                    <div class="status draft-preview-shell"><pre id="attorney-handoff-preview">No attorney handoff packet built yet.</pre></div>
+                                </div>
                                 <div class="draft-action-group" id="draft-download-boundary" data-download-state="blocked">
-                                    <strong>3. Download when cleared</strong>
+                                    <strong>4. Download when cleared</strong>
                                     <span>Downloads stay subordinate to the canonical filing verdict and only become active when this boundary says cleared.</span>
                                     <div class="soft-note" id="draft-download-blocker-note" data-download-state="blocked">Download is blocked until release-gate and record-strength checks are cleared.</div>
                                     <div class="button-row">
@@ -4466,11 +4836,32 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                     <div class="tool-card" style="margin-bottom: 16px;">
                         <h3>Start with a live tool workflow</h3>
                         <p class="muted">Use these first when you want to confirm the shared tool contract, prepare the mediator handoff, export the complaint packet, or continue the actor/critic UI review without scanning the whole tools page.</p>
-                        <div class="button-row">
-                            <button class="primary" id="integrations-start-readiness-button" type="button">Check Tool Readiness</button>
-                            <button class="secondary" id="integrations-start-mediator-button" type="button">Prepare Mediator Handoff</button>
-                            <button class="secondary" id="integrations-start-export-button" type="button">Export and Review Packet</button>
-                            <button class="secondary" id="integrations-start-ux-audit-button" type="button">Open UX Audit Workflow</button>
+                        <div class="integration-stage-tiles" aria-label="Integration quick actions">
+                            <div class="integration-stage-tile">
+                                <strong>Readiness</strong>
+                                <span>Confirm the shared package, CLI, MCP, and browser SDK contract is available.</span>
+                                <button class="primary" id="integrations-start-readiness-button" type="button">Run Readiness Check</button>
+                            </div>
+                            <div class="integration-stage-tile">
+                                <strong>Mediator</strong>
+                                <span>Prepare the plain-language handoff brief from the current complaint record.</span>
+                                <button class="secondary" id="integrations-start-mediator-button" type="button">Run Mediator Handoff</button>
+                            </div>
+                            <div class="integration-stage-tile">
+                                <strong>Packet</strong>
+                                <span>Export the attorney-review packet and refresh complaint-output checks.</span>
+                                <button class="secondary" id="integrations-start-export-button" type="button">Run Packet Review</button>
+                            </div>
+                            <div class="integration-stage-tile">
+                                <strong>Attorney Handoff</strong>
+                                <span>Stage the counsel-review packet with release-gate, evidence, and neurosymbolic trace signals attached.</span>
+                                <button class="secondary" id="integrations-start-attorney-handoff-button" type="button">Build Handoff Packet</button>
+                            </div>
+                            <div class="integration-stage-tile">
+                                <strong>UX Audit</strong>
+                                <span>Continue the screenshot-driven actor/critic review loop.</span>
+                                <button class="secondary" id="integrations-start-ux-audit-button" type="button">Open UX Audit Workflow</button>
+                            </div>
                         </div>
                     </div>
                     <div class="tool-card" id="integration-live-cards">
@@ -4478,7 +4869,9 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                         <p class="muted">Live pass/fail badges for Package, CLI, MCP, and SDK are bound to the current DID/session.</p>
                         <div class="integration-live-grid" id="integration-live-actions"></div>
                     </div>
-                    <div class="integration-grid">
+                    <details class="integrations-disclosure integrations-technical-reference" id="integrations-technical-reference" open>
+                        <summary>Advanced package, CLI, MCP, and browser SDK reference</summary>
+                        <div class="integration-grid integration-reference-grid">
                         <div class="tool-card">
                             <span class="integrations-stack-label">Package</span>
                             <h3>Python package imports</h3>
@@ -4531,6 +4924,9 @@ await client.exportComplaintPdf(bootstrap.did);
 await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit' });</pre>
                             <div class="chip-row" id="sdk-server-info"></div>
                         </div>
+                        </div>
+                    </details>
+                    <div class="integration-grid">
                         <div class="tool-card">
                             <span class="integrations-stack-label">Readiness Signals</span>
                             <h3>Available MCP Tools</h3>
@@ -4658,6 +5054,10 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 <div class="status draft-preview-shell"><pre id="claim-alignment-preview">No claim-alignment review run yet.</pre></div>
                             </div>
                         </div>
+                    </div>
+                    <details class="integrations-disclosure integrations-operator-panels" id="integrations-operator-panels" open>
+                        <summary>Operator data panels: workspace datasets, packaged dockets, and diagnostics</summary>
+                        <div class="integration-grid">
                         <div class="tool-card" id="workspace-data-operator-card">
                             <span class="integrations-stack-label">Workspace Data Ops</span>
                             <h3>Inspect and Migrate Workspace Dataset Primitives</h3>
@@ -4911,7 +5311,8 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                                 <div class="list" id="sdk-claim-elements-preview"></div>
                             </div>
                         </div>
-                    </div>
+                        </div>
+                    </details>
                 </section>
 
                 <section class="tab-panel" data-tab-panel="ux-review">
@@ -5026,6 +5427,8 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let workspaceUserId = new URLSearchParams(window.location.search).get('user_id') || null;
         let workspaceSession = null;
         let activeWorkspaceTab = 'intake';
+        let activeIntakeQuestionIndex = 0;
+        let intakeShowAllFields = false;
         let workspaceSessionTools = [];
         let workspaceCapabilities = null;
         let workspaceToolingContract = null;
@@ -5052,6 +5455,7 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
         let latestPackagedDocketRevalidationPersist = null;
         let latestPacketExport = null;
         let latestComplaintOutputAnalysis = null;
+        let latestAttorneyHandoffPacket = null;
         let latestUiReviewResult = null;
         let latestGmailImportResult = null;
         let latestGmailDuckdbPipelineResult = null;
@@ -5080,6 +5484,39 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
             statusNode.textContent = message;
             statusNode.classList.add('is-busy');
         }
+
+        function normalizeWorkspaceShellMode(value) {
+            const mode = String(value || '').trim().toLowerCase();
+            return mode === 'operator' || mode === 'client' ? mode : '';
+        }
+
+        function resolveWorkspaceShellMode() {
+            const params = new URLSearchParams(window.location.search || '');
+            const queryMode = normalizeWorkspaceShellMode(params.get('shell_mode') || params.get('app_shell_mode'));
+            if (queryMode) {
+                try {
+                    window.localStorage.setItem('complaintGenerator.shellMode', queryMode);
+                } catch (error) {
+                    // Ignore localStorage failures; the body data attribute still gates this page.
+                }
+                return queryMode;
+            }
+            try {
+                const storedMode = normalizeWorkspaceShellMode(window.localStorage.getItem('complaintGenerator.shellMode'));
+                if (storedMode) {
+                    return storedMode;
+                }
+            } catch (error) {
+                // Default to client mode when storage is unavailable.
+            }
+            return 'client';
+        }
+
+        function applyWorkspaceShellMode() {
+            document.body.dataset.workspaceShellMode = resolveWorkspaceShellMode();
+        }
+
+        applyWorkspaceShellMode();
 
         function loadLastSdkToolActivity() {
             if (typeof localStorage === 'undefined') {
@@ -5415,9 +5852,9 @@ Prefer calmer, trauma-informed language and remove friction that makes evidence 
                 outcome: 'Next: ask at least one document-specific question.',
                 readyGateSummary: '0 of 2 complete: chat impact summary needed, then ready confirmation.',
                 answeredGateSummary: '1 of 2 complete: confirm ready to label before anything is saved.',
-                readyFeedback: 'Mark Ready To Label is disabled until the first unmet checklist item is complete.',
+                readyFeedback: 'The ready-to-label confirmation is disabled until the first unmet checklist item is complete.',
                 answeredFeedback: 'Asked before: review the saved question count, then continue when ready.',
-                readyPersistence: 'Persistence mode: local draft only until Mark Ready.',
+                readyPersistence: 'Persistence mode: local draft only until ready confirmation.',
                 answeredPersistence: 'Persistence mode: chat progress is local; ready confirmation is the first selected-document write.',
                 scopeFallback: 'Questions will apply only to this document.',
             },
@@ -6000,11 +6437,22 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
         }
 
+        function openContainingDetails(node) {
+            let current = node && node.closest ? node.closest('details') : null;
+            while (current) {
+                current.open = true;
+                current = current.parentElement && current.parentElement.closest
+                    ? current.parentElement.closest('details')
+                    : null;
+            }
+        }
+
         function jumpToStage(tabName, focusSelector, statusMessage) {
             activateTab(tabName);
             if (focusSelector) {
                 const node = document.querySelector(focusSelector);
                 if (node && typeof node.focus === 'function') {
+                    openContainingDetails(node);
                     node.focus();
                 }
             }
@@ -6054,6 +6502,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 window.requestAnimationFrame(() => {
                     const node = document.querySelector(focusSelector);
                     if (node && typeof node.focus === 'function') {
+                        openContainingDetails(node);
                         node.focus();
                     }
                 });
@@ -6061,6 +6510,19 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             if (statusMessage) {
                 setStatus(statusMessage);
             }
+        }
+
+        function syncResponsiveIntegrationDisclosures() {
+            const compactIntegrations = window.matchMedia
+                ? window.matchMedia('(max-width: 640px)').matches
+                : false;
+            ['integrations-technical-reference', 'integrations-operator-panels'].forEach((id) => {
+                const details = document.getElementById(id);
+                if (!details) {
+                    return;
+                }
+                details.open = !compactIntegrations;
+            });
         }
 
         function buildOptimizerGoalSuggestions(sessionPayload) {
@@ -6097,12 +6559,69 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             return label ? `${baseLabel} for ${label}` : baseLabel;
         }
 
+        const evidenceClaimElementExamples = {
+            protected_activity: {
+                title: 'What proves protected activity?',
+                examples: [
+                    'An email, message, report, grievance, or hotline note showing the person complained, requested accommodation, opposed unlawful conduct, or used a legal right.',
+                    'A witness who heard the complaint or saw the report being made.',
+                    'A calendar entry, form, or case number that anchors when the protected act happened.',
+                ],
+            },
+            employer_knowledge: {
+                title: 'What proves employer knowledge?',
+                examples: [
+                    'Proof that a manager, HR contact, investigator, landlord, agency, or decision-maker received the complaint or request.',
+                    'Replies, meeting notes, forwarded messages, or witness accounts showing the decision-maker knew about the protected activity.',
+                    'A timeline showing the report was shared before the adverse decision.',
+                ],
+            },
+            adverse_action: {
+                title: 'What proves adverse action?',
+                examples: [
+                    'Termination, demotion, discipline, denial, eviction notice, benefit cutoff, suspension, pay reduction, or schedule change records.',
+                    'Written notices, policy decisions, performance paperwork, or messages announcing the harmful action.',
+                    'Witness statements describing what changed and who made the decision.',
+                ],
+            },
+            causation: {
+                title: 'What proves the causal link?',
+                examples: [
+                    'Close timing between the protected activity and the harm.',
+                    'Comments, shifting explanations, unusual discipline, comparators, or evidence that the stated reason does not match the records.',
+                    'A clean timeline that connects who knew what, when they knew it, and what happened next.',
+                ],
+            },
+            harm: {
+                title: 'What proves damages or harm?',
+                examples: [
+                    'Lost wages, medical expenses, housing costs, denied benefits, repair costs, or other out-of-pocket losses.',
+                    'Pay stubs, bills, benefit records, mitigation efforts, job applications, or bank records.',
+                    'Testimony explaining emotional distress, disruption, lost opportunities, or practical consequences.',
+                ],
+            },
+        };
+
+        function updateEvidenceClaimElementExamples() {
+            const select = document.getElementById('evidence-claim-element');
+            const container = document.getElementById('evidence-claim-element-examples');
+            if (!select || !container) {
+                return;
+            }
+            const copy = evidenceClaimElementExamples[select.value] || evidenceClaimElementExamples.protected_activity;
+            container.innerHTML = `
+                <strong>${escapeHtml(copy.title)}</strong>
+                <span>${copy.examples.map((example) => escapeHtml(example)).join(' ')}</span>
+            `;
+        }
+
         function presetEvidenceForGap(sessionPayload, preferredGap, preferredKind) {
             const weakest = resolveSupportGap(sessionPayload, preferredGap);
             if (weakest && weakest.id) {
                 const select = document.getElementById('evidence-claim-element');
                 if (select) {
                     select.value = weakest.id;
+                    updateEvidenceClaimElementExamples();
                 }
                 const kindField = document.getElementById('evidence-kind');
                 if (kindField && preferredKind) {
@@ -6458,48 +6977,171 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : 'Status has not been refreshed yet.';
         }
 
-        function renderIntake(sessionPayload) {
-            const intakeDisplayCopy = {
-                party_name: {
-                    label: 'What name should we use for the person harmed?',
-                    prompt: 'Share the name you want used in this complaint workspace.',
-                    placeholder: 'Name of the harmed person',
-                },
-                protected_activity: {
-                    label: 'What did they report, oppose, or ask for help about?',
-                    prompt: 'Describe the report, complaint, request, or protected step that came before things changed.',
-                    placeholder: 'Reported discrimination to HR',
-                },
-                adverse_action: {
-                    label: 'What happened after that?',
-                    prompt: 'Describe what the employer, housing provider, agency, or other party did next.',
-                    placeholder: 'Was terminated two days later',
-                },
-                harm: {
-                    label: 'How did this affect them?',
-                    prompt: 'Describe the practical harm, loss, stress, or instability that followed.',
-                    placeholder: 'Lost wages, benefits, or housing stability',
-                },
-                timeline: {
-                    label: 'When did the key events happen?',
-                    prompt: 'Use the best timeline you have right now. Best estimate is okay.',
-                    placeholder: 'Report on March 8, termination on March 10',
-                },
-            };
-            const grid = document.getElementById('intake-question-grid');
-            grid.innerHTML = (sessionPayload.questions || []).map((question) => `
-                <div class="interview-card">
-                    <strong>${escapeHtml(((intakeDisplayCopy[question.id] || {}).label) || question.label)}</strong>
-                    <span>${escapeHtml(((intakeDisplayCopy[question.id] || {}).prompt) || question.prompt)}</span>
-                    ${question.id === 'court_header'
-                        ? '<div class="helper-text">Optional. If you know the correct district, enter it here so the complaint caption uses that court header instead of the generic fallback.</div>'
-                        : ''}
-                    ${question.id !== 'court_header'
-                        ? '<div class="helper-text">You can save and return anytime. Share only what you can right now.</div>'
-                        : ''}
-                    <textarea id="intake-${escapeHtml(question.id)}" data-question-id="${escapeHtml(question.id)}" placeholder="${escapeHtml(((intakeDisplayCopy[question.id] || {}).placeholder) || question.placeholder || '')}">${escapeHtml(question.answer || '')}</textarea>
+        const intakeDisplayCopy = {
+            party_name: {
+                label: 'What name should we use for the person harmed?',
+                prompt: 'Share the name you want used in this complaint workspace.',
+                placeholder: 'Name of the harmed person',
+            },
+            opposing_party: {
+                label: 'Who is the complaint against?',
+                prompt: 'Name the employer, landlord, agency, company, or person on the other side.',
+                placeholder: 'Acme Corporation',
+            },
+            protected_activity: {
+                label: 'What did they report, oppose, or ask for help about?',
+                prompt: 'Describe the report, complaint, request, or protected step that came before things changed.',
+                placeholder: 'Reported discrimination to HR',
+            },
+            adverse_action: {
+                label: 'What happened after that?',
+                prompt: 'Describe what the employer, housing provider, agency, or other party did next.',
+                placeholder: 'Was terminated two days later',
+            },
+            timeline: {
+                label: 'When did the key events happen?',
+                prompt: 'Use the best timeline you have right now. Best estimate is okay.',
+                placeholder: 'Report on March 8, termination on March 10',
+            },
+            harm: {
+                label: 'How did this affect them?',
+                prompt: 'Describe the practical harm, loss, stress, or instability that followed.',
+                placeholder: 'Lost wages, benefits, or housing stability',
+            },
+            court_header: {
+                label: 'Court details (optional)',
+                prompt: 'If you know the court or district, add it here. Skip this if you are unsure.',
+                placeholder: 'FOR THE NORTHERN DISTRICT OF CALIFORNIA',
+            },
+        };
+
+        function normalizeIntakeQuestions(sessionPayload) {
+            const questions = Array.isArray(sessionPayload && sessionPayload.questions) ? sessionPayload.questions : [];
+            const hasCourtHeader = questions.some((question) => question && question.id === 'court_header');
+            if (hasCourtHeader) {
+                return questions;
+            }
+            return questions.concat([{
+                id: 'court_header',
+                label: 'Court caption',
+                prompt: 'If you know the court, what district caption should appear on the complaint?',
+                placeholder: 'FOR THE NORTHERN DISTRICT OF CALIFORNIA',
+                answer: currentIntakeValue('court_header'),
+                is_optional: true,
+            }]);
+        }
+
+        function renderIntakeCard(question, index, active, optional) {
+            const display = intakeDisplayCopy[question.id] || {};
+            const label = display.label || question.label || `Question ${index + 1}`;
+            const prompt = display.prompt || question.prompt || 'Add the best current answer.';
+            const placeholder = display.placeholder || question.placeholder || '';
+            const helper = optional
+                ? 'Optional. Court details can wait; a lawyer can confirm the exact caption later.'
+                : 'You can save and return anytime. Share only what you can right now.';
+            return `
+                <div
+                    class="interview-card intake-step-card ${active ? 'is-active' : ''}"
+                    data-intake-step-index="${escapeHtml(String(index))}"
+                    data-intake-question-id="${escapeHtml(question.id)}"
+                    data-intake-question-label="${escapeHtml(label)}"
+                    data-intake-optional="${optional ? 'true' : 'false'}"
+                >
+                    <strong>${escapeHtml(label)}</strong>
+                    <span>${escapeHtml(prompt)}</span>
+                    <div class="helper-text">${escapeHtml(helper)}</div>
+                    <textarea id="intake-${escapeHtml(question.id)}" data-question-id="${escapeHtml(question.id)}" placeholder="${escapeHtml(placeholder)}">${escapeHtml(question.answer || '')}</textarea>
                 </div>
-            `).join('');
+            `;
+        }
+
+        function updateIntakeWizardState(options) {
+            const cards = Array.from(document.querySelectorAll('[data-intake-step-index][data-intake-optional="false"]'));
+            const stepButtons = Array.from(document.querySelectorAll('[data-intake-step-target]'));
+            const grid = document.getElementById('intake-question-grid');
+            const progress = document.getElementById('intake-step-progress');
+            const backButton = document.getElementById('intake-back-button');
+            const nextButton = document.getElementById('intake-next-button');
+            const showAllButton = document.getElementById('intake-show-all-button');
+            const maxIndex = Math.max(cards.length - 1, 0);
+            activeIntakeQuestionIndex = Math.max(0, Math.min(activeIntakeQuestionIndex, maxIndex));
+            if (grid) {
+                grid.classList.toggle('show-all', intakeShowAllFields);
+            }
+            cards.forEach((card, index) => {
+                card.classList.toggle('is-active', index === activeIntakeQuestionIndex);
+            });
+            stepButtons.forEach((button, index) => {
+                const target = String(button.dataset.intakeStepTarget || '');
+                const field = document.getElementById(`intake-${target}`);
+                const complete = Boolean(field && String(field.value || '').trim());
+                button.classList.toggle('is-active', index === activeIntakeQuestionIndex);
+                button.classList.toggle('is-complete', complete);
+                button.setAttribute('aria-current', index === activeIntakeQuestionIndex ? 'step' : 'false');
+            });
+            if (progress && cards.length) {
+                const activeCard = cards[activeIntakeQuestionIndex];
+                const label = String((activeCard || {}).dataset.intakeQuestionLabel || '').trim()
+                    || `question ${activeIntakeQuestionIndex + 1}`;
+                progress.textContent = `Step ${activeIntakeQuestionIndex + 1} of ${cards.length}: ${label}.`;
+            }
+            if (backButton) {
+                backButton.disabled = activeIntakeQuestionIndex <= 0;
+            }
+            if (nextButton) {
+                nextButton.textContent = activeIntakeQuestionIndex >= maxIndex ? 'Review answers' : 'Next';
+            }
+            if (showAllButton) {
+                showAllButton.textContent = intakeShowAllFields ? 'Return to one question at a time' : 'Show all intake fields';
+                showAllButton.setAttribute('aria-pressed', intakeShowAllFields ? 'true' : 'false');
+            }
+            if (options && options.focus) {
+                const activeField = cards[activeIntakeQuestionIndex] ? cards[activeIntakeQuestionIndex].querySelector('textarea') : null;
+                if (activeField && typeof activeField.focus === 'function') {
+                    activeField.focus();
+                }
+            }
+        }
+
+        function activateIntakeQuestionById(questionId, focus) {
+            const card = Array.from(document.querySelectorAll('[data-intake-question-id]'))
+                .find((candidate) => candidate.dataset.intakeQuestionId === String(questionId || ''));
+            if (!card) {
+                return;
+            }
+            activeIntakeQuestionIndex = Number(card.dataset.intakeStepIndex || '0') || 0;
+            intakeShowAllFields = false;
+            updateIntakeWizardState({ focus });
+        }
+
+        function renderIntake(sessionPayload) {
+            const questions = normalizeIntakeQuestions(sessionPayload);
+            const coreQuestions = questions.filter((question) => question.id !== 'court_header');
+            const courtQuestion = questions.find((question) => question.id === 'court_header');
+            const grid = document.getElementById('intake-question-grid');
+            const stepList = document.getElementById('intake-step-list');
+            activeIntakeQuestionIndex = Math.max(0, Math.min(activeIntakeQuestionIndex, Math.max(coreQuestions.length - 1, 0)));
+            stepList.innerHTML = coreQuestions.map((question, index) => {
+                const display = intakeDisplayCopy[question.id] || {};
+                const label = display.label || question.label || `Question ${index + 1}`;
+                return `
+                    <button
+                        class="intake-step-button"
+                        type="button"
+                        data-intake-step-target="${escapeHtml(question.id)}"
+                    >${escapeHtml(`${index + 1}. ${label}`)}</button>
+                `;
+            }).join('');
+            grid.innerHTML = [
+                ...coreQuestions.map((question, index) => renderIntakeCard(question, index, index === activeIntakeQuestionIndex, false)),
+                courtQuestion ? `
+                    <details class="intake-court-details" id="intake-court-details">
+                        <summary>Court details (optional)</summary>
+                        ${renderIntakeCard(courtQuestion, coreQuestions.length, false, true)}
+                    </details>
+                ` : '',
+            ].join('');
+            updateIntakeWizardState();
             renderCaptionPreview();
         }
 
@@ -6553,6 +7195,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const claimType = claimTypeNode && claimTypeNode.value
                 ? claimTypeNode.value
                 : ((((workspaceSession || {}).session) || {}).claim_type || 'retaliation');
+            const civilActionNode = document.getElementById('draft-civil-action-number');
+            const civilActionNumber = civilActionNode && civilActionNode.value
+                ? civilActionNode.value.trim()
+                : '________________';
             const complaintHeading = `COMPLAINT FOR ${String(claimType).replace(/_/g, ' ').toUpperCase()}`;
             const requestedReliefItems = currentRequestedReliefItems();
             const reliefLines = requestedReliefItems.length
@@ -6566,7 +7212,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 'v.',
                 `${defendant}, Defendant.`,
                 '',
-                'Civil Action No. ________________',
+                `Civil Action No. ${civilActionNumber || '________________'}`,
                 complaintHeading,
                 'JURY TRIAL DEMANDED',
                 '',
@@ -6805,29 +7451,53 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     }).join('')}
                 </div>
             `;
-            supportGrid.innerHTML = (review.support_matrix || []).map((item) => `
-                <div class="support-state-card is-${escapeHtml(describeSupportStrength(item).label)}">
-                    <div class="support-state-header">
-                        <strong>${escapeHtml(item.label)}</strong>
-                        <span class="chip ${escapeHtml(describeSupportStrength(item).chipClass)}">${escapeHtml(describeSupportStrength(item).label)}</span>
+            supportGrid.innerHTML = (review.support_matrix || []).map((item) => {
+                const strength = describeSupportStrength(item);
+                const needsProofAction = strength.label !== 'grounded';
+                const actionVerb = item.supported ? 'Add corroboration for' : 'Add proof for';
+                return `
+                    <div class="support-state-card is-${escapeHtml(strength.label)}">
+                        <div class="support-state-header">
+                            <strong>${escapeHtml(item.label)}</strong>
+                            <span class="chip ${escapeHtml(strength.chipClass)}">${escapeHtml(strength.label)}</span>
+                        </div>
+                        <div class="chip-row" style="margin-top: 10px;">
+                            <span class="chip">Intake ${item.intake_supported ? 'yes' : 'no'}</span>
+                            <span class="chip">${item.testimony_count} testimony</span>
+                            <span class="chip">${item.document_count} documents</span>
+                        </div>
+                        <div class="support-state-body">
+                            <p>${escapeHtml(strength.detail)}</p>
+                        </div>
+                        <div class="support-state-next">${item.supported ? 'Next check: make sure the saved proof still matches the synopsis and requested relief.' : `Next move: add targeted proof that directly strengthens ${item.label.toLowerCase()}.`}</div>
+                        ${needsProofAction ? `
+                            <div class="button-row support-state-actions">
+                                <button
+                                    class="secondary evidence-shortcut-action"
+                                    type="button"
+                                    data-evidence-kind="document"
+                                    data-gap-id="${escapeHtml(item.id)}"
+                                    data-gap-label="${escapeHtml(item.label)}"
+                                >${escapeHtml(actionVerb)} ${escapeHtml(item.label)}</button>
+                                <button
+                                    class="secondary evidence-shortcut-action"
+                                    type="button"
+                                    data-evidence-kind="testimony"
+                                    data-gap-id="${escapeHtml(item.id)}"
+                                    data-gap-label="${escapeHtml(item.label)}"
+                                >Add testimony for ${escapeHtml(item.label)}</button>
+                            </div>
+                        ` : ''}
                     </div>
-                    <div class="chip-row" style="margin-top: 10px;">
-                        <span class="chip">Intake ${item.intake_supported ? 'yes' : 'no'}</span>
-                        <span class="chip">${item.testimony_count} testimony</span>
-                        <span class="chip">${item.document_count} documents</span>
-                    </div>
-                    <div class="support-state-body">
-                        <p>${escapeHtml(describeSupportStrength(item).detail)}</p>
-                    </div>
-                    <div class="support-state-next">${item.supported ? 'Next check: make sure the saved proof still matches the synopsis and requested relief.' : `Next move: add targeted proof that directly strengthens ${item.label.toLowerCase()}.`}</div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
             recommended.innerHTML = (review.recommended_actions || []).map((item) => `
                 <span class="chip">${escapeHtml(item.title)}: ${escapeHtml(item.detail)}</span>
             `).join('');
             reviewOverview.innerHTML = `
-                <span class="chip good">supported: ${escapeHtml(String(overview.supported_elements || 0))}</span>
-                <span class="chip warn">missing: ${escapeHtml(String(overview.missing_elements || 0))}</span>
+                <span class="chip good">coverage: ${escapeHtml(String(overview.supported_elements || 0))}/${escapeHtml(String(totalElements || 0))}</span>
+                <span class="chip warn">uncovered: ${escapeHtml(String(overview.missing_elements || 0))}</span>
+                <span class="chip warn">thin corroboration: ${escapeHtml(String(strengthBuckets.thin || 0))}</span>
                 <span class="chip">testimony: ${escapeHtml(String(overview.testimony_items || 0))}</span>
                 <span class="chip">documents: ${escapeHtml(String(overview.document_items || 0))}</span>
             `;
@@ -6992,6 +7662,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : (resolvedDraft.hasDraft
                     ? 'A complaint draft exists for this session, but the current tab is still hydrating the latest draft body and generation metadata.'
                     : 'Draft generation strategy details will appear here once a complaint is generated.');
+            renderDraftPlaceholderResolver();
             renderDraftReadiness(sessionPayload);
             renderDraftExportIntegrity(sessionPayload);
             syncSynopsisMirrors(document.getElementById('case-synopsis').value);
@@ -7182,6 +7853,56 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 warnings.push('Signature block still looks sparse and may be missing contact details.');
             }
             return warnings;
+        }
+
+        function renderDraftPlaceholderResolver() {
+            const note = document.getElementById('draft-placeholder-resolver-note');
+            const status = document.getElementById('draft-civil-action-status');
+            const input = document.getElementById('draft-civil-action-number');
+            const draftBody = String((document.getElementById('draft-body') || {}).value || '');
+            if (!note || !status || !input) {
+                return;
+            }
+            const civilActionNumber = String(input.value || '').trim();
+            const hasCivilActionPlaceholder = /Civil Action No\.\s*_+/i.test(draftBody);
+            if (!civilActionNumber) {
+                note.textContent = 'Civil Action No. is still blank. You can leave it blank for attorney review, but it should stay visible as unresolved filing text.';
+                status.textContent = hasCivilActionPlaceholder
+                    ? 'Draft body still contains the Civil Action No. placeholder.'
+                    : 'Caption preview will keep the Civil Action No. placeholder until a value is entered.';
+                return;
+            }
+            note.textContent = `Civil Action No. will appear in the live caption preview as ${civilActionNumber}.`;
+            status.textContent = hasCivilActionPlaceholder
+                ? 'Draft body still has placeholder underscores. Use Apply To Draft Body when this number should replace them.'
+                : 'No Civil Action No. placeholder was detected in the current draft body.';
+        }
+
+        function applyCivilActionNumberToDraftBody() {
+            const input = document.getElementById('draft-civil-action-number');
+            const draftBodyNode = document.getElementById('draft-body');
+            if (!input || !draftBodyNode) {
+                return;
+            }
+            const civilActionNumber = String(input.value || '').trim();
+            if (!civilActionNumber) {
+                setStatus('Enter a Civil Action No. before applying it to the draft body, or leave it visibly blank for attorney review.');
+                renderDraftPlaceholderResolver();
+                return;
+            }
+            const originalBody = String(draftBodyNode.value || '');
+            const nextBody = originalBody.replace(/Civil Action No\.\s*_+/gi, `Civil Action No. ${civilActionNumber}`);
+            if (nextBody === originalBody) {
+                setStatus('No Civil Action No. placeholder was found in the draft body. The caption preview still uses the entered number.');
+            } else {
+                draftBodyNode.value = nextBody;
+                document.getElementById('draft-preview').textContent = nextBody;
+                setStatus('Civil Action No. placeholder replaced in the draft body.');
+            }
+            renderCaptionPreview();
+            renderDraftPlaceholderResolver();
+            renderDraftExportIntegrity(workspaceSession || {});
+            renderDraftReadiness(workspaceSession || {});
         }
 
         function renderDraftExportIntegrity(sessionPayload) {
@@ -7616,10 +8337,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 blockerText.push('the complaint packet has not been exported yet');
             }
             if (draftSummaryGateNode) {
-                draftSummaryGateNode.dataset.gateRole = 'secondary-summary';
+                draftSummaryGateNode.dataset.gateRole = 'primary-summary';
             }
             if (releaseGateCardNode) {
-                releaseGateCardNode.dataset.canonicalGate = 'primary';
+                releaseGateCardNode.dataset.canonicalGate = 'action-boundary';
                 releaseGateCardNode.dataset.downloadState = downloadState;
                 releaseGateCardNode.dataset.primaryNextAction = primaryFixAction.targetTab || 'review';
             }
@@ -7817,7 +8538,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             }
             if (releaseGateSummaryNode) {
                 releaseGateSummaryNode.textContent = [
-                    'Keep this gate visible before download',
+                    'Action boundary mirrors the pinned filing-readiness gate above',
                     `${String((canonicalReadiness.gate || {}).status || (exportAllowed ? 'READY' : 'BLOCKED'))} | ${(canonicalReadiness.gate && canonicalReadiness.gate.blocking_reasons && canonicalReadiness.gate.blocking_reasons[0]) || 'No blocker detected.'} | Fix now: ${primaryFixAction.label}`,
                     `Release gate verdict: ${releaseVerdict ? releaseVerdict.toUpperCase() : 'UNKNOWN'}`,
                     `Primary action: ${canonicalReadiness.primaryAction}`,
@@ -7880,6 +8601,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : `Download is blocked until ${blockerText.length ? blockerText.join('; ') : 'the canonical filing verdict clears the packet'}.`;
             });
             renderDraftExportIntegrity(sessionPayload);
+            renderAttorneyHandoffPanel(sessionPayload);
         }
 
         function buildPlaywrightAssertionFollowups(playwrightFollowups, screenshotFindings, carryForwardAssessment) {
@@ -9186,6 +9908,315 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             return lines.join('\n') || JSON.stringify(summary, null, 2);
         }
 
+        function currentComplaintOutputFeedback() {
+            const analysis = latestComplaintOutputAnalysis || ((latestPacketExport || {}).ui_feedback) || {};
+            return analysis && analysis.ui_feedback && typeof analysis.ui_feedback === 'object'
+                ? analysis.ui_feedback
+                : (analysis || {});
+        }
+
+        function resolveIpfsDatasetsTraceStatus() {
+            const capabilities = workspaceCapabilities || {};
+            const preflight = capabilities.environment_preflight || capabilities.ipfs_datasets_preflight || null;
+            const fallbackCommand = 'git submodule update --init --recursive ipfs_datasets_py';
+            if (!preflight || typeof preflight !== 'object') {
+                return {
+                    checked: false,
+                    available: false,
+                    label: 'not checked',
+                    detail: `No browser capability payload has confirmed ipfs_datasets_py yet. Route-safe fallback: run ${fallbackCommand}.`,
+                    fallbackCommand,
+                };
+            }
+            const allReady = Boolean(preflight.all_ready || preflight.status === 'ready');
+            const checks = preflight.checks && typeof preflight.checks === 'object' ? preflight.checks : {};
+            const missingChecks = Object.entries(checks)
+                .filter(([, value]) => !Boolean((value || {}).exists))
+                .map(([key]) => key);
+            return {
+                checked: true,
+                available: allReady,
+                label: allReady ? 'ready' : 'degraded',
+                detail: allReady
+                    ? 'ipfs_datasets_py trace surfaces are present for the neurosymbolic review handoff.'
+                    : `ipfs_datasets_py trace surfaces are not fully available. Missing: ${missingChecks.join(', ') || 'unknown'}. Route-safe fallback: run ${fallbackCommand}.`,
+                fallbackCommand,
+                missingChecks,
+            };
+        }
+
+        function buildAttorneyHandoffState(sessionPayload) {
+            const payload = sessionPayload && typeof sessionPayload === 'object' ? sessionPayload : {};
+            const session = payload.session && typeof payload.session === 'object' ? payload.session : {};
+            const review = payload.review && typeof payload.review === 'object' ? payload.review : {};
+            const overview = review.overview || {};
+            const supportMatrix = Array.isArray(review.support_matrix) ? review.support_matrix : [];
+            const resolvedDraft = resolveDraftState(payload);
+            const draft = resolvedDraft.draft || {};
+            const packetDraft = (((latestPacketExport || {}).packet || {}).draft) || {};
+            const draftBodyNode = document.getElementById('draft-body');
+            const draftBody = String((draftBodyNode && draftBodyNode.value) || packetDraft.body || draft.body || '').trim();
+            const draftTitle = String((document.getElementById('draft-title') || {}).value || packetDraft.title || draft.title || 'Current complaint draft').trim();
+            const evidence = session.evidence || {};
+            const testimonyCount = Number(overview.testimony_items || (Array.isArray(evidence.testimony) ? evidence.testimony.length : 0) || 0);
+            const documentCount = Number(overview.document_items || (Array.isArray(evidence.documents) ? evidence.documents.length : 0) || 0);
+            const evidenceCount = testimonyCount + documentCount;
+            const supportedElements = Number(overview.supported_elements || 0);
+            const missingElements = Number(overview.missing_elements || 0);
+            const outputFeedback = currentComplaintOutputFeedback();
+            const releaseGate = outputFeedback.release_gate || {};
+            const releaseVerdict = String(releaseGate.verdict || '').trim().toLowerCase();
+            const releasePass = releaseVerdict === 'pass';
+            const provenance = workspaceFilingProvenance && typeof workspaceFilingProvenance === 'object' ? workspaceFilingProvenance : {};
+            const hasProvenance = Boolean(Object.keys(provenance).length);
+            const ipfsStatus = resolveIpfsDatasetsTraceStatus();
+            const checklist = [
+                {
+                    id: 'draft',
+                    label: 'Complaint draft',
+                    complete: Boolean(draftBody),
+                    critical: true,
+                    detail: draftBody
+                        ? `${draftTitle} is loaded for attorney review.`
+                        : 'Generate or paste a complaint draft before staging attorney review.',
+                },
+                {
+                    id: 'packet',
+                    label: 'Complaint packet export',
+                    complete: Boolean(latestPacketExport && latestPacketExport.packet),
+                    critical: true,
+                    detail: latestPacketExport
+                        ? 'Packet JSON and download formats are available from the shared MCP export path.'
+                        : 'Export the complaint packet so intake, evidence, review, and draft content travel together.',
+                },
+                {
+                    id: 'evidence',
+                    label: 'Evidence map',
+                    complete: evidenceCount > 0,
+                    critical: true,
+                    detail: evidenceCount > 0
+                        ? `${evidenceCount} evidence item${evidenceCount === 1 ? '' : 's'} mapped (${testimonyCount} testimony, ${documentCount} document).`
+                        : 'Attach at least one targeted evidence item so counsel can see what supports the allegations.',
+                },
+                {
+                    id: 'support',
+                    label: 'Support matrix',
+                    complete: supportMatrix.length > 0 && missingElements === 0,
+                    critical: true,
+                    detail: supportMatrix.length
+                        ? `${supportedElements} supported element${supportedElements === 1 ? '' : 's'}; ${missingElements} open gap${missingElements === 1 ? '' : 's'} remain.`
+                        : 'Run Review so the support matrix is visible before attorney handoff.',
+                },
+                {
+                    id: 'release',
+                    label: 'Release gate',
+                    complete: Boolean(releaseGate.verdict) && releasePass,
+                    critical: true,
+                    detail: releaseGate.verdict
+                        ? `Verdict: ${String(releaseGate.verdict).toUpperCase()}. ${releaseGate.reason || 'No reason supplied.'}`
+                        : 'Run packet analysis so the release-gate verdict is attached.',
+                },
+                {
+                    id: 'trace',
+                    label: 'Neurosymbolic/IPFS trace',
+                    complete: hasProvenance && ipfsStatus.available,
+                    critical: true,
+                    detail: hasProvenance
+                        ? `${ipfsStatus.detail} Filing provenance route is attached.`
+                        : `${ipfsStatus.detail} Refresh filing provenance before staging the handoff.`,
+                },
+            ];
+            const overrideReason = String((document.getElementById('attorney-handoff-override-reason') || {}).value || '').trim();
+            const blockingChecks = checklist.filter((entry) => entry.critical && !entry.complete);
+            const ready = blockingChecks.length === 0;
+            const sendAllowed = ready || overrideReason.length >= 12;
+            const state = ready ? 'ready' : (sendAllowed ? 'override' : 'blocked');
+            const routerPath = [
+                ((provenance.draft_backend || {}).strategy) || provenance.draft_strategy,
+                ((provenance.draft_backend || {}).provider),
+                ((provenance.draft_backend || {}).model),
+            ].map((item) => String(item || '').trim()).filter(Boolean).join(' / ') || 'not captured yet';
+            const criticPath = [
+                ((provenance.complaint_output_router_backend || {}).strategy),
+                ((provenance.complaint_output_router_backend || {}).provider),
+                ((provenance.complaint_output_router_backend || {}).model),
+            ].map((item) => String(item || '').trim()).filter(Boolean).join(' / ') || 'not captured yet';
+            const payloadSummary = [
+                'Attorney Handoff Packet',
+                `Session: ${workspaceUserId || session.user_id || 'unknown'}`,
+                `Draft: ${draftTitle}`,
+                `Evidence map: ${evidenceCount} item${evidenceCount === 1 ? '' : 's'} (${testimonyCount} testimony, ${documentCount} document)`,
+                `Support matrix: ${supportedElements} supported / ${missingElements} open gaps`,
+                `Release gate: ${releaseGate.verdict ? String(releaseGate.verdict).toUpperCase() : 'not run'}${releaseGate.reason ? ` - ${releaseGate.reason}` : ''}`,
+                `Generator route: ${routerPath}`,
+                `Complaint-output critic route: ${criticPath}`,
+                `Neurosymbolic trace: ${hasProvenance ? 'filing provenance attached' : 'filing provenance not attached yet'}`,
+                `IPFS dataset surface: ${ipfsStatus.label}`,
+                ipfsStatus.available ? 'ipfs_datasets_py: ready for linked review trace.' : `ipfs_datasets_py fallback: ${ipfsStatus.fallbackCommand}`,
+                blockingChecks.length ? `Open handoff blockers: ${blockingChecks.map((entry) => entry.label).join('; ')}` : 'Open handoff blockers: none',
+                overrideReason ? `Override reason: ${overrideReason}` : 'Override reason: none',
+                'Attorney packet contents: complaint draft, packet JSON, evidence map, support matrix, release gate, filing provenance, and counsel review notes.',
+            ];
+            return {
+                checklist,
+                blockingChecks,
+                ready,
+                sendAllowed,
+                state,
+                overrideReason,
+                releaseVerdict,
+                ipfsStatus,
+                payloadSummary,
+                payload: {
+                    user_id: workspaceUserId || session.user_id || 'unknown',
+                    draft_title: draftTitle,
+                    evidence_count: evidenceCount,
+                    supported_elements: supportedElements,
+                    missing_elements: missingElements,
+                    release_gate: releaseGate,
+                    filing_provenance: provenance,
+                    ipfs_datasets_status: ipfsStatus,
+                    checklist,
+                    override_reason: overrideReason || null,
+                    built_at: new Date().toISOString(),
+                },
+            };
+        }
+
+        function renderAttorneyHandoffPanel(sessionPayload) {
+            const card = document.getElementById('attorney-handoff-card');
+            if (!card) {
+                return;
+            }
+            const state = buildAttorneyHandoffState(sessionPayload || workspaceSession || {});
+            const stateChip = document.getElementById('attorney-handoff-state-chip');
+            const releaseChip = document.getElementById('attorney-handoff-release-chip');
+            const ipfsChip = document.getElementById('attorney-handoff-ipfs-chip');
+            const checklistNode = document.getElementById('attorney-handoff-checklist');
+            const statusNode = document.getElementById('attorney-handoff-status');
+            const previewNode = document.getElementById('attorney-handoff-preview');
+            const buildButton = document.getElementById('attorney-handoff-build-button');
+            const sendButton = document.getElementById('attorney-handoff-send-button');
+            card.dataset.handoffState = state.state;
+            if (stateChip) {
+                stateChip.className = `chip ${state.ready ? 'good' : 'warn'}`;
+                stateChip.textContent = state.ready
+                    ? 'handoff: ready'
+                    : state.sendAllowed
+                        ? 'handoff: override ready'
+                        : 'handoff: blocked';
+            }
+            if (releaseChip) {
+                releaseChip.className = `chip ${state.releaseVerdict === 'pass' ? 'good' : 'warn'}`;
+                releaseChip.textContent = `release gate: ${state.releaseVerdict || 'not run'}`;
+            }
+            if (ipfsChip) {
+                ipfsChip.className = `chip ${state.ipfsStatus.available ? 'good' : 'warn'}`;
+                ipfsChip.textContent = `ipfs_datasets_py: ${state.ipfsStatus.label}`;
+            }
+            if (checklistNode) {
+                checklistNode.innerHTML = state.checklist.map((entry) => `
+                    <div class="item" data-check-state="${entry.complete ? 'complete' : 'blocked'}">
+                        <strong>${escapeHtml(entry.complete ? `Ready: ${entry.label}` : `Needs work: ${entry.label}`)}</strong>
+                        <div class="muted">${escapeHtml(entry.detail)}</div>
+                    </div>
+                `).join('');
+            }
+            if (statusNode) {
+                statusNode.textContent = state.ready
+                    ? 'Attorney handoff is ready to stage for counsel review.'
+                    : state.sendAllowed
+                        ? 'Attorney handoff can be staged with the written override reason; blockers remain visible in the packet.'
+                        : `Attorney handoff is blocked until ${state.blockingChecks.map((entry) => entry.label).join(', ')} is clear or an override reason is entered.`;
+            }
+            if (previewNode && latestAttorneyHandoffPacket) {
+                previewNode.textContent = latestAttorneyHandoffPacket.preview;
+            } else if (previewNode) {
+                previewNode.textContent = 'No attorney handoff packet built yet.\n\n' + state.payloadSummary.join('\n');
+            }
+            if (buildButton) {
+                const hasDraft = state.checklist.some((entry) => entry.id === 'draft' && entry.complete);
+                setButtonGateState(buildButton, hasDraft, hasDraft
+                    ? 'Build or refresh the attorney handoff packet from the current complaint state.'
+                    : 'Generate or paste a complaint draft before building the attorney handoff packet.');
+            }
+            if (sendButton) {
+                setButtonGateState(sendButton, state.sendAllowed, state.sendAllowed
+                    ? 'Stage this packet for attorney review. This does not file anything with a court.'
+                    : 'Complete all handoff checks or enter a written override reason before staging attorney review.');
+                sendButton.textContent = state.ready
+                    ? 'Send to Attorney Review'
+                    : state.sendAllowed
+                        ? 'Send With Override'
+                        : 'Send to Attorney Review';
+            }
+        }
+
+        async function buildAttorneyHandoffPacket() {
+            setBusyStatus('Building the attorney handoff packet with export, release-gate, and neurosymbolic trace signals…');
+            try {
+                if (!latestPacketExport) {
+                    await exportPacket();
+                }
+                if (!latestComplaintOutputAnalysis) {
+                    await analyzeComplaintOutputPanel();
+                }
+                if (!workspaceClientReleaseGate) {
+                    await refreshClientReleaseGatePanel();
+                }
+                if (!workspaceFilingProvenance) {
+                    await refreshFilingProvenancePanel();
+                }
+                const state = buildAttorneyHandoffState(workspaceSession || {});
+                latestAttorneyHandoffPacket = {
+                    payload: state.payload,
+                    preview: state.payloadSummary.join('\n'),
+                };
+                renderAttorneyHandoffPanel(workspaceSession || {});
+                renderWorkflowOperations();
+                setStatus(state.ready
+                    ? 'Attorney handoff packet built and ready for counsel review.'
+                    : 'Attorney handoff packet built with visible blockers; enter an override reason before staging attorney review.');
+            } catch (error) {
+                setStatus(`Attorney handoff packet build failed: ${String((error && error.message) || error || 'Unknown error')}`);
+                throw error;
+            }
+        }
+
+        async function sendAttorneyHandoffPacket() {
+            const state = buildAttorneyHandoffState(workspaceSession || {});
+            if (!state.sendAllowed) {
+                renderAttorneyHandoffPanel(workspaceSession || {});
+                setStatus('Attorney review is blocked until all handoff checks are clear or an override reason is entered.');
+                return;
+            }
+            if (!latestAttorneyHandoffPacket) {
+                latestAttorneyHandoffPacket = {
+                    payload: state.payload,
+                    preview: state.payloadSummary.join('\n'),
+                };
+            }
+            const stagedAt = new Date().toISOString();
+            latestAttorneyHandoffPacket = Object.assign({}, latestAttorneyHandoffPacket, {
+                staged_at: stagedAt,
+                payload: Object.assign({}, latestAttorneyHandoffPacket.payload || state.payload, {
+                    staged_at: stagedAt,
+                    override_reason: state.overrideReason || null,
+                }),
+                preview: [
+                    'Attorney review packet staged',
+                    `Staged at: ${stagedAt}`,
+                    state.overrideReason ? `Override reason: ${state.overrideReason}` : 'Override reason: none',
+                    '',
+                    latestAttorneyHandoffPacket.preview || state.payloadSummary.join('\n'),
+                ].join('\n'),
+            });
+            renderAttorneyHandoffPanel(workspaceSession || {});
+            setStatus(state.overrideReason
+                ? 'Attorney review packet staged with override reason. Nothing has been filed with a court.'
+                : 'Attorney review packet staged. Nothing has been filed with a court.');
+        }
+
         function hydratePersistedWorkflowArtifacts(sessionPayload) {
             const session = (sessionPayload && sessionPayload.session) || {};
             const persistedPacketExport = session && typeof session.latest_packet_export === 'object'
@@ -9486,15 +10517,15 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 disabledReason: readyWriteAllowed
                     ? 'Enabled: Step 1 can save ready confirmation.'
                     : firstUnmet && firstUnmet.id === 'question'
-                        ? 'After you use Open Chat and ask one document question, Mark Ready To Label appears here.'
+                        ? 'After you use Open Chat and ask one document question, the ready-to-label confirmation appears here.'
                         : firstUnmet && firstUnmet.id === 'impact'
-                            ? 'Waiting for the chat impact summary before Mark Ready To Label can save.'
+                            ? 'Waiting for the chat impact summary before the ready-to-label confirmation can save.'
                             : firstUnmet && firstUnmet.id === 'ready'
-                                ? 'Mark Ready To Label is ready. This will be the first selected-document update.'
+                                ? 'Ready-to-label confirmation is available. This will be the first selected-document update.'
                                 : `Disabled: ${firstUnmet ? firstUnmet.unmetReason : 'ready confirmation already saved'}.`,
                 saveStatus: readySaved
                     ? 'Persistence: ready confirmation saved.'
-                    : 'Persistence: local draft only until Mark Ready.',
+                    : 'Persistence: local draft only until ready confirmation.',
             };
         }
 
@@ -9530,7 +10561,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     : firstUnmetId === 'impact'
                         ? 'A document question has been asked. Generate an impact summary before the ready confirmation can save.'
                         : firstUnmetId === 'ready'
-                            ? 'The question and impact summary are present. Mark Ready To Label is the first selected-document write boundary.'
+                            ? 'The question and impact summary are present. The ready-to-label confirmation is the first selected-document write boundary.'
                             : 'All Step 1 requirements are complete.';
             const primaryActionKind = state.readySaved
                 ? 'none'
@@ -9546,7 +10577,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : primaryActionKind === 'impact'
                     ? 'Generate Impact Summary'
                     : primaryActionKind === 'ready'
-                        ? 'Mark Ready To Label'
+                        ? 'Confirm this document is ready to label'
                         : 'Step 1 Complete';
             return {
                 state,
@@ -9595,7 +10626,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 primaryButton.disabled = presenter.primaryActionKind !== 'impact';
             }
             if (readyButton) {
-                readyButton.textContent = presenter.primaryActionKind === 'ready' ? 'Mark Ready To Label' : 'Mark Ready To Label';
+                readyButton.textContent = presenter.primaryActionKind === 'ready' ? 'Confirm this document is ready to label' : 'Confirm this document is ready to label';
                 readyButton.hidden = presenter.primaryActionKind !== 'ready';
                 readyButton.disabled = !presenter.readyEligible;
             }
@@ -9860,7 +10891,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 mobileAskPersistence.textContent = 'Persistence: nothing saved yet.';
                 mobileReadyLabelButton.disabled = true;
                 mobileReadyLabelButton.dataset.readyVisibility = 'hidden';
-                mobileReadyLabelButton.textContent = 'Mark Ready To Label';
+                mobileReadyLabelButton.textContent = 'Confirm this document is ready to label';
                 mobileSaveStatus.textContent = 'Persistence: no document selected.';
                 mobileSaveStatus.dataset.saveState = 'idle';
                 mobileSaveStatus.dataset.persistenceMode = 'none';
@@ -10004,11 +11035,11 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 ? `<strong>Available next</strong> ${escapeHtml(step1State.firstUnmet ? step1State.firstUnmet.text : 'Step 1 is complete.')}`
                 : `<strong>Not started</strong> ${escapeHtml(mobileDocketStepCopy.ask.outcome)}`;
             mobileNextUnlock.textContent = step1State.firstUnmet && step1State.firstUnmet.id === 'question'
-                ? 'Ask your first document-specific question to show Mark Ready To Label.'
+                ? 'Ask your first document-specific question to show Confirm this document is ready to label.'
                 : step1State.firstUnmet && step1State.firstUnmet.id === 'impact'
-                    ? 'Review the chat impact summary to turn on Mark Ready To Label.'
+                    ? 'Review the chat impact summary to turn on Confirm this document is ready to label.'
                     : step1State.firstUnmet && step1State.firstUnmet.id === 'ready'
-                        ? 'Mark Ready To Label is ready. This will be the first document update.'
+                        ? 'Ready-to-label confirmation is available. This will be the first document update.'
                         : 'Step 1 complete. Step 2 is unlocked.';
             mobileAskFeedback.textContent = questionCount > 0
                 ? `Next unmet item: ${step1State.firstUnmet ? step1State.firstUnmet.unmetReason : 'none'}.`
@@ -10021,12 +11052,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 ? 'guided'
                 : 'hidden';
             mobileReadyLabelButton.textContent = step1State.readySaved
-                ? 'Ready To Label Saved'
+                ? 'Ready confirmation saved'
                 : step1State.readyWriteAllowed
-                    ? 'Mark Ready To Label'
+                    ? 'Confirm this document is ready to label'
                     : step1State.hasQuestion
-                        ? 'Mark Ready To Label'
-                        : 'Next After Chat: Mark Ready To Label';
+                        ? 'Confirm this document is ready to label'
+                        : 'Next after chat: Confirm this document is ready to label';
             mobileReadyDisabledReason.textContent = step1State.disabledReason;
             mobileSaveStatus.textContent = step1State.saveStatus;
             mobileSaveStatus.dataset.saveState = step1State.readySaved ? 'saved' : 'idle';
@@ -10381,6 +11412,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 document.getElementById('operations-export-tool-button'),
                 document.getElementById('integrations-start-export-button'),
             ].filter(Boolean);
+            const attorneyHandoffButtons = [
+                document.getElementById('integrations-start-attorney-handoff-button'),
+            ].filter(Boolean);
             const auditButtons = [
                 document.getElementById('operations-ui-audit-tool-button'),
                 document.getElementById('integrations-start-ux-audit-button'),
@@ -10389,6 +11423,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const hasExportPath = toolNames.has('complaint.export_packet') || toolNames.has('complaint.export_complaint_markdown');
             const hasUiAuditPath = toolNames.has('complaint.review_ui') || toolNames.has('complaint.optimize_ui');
             const hasSchemaPath = toolNames.has('complaint.get_workspace_data_schema');
+            const resolvedDraft = resolveDraftState(sessionPayload || {});
 
             phaseChip.textContent = `case phase: ${state.phaseLabel}`;
             toolChip.textContent = `tools: ${availableToolCount} shared MCP tools`;
@@ -10417,6 +11452,9 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 : 'The mediator-brief tool is not visible in the current MCP tool list.'));
             exportButtons.forEach((button) => setButtonGateState(button, hasExportPath && state.builderReady, hasExportPath
                 ? state.builderGateReason
+                : 'The export tools are not visible in the current MCP tool list.'));
+            attorneyHandoffButtons.forEach((button) => setButtonGateState(button, hasExportPath && (state.builderReady || resolvedDraft.hasDraft), hasExportPath
+                ? 'Build the counsel-review packet from the current draft, packet export, release gate, and neurosymbolic trace.'
                 : 'The export tools are not visible in the current MCP tool list.'));
             auditButtons.forEach((button) => setButtonGateState(button, hasUiAuditPath, hasUiAuditPath
                 ? 'The actor/critic tool path is available through the shared MCP surface.'
@@ -10640,6 +11678,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             renderGmailDuckdbPipelineSummary();
             renderEmailDuckdbSearchSummary();
             renderGmailImportCommandExamples();
+            updateEvidenceClaimElementExamples();
             mirrorWorkspaceDataSchemaPreview();
             if (workspaceUiReadiness && typeof workspaceUiReadiness === 'object') {
                 renderUiReviewResult(normalizeUiReadinessResultForDisplay(workspaceUiReadiness));
@@ -12099,6 +13138,7 @@ function extractComplaintOutputSignals(result) {
             const releaseGate = (packetPayload.ui_feedback || {}).release_gate || {};
             document.getElementById('packet-preview').textContent = buildPacketPreviewText(packetPayload);
             syncPacketDownloadState();
+            renderDraftReadiness(workspaceSession || {});
             renderWorkflowOperations();
             setStatus(releaseGate.verdict
                 ? `Complaint packet exported. Release gate: ${String(releaseGate.verdict).toUpperCase()}.`
@@ -12109,6 +13149,7 @@ function extractComplaintOutputSignals(result) {
             setBusyStatus('Analyzing the exported complaint output for UI/UX improvement suggestions…');
             latestComplaintOutputAnalysis = await client.analyzeComplaintOutput(workspaceUserId);
             setStatus('Complaint output analysis refreshed.');
+            renderDraftReadiness(workspaceSession || {});
             renderWorkflowOperations();
         }
 
@@ -12120,6 +13161,7 @@ function extractComplaintOutputSignals(result) {
             latestComplaintOutputAnalysis = Object.assign({}, latestComplaintOutputAnalysis || {}, {
                 export_critic: criticResult,
             });
+            renderDraftReadiness(workspaceSession || {});
             renderWorkflowOperations();
             setStatus('Generated complaint exports reviewed through the export critic.');
         }
@@ -12177,6 +13219,7 @@ function extractComplaintOutputSignals(result) {
         async function refreshClientReleaseGatePanel() {
             setBusyStatus('Refreshing the combined client-safety release gate through the MCP tools…');
             workspaceClientReleaseGate = await client.getClientReleaseGate(workspaceUserId);
+            renderDraftReadiness(workspaceSession || {});
             renderWorkflowOperations();
             setStatus('Client release gate refreshed.');
         }
@@ -12191,6 +13234,7 @@ function extractComplaintOutputSignals(result) {
         async function refreshFilingProvenancePanel() {
             setBusyStatus('Refreshing filing provenance through the MCP tools…');
             workspaceFilingProvenance = await client.getFilingProvenance(workspaceUserId);
+            renderDraftReadiness(workspaceSession || {});
             renderWorkflowOperations();
             setStatus('Filing provenance refreshed.');
         }
@@ -12857,7 +13901,41 @@ function extractComplaintOutputSignals(result) {
         });
         document.getElementById('save-intake-button').addEventListener('click', saveIntake);
         document.getElementById('refresh-session-button').addEventListener('click', refreshWorkspace);
+        document.getElementById('intake-step-list').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-intake-step-target]');
+            if (!button) {
+                return;
+            }
+            activateIntakeQuestionById(button.dataset.intakeStepTarget, true);
+        });
+        document.getElementById('intake-back-button').addEventListener('click', () => {
+            activeIntakeQuestionIndex = Math.max(0, activeIntakeQuestionIndex - 1);
+            intakeShowAllFields = false;
+            updateIntakeWizardState({ focus: true });
+        });
+        document.getElementById('intake-next-button').addEventListener('click', () => {
+            const cards = Array.from(document.querySelectorAll('[data-intake-step-index][data-intake-optional="false"]'));
+            const maxIndex = Math.max(cards.length - 1, 0);
+            if (activeIntakeQuestionIndex >= maxIndex) {
+                intakeShowAllFields = true;
+                updateIntakeWizardState({ focus: false });
+                setStatus('Review the intake answers, then save when the story is clear enough to move forward.');
+                return;
+            }
+            activeIntakeQuestionIndex = Math.min(maxIndex, activeIntakeQuestionIndex + 1);
+            intakeShowAllFields = false;
+            updateIntakeWizardState({ focus: true });
+        });
+        document.getElementById('intake-show-all-button').addEventListener('click', () => {
+            intakeShowAllFields = !intakeShowAllFields;
+            const courtDetails = document.getElementById('intake-court-details');
+            if (courtDetails && intakeShowAllFields) {
+                courtDetails.open = true;
+            }
+            updateIntakeWizardState({ focus: false });
+        });
         document.getElementById('save-evidence-button').addEventListener('click', addEvidence);
+        document.getElementById('evidence-claim-element').addEventListener('change', updateEvidenceClaimElementExamples);
         document.getElementById('evidence-add-testimony-button').addEventListener('click', () => activateEvidenceComposer('testimony'));
         document.getElementById('evidence-add-document-button').addEventListener('click', () => activateEvidenceComposer('document'));
         document.getElementById('evidence-open-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so the current support gaps can be checked before more evidence is added.'));
@@ -12969,17 +14047,25 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('integrations-start-readiness-button').addEventListener('click', runOperationalToolReadiness);
         document.getElementById('integrations-start-mediator-button').addEventListener('click', runOperationalMediatorHandoff);
         document.getElementById('integrations-start-export-button').addEventListener('click', runOperationalExportReview);
+        document.getElementById('integrations-start-attorney-handoff-button').addEventListener('click', async () => {
+            jumpToStage('draft', '#attorney-handoff-card', 'Opened Draft to build the attorney handoff packet.');
+            await buildAttorneyHandoffPacket();
+        });
         document.getElementById('integrations-start-ux-audit-button').addEventListener('click', () => jumpToStage('ux-review', '#ux-review-notes', 'Opened UX Audit from the integrations quick-start lane so the actor/critic workflow can continue.'));
         document.getElementById('export-packet-tool-button').addEventListener('click', exportPacket);
         document.getElementById('download-packet-tool-markdown-button').addEventListener('click', downloadPacket);
         document.getElementById('download-packet-tool-docx-button').addEventListener('click', downloadPacket);
         document.getElementById('download-packet-tool-pdf-button').addEventListener('click', downloadPacket);
+        document.getElementById('attorney-handoff-build-button').addEventListener('click', buildAttorneyHandoffPacket);
+        document.getElementById('attorney-handoff-send-button').addEventListener('click', sendAttorneyHandoffPacket);
+        document.getElementById('attorney-handoff-override-reason').addEventListener('input', () => renderAttorneyHandoffPanel(workspaceSession || {}));
         document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));
         document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));
         document.getElementById('unsupported-thin-go-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the unsupported-elements blocker so the record can be strengthened before export or download.'));
         document.getElementById('unsupported-thin-go-review-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the unsupported-elements blocker so the filing verdict can be checked before export or download.'));
         document.getElementById('draft-fix-intake-names-button').addEventListener('click', () => jumpToStage('intake', '#intake-party_name', 'Opened Intake so placeholder party names can be fixed before export.'));
         document.getElementById('draft-fix-caption-button').addEventListener('click', () => jumpToStage('draft', '#draft-title', 'Focused the draft caption so the filing title can be fixed before export.'));
+        document.getElementById('draft-fix-civil-action-button').addEventListener('click', () => jumpToStage('draft', '#draft-civil-action-number', 'Focused Civil Action No. so the placeholder can be resolved or intentionally left for attorney review.'));
         const draftReleaseOpenReviewButton = document.getElementById('draft-release-open-review-button');
         if (draftReleaseOpenReviewButton) {
             draftReleaseOpenReviewButton.addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review from the draft release gate so support gaps can be checked before download.'));
@@ -13004,11 +14090,42 @@ function extractComplaintOutputSignals(result) {
             renderDraftReadiness(workspaceSession || {});
             renderCaptionPreview();
         });
-        document.getElementById('draft-body').addEventListener('input', () => renderDraftReadiness(workspaceSession || {}));
+        document.getElementById('draft-body').addEventListener('input', () => {
+            renderDraftReadiness(workspaceSession || {});
+            renderDraftPlaceholderResolver();
+            renderDraftExportIntegrity(workspaceSession || {});
+        });
+        document.getElementById('draft-civil-action-number').addEventListener('input', () => {
+            renderCaptionPreview();
+            renderDraftPlaceholderResolver();
+        });
+        document.getElementById('draft-apply-civil-action-button').addEventListener('click', applyCivilActionNumberToDraftBody);
+        document.getElementById('draft-clear-civil-action-button').addEventListener('click', () => {
+            document.getElementById('draft-civil-action-number').value = '';
+            renderCaptionPreview();
+            renderDraftPlaceholderResolver();
+            setStatus('Civil Action No. left as a visible placeholder for attorney review.');
+        });
+        document.querySelector('.draft-section-nav').addEventListener('click', (event) => {
+            const button = event.target.closest('[data-draft-jump-target]');
+            if (!button) {
+                return;
+            }
+            const target = document.querySelector(button.dataset.draftJumpTarget || '');
+            if (!target) {
+                return;
+            }
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (typeof target.focus === 'function') {
+                target.focus({ preventScroll: true });
+            }
+            setStatus(`Opened Draft section: ${button.textContent.trim()}.`);
+        });
         document.addEventListener('input', (event) => {
             const target = event.target;
             if (target && target.matches && target.matches('[data-question-id]')) {
                 renderCaptionPreview();
+                updateIntakeWizardState();
             }
         });
         document.getElementById('action-button').addEventListener('click', () => {
@@ -13240,6 +14357,16 @@ function extractComplaintOutputSignals(result) {
                 console.warn('Failed to parse workspace sync event:', error);
             }
         });
+        syncResponsiveIntegrationDisclosures();
+        if (window.matchMedia) {
+            const integrationMediaQuery = window.matchMedia('(max-width: 640px)');
+            const syncDisclosures = () => syncResponsiveIntegrationDisclosures();
+            if (integrationMediaQuery.addEventListener) {
+                integrationMediaQuery.addEventListener('change', syncDisclosures);
+            } else if (integrationMediaQuery.addListener) {
+                integrationMediaQuery.addListener(syncDisclosures);
+            }
+        }
 
         client.bootstrapWorkspace(workspaceUserId).then(async (bootstrap) => {
             setWorkspaceHydrationState('loading');
