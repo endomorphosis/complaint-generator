@@ -984,12 +984,162 @@ function formalDiagnosticsPayload(userId = 'did:key:playwright-demo') {
   };
 }
 
+function neurosymbolicTracePayload(userId = 'did:key:playwright-demo') {
+  const sessionPayload = workspaceSessionPayload(userId);
+  const packetPayload = exportComplaintPacketPayload(userId);
+  const analysis = buildComplaintOutputAnalysis(userId);
+  const envPreflight = buildEnvironmentPreflight();
+  const packet = packetPayload.packet || {};
+  const draft = packet.draft || {};
+  const review = sessionPayload.review || {};
+  const overview = review.overview || {};
+  const supportMatrix = Array.isArray(review.support_matrix) ? review.support_matrix : [];
+  const evidence = ((sessionPayload.session || {}).evidence) || {};
+  const testimonyItems = Array.isArray(evidence.testimony) ? evidence.testimony : [];
+  const documentItems = Array.isArray(evidence.documents) ? evidence.documents : [];
+  const uiFeedback = analysis.ui_feedback || {};
+  const releaseGate = uiFeedback.release_gate || {};
+  const formalSections = uiFeedback.formal_sections_present || {};
+  const packetSlug = slugifyFilename(draft.title || 'complaint-packet');
+  const cidStatus = envPreflight.all_ready ? 'ready_for_car_publish' : 'submodule_or_preview_missing';
+  const datasetRefs = [
+    {
+      ref_id: 'complaint_packet_json',
+      piece_id: 'complaint_packet',
+      label: 'Complaint packet JSON',
+      uri: `workspace://${encodeURIComponent(userId)}/packets/${packetSlug}.json`,
+      export_tool: 'complaint.export_complaint_packet',
+      artifact_format: 'json',
+      cid: null,
+      cid_status: cidStatus,
+    },
+    {
+      ref_id: 'complaint_markdown',
+      piece_id: 'complaint_markdown',
+      label: 'Complaint Markdown artifact',
+      uri: `workspace://${encodeURIComponent(userId)}/artifacts/${packetSlug}.md`,
+      export_tool: 'complaint.export_complaint_markdown',
+      artifact_format: 'markdown',
+      cid: null,
+      cid_status: cidStatus,
+    },
+    {
+      ref_id: 'evidence_map',
+      piece_id: 'evidence_items',
+      label: 'Evidence map',
+      uri: `workspace://${encodeURIComponent(userId)}/evidence`,
+      item_count: testimonyItems.length + documentItems.length,
+      testimony_count: testimonyItems.length,
+      document_count: documentItems.length,
+      cid: null,
+      cid_status: cidStatus,
+    },
+    {
+      ref_id: 'support_matrix',
+      piece_id: 'claim_support_matrix',
+      label: 'Claim support matrix',
+      uri: `workspace://${encodeURIComponent(userId)}/review/support-matrix`,
+      supported_elements: Number(overview.supported_elements || 0),
+      missing_elements: Number(overview.missing_elements || 0),
+      cid: null,
+      cid_status: cidStatus,
+    },
+    {
+      ref_id: 'filing_release_gate',
+      piece_id: 'release_gate',
+      label: 'Filing release gate',
+      uri: `workspace://${encodeURIComponent(userId)}/release-gate`,
+      verdict: String(releaseGate.verdict || 'unknown'),
+      cid: null,
+      cid_status: cidStatus,
+    },
+  ];
+  const evidenceRefs = testimonyItems.concat(documentItems).map((item, index) => ({
+    ref_id: `evidence_${index + 1}`,
+    piece_id: 'evidence_item',
+    label: String(item.title || item.id || `Evidence ${index + 1}`),
+    claim_element_id: String(item.claim_element_id || 'unmapped'),
+    kind: String(item.kind || (index < testimonyItems.length ? 'testimony' : 'document')),
+    uri: `workspace://${encodeURIComponent(userId)}/evidence/${encodeURIComponent(String(item.id || index + 1))}`,
+    source: String(item.source || ''),
+    cid: null,
+    cid_status: cidStatus,
+  }));
+  const ruleHits = [
+    {
+      rule_id: 'pleading.caption.present',
+      label: 'Caption and civil action placeholder are visible',
+      status: formalSections.caption ? 'pass' : 'fail',
+      severity: 'critical',
+      evidence_refs: ['complaint_markdown'],
+      explanation: formalSections.caption
+        ? 'The generated complaint includes a court-style caption.'
+        : 'The generated complaint is missing the expected caption structure.',
+    },
+    {
+      rule_id: 'pleading.required_sections.present',
+      label: 'Required pleading sections are present',
+      status: Object.values(formalSections).filter(Boolean).length >= 9 ? 'pass' : 'warning',
+      severity: 'high',
+      evidence_refs: ['complaint_markdown'],
+      explanation: `${Object.values(formalSections).filter(Boolean).length} formal sections were detected in the complaint output.`,
+    },
+    {
+      rule_id: 'claim.support.coverage',
+      label: 'Tracked claim elements have support coverage',
+      status: Number(overview.missing_elements || 0) === 0 ? 'pass' : 'warning',
+      severity: 'high',
+      evidence_refs: ['support_matrix', 'evidence_map'],
+      explanation: `${Number(overview.supported_elements || 0)} supported elements and ${Number(overview.missing_elements || 0)} open support gaps are visible.`,
+    },
+    {
+      rule_id: 'claim.support.corroboration',
+      label: 'Support is corroborated by saved evidence',
+      status: (testimonyItems.length + documentItems.length) > 1 ? 'pass' : 'warning',
+      severity: 'medium',
+      evidence_refs: evidenceRefs.length ? evidenceRefs.slice(0, 6).map((item) => item.ref_id) : ['evidence_map'],
+      explanation: `${testimonyItems.length} testimony item(s) and ${documentItems.length} document item(s) are attached to the record.`,
+    },
+    {
+      rule_id: 'release_gate.verdict',
+      label: 'Client filing-readiness release gate',
+      status: String(releaseGate.verdict || '').toLowerCase() === 'pass' ? 'pass' : 'block',
+      severity: 'critical',
+      evidence_refs: ['filing_release_gate'],
+      explanation: releaseGate.reason || 'No release-gate reason was provided.',
+    },
+  ];
+  return {
+    trace_id: `trace-${packetSlug}`,
+    trace_schema: 'complaint_handoff_neurosymbolic_trace.v1',
+    trace_backend: 'ipfs_datasets_py',
+    ipfs_preflight: envPreflight,
+    dataset_refs: datasetRefs.concat(evidenceRefs),
+    reasoning_summary: {
+      claim_type: String(packet.claim_type || 'retaliation'),
+      draft_strategy: String(draft.draft_strategy || 'template'),
+      support_summary: `${Number(overview.supported_elements || 0)} supported element(s), ${Number(overview.missing_elements || 0)} open gap(s), ${testimonyItems.length + documentItems.length} saved evidence item(s).`,
+      release_gate_verdict: String(releaseGate.verdict || 'unknown'),
+      release_gate_reason: String(releaseGate.reason || ''),
+      filing_shape_score: Number(uiFeedback.filing_shape_score || 0),
+      claim_type_alignment_score: Number(uiFeedback.claim_type_alignment_score || 0),
+      route_summary: [
+        String((draft.draft_backend || {}).provider || draft.draft_strategy || 'template'),
+        String(((uiFeedback.router_review || {}).backend || {}).provider || ''),
+        String(((uiFeedback.router_review || {}).backend || {}).model || ''),
+      ].filter(Boolean).join(' / ') || 'template',
+    },
+    rule_hits: ruleHits,
+  };
+}
+
 function filingProvenancePayload(userId = 'did:key:playwright-demo') {
   const analysis = buildComplaintOutputAnalysis(userId);
   const packetPayload = exportComplaintPacketPayload(userId);
   const draft = (((packetPayload.packet || {}).draft) || {});
   const complaintBackend = Object.assign({}, (((analysis.ui_feedback || {}).router_review || {}).backend || {}));
   const exportCriticBackend = Object.assign({}, complaintBackend);
+  const neurosymbolicTrace = neurosymbolicTracePayload(userId);
   return {
     user_id: userId,
     claim_type: String(((packetPayload.packet || {}).claim_type) || 'retaliation'),
@@ -1006,6 +1156,10 @@ function filingProvenancePayload(userId = 'did:key:playwright-demo') {
     ui_workflow_type: 'ui_ux_closed_loop',
     artifact_formats: Array.isArray((packetPayload.packet_summary || {}).artifact_formats) ? packetPayload.packet_summary.artifact_formats : [],
     has_draft: Boolean((packetPayload.packet_summary || {}).has_draft),
+    dataset_refs: neurosymbolicTrace.dataset_refs,
+    reasoning_summary: neurosymbolicTrace.reasoning_summary,
+    rule_hits: neurosymbolicTrace.rule_hits,
+    neurosymbolic_trace: neurosymbolicTrace,
   };
 }
 
@@ -2411,6 +2565,20 @@ function renderSdkPlaygroundFallback(preflight) {
   </style>
 </head>
 <body>
+  <nav class="surface-links" data-surface-nav="primary" aria-label="Complaint Generator Navigation" style="display:flex;flex-wrap:wrap;gap:12px;margin:16px auto 0;max-width:980px;padding:0 18px;">
+    <a class="surface-link" href="/">Landing</a>
+    <a class="surface-link" href="/home">Account</a>
+    <a class="surface-link" href="/chat">Chat</a>
+    <a class="surface-link" href="/profile">Profile</a>
+    <a class="surface-link" href="/results">Results</a>
+    <a class="surface-link" href="/workspace">Workspace</a>
+    <a class="surface-link" href="/claim-support-review">Review</a>
+    <a class="surface-link" href="/document">Builder</a>
+    <a class="surface-link" href="/mlwysiwyg">Editor</a>
+    <a class="surface-link" href="/document/optimization-trace">Trace</a>
+    <a class="surface-link" href="/ipfs-datasets/sdk-playground" aria-current="page">SDK</a>
+    <a class="surface-link" href="/dashboards">Dashboards</a>
+  </nav>
   <main>
     <section class="card banner">
       SDK playground preview is unavailable. The server stayed online and returned this fallback page so other complaint routes continue to work.
@@ -2432,6 +2600,39 @@ function renderSdkPlaygroundFallback(preflight) {
   </main>
   <script src="/static/complaint_mcp_sdk.js"></script>
   <script src="/static/complaint_app_shell.js"></script>
+</body>
+</html>`;
+}
+
+function renderRawDashboardFallback(entry) {
+  const missingPath = ipfsTemplate(entry.templateName);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeXml(entry.title)} Fallback Dashboard</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f7f2e8; color: #1c1f24; }
+    main { max-width: 960px; margin: 0 auto; padding: 32px 18px; }
+    section { background: #fffdf8; border: 1px solid rgba(28, 31, 36, 0.14); border-radius: 16px; padding: 22px; box-shadow: 0 14px 30px rgba(28, 31, 36, 0.08); }
+    h1 { margin: 0 0 10px; }
+    p { line-height: 1.55; color: #505760; }
+    code, pre { background: #fff; border: 1px solid rgba(28, 31, 36, 0.14); border-radius: 10px; }
+    code { padding: 2px 6px; }
+    pre { padding: 12px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>${escapeXml(entry.title)}</h1>
+      <p>${escapeXml(entry.summary)}</p>
+      <p>This raw dashboard route is mounted, but the corresponding <code>ipfs_datasets_py</code> template asset is missing in this checkout. The Playwright server returns this fallback so the complaint-generator navigation remains testable while the submodule is unavailable.</p>
+      <pre>${escapeXml(missingPath)}</pre>
+      <p>Initialize the submodule assets to restore the full Dashboard, Admin, Investigation, News, Software, Analytics, GraphRAG, Patent, Discord, Finance, Medicine, Caselaw, or RAG experience.</p>
+    </section>
+  </main>
 </body>
 </html>`;
 }
@@ -3192,7 +3393,11 @@ const server = http.createServer(async (request, response) => {
       response.end('Not found');
       return;
     }
-    return sendFile(response, ipfsTemplate(entry.templateName));
+    const dashboardPath = ipfsTemplate(entry.templateName);
+    if (!fs.existsSync(dashboardPath)) {
+      return sendText(response, renderRawDashboardFallback(entry), 'text/html; charset=utf-8');
+    }
+    return sendFile(response, dashboardPath);
   }
 
   if (request.method === 'GET' && url.pathname.startsWith('/static/')) {

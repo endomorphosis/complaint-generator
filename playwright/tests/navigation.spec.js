@@ -57,6 +57,19 @@ async function revealAllIntakeFields(page) {
   await expect(page.locator('#intake-party_name')).toBeVisible({ timeout: 10000 });
 }
 
+async function expectScreenshotBudget(locator, { label, maxRenderedHeight, maxScrollHeight = maxRenderedHeight }) {
+  const metrics = await locator.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    return {
+      renderedHeight: Math.ceil(rect.height),
+      scrollHeight: Math.ceil(node.scrollHeight),
+    };
+  });
+  expect(metrics.renderedHeight, `${label} rendered height should stay within screenshot budget`).toBeLessThanOrEqual(maxRenderedHeight);
+  expect(metrics.scrollHeight, `${label} scroll height should stay within screenshot budget`).toBeLessThanOrEqual(maxScrollHeight);
+  return metrics;
+}
+
 test.describe('website surface navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
@@ -176,6 +189,45 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('[data-surface-nav="primary"]')).not.toContainText(/Profile|Trace|SDK|Dashboards/i);
     await expect(page.locator('#review-advanced-nav')).toContainText(/Advanced tools/i);
     await expect(page.locator('#review-nav-trace')).toHaveAttribute('href', /\/document\/optimization-trace/);
+  });
+
+  test('client and operator personas gate advanced controls consistently', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('complaintGenerator.did', 'did:key:nav-persona-gates');
+      window.localStorage.removeItem('complaintGenerator.shellMode');
+    });
+
+    await page.goto('/chat?shell_mode=client');
+    await expect(page.locator('#cg-app-shell')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#cg-app-shell')).toContainText(/Client mode/i);
+    await expect(page.locator('#cg-app-shell')).toContainText(/Technical tools hidden in client mode/i);
+    await expect(page.locator('#cg-app-shell-advanced-nav')).toHaveCount(0);
+
+    await page.goto('/chat?shell_mode=operator');
+    await expect(page.locator('#cg-app-shell')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#cg-app-shell')).toContainText(/Operator mode/i);
+    await expect(page.locator('#cg-app-shell-advanced-nav')).toBeVisible();
+    await expect(page.locator('#cg-app-shell')).toContainText(/MCP tools/i);
+
+    await page.goto('/workspace?shell_mode=client');
+    await waitForWorkspaceReady(page);
+    await expect(page.locator('body')).toHaveAttribute('data-workspace-shell-mode', 'client');
+    await page.locator('[data-tab-target="docket"]').click();
+    await expect(page.locator('#docket-advanced-operations')).toBeHidden();
+    await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
+    await expect(page.locator('#integrations-technical-reference')).toBeHidden();
+    await expect(page.locator('#integrations-operator-workbench-card')).toBeHidden();
+    await expect(page.locator('#integrations-operator-panels')).toBeHidden();
+
+    await page.goto('/workspace?shell_mode=operator');
+    await waitForWorkspaceReady(page);
+    await expect(page.locator('body')).toHaveAttribute('data-workspace-shell-mode', 'operator');
+    await page.locator('[data-tab-target="docket"]').click();
+    await expect(page.locator('#docket-advanced-operations')).toBeVisible();
+    await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
+    await expect(page.locator('#integrations-technical-reference')).toBeVisible();
+    await expect(page.locator('#integrations-operator-workbench-card')).toBeVisible();
+    await expect(page.locator('#integrations-operator-panels')).toBeVisible();
   });
 
   test('profile and results surfaces explain stored complaint state clearly', async ({ page }, testInfo) => {
@@ -535,6 +587,8 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('#review-nav-review')).toHaveAttribute('href', /user_id=did%3Akey%3Areview-nav-demo/);
     await expect(page.locator('#review-nav-builder')).toHaveAttribute('href', /user_id=did%3Akey%3Areview-nav-demo/);
     await expect(page.locator('#review-nav-trace')).toHaveAttribute('href', /user_id=did%3Akey%3Areview-nav-demo/);
+    await page.locator('#review-advanced-nav > summary').click();
+    await expect(page.locator('#review-nav-profile')).toBeVisible();
     await page.locator('#review-nav-profile').click();
     await expect(page).toHaveURL(/\/profile\?/);
     await expect(page).toHaveURL(/user_id=did%3Akey%3Areview-nav-demo/);
@@ -849,8 +903,9 @@ test.describe('website surface navigation', () => {
       window.localStorage.setItem('complaintGenerator.did', 'did:key:nav-workspace-mobile');
     });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/workspace');
+    await page.goto('/workspace?shell_mode=operator');
     await waitForWorkspaceReady(page, { requireIntakeVisible: false });
+    await expect(page.locator('body')).toHaveAttribute('data-workspace-shell-mode', 'operator');
 
     await page.getByRole('button', { name: 'CLI + MCP', exact: true }).click();
     await expect(page.locator('#integrations-start-readiness-button')).toBeVisible({ timeout: 10000 });
@@ -866,6 +921,11 @@ test.describe('website surface navigation', () => {
       scrollWidth: node.scrollWidth,
     }));
     expect(panelMetrics.scrollWidth).toBeLessThanOrEqual(panelMetrics.clientWidth + 2);
+    await expectScreenshotBudget(page.locator('[data-tab-panel="integrations"]'), {
+      label: 'mobile integrations panel',
+      maxRenderedHeight: 7200,
+      maxScrollHeight: 7200,
+    });
 
     const screenshotPath = testInfo.outputPath('workspace-integrations-mobile.png');
     await page.locator('[data-tab-panel="integrations"]').screenshot({ path: screenshotPath });
@@ -912,6 +972,11 @@ test.describe('website surface navigation', () => {
     });
     expect(panelMetrics.scrollWidth).toBeLessThanOrEqual(panelMetrics.clientWidth + 2);
     expect(panelMetrics.rectWidth).toBeGreaterThanOrEqual(panelMetrics.viewportWidth - 56);
+    await expectScreenshotBudget(docketPanel, {
+      label: 'mobile docket empty panel',
+      maxRenderedHeight: 3600,
+      maxScrollHeight: 3600,
+    });
 
     const screenshotPath = testInfo.outputPath('workspace-docket-mobile.png');
     await docketPanel.screenshot({ path: screenshotPath });
@@ -1166,6 +1231,11 @@ test.describe('website surface navigation', () => {
     await expect(page.locator('.docket-documents-card')).toBeHidden();
     await expect(page.locator('#docket-selected-rail')).toBeVisible();
     await expect(page.locator('.docket-selected-card')).toBeHidden();
+    await expectScreenshotBudget(docketPanel, {
+      label: 'mobile docket loaded panel',
+      maxRenderedHeight: 4200,
+      maxScrollHeight: 4200,
+    });
 
     const screenshotPath = testInfo.outputPath('workspace-docket-mobile-loaded.png');
     await docketPanel.screenshot({ path: screenshotPath });

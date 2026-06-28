@@ -825,6 +825,32 @@
             list-style-position: inside;
         }
 
+        [data-tab-panel="integrations"] #tool-list,
+        [data-tab-panel="integrations"] #feature-coverage-list,
+        [data-tab-panel="integrations"] #integrations-operator-workbench-card {
+            overflow: auto;
+            overscroll-behavior: contain;
+            padding-right: 4px;
+            scrollbar-gutter: stable;
+        }
+
+        [data-tab-panel="integrations"] #tool-list {
+            max-height: min(720px, 72vh);
+        }
+
+        [data-tab-panel="integrations"] #feature-coverage-list {
+            max-height: min(760px, 72vh);
+        }
+
+        [data-tab-panel="integrations"] #integrations-operator-workbench-card {
+            max-height: min(980px, 82vh);
+        }
+
+        [data-tab-panel="integrations"] #integrations-operator-workbench-card .draft-preview-shell pre {
+            max-height: 240px;
+            overflow: auto;
+        }
+
         .integrations-stack-label {
             display: block;
             margin-bottom: 8px;
@@ -1114,6 +1140,111 @@
             pointer-events: none;
         }
 
+        .draft-preview-shell pre {
+            pointer-events: auto;
+        }
+
+        [data-tab-panel="draft"] #draft-preview,
+        [data-tab-panel="draft"] #packet-preview {
+            max-height: min(360px, 54vh);
+            overflow: auto;
+        }
+
+        [data-tab-panel="draft"] #attorney-handoff-preview,
+        [data-tab-panel="draft"] #draft-export-safety-preview,
+        [data-tab-panel="draft"] #draft-export-integrity-preview,
+        [data-tab-panel="draft"] #draft-release-gate-summary,
+        [data-tab-panel="draft"] #draft-provenance-preview,
+        [data-tab-panel="draft"] #draft-readiness-preview,
+        [data-tab-panel="draft"] #draft-caption-gate-summary,
+        [data-tab-panel="draft"] #count-composer-preview {
+            max-height: min(360px, 48vh);
+            overflow: auto;
+        }
+
+        [data-tab-panel="draft"] #count-composer-card {
+            margin-top: 12px;
+            max-height: min(780px, 82vh);
+            overflow: auto;
+            overscroll-behavior: contain;
+        }
+
+        .draft-advanced-disclosure > summary {
+            display: grid;
+            gap: 4px;
+            cursor: pointer;
+            color: var(--accent-strong);
+            font-weight: 900;
+            list-style-position: inside;
+        }
+
+        .draft-advanced-disclosure > summary small {
+            color: var(--muted);
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.45;
+        }
+
+        .draft-advanced-body {
+            margin-top: 14px;
+        }
+
+        .stage-compact-actions {
+            margin: 12px 0 14px;
+        }
+
+        [data-tab-panel="review"].is-compact-readouts #support-grid,
+        [data-tab-panel="review"].is-compact-readouts #readiness-list,
+        [data-tab-panel="review"].is-compact-readouts #review-gap-list {
+            display: none;
+        }
+
+        [data-tab-panel="review"].is-compact-readouts #review-soft-note::after {
+            content: " Detailed support/readiness cards are collapsed. Use Show Review Readouts when an operator needs the full matrix again.";
+            display: block;
+            margin-top: 8px;
+            color: var(--accent-strong);
+            font-weight: 800;
+        }
+
+        [data-tab-panel="draft"] .draft-sidebar-card {
+            max-height: min(760px, 78vh);
+            overflow: auto;
+            overscroll-behavior: contain;
+            padding-right: 4px;
+            scrollbar-gutter: stable;
+        }
+
+        [data-tab-panel="draft"] #draft-export-safety-card {
+            max-height: min(420px, 64vh);
+            overflow: auto;
+            overscroll-behavior: contain;
+        }
+
+        [data-tab-panel="draft"] .callout,
+        [data-tab-panel="draft"] #optimizer-repair-focus-note,
+        [data-tab-panel="draft"] #draft-confidence-card,
+        [data-tab-panel="draft"] #draft-release-gate-card .tool-card {
+            display: none;
+        }
+
+        [data-tab-panel="evidence"] #evidence-list,
+        [data-tab-panel="review"] #support-grid,
+        [data-tab-panel="review"] #readiness-list,
+        [data-tab-panel="review"] #review-gap-list {
+            max-height: min(760px, 72vh);
+            overflow: auto;
+            overscroll-behavior: contain;
+            padding-right: 4px;
+            scrollbar-gutter: stable;
+        }
+
+        [data-tab-panel="evidence"] #evidence-advanced-imports[open] .advanced-evidence-body {
+            max-height: min(880px, 82vh);
+            overflow: auto;
+            overscroll-behavior: contain;
+        }
+
         .draft-status-scan {
             display: grid;
             gap: 10px;
@@ -1268,7 +1399,10 @@
             background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(251, 244, 236, 0.86));
         }
 
-        body:not([data-workspace-shell-mode="operator"]) #docket-advanced-operations {
+        body:not([data-workspace-shell-mode="operator"]) #docket-advanced-operations,
+        body:not([data-workspace-shell-mode="operator"]) #integrations-technical-reference,
+        body:not([data-workspace-shell-mode="operator"]) #integrations-operator-workbench-card,
+        body:not([data-workspace-shell-mode="operator"]) #integrations-operator-panels {
             display: none;
         }
 
@@ -1303,6 +1437,10 @@
         }
 
         .attorney-handoff-card {
+            grid-column: 1 / -1;
+            max-height: min(920px, 84vh);
+            overflow: auto;
+            overscroll-behavior: contain;
             border-color: rgba(30, 92, 71, 0.28);
             background: linear-gradient(180deg, rgba(244, 252, 246, 0.94), rgba(255, 255, 255, 0.82));
         }
@@ -1310,6 +1448,32 @@
         .attorney-handoff-card[data-handoff-state="blocked"] {
             border-color: rgba(145, 91, 38, 0.38);
             background: linear-gradient(180deg, rgba(255, 249, 240, 0.96), rgba(255, 255, 255, 0.82));
+        }
+
+        .attorney-handoff-card.is-print-preview {
+            max-height: none;
+            overflow: visible;
+            border-color: rgba(30, 92, 71, 0.42);
+            background: linear-gradient(180deg, rgba(244, 252, 246, 0.98), rgba(255, 255, 255, 0.94));
+        }
+
+        .attorney-handoff-card.is-print-preview label[for="attorney-handoff-override-reason"],
+        .attorney-handoff-card.is-print-preview #attorney-handoff-override-reason,
+        .attorney-handoff-card.is-print-preview #attorney-handoff-build-button,
+        .attorney-handoff-card.is-print-preview #attorney-handoff-send-button {
+            display: none;
+        }
+
+        .attorney-handoff-card.is-print-preview #attorney-handoff-preview {
+            max-height: none;
+            overflow: visible;
+            white-space: pre-wrap;
+        }
+
+        .attorney-handoff-card.is-print-preview #attorney-handoff-status::before {
+            content: "Attorney preview mode: ";
+            color: var(--accent-strong);
+            font-weight: 900;
         }
 
         .attorney-handoff-checklist {
@@ -3026,6 +3190,41 @@
                 max-height: 62vh;
             }
 
+            [data-tab-panel="integrations"] .stage-banner,
+            [data-tab-panel="integrations"] .integration-grid,
+            [data-tab-panel="integrations"] .integration-stage-tiles,
+            [data-tab-panel="integrations"] .integration-live-grid,
+            [data-tab-panel="integrations"] .field-grid {
+                grid-template-columns: minmax(0, 1fr) !important;
+                gap: 10px;
+            }
+
+            [data-tab-panel="integrations"] #tool-list,
+            [data-tab-panel="integrations"] #feature-coverage-list,
+            [data-tab-panel="integrations"] #integrations-operator-workbench-card {
+                overflow: auto;
+                overscroll-behavior: contain;
+                padding-right: 4px;
+                scrollbar-gutter: stable;
+            }
+
+            [data-tab-panel="integrations"] #tool-list {
+                max-height: 560px;
+            }
+
+            [data-tab-panel="integrations"] #feature-coverage-list {
+                max-height: 700px;
+            }
+
+            [data-tab-panel="integrations"] #integrations-operator-workbench-card {
+                max-height: 940px;
+            }
+
+            [data-tab-panel="integrations"] #integrations-operator-workbench-card .draft-preview-shell pre {
+                max-height: 220px;
+                overflow: auto;
+            }
+
             .docket-mobile-action-note {
                 display: block;
                 margin: 0 0 14px;
@@ -3714,6 +3913,9 @@
                         <strong>What to do here</strong>
                         <span>Add the records or witness details most likely to strengthen the missing parts of the complaint. Every saved item should answer the question: what does this help prove?</span>
                     </div>
+                    <div class="button-row stage-compact-actions">
+                        <button class="secondary" id="evidence-collapse-panels-button" type="button">Collapse Evidence Readouts</button>
+                    </div>
                     <div class="callout">
                         <h3>What counts as helpful support</h3>
                         <p class="muted">Prefer concrete sources: emails, messages, witness accounts, meeting notes, timeline records, HR filings, performance reviews, and anything that helps anchor protected activity, employer knowledge, causation, or damages.</p>
@@ -4387,6 +4589,9 @@
                         <strong>What to do here</strong>
                         <span>Use this stage to decide whether the complaint is merely drafted or genuinely supported. Missing elements are the best clue for what to collect next.</span>
                     </div>
+                    <div class="button-row stage-compact-actions">
+                        <button class="secondary" id="review-collapse-readouts-button" type="button">Collapse Review Readouts</button>
+                    </div>
                     <div class="tool-card canonical-release-gate" id="review-canonical-release-gate" style="margin-bottom: 14px;">
                         <h3>Review gate banner</h3>
                         <div class="chip-row">
@@ -4687,55 +4892,6 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                                     <a class="surface-link" id="unsupported-thin-add-evidence-link" href="/workspace?target_tab=evidence">Add Evidence (Session Link)</a>
                                 </div>
                             </div>
-                            <div class="tool-card" id="count-composer-card" style="margin-top: 12px;">
-                                <h3>Mandatory Count Composer</h3>
-                                <p class="muted">Hard-stop gate: fill caption anchors, Count I/II support links, and chronology milestones before generate/export.</p>
-                                <div class="field-grid">
-                                    <div class="field-row">
-                                        <div>
-                                            <label for="count-protected-activity-type-date">Protected Activity (type + date)</label>
-                                            <input id="count-protected-activity-type-date" type="text" placeholder="HR complaint on 2026-03-01">
-                                        </div>
-                                        <div>
-                                            <label for="count-adverse-action-type-date">Adverse Action (type + date)</label>
-                                            <input id="count-adverse-action-type-date" type="text" placeholder="Termination on 2026-03-10">
-                                        </div>
-                                    </div>
-                                    <div class="field-row">
-                                        <div>
-                                            <label for="count-employer-knowledge-facts">Employer Knowledge Facts</label>
-                                            <textarea id="count-employer-knowledge-facts" placeholder="Who knew, when they knew, and how they were informed."></textarea>
-                                        </div>
-                                        <div>
-                                            <label for="count-comparator-pretext">Comparator / Pretext Facts</label>
-                                            <textarea id="count-comparator-pretext" placeholder="Comparator treatment or pretext facts supporting retaliatory motive."></textarea>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label for="count-causation-narrative">Causation Narrative</label>
-                                        <textarea id="count-causation-narrative" placeholder="Explain why the adverse action followed the protected activity, with timing and motive facts."></textarea>
-                                    </div>
-                                    <div>
-                                        <label for="count-chronology">Chronology Builder (date | actor | event | source per line)</label>
-                                        <textarea id="count-chronology" placeholder="2026-03-01 | Plaintiff | Reported discrimination to HR | Ex. E-14&#10;2026-03-10 | Manager | Terminated Plaintiff | Ex. E-22"></textarea>
-                                    </div>
-                                    <div class="field-row">
-                                        <div>
-                                            <label for="count-i-evidence-ids">Count I Evidence/Paragraph IDs</label>
-                                            <input id="count-i-evidence-ids" type="text" placeholder="¶12, ¶18, E-14, E-22">
-                                        </div>
-                                        <div>
-                                            <label for="count-ii-evidence-ids">Count II Evidence/Paragraph IDs</label>
-                                            <input id="count-ii-evidence-ids" type="text" placeholder="¶23, ¶31, E-31">
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="progress-track" style="margin-top: 10px;">
-                                    <div class="progress-meter" id="count-composer-meter" style="width: 0%;"></div>
-                                </div>
-                                <div class="soft-note" id="count-composer-progress">Count composer completeness: 0/8 required blocks complete.</div>
-                                <div class="status draft-preview-shell"><pre id="count-composer-preview">Count composer checks will appear here after draft readiness loads.</pre></div>
-                            </div>
                             <div class="draft-action-groups">
                                 <div class="draft-action-group">
                                     <strong>1. Generate or save</strong>
@@ -4782,6 +4938,7 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                                     <div class="button-row">
                                         <button class="secondary" id="attorney-handoff-build-button" type="button">Build Attorney Handoff Packet</button>
                                         <button class="secondary" id="attorney-handoff-send-button" type="button" disabled aria-disabled="true">Send to Attorney Review</button>
+                                        <button class="secondary" id="attorney-handoff-print-preview-button" type="button" aria-pressed="false">Show Attorney Print Preview</button>
                                     </div>
                                     <div class="soft-note" id="attorney-handoff-status">Attorney handoff is blocked until the complaint packet, support posture, release gate, and trace are visible.</div>
                                     <div class="status draft-preview-shell"><pre id="attorney-handoff-preview">No attorney handoff packet built yet.</pre></div>
@@ -4797,6 +4954,60 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                                     </div>
                                 </div>
                             </div>
+                            <details class="tool-card draft-advanced-disclosure" id="count-composer-card">
+                                <summary>
+                                    <span>Mandatory Count Composer</span>
+                                    <small>Advanced pleading structure. Open after the primary Generate/Save and packet-review steps when you need count-level chronology and support links.</small>
+                                </summary>
+                                <div class="draft-advanced-body">
+                                    <p class="muted">Hard-stop gate: fill caption anchors, Count I/II support links, and chronology milestones before generate/export.</p>
+                                    <div class="field-grid">
+                                        <div class="field-row">
+                                            <div>
+                                                <label for="count-protected-activity-type-date">Protected Activity (type + date)</label>
+                                                <input id="count-protected-activity-type-date" type="text" placeholder="HR complaint on 2026-03-01">
+                                            </div>
+                                            <div>
+                                                <label for="count-adverse-action-type-date">Adverse Action (type + date)</label>
+                                                <input id="count-adverse-action-type-date" type="text" placeholder="Termination on 2026-03-10">
+                                            </div>
+                                        </div>
+                                        <div class="field-row">
+                                            <div>
+                                                <label for="count-employer-knowledge-facts">Employer Knowledge Facts</label>
+                                                <textarea id="count-employer-knowledge-facts" placeholder="Who knew, when they knew, and how they were informed."></textarea>
+                                            </div>
+                                            <div>
+                                                <label for="count-comparator-pretext">Comparator / Pretext Facts</label>
+                                                <textarea id="count-comparator-pretext" placeholder="Comparator treatment or pretext facts supporting retaliatory motive."></textarea>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label for="count-causation-narrative">Causation Narrative</label>
+                                            <textarea id="count-causation-narrative" placeholder="Explain why the adverse action followed the protected activity, with timing and motive facts."></textarea>
+                                        </div>
+                                        <div>
+                                            <label for="count-chronology">Chronology Builder (date | actor | event | source per line)</label>
+                                            <textarea id="count-chronology" placeholder="2026-03-01 | Plaintiff | Reported discrimination to HR | Ex. E-14&#10;2026-03-10 | Manager | Terminated Plaintiff | Ex. E-22"></textarea>
+                                        </div>
+                                        <div class="field-row">
+                                            <div>
+                                                <label for="count-i-evidence-ids">Count I Evidence/Paragraph IDs</label>
+                                                <input id="count-i-evidence-ids" type="text" placeholder="¶12, ¶18, E-14, E-22">
+                                            </div>
+                                            <div>
+                                                <label for="count-ii-evidence-ids">Count II Evidence/Paragraph IDs</label>
+                                                <input id="count-ii-evidence-ids" type="text" placeholder="¶23, ¶31, E-31">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="progress-track" style="margin-top: 10px;">
+                                        <div class="progress-meter" id="count-composer-meter" style="width: 0%;"></div>
+                                    </div>
+                                    <div class="soft-note" id="count-composer-progress">Count composer completeness: 0/8 required blocks complete.</div>
+                                    <div class="status draft-preview-shell"><pre id="count-composer-preview">Count composer checks will appear here after draft readiness loads.</pre></div>
+                                </div>
+                            </details>
                         </div>
                     </div>
                     <div class="soft-note" id="draft-soft-note">Treat the first draft as a working document. Review is still the place to decide whether the record behind it feels strong enough.</div>
@@ -4869,7 +5080,7 @@ Blocker reasons: waiting for readiness signals.</pre></div>
                         <p class="muted">Live pass/fail badges for Package, CLI, MCP, and SDK are bound to the current DID/session.</p>
                         <div class="integration-live-grid" id="integration-live-actions"></div>
                     </div>
-                    <details class="integrations-disclosure integrations-technical-reference" id="integrations-technical-reference" open>
+                    <details class="integrations-disclosure integrations-technical-reference" id="integrations-technical-reference">
                         <summary>Advanced package, CLI, MCP, and browser SDK reference</summary>
                         <div class="integration-grid integration-reference-grid">
                         <div class="tool-card">
@@ -4927,20 +5138,20 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                         </div>
                     </details>
                     <div class="integration-grid">
-                        <div class="tool-card">
+                        <div class="tool-card" id="integrations-tool-readiness-card">
                             <span class="integrations-stack-label">Readiness Signals</span>
                             <h3>Available MCP Tools</h3>
                             <p class="muted" id="tool-list-summary">The browser will group the visible MCP tools by workflow stage once the shared session is loaded.</p>
                             <div class="chip-row" id="tool-list-phase-chips"></div>
                             <div class="list" id="tool-list"></div>
                         </div>
-                        <div class="tool-card">
+                        <div class="tool-card" id="integrations-feature-coverage-card">
                             <span class="integrations-stack-label">Coverage</span>
                             <h3>Feature Coverage</h3>
                             <p class="muted">This panel shows whether the current workspace session can actually use the full complaint-generator flow, including the actor/critic optimizer path and cross-surface handoffs.</p>
                             <div class="feature-grid" id="feature-coverage-list"></div>
                         </div>
-                        <div class="tool-card">
+                        <div class="tool-card" id="integrations-operator-workbench-card">
                             <span class="integrations-stack-label">Operational Lane</span>
                             <h3>Workflow Operations</h3>
                             <p class="muted">Use the same JavaScript MCP SDK path to inspect capabilities, prepare the mediator brief, and export the current lawsuit packet without leaving the workspace.</p>
@@ -5055,7 +5266,7 @@ await client.runBrowserAudit({ screenshot_dir: 'artifacts/ui-audit/browser-audit
                             </div>
                         </div>
                     </div>
-                    <details class="integrations-disclosure integrations-operator-panels" id="integrations-operator-panels" open>
+                    <details class="integrations-disclosure integrations-operator-panels" id="integrations-operator-panels">
                         <summary>Operator data panels: workspace datasets, packaged dockets, and diagnostics</summary>
                         <div class="integration-grid">
                         <div class="tool-card" id="workspace-data-operator-card">
@@ -6513,15 +6724,12 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
         }
 
         function syncResponsiveIntegrationDisclosures() {
-            const compactIntegrations = window.matchMedia
-                ? window.matchMedia('(max-width: 640px)').matches
-                : false;
             ['integrations-technical-reference', 'integrations-operator-panels'].forEach((id) => {
                 const details = document.getElementById(id);
                 if (!details) {
                     return;
                 }
-                details.open = !compactIntegrations;
+                details.open = false;
             });
         }
 
@@ -9945,6 +10153,196 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             };
         }
 
+        function localWorkspaceDatasetRefs(sessionPayload, ipfsStatus) {
+            const payload = sessionPayload && typeof sessionPayload === 'object' ? sessionPayload : {};
+            const session = payload.session && typeof payload.session === 'object' ? payload.session : {};
+            const review = payload.review && typeof payload.review === 'object' ? payload.review : {};
+            const overview = review.overview || {};
+            const evidence = session.evidence || {};
+            const testimony = Array.isArray(evidence.testimony) ? evidence.testimony : [];
+            const documents = Array.isArray(evidence.documents) ? evidence.documents : [];
+            const draft = (resolveDraftState(payload).draft || {});
+            const encodedUser = encodeURIComponent(workspaceUserId || session.user_id || 'current-session');
+            const cidStatus = (ipfsStatus || {}).available ? 'ready_for_car_publish' : 'submodule_or_preview_missing';
+            const refs = [
+                {
+                    ref_id: 'complaint_packet_json',
+                    piece_id: 'complaint_packet',
+                    label: 'Complaint packet JSON',
+                    uri: `workspace://${encodedUser}/packets/current.json`,
+                    export_tool: 'complaint.export_complaint_packet',
+                    cid_status: cidStatus,
+                },
+                {
+                    ref_id: 'complaint_markdown',
+                    piece_id: 'complaint_markdown',
+                    label: 'Complaint Markdown artifact',
+                    uri: `workspace://${encodedUser}/artifacts/current.md`,
+                    export_tool: 'complaint.export_complaint_markdown',
+                    cid_status: cidStatus,
+                },
+                {
+                    ref_id: 'evidence_map',
+                    piece_id: 'evidence_items',
+                    label: 'Evidence map',
+                    uri: `workspace://${encodedUser}/evidence`,
+                    item_count: testimony.length + documents.length,
+                    cid_status: cidStatus,
+                },
+                {
+                    ref_id: 'support_matrix',
+                    piece_id: 'claim_support_matrix',
+                    label: 'Claim support matrix',
+                    uri: `workspace://${encodedUser}/review/support-matrix`,
+                    supported_elements: Number(overview.supported_elements || 0),
+                    missing_elements: Number(overview.missing_elements || 0),
+                    cid_status: cidStatus,
+                },
+                {
+                    ref_id: 'filing_release_gate',
+                    piece_id: 'release_gate',
+                    label: 'Filing release gate',
+                    uri: `workspace://${encodedUser}/release-gate`,
+                    cid_status: cidStatus,
+                },
+            ];
+            testimony.concat(documents).forEach((item, index) => {
+                refs.push({
+                    ref_id: `evidence_${index + 1}`,
+                    piece_id: 'evidence_item',
+                    label: String((item || {}).title || (item || {}).id || `Evidence ${index + 1}`),
+                    claim_element_id: String((item || {}).claim_element_id || 'unmapped'),
+                    kind: String((item || {}).kind || (index < testimony.length ? 'testimony' : 'document')),
+                    uri: `workspace://${encodedUser}/evidence/${encodeURIComponent(String((item || {}).id || index + 1))}`,
+                    cid_status: cidStatus,
+                });
+            });
+            if (draft && draft.title) {
+                refs[0].draft_title = String(draft.title);
+            }
+            return refs;
+        }
+
+        function localAttorneyRuleHits(sessionPayload, releaseGate) {
+            const payload = sessionPayload && typeof sessionPayload === 'object' ? sessionPayload : {};
+            const review = payload.review && typeof payload.review === 'object' ? payload.review : {};
+            const overview = review.overview || {};
+            const evidence = ((payload.session || {}).evidence) || {};
+            const evidenceCount = (Array.isArray(evidence.testimony) ? evidence.testimony.length : 0)
+                + (Array.isArray(evidence.documents) ? evidence.documents.length : 0);
+            const draftBody = String((document.getElementById('draft-body') || {}).value || ((resolveDraftState(payload).draft || {}).body) || '');
+            const hasCaption = /IN THE UNITED STATES DISTRICT COURT/i.test(draftBody);
+            const hasPrayer = /PRAYER FOR RELIEF/i.test(draftBody);
+            const verdict = String((releaseGate || {}).verdict || '').trim().toLowerCase();
+            return [
+                {
+                    rule_id: 'pleading.caption.present',
+                    label: 'Caption structure is present',
+                    status: hasCaption ? 'pass' : 'fail',
+                    severity: 'critical',
+                    evidence_refs: ['complaint_markdown'],
+                    explanation: hasCaption ? 'The draft includes a federal-court style caption.' : 'The draft is missing the expected court caption.',
+                },
+                {
+                    rule_id: 'pleading.prayer_for_relief.present',
+                    label: 'Prayer for relief is present',
+                    status: hasPrayer ? 'pass' : 'warning',
+                    severity: 'high',
+                    evidence_refs: ['complaint_markdown'],
+                    explanation: hasPrayer ? 'Requested relief is visible in the draft.' : 'The draft should identify requested relief before attorney review.',
+                },
+                {
+                    rule_id: 'claim.support.coverage',
+                    label: 'Tracked claim elements have support coverage',
+                    status: Number(overview.missing_elements || 0) === 0 ? 'pass' : 'warning',
+                    severity: 'high',
+                    evidence_refs: ['support_matrix', 'evidence_map'],
+                    explanation: `${Number(overview.supported_elements || 0)} supported element(s), ${Number(overview.missing_elements || 0)} open support gap(s).`,
+                },
+                {
+                    rule_id: 'claim.support.corroboration',
+                    label: 'Saved evidence corroborates the theory',
+                    status: evidenceCount > 1 ? 'pass' : 'warning',
+                    severity: 'medium',
+                    evidence_refs: ['evidence_map'],
+                    explanation: `${evidenceCount} saved evidence item(s) are attached to the record.`,
+                },
+                {
+                    rule_id: 'release_gate.verdict',
+                    label: 'Client filing-readiness release gate',
+                    status: verdict === 'pass' ? 'pass' : 'block',
+                    severity: 'critical',
+                    evidence_refs: ['filing_release_gate'],
+                    explanation: String((releaseGate || {}).reason || 'No release-gate reason was provided.'),
+                },
+            ];
+        }
+
+        function buildAttorneyNeurosymbolicTrace(sessionPayload, ipfsStatus, releaseGate) {
+            const payload = sessionPayload && typeof sessionPayload === 'object' ? sessionPayload : {};
+            const provenance = workspaceFilingProvenance && typeof workspaceFilingProvenance === 'object' ? workspaceFilingProvenance : {};
+            const trace = provenance.neurosymbolic_trace && typeof provenance.neurosymbolic_trace === 'object'
+                ? provenance.neurosymbolic_trace
+                : {};
+            const datasetRefs = Array.isArray(trace.dataset_refs) && trace.dataset_refs.length
+                ? trace.dataset_refs
+                : Array.isArray(provenance.dataset_refs) && provenance.dataset_refs.length
+                    ? provenance.dataset_refs
+                    : localWorkspaceDatasetRefs(payload, ipfsStatus);
+            const reasoningSummary = trace.reasoning_summary && typeof trace.reasoning_summary === 'object'
+                ? trace.reasoning_summary
+                : provenance.reasoning_summary && typeof provenance.reasoning_summary === 'object'
+                    ? provenance.reasoning_summary
+                    : {
+                        claim_type: String((((payload || {}).session || {}).claim_type) || 'retaliation'),
+                        support_summary: `${Number((((payload || {}).review || {}).overview || {}).supported_elements || 0)} supported element(s), ${Number((((payload || {}).review || {}).overview || {}).missing_elements || 0)} open gap(s).`,
+                        release_gate_verdict: String((releaseGate || {}).verdict || 'unknown'),
+                        release_gate_reason: String((releaseGate || {}).reason || ''),
+                        route_summary: 'browser workspace / complaint MCP SDK / attorney handoff',
+                    };
+            const ruleHits = Array.isArray(trace.rule_hits) && trace.rule_hits.length
+                ? trace.rule_hits
+                : Array.isArray(provenance.rule_hits) && provenance.rule_hits.length
+                    ? provenance.rule_hits
+                    : localAttorneyRuleHits(payload, releaseGate);
+            return {
+                trace_id: String(trace.trace_id || provenance.trace_id || `trace-${workspaceUserId || 'current-session'}`),
+                trace_schema: String(trace.trace_schema || provenance.trace_schema || 'complaint_handoff_neurosymbolic_trace.v1'),
+                trace_backend: String(trace.trace_backend || provenance.trace_backend || 'ipfs_datasets_py'),
+                ipfs_preflight: trace.ipfs_preflight || provenance.ipfs_preflight || (workspaceCapabilities || {}).environment_preflight || null,
+                dataset_refs: datasetRefs,
+                reasoning_summary: reasoningSummary,
+                rule_hits: ruleHits,
+            };
+        }
+
+        function formatAttorneyTracePreview(trace) {
+            const datasetRefs = Array.isArray((trace || {}).dataset_refs) ? trace.dataset_refs : [];
+            const ruleHits = Array.isArray((trace || {}).rule_hits) ? trace.rule_hits : [];
+            const reasoningSummary = ((trace || {}).reasoning_summary && typeof (trace || {}).reasoning_summary === 'object')
+                ? (trace || {}).reasoning_summary
+                : {};
+            const lines = [
+                '',
+                'Dataset refs:',
+                ...(datasetRefs.length
+                    ? datasetRefs.slice(0, 8).map((item) => `- ${String((item || {}).ref_id || (item || {}).piece_id || 'dataset_ref')}: ${String((item || {}).uri || (item || {}).label || 'workspace artifact')} [${String((item || {}).cid_status || 'cid pending')}]`)
+                    : ['- No dataset refs attached yet.']),
+                '',
+                'Reasoning summary:',
+                `- Claim type: ${String(reasoningSummary.claim_type || 'unknown')}`,
+                `- Support: ${String(reasoningSummary.support_summary || 'not summarized')}`,
+                `- Release gate: ${String(reasoningSummary.release_gate_verdict || 'unknown')}${reasoningSummary.release_gate_reason ? ` - ${String(reasoningSummary.release_gate_reason)}` : ''}`,
+                `- Route: ${String(reasoningSummary.route_summary || 'not captured')}`,
+                '',
+                'Rule hits:',
+                ...(ruleHits.length
+                    ? ruleHits.slice(0, 8).map((item) => `- ${String((item || {}).rule_id || 'rule')}: ${String((item || {}).status || 'unknown').toUpperCase()} - ${String((item || {}).explanation || (item || {}).label || '')}`)
+                    : ['- No rule hits attached yet.']),
+            ];
+            return lines.join('\n');
+        }
+
         function buildAttorneyHandoffState(sessionPayload) {
             const payload = sessionPayload && typeof sessionPayload === 'object' ? sessionPayload : {};
             const session = payload.session && typeof payload.session === 'object' ? payload.session : {};
@@ -9970,6 +10368,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
             const provenance = workspaceFilingProvenance && typeof workspaceFilingProvenance === 'object' ? workspaceFilingProvenance : {};
             const hasProvenance = Boolean(Object.keys(provenance).length);
             const ipfsStatus = resolveIpfsDatasetsTraceStatus();
+            const neurosymbolicTrace = buildAttorneyNeurosymbolicTrace(payload, ipfsStatus, releaseGate);
+            const datasetRefs = Array.isArray(neurosymbolicTrace.dataset_refs) ? neurosymbolicTrace.dataset_refs : [];
+            const ruleHits = Array.isArray(neurosymbolicTrace.rule_hits) ? neurosymbolicTrace.rule_hits : [];
+            const traceReady = datasetRefs.length > 0 && ruleHits.length > 0 && Boolean(neurosymbolicTrace.reasoning_summary);
             const checklist = [
                 {
                     id: 'draft',
@@ -10019,10 +10421,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 {
                     id: 'trace',
                     label: 'Neurosymbolic/IPFS trace',
-                    complete: hasProvenance && ipfsStatus.available,
+                    complete: traceReady,
                     critical: true,
-                    detail: hasProvenance
-                        ? `${ipfsStatus.detail} Filing provenance route is attached.`
+                    detail: traceReady
+                        ? `${datasetRefs.length} dataset ref${datasetRefs.length === 1 ? '' : 's'} and ${ruleHits.length} rule hit${ruleHits.length === 1 ? '' : 's'} are attached. ${ipfsStatus.detail}`
                         : `${ipfsStatus.detail} Refresh filing provenance before staging the handoff.`,
                 },
             ];
@@ -10050,12 +10452,13 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 `Release gate: ${releaseGate.verdict ? String(releaseGate.verdict).toUpperCase() : 'not run'}${releaseGate.reason ? ` - ${releaseGate.reason}` : ''}`,
                 `Generator route: ${routerPath}`,
                 `Complaint-output critic route: ${criticPath}`,
-                `Neurosymbolic trace: ${hasProvenance ? 'filing provenance attached' : 'filing provenance not attached yet'}`,
+                `Neurosymbolic trace: ${traceReady ? `${datasetRefs.length} dataset refs and ${ruleHits.length} rule hits attached` : hasProvenance ? 'filing provenance attached without structured trace' : 'filing provenance not attached yet'}`,
                 `IPFS dataset surface: ${ipfsStatus.label}`,
                 ipfsStatus.available ? 'ipfs_datasets_py: ready for linked review trace.' : `ipfs_datasets_py fallback: ${ipfsStatus.fallbackCommand}`,
                 blockingChecks.length ? `Open handoff blockers: ${blockingChecks.map((entry) => entry.label).join('; ')}` : 'Open handoff blockers: none',
                 overrideReason ? `Override reason: ${overrideReason}` : 'Override reason: none',
                 'Attorney packet contents: complaint draft, packet JSON, evidence map, support matrix, release gate, filing provenance, and counsel review notes.',
+                formatAttorneyTracePreview(neurosymbolicTrace),
             ];
             return {
                 checklist,
@@ -10066,6 +10469,7 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                 overrideReason,
                 releaseVerdict,
                 ipfsStatus,
+                neurosymbolicTrace,
                 payloadSummary,
                 payload: {
                     user_id: workspaceUserId || session.user_id || 'unknown',
@@ -10076,6 +10480,10 @@ ${cliOAuthLines}${cliCheckpointLines}`.replace(/\\\n$/, '');
                     release_gate: releaseGate,
                     filing_provenance: provenance,
                     ipfs_datasets_status: ipfsStatus,
+                    dataset_refs: datasetRefs,
+                    reasoning_summary: neurosymbolicTrace.reasoning_summary,
+                    rule_hits: ruleHits,
+                    neurosymbolic_trace: neurosymbolicTrace,
                     checklist,
                     override_reason: overrideReason || null,
                     built_at: new Date().toISOString(),
@@ -13978,6 +14386,31 @@ function extractComplaintOutputSignals(result) {
                 await loadPackagedDocketOperatorDashboardPanel();
             }
         });
+        document.getElementById('evidence-collapse-panels-button').addEventListener('click', () => {
+            const advancedImports = document.getElementById('evidence-advanced-imports');
+            const evidenceList = document.getElementById('evidence-list');
+            if (advancedImports) {
+                advancedImports.open = false;
+            }
+            if (evidenceList) {
+                evidenceList.scrollTop = 0;
+            }
+            setStatus('Collapsed Evidence readouts so the basic proof capture path is visible again.');
+        });
+        document.getElementById('review-collapse-readouts-button').addEventListener('click', () => {
+            const reviewPanel = document.querySelector('[data-tab-panel="review"]');
+            const button = document.getElementById('review-collapse-readouts-button');
+            const compact = !(reviewPanel && reviewPanel.classList.contains('is-compact-readouts'));
+            if (reviewPanel) {
+                reviewPanel.classList.toggle('is-compact-readouts', compact);
+            }
+            if (button) {
+                button.textContent = compact ? 'Show Review Readouts' : 'Collapse Review Readouts';
+            }
+            setStatus(compact
+                ? 'Collapsed Review support/readiness readouts for a concise filing checkpoint.'
+                : 'Expanded Review support/readiness readouts for operator inspection.');
+        });
         document.getElementById('import-gmail-evidence-button').addEventListener('click', importGmailEvidence);
         document.getElementById('import-local-evidence-button').addEventListener('click', importLocalEvidence);
         document.getElementById('run-gmail-duckdb-pipeline-button').addEventListener('click', runGmailDuckdbPipelineFromWorkspace);
@@ -14059,6 +14492,21 @@ function extractComplaintOutputSignals(result) {
         document.getElementById('attorney-handoff-build-button').addEventListener('click', buildAttorneyHandoffPacket);
         document.getElementById('attorney-handoff-send-button').addEventListener('click', sendAttorneyHandoffPacket);
         document.getElementById('attorney-handoff-override-reason').addEventListener('input', () => renderAttorneyHandoffPanel(workspaceSession || {}));
+        document.getElementById('attorney-handoff-print-preview-button').addEventListener('click', () => {
+            const card = document.getElementById('attorney-handoff-card');
+            const button = document.getElementById('attorney-handoff-print-preview-button');
+            const enabled = !(card && card.classList.contains('is-print-preview'));
+            if (card) {
+                card.classList.toggle('is-print-preview', enabled);
+            }
+            if (button) {
+                button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+                button.textContent = enabled ? 'Exit Attorney Print Preview' : 'Show Attorney Print Preview';
+            }
+            setStatus(enabled
+                ? 'Attorney handoff print preview is showing the counsel-facing packet without edit/send controls.'
+                : 'Attorney handoff print preview closed; edit and send controls are visible again.');
+        });
         document.getElementById('draft-review-before-export-button').addEventListener('click', () => jumpToStage('review', '#support-grid', 'Opened Review so support and release-gate blockers can be checked before export.'));
         document.getElementById('draft-evidence-before-export-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence so the record can be strengthened before export.'));
         document.getElementById('unsupported-thin-go-evidence-button').addEventListener('click', () => jumpToStage('evidence', '#evidence-title', 'Opened Evidence from the unsupported-elements blocker so the record can be strengthened before export or download.'));
