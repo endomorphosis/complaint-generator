@@ -9,12 +9,15 @@ import sys
 import threading
 import uuid
 import zipfile
+import hashlib
+import hmac
 from base64 import b64encode
 from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Set
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
 from complaint_phases.legal_document import parse_legal_document
@@ -69,6 +72,20 @@ DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER: Dict[str, int] = {
     "hf_inference_api": 30,
     "hf_inference": 30,
     "hf_api": 30,
+}
+# Citation-link identity precedence keeps explicit IDs stable before looser source/url fallback keys.
+MIKE_CITATION_KEY_FIELD_PRECEDENCE: tuple[str, ...] = ("citation_id", "id", "source_id", "url")
+MIKE_STATUS_CONTRACT_VERSION = "complaint-mike-status-v2"
+MIKE_HANDOFF_CONTRACT_VERSION = "complaint-mike-handoff-v2"
+MIKE_SYNC_CONTRACT_VERSION = "complaint-mike-sync-v2"
+MAX_MIKE_HANDOFF_PARAGRAPHS = 80
+MAX_MIKE_WEAK_LINKS_DISPLAY = 3
+VALID_MIKE_STRUCTURED_DELTA_OPS: Set[str] = {"insert", "delete", "replace", "edit", "move"}
+MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
+    "not_handed_off": "Not handed off",
+    "handoff_pending_sync": "Handoff pending sync",
+    "synced_clean": "Synced clean",
+    "synced_with_conflicts": "Synced with conflicts",
 }
 DEFAULT_UI_UX_SCREENSHOT_TARGET = (
     "tests/test_website_cohesion_playwright.py::"
@@ -161,6 +178,9 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "migrate_legacy_workspace_data",
     "search_workspace_dataset",
     "view_workspace_dataset",
+    "build_mike_handoff",
+    "get_mike_integration_status",
+    "sync_mike_final_draft",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -202,6 +222,9 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "migrate-legacy-workspace-data",
     "search-workspace-data",
     "view-workspace-data",
+    "build-mike-handoff",
+    "mike-status",
+    "sync-mike-draft",
     "generate",
     "export-packet",
     "export-markdown",
@@ -244,6 +267,9 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "migrateLegacyWorkspaceData",
     "searchWorkspaceDataset",
     "viewWorkspaceDataset",
+    "buildMikeHandoff",
+    "getMikeIntegrationStatus",
+    "syncMikeFinalDraft",
     "generateComplaint",
     "exportComplaintPacket",
     "exportComplaintMarkdown",
@@ -415,6 +441,24 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "view-workspace-data",
         "mcp_tool": "complaint.view_workspace_dataset",
         "browser_sdk_method": "viewWorkspaceDataset",
+    },
+    "mike_editor_handoff": {
+        "package_export": "build_mike_handoff",
+        "cli_command": "build-mike-handoff",
+        "mcp_tool": "complaint.build_mike_handoff",
+        "browser_sdk_method": "buildMikeHandoff",
+    },
+    "mike_editor_status": {
+        "package_export": "get_mike_integration_status",
+        "cli_command": "mike-status",
+        "mcp_tool": "complaint.get_mike_integration_status",
+        "browser_sdk_method": "getMikeIntegrationStatus",
+    },
+    "mike_editor_sync": {
+        "package_export": "sync_mike_final_draft",
+        "cli_command": "sync-mike-draft",
+        "mcp_tool": "complaint.sync_mike_final_draft",
+        "browser_sdk_method": "syncMikeFinalDraft",
     },
     "export_critic": {
         "package_export": "review_generated_exports",
@@ -1578,6 +1622,13 @@ def _default_state(user_id: str) -> Dict[str, Any]:
         "latest_packet_export": None,
         "latest_export_critic": None,
         "ui_readiness": None,
+        "mike_integration": {
+            "last_handoff": None,
+            "last_sync": None,
+            "handoff_history": [],
+            "sync_history": [],
+            "audit_trail": [],
+        },
     }
 
 
@@ -1615,6 +1666,18 @@ class ComplaintWorkspaceService:
         payload.setdefault("latest_packet_export", None)
         payload.setdefault("latest_export_critic", None)
         payload.setdefault("ui_readiness", None)
+        payload.setdefault(
+            "mike_integration",
+            {
+                "last_handoff": None,
+                "last_sync": None,
+                "handoff_history": [],
+                "sync_history": [],
+                "audit_trail": [],
+            },
+        )
+        if isinstance(payload.get("mike_integration"), dict):
+            payload["mike_integration"].setdefault("audit_trail", [])
         return payload
 
     def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -3200,6 +3263,7 @@ class ComplaintWorkspaceService:
         answered_count = len([item for item in questions if item.get("is_answered")])
         total_questions = len(questions)
         readiness = self.get_complaint_readiness(user_id)
+        mike_status = self.get_mike_integration_status(user_id)
         capabilities = [
             {
                 "id": "intake_questions",
@@ -3253,6 +3317,13 @@ class ComplaintWorkspaceService:
                 "available": True,
                 "detail": "The lawsuit packet can be exported as a structured browser, CLI, or MCP artifact.",
             },
+            {
+                "id": "mike_editor_handoff",
+                "label": "Mike editor handoff and draft sync",
+                "available": True,
+                "detail": str(mike_status.get("recommended_action") or "").strip()
+                or "No Mike integration activity yet. Start with complaint.build_mike_handoff.",
+            },
         ]
         workspace_data_schema = self.get_workspace_data_schema(session["session"]["user_id"])
         return {
@@ -3265,6 +3336,7 @@ class ComplaintWorkspaceService:
             "complaint_readiness": readiness,
             "ui_readiness": self.get_ui_readiness(user_id),
             "client_release_gate": self.get_client_release_gate(user_id),
+            "mike_integration_status": mike_status,
             "tooling_contract": self.get_tooling_contract(user_id),
             "workspace_data_schema": workspace_data_schema,
             "schema_guided_recommendations": _build_schema_guided_tooling_recommendations(workspace_data_schema),
@@ -3854,10 +3926,9 @@ class ComplaintWorkspaceService:
         }
 
     def get_provider_diagnostics(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        from applications import ui_review as ui_review_module
-        from ipfs_datasets_py import llm_router
-
         def _vault_value(*names: str) -> str:
+            if str(os.getenv("COMPLAINT_PROVIDER_DIAGNOSTICS_CHECK_SECRETS", "") or "").strip() != "1":
+                return ""
             try:
                 from ipfs_datasets_py.mcp_server.secrets_vault import get_secrets_vault
 
@@ -3871,6 +3942,8 @@ class ComplaintWorkspaceService:
             return ""
 
         def _keyring_value(*names: str) -> str:
+            if str(os.getenv("COMPLAINT_PROVIDER_DIAGNOSTICS_CHECK_SECRETS", "") or "").strip() != "1":
+                return ""
             try:
                 import keyring  # type: ignore
 
@@ -3896,25 +3969,9 @@ class ComplaintWorkspaceService:
                 return "vault"
             if _keyring_value("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN"):
                 return "keyring"
-            try:
-                from ipfs_datasets_py.utils.engine_env import _openai_key_from_common_files
-
-                if str(_openai_key_from_common_files() or "").strip():
-                    return "local_cli_config"
-            except Exception:
-                pass
             return "unavailable"
 
         def _resolve_openai_key() -> str:
-            resolver = getattr(llm_router, "_resolve_openai_api_key", None)
-            if callable(resolver):
-                try:
-                    resolved = str(resolver() or "").strip()
-                    if resolved:
-                        return resolved
-                except Exception:
-                    pass
-
             resolved = _first_env("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
             if resolved:
                 return resolved
@@ -3926,13 +3983,7 @@ class ComplaintWorkspaceService:
             resolved = _keyring_value("OPENAI_API_KEY", "OPENAI_KEY", "OPENAI_TOKEN")
             if resolved:
                 return resolved
-
-            try:
-                from ipfs_datasets_py.utils.engine_env import _openai_key_from_common_files
-
-                return str(_openai_key_from_common_files() or "").strip()
-            except Exception:
-                return ""
+            return ""
 
         def _source_for_hf() -> str:
             if _first_env(
@@ -3965,21 +4016,93 @@ class ComplaintWorkspaceService:
                 "HF_API_TOKEN",
             ):
                 return "keyring"
-            if str(llm_router._resolve_hf_api_token() or "").strip():
-                return "huggingface_cli"
             return "unavailable"
 
-        default_order = list(getattr(llm_router, "_UNPINNED_OPTIONAL_PROVIDER_ORDER", []))
+        def _resolve_hf_token_for_diagnostics() -> str:
+            resolved = _first_env(
+                "IPFS_DATASETS_PY_HF_API_TOKEN",
+                "HUGGINGFACEHUB_API_TOKEN",
+                "HF_TOKEN",
+                "HUGGINGFACE_HUB_TOKEN",
+                "HUGGINGFACE_API_KEY",
+                "HUGGINGFACE_API_TOKEN",
+                "HF_API_TOKEN",
+            )
+            if resolved:
+                return resolved
+            resolved = _vault_value(
+                "IPFS_DATASETS_PY_HF_API_TOKEN",
+                "HUGGINGFACEHUB_API_TOKEN",
+                "HF_TOKEN",
+                "HUGGINGFACE_HUB_TOKEN",
+                "HUGGINGFACE_API_KEY",
+                "HUGGINGFACE_API_TOKEN",
+                "HF_API_TOKEN",
+            )
+            if resolved:
+                return resolved
+            return _keyring_value(
+                "IPFS_DATASETS_PY_HF_API_TOKEN",
+                "HUGGINGFACEHUB_API_TOKEN",
+                "HF_TOKEN",
+                "HUGGINGFACE_HUB_TOKEN",
+                "HUGGINGFACE_API_KEY",
+                "HUGGINGFACE_API_TOKEN",
+                "HF_API_TOKEN",
+            )
+
+        def _copilot_command_available(command: str) -> bool:
+            parts = str(command or "").strip().split()
+            if not parts:
+                return False
+            if parts[0] == "npx":
+                return True
+            return shutil.which(parts[0]) is not None
+
+        def _copilot_supports_image_inputs_for_diagnostics() -> bool:
+            explicit = str(os.getenv("IPFS_DATASETS_PY_COPILOT_CLI_SUPPORTS_IMAGE_INPUTS", "") or "").strip().lower()
+            if explicit:
+                return explicit in {"1", "true", "yes", "on"}
+            # Avoid running `copilot --help` or `npx ... --help` here; provider diagnostics
+            # must stay fast and should not spawn long-lived CLI probes from the browser UI.
+            return False
+
+        raw_default_order = [
+            "codex_cli",
+            "copilot_cli",
+            "openai",
+            "hf_inference_api",
+            "openrouter",
+            "gemini_cli",
+            "claude_code",
+            "claude_py",
+            "gemini_py",
+            "copilot_sdk",
+        ]
+        preferred_default_order = [
+            "codex_cli",
+            "copilot_cli",
+            "openai",
+            "hf_inference_api",
+        ]
+        default_order = [
+            item
+            for item in preferred_default_order
+            if item in set(raw_default_order) or item in {"codex_cli", "copilot_cli", "openai", "hf_inference_api"}
+        ]
+        default_order.extend(
+            item
+            for item in raw_default_order
+            if item and item not in default_order
+        )
         forced_provider = str(os.getenv("IPFS_DATASETS_PY_LLM_PROVIDER", "") or "").strip()
         codex_path = shutil.which("codex") or ""
         copilot_path = shutil.which("copilot") or ""
         openai_key = _resolve_openai_key()
-        hf_token = str(llm_router._resolve_hf_api_token() or "").strip()
-        copilot_provider = llm_router._builtin_provider_by_name("copilot_cli")
         copilot_command = os.getenv("IPFS_DATASETS_PY_COPILOT_CLI_CMD", "npx --yes @github/copilot -p {prompt}")
-        copilot_supports_image_inputs = bool(
-            getattr(llm_router, "_copilot_cli_supports_image_inputs", lambda _command: False)(copilot_command)
-        )
+        hf_token = _resolve_hf_token_for_diagnostics()
+        copilot_available = _copilot_command_available(copilot_command)
+        copilot_supports_image_inputs = _copilot_supports_image_inputs_for_diagnostics()
 
         providers = [
             {
@@ -4001,12 +4124,12 @@ class ComplaintWorkspaceService:
             },
             {
                 "name": "copilot_cli",
-                "available": copilot_provider is not None,
+                "available": copilot_available,
                 "reason": (
                     "Copilot CLI command template resolved and is available."
-                    if copilot_provider is not None and copilot_path
+                    if copilot_available and copilot_path
                     else "Copilot fallback is available through the configured command template."
-                    if copilot_provider is not None
+                    if copilot_available
                     else "Copilot CLI command is not currently available on this machine."
                 ),
                 "binary_path": copilot_path or None,
@@ -4014,9 +4137,9 @@ class ComplaintWorkspaceService:
                 "supports_multimodal_ui_review": copilot_supports_image_inputs,
                 "credential_source": (
                     "github_copilot_cli"
-                    if copilot_provider is not None and copilot_path
+                    if copilot_available and copilot_path
                     else "github_copilot_command_template"
-                    if copilot_provider is not None
+                    if copilot_available
                     else "unavailable"
                 ),
                 "draft_timeout_seconds": _llm_draft_timeout_for_provider("copilot_cli"),
@@ -4028,8 +4151,11 @@ class ComplaintWorkspaceService:
                 "credential_source": _source_for_hf(),
                 "base_url": str(os.getenv("IPFS_DATASETS_PY_HF_INFERENCE_BASE_URL", "https://router.huggingface.co/hf-inference/models")).rstrip("/"),
                 "draft_timeout_seconds": _llm_draft_timeout_for_provider("hf_inference_api"),
-                "ui_review_model": ui_review_module._ui_review_model_for_provider("hf_inference_api"),
-                "ui_review_timeout_seconds": ui_review_module._ui_review_timeout_for_provider("hf_inference_api"),
+                "ui_review_model": str(
+                    os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL_HF_INFERENCE_API", "") or ""
+                ).strip()
+                or "Qwen/Qwen2.5-VL-7B-Instruct",
+                "ui_review_timeout_seconds": _llm_draft_timeout_for_provider("hf_inference_api"),
             },
         ]
 
@@ -4044,20 +4170,24 @@ class ComplaintWorkspaceService:
                 str(os.getenv("COMPLAINT_GENERATOR_LLM_DRAFT_PROVIDER", "") or "").strip()
                 or DEFAULT_LLM_DRAFT_PROVIDER_FALLBACK_CHAIN[0]
             ),
-            "ui_review_default_provider": ui_review_module.DEFAULT_UI_REVIEW_PROVIDER,
-            "ui_review_default_model": ui_review_module._ui_review_model_for_provider(
-                ui_review_module.DEFAULT_UI_REVIEW_PROVIDER
-            ),
+            "ui_review_default_provider": str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_PROVIDER", "") or "").strip()
+            or "codex_cli",
+            "ui_review_default_model": str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL_CODEX_CLI", "") or "").strip()
+            or str(os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL", "") or "").strip()
+            or "gpt-5.3-codex",
             "ui_review_multimodal_rate_limit_fallbacks": {
-                "codex_cli": list(ui_review_module._multimodal_rate_limit_fallback_chain("codex_cli")),
-                "copilot_cli": list(ui_review_module._multimodal_rate_limit_fallback_chain("copilot_cli")),
+                "codex_cli": ["copilot_cli", "hf_inference_api"],
+                "copilot_cli": ["hf_inference_api"],
             },
-            "ui_review_hf_fallback_model": ui_review_module._ui_review_model_for_provider("hf_inference_api"),
+            "ui_review_hf_fallback_model": str(
+                os.getenv("COMPLAINT_GENERATOR_UI_REVIEW_MODEL_HF_INFERENCE_API", "") or ""
+            ).strip()
+            or "Qwen/Qwen2.5-VL-7B-Instruct",
             "providers": providers,
             "summary": {
                 "codex_available": bool(codex_path),
                 "openai_available": bool(openai_key),
-                "copilot_available": copilot_provider is not None,
+                "copilot_available": copilot_available,
                 "huggingface_available": bool(hf_token),
             },
         }
@@ -5020,6 +5150,734 @@ class ComplaintWorkspaceService:
             "case_synopsis": session["case_synopsis"],
         }
 
+    @staticmethod
+    def _resolve_mike_base_url(override: Optional[str] = None) -> str:
+        candidate = str(override or os.getenv("COMPLAINT_MIKE_BASE_URL") or "").strip()
+        if not candidate:
+            candidate = "http://localhost:3000"
+        return candidate.rstrip("/")
+
+    @staticmethod
+    def _build_mike_launch_url(base_url: str, query: Mapping[str, str]) -> str:
+        parsed = urlsplit(str(base_url or "").strip())
+        path = parsed.path or "/"
+        return urlunsplit((parsed.scheme, parsed.netloc, path, urlencode(dict(query)), parsed.fragment))
+
+    @staticmethod
+    def _mike_transport_warning(base_url: str) -> Optional[str]:
+        parsed = urlsplit(str(base_url or "").strip())
+        hostname = str(parsed.hostname or "").strip().lower()
+        if parsed.scheme == "http" and hostname not in {"localhost", "127.0.0.1", "::1"}:
+            return (
+                "Mike launch URL is using plain HTTP on a non-localhost host. "
+                "Prefer HTTPS for production deployments."
+            )
+        return None
+
+    @staticmethod
+    def _summarize_mike_evidence_context(state: Dict[str, Any], review: Dict[str, Any]) -> Dict[str, Any]:
+        evidence = dict(state.get("evidence") or {})
+        testimony = list(evidence.get("testimony") or [])
+        documents = list(evidence.get("documents") or [])
+        support_matrix = list((review or {}).get("support_matrix") or [])
+        testimony_by_element: Dict[str, List[Dict[str, Any]]] = {}
+        for item in testimony:
+            element_id = str((item or {}).get("claim_element_id") or "").strip()
+            if not element_id:
+                continue
+            testimony_by_element.setdefault(element_id, []).append(item)
+        documents_by_element: Dict[str, List[Dict[str, Any]]] = {}
+        for item in documents:
+            element_id = str((item or {}).get("claim_element_id") or "").strip()
+            if not element_id:
+                continue
+            documents_by_element.setdefault(element_id, []).append(item)
+        evidence_by_element: Dict[str, Dict[str, Any]] = {}
+        for element in support_matrix:
+            element_id = str((element or {}).get("id") or "").strip()
+            if not element_id:
+                continue
+            matching_testimony = list(testimony_by_element.get(element_id) or [])
+            matching_documents = list(documents_by_element.get(element_id) or [])
+            samples = [
+                str((item or {}).get("title") or "").strip()
+                for item in (matching_testimony + matching_documents)
+                if str((item or {}).get("title") or "").strip()
+            ][:3]
+            evidence_by_element[element_id] = {
+                "label": str((element or {}).get("label") or element_id),
+                "supported": bool((element or {}).get("supported")),
+                "testimony_count": len(matching_testimony),
+                "document_count": len(matching_documents),
+                "sample_titles": samples,
+            }
+        return {
+            "testimony_count": len(testimony),
+            "document_count": len(documents),
+            "elements": evidence_by_element,
+            "missing_element_ids": [
+                str((element or {}).get("id") or "").strip()
+                for element in support_matrix
+                if not bool((element or {}).get("supported"))
+            ],
+        }
+
+    @staticmethod
+    def _normalize_mike_citation_links(citation_links: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize Mike citation links to mutable dict rows.
+
+        Non-dict inputs are ignored and dict entries are shallow-copied so downstream
+        mutation cannot alter caller-provided payload objects.
+        """
+        return [dict(item) for item in list(citation_links or []) if isinstance(item, dict)]
+
+    @staticmethod
+    def _extract_mike_claim_element_id(item: Mapping[str, Any]) -> str:
+        # Support both Mike payload conventions while preferring claim_element_id.
+        return str((item.get("claim_element_id") or item.get("element_id") or "")).strip()
+
+    @staticmethod
+    def _extract_mike_citation_key(item: Mapping[str, Any]) -> str:
+        for field in MIKE_CITATION_KEY_FIELD_PRECEDENCE:
+            candidate = str(item.get(field) or "").strip()
+            if candidate:
+                return candidate
+        return ""
+
+    def _check_mike_citation_links(
+        self,
+        state: Dict[str, Any],
+        citation_links: List[Dict[str, Any]],
+        *,
+        review: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Validate Mike citation links against claim elements and detect citation conflicts.
+
+        Args:
+            state: Current workspace state payload.
+            citation_links: Citation-link objects supplied on Mike sync.
+            review: Optional precomputed review payload to avoid recomputing support_matrix.
+
+        Returns:
+            Dict with total link count, known/unknown claim elements, per-citation conflicts,
+            and an aggregate has_conflicts boolean.
+        """
+        review_payload = dict(review or {})
+        if not review_payload:
+            review_payload = self._build_review(state)
+        support_matrix = list((review_payload or {}).get("support_matrix") or [])
+
+        known_element_ids: Set[str] = set()
+        for item in support_matrix:
+            element_id = str((item or {}).get("id") or "").strip()
+            if element_id:
+                known_element_ids.add(element_id)
+        normalized_links = self._normalize_mike_citation_links(citation_links)
+        unknown_claim_element_ids: Set[str] = set()
+        for item in normalized_links:
+            claim_element_id = self._extract_mike_claim_element_id(item)
+            if claim_element_id and claim_element_id not in known_element_ids:
+                unknown_claim_element_ids.add(claim_element_id)
+        citation_to_elements: Dict[str, Set[str]] = {}
+        for item in normalized_links:
+            citation_key = self._extract_mike_citation_key(item)
+            claim_element_id = self._extract_mike_claim_element_id(item)
+            if not citation_key or not claim_element_id:
+                continue
+            citation_to_elements.setdefault(citation_key, set()).add(claim_element_id)
+        conflicts = [
+            {
+                "citation_id": citation_id,
+                # Keep deterministic claim-element ordering for tests and downstream diffs.
+                "claim_element_ids": sorted(claim_element_ids),
+            }
+            for citation_id, claim_element_ids in sorted(citation_to_elements.items())
+            if len(claim_element_ids) > 1
+        ]
+        return {
+            "total_links": len(normalized_links),
+            "known_claim_element_ids": sorted(known_element_ids),
+            "unknown_claim_element_ids": sorted(unknown_claim_element_ids),
+            "conflicts": conflicts,
+            "has_conflicts": bool(conflicts or unknown_claim_element_ids),
+        }
+
+    @staticmethod
+    def _build_mike_workflow_state(
+        *,
+        latest_handoff_id: str,
+        pending_sync: bool,
+        has_mike_synced_draft: bool,
+        has_citation_link_conflicts: bool,
+    ) -> Dict[str, str]:
+        if not latest_handoff_id:
+            key = "not_handed_off"
+            severity = "warn"
+        elif pending_sync:
+            key = "handoff_pending_sync"
+            severity = "warn"
+        elif has_mike_synced_draft and has_citation_link_conflicts:
+            key = "synced_with_conflicts"
+            severity = "warn"
+        elif has_mike_synced_draft:
+            key = "synced_clean"
+            severity = "good"
+        else:
+            key = "handoff_pending_sync"
+            severity = "warn"
+        return {
+            "key": key,
+            "label": MIKE_WORKFLOW_STATE_LABELS.get(key, "Unknown"),
+            "severity": severity,
+        }
+
+    @staticmethod
+    def _derive_mike_recommended_action(
+        *,
+        workflow_state_key: str,
+        has_citation_link_conflicts: bool,
+    ) -> str:
+        if workflow_state_key == "synced_with_conflicts" and has_citation_link_conflicts:
+            return "Resolve conflicts in Mike and sync again before export."
+        if workflow_state_key == "handoff_pending_sync":
+            return "Latest Mike handoff has not been synced yet. Import the edited draft with complaint.sync_mike_final_draft."
+        if workflow_state_key == "not_handed_off":
+            return "Start with complaint.build_mike_handoff to open Mike with the current draft and evidence context."
+        if workflow_state_key == "synced_clean":
+            return "Mike sync is current. Continue export review and release-gate checks for filing readiness."
+        return "A handoff exists. Sync the finalized Mike draft back into complaint-generator before export."
+
+    @staticmethod
+    def _build_mike_structured_packet_context(
+        draft: Mapping[str, Any],
+        review: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        draft_body = str((draft or {}).get("body") or "")
+        paragraphs = [line.strip() for line in draft_body.splitlines() if line.strip()]
+        paragraph_count_truncated = len(paragraphs) > MAX_MIKE_HANDOFF_PARAGRAPHS
+        section_cards: List[Dict[str, Any]] = []
+        for index, paragraph in enumerate(paragraphs[:MAX_MIKE_HANDOFF_PARAGRAPHS], start=1):
+            section_cards.append(
+                {
+                    "section_id": f"section-{index:03d}",
+                    "section_type": "draft_paragraph",
+                    "paragraph_ids": [f"paragraph-{index:03d}"],
+                    "paragraphs": [
+                        {
+                            "paragraph_id": f"paragraph-{index:03d}",
+                            "text": paragraph,
+                        }
+                    ],
+                }
+            )
+        support_matrix = list((review or {}).get("support_matrix") or [])
+        claim_elements = [
+            {
+                "claim_element_id": str((item or {}).get("id") or "").strip(),
+                "label": str((item or {}).get("label") or "").strip(),
+                "supported": bool((item or {}).get("supported")),
+                "stable_claim_id": f"claim-element-{idx:03d}",
+            }
+            for idx, item in enumerate(support_matrix, start=1)
+            if str((item or {}).get("id") or "").strip()
+        ]
+        return {
+            "section_cards": section_cards,
+            "claim_elements": claim_elements,
+            "total_paragraph_count": len(paragraphs),
+            "paragraph_count_truncated": paragraph_count_truncated,
+            "stable_id_rules": {
+                "sections": "section-###",
+                "paragraphs": "paragraph-###",
+                "claim_elements": "claim-element-###",
+            },
+        }
+
+    @staticmethod
+    def _build_mike_editor_guardrails(review: Mapping[str, Any]) -> Dict[str, Any]:
+        support_matrix = list((review or {}).get("support_matrix") or [])
+        unsupported_ids = [
+            str((item or {}).get("id") or "").strip()
+            for item in support_matrix
+            if str((item or {}).get("id") or "").strip() and not bool((item or {}).get("supported"))
+        ]
+        contradiction_candidates = list((review or {}).get("contradiction_candidates") or [])
+        contradiction_ids = [
+            str((item or {}).get("id") or item or "").strip()
+            for item in contradiction_candidates
+            if str((item or {}).get("id") or item or "").strip()
+        ]
+        return {
+            "unsupported_claim_elements": unsupported_ids,
+            "weak_evidentiary_links": unsupported_ids[:MAX_MIKE_WEAK_LINKS_DISPLAY],
+            "proof_readiness_flags": {
+                "missing_support_count": len(unsupported_ids),
+                "supported_count": len(support_matrix) - len(unsupported_ids),
+            },
+            "contradiction_hotspots": contradiction_ids,
+        }
+
+    @staticmethod
+    def _validate_mike_structured_deltas(structured_deltas: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Normalize structured deltas while intentionally ignoring malformed rows."""
+        normalized: List[Dict[str, Any]] = []
+        for item in list(structured_deltas or []):
+            if not isinstance(item, dict):
+                continue
+            op = str(item.get("op") or "").strip().lower() or "edit"
+            target = str(item.get("target") or "").strip()
+            normalized_from_invalid_op = op not in VALID_MIKE_STRUCTURED_DELTA_OPS
+            if op not in VALID_MIKE_STRUCTURED_DELTA_OPS:
+                op = "edit"
+            metadata = dict(item.get("metadata") or {}) if isinstance(item.get("metadata"), dict) else {}
+            if normalized_from_invalid_op:
+                metadata["normalized_from_invalid_op"] = True
+            normalized.append(
+                {
+                    "op": op,
+                    "target": target or "draft.body",
+                    "before": item.get("before"),
+                    "after": item.get("after"),
+                    "metadata": metadata,
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _normalize_mike_editor_metadata(editor_metadata: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        payload = dict(editor_metadata or {})
+        return {
+            "editor_user_id": str(payload.get("editor_user_id") or "").strip() or None,
+            "editor_session_id": str(payload.get("editor_session_id") or "").strip() or None,
+            "source_updated_at": str(payload.get("source_updated_at") or "").strip() or None,
+            "source_transport": str(payload.get("source_transport") or "").strip() or None,
+        }
+
+    @staticmethod
+    def _build_mike_sync_diagnostics(
+        *,
+        citation_link_check: Mapping[str, Any],
+        review_payload: Mapping[str, Any],
+        structured_deltas: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        conflict_count = len(list((citation_link_check or {}).get("conflicts") or []))
+        unknown_count = len(list((citation_link_check or {}).get("unknown_claim_element_ids") or []))
+        overview = dict((review_payload or {}).get("overview") or {})
+        missing_count = int(overview.get("missing_elements") or 0)
+        diagnostics = [
+            {
+                "id": "citation_link_integrity",
+                "severity": "error" if (conflict_count or unknown_count) else "info",
+                "status": "failed" if (conflict_count or unknown_count) else "passed",
+                "message": (
+                    f"Detected {conflict_count} citation-link conflict(s) and {unknown_count} unknown claim element link(s)."
+                    if (conflict_count or unknown_count)
+                    else "Citation-link integrity check passed."
+                ),
+                "remediation": "Resolve conflicts in Mike and sync again."
+                if (conflict_count or unknown_count)
+                else "No action required.",
+            },
+            {
+                "id": "claim_proof_coverage",
+                "severity": "warning" if missing_count else "info",
+                "status": "needs_review" if missing_count else "passed",
+                "message": (
+                    f"Support review still reports {missing_count} missing claim element(s)."
+                    if missing_count
+                    else "Support review reports complete claim-element coverage."
+                ),
+                "remediation": "Collect additional corroboration before export." if missing_count else "No action required.",
+            },
+            {
+                "id": "theorem_export_compatibility",
+                "severity": "warning" if missing_count else "info",
+                "status": "needs_review" if missing_count else "passed",
+                "message": (
+                    "Theorem/export compatibility should be re-checked after this sync because unresolved proof gaps remain."
+                    if missing_count
+                    else "No proof-gap regressions detected for theorem/export compatibility."
+                ),
+                "remediation": "Run complaint.review_case and complaint.get_client_release_gate before filing.",
+            },
+        ]
+        normalized_invalid_op_count = sum(
+            1
+            for item in structured_deltas
+            if bool(dict(item.get("metadata") or {}).get("normalized_from_invalid_op"))
+        )
+        return {
+            "severity": "error" if (conflict_count or unknown_count) else ("warning" if missing_count else "info"),
+            "has_blockers": bool(conflict_count or unknown_count),
+            "checks": diagnostics,
+            "structured_delta_count": len(structured_deltas),
+            "normalized_invalid_op_count": normalized_invalid_op_count,
+        }
+
+    def build_mike_handoff(
+        self,
+        user_id: Optional[str],
+        *,
+        mike_base_url: Optional[str] = None,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        generate_draft_if_missing: bool = True,
+    ) -> Dict[str, Any]:
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        generated_draft = False
+        if generate_draft_if_missing and not state.get("draft"):
+            state["draft"] = self._build_draft(state)
+            generated_draft = True
+        review = self._build_review(state)
+        handoff_id = f"mike-handoff-{uuid.uuid4().hex[:12]}"
+        resolved_base_url = self._resolve_mike_base_url(mike_base_url)
+        launch_query: Dict[str, str] = {
+            "user_id": resolved_user_id,
+            "handoff_id": handoff_id,
+        }
+        normalized_project_id = str(project_id or "").strip()
+        normalized_workspace_id = str(workspace_id or "").strip()
+        if normalized_project_id:
+            launch_query["project_id"] = normalized_project_id
+        if normalized_workspace_id:
+            launch_query["workspace_id"] = normalized_workspace_id
+        launch_url = self._build_mike_launch_url(resolved_base_url, launch_query)
+        transport_warning = self._mike_transport_warning(resolved_base_url)
+        handoff_payload = {
+            "version": MIKE_HANDOFF_CONTRACT_VERSION,
+            "user_id": resolved_user_id,
+            "project_id": normalized_project_id or None,
+            "workspace_id": normalized_workspace_id or None,
+            "handoff_id": handoff_id,
+            "created_at": _utc_now(),
+            "case_synopsis": self._build_case_synopsis(state),
+            "claim_type": str(state.get("claim_type") or "retaliation"),
+            "draft": deepcopy(state.get("draft") or {}),
+            "review": deepcopy(review),
+            "evidence_context": self._summarize_mike_evidence_context(state, review),
+            "structured_legal_packet_context": self._build_mike_structured_packet_context(
+                dict(state.get("draft") or {}),
+                review,
+            ),
+            "editor_guardrails": self._build_mike_editor_guardrails(review),
+            "non_negotiable_constraints": {
+                "must_preserve_claim_element_references": True,
+                "must_return_sync_handoff_id": True,
+                "must_run_citation_link_integrity_checks": True,
+                "must_include_source_timestamps": True,
+            },
+        }
+        mike_integration = dict(state.get("mike_integration") or {})
+        handoff_history = [dict(item) for item in list(mike_integration.get("handoff_history") or []) if isinstance(item, dict)]
+        handoff_record = {
+            "handoff_id": handoff_id,
+            "created_at": handoff_payload["created_at"],
+            "project_id": normalized_project_id or None,
+            "workspace_id": normalized_workspace_id or None,
+            "generated_draft": generated_draft,
+            "launch_url": launch_url,
+        }
+        handoff_history.insert(0, handoff_record)
+        mike_integration["last_handoff"] = handoff_record
+        mike_integration["handoff_history"] = handoff_history[:25]
+        state["mike_integration"] = mike_integration
+        self._save_state(state)
+        return {
+            "user_id": resolved_user_id,
+            "handoff_id": handoff_id,
+            "generated_draft": generated_draft,
+            "mike": {
+                "base_url": resolved_base_url,
+                "launch_url": launch_url,
+                "project_id": normalized_project_id or None,
+                "workspace_id": normalized_workspace_id or None,
+                "transport_warning": transport_warning,
+            },
+            "handoff_payload": handoff_payload,
+            "sync_contract": {
+                "tool_name": "complaint.sync_mike_final_draft",
+                "contract_version": MIKE_SYNC_CONTRACT_VERSION,
+                "required_fields": ["user_id", "body"],
+                "optional_fields": [
+                    "handoff_id",
+                    "project_id",
+                    "workspace_id",
+                    "title",
+                    "requested_relief",
+                    "mike_document_id",
+                    "citation_links",
+                    "redline_summary",
+                    "source_updated_at",
+                    "structured_deltas",
+                    "editor_metadata",
+                ],
+            },
+            "session_snapshot": {
+                "user_id": str(state.get("user_id") or resolved_user_id),
+                "claim_type": str(state.get("claim_type") or "retaliation"),
+                "has_draft": bool(state.get("draft")),
+                "testimony_count": len(list((state.get("evidence") or {}).get("testimony") or [])),
+                "document_count": len(list((state.get("evidence") or {}).get("documents") or [])),
+                "updated_at": str(state.get("updated_at") or ""),
+            },
+            "review": deepcopy(review),
+            "case_synopsis": self._build_case_synopsis(state),
+            "contract_versions": {
+                "handoff": MIKE_HANDOFF_CONTRACT_VERSION,
+                "sync": MIKE_SYNC_CONTRACT_VERSION,
+                "status": MIKE_STATUS_CONTRACT_VERSION,
+            },
+        }
+
+    def sync_mike_final_draft(
+        self,
+        user_id: Optional[str],
+        *,
+        body: str,
+        title: Optional[str] = None,
+        requested_relief: Optional[List[str]] = None,
+        handoff_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        mike_document_id: Optional[str] = None,
+        citation_links: Optional[List[Dict[str, Any]]] = None,
+        redline_summary: Optional[str] = None,
+        source_updated_at: Optional[str] = None,
+        structured_deltas: Optional[List[Dict[str, Any]]] = None,
+        editor_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        raw_body = str(body or "")
+        if not raw_body.strip():
+            raise ValueError("The draft body content is required and cannot be empty.")
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        draft = deepcopy(state.get("draft") or self._build_draft(state))
+        mike_integration = dict(state.get("mike_integration") or {})
+        last_handoff = dict(mike_integration.get("last_handoff") or {})
+        provided_handoff_id = str(handoff_id or "").strip()
+        fallback_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
+        resolved_handoff_id = provided_handoff_id or fallback_handoff_id or None
+        existing_title = str(draft.get("title") or "").strip()
+        if title is not None:
+            normalized_title = str(title or "").strip()
+            draft["title"] = normalized_title or existing_title or "Complaint Draft"
+        draft["body"] = raw_body
+        if requested_relief is not None:
+            draft["requested_relief"] = [str(item).strip() for item in list(requested_relief or []) if str(item).strip()]
+        synced_at = _utc_now()
+        normalized_citation_links = self._normalize_mike_citation_links(citation_links)
+        normalized_structured_deltas = self._validate_mike_structured_deltas(structured_deltas)
+        normalized_editor_metadata = self._normalize_mike_editor_metadata(editor_metadata)
+        review_payload = dict(state.get("support_review") or {})
+        if not review_payload:
+            review_payload = self._build_review(state)
+        citation_link_check = self._check_mike_citation_links(
+            state,
+            normalized_citation_links,
+            review=review_payload,
+        )
+        sync_diagnostics = self._build_mike_sync_diagnostics(
+            citation_link_check=citation_link_check,
+            review_payload=review_payload,
+            structured_deltas=normalized_structured_deltas,
+        )
+        sync_integrity_payload_bytes = json.dumps(
+            {
+                "handoff_id": resolved_handoff_id,
+                "body": raw_body,
+                "synced_at": synced_at,
+                "citation_links": normalized_citation_links,
+                "structured_deltas": normalized_structured_deltas,
+                "source_updated_at": str(source_updated_at or "").strip(),
+                "editor_metadata": normalized_editor_metadata,
+            },
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+        sync_hash_secret = str(os.getenv("COMPLAINT_MIKE_SYNC_HASH_SECRET") or "").strip()
+        if sync_hash_secret:
+            sync_integrity_hash = hmac.new(sync_hash_secret.encode("utf-8"), sync_integrity_payload_bytes, hashlib.sha256).hexdigest()
+            sync_integrity_hash_mode = "hmac_sha256"
+        else:
+            sync_integrity_hash = hashlib.sha256(sync_integrity_payload_bytes).hexdigest()
+            sync_integrity_hash_mode = "sha256_unkeyed"
+        draft["updated_at"] = synced_at
+        draft["sync_source"] = "mike"
+        draft["sync_metadata"] = {
+            "contract_version": MIKE_SYNC_CONTRACT_VERSION,
+            "handoff_id": resolved_handoff_id,
+            "project_id": str(project_id or "").strip() or None,
+            "workspace_id": str(workspace_id or "").strip() or None,
+            "mike_document_id": str(mike_document_id or "").strip() or None,
+            "citation_links": normalized_citation_links,
+            "structured_deltas": normalized_structured_deltas,
+            "citation_link_check": citation_link_check,
+            "sync_diagnostics": sync_diagnostics,
+            "redline_summary": str(redline_summary or "").strip() or None,
+            "source_updated_at": str(source_updated_at or "").strip() or None,
+            "editor_metadata": normalized_editor_metadata,
+            "sync_integrity_hash": sync_integrity_hash,
+            "sync_integrity_hash_mode": sync_integrity_hash_mode,
+            "synced_at": synced_at,
+        }
+        state["draft"] = draft
+        sync_history = [dict(item) for item in list(mike_integration.get("sync_history") or []) if isinstance(item, dict)]
+        sync_record = {
+            "synced_at": synced_at,
+            "handoff_id": draft["sync_metadata"]["handoff_id"],
+            "project_id": draft["sync_metadata"]["project_id"],
+            "workspace_id": draft["sync_metadata"]["workspace_id"],
+            "mike_document_id": draft["sync_metadata"]["mike_document_id"],
+            "body_chars": len(raw_body),
+            "title": str(draft.get("title") or "").strip(),
+            "citation_link_count": citation_link_check["total_links"],
+            "citation_link_conflict_count": len(citation_link_check["conflicts"]),
+            "citation_link_has_conflicts": citation_link_check["has_conflicts"],
+            "citation_link_unknown_element_count": len(list(citation_link_check.get("unknown_claim_element_ids") or [])),
+            "structured_delta_count": len(normalized_structured_deltas),
+            "sync_diagnostics_severity": str(sync_diagnostics.get("severity") or "info"),
+            "editor_user_id": normalized_editor_metadata.get("editor_user_id"),
+            "sync_integrity_hash": sync_integrity_hash,
+            "sync_integrity_hash_mode": sync_integrity_hash_mode,
+        }
+        sync_history.insert(0, sync_record)
+        mike_integration["last_sync"] = sync_record
+        mike_integration["sync_history"] = sync_history[:25]
+        audit_trail = [dict(item) for item in list(mike_integration.get("audit_trail") or []) if isinstance(item, dict)]
+        audit_trail.insert(
+            0,
+            {
+                "audit_id": f"mike-sync-audit-{uuid.uuid4().hex[:12]}",
+                "synced_at": synced_at,
+                "handoff_id": sync_record.get("handoff_id"),
+                "editor_user_id": normalized_editor_metadata.get("editor_user_id"),
+                "severity": sync_diagnostics.get("severity"),
+                "has_blockers": bool(sync_diagnostics.get("has_blockers")),
+                "sync_integrity_hash": sync_integrity_hash,
+            },
+        )
+        mike_integration["audit_trail"] = audit_trail[:50]
+        state["mike_integration"] = mike_integration
+        self._save_state(state)
+        session = self.get_session(str(state.get("user_id")))
+        return {
+            "user_id": session["session"]["user_id"],
+            "draft": deepcopy(session["session"].get("draft") or {}),
+            "sync_record": sync_record,
+            "citation_link_check": citation_link_check,
+            "sync_diagnostics": sync_diagnostics,
+            "contract_versions": {
+                "sync": MIKE_SYNC_CONTRACT_VERSION,
+                "status": MIKE_STATUS_CONTRACT_VERSION,
+            },
+            "review": session["review"],
+            "session": session["session"],
+            "questions": session["questions"],
+            "next_question": session["next_question"],
+            "case_synopsis": session["case_synopsis"],
+        }
+
+    def get_mike_integration_status(self, user_id: Optional[str]) -> Dict[str, Any]:
+        state = self._load_state(str(user_id or DEFAULT_USER_ID))
+        mike_integration = dict(state.get("mike_integration") or {})
+        last_handoff = dict(mike_integration.get("last_handoff") or {})
+        last_sync = dict(mike_integration.get("last_sync") or {})
+        handoff_history = [dict(item) for item in list(mike_integration.get("handoff_history") or []) if isinstance(item, dict)]
+        sync_history = [dict(item) for item in list(mike_integration.get("sync_history") or []) if isinstance(item, dict)]
+        draft = dict(state.get("draft") or {})
+        draft_sync_source = str(draft.get("sync_source") or "").strip().lower()
+        has_mike_synced_draft = draft_sync_source == "mike" and bool(str(draft.get("body") or "").strip())
+        draft_updated_at_raw = str(draft.get("updated_at") or "").strip()
+        latest_sync_timestamp_raw = str(last_sync.get("synced_at") or "").strip()
+        if has_mike_synced_draft and draft_updated_at_raw and latest_sync_timestamp_raw:
+            try:
+                draft_updated_at = datetime.fromisoformat(draft_updated_at_raw)
+                latest_sync_timestamp = datetime.fromisoformat(latest_sync_timestamp_raw)
+                # Equality is intentional because Mike sync writes both timestamps in one operation.
+                # If they differ, the draft changed after sync and should no longer be treated as current.
+                has_mike_synced_draft = draft_updated_at == latest_sync_timestamp
+            except ValueError:
+                has_mike_synced_draft = draft_updated_at_raw == latest_sync_timestamp_raw
+        draft_sync_metadata = dict(draft.get("sync_metadata") or {})
+        raw_citation_link_check = dict(draft_sync_metadata.get("citation_link_check") or {})
+        has_citation_link_conflicts = bool(raw_citation_link_check.get("has_conflicts"))
+        citation_link_conflict_count = len(list(raw_citation_link_check.get("conflicts") or []))
+        citation_link_unknown_element_count = len(list(raw_citation_link_check.get("unknown_claim_element_ids") or []))
+        latest_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
+        latest_sync_handoff_id = str(last_sync.get("handoff_id") or "").strip()
+        # When latest_sync_handoff_id is empty, no Mike sync has been persisted yet for this session.
+        pending_sync = bool(latest_handoff_id) and latest_handoff_id != latest_sync_handoff_id
+        workflow_state = self._build_mike_workflow_state(
+            latest_handoff_id=latest_handoff_id,
+            pending_sync=pending_sync,
+            has_mike_synced_draft=has_mike_synced_draft,
+            has_citation_link_conflicts=has_citation_link_conflicts,
+        )
+        recommended_action = self._derive_mike_recommended_action(
+            workflow_state_key=workflow_state["key"],
+            has_citation_link_conflicts=has_citation_link_conflicts,
+        )
+        pending_sync_implies_handoff = (not pending_sync) or bool(latest_handoff_id)
+        synced_handoff_never_pending = not (
+            bool(latest_handoff_id)
+            and latest_handoff_id == latest_sync_handoff_id
+            and pending_sync
+        )
+        conflict_count_non_null = isinstance(citation_link_conflict_count, int) and citation_link_conflict_count >= 0
+        unknown_count_non_null = isinstance(citation_link_unknown_element_count, int) and citation_link_unknown_element_count >= 0
+        recommended_action_valid = bool(str(recommended_action or "").strip())
+        conflict_component = {
+            "conflict_count": int(citation_link_conflict_count),
+            "unknown_element_count": int(citation_link_unknown_element_count),
+            "impact_statement": (
+                "Export readiness is blocked until Mike citation-link conflicts are resolved and synced again."
+                if has_citation_link_conflicts
+                else "No citation-link blockers are currently reported."
+            ),
+            "required_next_action": recommended_action,
+            "why_blocked": (
+                "Citation-link integrity checks found conflicts or unknown claim elements."
+                if has_citation_link_conflicts
+                else ""
+            ),
+        }
+        return {
+            "user_id": str(state.get("user_id") or DEFAULT_USER_ID),
+            "status": "ok",
+            "status_contract_version": MIKE_STATUS_CONTRACT_VERSION,
+            "status_contract": {
+                "version": MIKE_STATUS_CONTRACT_VERSION,
+                "canonical_source": "/api/complaint-workspace/mike/status",
+                "state_mapping": deepcopy(MIKE_WORKFLOW_STATE_LABELS),
+            },
+            "last_handoff": last_handoff or None,
+            "last_sync": last_sync or None,
+            "handoff_history_count": len(handoff_history),
+            "sync_history_count": len(sync_history),
+            "latest_handoff_id": latest_handoff_id or None,
+            "latest_sync_handoff_id": latest_sync_handoff_id or None,
+            "pending_sync": pending_sync,
+            "workflow_state": workflow_state,
+            "has_mike_synced_draft": has_mike_synced_draft,
+            "has_citation_link_conflicts": has_citation_link_conflicts,
+            "citation_link_conflict_count": citation_link_conflict_count,
+            "citation_link_unknown_element_count": citation_link_unknown_element_count,
+            "conflict_component": conflict_component,
+            "draft_sync_source": draft_sync_source or None,
+            "recommended_action": recommended_action,
+            "invariants": {
+                "pending_sync_implies_handoff": pending_sync_implies_handoff,
+                "synced_handoff_never_pending": synced_handoff_never_pending,
+                "conflict_counters_non_null_numeric": bool(conflict_count_non_null and unknown_count_non_null),
+                "recommended_action_present": recommended_action_valid,
+            },
+            "status_freshness": {
+                "last_handoff_at": str(last_handoff.get("created_at") or "").strip() or None,
+                "last_sync_at": str(last_sync.get("synced_at") or "").strip() or None,
+                "latest_status_observed_at": _utc_now(),
+            },
+        }
+
     def update_filing_metadata(
         self,
         user_id: Optional[str],
@@ -5069,23 +5927,183 @@ class ComplaintWorkspaceService:
         *,
         input_type: str = "packaged",
     ) -> Dict[str, Any]:
+        resolved_path = self._resolve_workspace_dataset_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            return self._load_workspace_single_parquet_payload(resolved_path)
+
         from ipfs_datasets_py.processors.legal_data import (
             WorkspaceDatasetBuilder,
             load_packaged_workspace_dataset,
-            load_workspace_dataset_single_parquet,
         )
 
-        resolved_path = self._resolve_workspace_dataset_path(input_path)
-        normalized_type = str(input_type or "packaged").strip().lower()
         if normalized_type == "packaged":
             dataset = load_packaged_workspace_dataset(resolved_path)
         elif normalized_type == "json":
             dataset = WorkspaceDatasetBuilder().build_from_json_file(resolved_path)
-        elif normalized_type == "single":
-            dataset = load_workspace_dataset_single_parquet(resolved_path)
         else:
             raise ValueError(f"Unsupported workspace dataset input_type: {input_type}")
         return dict(dataset.to_dict() if hasattr(dataset, "to_dict") else dataset)
+
+    @staticmethod
+    def _load_workspace_single_parquet_payload(input_path: str | Path) -> Dict[str, Any]:
+        import pyarrow.parquet as pq
+
+        table = pq.read_table(
+            str(input_path),
+            columns=[
+                "dataset_id",
+                "workspace_id",
+                "workspace_name",
+                "source_type",
+                "section",
+                "row_id",
+                "title",
+                "text",
+                "payload_json",
+            ],
+        )
+        rows = table.to_pylist()
+        sections: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            section = str(row.get("section") or "").strip()
+            if not section:
+                continue
+            try:
+                payload = json.loads(str(row.get("payload_json") or "{}"))
+            except json.JSONDecodeError:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.setdefault("row_id", row.get("row_id"))
+            if row.get("title") and not payload.get("title"):
+                payload["title"] = row.get("title")
+            if row.get("text") and not payload.get("text"):
+                payload["text"] = row.get("text")
+            sections.setdefault(section, []).append(payload)
+
+        core = dict(sections.get("dataset_core", [{}])[0] or {})
+        metadata = dict(core.get("metadata") or {})
+        if sections.get("zkp_proof_certificates"):
+            metadata.setdefault("zkp_proof_certificates", sections["zkp_proof_certificates"])
+        formal_logic = dict(metadata.get("formal_logic") or {})
+        proof_store = dict(formal_logic.get("proof_store") or {})
+        if sections.get("zkp_proof_certificates"):
+            proof_store.setdefault("zkp_proof_certificates", sections["zkp_proof_certificates"])
+            formal_logic["proof_store"] = proof_store
+            metadata["formal_logic"] = formal_logic
+
+        return {
+            **core,
+            "dataset_id": core.get("dataset_id") or (rows[0].get("dataset_id") if rows else ""),
+            "workspace_id": core.get("workspace_id") or (rows[0].get("workspace_id") if rows else ""),
+            "workspace_name": core.get("workspace_name") or (rows[0].get("workspace_name") if rows else ""),
+            "source_type": core.get("source_type") or (rows[0].get("source_type") if rows else ""),
+            "documents": sections.get("documents", []),
+            "collections": sections.get("collections", []),
+            "knowledge_graph": {
+                **dict(core.get("knowledge_graph") or {}),
+                "entities": sections.get("knowledge_graph_entities", []),
+                "relationships": sections.get("knowledge_graph_relationships", []),
+            },
+            "bm25_index": {
+                **dict(core.get("bm25_index") or {}),
+                "documents": sections.get("bm25_documents", []),
+            },
+            "vector_index": {
+                **dict(core.get("vector_index") or {}),
+                "items": sections.get("vector_items", []),
+            },
+            "metadata": metadata,
+            "_single_parquet_sections": {key: len(value) for key, value in sections.items()},
+        }
+
+    @staticmethod
+    def _summarize_workspace_dataset_payload(dataset_payload: Mapping[str, Any]) -> Dict[str, Any]:
+        metadata = dict(dataset_payload.get("metadata") or {})
+        formal_logic = dict(metadata.get("formal_logic") or {})
+        summary = dict(metadata.get("formal_logic_summary") or formal_logic.get("summary") or {})
+        proof_store = dict(formal_logic.get("proof_store") or {})
+        knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
+        return {
+            "document_count": len(list(dataset_payload.get("documents") or [])),
+            "collection_count": len(list(dataset_payload.get("collections") or [])),
+            "knowledge_graph_entity_count": len(list(knowledge_graph.get("entities") or [])),
+            "knowledge_graph_relationship_count": len(list(knowledge_graph.get("relationships") or [])),
+            "bm25_document_count": len(list((dataset_payload.get("bm25_index") or {}).get("documents") or [])),
+            "vector_document_count": len(list((dataset_payload.get("vector_index") or {}).get("items") or [])),
+            "first_order_formula_count": int(summary.get("first_order_formula_count") or summary.get("fol_formula_count") or 0),
+            "temporal_deontic_formula_count": int(
+                summary.get("temporal_deontic_formula_count")
+                or summary.get("temporal_formula_count")
+                or summary.get("tdfol_formula_count")
+                or 0
+            ),
+            "deontic_cognitive_event_count": int(summary.get("deontic_cognitive_event_count") or summary.get("dcec_formula_count") or 0),
+            "formal_proof_count": int(summary.get("formal_proof_count") or summary.get("proof_count") or len(list(proof_store.get("proofs") or []))),
+            "proof_certificate_count": int(summary.get("proof_certificate_count") or len(list(proof_store.get("certificates") or []))),
+            "zkp_certificate_count": int(
+                summary.get("zkp_certificate_count")
+                or len(list(proof_store.get("zkp_proof_certificates") or metadata.get("zkp_proof_certificates") or []))
+            ),
+        }
+
+    @staticmethod
+    def _search_workspace_dataset_local(
+        dataset_payload: Mapping[str, Any],
+        query: str,
+        *,
+        search_backend: str,
+        top_k: int,
+    ) -> Dict[str, Any]:
+        terms = [term for term in re.findall(r"[A-Za-z0-9$%.-]+", str(query or "").lower()) if term]
+        documents = [dict(item) for item in list(dataset_payload.get("documents") or []) if isinstance(item, dict)]
+        rows = (
+            list((dataset_payload.get("vector_index") or {}).get("items") or [])
+            if str(search_backend or "").lower() == "vector"
+            else list((dataset_payload.get("bm25_index") or {}).get("documents") or [])
+        )
+        document_by_id = {
+            str(document.get("document_id") or document.get("id") or document.get("row_id") or ""): document
+            for document in documents
+        }
+        scored: List[Dict[str, Any]] = []
+        for row in rows or documents:
+            item = dict(row) if isinstance(row, dict) else {}
+            document_id = str(item.get("document_id") or item.get("id") or item.get("row_id") or "")
+            document = dict(document_by_id.get(document_id) or item)
+            haystack = " ".join(
+                str(value or "")
+                for value in [
+                    item.get("title"),
+                    item.get("text"),
+                    item.get("content"),
+                    item.get("payload_json"),
+                    document.get("title"),
+                    document.get("text"),
+                    document.get("content"),
+                    json.dumps(document, sort_keys=True),
+                ]
+            ).lower()
+            score = float(sum(haystack.count(term) for term in terms)) if terms else 0.0
+            if score <= 0:
+                continue
+            scored.append(
+                {
+                    "document_id": document_id or document.get("document_id") or document.get("id"),
+                    "title": document.get("title") or item.get("title") or document_id,
+                    "score": score,
+                    "document": document,
+                    "match_text": str(document.get("text") or item.get("text") or "")[:500],
+                }
+            )
+        scored.sort(key=lambda item: (-float(item.get("score") or 0), str(item.get("title") or "")))
+        return {
+            "query": str(query or ""),
+            "backend": f"local_{str(search_backend or 'bm25').lower()}",
+            "results": scored[: max(1, int(top_k or 10))],
+            "result_count": len(scored[: max(1, int(top_k or 10))]),
+        }
 
     @staticmethod
     def _apply_workspace_dataset_filters(
@@ -5448,9 +6466,8 @@ class ComplaintWorkspaceService:
         claim_element_id: Optional[str] = None,
         source_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
-
         resolved_path = self._resolve_workspace_dataset_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
         dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
         filtered_payload = self._apply_workspace_dataset_filters(
             dataset_payload,
@@ -5460,10 +6477,16 @@ class ComplaintWorkspaceService:
             claim_element_id=claim_element_id,
             source_type=source_type,
         )
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            summary = self._summarize_workspace_dataset_payload(filtered_payload)
+        else:
+            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+
+            summary = dict(summarize_workspace_dataset(filtered_payload))
         return {
             "input_path": resolved_path,
-            "input_type": str(input_type or "packaged").strip().lower(),
-            "summary": dict(summarize_workspace_dataset(filtered_payload)),
+            "input_type": normalized_type,
+            "summary": summary,
             "documents": self._build_workspace_document_view(
                 filtered_payload,
                 include_document_text=bool(include_document_text),
@@ -5473,6 +6496,591 @@ class ComplaintWorkspaceService:
             "metadata": dict(filtered_payload.get("metadata") or {}),
             "applied_filters": dict(filtered_payload.get("applied_filters") or {}),
             "source": "complaint_workspace_dataset_view",
+        }
+
+    @staticmethod
+    def _workspace_graph_text(item: Dict[str, Any]) -> str:
+        values = [
+            item.get("id"),
+            item.get("label"),
+            item.get("name"),
+            item.get("type"),
+            item.get("document_id"),
+            item.get("source_document"),
+        ]
+        properties = item.get("properties") or item.get("metadata") or {}
+        if isinstance(properties, dict):
+            values.extend(str(value) for value in properties.values() if isinstance(value, (str, int, float)))
+        return " ".join(str(value or "") for value in values).lower()
+
+    @staticmethod
+    def _workspace_relationship_endpoints(relationship: Dict[str, Any]) -> tuple[str, str]:
+        source_id = str(
+            relationship.get("source")
+            or relationship.get("source_id")
+            or relationship.get("from")
+            or relationship.get("head")
+            or ""
+        )
+        target_id = str(
+            relationship.get("target")
+            or relationship.get("target_id")
+            or relationship.get("to")
+            or relationship.get("tail")
+            or ""
+        )
+        return source_id, target_id
+
+    @staticmethod
+    def _compact_workspace_entity(entity: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "id": str(entity.get("id") or ""),
+            "label": str(entity.get("label") or entity.get("name") or entity.get("id") or ""),
+            "type": str(entity.get("type") or ""),
+            "properties": dict(entity.get("properties") or entity.get("metadata") or {}),
+            "confidence": entity.get("confidence"),
+        }
+
+    @classmethod
+    def _compact_workspace_relationship(
+        cls,
+        relationship: Dict[str, Any],
+        entity_by_id: Dict[str, Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        source_id, target_id = cls._workspace_relationship_endpoints(relationship)
+        return {
+            "id": str(relationship.get("id") or ""),
+            "type": str(relationship.get("type") or relationship.get("label") or ""),
+            "source": source_id,
+            "target": target_id,
+            "source_label": str((entity_by_id.get(source_id) or {}).get("label") or source_id),
+            "target_label": str((entity_by_id.get(target_id) or {}).get("label") or target_id),
+            "properties": dict(relationship.get("properties") or relationship.get("metadata") or {}),
+            "confidence": relationship.get("confidence"),
+        }
+
+    @staticmethod
+    def _workspace_logic_statement_text(statement: Dict[str, Any]) -> str:
+        return " ".join(
+            str(statement.get(key) or "")
+            for key in ("id", "entity", "modality", "action", "source_document", "source_text")
+        ).lower()
+
+    @staticmethod
+    def _normalize_workspace_modality(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"permission", "permitted", "may", "allowed", "allowance"}:
+            return "allowed"
+        if text in {"obligation", "obligatory", "required", "requirement", "must", "shall", "duty"}:
+            return "required"
+        if text in {"prohibition", "prohibited", "forbidden", "disallowed", "cannot", "must_not"}:
+            return "prohibited"
+        if text in {"conditional", "condition", "if_then"}:
+            return "conditional"
+        return text or "unknown"
+
+    @staticmethod
+    def _statement_event_candidates(statement: Dict[str, Any], events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        statement_id = str(statement.get("id") or "")
+        action = str(statement.get("action") or "").strip().lower()
+        entity = str(statement.get("entity") or "").strip().lower()
+        direct_matches: List[Dict[str, Any]] = []
+        entity_matches: List[Dict[str, Any]] = []
+        for event in events:
+            event_id = str(event.get("id") or "")
+            event_label = str(event.get("label") or "").strip().lower()
+            event_agent = str(event.get("agent") or "").strip().lower()
+            if statement_id and event_id.startswith(f"{statement_id}:"):
+                direct_matches.append(event)
+            elif action and (action in event_label or event_label in action):
+                direct_matches.append(event)
+            elif entity and event_agent == entity:
+                entity_matches.append(event)
+        return (direct_matches or entity_matches)[:5]
+
+    @staticmethod
+    def _workspace_formula_text(value: Any) -> str:
+        if isinstance(value, dict):
+            return " ".join(str(item or "") for item in value.values()).lower()
+        return str(value or "").lower()
+
+    @staticmethod
+    def _compact_workspace_proof_certificate(certificate: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "certificate_id": str(certificate.get("certificate_id") or ""),
+            "backend": str(certificate.get("backend") or ""),
+            "format": str(certificate.get("format") or ""),
+            "theorem": str(certificate.get("theorem") or "")[:500],
+            "assumptions": [str(item)[:300] for item in list(certificate.get("assumptions") or [])[:5]],
+        }
+
+    @classmethod
+    def _build_workspace_logic_systems(
+        cls,
+        formal_logic: Dict[str, Any],
+        *,
+        query: str = "",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        normalized_query = str(query or "").strip().lower()
+        sample_limit = min(max(int(limit or 50), 1), 20)
+
+        def formula_sample(system_payload: Any) -> List[Any]:
+            if isinstance(system_payload, dict):
+                formulas = list(system_payload.get("formulas") or [])
+            elif isinstance(system_payload, list):
+                formulas = list(system_payload)
+            else:
+                formulas = []
+            if normalized_query:
+                formulas = [
+                    formula
+                    for formula in formulas
+                    if normalized_query in cls._workspace_formula_text(formula)
+                ]
+            return formulas[:sample_limit]
+
+        temporal_payload = dict(formal_logic.get("temporal_fol") or {})
+        dcec_payload = dict(formal_logic.get("deontic_cognitive_event_calculus") or {})
+        fol_payload = dict(formal_logic.get("first_order_logic") or {})
+        frame_logic_payload = dict(formal_logic.get("frame_logic") or {})
+        document_frame_logic_payload = dict(formal_logic.get("document_frame_logic") or {})
+        temporal_formulas = formula_sample(temporal_payload)
+        dcec_formulas = formula_sample(dcec_payload)
+        fol_formulas = formula_sample(fol_payload)
+        frame_records = list(frame_logic_payload.values()) or list(document_frame_logic_payload.values())
+        if normalized_query:
+            frame_records = [
+                record
+                for record in frame_records
+                if normalized_query in cls._workspace_formula_text(record)
+            ]
+
+        return {
+            "deontic_temporal_first_order_logic": {
+                "backend": str(temporal_payload.get("backend") or ""),
+                "formula_count": int(temporal_payload.get("formula_count") or len(temporal_payload.get("formulas") or [])),
+                "sample": temporal_formulas,
+            },
+            "first_order_logic": {
+                "backend": str(fol_payload.get("backend") or temporal_payload.get("backend") or ""),
+                "formula_count": int(fol_payload.get("formula_count") or len(fol_payload.get("formulas") or [])),
+                "sample": fol_formulas,
+            },
+            "deontic_cognitive_event_calculus": {
+                "backend": str(dcec_payload.get("backend") or ""),
+                "formula_count": int(dcec_payload.get("formula_count") or len(dcec_payload.get("formulas") or [])),
+                "sample": dcec_formulas,
+            },
+            "frame_logic": {
+                "backend": str((frame_logic_payload.get("metadata") or {}).get("backend") or ""),
+                "record_count": len(frame_logic_payload) or len(document_frame_logic_payload),
+                "sample": frame_records[:sample_limit],
+            },
+        }
+
+    @classmethod
+    def _build_workspace_proof_system(
+        cls,
+        proof_store: Dict[str, Any],
+        *,
+        query: str = "",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        normalized_query = str(query or "").strip().lower()
+        sample_limit = min(max(int(limit or 50), 1), 20)
+        proof_summary = dict(proof_store.get("summary") or {})
+        proof_metadata = dict(proof_store.get("metadata") or {})
+        zkp_status = dict(proof_metadata.get("zkp_status") or {})
+        proofs = {
+            str(key): dict(value)
+            for key, value in dict(proof_store.get("proofs") or {}).items()
+            if isinstance(value, dict)
+        }
+        certificates = [dict(item) for item in list(proof_store.get("certificates") or []) if isinstance(item, dict)]
+        if normalized_query:
+            sample_proofs = [
+                proof
+                for proof in proofs.values()
+                if normalized_query in json.dumps(proof, ensure_ascii=False).lower()
+            ]
+            sample_certificates = [
+                certificate
+                for certificate in certificates
+                if normalized_query in json.dumps(certificate, ensure_ascii=False).lower()
+            ]
+        else:
+            sample_proofs = list(proofs.values())
+            sample_certificates = certificates
+
+        certificate_backend_counts: Dict[str, int] = {}
+        certificate_format_counts: Dict[str, int] = {}
+        for certificate in certificates:
+            backend = str(certificate.get("backend") or "unknown")
+            proof_format = str(certificate.get("format") or "unknown")
+            certificate_backend_counts[backend] = certificate_backend_counts.get(backend, 0) + 1
+            certificate_format_counts[proof_format] = certificate_format_counts.get(proof_format, 0) + 1
+
+        return {
+            "backend": str(proof_metadata.get("backend") or ""),
+            "summary": proof_summary,
+            "proof_count": int(proof_summary.get("proof_count") or len(proofs)),
+            "certificate_count": len(certificates),
+            "certificate_backend_counts": certificate_backend_counts,
+            "certificate_format_counts": certificate_format_counts,
+            "zero_knowledge_proofs": {
+                "available": bool(zkp_status.get("available")),
+                "backend": str(zkp_status.get("backend") or ""),
+                "backend_info": dict(zkp_status.get("backend_info") or {}),
+                "certificate_count": certificate_backend_counts.get(str(zkp_status.get("backend") or "groth16"), 0),
+            },
+            "sample_proofs": [
+                {
+                    "proof_id": str(proof.get("proof_id") or ""),
+                    "status": str(proof.get("status") or ""),
+                    "query": str(proof.get("query") or "")[:500],
+                    "root_conclusion": str(proof.get("root_conclusion") or "")[:500],
+                    "proof_hash": str(proof.get("proof_hash") or ""),
+                    "certificate_count": len(list(proof.get("certificates") or [])),
+                }
+                for proof in sample_proofs[:sample_limit]
+            ],
+            "sample_certificates": [
+                cls._compact_workspace_proof_certificate(certificate)
+                for certificate in sample_certificates[:sample_limit]
+            ],
+        }
+
+    @classmethod
+    def _build_workspace_logic_flow(
+        cls,
+        formal_logic: Dict[str, Any],
+        *,
+        entity_query: str = "",
+        document_id: str = "",
+        modality: str = "",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        normalized_query = str(entity_query or "").strip().lower()
+        normalized_document_id = str(document_id or "").strip()
+        normalized_modality = cls._normalize_workspace_modality(modality)
+        apply_modality_filter = bool(str(modality or "").strip())
+        document_analyses = {
+            str(key): dict(value)
+            for key, value in dict(formal_logic.get("document_analyses") or {}).items()
+            if isinstance(value, dict)
+        }
+        proof_store = dict(formal_logic.get("proof_store") or {})
+        certificates = [dict(item) for item in list(proof_store.get("certificates") or []) if isinstance(item, dict)]
+        certificate_by_theorem: Dict[str, List[Dict[str, Any]]] = {}
+        for certificate in certificates:
+            theorem = str(certificate.get("theorem") or "").strip().lower()
+            if theorem:
+                certificate_by_theorem.setdefault(theorem, []).append(certificate)
+
+        rows: List[Dict[str, Any]] = []
+        edges: List[Dict[str, Any]] = []
+        deontic_analysis: List[Dict[str, Any]] = []
+        event_rows: List[Dict[str, Any]] = []
+        event_flow_edges: List[Dict[str, Any]] = []
+        status_counts = {"allowed": 0, "required": 0, "prohibited": 0, "conditional": 0, "unknown": 0}
+        for current_document_id, analysis in document_analyses.items():
+            if normalized_document_id and normalized_document_id not in current_document_id:
+                continue
+            statements = [dict(item) for item in list(analysis.get("deontic_statements") or []) if isinstance(item, dict)]
+            frames = [dict(item) for item in list(analysis.get("frames") or []) if isinstance(item, dict)]
+            events = [dict(item) for item in list(analysis.get("events") or []) if isinstance(item, dict)]
+            frame_by_statement_id = {
+                str((frame.get("slots") or {}).get("statement_id") or frame.get("object_id") or frame.get("frame_id") or ""): frame
+                for frame in frames
+            }
+            for statement in statements:
+                if normalized_query and normalized_query not in cls._workspace_logic_statement_text(statement):
+                    continue
+                deontic_status = cls._normalize_workspace_modality(statement.get("modality"))
+                if apply_modality_filter and deontic_status != normalized_modality:
+                    continue
+                statement_id = str(statement.get("id") or f"{current_document_id}:statement:{len(rows) + 1}")
+                action = str(statement.get("action") or "")
+                entity = str(statement.get("entity") or "")
+                conditions = [str(item) for item in list(statement.get("conditions") or []) if str(item or "").strip()]
+                exceptions = [str(item) for item in list(statement.get("exceptions") or []) if str(item or "").strip()]
+                matched_events = cls._statement_event_candidates(statement, events)
+                theorem_key = action.strip().lower()
+                matching_certificates = [
+                    dict(certificate)
+                    for key, theorem_certificates in certificate_by_theorem.items()
+                    if theorem_key and (theorem_key in key or key in theorem_key)
+                    for certificate in theorem_certificates[:2]
+                ]
+                proof_backends = sorted({str(certificate.get("backend") or "") for certificate in matching_certificates if str(certificate.get("backend") or "").strip()})
+                zkp_certificate_ids = [
+                    str(certificate.get("certificate_id") or "")
+                    for certificate in matching_certificates
+                    if str(certificate.get("backend") or "").lower() == "groth16"
+                    or "groth16" in str(certificate.get("format") or "").lower()
+                ]
+                frame = frame_by_statement_id.get(statement_id) or {}
+                rows.append(
+                    {
+                        "document_id": current_document_id,
+                        "statement_id": statement_id,
+                        "entity": entity,
+                        "modality": str(statement.get("modality") or ""),
+                        "deontic_status": deontic_status,
+                        "action": action,
+                        "event_label": str((matched_events[0] if matched_events else {}).get("label") or action),
+                        "conditions": conditions,
+                        "exceptions": exceptions,
+                        "source_text": str(statement.get("source_text") or "")[:500],
+                        "frame_id": str(frame.get("frame_id") or frame.get("object_id") or ""),
+                        "event_ids": [str(event.get("id") or "") for event in matched_events],
+                        "proof_certificate_count": len(matching_certificates),
+                        "proof_status": "proved" if matching_certificates else "unproved",
+                        "proof_backends": proof_backends,
+                        "zkp_certificate_ids": zkp_certificate_ids,
+                        "proof_certificates": [
+                            cls._compact_workspace_proof_certificate(certificate)
+                            for certificate in matching_certificates[:2]
+                        ],
+                    }
+                )
+                status_counts[deontic_status if deontic_status in status_counts else "unknown"] += 1
+                deontic_analysis.append(
+                    {
+                        "entity": entity,
+                        "event": str((matched_events[0] if matched_events else {}).get("label") or action),
+                        "status": deontic_status,
+                        "modality": str(statement.get("modality") or ""),
+                        "conditions": conditions,
+                        "exceptions": exceptions,
+                        "document_id": current_document_id,
+                        "statement_id": statement_id,
+                        "source_text": str(statement.get("source_text") or "")[:500],
+                        "proof_certificate_count": len(matching_certificates),
+                        "proof_status": "proved" if matching_certificates else "unproved",
+                        "proof_backends": proof_backends,
+                        "zkp_certificate_ids": zkp_certificate_ids,
+                    }
+                )
+                for event in matched_events:
+                    event_id = str(event.get("id") or "")
+                    if event_id and not any(str(item.get("id") or "") == event_id for item in event_rows):
+                        event_rows.append(
+                            {
+                                "id": event_id,
+                                "label": str(event.get("label") or ""),
+                                "agent": str(event.get("agent") or ""),
+                                "time": str(event.get("time") or ""),
+                                "document_id": current_document_id,
+                            }
+                        )
+                edges.extend(
+                    [
+                        {
+                            "source": current_document_id,
+                            "target": statement_id,
+                            "type": "EXTRACTED_STATEMENT",
+                            "label": "document -> statement",
+                        },
+                        {
+                            "source": statement_id,
+                            "target": entity or "unknown_entity",
+                            "type": deontic_status.upper(),
+                            "label": "statement -> entity",
+                        },
+                    ]
+                )
+                for event in matched_events:
+                    event_id = str(event.get("id") or "")
+                    if event_id:
+                        event_flow_edges.extend(
+                            [
+                                {
+                                    "source": statement_id,
+                                    "target": event_id,
+                                    "type": "GOVERNS_EVENT",
+                                    "label": f"{deontic_status} event",
+                                },
+                                {
+                                    "source": entity or "unknown_entity",
+                                    "target": event_id,
+                                    "type": deontic_status.upper(),
+                                    "label": f"{entity or 'entity'} is {deontic_status}",
+                                },
+                            ]
+                        )
+                for index, condition in enumerate(conditions, start=1):
+                    event_flow_edges.append(
+                        {
+                            "source": f"{statement_id}:condition:{index}",
+                            "target": statement_id,
+                            "type": "CONDITION_FOR",
+                            "label": condition,
+                        }
+                    )
+                for index, exception in enumerate(exceptions, start=1):
+                    event_flow_edges.append(
+                        {
+                            "source": f"{statement_id}:exception:{index}",
+                            "target": statement_id,
+                            "type": "EXCEPTION_TO",
+                            "label": exception,
+                        }
+                    )
+                if len(rows) >= limit:
+                    break
+            if len(rows) >= limit:
+                break
+
+        conflicts = [dict(item) for item in list(formal_logic.get("deontic_conflicts") or []) if isinstance(item, dict)]
+        if normalized_query:
+            conflicts = [
+                conflict
+                for conflict in conflicts
+                if normalized_query in json.dumps(conflict, ensure_ascii=False).lower()
+            ]
+        formulas = {
+            "temporal_fol": list((formal_logic.get("temporal_fol") or {}).get("formulas") or [])[: min(limit, 20)],
+            "first_order_logic": list((formal_logic.get("first_order_logic") or {}).get("formulas") or [])[: min(limit, 20)],
+            "dcec": list((formal_logic.get("deontic_cognitive_event_calculus") or {}).get("formulas") or [])[: min(limit, 20)],
+            "frame_logic": list(dict(formal_logic.get("frame_logic") or {}).values())[: min(limit, 20)],
+        }
+        logic_systems = cls._build_workspace_logic_systems(formal_logic, query=entity_query, limit=limit)
+        proof_system = cls._build_workspace_proof_system(proof_store, query=entity_query, limit=limit)
+        return {
+            "statements": rows,
+            "flow_edges": edges[: limit * 2],
+            "events": event_rows[:limit],
+            "event_flow_edges": event_flow_edges[: limit * 3],
+            "deontic_analysis": deontic_analysis[:limit],
+            "deontic_status_counts": status_counts,
+            "conflicts": conflicts[: min(limit, 20)],
+            "formulas": formulas,
+            "logic_systems": logic_systems,
+            "proof_system": proof_system,
+            "returned_statement_count": len(rows),
+            "returned_flow_edge_count": min(len(edges), limit * 2),
+            "returned_event_count": min(len(event_rows), limit),
+            "returned_event_flow_edge_count": min(len(event_flow_edges), limit * 3),
+            "returned_deontic_analysis_count": min(len(deontic_analysis), limit),
+            "returned_conflict_count": min(len(conflicts), min(limit, 20)),
+        }
+
+    def get_workspace_dataset_graph(
+        self,
+        input_path: str | Path,
+        *,
+        input_type: str = "packaged",
+        entity_query: str = "",
+        relationship_type: str = "",
+        document_id: str = "",
+        modality: str = "",
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        resolved_path = self._resolve_workspace_dataset_path(input_path)
+        normalized_type = str(input_type or "packaged").strip().lower()
+        dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            summary = self._summarize_workspace_dataset_payload(dataset_payload)
+        else:
+            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+
+            summary = dict(summarize_workspace_dataset(dataset_payload))
+        knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
+        entities = [dict(item) for item in list(knowledge_graph.get("entities") or []) if isinstance(item, dict)]
+        relationships = [dict(item) for item in list(knowledge_graph.get("relationships") or []) if isinstance(item, dict)]
+        entity_by_id = {str(entity.get("id") or ""): entity for entity in entities if str(entity.get("id") or "").strip()}
+
+        normalized_query = str(entity_query or "").strip().lower()
+        normalized_relationship_type = str(relationship_type or "").strip().lower()
+        normalized_document_id = str(document_id or "").strip().lower()
+        bounded_limit = max(1, min(int(limit or 50), 500))
+
+        matched_entities = []
+        for entity in entities:
+            entity_text = self._workspace_graph_text(entity)
+            if normalized_query and normalized_query not in entity_text:
+                continue
+            matched_entities.append(entity)
+        if not normalized_query and not normalized_document_id:
+            matched_entities = entities
+        matched_entity_ids = {str(entity.get("id") or "") for entity in matched_entities if str(entity.get("id") or "").strip()}
+
+        matched_relationships = []
+        for relationship in relationships:
+            source_id, target_id = self._workspace_relationship_endpoints(relationship)
+            relationship_type_text = str(relationship.get("type") or relationship.get("label") or "").lower()
+            relationship_text = self._workspace_graph_text(relationship)
+            touches_matched_entity = (
+                (not normalized_query and not normalized_document_id)
+                or source_id in matched_entity_ids
+                or target_id in matched_entity_ids
+            )
+            if normalized_relationship_type and normalized_relationship_type not in relationship_type_text:
+                continue
+            if normalized_document_id and normalized_document_id not in relationship_text and normalized_document_id not in source_id.lower() and normalized_document_id not in target_id.lower():
+                continue
+            if normalized_query and not touches_matched_entity and normalized_query not in relationship_text:
+                continue
+            matched_relationships.append(relationship)
+
+        neighbor_ids = set(matched_entity_ids)
+        for relationship in matched_relationships:
+            source_id, target_id = self._workspace_relationship_endpoints(relationship)
+            if source_id:
+                neighbor_ids.add(source_id)
+            if target_id:
+                neighbor_ids.add(target_id)
+        neighborhood_entities = [entity_by_id[entity_id] for entity_id in neighbor_ids if entity_id in entity_by_id]
+
+        metadata = dict(dataset_payload.get("metadata") or {})
+        formal_logic = dict(metadata.get("formal_logic") or {})
+        logic_flow = self._build_workspace_logic_flow(
+            formal_logic,
+            entity_query=entity_query,
+            document_id=document_id,
+            modality=modality,
+            limit=bounded_limit,
+        )
+        formal_summary = dict(metadata.get("formal_logic_summary") or formal_logic.get("summary") or {})
+        return {
+            "input_path": resolved_path,
+            "input_type": str(input_type or "packaged").strip().lower(),
+            "dataset_id": dataset_payload.get("dataset_id"),
+            "workspace_id": dataset_payload.get("workspace_id"),
+            "workspace_name": dataset_payload.get("workspace_name"),
+            "summary": summary,
+            "filters": {
+                "entity_query": str(entity_query or ""),
+                "relationship_type": str(relationship_type or ""),
+                "document_id": str(document_id or ""),
+                "modality": str(modality or ""),
+                "limit": bounded_limit,
+            },
+            "knowledge_graph": {
+                "entity_count": len(entities),
+                "relationship_count": len(relationships),
+                "matched_entity_count": len(matched_entities),
+                "matched_relationship_count": len(matched_relationships),
+                "returned_entity_count": min(len(neighborhood_entities), bounded_limit),
+                "returned_relationship_count": min(len(matched_relationships), bounded_limit),
+                "entities": [self._compact_workspace_entity(entity) for entity in neighborhood_entities[:bounded_limit]],
+                "relationships": [
+                    self._compact_workspace_relationship(relationship, entity_by_id)
+                    for relationship in matched_relationships[:bounded_limit]
+                ],
+            },
+            "logical_flow": {
+                **logic_flow,
+                "summary": formal_summary,
+            },
+            "metadata": {
+                "artifact_status": dict(metadata.get("artifact_status") or {}),
+                "artifact_provenance": dict(metadata.get("artifact_provenance") or {}),
+                "formal_logic_summary": formal_summary,
+            },
+            "source": "complaint_workspace_dataset_graph",
         }
 
     def search_workspace_dataset(
@@ -5490,14 +7098,9 @@ class ComplaintWorkspaceService:
         claim_element_id: Optional[str] = None,
         source_type: Optional[str] = None,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import (
-            search_workspace_dataset_bm25,
-            search_workspace_dataset_vector,
-            summarize_workspace_dataset,
-        )
-
         resolved_path = self._resolve_workspace_dataset_path(input_path)
         normalized_backend = str(search_backend or "bm25").strip().lower()
+        normalized_type = str(input_type or "packaged").strip().lower()
         dataset_payload = self._load_workspace_dataset_payload(resolved_path, input_type=input_type)
         filtered_payload = self._apply_workspace_dataset_filters(
             dataset_payload,
@@ -5507,23 +7110,39 @@ class ComplaintWorkspaceService:
             claim_element_id=claim_element_id,
             source_type=source_type,
         )
-        if normalized_backend == "bm25":
-            results = search_workspace_dataset_bm25(filtered_payload, query, top_k=int(top_k or 10))
-        elif normalized_backend == "vector":
-            results = search_workspace_dataset_vector(
+        if normalized_backend not in {"bm25", "vector"}:
+            raise ValueError(f"Unsupported workspace search backend: {search_backend}")
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            results = self._search_workspace_dataset_local(
                 filtered_payload,
                 query,
+                search_backend=normalized_backend,
                 top_k=int(top_k or 10),
-                vector_dimension=int(vector_dimension or 32),
             )
+            summary = self._summarize_workspace_dataset_payload(filtered_payload)
         else:
-            raise ValueError(f"Unsupported workspace search backend: {search_backend}")
+            from ipfs_datasets_py.processors.legal_data import (
+                search_workspace_dataset_bm25,
+                search_workspace_dataset_vector,
+                summarize_workspace_dataset,
+            )
+
+            if normalized_backend == "bm25":
+                results = search_workspace_dataset_bm25(filtered_payload, query, top_k=int(top_k or 10))
+            else:
+                results = search_workspace_dataset_vector(
+                    filtered_payload,
+                    query,
+                    top_k=int(top_k or 10),
+                    vector_dimension=int(vector_dimension or 32),
+                )
+            summary = dict(summarize_workspace_dataset(filtered_payload))
         return {
             "input_path": resolved_path,
             "input_type": str(input_type or "packaged").strip().lower(),
             "query": str(query or ""),
             "search_backend": normalized_backend,
-            "summary": dict(summarize_workspace_dataset(filtered_payload)),
+            "summary": summary,
             "search_results": dict(results),
             "applied_filters": dict(filtered_payload.get("applied_filters") or {}),
             "source": "complaint_workspace_dataset_search",
@@ -5741,6 +7360,10 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.migrate_legacy_workspace_data", "description": "Project legacy complaint session and mediator DuckDB state into a packaged workspace dataset stored as parquet pieces."},
                 {"name": "complaint.view_workspace_dataset", "description": "Browse a packaged or single-file workspace dataset with schema-aligned filters and filtered document previews."},
                 {"name": "complaint.search_workspace_dataset", "description": "Search a packaged or single-file workspace dataset using BM25 or vector retrieval plus schema-aligned filters."},
+                {"name": "complaint.get_workspace_dataset_graph", "description": "Explore workspace dataset knowledge-graph entities, relationships, deontic logic flow, formulas, conflicts, and proof links."},
+                {"name": "complaint.build_mike_handoff", "description": "Build a Mike editor handoff payload with prefilled complaint draft, review state, and evidence context."},
+                {"name": "complaint.get_mike_integration_status", "description": "Return Mike handoff/sync status, correlation IDs, and recommended next integration action."},
+                {"name": "complaint.sync_mike_final_draft", "description": "Sync an edited draft from Mike back into the complaint workspace and persist the merged draft state."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
                 {"name": "complaint.export_complaint_packet", "description": "Export the current lawsuit complaint packet with intake, evidence, review, and draft content."},
@@ -5976,6 +7599,48 @@ class ComplaintWorkspaceService:
                 claim_type=args.get("claim_type"),
                 claim_element_id=args.get("claim_element_id"),
                 source_type=args.get("source_type"),
+            )
+        if tool_name == "complaint.get_workspace_dataset_graph":
+            input_path = args.get("input_path") or args.get("manifest_path")
+            if not input_path:
+                raise ValueError("complaint.get_workspace_dataset_graph requires input_path or manifest_path.")
+            return self.get_workspace_dataset_graph(
+                input_path,
+                input_type=args.get("input_type", "packaged"),
+                entity_query=str(args.get("entity_query") or ""),
+                relationship_type=str(args.get("relationship_type") or ""),
+                document_id=str(args.get("document_id") or ""),
+                modality=str(args.get("modality") or args.get("deontic_status") or ""),
+                limit=int(args.get("limit") or 50),
+            )
+        if tool_name == "complaint.build_mike_handoff":
+            return self.build_mike_handoff(
+                args.get("user_id"),
+                mike_base_url=args.get("mike_base_url"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                generate_draft_if_missing=bool(args.get("generate_draft_if_missing", True)),
+            )
+        if tool_name == "complaint.get_mike_integration_status":
+            return self.get_mike_integration_status(args.get("user_id"))
+        if tool_name == "complaint.sync_mike_final_draft":
+            requested_relief = args.get("requested_relief")
+            if isinstance(requested_relief, str):
+                requested_relief = _split_lines(requested_relief)
+            return self.sync_mike_final_draft(
+                args.get("user_id"),
+                body=args.get("body"),
+                title=args.get("title"),
+                requested_relief=requested_relief,
+                handoff_id=args.get("handoff_id"),
+                project_id=args.get("project_id"),
+                workspace_id=args.get("workspace_id"),
+                mike_document_id=args.get("mike_document_id"),
+                citation_links=args.get("citation_links"),
+                redline_summary=args.get("redline_summary"),
+                source_updated_at=args.get("source_updated_at"),
+                structured_deltas=args.get("structured_deltas"),
+                editor_metadata=args.get("editor_metadata"),
             )
         if tool_name == "complaint.generate_complaint":
             return self.generate_complaint(

@@ -1,6 +1,8 @@
 (function () {
     const readinessStorageKey = 'complaintGenerator.uiReadiness';
     const lastToolCallStorageKey = 'complaintGenerator.sdkLastToolCall';
+    const shellModeStorageKey = 'complaintGenerator.shellMode';
+    const shellModeValues = new Set(['client', 'operator']);
     const primaryNavItems = [
         ['Landing', '/'],
         ['Secure Intake', '/home'],
@@ -23,6 +25,55 @@
             return fallback;
         }
         return String(value);
+    }
+
+    function normalizeShellMode(value) {
+        const normalized = String(value || '').trim().toLowerCase();
+        return shellModeValues.has(normalized) ? normalized : '';
+    }
+
+    function readStoredShellMode() {
+        if (typeof localStorage === 'undefined') {
+            return '';
+        }
+        try {
+            return normalizeShellMode(localStorage.getItem(shellModeStorageKey));
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function writeStoredShellMode(mode) {
+        if (typeof localStorage === 'undefined') {
+            return;
+        }
+        try {
+            localStorage.setItem(shellModeStorageKey, mode);
+        } catch (error) {
+            // Ignore storage failures.
+        }
+    }
+
+    function resolveShellMode() {
+        const params = new URLSearchParams(window.location.search || '');
+        const queryMode = normalizeShellMode(params.get('shell_mode') || params.get('app_shell_mode'));
+        if (queryMode) {
+            writeStoredShellMode(queryMode);
+            return queryMode;
+        }
+        const storedMode = readStoredShellMode();
+        if (storedMode) {
+            return storedMode;
+        }
+        const bodyMode = normalizeShellMode(document.body && document.body.dataset ? document.body.dataset.complaintShellMode : '');
+        return bodyMode || 'client';
+    }
+
+    function buildShellModeHref(targetMode) {
+        const mode = normalizeShellMode(targetMode) || 'client';
+        const next = new URL(window.location.href);
+        next.searchParams.set('shell_mode', mode);
+        return `${next.pathname}${next.search}${next.hash}`;
     }
 
     function countAnsweredQuestions(payload) {
@@ -252,9 +303,14 @@
         if (existing) {
             existing.remove();
         }
+        if (document.body) {
+            document.body.classList.remove('cg-app-shell-active');
+        }
 
         const summary = buildSummary(state.sessionPayload, state.complaintReadiness || null);
         const workflowState = deriveWorkflowState(state.sessionPayload || {}, state.complaintReadiness || null);
+        const shellMode = resolveShellMode();
+        const isOperatorMode = shellMode === 'operator';
         const shell = document.createElement('aside');
         shell.id = 'cg-app-shell';
         shell.className = 'cg-app-shell';
@@ -273,6 +329,9 @@
         };
         const navHtml = primaryNavItems.map(renderNavLink).join('');
         const advancedNavHtml = advancedNavItems.map(renderNavLink).join('');
+        const modeToggleHref = buildShellModeHref(isOperatorMode ? 'client' : 'operator');
+        const modeToggleLabel = isOperatorMode ? 'Use client mode' : 'Use operator mode';
+        const modeChipLabel = isOperatorMode ? 'Operator mode' : 'Client mode';
         const readiness = state.uiReadiness || loadCachedReadiness();
         const lastToolCall = loadCachedLastToolCall();
         const readinessVerdict = readiness && readiness.verdict ? readiness.verdict : 'No UI verdict cached';
@@ -362,22 +421,73 @@
             }
             return link.indexOf('Open Builder') === -1;
         });
+        const advancedNavSection = isOperatorMode
+            ? '<details class="cg-app-shell__drawer" id="cg-app-shell-advanced-nav" open><summary class="cg-app-shell__drawer-summary">Developer tools and linked surfaces</summary><div class="cg-app-shell__nav cg-app-shell__nav--secondary">' + advancedNavHtml + '</div></details>'
+            : '<div class="cg-app-shell__phase-note">Developer dashboards and MCP internals are hidden in client mode.</div>';
+        const sessionSyncSection = isOperatorMode
+            ? [
+                '<div class="cg-app-shell__section-title">Session Sync</div>',
+                '<div class="cg-app-shell__readiness" id="cg-app-shell-session-sync">',
+                '<div class="cg-app-shell__readiness-header"><strong>' + safeText(state.did ? 'Shared session synced' : 'Session not loaded', 'Session not loaded') + '</strong><span>' + safeText(workflowState.phaseLabel, 'unknown') + '</span></div>',
+                '<div class="cg-app-shell__readiness-copy">' + safeText(lastToolCall && lastToolCall.tool_name ? ('Last MCP tool: ' + lastToolCall.tool_name) : 'No MCP tool calls have been cached for this browser session yet.') + '</div>',
+                '<div class="cg-app-shell__phase-note">' + safeText(lastToolCall && lastToolCall.finished_at ? ('Updated: ' + lastToolCall.finished_at) : 'Updated: waiting for the next shared SDK action.') + '</div>',
+                (lastToolCall && lastToolCall.status ? '<div class="cg-app-shell__phase-note">Status: ' + safeText(lastToolCall.status, 'unknown') + (lastToolCall.error_message ? ' (' + safeText(lastToolCall.error_message, '') + ')' : '') + '</div>' : ''),
+                (toolDiagnosticPrimary ? '<div class="cg-app-shell__phase-note">Latest retrieval warning: ' + safeText(toolDiagnosticPrimary.warning_message, '') + '</div>' : ''),
+                (toolDiagnosticMeta ? '<div class="cg-app-shell__phase-note">Retrieval warning details: ' + safeText(toolDiagnosticMeta, '') + '</div>' : ''),
+                '</div>',
+            ].join('')
+            : '';
+        const uiReadinessSection = isOperatorMode
+            ? [
+                '<div class="cg-app-shell__section-title">UI Readiness</div>',
+                '<div class="cg-app-shell__readiness' + readinessTone + '" id="cg-app-shell-readiness">',
+                '<div class="cg-app-shell__readiness-header"><strong>' + safeText(readinessVerdict, 'No UI verdict cached') + '</strong><span>' + safeText(readinessScore, 'pending') + '</span></div>',
+                '<div class="cg-app-shell__readiness-copy">' + safeText(readinessBlockers[0], readiness ? 'The latest actor/critic review did not return a release blocker.' : 'Run UX Audit in the workspace to cache an actor/critic verdict for the rest of the site.') + '</div>',
+                '<div class="cg-app-shell__readiness-meta">' + (readinessStages.length ? ('Stages: ' + readinessStages.join(', ')) : 'Stages: not reviewed yet') + '</div>',
+                '<div class="cg-app-shell__readiness-meta">' + (readinessTools.length ? ('Shared tools: ' + readinessTools.slice(0, 3).join(', ')) : 'Shared tools: not cached yet') + '</div>',
+                (readinessUpdated ? '<div class="cg-app-shell__readiness-meta">Updated: ' + safeText(readinessUpdated, '') + '</div>' : ''),
+                '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/workspace', context, { target_tab: 'ux-review' }) + '">Open UX Audit</a>',
+                '</div>',
+            ].join('')
+            : '';
+        const draftFlowRailSection = isOperatorMode
+            ? [
+                '<div class="cg-app-shell__section-title">Draft Flow Rail</div>',
+                '<div class="cg-app-shell__draft-rail' + (draftFlowEnabled && releaseGateSafe ? '' : ' is-warn') + '" id="cg-app-shell-draft-flow-rail">',
+                '<div class="cg-app-shell__phase-note">Keep one visible sequence: generate or refine, export and review, then confirm the release-gate next step.</div>',
+                '<div class="cg-app-shell__draft-flow-grid">',
+                buildGatedLink('cg-app-shell__draft-step', '1. Generate / refine draft', buildShellSurfaceUrl('/document', context), draftFlowEnabled, draftFlowReason),
+                buildGatedLink('cg-app-shell__draft-step', '2. Export + review packet', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),
+                buildGatedLink('cg-app-shell__draft-step', '3. Check next-step gate', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),
+                '</div>',
+                '</div>',
+            ].join('')
+            : '';
+        const releaseGateTitle = isOperatorMode ? 'Client gate' : 'Filing gate';
+        const releaseGateVersionCopy = isOperatorMode ? safeText(releaseGateVersion, 'workspace-gate-v1') : 'client-safe check';
+        const releaseGateNextCopy = isOperatorMode
+            ? safeText(releaseGateNextStep, '')
+            : (releaseGateSafe ? 'You can proceed to export review and attorney handoff.' : 'Stay in Review and Evidence until filing blockers are cleared.');
 
         shell.innerHTML = [
             '<div class="cg-app-shell__inner">',
+            '<div class="cg-app-shell__mode-row">',
+            '<span class="cg-app-shell__mode-chip">' + modeChipLabel + '</span>',
+            '<a class="cg-app-shell__mode-toggle" href="' + modeToggleHref + '">' + modeToggleLabel + '</a>',
+            '</div>',
             '<div class="cg-app-shell__eyebrow">Complaint Generator</div>',
             '<h2 class="cg-app-shell__title">' + safeText(findPageTitle(), 'Complaint Generator') + '</h2>',
             '<p class="cg-app-shell__copy">' + safeText(findPageDescription(), '') + '</p>',
             '<div class="cg-app-shell__status" id="cg-app-shell-status">' + safeText(state.status, 'Shell ready.') + '</div>',
-            '<div class="cg-app-shell__section-title">Identity</div>',
+            '<div class="cg-app-shell__section-title">Session</div>',
             '<div class="cg-app-shell__chip-row">',
             '<div class="cg-app-shell__chip"><span class="cg-app-shell__chip-label">DID</span><span class="cg-app-shell__chip-value" id="cg-app-shell-did">' + safeText(state.did, 'Unavailable') + '</span></div>',
-            '<div class="cg-app-shell__chip"><span class="cg-app-shell__chip-label">Tools</span><span class="cg-app-shell__chip-value">' + safeText(state.toolCount, '0') + ' MCP tools</span></div>',
+            '<div class="cg-app-shell__chip"><span class="cg-app-shell__chip-label">' + (isOperatorMode ? 'Tools' : 'Operator') + '</span><span class="cg-app-shell__chip-value">' + (isOperatorMode ? safeText(state.toolCount, '0') + ' MCP tools' : 'Technical tools hidden in client mode') + '</span></div>',
             '</div>',
             '<div class="cg-app-shell__section-title">Navigate</div>',
             '<div class="cg-app-shell__nav">' + navHtml + '</div>',
-            '<details class="cg-app-shell__drawer" id="cg-app-shell-advanced-nav" open><summary class="cg-app-shell__drawer-summary">Developer tools and linked surfaces</summary><div class="cg-app-shell__nav cg-app-shell__nav--secondary">' + advancedNavHtml + '</div></details>',
-            '<div class="cg-app-shell__section-title">Session</div>',
+            advancedNavSection,
+            '<div class="cg-app-shell__section-title">Case Snapshot</div>',
             '<div class="cg-app-shell__stats">',
             '<div class="cg-app-shell__stat"><span class="cg-app-shell__stat-label">Intake</span><span class="cg-app-shell__stat-value" id="cg-app-shell-intake-count">' + summary.answeredQuestions + '</span><span class="cg-app-shell__stat-detail">' + safeText(summary.nextQuestion, 'Intake complete.') + '</span></div>',
             '<div class="cg-app-shell__stat"><span class="cg-app-shell__stat-label">Support Review</span><span class="cg-app-shell__stat-value" id="cg-app-shell-supported-count">' + summary.supportedElements + '</span><span class="cg-app-shell__stat-detail">' + summary.missingElements + ' claim elements still need support.</span></div>',
@@ -396,30 +506,14 @@
             '<div class="cg-app-shell__readiness-copy">The shared shell now gates review and builder links so every page respects the same complaint phase.</div>',
             '<div class="cg-app-shell__phase-note">' + safeText(workflowState.builderReady ? 'The session is coherent enough for cross-surface drafting.' : workflowState.builderGateReason, '') + '</div>',
             '</div>',
-            '<div class="cg-app-shell__section-title">Session Sync</div>',
-            '<div class="cg-app-shell__readiness" id="cg-app-shell-session-sync">',
-            '<div class="cg-app-shell__readiness-header"><strong>' + safeText(state.did ? 'Shared session synced' : 'Session not loaded', 'Session not loaded') + '</strong><span>' + safeText(workflowState.phaseLabel, 'unknown') + '</span></div>',
-            '<div class="cg-app-shell__readiness-copy">' + safeText(lastToolCall && lastToolCall.tool_name ? ('Last MCP tool: ' + lastToolCall.tool_name) : 'No MCP tool calls have been cached for this browser session yet.') + '</div>',
-            '<div class="cg-app-shell__phase-note">' + safeText(lastToolCall && lastToolCall.finished_at ? ('Updated: ' + lastToolCall.finished_at) : 'Updated: waiting for the next shared SDK action.') + '</div>',
-            (lastToolCall && lastToolCall.status ? '<div class="cg-app-shell__phase-note">Status: ' + safeText(lastToolCall.status, 'unknown') + (lastToolCall.error_message ? ' (' + safeText(lastToolCall.error_message, '') + ')' : '') + '</div>' : ''),
-            (toolDiagnosticPrimary ? '<div class="cg-app-shell__phase-note">Latest retrieval warning: ' + safeText(toolDiagnosticPrimary.warning_message, '') + '</div>' : ''),
-            (toolDiagnosticMeta ? '<div class="cg-app-shell__phase-note">Retrieval warning details: ' + safeText(toolDiagnosticMeta, '') + '</div>' : ''),
-            '</div>',
-            '<div class="cg-app-shell__section-title">UI Readiness</div>',
-            '<div class="cg-app-shell__readiness' + readinessTone + '" id="cg-app-shell-readiness">',
-            '<div class="cg-app-shell__readiness-header"><strong>' + safeText(readinessVerdict, 'No UI verdict cached') + '</strong><span>' + safeText(readinessScore, 'pending') + '</span></div>',
-            '<div class="cg-app-shell__readiness-copy">' + safeText(readinessBlockers[0], readiness ? 'The latest actor/critic review did not return a release blocker.' : 'Run UX Audit in the workspace to cache an actor/critic verdict for the rest of the site.') + '</div>',
-            '<div class="cg-app-shell__readiness-meta">' + (readinessStages.length ? ('Stages: ' + readinessStages.join(', ')) : 'Stages: not reviewed yet') + '</div>',
-            '<div class="cg-app-shell__readiness-meta">' + (readinessTools.length ? ('Shared tools: ' + readinessTools.slice(0, 3).join(', ')) : 'Shared tools: not cached yet') + '</div>',
-            (readinessUpdated ? '<div class="cg-app-shell__readiness-meta">Updated: ' + safeText(readinessUpdated, '') + '</div>' : ''),
-            '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/workspace', context, { target_tab: 'ux-review' }) + '">Open UX Audit</a>',
-            '</div>',
+            sessionSyncSection,
+            uiReadinessSection,
             '<div class="cg-app-shell__section-title">Complaint Output Gate</div>',
             '<div class="cg-app-shell__readiness' + releaseGateTone + '" id="cg-app-shell-release-gate">',
-            '<div class="cg-app-shell__readiness-header"><strong>Client gate: ' + safeText(String(canonicalReleaseGate.verdict || 'unknown').toUpperCase(), 'UNKNOWN') + '</strong><span>' + safeText(releaseGateVersion, 'workspace-gate-v1') + '</span></div>',
+            '<div class="cg-app-shell__readiness-header"><strong>' + releaseGateTitle + ': ' + safeText(String(canonicalReleaseGate.verdict || 'unknown').toUpperCase(), 'UNKNOWN') + '</strong><span>' + releaseGateVersionCopy + '</span></div>',
             '<div class="cg-app-shell__readiness-copy">' + safeText(releaseGateReason, 'Refresh the release gate before treating complaint output as safe to download.') + '</div>',
             '<div class="cg-app-shell__readiness-meta">' + safeText(releaseGateBlockers.length ? ('Blockers: ' + releaseGateBlockers.join('; ')) : 'Blockers: none reported in the latest gate response.', '') + '</div>',
-            '<div class="cg-app-shell__readiness-meta">Next step: ' + safeText(releaseGateNextStep, '') + '</div>',
+            '<div class="cg-app-shell__readiness-meta">Next step: ' + releaseGateNextCopy + '</div>',
             '<a class="cg-app-shell__action" href="' + buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }) + '">Open Draft + Export Rail</a>',
             '</div>',
             '<div class="cg-app-shell__section-title">Next Actions</div>',
@@ -432,25 +526,15 @@
             '<div class="cg-app-shell__phase-note">Keep draft generation, packet export, and release-gate next-step guidance visible together before downloading complaint files.</div>',
             (!releaseGateSafe ? '<div class="cg-app-shell__phase-note">Release gate warning: ' + safeText(releaseGateReason, '') + '</div>' : ''),
             '</div>',
-            '<div class="cg-app-shell__section-title">Draft Flow Rail</div>',
-            '<div class="cg-app-shell__draft-rail' + (draftFlowEnabled && releaseGateSafe ? '' : ' is-warn') + '" id="cg-app-shell-draft-flow-rail">',
-            '<div class="cg-app-shell__phase-note">Keep one visible sequence: generate or refine, export and review, then confirm the release-gate next step.</div>',
-            '<div class="cg-app-shell__draft-flow-grid">',
-            buildGatedLink('cg-app-shell__draft-step', '1. Generate / refine draft', buildShellSurfaceUrl('/document', context), draftFlowEnabled, draftFlowReason),
-            buildGatedLink('cg-app-shell__draft-step', '2. Export + review packet', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),
-            buildGatedLink('cg-app-shell__draft-step', '3. Check next-step gate', buildShellSurfaceUrl('/workspace', context, { target_tab: 'draft' }), draftFlowEnabled, draftFlowReason),
-            '</div>',
-            '</div>',
-            '<div class="cg-app-shell__meta">This sidebar is backed by the same cached DID and complaint workspace session used by the CLI, MCP tools, and browser SDK.</div>',
+            draftFlowRailSection,
+            '<div class="cg-app-shell__meta">' + (isOperatorMode
+                ? 'This sidebar is backed by the same cached DID and complaint workspace session used by the CLI, MCP tools, and browser SDK.'
+                : 'Client mode keeps focus on next steps toward a filing-ready complaint for attorney review.') + '</div>',
             '</div>',
         ].join('');
 
-        const anchor = document.querySelector('[data-surface-nav="primary"]')
-            || document.querySelector('h1')
-            || document.body.firstChild;
-        if (anchor && anchor.parentNode) {
-            anchor.parentNode.insertBefore(shell, anchor.nextSibling);
-        } else {
+        if (document.body) {
+            document.body.classList.add('cg-app-shell-active');
             document.body.appendChild(shell);
         }
         shell.addEventListener('click', (event) => {
@@ -472,6 +556,9 @@
     }
 
     async function bootShell() {
+        if (window.__complaintAppShellDisabled) {
+            return;
+        }
         if (document.body && document.body.dataset.complaintShell === 'off') {
             return;
         }

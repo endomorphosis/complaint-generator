@@ -112,6 +112,24 @@ Operator workflow for testimony capture, document intake, and legal sufficiency 
 
 [Dashboard Improvement Plan →](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_IMPROVEMENT_PLAN.md) | [Execution Backlog →](docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md)
 
+### 📝 Mike Legal Document Editing Interface
+
+This repository now includes the `endomorphosis/mike` application as a submodule at `mike/` to provide a stronger legal document editing interface:
+
+- `mike/frontend` - Next.js editor and document workflow UI
+- `mike/backend` - Express API for document processing and persistence
+- `mike/backend/schema.sql` - one-shot Supabase schema for fresh databases
+- `mike/backend/migrations` - incremental updates for existing databases
+- `mike/docs` - product and implementation documentation
+
+Complaint workspace now also includes a Mike handoff/sync bridge:
+
+- `POST /api/complaint-workspace/mike/handoff` builds a prefilled Mike launch payload from intake, evidence, review, and draft state
+- `GET /api/complaint-workspace/mike/status` returns handoff/sync correlation status and next recommended action
+- `POST /api/complaint-workspace/mike/sync` writes Mike-edited draft content back into the complaint workspace session
+
+[Mike Integration Operator Playbook →](docs/MIKE_INTEGRATION_PLAYBOOK.md)
+
 ### 🧠 GraphRAG Ontology Optimization
 
 Knowledge-graph-powered document analysis and reasoning:
@@ -147,7 +165,24 @@ pip install -r requirements.txt
 # (Optional) Configure API keys
 export OPENAI_API_KEY="your-key"
 export BRAVE_SEARCH_API_KEY="your-key"
+# (Optional) Override Mike editor launch base URL used by handoff payloads
+export COMPLAINT_MIKE_BASE_URL="http://localhost:3000"
 ```
+
+### Mike Interface Setup
+
+Initialize the submodule, then install and run the Mike services:
+
+```bash
+git submodule update --init --recursive
+npm install --prefix mike/backend
+npm install --prefix mike/frontend
+# Run these in separate terminals
+npm run dev --prefix mike/backend
+npm run dev --prefix mike/frontend
+```
+
+Then open `http://localhost:3000` for the Mike interface.
 
 ### Package, CLI, MCP, and SDK Surfaces
 

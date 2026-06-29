@@ -25,6 +25,9 @@ def test_tools_list_uses_jsonrpc_shape(tmp_path):
     assert "result" in response
     assert response["result"]["tools"]
     assert response["result"]["tools"][0]["name"].startswith("complaint.")
+    tools_by_name = {tool["name"]: tool for tool in response["result"]["tools"]}
+    assert tools_by_name["complaint.build_mike_handoff"]["inputSchema"]["properties"]["generate_draft_if_missing"]["type"] == "boolean"
+    assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["required"] == ["body"]
 
 
 def test_public_package_exports_workspace_service():
@@ -143,6 +146,76 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
             },
         },
     )
+    mike_handoff = handle_jsonrpc_message(
+        service,
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "complaint.build_mike_handoff",
+                "arguments": {
+                    "user_id": "demo-user",
+                    "project_id": "project-demo",
+                    "workspace_id": "workspace-demo",
+                },
+            },
+        },
+    )
+    handoff_id = mike_handoff["result"]["structuredContent"]["handoff_id"]
+    mike_status_after_handoff = handle_jsonrpc_message(
+        service,
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "complaint.get_mike_integration_status",
+                "arguments": {"user_id": "demo-user"},
+            },
+        },
+    )
+    mike_sync = handle_jsonrpc_message(
+        service,
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "complaint.sync_mike_final_draft",
+                "arguments": {
+                    "user_id": "demo-user",
+                    "handoff_id": handoff_id,
+                    "title": "Mike Synced Draft",
+                    "body": "This draft was synced from Mike.",
+                    "citation_links": [
+                        {"citation_id": "cite-1", "claim_element_id": "causation"},
+                        {"citation_id": "cite-1", "claim_element_id": "harm"},
+                        {"citation_id": "cite-2", "claim_element_id": "unknown"},
+                    ],
+                    "structured_deltas": [
+                        {"op": "replace", "target": "paragraph-001", "before": "old", "after": "new"},
+                    ],
+                    "editor_metadata": {
+                        "editor_user_id": "editor-mcp",
+                        "editor_session_id": "session-mcp",
+                    },
+                },
+            },
+        },
+    )
+    mike_status_after_sync = handle_jsonrpc_message(
+        service,
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "complaint.get_mike_integration_status",
+                "arguments": {"user_id": "demo-user"},
+            },
+        },
+    )
 
     assert "Mediator, help turn this into testimony-ready narrative" in mediator_response["result"]["structuredContent"]["prefill_message"]
     assert export_response["result"]["structuredContent"]["packet"]["draft"]["body"]
@@ -163,3 +236,37 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
         "warning",
         "blocked",
     }
+    assert handoff_id.startswith("mike-handoff-")
+    assert mike_handoff["result"]["structuredContent"]["mike"]["launch_url"]
+    handoff_status_payload = mike_status_after_handoff["result"]["structuredContent"]
+    assert handoff_status_payload["pending_sync"] is True
+    assert handoff_status_payload["status_contract_version"] == "complaint-mike-status-v2"
+    assert handoff_status_payload["workflow_state"]["key"] == "handoff_pending_sync"
+    assert handoff_status_payload["latest_sync_handoff_id"] is None
+    assert handoff_status_payload["has_citation_link_conflicts"] is False
+    assert handoff_status_payload["citation_link_conflict_count"] == 0
+    assert handoff_status_payload["citation_link_unknown_element_count"] == 0
+    assert (
+        "Latest Mike handoff has not been synced yet."
+        in handoff_status_payload["recommended_action"]
+    )
+    assert mike_sync["result"]["structuredContent"]["draft"]["sync_source"] == "mike"
+    assert mike_sync["result"]["structuredContent"]["sync_record"]["citation_link_conflict_count"] == 1
+    assert mike_sync["result"]["structuredContent"]["sync_record"]["structured_delta_count"] == 1
+    assert mike_sync["result"]["structuredContent"]["sync_record"]["editor_user_id"] == "editor-mcp"
+    assert mike_sync["result"]["structuredContent"]["sync_diagnostics"]["severity"] == "error"
+    assert mike_sync["result"]["structuredContent"]["citation_link_check"]["has_conflicts"] is True
+    assert mike_sync["result"]["structuredContent"]["citation_link_check"]["unknown_claim_element_ids"] == ["unknown"]
+    assert mike_sync["result"]["structuredContent"]["citation_link_check"]["conflicts"] == [
+        {"citation_id": "cite-1", "claim_element_ids": ["causation", "harm"]}
+    ]
+    assert mike_status_after_sync["result"]["structuredContent"]["pending_sync"] is False
+    assert mike_status_after_sync["result"]["structuredContent"]["workflow_state"]["key"] == "synced_with_conflicts"
+    assert mike_status_after_sync["result"]["structuredContent"]["latest_sync_handoff_id"] == handoff_id
+    assert mike_status_after_sync["result"]["structuredContent"]["has_citation_link_conflicts"] is True
+    assert mike_status_after_sync["result"]["structuredContent"]["citation_link_conflict_count"] == 1
+    assert mike_status_after_sync["result"]["structuredContent"]["citation_link_unknown_element_count"] == 1
+    assert (
+        "Resolve conflicts in Mike and sync again before export."
+        in mike_status_after_sync["result"]["structuredContent"]["recommended_action"]
+    )

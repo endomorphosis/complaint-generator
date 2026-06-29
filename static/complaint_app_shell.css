@@ -1,11 +1,17 @@
+.cg-app-shell-active {
+    padding-right: 332px;
+}
+
 .cg-app-shell {
-    position: relative;
-    width: 300px;
-    max-width: calc(100% - 40px);
-    max-height: none;
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 316px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
     overflow: auto;
-    z-index: 10;
-    margin: 16px 20px 20px auto;
+    z-index: 1000;
+    margin: 0;
     border-radius: 24px;
     border: 1px solid rgba(148, 163, 184, 0.35);
     background:
@@ -18,6 +24,42 @@
 
 .cg-app-shell__inner {
     padding: 18px 18px 20px;
+}
+
+.cg-app-shell__mode-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.cg-app-shell__mode-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: #ecfeff;
+    border: 1px solid #bae6fd;
+    color: #0e7490;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.cg-app-shell__mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
 }
 
 .cg-app-shell__eyebrow {
@@ -274,10 +316,53 @@
     line-height: 1.5;
 }
 
+.cg-app-shell__draft-rail {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid #d1d5db;
+    background: #f8fafc;
+}
+
+.cg-app-shell__draft-rail.is-warn {
+    border-color: #fdba74;
+    background: #fff7ed;
+}
+
+.cg-app-shell__draft-flow-grid {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.cg-app-shell__draft-step {
+    display: block;
+    min-height: 36px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    text-decoration: none;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #0f172a;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.cg-app-shell__draft-step.is-disabled {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
 @media (max-width: 1180px) {
+    .cg-app-shell-active {
+        padding-right: 0;
+    }
+
     .cg-app-shell {
+        position: static;
         width: auto;
-        max-width: none;
+        max-width: calc(100% - 24px);
+        max-height: none;
         margin: 16px;
     }
 }

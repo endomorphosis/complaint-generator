@@ -43,6 +43,8 @@ def test_packaging_metadata_includes_playwright_and_console_entry_points():
     assert "playwright>=" in requirements_text
     assert '"playwright>=' in pyproject_text
     assert '"playwright>=' in setup_text
+    assert "ipfs_datasets_py[file_conversion,ipld,knowledge_graphs,logic,scraping,vectors]" in pyproject_text
+    assert "ipfs_datasets_py[file_conversion,ipld,knowledge_graphs,logic,scraping,vectors]" in setup_text
 
     for script_name in (
         "complaint-generator",
@@ -57,6 +59,38 @@ def test_packaging_metadata_includes_playwright_and_console_entry_points():
 
     assert "recursive-include templates *.html" in manifest_text
     assert "recursive-include static *.js *.mjs *.css" in manifest_text
+
+
+def test_ipfs_datasets_symbolicai_dependency_is_automatic():
+    ipfs_setup_text = (REPO_ROOT / "ipfs_datasets_py" / "setup.py").read_text()
+    ipfs_pyproject_text = (REPO_ROOT / "ipfs_datasets_py" / "pyproject.toml").read_text()
+
+    assert "'symbolicai>=1.14.0,<2.0.0'" in ipfs_setup_text
+    assert '"symbolicai>=1.14.0,<2.0.0"' in ipfs_pyproject_text
+    assert "logic = [" in ipfs_pyproject_text
+    assert "elif component in {'logic', 'symbolicai'}" in (
+        REPO_ROOT / "ipfs_datasets_py" / "ipfs_datasets_py" / "auto_installer.py"
+    ).read_text()
+
+
+def test_ipfs_datasets_ipld_dependency_is_automatic():
+    ipfs_setup_text = (REPO_ROOT / "ipfs_datasets_py" / "setup.py").read_text()
+    ipfs_pyproject_text = (REPO_ROOT / "ipfs_datasets_py" / "pyproject.toml").read_text()
+    auto_installer_text = (
+        REPO_ROOT / "ipfs_datasets_py" / "ipfs_datasets_py" / "auto_installer.py"
+    ).read_text()
+
+    for dependency in (
+        "libipld>=3.3.2",
+        "ipld-car>=0.0.1",
+        "ipld-dag-pb>=0.0.1",
+        "dag-cbor>=0.3.3",
+        "multiformats>=0.3.0",
+    ):
+        assert dependency in ipfs_setup_text
+        assert dependency in ipfs_pyproject_text
+        assert dependency in auto_installer_text
+    assert "elif component == 'ipld'" in auto_installer_text
 
 
 def test_package_exports_expose_workspace_review_and_entrypoint_helpers():

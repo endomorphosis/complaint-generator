@@ -19,6 +19,10 @@ _PROVIDER_ALIASES = {
     'local_hf': 'local_hf',
     'hf': 'local_hf',
     'huggingface': 'hf_inference_api',
+    'p2p': 'p2p_task_queue',
+    'p2p_task': 'p2p_task_queue',
+    'remote_queue': 'p2p_task_queue',
+    'task_queue': 'p2p_task_queue',
 }
 
 _PROVIDER_ENV_KEYS = (

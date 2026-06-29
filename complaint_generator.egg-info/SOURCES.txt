@@ -289,6 +289,7 @@ tests/test_ipfs_llm_accelerate_diagnostics.py
 tests/test_ipfs_llm_huggingface_router.py
 tests/test_ipfs_logic_adapter.py
 tests/test_ipfs_provenance.py
+tests/test_ipld_logic_storage_dependency.py
 tests/test_legal_authority_hooks.py
 tests/test_legal_document_parsing.py
 tests/test_legal_hooks.py
@@ -367,6 +368,7 @@ tests/test_state.py
 tests/test_support_map.py
 tests/test_surya_ocr_compat.py
 tests/test_sweep_ranker.py
+tests/test_symbolicai_logic_dependency.py
 tests/test_synonym_handling_resolution.py
 tests/test_synthesize_hacc_complaint.py
 tests/test_temporal_reasoning_extraction.py
