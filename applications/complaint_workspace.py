@@ -29,7 +29,7 @@ def _legal_source_availability_snapshot() -> Dict[str, Any]:
         try:
             from integrations.ipfs_datasets.legal import LEGAL_SOURCE_AVAILABILITY as availability
 
-            return deepcopy(dict(availability or {}))
+            return deepcopy(availability or {})
         except Exception:
             pass
     return {
@@ -226,6 +226,7 @@ MIKE_TEMPORAL_ASSERTION_KEYWORDS: tuple[str, ...] = (
     "timeline",
     "date",
 )
+MIKE_MISSING_TIMELINE_ISSUE_ID = "missing_timeline"
 MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
     "not_handed_off": "Not handed off",
     "handoff_pending_sync": "Handoff pending sync",
@@ -5705,8 +5706,8 @@ class ComplaintWorkspaceService:
             "chronology_task_count": 0 if timeline_text else 1,
             "event_ids": event_ids,
             "temporal_fact_ids": event_ids,
-            "timeline_issue_ids": [] if timeline_text else ["missing_timeline"],
-            "temporal_issue_ids": [] if timeline_text else ["missing_timeline"],
+            "timeline_issue_ids": [] if timeline_text else [MIKE_MISSING_TIMELINE_ISSUE_ID],
+            "temporal_issue_ids": [] if timeline_text else [MIKE_MISSING_TIMELINE_ISSUE_ID],
             "temporal_proof_objectives": [
                 "preserve chronology between protected activity and adverse action",
             ],
@@ -6118,6 +6119,44 @@ class ComplaintWorkspaceService:
         }
 
     @staticmethod
+    def _derive_mike_theorem_export_check_state(
+        *,
+        missing_count: int,
+        contradiction_count: int,
+        chronology_blocked: bool,
+        proof_status: str,
+    ) -> Dict[str, Any]:
+        if chronology_blocked or contradiction_count:
+            return {"severity": "error", "status": "failed", "needs_review": True}
+        if missing_count or proof_status == "needs_review":
+            return {"severity": "warning", "status": "needs_review", "needs_review": True}
+        return {"severity": "info", "status": "passed", "needs_review": False}
+
+    @staticmethod
+    def _derive_mike_sync_overall_state(
+        *,
+        conflict_count: int,
+        unknown_count: int,
+        corpus_has_blockers: bool,
+        chronology_blocked: bool,
+        contradiction_count: int,
+        missing_count: int,
+        unsupported_assertion_count: int,
+        proof_status: str,
+    ) -> Dict[str, Any]:
+        has_blockers = bool(conflict_count or unknown_count or corpus_has_blockers or chronology_blocked or contradiction_count)
+        if has_blockers:
+            severity = "error"
+        elif missing_count or unsupported_assertion_count or proof_status == "needs_review":
+            severity = "warning"
+        else:
+            severity = "info"
+        return {
+            "severity": severity,
+            "has_blockers": has_blockers,
+        }
+
+    @staticmethod
     def _build_mike_sync_diagnostics(
         *,
         citation_link_check: Mapping[str, Any],
@@ -6137,6 +6176,22 @@ class ComplaintWorkspaceService:
         contradiction_count = int(reasoning_review.get("contradiction_count") or 0)
         chronology_blocked = bool(reasoning_review.get("chronology_blocked"))
         proof_status = str(reasoning_review.get("proof_status") or "needs_review")
+        theorem_check_state = ComplaintWorkspaceService._derive_mike_theorem_export_check_state(
+            missing_count=missing_count,
+            contradiction_count=contradiction_count,
+            chronology_blocked=chronology_blocked,
+            proof_status=proof_status,
+        )
+        sync_state = ComplaintWorkspaceService._derive_mike_sync_overall_state(
+            conflict_count=conflict_count,
+            unknown_count=unknown_count,
+            corpus_has_blockers=bool(corpus_review.get("has_blockers")),
+            chronology_blocked=chronology_blocked,
+            contradiction_count=contradiction_count,
+            missing_count=missing_count,
+            unsupported_assertion_count=unsupported_assertion_count,
+            proof_status=proof_status,
+        )
         diagnostics = [
             {
                 "id": "citation_link_integrity",
@@ -6174,11 +6229,11 @@ class ComplaintWorkspaceService:
             },
             {
                 "id": "theorem_export_compatibility",
-                "severity": "error" if (chronology_blocked or contradiction_count) else ("warning" if (missing_count or proof_status == "needs_review") else "info"),
-                "status": "failed" if (chronology_blocked or contradiction_count) else ("needs_review" if (missing_count or proof_status == "needs_review") else "passed"),
+                "severity": theorem_check_state["severity"],
+                "status": theorem_check_state["status"],
                 "message": (
                     f"Theorem/export compatibility reports proof_status={proof_status}, contradiction_count={contradiction_count}, chronology_blocked={chronology_blocked}."
-                    if (chronology_blocked or contradiction_count or missing_count or proof_status == "needs_review")
+                    if theorem_check_state["needs_review"]
                     else "No proof-gap regressions detected for theorem/export compatibility."
                 ),
                 "remediation": "Run complaint.review_case and complaint.get_client_release_gate before filing.",
@@ -6190,8 +6245,8 @@ class ComplaintWorkspaceService:
             if bool(dict(item.get("metadata") or {}).get("normalized_from_invalid_op"))
         )
         return {
-            "severity": "error" if (conflict_count or unknown_count or corpus_review.get("has_blockers") or chronology_blocked or contradiction_count) else ("warning" if (missing_count or unsupported_assertion_count or proof_status == "needs_review") else "info"),
-            "has_blockers": bool(conflict_count or unknown_count or corpus_review.get("has_blockers") or chronology_blocked or contradiction_count),
+            "severity": sync_state["severity"],
+            "has_blockers": sync_state["has_blockers"],
             "checks": diagnostics,
             "structured_delta_count": len(structured_deltas),
             "normalized_invalid_op_count": normalized_invalid_op_count,

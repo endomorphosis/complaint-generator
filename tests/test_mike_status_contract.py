@@ -287,3 +287,10 @@ def test_formal_diagnostics_include_mike_grounding_and_logic_snapshot(tmp_path, 
     assert "mike_grounding" in payload
     assert "mike_logic" in payload
     assert "mike_sync_diagnostics" in payload
+
+
+def test_mike_assertion_classifier_covers_relief_temporal_legal_and_factual_cases():
+    assert ComplaintWorkspaceService._classify_mike_assertion_type("Plaintiff seeks injunctive relief and damages.") == "requested_relief"
+    assert ComplaintWorkspaceService._classify_mike_assertion_type("On March 3, Defendant terminated Plaintiff after the complaint.") == "temporal_assertion"
+    assert ComplaintWorkspaceService._classify_mike_assertion_type("Defendant unlawfully retaliated against Plaintiff.") == "legal_conclusion"
+    assert ComplaintWorkspaceService._classify_mike_assertion_type("Plaintiff reported safety concerns to HR in writing.") == "factual_statement"
