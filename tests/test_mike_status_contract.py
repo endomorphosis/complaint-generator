@@ -321,7 +321,7 @@ def test_mike_sync_persists_grounding_logic_and_release_gate_blockers(tmp_path):
     assert "Formal proof coverage, contradiction, or chronology checks are still failing" in gate["complaint_output_release_gate"]["reason"]
 
 
-def test_mike_sync_keeps_router_policy_and_skill_roundtrip_workspace_owned(tmp_path):
+def test_mike_sync_preserves_router_policy_ownership(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path)
     user_id = "mike-router-policy-user"
     handoff = service.build_mike_handoff(user_id)
