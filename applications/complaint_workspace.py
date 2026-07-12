@@ -5352,6 +5352,14 @@ class ComplaintWorkspaceService:
         return payload if isinstance(payload, dict) else {}
 
     @classmethod
+    def _ipfs_project_file(cls, ipfs_root: Path) -> Path:
+        # ipfs_datasets_py currently ships a non-standard "__pyproject.toml" file upstream.
+        project_file = ipfs_root / "__pyproject.toml"
+        if not project_file.exists():
+            project_file = ipfs_root / "pyproject.toml"
+        return project_file
+
+    @classmethod
     def _resolve_mike_grounding_mode(cls, override: Optional[str] = None) -> str:
         candidate = str(override or os.getenv("COMPLAINT_MIKE_GROUNDING_MODE") or DEFAULT_MIKE_GROUNDING_MODE).strip().lower()
         return candidate or DEFAULT_MIKE_GROUNDING_MODE
@@ -5388,11 +5396,7 @@ class ComplaintWorkspaceService:
         ipfs_root = repo_root / "ipfs_datasets_py"
         mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
-        # ipfs_datasets_py currently ships a non-standard "__pyproject.toml" file upstream.
-        ipfs_project_file = ipfs_root / "__pyproject.toml"
-        if not ipfs_project_file.exists():
-            ipfs_project_file = ipfs_root / "pyproject.toml"
-        ipfs_pyproject = cls._safe_read_toml_file(ipfs_project_file)
+        ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(ipfs_root))
         frontend_src = mike_root / "frontend" / "src"
         backend_src = mike_root / "backend" / "src"
         editor_modules = [
@@ -5461,11 +5465,7 @@ class ComplaintWorkspaceService:
         complaint_pyproject = cls._safe_read_toml_file(repo_root / "pyproject.toml")
         mike_frontend_package = cls._safe_read_json_file(repo_root / "mike" / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(repo_root / "mike" / "backend" / "package.json")
-        # ipfs_datasets_py currently ships a non-standard "__pyproject.toml" file upstream.
-        ipfs_project_file = repo_root / "ipfs_datasets_py" / "__pyproject.toml"
-        if not ipfs_project_file.exists():
-            ipfs_project_file = repo_root / "ipfs_datasets_py" / "pyproject.toml"
-        ipfs_pyproject = cls._safe_read_toml_file(ipfs_project_file)
+        ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(repo_root / "ipfs_datasets_py"))
         complaint_project = dict(complaint_pyproject.get("project") or {})
         ipfs_project = dict(ipfs_pyproject.get("project") or {})
         return {
