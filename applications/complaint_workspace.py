@@ -270,24 +270,6 @@ MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
     "synced_with_conflicts": "Synced with conflicts",
 }
 MIKE_SKILL_ASSET_MANIFEST_VERSION = "complaint-mike-skill-assets-v1"
-MIKE_CORPUS_LANE_ADAPTERS: List[Dict[str, Any]] = [
-    {
-        "adapter": "integrations/ipfs_datasets/legal.py",
-        "capability": "authority_grounding",
-    },
-    {
-        "adapter": "integrations/ipfs_datasets/search.py",
-        "capability": "legal_corpus_search",
-    },
-    {
-        "adapter": "integrations/ipfs_datasets/policy_rules.py",
-        "capability": "strict_containment_policy",
-    },
-    {
-        "adapter": "integrations/ipfs_datasets/graphs.py",
-        "capability": "authority_graph_enrichment",
-    },
-]
 DEFAULT_MIKE_SKILL_ASSET_MANIFEST: List[Dict[str, Any]] = [
     {
         "skill_asset_id": "complaint-grounding",
@@ -5526,6 +5508,23 @@ class ComplaintWorkspaceService:
             "assets": assets,
         }
 
+    @classmethod
+    def _build_mike_corpus_lane_adapters(cls) -> List[Dict[str, Any]]:
+        capabilities = {
+            "legal_corpus_review",
+            "legal_corpus_search",
+            "strict_containment_policy",
+            "authority_graph_enrichment",
+        }
+        return [
+            {
+                "adapter": str(item.get("adapter") or "").strip(),
+                "capability": str(item.get("capability") or "").strip(),
+            }
+            for item in cls._build_mike_skill_asset_manifest().get("assets") or []
+            if str(item.get("adapter") or "").strip() and str(item.get("capability") or "").strip() in capabilities
+        ]
+
     @staticmethod
     def _build_mike_base_draft_identity(draft: Mapping[str, Any]) -> Dict[str, Any]:
         draft_payload = {
@@ -5906,7 +5905,7 @@ class ComplaintWorkspaceService:
                 "state_statutes",
                 "administrative_rules",
             ],
-            "adapter_lane": deepcopy(MIKE_CORPUS_LANE_ADAPTERS),
+            "adapter_lane": cls._build_mike_corpus_lane_adapters(),
             "canonical_source_adapters": {
                 "legal_search": "integrations/ipfs_datasets/legal.py",
                 "corpus_search": "integrations/ipfs_datasets/search.py",
@@ -6041,7 +6040,7 @@ class ComplaintWorkspaceService:
             "authority_count": len(authority_links),
             "authorities": deepcopy(authority_links[:MAX_MIKE_AUTHORITY_EXAMPLES]),
             "has_blockers": grounding_mode in STRICT_MIKE_GROUNDING_MODES and bool(unsupported or extra_corpus),
-            "adapter_lane": deepcopy(MIKE_CORPUS_LANE_ADAPTERS),
+            "adapter_lane": cls._build_mike_corpus_lane_adapters(),
             "canonical_sources": _legal_source_availability_snapshot(),
         }
 
