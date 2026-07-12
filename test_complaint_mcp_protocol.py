@@ -249,6 +249,9 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     assert mike_handoff["result"]["structuredContent"]["handoff_payload"]["skill_asset_manifest"]["asset_ids"] == [
         "complaint-grounding",
         "complaint-logic",
+        "complaint-corpus-search",
+        "complaint-policy-rules",
+        "complaint-authority-graphs",
         "complaint-router",
     ]
     handoff_status_payload = mike_status_after_handoff["result"]["structuredContent"]

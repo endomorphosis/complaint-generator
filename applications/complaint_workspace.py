@@ -270,6 +270,24 @@ MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
     "synced_with_conflicts": "Synced with conflicts",
 }
 MIKE_SKILL_ASSET_MANIFEST_VERSION = "complaint-mike-skill-assets-v1"
+MIKE_CORPUS_LANE_ADAPTERS: List[Dict[str, Any]] = [
+    {
+        "adapter": "integrations/ipfs_datasets/legal.py",
+        "capability": "authority_grounding",
+    },
+    {
+        "adapter": "integrations/ipfs_datasets/search.py",
+        "capability": "legal_corpus_search",
+    },
+    {
+        "adapter": "integrations/ipfs_datasets/policy_rules.py",
+        "capability": "strict_containment_policy",
+    },
+    {
+        "adapter": "integrations/ipfs_datasets/graphs.py",
+        "capability": "authority_graph_enrichment",
+    },
+]
 DEFAULT_MIKE_SKILL_ASSET_MANIFEST: List[Dict[str, Any]] = [
     {
         "skill_asset_id": "complaint-grounding",
@@ -283,6 +301,27 @@ DEFAULT_MIKE_SKILL_ASSET_MANIFEST: List[Dict[str, Any]] = [
         "name": "Complaint theorem export",
         "capability": "formal_logic_review",
         "adapter": "integrations/ipfs_datasets/logic.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+    {
+        "skill_asset_id": "complaint-corpus-search",
+        "name": "Complaint legal corpus search",
+        "capability": "legal_corpus_search",
+        "adapter": "integrations/ipfs_datasets/search.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+    {
+        "skill_asset_id": "complaint-policy-rules",
+        "name": "Complaint containment policy rules",
+        "capability": "strict_containment_policy",
+        "adapter": "integrations/ipfs_datasets/policy_rules.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+    {
+        "skill_asset_id": "complaint-authority-graphs",
+        "name": "Complaint authority graph enrichment",
+        "capability": "authority_graph_enrichment",
+        "adapter": "integrations/ipfs_datasets/graphs.py",
         "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
     },
     {
@@ -5867,8 +5906,12 @@ class ComplaintWorkspaceService:
                 "state_statutes",
                 "administrative_rules",
             ],
+            "adapter_lane": deepcopy(MIKE_CORPUS_LANE_ADAPTERS),
             "canonical_source_adapters": {
                 "legal_search": "integrations/ipfs_datasets/legal.py",
+                "corpus_search": "integrations/ipfs_datasets/search.py",
+                "containment_policy": "integrations/ipfs_datasets/policy_rules.py",
+                "authority_graph": "integrations/ipfs_datasets/graphs.py",
                 "formal_logic": "integrations/ipfs_datasets/logic.py",
                 "llm_router": "integrations/ipfs_datasets/llm.py",
             },
@@ -5998,6 +6041,7 @@ class ComplaintWorkspaceService:
             "authority_count": len(authority_links),
             "authorities": deepcopy(authority_links[:MAX_MIKE_AUTHORITY_EXAMPLES]),
             "has_blockers": grounding_mode in STRICT_MIKE_GROUNDING_MODES and bool(unsupported or extra_corpus),
+            "adapter_lane": deepcopy(MIKE_CORPUS_LANE_ADAPTERS),
             "canonical_sources": _legal_source_availability_snapshot(),
         }
 

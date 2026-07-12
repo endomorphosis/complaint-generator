@@ -38,8 +38,9 @@ Use one of the aligned surfaces below:
   - draft body/title/relief
   - support review
   - centralized `router_policy` so Mike routes assistance through Complaint Generator's LLM control plane
-  - `skill_asset_manifest` so Mike can roundtrip only complaint-generator-owned skill IDs
+  - `skill_asset_manifest` so Mike can roundtrip only complaint-generator-owned skill IDs, including corpus-search, containment-policy, and authority-graph assets owned by complaint-generator
   - `grounding_mode`, `corpus_boundaries`, and `legal_corpus_context`
+  - legal-corpus adapter lane metadata that keeps strict containment rooted in `integrations/ipfs_datasets/legal.py`, `search.py`, `policy_rules.py`, and `graphs.py`
   - `logic_handoff` with proof constraints, theorem-export metadata, formal predicates to preserve, and the optional Leanstral assist lane policy for unresolved proof work
   - summarized evidence context by claim element
   - `structured_legal_packet_context` with stable section/paragraph/claim IDs

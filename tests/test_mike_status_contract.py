@@ -180,9 +180,20 @@ def test_mike_handoff_exposes_router_grounding_logic_and_submodule_contracts(tmp
     assert handoff_payload["router_policy"]["provider_policy_source"] == "complaint_generator"
     assert handoff_payload["grounding_mode"] == "legal_corpus_only"
     assert handoff_payload["corpus_boundaries"]["strict_legal_containment"] is True
+    assert {
+        item["adapter"] for item in handoff_payload["corpus_boundaries"]["adapter_lane"]
+    } == {
+        "integrations/ipfs_datasets/legal.py",
+        "integrations/ipfs_datasets/search.py",
+        "integrations/ipfs_datasets/policy_rules.py",
+        "integrations/ipfs_datasets/graphs.py",
+    }
     assert "logic_handoff" in handoff_payload
     assert handoff_payload["skill_asset_manifest"]["version"] == "complaint-mike-skill-assets-v1"
     assert "complaint-grounding" in handoff_payload["skill_asset_manifest"]["asset_ids"]
+    assert "complaint-corpus-search" in handoff_payload["skill_asset_manifest"]["asset_ids"]
+    assert "complaint-policy-rules" in handoff_payload["skill_asset_manifest"]["asset_ids"]
+    assert "complaint-authority-graphs" in handoff_payload["skill_asset_manifest"]["asset_ids"]
     assert "submodule_inventory" in handoff_payload
     assert "compatibility_target_matrix" in handoff_payload
     assert handoff_payload["submodule_inventory"]["mike"]["skill_asset_count"] >= 1
@@ -289,6 +300,14 @@ def test_mike_sync_persists_grounding_logic_and_release_gate_blockers(tmp_path):
     )
 
     assert sync_payload["legal_corpus_review"]["has_blockers"] is True
+    assert {
+        item["adapter"] for item in sync_payload["legal_corpus_review"]["adapter_lane"]
+    } == {
+        "integrations/ipfs_datasets/legal.py",
+        "integrations/ipfs_datasets/search.py",
+        "integrations/ipfs_datasets/policy_rules.py",
+        "integrations/ipfs_datasets/graphs.py",
+    }
     assert sync_payload["logic_review"]["has_blockers"] is True
     assert sync_payload["draft"]["sync_metadata"]["sync_provenance"]["editor_version"] == "mike-test"
     assert sync_payload["sync_provenance"]["enabled_skill_ids"] == ["complaint-grounding"]
