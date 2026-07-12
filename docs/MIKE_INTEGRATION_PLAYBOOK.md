@@ -43,7 +43,7 @@ Use one of the aligned surfaces below:
   - summarized evidence context by claim element
   - `structured_legal_packet_context` with stable section/paragraph/claim IDs
   - `editor_guardrails` with unsupported elements, weak links, and contradiction hotspots
-  - `submodule_inventory` and `compatibility_target_matrix` for repeatable upstream refreshes
+  - `submodule_inventory` and `compatibility_target_matrix` for repeatable upstream refreshes, including current `HEAD` and `origin/main` SHAs for `mike` and `ipfs_datasets_py`
   - `non_negotiable_constraints` machine-readable must-hold legal/proof invariants
 
 ## 2.5) Check integration status and next action

@@ -180,6 +180,10 @@ def test_mike_handoff_exposes_router_grounding_logic_and_submodule_contracts(tmp
     assert "logic_handoff" in handoff_payload
     assert "submodule_inventory" in handoff_payload
     assert "compatibility_target_matrix" in handoff_payload
+    assert len(str(handoff_payload["submodule_inventory"]["mike"]["commit"])) == 40
+    assert len(str(handoff_payload["submodule_inventory"]["ipfs_datasets_py"]["commit"])) == 40
+    assert len(str(handoff_payload["compatibility_target_matrix"]["submodule_shas"]["mike_commit"])) == 40
+    assert len(str(handoff_payload["compatibility_target_matrix"]["submodule_shas"]["ipfs_datasets_py_commit"])) == 40
     assert "grounding_mode" in payload["sync_contract"]["optional_fields"]
     assert "assertion_annotations" in payload["sync_contract"]["optional_fields"]
     assert "authority_links" in payload["sync_contract"]["optional_fields"]
