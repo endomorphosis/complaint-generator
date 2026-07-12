@@ -12,7 +12,7 @@ def test_mike_status_contract_state_transitions_and_invariants(tmp_path):
     user_id = "mike-contract-user"
 
     initial = service.get_mike_integration_status(user_id)
-    assert initial["status_contract_version"] == "complaint-mike-status-v2"
+    assert initial["status_contract_version"] == "complaint-mike-status-v3"
     assert initial["workflow_state"]["key"] == "not_handed_off"
     assert initial["pending_sync"] is False
     assert isinstance(initial["citation_link_conflict_count"], int)
@@ -37,6 +37,8 @@ def test_mike_status_contract_state_transitions_and_invariants(tmp_path):
     assert after_clean_sync["workflow_state"]["key"] == "synced_clean"
     assert after_clean_sync["pending_sync"] is False
     assert after_clean_sync["has_citation_link_conflicts"] is False
+    assert "grounding_component" in after_clean_sync
+    assert "proof_component" in after_clean_sync
 
     service.sync_mike_final_draft(
         user_id,
@@ -55,6 +57,7 @@ def test_mike_status_contract_state_transitions_and_invariants(tmp_path):
     assert after_conflict_sync["conflict_component"]["unknown_element_count"] == 1
     assert after_conflict_sync["invariants"]["pending_sync_implies_handoff"] is True
     assert after_conflict_sync["invariants"]["synced_handoff_never_pending"] is True
+    assert "router_policy" in after_conflict_sync
 
 
 def test_mike_ui_state_contract_keys_are_shared_across_surfaces():
@@ -151,3 +154,136 @@ def test_package_sync_wrapper_passes_structured_deltas_and_editor_metadata(tmp_p
     sync_metadata = session["session"]["draft"]["sync_metadata"]
     assert sync_metadata["structured_deltas"][0]["target"] == "paragraph-1"
     assert sync_metadata["editor_metadata"]["editor_user_id"] == "wrapper-editor"
+
+
+def test_mike_handoff_exposes_router_grounding_logic_and_submodule_contracts(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path)
+    service.submit_intake_answers(
+        "handoff-contract-user",
+        {
+            "party_name": "Taylor Smith",
+            "opposing_party": "Acme Logistics",
+            "protected_activity": "Reported safety violations",
+            "adverse_action": "Termination",
+            "timeline": "Reported on April 2; terminated on April 5",
+            "harm": "Lost wages",
+        },
+    )
+
+    payload = service.build_mike_handoff("handoff-contract-user", grounding_mode="legal_corpus_only")
+    handoff_payload = payload["handoff_payload"]
+
+    assert payload["contract_versions"]["handoff"] == "complaint-mike-handoff-v3"
+    assert handoff_payload["router_policy"]["provider_policy_source"] == "complaint_generator"
+    assert handoff_payload["grounding_mode"] == "legal_corpus_only"
+    assert handoff_payload["corpus_boundaries"]["strict_legal_containment"] is True
+    assert "logic_handoff" in handoff_payload
+    assert "submodule_inventory" in handoff_payload
+    assert "compatibility_target_matrix" in handoff_payload
+    assert "grounding_mode" in payload["sync_contract"]["optional_fields"]
+    assert "assertion_annotations" in payload["sync_contract"]["optional_fields"]
+    assert "authority_links" in payload["sync_contract"]["optional_fields"]
+
+
+def test_mike_sync_persists_grounding_logic_and_release_gate_blockers(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path)
+    user_id = "mike-grounding-user"
+    service.submit_intake_answers(
+        user_id,
+        {
+            "party_name": "Taylor Smith",
+            "opposing_party": "Acme Logistics",
+            "protected_activity": "Reported safety violations to HR",
+            "adverse_action": "Was terminated three days later",
+            "timeline": "Reported on April 2; terminated on April 5",
+            "harm": "Lost wages and benefits",
+        },
+    )
+    handoff = service.build_mike_handoff(user_id)
+
+    sync_payload = service.sync_mike_final_draft(
+        user_id,
+        body="Defendant unlawfully retaliated against Plaintiff. Plaintiff seeks damages and fees.",
+        handoff_id=handoff["handoff_id"],
+        grounding_mode="legal_corpus_only",
+        assertion_annotations=[
+            {
+                "assertion_id": "a-1",
+                "text": "Defendant unlawfully retaliated against Plaintiff.",
+                "assertion_type": "legal_conclusion",
+                "grounded": False,
+            },
+            {
+                "assertion_id": "a-2",
+                "text": "Plaintiff seeks damages and fees.",
+                "assertion_type": "requested_relief",
+                "grounded": True,
+                "authority_ids": ["relief-1"],
+            },
+        ],
+        authority_links=[
+            {
+                "authority_id": "relief-1",
+                "authority_type": "statute",
+                "citation": "42 U.S.C. § 1988",
+                "source": "federal_statutes",
+                "assertion_ids": ["a-2"],
+            }
+        ],
+        sync_provenance={"editor_version": "mike-test", "skill_asset_ids": ["complaint-grounding"]},
+    )
+
+    assert sync_payload["legal_corpus_review"]["has_blockers"] is True
+    assert sync_payload["logic_review"]["has_blockers"] is True
+    assert sync_payload["draft"]["sync_metadata"]["sync_provenance"]["editor_version"] == "mike-test"
+
+    gate = service.get_client_release_gate(user_id)
+    assert gate["complaint_output_release_gate"]["verdict"] == "blocked"
+    assert "Legal-corpus-only mode" in gate["complaint_output_release_gate"]["reason"]
+
+
+def test_formal_diagnostics_include_mike_grounding_and_logic_snapshot(tmp_path, monkeypatch):
+    service = ComplaintWorkspaceService(root_dir=tmp_path)
+    user_id = "mike-formal-diagnostics-user"
+    handoff = service.build_mike_handoff(user_id)
+    service.sync_mike_final_draft(
+        user_id,
+        body="Plaintiff reported discrimination on March 1. Defendant terminated Plaintiff on March 3.",
+        handoff_id=handoff["handoff_id"],
+    )
+
+    monkeypatch.setattr(
+        service,
+        "analyze_complaint_output",
+        lambda user_id: {
+            "user_id": user_id,
+            "ui_feedback": {
+                "claim_type_alignment_score": 75,
+                "filing_shape_score": 80,
+                "release_gate": {"verdict": "warning"},
+                "formal_diagnostics": {"release_gate_verdict": "warning"},
+                "router_review": {"backend": {"provider": "template"}},
+            },
+            "packet_summary": {
+                "has_draft": True,
+                "draft_strategy": "template",
+                "formal_defect_count": 0,
+                "high_severity_issue_count": 0,
+                "complaint_output_router_backend": {"provider": "template"},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "build_export_artifact",
+        lambda user_id, output_format="markdown": {
+            "filename": "complaint.md",
+            "media_type": "text/markdown",
+            "body": b"COMPLAINT\n\n1. Plaintiff reported discrimination.\n2. Defendant terminated Plaintiff.\n",
+        },
+    )
+
+    payload = service.get_formal_diagnostics(user_id)
+    assert "mike_grounding" in payload
+    assert "mike_logic" in payload
+    assert "mike_sync_diagnostics" in payload

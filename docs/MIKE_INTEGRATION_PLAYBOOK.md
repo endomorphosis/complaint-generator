@@ -37,9 +37,13 @@ Use one of the aligned surfaces below:
   - claim type
   - draft body/title/relief
   - support review
+  - centralized `router_policy` so Mike routes assistance through Complaint Generator's LLM control plane
+  - `grounding_mode`, `corpus_boundaries`, and `legal_corpus_context`
+  - `logic_handoff` with proof constraints, theorem-export metadata, and formal predicates to preserve
   - summarized evidence context by claim element
   - `structured_legal_packet_context` with stable section/paragraph/claim IDs
   - `editor_guardrails` with unsupported elements, weak links, and contradiction hotspots
+  - `submodule_inventory` and `compatibility_target_matrix` for repeatable upstream refreshes
   - `non_negotiable_constraints` machine-readable must-hold legal/proof invariants
 
 ## 2.5) Check integration status and next action
@@ -99,12 +103,18 @@ Use one of the aligned surfaces below:
 - `source_updated_at`
 - `structured_deltas` (paragraph/citation/claim/relief/metadata edit operations)
 - `editor_metadata` (editor attribution/session/source transport metadata)
+- `grounding_mode`
+- `assertion_annotations` (grounded or unsupported substantive assertions)
+- `authority_links` (retrieved legal authorities tied to assertions)
+- `sync_provenance` (editor version, skill assets, base-draft identity)
 
 ### Sync behavior
 
 - Persists draft text into the complaint workspace session.
 - Marks `draft.sync_source = "mike"` with `draft.sync_metadata`.
 - Runs citation-link integrity checks and returns conflict metadata (`citation_link_check`) in the sync response.
+- Runs legal-corpus grounding checks and returns `legal_corpus_review`.
+- Runs prose-to-logic / theorem-export review and returns `logic_review`.
 - Stores sync diagnostics (`sync_diagnostics`) with severity tiers and remediation guidance.
 - Stores tamper-evident `sync_integrity_hash` in sync metadata and sync history.
 - Updates Mike integration history (`last_handoff`, `last_sync`).
