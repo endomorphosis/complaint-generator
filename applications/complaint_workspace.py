@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import tomllib
@@ -5351,6 +5352,24 @@ class ComplaintWorkspaceService:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    @staticmethod
+    def _safe_read_git_ref(path: Path, ref: str) -> str:
+        if not path.exists() or not path.is_dir():
+            return "unavailable"
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(path), "rev-parse", ref],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            # Return unavailable if the path is not usable, the git ref is missing/non-git, or the command times out.
+            return "unavailable"
+        value = (result.stdout or "").strip()
+        return value or "unavailable"
+
     @classmethod
     def _ipfs_project_file(cls, ipfs_root: Path) -> Path:
         # ipfs_datasets_py currently ships a non-standard "__pyproject.toml" file upstream.
@@ -5421,6 +5440,8 @@ class ComplaintWorkspaceService:
             "mike": {
                 "available": mike_root.is_dir() and (mike_root / "README.md").exists(),
                 "root": str(mike_root),
+                "commit": cls._safe_read_git_ref(mike_root, "HEAD"),
+                "origin_main_commit": cls._safe_read_git_ref(mike_root, "origin/main"),
                 "frontend_package_name": str(mike_frontend_package.get("name") or ""),
                 "backend_package_name": str(mike_backend_package.get("name") or ""),
                 "frontend_dependencies": sorted(dict(mike_frontend_package.get("dependencies") or {}).keys())[:20],
@@ -5439,6 +5460,8 @@ class ComplaintWorkspaceService:
             "ipfs_datasets_py": {
                 "available": ipfs_root.is_dir() and (ipfs_root / "README.md").exists(),
                 "root": str(ipfs_root),
+                "commit": cls._safe_read_git_ref(ipfs_root, "HEAD"),
+                "origin_main_commit": cls._safe_read_git_ref(ipfs_root, "origin/main"),
                 "python_project_name": str(((ipfs_pyproject.get("project") or {}).get("name") or "")),
                 "logic_bridge_present": (ipfs_root / "ipfs_datasets_py" / "logic").exists(),
                 "legal_processors_present": (ipfs_root / "ipfs_datasets_py" / "processors" / "legal_data").exists(),
@@ -5485,6 +5508,14 @@ class ComplaintWorkspaceService:
                 "workspace_status_contract": MIKE_STATUS_CONTRACT_VERSION,
                 "mike_editor_role": "editing_surface_only",
                 "workspace_source_of_truth": "complaint_generator_session_state",
+            },
+            "submodule_shas": {
+                "mike_commit": cls._safe_read_git_ref(repo_root / "mike", "HEAD"),
+                "mike_origin_main_commit": cls._safe_read_git_ref(repo_root / "mike", "origin/main"),
+                "ipfs_datasets_py_commit": cls._safe_read_git_ref(repo_root / "ipfs_datasets_py", "HEAD"),
+                "ipfs_datasets_py_origin_main_commit": cls._safe_read_git_ref(
+                    repo_root / "ipfs_datasets_py", "origin/main"
+                ),
             },
             "config_expectations": {
                 "complaint_mike_base_url_env": "COMPLAINT_MIKE_BASE_URL",
