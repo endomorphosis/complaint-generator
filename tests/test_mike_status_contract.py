@@ -321,6 +321,41 @@ def test_mike_sync_persists_grounding_logic_and_release_gate_blockers(tmp_path):
     assert "Formal proof coverage, contradiction, or chronology checks are still failing" in gate["complaint_output_release_gate"]["reason"]
 
 
+def test_mike_sync_keeps_router_policy_and_skill_roundtrip_workspace_owned(tmp_path):
+    service = ComplaintWorkspaceService(root_dir=tmp_path)
+    user_id = "mike-router-policy-user"
+    handoff = service.build_mike_handoff(user_id)
+
+    handoff_payload = handoff["handoff_payload"]
+    assert "complaint-router" in handoff_payload["skill_asset_manifest"]["asset_ids"]
+    assert handoff_payload["router_policy"]["provider_policy_source"] == "complaint_generator"
+    assert handoff_payload["router_policy"]["narrow_adapter_boundary"]["mike_requests_generation_via_workspace"] is True
+    assert handoff_payload["router_policy"]["narrow_adapter_boundary"]["mike_does_not_choose_provider"] is True
+    assert handoff_payload["router_policy"]["narrow_adapter_boundary"]["mike_does_not_choose_model"] is True
+
+    sync_payload = service.sync_mike_final_draft(
+        user_id,
+        body="Plaintiff reported safety concerns. Defendant terminated Plaintiff shortly after.",
+        handoff_id=handoff["handoff_id"],
+        sync_provenance={
+            "editor_version": "mike-web",
+            "skill_asset_ids": ["complaint-router", "complaint-logic", "unknown-skill"],
+            "redline_metadata": {"summary": "Applied complaint-owned routing edits."},
+        },
+        structured_deltas=[{"op": "replace", "target": "paragraph-001", "before": "old", "after": "new"}],
+    )
+
+    assert sync_payload["router_policy"]["provider_policy_source"] == "complaint_generator"
+    assert sync_payload["router_policy"]["narrow_adapter_boundary"]["mike_requests_generation_via_workspace"] is True
+    assert sync_payload["sync_provenance"]["enabled_skill_ids"] == ["complaint-router", "complaint-logic"]
+    assert sync_payload["sync_provenance"]["unknown_skill_asset_ids"] == ["unknown-skill"]
+    assert sync_payload["sync_provenance"]["base_draft_identity"]["hash"]
+    assert sync_payload["redline_metadata"]["structured_delta_count"] == 1
+
+    status_payload = service.get_mike_integration_status(user_id)
+    assert status_payload["router_policy"]["provider_policy_source"] == "complaint_generator"
+
+
 def test_formal_diagnostics_include_mike_grounding_and_logic_snapshot(tmp_path, monkeypatch):
     service = ComplaintWorkspaceService(root_dir=tmp_path)
     user_id = "mike-formal-diagnostics-user"
