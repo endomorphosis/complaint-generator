@@ -181,8 +181,11 @@ def test_mike_handoff_exposes_router_grounding_logic_and_submodule_contracts(tmp
     assert handoff_payload["grounding_mode"] == "legal_corpus_only"
     assert handoff_payload["corpus_boundaries"]["strict_legal_containment"] is True
     assert "logic_handoff" in handoff_payload
+    assert handoff_payload["skill_asset_manifest"]["version"] == "complaint-mike-skill-assets-v1"
+    assert "complaint-grounding" in handoff_payload["skill_asset_manifest"]["asset_ids"]
     assert "submodule_inventory" in handoff_payload
     assert "compatibility_target_matrix" in handoff_payload
+    assert handoff_payload["submodule_inventory"]["mike"]["skill_asset_count"] >= 1
     assert handoff_payload["submodule_inventory"]["mike"]["commit"] != "unavailable"
     assert handoff_payload["submodule_inventory"]["mike"]["origin_main_commit"] != "unavailable"
     assert handoff_payload["submodule_inventory"]["ipfs_datasets_py"]["commit"] != "unavailable"
@@ -278,12 +281,20 @@ def test_mike_sync_persists_grounding_logic_and_release_gate_blockers(tmp_path):
                 "assertion_ids": ["a-2"],
             }
         ],
-        sync_provenance={"editor_version": "mike-test", "skill_asset_ids": ["complaint-grounding"]},
+        sync_provenance={
+            "editor_version": "mike-test",
+            "skill_asset_ids": ["complaint-grounding"],
+            "redline_metadata": {"summary": "Tightened retaliation theory."},
+        },
     )
 
     assert sync_payload["legal_corpus_review"]["has_blockers"] is True
     assert sync_payload["logic_review"]["has_blockers"] is True
     assert sync_payload["draft"]["sync_metadata"]["sync_provenance"]["editor_version"] == "mike-test"
+    assert sync_payload["sync_provenance"]["enabled_skill_ids"] == ["complaint-grounding"]
+    assert sync_payload["sync_provenance"]["base_draft_identity"]["hash"]
+    assert sync_payload["redline_metadata"]["structured_delta_count"] == 0
+    assert sync_payload["logic_review"]["leanstral_assist"]["bypass_release_gate"] is False
 
     gate = service.get_client_release_gate(user_id)
     assert gate["complaint_output_release_gate"]["verdict"] == "blocked"

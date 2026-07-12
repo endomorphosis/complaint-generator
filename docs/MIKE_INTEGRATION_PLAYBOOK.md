@@ -38,8 +38,9 @@ Use one of the aligned surfaces below:
   - draft body/title/relief
   - support review
   - centralized `router_policy` so Mike routes assistance through Complaint Generator's LLM control plane
+  - `skill_asset_manifest` so Mike can roundtrip only complaint-generator-owned skill IDs
   - `grounding_mode`, `corpus_boundaries`, and `legal_corpus_context`
-  - `logic_handoff` with proof constraints, theorem-export metadata, and formal predicates to preserve
+  - `logic_handoff` with proof constraints, theorem-export metadata, formal predicates to preserve, and the optional Leanstral assist lane policy for unresolved proof work
   - summarized evidence context by claim element
   - `structured_legal_packet_context` with stable section/paragraph/claim IDs
   - `editor_guardrails` with unsupported elements, weak links, and contradiction hotspots
@@ -106,7 +107,7 @@ Use one of the aligned surfaces below:
 - `grounding_mode`
 - `assertion_annotations` (grounded or unsupported substantive assertions)
 - `authority_links` (retrieved legal authorities tied to assertions)
-- `sync_provenance` (editor version, skill assets, base-draft identity)
+- `sync_provenance` (editor version, enabled skill assets, base-draft identity, redline metadata)
 
 ### Sync behavior
 
@@ -115,6 +116,7 @@ Use one of the aligned surfaces below:
 - Runs citation-link integrity checks and returns conflict metadata (`citation_link_check`) in the sync response.
 - Runs legal-corpus grounding checks and returns `legal_corpus_review`.
 - Runs prose-to-logic / theorem-export review and returns `logic_review`.
+- Returns normalized `sync_provenance` so complaint-generator remains authoritative for enabled skill IDs, base-draft identity, and redline metadata after the editor roundtrip.
 - Stores sync diagnostics (`sync_diagnostics`) with severity tiers and remediation guidance.
 - Stores tamper-evident `sync_integrity_hash` in sync metadata and sync history.
 - Updates Mike integration history (`last_handoff`, `last_sync`).

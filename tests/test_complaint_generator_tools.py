@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 from typer.testing import CliRunner
-from ipfs_datasets_py.processors.legal_data import DocketDatasetBuilder
+from integrations.ipfs_datasets.legal_data import DocketDatasetBuilder
 
 from applications import complaint_cli as complaint_cli_impl
 from applications.complaint_workspace_api import attach_complaint_workspace_routes

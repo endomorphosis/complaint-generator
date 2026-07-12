@@ -203,6 +203,11 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
                         "editor_user_id": "editor-mcp",
                         "editor_session_id": "session-mcp",
                     },
+                    "sync_provenance": {
+                        "editor_version": "mike-web",
+                        "skill_asset_ids": ["complaint-grounding", "complaint-logic"],
+                        "redline_metadata": {"summary": "Applied citation-safe edits."},
+                    },
                 },
             },
         },
@@ -241,6 +246,11 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     }
     assert handoff_id.startswith("mike-handoff-")
     assert mike_handoff["result"]["structuredContent"]["mike"]["launch_url"]
+    assert mike_handoff["result"]["structuredContent"]["handoff_payload"]["skill_asset_manifest"]["asset_ids"] == [
+        "complaint-grounding",
+        "complaint-logic",
+        "complaint-router",
+    ]
     handoff_status_payload = mike_status_after_handoff["result"]["structuredContent"]
     assert handoff_status_payload["pending_sync"] is True
     assert handoff_status_payload["status_contract_version"] == "complaint-mike-status-v3"
@@ -257,6 +267,12 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     assert mike_sync["result"]["structuredContent"]["sync_record"]["citation_link_conflict_count"] == 1
     assert mike_sync["result"]["structuredContent"]["sync_record"]["structured_delta_count"] == 1
     assert mike_sync["result"]["structuredContent"]["sync_record"]["editor_user_id"] == "editor-mcp"
+    assert mike_sync["result"]["structuredContent"]["sync_record"]["editor_version"] == "mike-web"
+    assert mike_sync["result"]["structuredContent"]["sync_provenance"]["enabled_skill_ids"] == [
+        "complaint-grounding",
+        "complaint-logic",
+    ]
+    assert mike_sync["result"]["structuredContent"]["redline_metadata"]["structured_delta_count"] == 1
     assert mike_sync["result"]["structuredContent"]["sync_diagnostics"]["severity"] == "error"
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["has_conflicts"] is True
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["unknown_claim_element_ids"] == ["unknown"]

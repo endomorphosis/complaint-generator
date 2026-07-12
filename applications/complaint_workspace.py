@@ -31,7 +31,7 @@ def _legal_source_availability_snapshot() -> Dict[str, Any]:
             from integrations.ipfs_datasets.legal import LEGAL_SOURCE_AVAILABILITY as availability
 
             return deepcopy(availability or {})
-        except Exception:
+        except (OSError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             pass
     return {
         "federal_statutes": True,
@@ -64,6 +64,36 @@ def _llm_router_status_snapshot() -> Dict[str, Any]:
         "backend_available": False,
         "implementation_status": "degraded_local",
     }
+
+
+def _leanstral_status_snapshot() -> Dict[str, Any]:
+    try:
+        from integrations.ipfs_datasets.loader import import_module_optional
+
+        module, error = import_module_optional("ipfs_accelerate_py")
+        if module is not None:
+            return {
+                "status": "available",
+                "backend_available": True,
+                "module_path": str(getattr(module, "__file__", "") or ""),
+                "model": "leanstral",
+                "provider": "ipfs_accelerate_py",
+            }
+        return {
+            "status": "unavailable",
+            "backend_available": False,
+            "error": str(error or ""),
+            "model": "leanstral",
+            "provider": "ipfs_accelerate_py",
+        }
+    except Exception as exc:
+        return {
+            "status": "unavailable",
+            "backend_available": False,
+            "error": str(exc),
+            "model": "leanstral",
+            "provider": "ipfs_accelerate_py",
+        }
 
 
 def _run_hybrid_reasoning_safely(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -239,6 +269,30 @@ MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
     "synced_clean": "Synced clean",
     "synced_with_conflicts": "Synced with conflicts",
 }
+MIKE_SKILL_ASSET_MANIFEST_VERSION = "complaint-mike-skill-assets-v1"
+DEFAULT_MIKE_SKILL_ASSET_MANIFEST: List[Dict[str, Any]] = [
+    {
+        "skill_asset_id": "complaint-grounding",
+        "name": "Complaint grounding review",
+        "capability": "legal_corpus_review",
+        "adapter": "integrations/ipfs_datasets/legal.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+    {
+        "skill_asset_id": "complaint-logic",
+        "name": "Complaint theorem export",
+        "capability": "formal_logic_review",
+        "adapter": "integrations/ipfs_datasets/logic.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+    {
+        "skill_asset_id": "complaint-router",
+        "name": "Complaint router policy",
+        "capability": "workspace_llm_router",
+        "adapter": "integrations/ipfs_datasets/llm.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+]
 DEFAULT_UI_UX_SCREENSHOT_TARGET = (
     "tests/test_website_cohesion_playwright.py::"
     "test_homepage_navigation_can_drive_a_full_complaint_journey_with_real_handoffs"
@@ -5365,6 +5419,21 @@ class ComplaintWorkspaceService:
                 timeout=5,
             )
         except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            repo_root = Path(__file__).resolve().parent.parent
+            try:
+                relative_path = path.resolve().relative_to(repo_root.resolve())
+                fallback = subprocess.run(
+                    ["git", "-C", str(repo_root), "ls-tree", "HEAD", str(relative_path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                parts = [part for part in str(fallback.stdout or "").strip().split() if part]
+                if len(parts) >= 3 and re.fullmatch(r"[0-9a-f]{40}", parts[2]):
+                    return parts[2]
+            except Exception:
+                pass
             # Return unavailable if the path is not usable, the git ref is missing/non-git, or the command times out.
             return "unavailable"
         value = (result.stdout or "").strip()
@@ -5409,6 +5478,44 @@ class ComplaintWorkspaceService:
         }
 
     @classmethod
+    def _build_mike_skill_asset_manifest(cls) -> Dict[str, Any]:
+        assets = [deepcopy(item) for item in DEFAULT_MIKE_SKILL_ASSET_MANIFEST]
+        return {
+            "version": MIKE_SKILL_ASSET_MANIFEST_VERSION,
+            "asset_count": len(assets),
+            "asset_ids": [str(item.get("skill_asset_id") or "").strip() for item in assets if str(item.get("skill_asset_id") or "").strip()],
+            "assets": assets,
+        }
+
+    @staticmethod
+    def _build_mike_base_draft_identity(draft: Mapping[str, Any]) -> Dict[str, Any]:
+        draft_payload = {
+            "title": str((draft or {}).get("title") or "").strip() or None,
+            "body": str((draft or {}).get("body") or ""),
+            "updated_at": str((draft or {}).get("updated_at") or "").strip() or None,
+            "draft_strategy": str((draft or {}).get("draft_strategy") or "").strip() or None,
+            "sync_source": str((draft or {}).get("sync_source") or "").strip() or None,
+        }
+        hash_payload = json.dumps(draft_payload, sort_keys=True, default=str).encode("utf-8")
+        return {
+            **draft_payload,
+            "hash": hashlib.sha256(hash_payload).hexdigest(),
+        }
+
+    @staticmethod
+    def _build_mike_redline_metadata(
+        *,
+        redline_summary: Optional[str],
+        structured_deltas: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        summary = str(redline_summary or "").strip() or None
+        return {
+            "summary": summary,
+            "structured_delta_count": len(structured_deltas),
+            "has_structured_redlines": bool(structured_deltas),
+        }
+
+    @classmethod
     def _build_mike_submodule_inventory(cls) -> Dict[str, Any]:
         repo_root = cls._repo_root()
         mike_root = repo_root / "mike"
@@ -5416,6 +5523,7 @@ class ComplaintWorkspaceService:
         mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
         ipfs_pyproject = cls._safe_read_toml_file(cls._ipfs_project_file(ipfs_root))
+        skill_asset_manifest = cls._build_mike_skill_asset_manifest()
         frontend_src = mike_root / "frontend" / "src"
         backend_src = mike_root / "backend" / "src"
         editor_modules = [
@@ -5448,8 +5556,9 @@ class ComplaintWorkspaceService:
                 "backend_dependencies": sorted(dict(mike_backend_package.get("dependencies") or {}).keys())[:20],
                 "editor_modules": existing_editor_modules,
                 "editor_module_count": len(existing_editor_modules),
-                "skill_assets": [],
-                "skill_asset_count": 0,
+                "skill_assets": deepcopy(skill_asset_manifest.get("assets") or []),
+                "skill_asset_count": int(skill_asset_manifest.get("asset_count") or 0),
+                "skill_asset_manifest_version": str(skill_asset_manifest.get("version") or ""),
                 "upgrade_path": [
                     "refresh_submodule",
                     "recompute_compatibility_matrix",
@@ -5523,6 +5632,7 @@ class ComplaintWorkspaceService:
                 "workspace_router_provider_env": "COMPLAINT_LLM_PROVIDER",
                 "workspace_router_model_env": "COMPLAINT_LLM_MODEL",
             },
+            "skill_asset_manifest_version": MIKE_SKILL_ASSET_MANIFEST_VERSION,
         }
 
     @staticmethod
@@ -5618,13 +5728,51 @@ class ComplaintWorkspaceService:
             )
         return [item for item in normalized if item["authority_id"]]
 
-    @staticmethod
-    def _normalize_mike_sync_provenance(sync_provenance: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    @classmethod
+    def _normalize_mike_sync_provenance(
+        cls,
+        sync_provenance: Optional[Mapping[str, Any]],
+        *,
+        base_draft_identity: Optional[Mapping[str, Any]] = None,
+        redline_metadata: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
         payload = dict(sync_provenance or {})
+        skill_asset_ids = [
+            str(value).strip()
+            for value in list(payload.get("skill_asset_ids") or payload.get("enabled_skill_ids") or [])
+            if str(value).strip()
+        ]
+        known_skill_asset_ids = set(cls._build_mike_skill_asset_manifest().get("asset_ids") or [])
+        enabled_skill_ids = [value for value in skill_asset_ids if value in known_skill_asset_ids]
+        unknown_skill_asset_ids = [value for value in skill_asset_ids if value not in known_skill_asset_ids]
+        base_identity = dict(base_draft_identity or {})
+        payload_base_identity = payload.get("base_draft_identity")
+        if isinstance(payload_base_identity, Mapping):
+            base_identity.update(dict(payload_base_identity))
+        base_draft_hash = str(payload.get("base_draft_hash") or base_identity.get("hash") or "").strip() or None
+        normalized_redline_metadata = dict(redline_metadata or {})
+        payload_redline_metadata = payload.get("redline_metadata")
+        if isinstance(payload_redline_metadata, Mapping):
+            normalized_redline_metadata.update(dict(payload_redline_metadata))
         return {
             "editor_version": str(payload.get("editor_version") or "").strip() or None,
-            "skill_asset_ids": [str(value).strip() for value in list(payload.get("skill_asset_ids") or []) if str(value).strip()],
-            "base_draft_hash": str(payload.get("base_draft_hash") or "").strip() or None,
+            "skill_asset_ids": skill_asset_ids,
+            "enabled_skill_ids": enabled_skill_ids,
+            "unknown_skill_asset_ids": unknown_skill_asset_ids,
+            "skill_asset_manifest_version": MIKE_SKILL_ASSET_MANIFEST_VERSION,
+            "base_draft_hash": base_draft_hash,
+            "base_draft_identity": {
+                "title": str(base_identity.get("title") or "").strip() or None,
+                "updated_at": str(base_identity.get("updated_at") or "").strip() or None,
+                "draft_strategy": str(base_identity.get("draft_strategy") or "").strip() or None,
+                "sync_source": str(base_identity.get("sync_source") or "").strip() or None,
+                "hash": base_draft_hash,
+            },
+            "redline_metadata": {
+                "summary": str(normalized_redline_metadata.get("summary") or "").strip() or None,
+                "structured_delta_count": int(normalized_redline_metadata.get("structured_delta_count") or 0),
+                "has_structured_redlines": bool(normalized_redline_metadata.get("has_structured_redlines")),
+            },
             "source_transport": str(payload.get("source_transport") or "").strip() or None,
             "upstream_project": str(payload.get("upstream_project") or "mike").strip(),
         }
@@ -5898,6 +6046,37 @@ class ComplaintWorkspaceService:
             or chronology_blocked
             or proof_status in {"error", "failed", "violation", "needs_review"}
         )
+        theorem_export_metadata = deepcopy(result.get("theorem_export_metadata") or {})
+        leanstral_status = _leanstral_status_snapshot()
+        leanstral_assist = {
+            "eligible": has_blockers,
+            "status": (
+                "ready"
+                if has_blockers and bool(leanstral_status.get("backend_available"))
+                else "not_needed"
+                if not has_blockers
+                else "unavailable"
+            ),
+            "provider": str(leanstral_status.get("provider") or "ipfs_accelerate_py"),
+            "model": str(leanstral_status.get("model") or "leanstral"),
+            "bypass_release_gate": False,
+            "proof_objectives": list(theorem_export_metadata.get("temporal_proof_objectives") or []),
+            "unresolved_claim_element_ids": unsupported_claim_elements,
+            "proposed_steps": [
+                f"Ground unsupported claim element `{claim_id}` with authority-backed proof predicates."
+                for claim_id in unsupported_claim_elements[:3]
+            ]
+            + (
+                ["Resolve chronology blockers before retrying theorem export."]
+                if chronology_blocked
+                else []
+            )
+            + (
+                ["Review contradiction candidates before requesting additional prover assistance."]
+                if contradiction_count
+                else []
+            ),
+        }
         return {
             "reasoning_payload": reasoning_payload,
             "hybrid_reasoning": hybrid_reasoning,
@@ -5910,8 +6089,9 @@ class ComplaintWorkspaceService:
             "temporal_formula_count": int(temporal_reasoning_payload.get("tdfol_formula_count") or 0),
             "dcec_formula_count": int(temporal_reasoning_payload.get("dcec_formula_count") or 0),
             "has_blockers": has_blockers,
-            "theorem_export_metadata": deepcopy(result.get("theorem_export_metadata") or {}),
+            "theorem_export_metadata": theorem_export_metadata,
             "proof_artifact": proof_artifact,
+            "leanstral_assist": leanstral_assist,
         }
 
     @staticmethod
@@ -6312,6 +6492,7 @@ class ComplaintWorkspaceService:
         review = self._build_review(state)
         resolved_grounding_mode = self._resolve_mike_grounding_mode(grounding_mode)
         router_policy = self._build_mike_router_policy_snapshot()
+        skill_asset_manifest = self._build_mike_skill_asset_manifest()
         submodule_inventory = self._build_mike_submodule_inventory()
         compatibility_target_matrix = self._build_mike_compatibility_target_matrix()
         draft_payload = dict(state.get("draft") or {})
@@ -6359,6 +6540,7 @@ class ComplaintWorkspaceService:
                 "source_of_truth": "complaint_generator_workspace_session",
             },
             "router_policy": router_policy,
+            "skill_asset_manifest": skill_asset_manifest,
             "grounding_mode": resolved_grounding_mode,
             "corpus_boundaries": self._build_mike_corpus_boundaries(
                 claim_type=str(state.get("claim_type") or "retaliation"),
@@ -6379,6 +6561,7 @@ class ComplaintWorkspaceService:
                 },
                 "formal_predicates": deepcopy(((logic_review.get("reasoning_payload") or {}).get("predicates") or [])),
                 "theorem_export_metadata": deepcopy(logic_review.get("theorem_export_metadata") or {}),
+                "leanstral_assist": deepcopy(logic_review.get("leanstral_assist") or {}),
             },
             "editor_guardrails": self._build_mike_editor_guardrails(
                 review,
@@ -6458,6 +6641,7 @@ class ComplaintWorkspaceService:
             "review": deepcopy(review),
             "case_synopsis": self._build_case_synopsis(state),
             "router_policy": router_policy,
+            "skill_asset_manifest": skill_asset_manifest,
             "submodule_inventory": submodule_inventory,
             "compatibility_target_matrix": compatibility_target_matrix,
             "contract_versions": {
@@ -6499,6 +6683,7 @@ class ComplaintWorkspaceService:
         fallback_handoff_id = str(last_handoff.get("handoff_id") or "").strip()
         resolved_handoff_id = provided_handoff_id or fallback_handoff_id or None
         existing_title = str(draft.get("title") or "").strip()
+        base_draft_identity = self._build_mike_base_draft_identity(draft)
         if title is not None:
             normalized_title = str(title or "").strip()
             draft["title"] = normalized_title or existing_title or "Complaint Draft"
@@ -6515,7 +6700,14 @@ class ComplaintWorkspaceService:
             body=raw_body,
         )
         normalized_authority_links = self._normalize_mike_authority_links(authority_links)
-        normalized_sync_provenance = self._normalize_mike_sync_provenance(sync_provenance)
+        normalized_sync_provenance = self._normalize_mike_sync_provenance(
+            sync_provenance,
+            base_draft_identity=base_draft_identity,
+            redline_metadata=self._build_mike_redline_metadata(
+                redline_summary=redline_summary,
+                structured_deltas=normalized_structured_deltas,
+            ),
+        )
         review_payload = dict(state.get("support_review") or {})
         if not review_payload:
             review_payload = self._build_review(state)
@@ -6581,6 +6773,7 @@ class ComplaintWorkspaceService:
             "citation_link_check": citation_link_check,
             "sync_diagnostics": sync_diagnostics,
             "redline_summary": str(redline_summary or "").strip() or None,
+            "redline_metadata": deepcopy(normalized_sync_provenance.get("redline_metadata") or {}),
             "source_updated_at": str(source_updated_at or "").strip() or None,
             "editor_metadata": normalized_editor_metadata,
             "grounding_mode": resolved_grounding_mode,
@@ -6617,6 +6810,10 @@ class ComplaintWorkspaceService:
             "chronology_blocked": bool(logic_review.get("chronology_blocked")),
             "contradiction_count": int(logic_review.get("contradiction_count") or 0),
             "editor_user_id": normalized_editor_metadata.get("editor_user_id"),
+            "editor_version": normalized_sync_provenance.get("editor_version"),
+            "enabled_skill_ids": list(normalized_sync_provenance.get("enabled_skill_ids") or []),
+            "base_draft_hash": normalized_sync_provenance.get("base_draft_hash"),
+            "redline_delta_count": int(((normalized_sync_provenance.get("redline_metadata") or {}).get("structured_delta_count")) or 0),
             "sync_integrity_hash": sync_integrity_hash,
             "sync_integrity_hash_mode": sync_integrity_hash_mode,
         }
@@ -6649,6 +6846,8 @@ class ComplaintWorkspaceService:
             "legal_corpus_review": legal_corpus_review,
             "logic_review": logic_review,
             "router_policy": router_policy,
+            "sync_provenance": normalized_sync_provenance,
+            "redline_metadata": deepcopy(normalized_sync_provenance.get("redline_metadata") or {}),
             "contract_versions": {
                 "sync": MIKE_SYNC_CONTRACT_VERSION,
                 "status": MIKE_STATUS_CONTRACT_VERSION,
@@ -7120,7 +7319,7 @@ class ComplaintWorkspaceService:
         *,
         input_type: str = "packaged",
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import DocketDatasetBuilder, load_packaged_docket_dataset
+        from integrations.ipfs_datasets.legal_data import DocketDatasetBuilder, load_packaged_docket_dataset
 
         resolved_path = self._resolve_docket_path(input_path)
         normalized_type = str(input_type or "packaged").strip().lower()
@@ -7317,7 +7516,7 @@ class ComplaintWorkspaceService:
         include_document_text: bool = False,
         document_limit: Optional[int] = 25,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import summarize_docket_dataset
+        from integrations.ipfs_datasets.legal_data import summarize_docket_dataset
 
         resolved_path = self._resolve_docket_path(input_path)
         dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
@@ -7333,6 +7532,43 @@ class ComplaintWorkspaceService:
             ),
             "metadata": dict(dataset_payload.get("metadata") or {}),
             "source": "complaint_workspace_docket_view",
+        }
+
+    @staticmethod
+    def _search_docket_dataset_local(
+        dataset_payload: Mapping[str, Any],
+        query: str,
+        *,
+        top_k: int,
+    ) -> Dict[str, Any]:
+        needle = str(query or "").strip().lower()
+        matches: List[Dict[str, Any]] = []
+        for document in list((dataset_payload or {}).get("documents") or []):
+            if not isinstance(document, dict):
+                continue
+            haystack = " ".join(
+                [
+                    str(document.get("title") or ""),
+                    str(document.get("text") or ""),
+                    str(document.get("document_number") or ""),
+                ]
+            ).lower()
+            if needle and needle not in haystack:
+                continue
+            matches.append(
+                {
+                    "document_id": str(document.get("id") or document.get("document_id") or ""),
+                    "title": str(document.get("title") or ""),
+                    "document_number": str(document.get("document_number") or ""),
+                    "score": 1.0 if needle else 0.0,
+                    "snippet": str(document.get("text") or "")[:280],
+                }
+            )
+        matches = matches[: max(0, int(top_k or 10))]
+        return {
+            "query": str(query or ""),
+            "result_count": len(matches),
+            "items": matches,
         }
 
     @staticmethod
@@ -8073,26 +8309,35 @@ class ComplaintWorkspaceService:
         top_k: int = 10,
         vector_dimension: int = 32,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import (
-            search_docket_dataset_bm25,
-            search_docket_dataset_vector,
-            summarize_docket_dataset,
-        )
+        from integrations.ipfs_datasets.legal_data import summarize_docket_dataset
 
         resolved_path = self._resolve_docket_path(input_path)
         normalized_backend = str(search_backend or "bm25").strip().lower()
+        normalized_type = str(input_type or "packaged").strip().lower()
         dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
-        if normalized_backend == "bm25":
-            results = search_docket_dataset_bm25(dataset_payload, query, top_k=int(top_k or 10))
-        elif normalized_backend == "vector":
-            results = search_docket_dataset_vector(
+        if normalized_type in {"single", "single_parquet", "parquet"}:
+            results = self._search_docket_dataset_local(
                 dataset_payload,
                 query,
                 top_k=int(top_k or 10),
-                vector_dimension=int(vector_dimension or 32),
             )
         else:
-            raise ValueError(f"Unsupported docket search backend: {search_backend}")
+            from ipfs_datasets_py.processors.legal_data import (
+                search_docket_dataset_bm25,
+                search_docket_dataset_vector,
+            )
+
+            if normalized_backend == "bm25":
+                results = search_docket_dataset_bm25(dataset_payload, query, top_k=int(top_k or 10))
+            elif normalized_backend == "vector":
+                results = search_docket_dataset_vector(
+                    dataset_payload,
+                    query,
+                    top_k=int(top_k or 10),
+                    vector_dimension=int(vector_dimension or 32),
+                )
+            else:
+                raise ValueError(f"Unsupported docket search backend: {search_backend}")
         return {
             "input_path": resolved_path,
             "input_type": str(input_type or "packaged").strip().lower(),
@@ -8109,7 +8354,7 @@ class ComplaintWorkspaceService:
         *,
         input_type: str = "packaged",
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import summarize_docket_dataset
+        from integrations.ipfs_datasets.legal_data import summarize_docket_dataset
 
         resolved_path = self._resolve_docket_path(input_path)
         dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
@@ -8151,7 +8396,7 @@ class ComplaintWorkspaceService:
         }
 
     def get_packaged_docket_operator_dashboard(self, manifest_path: str | Path) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import get_packaged_docket_operator_dashboard
+        from integrations.ipfs_datasets.legal_data import get_packaged_docket_operator_dashboard
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         dashboard = get_packaged_docket_operator_dashboard(resolved_manifest)
@@ -8167,7 +8412,7 @@ class ComplaintWorkspaceService:
         *,
         report_format: str = "parsed",
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import load_packaged_docket_operator_dashboard_report
+        from integrations.ipfs_datasets.legal_data import load_packaged_docket_operator_dashboard_report
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         normalized_format = str(report_format or "parsed").strip().lower()
