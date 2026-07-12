@@ -5516,14 +5516,18 @@ class ComplaintWorkspaceService:
             "strict_containment_policy",
             "authority_graph_enrichment",
         }
-        return [
-            {
-                "adapter": str(item.get("adapter") or "").strip(),
-                "capability": str(item.get("capability") or "").strip(),
-            }
-            for item in cls._build_mike_skill_asset_manifest().get("assets") or []
-            if str(item.get("adapter") or "").strip() and str(item.get("capability") or "").strip() in capabilities
-        ]
+        adapters: List[Dict[str, Any]] = []
+        for item in cls._build_mike_skill_asset_manifest().get("assets") or []:
+            adapter = (item.get("adapter") or "").strip()
+            capability = (item.get("capability") or "").strip()
+            if adapter and capability in capabilities:
+                adapters.append(
+                    {
+                        "adapter": adapter,
+                        "capability": capability,
+                    }
+                )
+        return adapters
 
     @staticmethod
     def _build_mike_base_draft_identity(draft: Mapping[str, Any]) -> Dict[str, Any]:
