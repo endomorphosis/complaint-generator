@@ -1,9 +1,12 @@
+import subprocess
+import re
 from pathlib import Path
 
 from complaint_generator.workspace import (
     build_mike_handoff as package_build_mike_handoff,
     sync_mike_final_draft as package_sync_mike_final_draft,
 )
+import applications.complaint_workspace as complaint_workspace_module
 from applications.complaint_workspace import ComplaintWorkspaceService
 
 
@@ -180,14 +183,55 @@ def test_mike_handoff_exposes_router_grounding_logic_and_submodule_contracts(tmp
     assert "logic_handoff" in handoff_payload
     assert "submodule_inventory" in handoff_payload
     assert "compatibility_target_matrix" in handoff_payload
-    assert len(str(handoff_payload["submodule_inventory"]["mike"]["commit"])) == 40
-    assert len(str(handoff_payload["submodule_inventory"]["ipfs_datasets_py"]["commit"])) == 40
-    assert len(str(handoff_payload["compatibility_target_matrix"]["submodule_shas"]["mike_commit"])) == 40
-    assert len(str(handoff_payload["compatibility_target_matrix"]["submodule_shas"]["ipfs_datasets_py_commit"])) == 40
+    assert handoff_payload["submodule_inventory"]["mike"]["commit"] != "unavailable"
+    assert handoff_payload["submodule_inventory"]["mike"]["origin_main_commit"] != "unavailable"
+    assert handoff_payload["submodule_inventory"]["ipfs_datasets_py"]["commit"] != "unavailable"
+    assert handoff_payload["submodule_inventory"]["ipfs_datasets_py"]["origin_main_commit"] != "unavailable"
+    assert re.fullmatch(r"[0-9a-f]{40}", handoff_payload["submodule_inventory"]["mike"]["commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}", handoff_payload["submodule_inventory"]["mike"]["origin_main_commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}", handoff_payload["submodule_inventory"]["ipfs_datasets_py"]["commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}", handoff_payload["submodule_inventory"]["ipfs_datasets_py"]["origin_main_commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}", handoff_payload["compatibility_target_matrix"]["submodule_shas"]["mike_commit"])
+    assert re.fullmatch(
+        r"[0-9a-f]{40}",
+        handoff_payload["compatibility_target_matrix"]["submodule_shas"]["mike_origin_main_commit"],
+    )
+    assert re.fullmatch(
+        r"[0-9a-f]{40}",
+        handoff_payload["compatibility_target_matrix"]["submodule_shas"]["ipfs_datasets_py_commit"],
+    )
+    assert re.fullmatch(
+        r"[0-9a-f]{40}",
+        handoff_payload["compatibility_target_matrix"]["submodule_shas"]["ipfs_datasets_py_origin_main_commit"],
+    )
     assert "grounding_mode" in payload["sync_contract"]["optional_fields"]
     assert "assertion_annotations" in payload["sync_contract"]["optional_fields"]
     assert "authority_links" in payload["sync_contract"]["optional_fields"]
 
+
+def test_mike_safe_read_git_ref_handles_edge_cases(tmp_path, monkeypatch):
+    missing_dir = tmp_path / "missing-submodule"
+    assert ComplaintWorkspaceService._safe_read_git_ref(missing_dir, "HEAD") == "unavailable"
+
+    file_path = tmp_path / "not-a-dir.txt"
+    file_path.write_text("noop")
+    assert ComplaintWorkspaceService._safe_read_git_ref(file_path, "HEAD") == "unavailable"
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+
+    def _raise_called_process_error(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd=["git"])
+
+    monkeypatch.setattr(complaint_workspace_module.subprocess, "run", _raise_called_process_error)
+    assert ComplaintWorkspaceService._safe_read_git_ref(repo_dir, "HEAD") == "unavailable"
+
+    monkeypatch.setattr(
+        complaint_workspace_module.subprocess,
+        "run",
+        lambda *args, **kwargs: type("Result", (), {"stdout": ""})(),
+    )
+    assert ComplaintWorkspaceService._safe_read_git_ref(repo_dir, "HEAD") == "unavailable"
 
 def test_mike_sync_persists_grounding_logic_and_release_gate_blockers(tmp_path):
     service = ComplaintWorkspaceService(root_dir=tmp_path)

@@ -5354,16 +5354,21 @@ class ComplaintWorkspaceService:
 
     @staticmethod
     def _safe_read_git_ref(path: Path, ref: str) -> str:
+        if not path.exists() or not path.is_dir():
+            return "unavailable"
         try:
             result = subprocess.run(
                 ["git", "-C", str(path), "rev-parse", ref],
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=5,
             )
-        except (OSError, subprocess.SubprocessError):
-            return ""
-        return str(result.stdout or "").strip()
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            # Return unavailable if the path is not usable, the git ref is missing/non-git, or the command times out.
+            return "unavailable"
+        value = (result.stdout or "").strip()
+        return value or "unavailable"
 
     @classmethod
     def _ipfs_project_file(cls, ipfs_root: Path) -> Path:
