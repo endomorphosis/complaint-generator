@@ -240,6 +240,7 @@ def test_mike_sync_persists_grounding_logic_and_release_gate_blockers(tmp_path):
     gate = service.get_client_release_gate(user_id)
     assert gate["complaint_output_release_gate"]["verdict"] == "blocked"
     assert "Legal-corpus-only mode" in gate["complaint_output_release_gate"]["reason"]
+    assert "Formal proof coverage, contradiction, or chronology checks are still failing" in gate["complaint_output_release_gate"]["reason"]
 
 
 def test_formal_diagnostics_include_mike_grounding_and_logic_snapshot(tmp_path, monkeypatch):
@@ -294,3 +295,5 @@ def test_mike_assertion_classifier_covers_relief_temporal_legal_and_factual_case
     assert ComplaintWorkspaceService._classify_mike_assertion_type("On March 3, Defendant terminated Plaintiff after the complaint.") == "temporal_assertion"
     assert ComplaintWorkspaceService._classify_mike_assertion_type("Defendant unlawfully retaliated against Plaintiff.") == "legal_conclusion"
     assert ComplaintWorkspaceService._classify_mike_assertion_type("Plaintiff reported safety concerns to HR in writing.") == "factual_statement"
+    assert ComplaintWorkspaceService._classify_mike_assertion_type("") == "unsupported_rhetoric"
+    assert ComplaintWorkspaceService._classify_mike_assertion_type("Too vague.") == "unsupported_rhetoric"

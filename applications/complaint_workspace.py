@@ -192,6 +192,8 @@ DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER: Dict[str, int] = {
 }
 # Citation-link identity precedence keeps explicit IDs stable before looser source/url fallback keys.
 MIKE_CITATION_KEY_FIELD_PRECEDENCE: tuple[str, ...] = ("citation_id", "id", "source_id", "url")
+# v3 adds router-policy, grounding, provenance, and logic-review fields on the
+# existing Mike handoff/sync/status contracts while keeping the same route names.
 MIKE_STATUS_CONTRACT_VERSION = "complaint-mike-status-v3"
 MIKE_HANDOFF_CONTRACT_VERSION = "complaint-mike-handoff-v3"
 MIKE_SYNC_CONTRACT_VERSION = "complaint-mike-sync-v3"
@@ -200,6 +202,9 @@ MAX_MIKE_WEAK_LINKS_DISPLAY = 3
 VALID_MIKE_STRUCTURED_DELTA_OPS: Set[str] = {"insert", "delete", "replace", "edit", "move"}
 DEFAULT_MIKE_GROUNDING_MODE = "legal_corpus_only"
 STRICT_MIKE_GROUNDING_MODES: Set[str] = {"legal_corpus_only", "strict_legal_containment"}
+MIN_MIKE_FACTUAL_ASSERTION_WORDS = 5
+MAX_MIKE_GROUNDING_EXAMPLES = 8
+MAX_MIKE_AUTHORITY_EXAMPLES = 12
 MIKE_SUBSTANTIVE_ASSERTION_TYPES: Set[str] = {
     "factual_statement",
     "legal_conclusion",
@@ -5498,7 +5503,7 @@ class ComplaintWorkspaceService:
             return "temporal_assertion"
         if any(token in lowered for token in ("violat", "retaliat", "discriminat", "breach", "unlawful", "entitled", "liable")):
             return "legal_conclusion"
-        if len(lowered.split()) <= 4:
+        if len(lowered.split()) < MIN_MIKE_FACTUAL_ASSERTION_WORDS:
             return "unsupported_rhetoric"
         return "factual_statement"
 
@@ -5795,7 +5800,7 @@ class ComplaintWorkspaceService:
             if str(item.get("support_strength") or "").strip().lower() in {"weak", "low", "unknown"}
         ]
         extra_corpus = [item for item in substantive if bool(item.get("extra_corpus"))]
-        coverage_percent = int(round((len(grounded) / len(substantive)) * 100)) if substantive else 100
+        coverage_percent = int(round((len(grounded) / len(substantive)) * 100)) if substantive else None
         return {
             "claim_type": claim_type,
             "grounding_mode": grounding_mode,
@@ -5806,11 +5811,11 @@ class ComplaintWorkspaceService:
             "unsupported_assertion_count": len(unsupported),
             "weak_grounding_count": len(weak),
             "extra_corpus_assertion_count": len(extra_corpus),
-            "unsupported_assertions": deepcopy(unsupported[:8]),
-            "weakly_grounded_assertions": deepcopy(weak[:8]),
-            "extra_corpus_assertions": deepcopy(extra_corpus[:8]),
+            "unsupported_assertions": deepcopy(unsupported[:MAX_MIKE_GROUNDING_EXAMPLES]),
+            "weakly_grounded_assertions": deepcopy(weak[:MAX_MIKE_GROUNDING_EXAMPLES]),
+            "extra_corpus_assertions": deepcopy(extra_corpus[:MAX_MIKE_GROUNDING_EXAMPLES]),
             "authority_count": len(authority_links),
-            "authorities": deepcopy(authority_links[:12]),
+            "authorities": deepcopy(authority_links[:MAX_MIKE_AUTHORITY_EXAMPLES]),
             "has_blockers": grounding_mode in STRICT_MIKE_GROUNDING_MODES and bool(unsupported or extra_corpus),
             "canonical_sources": _legal_source_availability_snapshot(),
         }
