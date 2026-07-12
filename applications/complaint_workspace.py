@@ -5388,6 +5388,7 @@ class ComplaintWorkspaceService:
         ipfs_root = repo_root / "ipfs_datasets_py"
         mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
+        # ipfs_datasets_py currently ships a non-standard "__pyproject.toml" file upstream.
         ipfs_project_file = ipfs_root / "__pyproject.toml"
         if not ipfs_project_file.exists():
             ipfs_project_file = ipfs_root / "pyproject.toml"
@@ -5460,6 +5461,7 @@ class ComplaintWorkspaceService:
         complaint_pyproject = cls._safe_read_toml_file(repo_root / "pyproject.toml")
         mike_frontend_package = cls._safe_read_json_file(repo_root / "mike" / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(repo_root / "mike" / "backend" / "package.json")
+        # ipfs_datasets_py currently ships a non-standard "__pyproject.toml" file upstream.
         ipfs_project_file = repo_root / "ipfs_datasets_py" / "__pyproject.toml"
         if not ipfs_project_file.exists():
             ipfs_project_file = repo_root / "ipfs_datasets_py" / "pyproject.toml"
@@ -6234,11 +6236,11 @@ class ComplaintWorkspaceService:
             },
             {
                 "id": "theorem_export_compatibility",
-                "severity": theorem_check_state["severity"],
-                "status": theorem_check_state["status"],
+                "severity": str(theorem_check_state.get("severity") or "warning"),
+                "status": str(theorem_check_state.get("status") or "needs_review"),
                 "message": (
                     f"Theorem/export compatibility reports proof_status={proof_status}, contradiction_count={contradiction_count}, chronology_blocked={chronology_blocked}."
-                    if theorem_check_state["needs_review"]
+                    if bool(theorem_check_state.get("needs_review"))
                     else "No proof-gap regressions detected for theorem/export compatibility."
                 ),
                 "remediation": "Run complaint.review_case and complaint.get_client_release_gate before filing.",
@@ -6250,8 +6252,8 @@ class ComplaintWorkspaceService:
             if bool(dict(item.get("metadata") or {}).get("normalized_from_invalid_op"))
         )
         return {
-            "severity": sync_state["severity"],
-            "has_blockers": sync_state["has_blockers"],
+            "severity": str(sync_state.get("severity") or "warning"),
+            "has_blockers": bool(sync_state.get("has_blockers")),
             "checks": diagnostics,
             "structured_delta_count": len(structured_deltas),
             "normalized_invalid_op_count": normalized_invalid_op_count,
