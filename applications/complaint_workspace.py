@@ -206,6 +206,26 @@ MIKE_SUBSTANTIVE_ASSERTION_TYPES: Set[str] = {
     "temporal_assertion",
     "requested_relief",
 }
+MIKE_TEMPORAL_ASSERTION_KEYWORDS: tuple[str, ...] = (
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+    "before",
+    "after",
+    "later",
+    "earlier",
+    "timeline",
+    "date",
+)
 MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
     "not_handed_off": "Not handed off",
     "handoff_pending_sync": "Handoff pending sync",
@@ -5362,7 +5382,10 @@ class ComplaintWorkspaceService:
         ipfs_root = repo_root / "ipfs_datasets_py"
         mike_frontend_package = cls._safe_read_json_file(mike_root / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(mike_root / "backend" / "package.json")
-        ipfs_pyproject = cls._safe_read_toml_file(ipfs_root / "__pyproject.toml")
+        ipfs_project_file = ipfs_root / "__pyproject.toml"
+        if not ipfs_project_file.exists():
+            ipfs_project_file = ipfs_root / "pyproject.toml"
+        ipfs_pyproject = cls._safe_read_toml_file(ipfs_project_file)
         frontend_src = mike_root / "frontend" / "src"
         backend_src = mike_root / "backend" / "src"
         editor_modules = [
@@ -5431,7 +5454,10 @@ class ComplaintWorkspaceService:
         complaint_pyproject = cls._safe_read_toml_file(repo_root / "pyproject.toml")
         mike_frontend_package = cls._safe_read_json_file(repo_root / "mike" / "frontend" / "package.json")
         mike_backend_package = cls._safe_read_json_file(repo_root / "mike" / "backend" / "package.json")
-        ipfs_pyproject = cls._safe_read_toml_file(repo_root / "ipfs_datasets_py" / "__pyproject.toml")
+        ipfs_project_file = repo_root / "ipfs_datasets_py" / "__pyproject.toml"
+        if not ipfs_project_file.exists():
+            ipfs_project_file = repo_root / "ipfs_datasets_py" / "pyproject.toml"
+        ipfs_pyproject = cls._safe_read_toml_file(ipfs_project_file)
         complaint_project = dict(complaint_pyproject.get("project") or {})
         ipfs_project = dict(ipfs_pyproject.get("project") or {})
         return {
@@ -5467,7 +5493,7 @@ class ComplaintWorkspaceService:
             return "unsupported_rhetoric"
         if any(token in lowered for token in ("relief", "damages", "injunction", "fees", "declare", "prayer")):
             return "requested_relief"
-        if any(token in lowered for token in ("january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december", "before", "after", "later", "earlier", "timeline", "date")):
+        if any(token in lowered for token in MIKE_TEMPORAL_ASSERTION_KEYWORDS):
             return "temporal_assertion"
         if any(token in lowered for token in ("violat", "retaliat", "discriminat", "breach", "unlawful", "entitled", "liable")):
             return "legal_conclusion"
@@ -5768,7 +5794,7 @@ class ComplaintWorkspaceService:
             if str(item.get("support_strength") or "").strip().lower() in {"weak", "low", "unknown"}
         ]
         extra_corpus = [item for item in substantive if bool(item.get("extra_corpus"))]
-        coverage_percent = round((len(grounded) / len(substantive)) * 100) if substantive else 100
+        coverage_percent = int(round((len(grounded) / len(substantive)) * 100)) if substantive else 100
         return {
             "claim_type": claim_type,
             "grounding_mode": grounding_mode,
