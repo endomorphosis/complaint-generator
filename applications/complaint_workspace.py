@@ -5516,13 +5516,13 @@ class ComplaintWorkspaceService:
             "strict_containment_policy",
             "authority_graph_enrichment",
         }
-        def _manifest_text(item: Mapping[str, Any], key: str) -> str:
+        def _extract_manifest_field(item: Mapping[str, Any], key: str) -> str:
             return (item.get(key) or "").strip()
 
         adapters: List[Dict[str, Any]] = []
         for item in DEFAULT_MIKE_SKILL_ASSET_MANIFEST:
-            adapter = _manifest_text(item, "adapter")
-            capability = _manifest_text(item, "capability")
+            adapter = _extract_manifest_field(item, "adapter")
+            capability = _extract_manifest_field(item, "capability")
             if adapter and capability in capabilities:
                 adapters.append(
                     {
