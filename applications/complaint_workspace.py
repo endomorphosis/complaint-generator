@@ -96,6 +96,51 @@ def _leanstral_status_snapshot() -> Dict[str, Any]:
         }
 
 
+def _run_draft_logic_pipeline_safely(body: str, *, state: Optional[str] = None) -> Dict[str, Any]:
+    """Run the draft logic pipeline if the integration layer is available.
+
+    Gated behind ``COMPLAINT_USE_DRAFT_LOGIC_PIPELINE=1`` so that offline and
+    test environments are not blocked by network calls.  Falls back to a
+    minimal proof report dict on any import or runtime error.
+    """
+    if os.getenv("COMPLAINT_USE_DRAFT_LOGIC_PIPELINE") != "1":
+        return {
+            "proof_status": "needs_review",
+            "contradiction_count": 0,
+            "chronology_blocked": False,
+            "ungrounded_assertions": [],
+            "ungrounded_assertion_count": 0,
+            "corpus_coverage_percent": None,
+            "norms": [],
+            "policy_violations": [],
+            "policy_warnings": [],
+            "has_blockers": False,
+            "predicate_count": 0,
+            "pipeline_version": "draft-logic-pipeline-disabled",
+            "errors": [],
+        }
+    try:
+        from integrations.ipfs_datasets.draft_logic_pipeline import run_pipeline
+
+        return run_pipeline(body, state=state, allow_live_scrape_fallback=False)
+    except Exception as exc:
+        return {
+            "proof_status": "needs_review",
+            "contradiction_count": 0,
+            "chronology_blocked": False,
+            "ungrounded_assertions": [],
+            "ungrounded_assertion_count": 0,
+            "corpus_coverage_percent": None,
+            "norms": [],
+            "policy_violations": [],
+            "policy_warnings": [],
+            "has_blockers": False,
+            "predicate_count": 0,
+            "pipeline_version": "draft-logic-pipeline-unavailable",
+            "errors": [str(exc)],
+        }
+
+
 def _run_hybrid_reasoning_safely(payload: Dict[str, Any]) -> Dict[str, Any]:
     predicates = [
         dict(item) for item in list(payload.get("predicates") or [])
@@ -225,9 +270,9 @@ DEFAULT_LLM_DRAFT_TIMEOUTS_BY_PROVIDER: Dict[str, int] = {
 MIKE_CITATION_KEY_FIELD_PRECEDENCE: tuple[str, ...] = ("citation_id", "id", "source_id", "url")
 # v3 adds router-policy, grounding, provenance, and logic-review fields on the
 # existing Mike handoff/sync/status contracts while keeping the same route names.
-MIKE_STATUS_CONTRACT_VERSION = "complaint-mike-status-v3"
-MIKE_HANDOFF_CONTRACT_VERSION = "complaint-mike-handoff-v3"
-MIKE_SYNC_CONTRACT_VERSION = "complaint-mike-sync-v3"
+MIKE_STATUS_CONTRACT_VERSION = "complaint-mike-status-v4"
+MIKE_HANDOFF_CONTRACT_VERSION = "complaint-mike-handoff-v4"
+MIKE_SYNC_CONTRACT_VERSION = "complaint-mike-sync-v4"
 MAX_MIKE_HANDOFF_PARAGRAPHS = 80
 MAX_MIKE_WEAK_LINKS_DISPLAY = 3
 VALID_MIKE_STRUCTURED_DELTA_OPS: Set[str] = {"insert", "delete", "replace", "edit", "move"}
@@ -269,7 +314,7 @@ MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
     "synced_clean": "Synced clean",
     "synced_with_conflicts": "Synced with conflicts",
 }
-MIKE_SKILL_ASSET_MANIFEST_VERSION = "complaint-mike-skill-assets-v1"
+MIKE_SKILL_ASSET_MANIFEST_VERSION = "complaint-mike-skill-assets-v2"
 DEFAULT_MIKE_SKILL_ASSET_MANIFEST: List[Dict[str, Any]] = [
     {
         "skill_asset_id": "complaint-grounding",
@@ -311,6 +356,27 @@ DEFAULT_MIKE_SKILL_ASSET_MANIFEST: List[Dict[str, Any]] = [
         "name": "Complaint router policy",
         "capability": "workspace_llm_router",
         "adapter": "integrations/ipfs_datasets/llm.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+    {
+        "skill_asset_id": "complaint-draft-logic-pipeline",
+        "name": "Complaint draft-text → formal-logic → theorem-prover pipeline",
+        "capability": "draft_logic_pipeline",
+        "adapter": "integrations/ipfs_datasets/draft_logic_pipeline.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+    {
+        "skill_asset_id": "complaint-corpus-containment",
+        "name": "Complaint legal corpus containment (assertion grounding)",
+        "capability": "legal_corpus_containment",
+        "adapter": "integrations/ipfs_datasets/legal.py",
+        "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
+    },
+    {
+        "skill_asset_id": "complaint-mike-llm-patch",
+        "name": "Mike LLM router monkey-patch",
+        "capability": "mike_llm_router_patch",
+        "adapter": "integrations/mike/llm_patch.py",
         "required_for_grounding_modes": ["legal_corpus_only", "strict_legal_containment"],
     },
 ]
@@ -6145,6 +6211,46 @@ class ComplaintWorkspaceService:
         }
 
     @staticmethod
+    def _merge_draft_proof_report(
+        logic_review: Dict[str, Any],
+        draft_proof_report: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge *draft_proof_report* (from the pipeline) into *logic_review*.
+
+        Pipeline values take precedence when they carry richer information
+        (e.g. a concrete ``corpus_coverage_percent``), but existing values
+        are preserved when the pipeline falls back to defaults.
+        """
+        merged = deepcopy(logic_review)
+        # Only upgrade proof_status if pipeline returned something more specific.
+        pipeline_status = str(draft_proof_report.get("proof_status") or "").strip()
+        if pipeline_status and pipeline_status not in {"needs_review", ""}:
+            merged["proof_status"] = pipeline_status
+        # Merge contradiction counts additively.
+        pipeline_contradictions = int(draft_proof_report.get("contradiction_count") or 0)
+        merged["contradiction_count"] = int(merged.get("contradiction_count") or 0) + pipeline_contradictions
+        # Chronology blocked is sticky.
+        if draft_proof_report.get("chronology_blocked"):
+            merged["chronology_blocked"] = True
+        # Attach pipeline-specific fields.
+        merged["ungrounded_assertions"] = list(draft_proof_report.get("ungrounded_assertions") or [])
+        merged["corpus_coverage_percent"] = draft_proof_report.get("corpus_coverage_percent")
+        merged["pipeline_norms"] = list(draft_proof_report.get("norms") or [])
+        merged["pipeline_policy_violations"] = list(draft_proof_report.get("policy_violations") or [])
+        merged["pipeline_policy_warnings"] = list(draft_proof_report.get("policy_warnings") or [])
+        merged["draft_proof_pipeline_version"] = str(
+            draft_proof_report.get("pipeline_version") or ""
+        )
+        # Re-compute has_blockers after merge.
+        merged["has_blockers"] = bool(
+            merged.get("has_blockers")
+            or draft_proof_report.get("has_blockers")
+            or merged.get("contradiction_count")
+            or merged.get("chronology_blocked")
+        )
+        return merged
+
+    @staticmethod
     def _normalize_mike_citation_links(citation_links: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
         """Normalize Mike citation links to mutable dict rows.
 
@@ -6336,18 +6442,27 @@ class ComplaintWorkspaceService:
         ]
         corpus_review = dict(legal_corpus_review or {})
         reasoning_review = dict(logic_review or {})
+        pipeline_corpus_coverage = reasoning_review.get("corpus_coverage_percent")
+        corpus_grounding_coverage = (
+            int(pipeline_corpus_coverage)
+            if pipeline_corpus_coverage is not None
+            else int(corpus_review.get("coverage_percent") or 0)
+        )
+        ungrounded_assertions = list(reasoning_review.get("ungrounded_assertions") or [])
         return {
             "unsupported_claim_elements": unsupported_ids,
             "weak_evidentiary_links": unsupported_ids[:MAX_MIKE_WEAK_LINKS_DISPLAY],
             "proof_readiness_flags": {
                 "missing_support_count": len(unsupported_ids),
                 "supported_count": len(support_matrix) - len(unsupported_ids),
-                "corpus_grounding_coverage_percent": int(corpus_review.get("coverage_percent") or 0),
+                "corpus_grounding_coverage_percent": corpus_grounding_coverage,
                 "proof_status": str(reasoning_review.get("proof_status") or "needs_review"),
+                "ungrounded_assertion_count": len(ungrounded_assertions),
             },
             "contradiction_hotspots": contradiction_ids,
             "unsupported_legal_assertion_count": int(corpus_review.get("unsupported_assertion_count") or 0),
             "chronology_blocked": bool(reasoning_review.get("chronology_blocked")),
+            "ungrounded_assertions": ungrounded_assertions[:10],
         }
 
     @staticmethod
@@ -6631,6 +6746,13 @@ class ComplaintWorkspaceService:
                 "must_route_generation_through_workspace_llm_router": True,
             },
         }
+        # Apply the Mike LLM router patch so every handoff carries the patched
+        # router reference and enforcement metadata.
+        try:
+            from integrations.mike.llm_patch import apply_mike_llm_router_patch
+            apply_mike_llm_router_patch(handoff_payload)
+        except Exception:
+            pass
         mike_integration = dict(state.get("mike_integration") or {})
         handoff_history = [dict(item) for item in list(mike_integration.get("handoff_history") or []) if isinstance(item, dict)]
         handoff_record = {
@@ -6773,6 +6895,12 @@ class ComplaintWorkspaceService:
             assertion_annotations=normalized_assertion_annotations,
             authority_links=normalized_authority_links,
         )
+        # Run the draft-logic pipeline and merge its proof report into logic_review.
+        draft_proof_report = _run_draft_logic_pipeline_safely(
+            raw_body,
+            state=str(state.get("state_code") or "").strip() or None,
+        )
+        logic_review = self._merge_draft_proof_report(logic_review, draft_proof_report)
         router_policy = self._build_mike_router_policy_snapshot()
         citation_link_check = self._check_mike_citation_links(
             state,

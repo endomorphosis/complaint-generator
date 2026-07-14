@@ -519,10 +519,45 @@ def persist_graph_snapshot(
     )
 
 
+def get_authority_graph_api_version() -> Dict[str, Any]:
+    """Return a snapshot of the authority graph API version information.
+
+    Reflects the refreshed ``ipfs_datasets_py`` submodule layout so that the
+    workspace can verify compatibility at runtime.
+    """
+    modules_available = {
+        "knowledge_graphs": _knowledge_graphs_module is not None,
+        "graph_extraction": _graph_extraction_module is not None,
+        "graph_query": _graph_query_module is not None,
+        "graph_storage": _graph_storage_module is not None,
+        "graph_lineage": _graph_lineage_module is not None,
+    }
+    module_paths = {
+        name: getattr(mod, "__file__", "") or ""
+        for name, mod in {
+            "knowledge_graphs": _knowledge_graphs_module,
+            "graph_extraction": _graph_extraction_module,
+            "graph_query": _graph_query_module,
+            "graph_storage": _graph_storage_module,
+            "graph_lineage": _graph_lineage_module,
+        }.items()
+        if mod is not None
+    }
+    return {
+        "api_version": "authority-graph-v1",
+        "backend_available": KNOWLEDGE_GRAPHS_AVAILABLE,
+        "modules_available": modules_available,
+        "module_paths": module_paths,
+        "error": str(GRAPHS_ERROR or "") or None,
+        "submodule": "ipfs_datasets_py",
+    }
+
+
 __all__ = [
     "KNOWLEDGE_GRAPHS_AVAILABLE",
     "GRAPHS_ERROR",
     "extract_graph_from_text",
     "query_graph_support",
     "persist_graph_snapshot",
+    "get_authority_graph_api_version",
 ]

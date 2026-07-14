@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from copy import deepcopy
 import inspect
+import re
 from typing import Any, Dict, Iterable, List
 
 from lib.formal_logic.frames import FrameKnowledgeBase
@@ -556,17 +557,178 @@ def _build_local_logic_snapshot(temporal_reasoning_payload: Dict[str, Any]) -> D
     }
 
 
+# ---------------------------------------------------------------------------
+# Local FOL extraction helpers (regex-based fallback when ipfs_datasets_py
+# logic modules are absent or have not yet been populated by the submodule).
+# ---------------------------------------------------------------------------
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_NAMED_ENTITY_RE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b")
+_VERB_PHRASE_RE = re.compile(
+    r"\b(report(?:ed)?|terminat(?:ed)?|discriminat(?:ed)?|retaliat(?:ed)?|"
+    r"violat(?:ed)?|breach(?:ed)?|fail(?:ed)?|notif(?:ied)?|request(?:ed)?|"
+    r"deny|denied|harm(?:ed)?|seek(?:s)?|allege(?:s)?)\b",
+    re.IGNORECASE,
+)
+_DATE_RE = re.compile(
+    r"\b(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December)\s+\d{1,2}(?:,?\s+\d{4})?"
+    r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b"
+    r"|\b\d{4}-\d{2}-\d{2}\b",
+    re.IGNORECASE,
+)
+
+
+def _local_extract_fol_predicates(text: str) -> List[Dict[str, Any]]:
+    """Extract simple FOL-style predicates from *text* using regex heuristics.
+
+    Returns a list of predicate dicts compatible with the rest of the logic
+    pipeline.  Each dict carries at minimum ``predicate_type``, ``formula``,
+    and ``source_sentence``.
+    """
+    predicates: List[Dict[str, Any]] = []
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+    for index, sentence in enumerate(sentences, start=1):
+        entities = _NAMED_ENTITY_RE.findall(sentence)
+        verbs = _VERB_PHRASE_RE.findall(sentence)
+        dates = _DATE_RE.findall(sentence)
+
+        for verb in verbs:
+            subj = entities[0] if entities else "Unknown"
+            obj = entities[1] if len(entities) > 1 else "party"
+            sym = _normalize_logic_symbol(f"{verb}_{index}", prefix="pred")
+            predicates.append(
+                {
+                    "predicate_type": "factual_statement",
+                    "formula": f"{verb.capitalize()}({_normalize_logic_symbol(subj, prefix='e')},{_normalize_logic_symbol(obj, prefix='e')})",
+                    "symbol": sym,
+                    "source_sentence": sentence,
+                    "entities": entities[:4],
+                    "verb": verb.lower(),
+                }
+            )
+
+        for date in dates:
+            sym = _normalize_logic_symbol(f"temporal_{index}", prefix="t")
+            predicates.append(
+                {
+                    "predicate_type": "temporal_fact",
+                    "formula": f"AtTime({sym},{_normalize_time_symbol(date)})",
+                    "symbol": sym,
+                    "source_sentence": sentence,
+                    "date_expression": date,
+                }
+            )
+
+    return predicates
+
+
+# ---------------------------------------------------------------------------
+# Local deontic extraction helpers
+# ---------------------------------------------------------------------------
+
+_DEONTIC_PATTERNS: List[tuple[str, str, re.Pattern[str]]] = [
+    ("prohibition", "F",
+     re.compile(r"\b(must not|shall not|may not|cannot|can not|will not|is prohibited from|is forbidden to)\b", re.I)),
+    ("obligation", "O",
+     re.compile(r"\b(must|shall|required to|is required to|has a duty to|ought to)\b", re.I)),
+    ("permission", "P",
+     re.compile(r"\b(may|is permitted to|is allowed to|is entitled to|has the right to)\b", re.I)),
+]
+
+
+def _local_extract_deontic_norms(text: str) -> List[Dict[str, Any]]:
+    """Extract deontic norms from *text* using pattern matching."""
+    norms: List[Dict[str, Any]] = []
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+    for index, sentence in enumerate(sentences, start=1):
+        for norm_type, modality_symbol, pattern in _DEONTIC_PATTERNS:
+            match = pattern.search(sentence)
+            if match:
+                entities = _NAMED_ENTITY_RE.findall(sentence)
+                actor = entities[0] if entities else "actor"
+                actor_sym = _normalize_logic_symbol(actor, prefix="a")
+                norm_sym = _normalize_logic_symbol(f"{norm_type}_{index}", prefix="norm")
+                verb_rest = sentence[match.end():].strip().rstrip(".,;") or "perform_action"
+                action_sym = _normalize_logic_symbol(verb_rest[:40], prefix="act")
+                norms.append(
+                    {
+                        "norm_type": norm_type,
+                        "modality": modality_symbol,
+                        "formula": f"{modality_symbol}({actor_sym},{action_sym})",
+                        "symbol": norm_sym,
+                        "actor": actor,
+                        "action_text": verb_rest[:80],
+                        "source_sentence": sentence,
+                        "trigger_keyword": match.group(0),
+                    }
+                )
+                break
+    return norms
+
+
 def text_to_fol(text: str) -> Dict[str, Any]:
+    """Convert *text* to First-Order Logic predicates.
+
+    Tries the ``ipfs_datasets_py.logic.fol.FOLConverter`` from the submodule
+    first.  Falls back to local regex-based extraction when the upstream
+    module is unavailable.
+    """
+    # --- Try upstream FOLConverter (sync path) ---
+    if _fol_module is not None:
+        try:
+            FOLConverter = getattr(_fol_module, "FOLConverter", None)
+            if FOLConverter is None:
+                # Older module layout: fol is a directory package
+                fol_converter_mod, _ = import_module_optional("ipfs_datasets_py.logic.fol.converter")
+                if fol_converter_mod is not None:
+                    FOLConverter = getattr(fol_converter_mod, "FOLConverter", None)
+            if FOLConverter is not None:
+                converter = FOLConverter(use_nlp=False, use_cache=False)
+                result = converter.convert(str(text or ""))
+                raw_predicates = []
+                if hasattr(result, "output") and result.output is not None:
+                    output = result.output
+                    if hasattr(output, "predicates"):
+                        raw_predicates = [
+                            {
+                                "predicate_type": "factual_statement",
+                                "formula": str(p) if not isinstance(p, dict) else str(p.get("formula", p)),
+                                "symbol": _normalize_logic_symbol(str(p)[:30], prefix="pred"),
+                            }
+                            for p in (output.predicates or [])
+                        ]
+                return with_adapter_metadata(
+                    {
+                        "status": "success",
+                        "predicates": raw_predicates,
+                        "source_text": str(text or ""),
+                        "converter": "FOLConverter",
+                    },
+                    operation="text_to_fol",
+                    backend_available=True,
+                    implementation_status="implemented",
+                    extra_metadata={
+                        "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
+                        "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+                    },
+                )
+        except Exception:
+            pass
+
+    # --- Local regex fallback ---
+    predicates = _local_extract_fol_predicates(str(text or ""))
     return with_adapter_metadata(
         {
-            "status": "not_implemented" if LOGIC_AVAILABLE else "unavailable",
-            "predicates": [],
-            "source_text": text,
+            "status": "success",
+            "predicates": predicates,
+            "source_text": str(text or ""),
+            "converter": "local_regex_fallback",
         },
         operation="text_to_fol",
         backend_available=LOGIC_AVAILABLE,
         degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
-        implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
+        implementation_status="implemented",
         extra_metadata={
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
@@ -575,16 +737,100 @@ def text_to_fol(text: str) -> Dict[str, Any]:
 
 
 def legal_text_to_deontic(text: str) -> Dict[str, Any]:
+    """Convert legal *text* to deontic logic norms.
+
+    Tries ``ipfs_datasets_py.logic.deontic.DeonticConverter`` first, then
+    supplements (or falls back) to local pattern-based extraction.
+
+    The upstream converter returns a single ``DeonticFormula`` per call.  We
+    wrap it into the same list format as the local extractor.  When the
+    upstream result is empty the local extractor is used as a supplement so
+    that well-known prohibition/obligation patterns are never silently dropped.
+    """
+    upstream_norms: List[Dict[str, Any]] = []
+    upstream_available = False
+
+    # --- Try upstream DeonticConverter (sync path) ---
+    if _deontic_module is not None:
+        try:
+            DeonticConverter = getattr(_deontic_module, "DeonticConverter", None)
+            if DeonticConverter is None:
+                deontic_conv_mod, _ = import_module_optional(
+                    "ipfs_datasets_py.logic.deontic.converter"
+                )
+                if deontic_conv_mod is not None:
+                    DeonticConverter = getattr(deontic_conv_mod, "DeonticConverter", None)
+            if DeonticConverter is not None:
+                converter = DeonticConverter(jurisdiction="us", document_type="general")
+                result = converter.convert(str(text or ""))
+                if hasattr(result, "output") and result.output is not None:
+                    output = result.output
+                    # DeonticFormula is a single formula object — wrap it.
+                    if hasattr(output, "operator") and hasattr(output, "proposition"):
+                        raw_op = getattr(output, "operator", None)
+                        # Handle enum objects: prefer .value, then fall back to str.
+                        op_value = str(getattr(raw_op, "value", raw_op) or "")
+                        modality_map = {"O": "obligation", "P": "permission", "F": "prohibition"}
+                        upstream_norms = [
+                            {
+                                "norm_type": modality_map.get(op_value, "obligation"),
+                                "modality": op_value,
+                                "formula": str(output.formula) if hasattr(output, "formula") else str(output),
+                                "source_text": str(getattr(output, "source_text", "")),
+                                "converter": "DeonticConverter",
+                            }
+                        ]
+                    elif hasattr(output, "formulas"):
+                        # DeonticFormulaSet
+                        for f in (output.formulas or []):
+                            op_val = str(getattr(getattr(f, "operator", None), "value", "") or "")
+                            modality_map = {"O": "obligation", "P": "permission", "F": "prohibition"}
+                            upstream_norms.append(
+                                {
+                                    "norm_type": modality_map.get(op_val, "obligation"),
+                                    "modality": op_val,
+                                    "formula": str(f.formula) if hasattr(f, "formula") else str(f),
+                                    "source_text": str(getattr(f, "source_text", "")),
+                                    "converter": "DeonticConverter",
+                                }
+                            )
+                    elif hasattr(output, "norms"):
+                        for n in (output.norms or []):
+                            upstream_norms.append(
+                                {
+                                    "norm_type": str(getattr(n, "norm_type", "obligation")),
+                                    "modality": str(getattr(n, "modality", "O")),
+                                    "formula": str(getattr(n, "formula", n)),
+                                    "source_text": str(getattr(n, "source_text", "")),
+                                    "converter": "DeonticConverter",
+                                }
+                            )
+                upstream_available = True
+        except Exception:
+            pass
+
+    # --- Local pattern extraction ---
+    local_norms = _local_extract_deontic_norms(str(text or ""))
+
+    # Use upstream if it found norms, otherwise supplement with local patterns.
+    if upstream_norms:
+        norms = upstream_norms
+        converter_used = "DeonticConverter"
+    else:
+        norms = local_norms
+        converter_used = "local_pattern_fallback"
+
     return with_adapter_metadata(
         {
-            "status": "not_implemented" if LOGIC_AVAILABLE else "unavailable",
-            "norms": [],
-            "source_text": text,
+            "status": "success",
+            "norms": norms,
+            "source_text": str(text or ""),
+            "converter": converter_used,
         },
         operation="legal_text_to_deontic",
-        backend_available=LOGIC_AVAILABLE,
-        degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
-        implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
+        backend_available=upstream_available or LOGIC_AVAILABLE,
+        degraded_reason=LOGIC_ERROR if not (upstream_available or LOGIC_AVAILABLE) else None,
+        implementation_status="implemented",
         extra_metadata={
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
@@ -593,31 +839,66 @@ def legal_text_to_deontic(text: str) -> Dict[str, Any]:
 
 
 def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) -> Dict[str, Any]:
+    """Prove or refute claim elements by running the hybrid reasoning pipeline.
+
+    Delegates to :func:`run_hybrid_reasoning` so that both the upstream
+    ``hybrid_v2_blueprint`` reasoner bridge *and* the local TDFOL/DCEC bridge
+    are tried in priority order.  The return value includes ``provable_elements``
+    and ``unprovable_elements`` extracted from the proof artifact.
+    """
     normalized_payload = _normalize_logic_payload(predicates)
     predicate_list = normalized_payload["predicates"]
     predicate_summary = _summarize_predicates(predicate_list)
-    temporal_reasoning_payload = _build_temporal_reasoning_payload(
-        predicate_list,
-        claim_support_temporal_handoff=normalized_payload["claim_support_temporal_handoff"],
-        claim_reasoning_review=normalized_payload["claim_reasoning_review"],
+
+    # Run the full hybrid reasoning pipeline (handles reasoner bridge + fallback).
+    reasoning_result = run_hybrid_reasoning(normalized_payload)
+    result_inner = dict(reasoning_result.get("result") or {})
+    proof_artifact = dict(result_inner.get("proof_artifact") or {})
+    temporal_reasoning_payload = dict(reasoning_result.get("temporal_reasoning_payload") or {})
+
+    proof_status = str(
+        proof_artifact.get("proof_status")
+        or proof_artifact.get("status")
+        or "needs_review"
     )
+    # Normalise status values from the reasoner bridge that should be treated
+    # as "needs_review" rather than propagated as opaque strings.
+    if proof_status in ("unavailable", "pending", "not_implemented", ""):
+        proof_status = "needs_review"
+    violation_count = int(proof_artifact.get("violation_count") or 0)
+
+    # Classify each predicate as provable / unprovable based on proof status.
+    provable_elements: List[Dict[str, Any]] = []
+    unprovable_elements: List[Dict[str, Any]] = []
+    for pred in predicate_list:
+        pred_type = str(pred.get("predicate_type") or "")
+        if pred_type == "claim_element":
+            coverage = str(pred.get("coverage_status") or "").strip().lower()
+            if coverage == "supported":
+                provable_elements.append(pred)
+            else:
+                unprovable_elements.append(pred)
+
     return with_adapter_metadata(
         {
-            "status": "not_implemented" if LOGIC_AVAILABLE else "unavailable",
-            "provable_elements": [],
-            "unprovable_elements": [],
+            "status": "success" if proof_status not in {"error", "failed"} else "error",
+            "provable_elements": provable_elements,
+            "unprovable_elements": unprovable_elements,
+            "proof_status": proof_status,
+            "violation_count": violation_count,
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
+            "proof_artifact": proof_artifact,
         },
         operation="prove_claim_elements",
-        backend_available=LOGIC_AVAILABLE,
-        degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
-        implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
+        backend_available=True,
+        implementation_status="implemented",
         extra_metadata={
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+            "reasoner_bridge_available": REASONER_BRIDGE_AVAILABLE,
         },
     )
 

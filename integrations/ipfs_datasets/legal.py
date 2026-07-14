@@ -963,6 +963,116 @@ def search_state_administrative_rules(
     return payload
 
 
+# ---------------------------------------------------------------------------
+# Legal corpus containment — constrain FOL assertions to grounded citations
+# ---------------------------------------------------------------------------
+
+def constrain_assertions_to_corpus(
+    assertions: List[Dict[str, Any]],
+    *,
+    state: Optional[str] = None,
+    max_results_per_assertion: int = 3,
+    allow_live_scrape_fallback: bool = False,
+) -> Dict[str, Any]:
+    """Ground *assertions* against the legal corpus and classify each one.
+
+    For every assertion dict (expected to have at least a ``text`` key) the
+    function issues a search against the combined federal and state-law corpus
+    (US Code + Federal Register + state laws) and marks each assertion as one
+    of:
+
+    * ``grounded``  — at least one authoritative corpus document was found.
+    * ``ungrounded`` — no corpus document could be located.
+
+    The summary dict exposes ``grounded_count``, ``ungrounded_count``, and
+    ``corpus_coverage_percent`` for downstream use by the proof pipeline and
+    the editor guardrails.
+
+    Parameters
+    ----------
+    assertions:
+        List of assertion dicts.  Each should carry at minimum a ``text`` key
+        with the assertion text to search.  A ``assertion_id`` key is used for
+        tracking; one is synthesised if absent.
+    state:
+        Optional two-letter state code to narrow state-law searches.
+    max_results_per_assertion:
+        How many corpus hits to return per assertion.
+    allow_live_scrape_fallback:
+        Whether to permit live-scrape calls when IPFS backends are absent.
+        Defaults to *False* to keep the function fast in offline / test
+        environments.
+    """
+    grounded: List[Dict[str, Any]] = []
+    ungrounded: List[Dict[str, Any]] = []
+    details: List[Dict[str, Any]] = []
+
+    for index, assertion in enumerate(assertions or []):
+        assertion_id = str(assertion.get("assertion_id") or assertion.get("id") or f"a-{index + 1}")
+        text = str(assertion.get("text") or "").strip()
+        if not text:
+            ungrounded.append(assertion)
+            details.append({"assertion_id": assertion_id, "grounded": False, "corpus_hits": []})
+            continue
+
+        corpus_hits: List[Dict[str, Any]] = []
+
+        # 1. Try US Code
+        try:
+            hits = search_us_code(text, max_results=max_results_per_assertion)
+            corpus_hits.extend(hits or [])
+        except Exception:
+            pass
+
+        # 2. Try Federal Register if still empty
+        if not corpus_hits:
+            try:
+                hits = search_federal_register(text, max_results=max_results_per_assertion)
+                corpus_hits.extend(hits or [])
+            except Exception:
+                pass
+
+        # 3. Try state laws if a state is provided and still empty
+        if not corpus_hits and state:
+            try:
+                hits = search_state_laws(
+                    text,
+                    state=state,
+                    max_results=max_results_per_assertion,
+                    allow_live_scrape_fallback=allow_live_scrape_fallback,
+                )
+                corpus_hits.extend(hits or [])
+            except Exception:
+                pass
+
+        is_grounded = bool(corpus_hits)
+        detail: Dict[str, Any] = {
+            "assertion_id": assertion_id,
+            "text": text,
+            "grounded": is_grounded,
+            "corpus_hits": corpus_hits[:max_results_per_assertion],
+        }
+        details.append(detail)
+        if is_grounded:
+            grounded.append({**assertion, "grounded": True, "corpus_hits": corpus_hits[:max_results_per_assertion]})
+        else:
+            ungrounded.append({**assertion, "grounded": False, "corpus_hits": []})
+
+    total = len(assertions or [])
+    grounded_count = len(grounded)
+    corpus_coverage_percent = int(round((grounded_count / total) * 100)) if total else None
+
+    return {
+        "grounded": grounded,
+        "ungrounded": ungrounded,
+        "details": details,
+        "grounded_count": grounded_count,
+        "ungrounded_count": len(ungrounded),
+        "total_assertion_count": total,
+        "corpus_coverage_percent": corpus_coverage_percent,
+    }
+
+
 __all__ = [
     "LEGAL_SCRAPERS_AVAILABLE",
     "LEGAL_SCRAPERS_ERROR",
@@ -973,4 +1083,5 @@ __all__ = [
     "search_recap_documents",
     "search_state_laws",
     "search_state_administrative_rules",
+    "constrain_assertions_to_corpus",
 ]

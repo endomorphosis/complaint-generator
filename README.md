@@ -831,6 +831,63 @@ rm statefiles/*.duckdb-wal
 
 ---
 
+## 🤖 Mike LLM Router Patch
+
+The Mike editor is monkey-patched at handoff time to route **all text generation requests** through the workspace `llm_router` rather than issuing calls directly.
+
+### How it works
+
+1. `apply_mike_llm_router_patch(handoff_payload)` is called from `ComplaintWorkspace.build_mike_handoff()`.
+2. The patch adds a `mike_llm_patch` block to the handoff payload that declares `workspace_llm_router_owns_generation: true` and enforces all `narrow_adapter_boundary` policy flags.
+3. Every MCP call from Mike's frontend that would normally call an external model is intercepted and re-routed through `integrations/mike/llm_patch.py → get_router_generate_fn()` → `generate_text_with_metadata()`.
+
+See `integrations/mike/llm_patch.py` and `integrations/mike/__init__.py`.
+
+---
+
+## 🧮 Draft-Text → Formal Logic → Theorem Prover Pipeline
+
+Complaint drafts can be validated against the legal corpus using a formal-logic pipeline before submission.
+
+### Pipeline steps (A → E)
+
+| Step | Function | Description |
+|------|----------|-------------|
+| A | `text_to_fol(body)` | Extracts First-Order Logic predicates from draft text using `ipfs_datasets_py.logic.fol.converter.FOLConverter` (falls back to regex) |
+| B | `legal_text_to_deontic(body)` | Extracts deontic (O/P/F) norms using `ipfs_datasets_py.logic.types.deontic_types.DeonticConverter` (falls back to regex) |
+| C | `constrain_assertions_to_corpus(predicates)` | Rejects predicates that cannot be grounded to the legal corpus (HuggingFace `justicedao/ipfs_state_laws` + federal register) |
+| D | `prove_claim_elements(predicates)` | Runs the hybrid reasoner + Z3 SMT prover via the `ipfs_datasets_py` reasoner bridge |
+| E | Policy check | Calls `check_policy_rules_with_deontic_norms()` to flag rule violations |
+
+The pipeline returns a `DraftProofReport`:
+
+```json
+{
+  "proof_status": "passed | needs_review | error | failed",
+  "contradiction_count": 0,
+  "chronology_blocked": false,
+  "ungrounded_assertions": [...],
+  "corpus_coverage_percent": 87.5,
+  "draft_proof_pipeline_version": "draft-logic-pipeline-v1"
+}
+```
+
+### Enabling the pipeline
+
+The pipeline is **opt-in** via environment variable to avoid slow corpus lookups during tests:
+
+```bash
+export COMPLAINT_USE_DRAFT_LOGIC_PIPELINE=1
+```
+
+### Integration point
+
+The pipeline is wired into `ComplaintWorkspace.sync_mike_final_draft()`. After a draft body is accepted, `_run_draft_logic_pipeline_safely()` is called and its `DraftProofReport` is merged into the existing `logic_review` via `_merge_draft_proof_report()`. The merged report surfaces `ungrounded_assertions` and `corpus_coverage_percent` in `_build_mike_editor_guardrails()` → `proof_readiness_flags`.
+
+See `integrations/ipfs_datasets/draft_logic_pipeline.py`.
+
+---
+
 ## 📈 Project Status
 
 ✅ Core systems implemented
@@ -839,8 +896,10 @@ rm statefiles/*.duckdb-wal
 ✅ Claim Support Review Dashboard
 ✅ Agentic document optimization with HF router
 ✅ Adversarial autopatch (demo and live modes)
+✅ Mike LLM router patch (integrations/mike/llm_patch.py)
+✅ Draft-text → formal logic → theorem prover pipeline
+✅ ipfs_datasets_py logic processors + legal corpus containment
 🚧 Web UI polish (in progress)
-🚧 IPFS Datasets Py full integration (in progress)
 📋 Mobile app (planned)
 
 ---

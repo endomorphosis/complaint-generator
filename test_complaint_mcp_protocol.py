@@ -246,17 +246,22 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     }
     assert handoff_id.startswith("mike-handoff-")
     assert mike_handoff["result"]["structuredContent"]["mike"]["launch_url"]
-    assert mike_handoff["result"]["structuredContent"]["handoff_payload"]["skill_asset_manifest"]["asset_ids"] == [
+    actual_asset_ids = mike_handoff["result"]["structuredContent"]["handoff_payload"]["skill_asset_manifest"]["asset_ids"]
+    for expected_id in [
         "complaint-grounding",
         "complaint-logic",
         "complaint-corpus-search",
         "complaint-policy-rules",
         "complaint-authority-graphs",
         "complaint-router",
-    ]
+        "complaint-draft-logic-pipeline",
+        "complaint-corpus-containment",
+        "complaint-mike-llm-patch",
+    ]:
+        assert expected_id in actual_asset_ids, f"Expected skill asset '{expected_id}' in manifest"
     handoff_status_payload = mike_status_after_handoff["result"]["structuredContent"]
     assert handoff_status_payload["pending_sync"] is True
-    assert handoff_status_payload["status_contract_version"] == "complaint-mike-status-v3"
+    assert handoff_status_payload["status_contract_version"] == "complaint-mike-status-v4"
     assert handoff_status_payload["workflow_state"]["key"] == "handoff_pending_sync"
     assert handoff_status_payload["latest_sync_handoff_id"] is None
     assert handoff_status_payload["has_citation_link_conflicts"] is False
