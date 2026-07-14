@@ -27,7 +27,10 @@ def test_tools_list_uses_jsonrpc_shape(tmp_path):
     assert response["result"]["tools"][0]["name"].startswith("complaint.")
     tools_by_name = {tool["name"]: tool for tool in response["result"]["tools"]}
     assert tools_by_name["complaint.build_mike_handoff"]["inputSchema"]["properties"]["generate_draft_if_missing"]["type"] == "boolean"
+    assert tools_by_name["complaint.build_mike_handoff"]["inputSchema"]["properties"]["grounding_mode"]["type"] == "string"
     assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["required"] == ["body"]
+    assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["properties"]["assertion_annotations"]["type"] == "array"
+    assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["properties"]["authority_links"]["type"] == "array"
 
 
 def test_public_package_exports_workspace_service():
@@ -200,6 +203,11 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
                         "editor_user_id": "editor-mcp",
                         "editor_session_id": "session-mcp",
                     },
+                    "sync_provenance": {
+                        "editor_version": "mike-web",
+                        "skill_asset_ids": ["complaint-grounding", "complaint-logic"],
+                        "redline_metadata": {"summary": "Applied citation-safe edits."},
+                    },
                 },
             },
         },
@@ -238,9 +246,17 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     }
     assert handoff_id.startswith("mike-handoff-")
     assert mike_handoff["result"]["structuredContent"]["mike"]["launch_url"]
+    assert mike_handoff["result"]["structuredContent"]["handoff_payload"]["skill_asset_manifest"]["asset_ids"] == [
+        "complaint-grounding",
+        "complaint-logic",
+        "complaint-corpus-search",
+        "complaint-policy-rules",
+        "complaint-authority-graphs",
+        "complaint-router",
+    ]
     handoff_status_payload = mike_status_after_handoff["result"]["structuredContent"]
     assert handoff_status_payload["pending_sync"] is True
-    assert handoff_status_payload["status_contract_version"] == "complaint-mike-status-v2"
+    assert handoff_status_payload["status_contract_version"] == "complaint-mike-status-v3"
     assert handoff_status_payload["workflow_state"]["key"] == "handoff_pending_sync"
     assert handoff_status_payload["latest_sync_handoff_id"] is None
     assert handoff_status_payload["has_citation_link_conflicts"] is False
@@ -254,6 +270,12 @@ def test_mcp_protocol_exposes_mediator_prompt_and_packet_export(tmp_path):
     assert mike_sync["result"]["structuredContent"]["sync_record"]["citation_link_conflict_count"] == 1
     assert mike_sync["result"]["structuredContent"]["sync_record"]["structured_delta_count"] == 1
     assert mike_sync["result"]["structuredContent"]["sync_record"]["editor_user_id"] == "editor-mcp"
+    assert mike_sync["result"]["structuredContent"]["sync_record"]["editor_version"] == "mike-web"
+    assert mike_sync["result"]["structuredContent"]["sync_provenance"]["enabled_skill_ids"] == [
+        "complaint-grounding",
+        "complaint-logic",
+    ]
+    assert mike_sync["result"]["structuredContent"]["redline_metadata"]["structured_delta_count"] == 1
     assert mike_sync["result"]["structuredContent"]["sync_diagnostics"]["severity"] == "error"
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["has_conflicts"] is True
     assert mike_sync["result"]["structuredContent"]["citation_link_check"]["unknown_claim_element_ids"] == ["unknown"]

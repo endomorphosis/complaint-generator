@@ -292,6 +292,7 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "project_id": {"type": "string"},
             "workspace_id": {"type": "string"},
             "generate_draft_if_missing": {"type": "boolean"},
+            "grounding_mode": {"type": "string"},
         },
     },
     "complaint.get_mike_integration_status": {
@@ -316,6 +317,10 @@ _TOOL_SCHEMAS: Dict[str, Dict[str, Any]] = {
             "source_updated_at": {"type": "string"},
             "structured_deltas": {"type": "array", "items": {"type": "object"}},
             "editor_metadata": {"type": "object"},
+            "grounding_mode": {"type": "string"},
+            "assertion_annotations": {"type": "array", "items": {"type": "object"}},
+            "authority_links": {"type": "array", "items": {"type": "object"}},
+            "sync_provenance": {"type": "object"},
         },
         "required": ["body"],
     },

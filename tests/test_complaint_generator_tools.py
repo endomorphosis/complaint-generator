@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 from typer.testing import CliRunner
-from ipfs_datasets_py.processors.legal_data import DocketDatasetBuilder
+from integrations.ipfs_datasets.legal_data import DocketDatasetBuilder
 
 from applications import complaint_cli as complaint_cli_impl
 from applications.complaint_workspace_api import attach_complaint_workspace_routes
@@ -265,8 +265,11 @@ def test_tool_list_exposes_all_complaint_cli_and_mcp_tools(tmp_path):
     assert tools_by_name["complaint.get_tooling_contract"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
     assert tools_by_name["complaint.get_filing_provenance"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
     assert tools_by_name["complaint.build_mike_handoff"]["inputSchema"]["properties"]["generate_draft_if_missing"]["type"] == "boolean"
+    assert tools_by_name["complaint.build_mike_handoff"]["inputSchema"]["properties"]["grounding_mode"]["type"] == "string"
     assert tools_by_name["complaint.get_mike_integration_status"]["inputSchema"]["properties"] == {"user_id": {"type": "string"}}
     assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["required"] == ["body"]
+    assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["properties"]["assertion_annotations"]["type"] == "array"
+    assert tools_by_name["complaint.sync_mike_final_draft"]["inputSchema"]["properties"]["authority_links"]["type"] == "array"
     assert tools_by_name["complaint.tag_document_annotation"]["inputSchema"]["required"] == ["document_id", "note"]
     assert tools_by_name["complaint.tag_workspace_dataset_document"]["inputSchema"]["required"] == ["document_id", "note"]
     assert tools_by_name["complaint.get_packaged_docket_operator_dashboard"]["inputSchema"]["required"] == ["manifest_path"]
