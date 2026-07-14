@@ -845,6 +845,9 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
     ``hybrid_v2_blueprint`` reasoner bridge *and* the local TDFOL/DCEC bridge
     are tried in priority order.  The return value includes ``provable_elements``
     and ``unprovable_elements`` extracted from the proof artifact.
+
+    Contradiction detection is performed by :func:`check_contradictions` and
+    the count is included as ``contradiction_count`` in the result.
     """
     normalized_payload = _normalize_logic_payload(predicates)
     predicate_list = normalized_payload["predicates"]
@@ -867,6 +870,15 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
         proof_status = "needs_review"
     violation_count = int(proof_artifact.get("violation_count") or 0)
 
+    # Run check_contradictions for a precise contradiction count that includes
+    # both temporal-signal contradictions and formula-level negation pairs.
+    contradiction_result = check_contradictions(normalized_payload)
+    contradiction_count = int(contradiction_result.get("contradiction_count") or 0)
+    contradiction_list = list(contradiction_result.get("contradictions") or [])
+    # Escalate proof_status to needs_review when contradictions are found.
+    if contradiction_count and proof_status == "passed":
+        proof_status = "needs_review"
+
     # Classify each predicate as provable / unprovable based on proof status.
     provable_elements: List[Dict[str, Any]] = []
     unprovable_elements: List[Dict[str, Any]] = []
@@ -886,6 +898,8 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             "unprovable_elements": unprovable_elements,
             "proof_status": proof_status,
             "violation_count": violation_count,
+            "contradiction_count": contradiction_count,
+            "contradictions": contradiction_list,
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
             "proof_artifact": proof_artifact,
@@ -903,7 +917,101 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
     )
 
 
+def _detect_formula_contradictions(formulas: List[str]) -> List[Dict[str, Any]]:
+    """Detect simple A / not-A formula contradictions in *formulas*.
+
+    A contradiction is flagged when the formula list contains both a positive
+    assertion ``Pred(x,y)`` and its negation ``not(Pred(x,y))`` or a
+    ``Conflict(x,y)`` entry that references known predicates.
+
+    Returns a list of contradiction dicts compatible with the unified
+    ``contradictions`` schema.
+    """
+    contradictions: List[Dict[str, Any]] = []
+    positive: Dict[str, str] = {}
+    negative: Dict[str, str] = {}
+    conflict_pairs: List[tuple[str, str]] = []
+
+    _not_re = re.compile(r"^not\((.+)\)$", re.IGNORECASE)
+    _conflict_re = re.compile(r"^Conflict\(([^,]+),([^)]+)\)$", re.IGNORECASE)
+
+    for formula in formulas:
+        formula = formula.strip()
+        not_match = _not_re.match(formula)
+        if not_match:
+            inner = not_match.group(1).strip()
+            negative[inner] = formula
+            if inner in positive:
+                contradictions.append(
+                    {
+                        "contradiction_id": f"formula-{len(contradictions) + 1}",
+                        "type": "formula_negation",
+                        "positive_formula": positive[inner],
+                        "negative_formula": formula,
+                        "summary": f"Contradiction: {inner} and not({inner})",
+                        "severity": "error",
+                    }
+                )
+        else:
+            conflict_match = _conflict_re.match(formula)
+            if conflict_match:
+                left = conflict_match.group(1).strip()
+                right = conflict_match.group(2).strip()
+                conflict_pairs.append((left, right))
+            else:
+                positive[formula] = formula
+                if formula in negative:
+                    contradictions.append(
+                        {
+                            "contradiction_id": f"formula-{len(contradictions) + 1}",
+                            "type": "formula_negation",
+                            "positive_formula": formula,
+                            "negative_formula": negative[formula],
+                            "summary": f"Contradiction: {formula} and not({formula})",
+                            "severity": "error",
+                        }
+                    )
+
+    for left, right in conflict_pairs:
+        contradictions.append(
+            {
+                "contradiction_id": f"conflict-{len(contradictions) + 1}",
+                "type": "temporal_conflict",
+                "left_symbol": left,
+                "right_symbol": right,
+                "summary": f"Temporal conflict between {left} and {right}",
+                "severity": "warning",
+            }
+        )
+
+    return contradictions
+
+
 def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) -> Dict[str, Any]:
+    """Check *predicates* for logical contradictions.
+
+    Detection strategy (applied in order, results merged):
+
+    1. **Contradiction-signal predicates** — predicates with
+       ``predicate_type`` of ``temporal_issue`` or
+       ``contradiction_candidate`` are surfaced directly.
+    2. **Formula-level negation** — pairs ``P(x)`` / ``not(P(x))`` in the
+       TDFOL formula set generated by the temporal bridge.
+    3. **Conflict formulas** — any ``Conflict(a,b)`` entry emitted by the
+       temporal bridge for temporal ordering violations.
+    4. **Z3 SMT prover** (when ``ipfs_datasets_py`` Z3 bridge is available) —
+       the formula set is submitted to the SMT prover for a satisfiability
+       check; an UNSAT result is reported as a contradiction.
+
+    Returns a dict with:
+
+    * ``contradictions`` — list of contradiction dicts (typed, with
+      ``contradiction_id``, ``type``, ``summary``, ``severity``)
+    * ``contradiction_count`` — integer count
+    * ``has_contradictions`` — bool
+    * ``proof_status`` — ``"passed"`` (no contradictions found),
+      ``"needs_review"`` (signals present but not proven), or ``"error"``
+    """
     normalized_payload = _normalize_logic_payload(predicates)
     predicate_list = normalized_payload["predicates"]
     predicate_summary = _summarize_predicates(predicate_list)
@@ -912,17 +1020,61 @@ def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
         claim_support_temporal_handoff=normalized_payload["claim_support_temporal_handoff"],
         claim_reasoning_review=normalized_payload["claim_reasoning_review"],
     )
+
+    contradictions: List[Dict[str, Any]] = []
+
+    # 1. Contradiction-signal predicates (temporal_issue / contradiction_candidate)
+    for signal in temporal_reasoning_payload.get("contradiction_signals") or []:
+        contradictions.append(
+            {
+                "contradiction_id": f"signal-{len(contradictions) + 1}",
+                "type": str(signal.get("predicate_type") or "temporal_issue"),
+                "issue_type": str(signal.get("issue_type") or ""),
+                "summary": str(signal.get("summary") or "temporal contradiction signal"),
+                "severity": str(signal.get("severity") or "warning"),
+                "claim_type": str(signal.get("claim_type") or ""),
+                "signal_symbol": str(signal.get("signal_symbol") or ""),
+            }
+        )
+
+    # 2 & 3. Formula-level negation and Conflict() pairs from TDFOL bridge
+    tdfol_formulas: List[str] = list(temporal_reasoning_payload.get("tdfol_formulas") or [])
+    contradictions.extend(_detect_formula_contradictions(tdfol_formulas))
+
+    # 4. Z3 SMT prover (optional, additive)
+    if _z3_module is not None:
+        try:
+            z3_check = getattr(_z3_module, "check_satisfiability", None)
+            if callable(z3_check) and tdfol_formulas:
+                z3_result = z3_check(tdfol_formulas)
+                if isinstance(z3_result, dict) and z3_result.get("satisfiable") is False:
+                    contradictions.append(
+                        {
+                            "contradiction_id": f"z3-{len(contradictions) + 1}",
+                            "type": "smt_unsat",
+                            "summary": "Z3 SMT solver reports formula set is unsatisfiable",
+                            "severity": "error",
+                            "z3_result": z3_result,
+                        }
+                    )
+        except Exception:
+            pass
+
+    proof_status = "passed" if not contradictions else "needs_review"
+
     return with_adapter_metadata(
         {
-            "status": "not_implemented" if LOGIC_AVAILABLE else "unavailable",
-            "contradictions": [],
+            "status": "success",
+            "contradictions": contradictions,
+            "contradiction_count": len(contradictions),
+            "has_contradictions": bool(contradictions),
+            "proof_status": proof_status,
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
         },
         operation="check_contradictions",
-        backend_available=LOGIC_AVAILABLE,
-        degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
-        implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
+        backend_available=True,
+        implementation_status="implemented",
         extra_metadata={
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,

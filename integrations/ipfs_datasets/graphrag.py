@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional
 
 from .loader import import_attr_optional, run_async_compat
 from .types import with_adapter_metadata
@@ -120,6 +121,196 @@ def _run_pdf_facade(
     )
 
 
+# ---------------------------------------------------------------------------
+# Local ontology extraction helpers (used when the upstream backend is absent
+# or when it returns "not_implemented" because it lacks the expected methods).
+# ---------------------------------------------------------------------------
+
+_ENTITY_RE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b")
+_RELATION_VERB_RE = re.compile(
+    r"\b(report(?:ed)?|terminat(?:ed)?|discriminat(?:ed)?|retaliat(?:ed)?|"
+    r"violat(?:ed)?|breach(?:ed)?|fail(?:ed)?|notif(?:ied)?|request(?:ed)?|"
+    r"discriminat(?:ed)?|employ(?:ed)?|harass(?:ed)?|demot(?:ed)?|"
+    r"harm(?:ed)?|seek(?:s)?|allege(?:s)?|file[ds]?)\b",
+    re.IGNORECASE,
+)
+_CONCEPT_KEYWORDS = frozenset(
+    [
+        "discrimination", "retaliation", "harassment", "termination", "demotion",
+        "hostile", "complaint", "violation", "damages", "relief", "employment",
+        "protected", "class", "disability", "race", "gender", "age", "religion",
+        "whistleblower", "safety", "duty", "obligation", "prohibition",
+    ]
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _build_local_ontology(text: str) -> Dict[str, Any]:
+    """Build a minimal ontology from *text* using regex heuristics.
+
+    Returns a dict with ``entities``, ``relations``, ``concepts``, and
+    ``metadata`` keys compatible with the standard ontology schema used
+    elsewhere in the pipeline.
+    """
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+    seen_entities: dict[str, int] = {}
+    relations: List[Dict[str, Any]] = []
+    seen_concepts: dict[str, int] = {}
+
+    for sentence in sentences:
+        entities = _ENTITY_RE.findall(sentence)
+        verbs = _RELATION_VERB_RE.findall(sentence)
+
+        for entity in entities:
+            seen_entities[entity] = seen_entities.get(entity, 0) + 1
+
+        if len(entities) >= 2 and verbs:
+            for verb in verbs:
+                relations.append(
+                    {
+                        "subject": entities[0],
+                        "predicate": verb.lower(),
+                        "object": entities[1],
+                        "source_sentence": sentence,
+                    }
+                )
+
+        lowered = sentence.lower()
+        for keyword in _CONCEPT_KEYWORDS:
+            if keyword in lowered:
+                seen_concepts[keyword] = seen_concepts.get(keyword, 0) + 1
+
+    entities_list = [
+        {"name": name, "frequency": count, "type": "named_entity"}
+        for name, count in sorted(seen_entities.items(), key=lambda kv: -kv[1])
+    ]
+    concepts_list = [
+        {"name": name, "frequency": count, "type": "legal_concept"}
+        for name, count in sorted(seen_concepts.items(), key=lambda kv: -kv[1])
+    ]
+
+    return {
+        "entities": entities_list,
+        "relations": relations,
+        "concepts": concepts_list,
+        "entity_count": len(entities_list),
+        "relation_count": len(relations),
+        "concept_count": len(concepts_list),
+        "source": "local_regex_fallback",
+    }
+
+
+def _validate_ontology_locally(ontology: Any) -> Dict[str, Any]:
+    """Apply basic structural validation to *ontology*.
+
+    Checks that the ontology is a non-empty mapping with at least one of the
+    standard top-level keys (``entities``, ``relations``, ``concepts``).
+    Returns a validation result dict with ``valid``, ``issues``, and
+    ``field_presence`` keys.
+    """
+    issues: List[str] = []
+    field_presence: Dict[str, bool] = {}
+
+    if not isinstance(ontology, dict):
+        return {
+            "valid": False,
+            "issues": ["ontology must be a dict"],
+            "field_presence": {},
+        }
+    if not ontology:
+        return {
+            "valid": False,
+            "issues": ["ontology is empty"],
+            "field_presence": {},
+        }
+
+    for field in ("entities", "relations", "concepts"):
+        field_presence[field] = field in ontology
+
+    if not any(field_presence.values()):
+        issues.append("ontology is missing required keys: entities, relations, or concepts")
+
+    entities = ontology.get("entities")
+    if entities is not None and not isinstance(entities, list):
+        issues.append("'entities' must be a list")
+
+    relations = ontology.get("relations")
+    if relations is not None and not isinstance(relations, list):
+        issues.append("'relations' must be a list")
+
+    return {
+        "valid": len(issues) == 0,
+        "issues": issues,
+        "field_presence": field_presence,
+        "entity_count": len(ontology.get("entities") or []),
+        "relation_count": len(ontology.get("relations") or []),
+        "concept_count": len(ontology.get("concepts") or []),
+    }
+
+
+def _refine_ontology_locally(ontology: Any, *, rounds: int = 1) -> Dict[str, Any]:
+    """Apply lightweight local refinement to *ontology*.
+
+    Each round deduplicates entity and concept lists by normalised name and
+    merges duplicate (subject, predicate, object) relation triples.  The
+    refined ontology is returned as a new dict.
+    """
+    if not isinstance(ontology, dict):
+        return {"status": "skipped", "reason": "ontology is not a dict", "refined": ontology}
+
+    entities = list(ontology.get("entities") or [])
+    relations = list(ontology.get("relations") or [])
+    concepts = list(ontology.get("concepts") or [])
+
+    for _round in range(max(rounds, 1)):
+        # Deduplicate entities by normalised name
+        seen_entity_names: dict[str, Dict[str, Any]] = {}
+        for entity in entities:
+            key = str(entity.get("name") or "").strip().lower()
+            if key:
+                if key in seen_entity_names:
+                    existing = seen_entity_names[key]
+                    existing["frequency"] = int(existing.get("frequency") or 1) + int(entity.get("frequency") or 1)
+                else:
+                    seen_entity_names[key] = dict(entity)
+        entities = list(seen_entity_names.values())
+
+        # Deduplicate relations by (subject, predicate, object) triple
+        seen_relation_keys: dict[tuple[str, str, str], Dict[str, Any]] = {}
+        for relation in relations:
+            key = (
+                str(relation.get("subject") or "").strip().lower(),
+                str(relation.get("predicate") or "").strip().lower(),
+                str(relation.get("object") or "").strip().lower(),
+            )
+            if key not in seen_relation_keys:
+                seen_relation_keys[key] = dict(relation)
+        relations = list(seen_relation_keys.values())
+
+        # Deduplicate concepts
+        seen_concept_names: dict[str, Dict[str, Any]] = {}
+        for concept in concepts:
+            key = str(concept.get("name") or "").strip().lower()
+            if key:
+                if key in seen_concept_names:
+                    existing = seen_concept_names[key]
+                    existing["frequency"] = int(existing.get("frequency") or 1) + int(concept.get("frequency") or 1)
+                else:
+                    seen_concept_names[key] = dict(concept)
+        concepts = list(seen_concept_names.values())
+
+    refined = dict(ontology)
+    refined["entities"] = entities
+    refined["relations"] = relations
+    refined["concepts"] = concepts
+    refined["entity_count"] = len(entities)
+    refined["relation_count"] = len(relations)
+    refined["concept_count"] = len(concepts)
+    refined["refined_rounds"] = rounds
+    refined["source"] = refined.get("source", "unknown") + "+local_refinement"
+    return refined
+
+
 def create_ontology_generator() -> Any:
     if OntologyGenerator is None:
         return None
@@ -169,12 +360,13 @@ def build_ontology(text: str, config: Any | None = None) -> Dict[str, Any]:
             )
     return with_adapter_metadata(
         {
-            "status": "not_implemented",
-            "ontology": None,
+            "status": "success",
+            "ontology": _build_local_ontology(str(text or "")),
+            "metadata": {"text_length": len(text), "source": "local_regex_fallback"},
         },
         operation="build_ontology",
         backend_available=True,
-        implementation_status="not_implemented",
+        implementation_status="implemented",
     )
 
 
@@ -214,11 +406,16 @@ def validate_ontology(ontology: Any) -> Dict[str, Any]:
                     backend_available=True,
                     implementation_status="error",
                 )
+    validation_result = _validate_ontology_locally(ontology)
     return with_adapter_metadata(
-        {"status": "not_implemented", "result": None},
+        {
+            "status": "success",
+            "result": validation_result,
+            "valid": validation_result["valid"],
+        },
         operation="validate_ontology",
         backend_available=True,
-        implementation_status="not_implemented",
+        implementation_status="implemented",
     )
 
 
@@ -270,11 +467,12 @@ def run_refinement_cycle(ontology: Any, *, rounds: int = 1) -> Dict[str, Any]:
                     implementation_status="error",
                     extra_metadata={"rounds": rounds},
                 )
+    refined = _refine_ontology_locally(ontology, rounds=rounds)
     return with_adapter_metadata(
-        {"status": "not_implemented", "result": None},
+        {"status": "success", "result": refined},
         operation="run_refinement_cycle",
         backend_available=True,
-        implementation_status="not_implemented",
+        implementation_status="implemented",
         extra_metadata={"rounds": rounds},
     )
 
