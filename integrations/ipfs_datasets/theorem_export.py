@@ -135,9 +135,9 @@ def _formula_to_coq_hypothesis(index: int, formula: str) -> str:
 def _tdfol_to_lean4(formula: str) -> str:
     """Translate a TDFOL formula string to Lean 4 surface syntax."""
     formula = formula.strip()
-    # forall t (...) → ∀ t : Time, ...
+    # forall t (...) → ∀ t : Time, ...  (non-greedy inner capture)
     formula = re.sub(
-        r"\bforall\s+(\w+)\s*\((.+)\)\s*$",
+        r"\bforall\s+(\w+)\s*\((.+?)\)\s*$",
         lambda m: f"∀ ({_to_ident(m.group(1))} : Time), {_tdfol_to_lean4(m.group(2))}",
         formula,
     )
@@ -163,9 +163,9 @@ def _lean4_apply(pred: str, args_str: str) -> str:
 def _tdfol_to_coq(formula: str) -> str:
     """Translate a TDFOL formula string to Coq surface syntax."""
     formula = formula.strip()
-    # forall t (...) → forall t : Time, ...
+    # forall t (...) → forall t : Time, ...  (non-greedy inner capture)
     formula = re.sub(
-        r"\bforall\s+(\w+)\s*\((.+)\)\s*$",
+        r"\bforall\s+(\w+)\s*\((.+?)\)\s*$",
         lambda m: f"forall ({_to_ident(m.group(1))} : Time), {_tdfol_to_coq(m.group(2))}",
         formula,
     )

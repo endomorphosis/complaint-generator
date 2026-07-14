@@ -43,6 +43,10 @@ REASONER_BRIDGE_PATH = getattr(_reasoner_module, "__name__", "") if _reasoner_mo
 LOCAL_FORMAL_LOGIC_AVAILABLE = True
 LOCAL_FORMAL_LOGIC_PATH = "lib.formal_logic"
 
+# Maximum byte length of a Z3 Boolean variable atom name (avoids identifier
+# overflow for long formula strings submitted to the local z3-solver fallback).
+_Z3_ATOM_NAME_MAX_LENGTH = 60
+
 
 def _normalize_logic_symbol(value: Any, *, prefix: str) -> str:
     text = str(value or "").strip().lower()
@@ -1032,21 +1036,24 @@ def _run_local_z3_check(
         return
 
     solver = Solver()
+    # Pre-compute all normalised atom names in a set for O(1) negation lookup.
+    all_atom_names = {
+        re.sub(r"[^A-Za-z0-9_]", "_", f.strip())[:_Z3_ATOM_NAME_MAX_LENGTH]
+        for f in tdfol_formulas
+    }
     for formula in tdfol_formulas:
         # Represent each atomic formula as a fresh Boolean variable named
         # after the formula string (truncated to avoid Z3 identifier limits).
-        atom_name = re.sub(r"[^A-Za-z0-9_]", "_", formula.strip())[:60]
+        atom_name = re.sub(r"[^A-Za-z0-9_]", "_", formula.strip())[:_Z3_ATOM_NAME_MAX_LENGTH]
         if not atom_name:
             continue
         var = Bool(atom_name)
         solver.add(var)
         # If the formula set already contains the negation of this formula
-        # (detected in step 2/3) we add its negation as a second assertion
-        # so Z3 can derive UNSAT directly.
-        neg_name = re.sub(r"[^A-Za-z0-9_]", "_", f"not({formula.strip()})")[:60]
-        neg_var = Bool(neg_name)
-        # Only add the negation constraint when it also appears in the set.
-        if any(re.sub(r"[^A-Za-z0-9_]", "_", f.strip())[:60] == neg_name for f in tdfol_formulas):
+        # we add its negation as a second assertion so Z3 can derive UNSAT.
+        neg_name = re.sub(r"[^A-Za-z0-9_]", "_", f"not({formula.strip()})")[:_Z3_ATOM_NAME_MAX_LENGTH]
+        if neg_name in all_atom_names:
+            neg_var = Bool(neg_name)
             solver.add(neg_var)
 
     if solver.check() == unsat_const:
