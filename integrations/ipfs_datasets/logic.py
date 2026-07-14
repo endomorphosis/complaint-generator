@@ -4,7 +4,7 @@ from collections import Counter
 from copy import deepcopy
 import inspect
 import re
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 from lib.formal_logic.frames import FrameKnowledgeBase
 
@@ -930,7 +930,7 @@ def _detect_formula_contradictions(formulas: List[str]) -> List[Dict[str, Any]]:
     contradictions: List[Dict[str, Any]] = []
     positive: Dict[str, str] = {}
     negative: Dict[str, str] = {}
-    conflict_pairs: List[tuple[str, str]] = []
+    conflict_pairs: List[Tuple[str, str]] = []
 
     _not_re = re.compile(r"^not\((.+)\)$", re.IGNORECASE)
     _conflict_re = re.compile(r"^Conflict\(([^,]+),([^)]+)\)$", re.IGNORECASE)

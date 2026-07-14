@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .loader import import_attr_optional, run_async_compat
 from .types import with_adapter_metadata
@@ -153,9 +153,9 @@ def _build_local_ontology(text: str) -> Dict[str, Any]:
     elsewhere in the pipeline.
     """
     sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
-    seen_entities: dict[str, int] = {}
+    seen_entities: Dict[str, int] = {}
     relations: List[Dict[str, Any]] = []
-    seen_concepts: dict[str, int] = {}
+    seen_concepts: Dict[str, int] = {}
 
     for sentence in sentences:
         entities = _ENTITY_RE.findall(sentence)
@@ -264,7 +264,7 @@ def _refine_ontology_locally(ontology: Any, *, rounds: int = 1) -> Dict[str, Any
 
     for _round in range(max(rounds, 1)):
         # Deduplicate entities by normalised name
-        seen_entity_names: dict[str, Dict[str, Any]] = {}
+        seen_entity_names: Dict[str, Dict[str, Any]] = {}
         for entity in entities:
             key = str(entity.get("name") or "").strip().lower()
             if key:
@@ -276,7 +276,7 @@ def _refine_ontology_locally(ontology: Any, *, rounds: int = 1) -> Dict[str, Any
         entities = list(seen_entity_names.values())
 
         # Deduplicate relations by (subject, predicate, object) triple
-        seen_relation_keys: dict[tuple[str, str, str], Dict[str, Any]] = {}
+        seen_relation_keys: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         for relation in relations:
             key = (
                 str(relation.get("subject") or "").strip().lower(),
@@ -288,7 +288,7 @@ def _refine_ontology_locally(ontology: Any, *, rounds: int = 1) -> Dict[str, Any
         relations = list(seen_relation_keys.values())
 
         # Deduplicate concepts
-        seen_concept_names: dict[str, Dict[str, Any]] = {}
+        seen_concept_names: Dict[str, Dict[str, Any]] = {}
         for concept in concepts:
             key = str(concept.get("name") or "").strip().lower()
             if key:
