@@ -596,12 +596,12 @@ def _local_extract_fol_predicates(text: str) -> List[Dict[str, Any]]:
         for verb in verbs:
             subj = entities[0] if entities else "Unknown"
             obj = entities[1] if len(entities) > 1 else "party"
-            sym = _normalize_logic_symbol(f"{verb}_{index}", prefix="pred")
+            predicate_symbol = _normalize_logic_symbol(f"{verb}_{index}", prefix="pred")
             predicates.append(
                 {
                     "predicate_type": "factual_statement",
                     "formula": f"{verb.capitalize()}({_normalize_logic_symbol(subj, prefix='e')},{_normalize_logic_symbol(obj, prefix='e')})",
-                    "symbol": sym,
+                    "symbol": predicate_symbol,
                     "source_sentence": sentence,
                     "entities": entities[:4],
                     "verb": verb.lower(),
@@ -609,12 +609,12 @@ def _local_extract_fol_predicates(text: str) -> List[Dict[str, Any]]:
             )
 
         for date in dates:
-            sym = _normalize_logic_symbol(f"temporal_{index}", prefix="t")
+            temporal_symbol = _normalize_logic_symbol(f"temporal_{index}", prefix="t")
             predicates.append(
                 {
                     "predicate_type": "temporal_fact",
-                    "formula": f"AtTime({sym},{_normalize_time_symbol(date)})",
-                    "symbol": sym,
+                    "formula": f"AtTime({temporal_symbol},{_normalize_time_symbol(date)})",
+                    "symbol": temporal_symbol,
                     "source_sentence": sentence,
                     "date_expression": date,
                 }
@@ -648,7 +648,7 @@ def _local_extract_deontic_norms(text: str) -> List[Dict[str, Any]]:
                 entities = _NAMED_ENTITY_RE.findall(sentence)
                 actor = entities[0] if entities else "actor"
                 actor_sym = _normalize_logic_symbol(actor, prefix="a")
-                norm_sym = _normalize_logic_symbol(f"{norm_type}_{index}", prefix="norm")
+                norm_symbol = _normalize_logic_symbol(f"{norm_type}_{index}", prefix="norm")
                 verb_rest = sentence[match.end():].strip().rstrip(".,;") or "perform_action"
                 action_sym = _normalize_logic_symbol(verb_rest[:40], prefix="act")
                 norms.append(
@@ -656,7 +656,7 @@ def _local_extract_deontic_norms(text: str) -> List[Dict[str, Any]]:
                         "norm_type": norm_type,
                         "modality": modality_symbol,
                         "formula": f"{modality_symbol}({actor_sym},{action_sym})",
-                        "symbol": norm_sym,
+                        "symbol": norm_symbol,
                         "actor": actor,
                         "action_text": verb_rest[:80],
                         "source_sentence": sentence,

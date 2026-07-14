@@ -37,7 +37,7 @@ def _extract_text_assertions(body: str) -> List[Dict[str, Any]]:
     for index, sentence in enumerate(sentence_re.split(body), start=1):
         text = sentence.strip()
         if text:
-            assertions.append({"assertion_id": f"auto-{index}", "text": text})
+            assertions.append({"assertion_id": f"sent-{index}", "text": text})
     return assertions
 
 

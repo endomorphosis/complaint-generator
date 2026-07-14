@@ -6226,7 +6226,10 @@ class ComplaintWorkspaceService:
         pipeline_status = str(draft_proof_report.get("proof_status") or "").strip()
         if pipeline_status and pipeline_status not in {"needs_review", ""}:
             merged["proof_status"] = pipeline_status
-        # Merge contradiction counts additively.
+        # Merge contradiction counts additively.  Note: both sources independently
+        # detect contradictions, so the sum may over-count if the same contradiction
+        # is reported by both the existing logic_review and the pipeline.  This is
+        # intentional — callers should treat the count as an upper bound.
         pipeline_contradictions = int(draft_proof_report.get("contradiction_count") or 0)
         merged["contradiction_count"] = int(merged.get("contradiction_count") or 0) + pipeline_contradictions
         # Chronology blocked is sticky.
