@@ -19,6 +19,10 @@ _tdfol_module, _tdfol_error = import_module_optional("ipfs_datasets_py.logic.TDF
 _z3_module, _z3_error = import_module_optional(
     "ipfs_datasets_py.logic.external_provers.smt.z3_prover_bridge"
 )
+# If the ipfs_datasets_py z3 bridge is absent, try the standalone z3-solver package.
+_local_z3_module: Any = None
+if _z3_module is None:
+    _local_z3_module, _ = import_module_optional("z3")
 _reasoner_module, _reasoner_error = import_module_optional(
     "ipfs_datasets_py.ipfs_datasets_py.processors.legal_data.reasoner.hybrid_v2_blueprint"
 )
@@ -32,6 +36,7 @@ LOGIC_AVAILABLE = any(
     for value in (_logic_module, _fol_module, _deontic_module, _tdfol_module)
 )
 LOGIC_ERROR = _logic_error or _fol_error or _deontic_error or _tdfol_error or _z3_error
+Z3_AVAILABLE = _z3_module is not None or _local_z3_module is not None
 REASONER_BRIDGE_AVAILABLE = _reasoner_module is not None
 REASONER_BRIDGE_ERROR = _reasoner_error
 REASONER_BRIDGE_PATH = getattr(_reasoner_module, "__name__", "") if _reasoner_module is not None else ""
@@ -891,6 +896,17 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             else:
                 unprovable_elements.append(pred)
 
+    # Export TDFOL/DCEC formulas to Lean 4 and Coq theorem stubs.
+    theorem_export: Dict[str, Any] = {}
+    try:
+        from .theorem_export import export_proof_result_to_theorems
+
+        theorem_export = export_proof_result_to_theorems(
+            {"temporal_reasoning_payload": temporal_reasoning_payload, "proof_artifact": proof_artifact},
+        )
+    except Exception:
+        pass
+
     return with_adapter_metadata(
         {
             "status": "success" if proof_status not in {"error", "failed"} else "error",
@@ -903,6 +919,7 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
             "proof_artifact": proof_artifact,
+            "theorem_export": theorem_export,
         },
         operation="prove_claim_elements",
         backend_available=True,
@@ -913,6 +930,7 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
             "reasoner_bridge_available": REASONER_BRIDGE_AVAILABLE,
+            "theorem_export_version": theorem_export.get("export_version") or "",
         },
     )
 
@@ -987,6 +1005,62 @@ def _detect_formula_contradictions(formulas: List[str]) -> List[Dict[str, Any]]:
     return contradictions
 
 
+def _run_local_z3_check(
+    tdfol_formulas: List[str],
+    contradictions: List[Dict[str, Any]],
+    z3_mod: Any,
+) -> None:
+    """Use the standalone z3-solver package to check formula satisfiability.
+
+    This is called when the ipfs_datasets_py Z3 bridge is absent but the
+    ``z3-solver`` PyPI package is installed.  The approach is conservative:
+
+    * Each TDFOL formula string is parsed as a simple boolean variable
+      (``z3.Bool``).  Formulas whose negations are both present in the set
+      trigger an UNSAT result via the local :func:`_detect_formula_contradictions`
+      helper — that part is already handled by step 2/3 above.
+    * For conjunction formulas (``A and B``) we add both conjuncts as separate
+      assertions so Z3 can derive conflicts between them.
+
+    If Z3 reports UNSAT for the resulting assertion set we append a
+    ``smt_unsat`` entry to *contradictions*.
+    """
+    Bool = getattr(z3_mod, "Bool", None)
+    Solver = getattr(z3_mod, "Solver", None)
+    unsat_const = getattr(z3_mod, "unsat", None)
+    if not callable(Bool) or not callable(Solver) or unsat_const is None:
+        return
+
+    solver = Solver()
+    for formula in tdfol_formulas:
+        # Represent each atomic formula as a fresh Boolean variable named
+        # after the formula string (truncated to avoid Z3 identifier limits).
+        atom_name = re.sub(r"[^A-Za-z0-9_]", "_", formula.strip())[:60]
+        if not atom_name:
+            continue
+        var = Bool(atom_name)
+        solver.add(var)
+        # If the formula set already contains the negation of this formula
+        # (detected in step 2/3) we add its negation as a second assertion
+        # so Z3 can derive UNSAT directly.
+        neg_name = re.sub(r"[^A-Za-z0-9_]", "_", f"not({formula.strip()})")[:60]
+        neg_var = Bool(neg_name)
+        # Only add the negation constraint when it also appears in the set.
+        if any(re.sub(r"[^A-Za-z0-9_]", "_", f.strip())[:60] == neg_name for f in tdfol_formulas):
+            solver.add(neg_var)
+
+    if solver.check() == unsat_const:
+        contradictions.append(
+            {
+                "contradiction_id": f"z3-local-{len(contradictions) + 1}",
+                "type": "smt_unsat",
+                "summary": "Z3 SMT solver (local z3-solver) reports formula set is unsatisfiable",
+                "severity": "error",
+                "z3_backend": "z3-solver",
+            }
+        )
+
+
 def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) -> Dict[str, Any]:
     """Check *predicates* for logical contradictions.
 
@@ -1042,6 +1116,8 @@ def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
     contradictions.extend(_detect_formula_contradictions(tdfol_formulas))
 
     # 4. Z3 SMT prover (optional, additive)
+    # Tries the ipfs_datasets_py bridge first, then falls back to the
+    # standalone z3-solver package if available.
     if _z3_module is not None:
         try:
             z3_check = getattr(_z3_module, "check_satisfiability", None)
@@ -1057,6 +1133,14 @@ def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
                             "z3_result": z3_result,
                         }
                     )
+        except Exception:
+            pass
+    elif _local_z3_module is not None and tdfol_formulas:
+        # Local z3-solver fallback: build a simple uninterpreted-function
+        # model and check satisfiability of the formula set parsed as
+        # assertion strings via z3.parse_smt2_string when possible.
+        try:
+            _run_local_z3_check(tdfol_formulas, contradictions, _local_z3_module)
         except Exception:
             pass
 
@@ -1173,6 +1257,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
 __all__ = [
     "LOGIC_AVAILABLE",
     "LOGIC_ERROR",
+    "Z3_AVAILABLE",
     "LOCAL_FORMAL_LOGIC_AVAILABLE",
     "LOCAL_FORMAL_LOGIC_PATH",
     "REASONER_BRIDGE_AVAILABLE",

@@ -125,6 +125,7 @@ def run_pipeline(
     proof_status = "needs_review"
     contradiction_count = 0
     chronology_blocked = False
+    theorem_export: Dict[str, Any] = {}
     try:
         proof_result = prove_claim_elements(predicates)
         proof_status = str(
@@ -143,6 +144,8 @@ def run_pipeline(
             or {}
         )
         chronology_blocked = bool(theorem_meta.get("chronology_blocked"))
+        # Carry through the Lean 4 / Coq export from prove_claim_elements.
+        theorem_export = dict(proof_result.get("theorem_export") or {})
     except Exception as exc:
         errors.append(f"prove_claim_elements: {exc}")
 
@@ -181,6 +184,7 @@ def run_pipeline(
         "policy_warnings": policy_warnings,
         "has_blockers": has_blockers,
         "predicate_count": len(predicates),
+        "theorem_export": theorem_export,
         "pipeline_version": DRAFT_LOGIC_PIPELINE_VERSION,
         "errors": errors,
         # Carry through sub-results for downstream consumers.

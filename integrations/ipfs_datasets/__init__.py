@@ -86,6 +86,12 @@ from .vector_store import (
 	get_embeddings_router,
 	search_vector_index,
 )
+from .theorem_export import (
+	export_formulas_to_lean4,
+	export_formulas_to_coq,
+	export_proof_result_to_theorems,
+	THEOREM_EXPORT_VERSION,
+)
 
 __all__ = [
 	"CapabilityStatus",
@@ -161,4 +167,8 @@ __all__ = [
 	"create_vector_index",
 	"search_vector_index",
 	"get_embeddings_router",
+	"export_formulas_to_lean4",
+	"export_formulas_to_coq",
+	"export_proof_result_to_theorems",
+	"THEOREM_EXPORT_VERSION",
 ]
