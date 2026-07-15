@@ -889,6 +889,13 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
         proof_status = "needs_review"
 
     # Classify each predicate as provable / unprovable based on proof status.
+    # claim_element predicates are classified as provable only when their coverage
+    # status is 'supported'; partially-supported or missing elements are *not*
+    # classified as unprovable here, because those gaps are already tracked by the
+    # missing_support_kind proof gap mechanism and would otherwise create duplicate
+    # "logic_unprovable" proof gaps for what is really a support-coverage gap.
+    # Unprovable classification is reserved for explicit reasoner failures
+    # (proof_status == "failed") rather than partial-coverage situations.
     provable_elements: List[Dict[str, Any]] = []
     unprovable_elements: List[Dict[str, Any]] = []
     for pred in predicate_list:
@@ -897,7 +904,9 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             coverage = str(pred.get("coverage_status") or "").strip().lower()
             if coverage == "supported":
                 provable_elements.append(pred)
-            else:
+            elif proof_status == "failed":
+                # Only flag as unprovable when the reasoner explicitly rejected the
+                # predicate; a missing/partial coverage status is not a logic failure.
                 unprovable_elements.append(pred)
 
     # Export TDFOL/DCEC formulas to Lean 4 and Coq theorem stubs.

@@ -893,7 +893,7 @@ class LegalAuthoritySearchHook:
                           max_results: int = 10,
                           allow_live_scrape_fallback: bool = False) -> List[Dict[str, Any]]:
         """Search state statutory law via the ipfs legal adapter."""
-        if not LEGAL_SCRAPERS_AVAILABLE or search_state_laws is None:
+        if search_state_laws is None:
             self.mediator.log('legal_authority_unavailable',
                 search_type='state_law', query=query)
             return []
