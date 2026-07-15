@@ -209,9 +209,9 @@ LEGAL_SCRAPERS_ERROR = (
 )
 
 # Environment variable that enables the IPFS streaming live-lookup pass.
-# Set to "1" to allow search_state_laws to attempt IPFS streaming when the
-# HuggingFace corpus / parquet backends return no results and the
-# ipfs_datasets_py state_laws_ipfs_stream adapter is importable.
+# Set to "1", "true", "yes", or "on" to allow search_state_laws to attempt
+# IPFS streaming when the HuggingFace corpus / parquet backends return no
+# results and the ipfs_datasets_py state_laws_ipfs_stream adapter is importable.
 _IPFS_STREAM_STATE_LAWS_ENV = "COMPLAINT_ENABLE_IPFS_STATE_LAWS_STREAM"
 
 

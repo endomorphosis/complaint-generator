@@ -324,7 +324,7 @@ def test_build_corpus_index_script_imports():
     import importlib.util
     from pathlib import Path
 
-    script_path = Path(__file__).resolve().parent.parent / "scripts" / "build_legal_corpus_index.py"
+    script_path = Path(__file__).resolve().parents[1] / "scripts" / "build_legal_corpus_index.py"
     assert script_path.is_file(), "build_legal_corpus_index.py should exist"
 
     spec = importlib.util.spec_from_file_location("build_legal_corpus_index", script_path)

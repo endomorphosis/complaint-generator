@@ -16,12 +16,12 @@ Dimension weights
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 QUALITY_SCORER_VERSION = "draft-quality-scorer-v1"
 
 # Overall score thresholds → letter grades
-_GRADE_THRESHOLDS: List[tuple[int, str]] = [
+_GRADE_THRESHOLDS: List[Tuple[int, str]] = [
     (90, "A"),
     (80, "B"),
     (70, "C"),
