@@ -474,6 +474,9 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "build_mike_handoff",
     "get_mike_integration_status",
     "sync_mike_final_draft",
+    "get_draft_proof_report",
+    "render_draft_proof_report",
+    "pin_draft_proof_report",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -752,6 +755,24 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "sync-mike-draft",
         "mcp_tool": "complaint.sync_mike_final_draft",
         "browser_sdk_method": "syncMikeFinalDraft",
+    },
+    "draft_proof_report": {
+        "package_export": "get_draft_proof_report",
+        "cli_command": "get-draft-proof-report",
+        "mcp_tool": "complaint.get_draft_proof_report",
+        "browser_sdk_method": "getDraftProofReport",
+    },
+    "render_draft_proof_report": {
+        "package_export": "render_draft_proof_report",
+        "cli_command": "render-draft-proof-report",
+        "mcp_tool": "complaint.render_draft_proof_report",
+        "browser_sdk_method": "renderDraftProofReport",
+    },
+    "pin_draft_proof_report": {
+        "package_export": "pin_draft_proof_report",
+        "cli_command": "pin-draft-proof-report",
+        "mcp_tool": "complaint.pin_draft_proof_report",
+        "browser_sdk_method": "pinDraftProofReport",
     },
     "export_critic": {
         "package_export": "review_generated_exports",
@@ -7173,6 +7194,142 @@ class ComplaintWorkspaceService:
             },
         }
 
+    def get_draft_proof_report(
+        self,
+        user_id: Optional[str],
+        *,
+        state_code: Optional[str] = None,
+        allow_live_scrape_fallback: bool = False,
+    ) -> Dict[str, Any]:
+        """Run the draft-logic pipeline on the current complaint draft.
+
+        Returns the full ``DraftProofReport`` dict from
+        :func:`~integrations.ipfs_datasets.draft_logic_pipeline.run_pipeline`,
+        enriched with a quality score from
+        :func:`~integrations.ipfs_datasets.quality.score_draft_quality`.
+
+        Parameters
+        ----------
+        user_id:
+            Workspace user identifier.
+        state_code:
+            Optional two-letter US state abbreviation to narrow state-law
+            corpus searches.
+        allow_live_scrape_fallback:
+            Whether to permit live-scrape network calls during corpus grounding.
+            Defaults to ``False`` to keep the tool fast in offline environments.
+        """
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        draft = dict(state.get("draft") or {})
+        body = str(draft.get("body") or "").strip()
+        if not body:
+            return {
+                "status": "no_draft",
+                "message": "No complaint draft is available.  Run complaint.generate_complaint first.",
+                "proof_report": None,
+                "quality_score": None,
+            }
+        proof_report = _run_draft_logic_pipeline_safely(
+            body,
+            state=state_code or str(state.get("intake_answers", {}).get("state") or "").strip() or None,
+        )
+        quality_score: Optional[Dict[str, Any]] = None
+        try:
+            from integrations.ipfs_datasets.quality import score_draft_quality
+            quality_score = score_draft_quality(proof_report, claim_id=resolved_user_id)
+        except Exception:
+            pass
+        return {
+            "status": "ok",
+            "user_id": resolved_user_id,
+            "proof_report": proof_report,
+            "quality_score": quality_score,
+            "draft_body_length": len(body),
+        }
+
+    def render_draft_proof_report(
+        self,
+        user_id: Optional[str],
+        *,
+        state_code: Optional[str] = None,
+        claim_id: str = "",
+    ) -> Dict[str, Any]:
+        """Run the pipeline and render the proof report as Markdown.
+
+        Returns a dict with a ``rendered`` key containing the Markdown string.
+        """
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        proof_result = self.get_draft_proof_report(
+            resolved_user_id,
+            state_code=state_code,
+        )
+        if proof_result.get("status") != "ok":
+            return proof_result
+        proof_report = dict(proof_result.get("proof_report") or {})
+        rendered = ""
+        try:
+            from integrations.ipfs_datasets.draft_logic_pipeline import render_proof_report
+            rendered = render_proof_report(
+                proof_report,
+                claim_id=claim_id or resolved_user_id,
+            )
+        except Exception as exc:
+            rendered = f"# Proof Report (render error)\n\n`{exc}`\n"
+        return {
+            "status": "ok",
+            "user_id": resolved_user_id,
+            "rendered": rendered,
+            "proof_report": proof_report,
+            "quality_score": proof_result.get("quality_score"),
+        }
+
+    def pin_draft_proof_report(
+        self,
+        user_id: Optional[str],
+        *,
+        state_code: Optional[str] = None,
+        claim_id: str = "",
+    ) -> Dict[str, Any]:
+        """Run the pipeline, then pin the proof report to IPFS.
+
+        Returns the pin result from
+        :func:`~integrations.ipfs_datasets.draft_logic_pipeline.pin_proof_report_to_ipfs`
+        (``report_cid``, ``lean4_cid``, ``coq_cid``, ``pinned``, ``backend``,
+        ``pinned_at``) plus the quality score.
+        """
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        proof_result = self.get_draft_proof_report(
+            resolved_user_id,
+            state_code=state_code,
+        )
+        if proof_result.get("status") != "ok":
+            return proof_result
+        proof_report = dict(proof_result.get("proof_report") or {})
+        pin_result: Dict[str, Any] = {
+            "report_cid": "",
+            "lean4_cid": "",
+            "coq_cid": "",
+            "pinned": False,
+            "backend": "unavailable",
+            "pinned_at": "",
+        }
+        try:
+            from integrations.ipfs_datasets.draft_logic_pipeline import pin_proof_report_to_ipfs
+            pin_result = pin_proof_report_to_ipfs(
+                proof_report,
+                claim_id=claim_id or resolved_user_id,
+            )
+        except Exception as exc:
+            pin_result["error"] = str(exc)
+        return {
+            "status": "ok",
+            "user_id": resolved_user_id,
+            "pin_result": pin_result,
+            "proof_report": proof_report,
+            "quality_score": proof_result.get("quality_score"),
+        }
+
     def update_filing_metadata(
         self,
         user_id: Optional[str],
@@ -8705,6 +8862,9 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.build_mike_handoff", "description": "Build a Mike editor handoff payload with prefilled complaint draft, review state, and evidence context."},
                 {"name": "complaint.get_mike_integration_status", "description": "Return Mike handoff/sync status, correlation IDs, and recommended next integration action."},
                 {"name": "complaint.sync_mike_final_draft", "description": "Sync an edited draft from Mike back into the complaint workspace and persist the merged draft state."},
+                {"name": "complaint.get_draft_proof_report", "description": "Run the draft-logic pipeline on the current complaint draft and return the full DraftProofReport with proof status, contradictions, corpus coverage, and deontic norms."},
+                {"name": "complaint.render_draft_proof_report", "description": "Run the draft-logic pipeline on the current draft and render a human-readable Markdown proof report."},
+                {"name": "complaint.pin_draft_proof_report", "description": "Run the draft-logic pipeline, then pin the DraftProofReport and its Lean 4 / Coq theorem exports to IPFS for immutable provenance."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
                 {"name": "complaint.export_complaint_packet", "description": "Export the current lawsuit complaint packet with intake, evidence, review, and draft content."},
@@ -8987,6 +9147,24 @@ class ComplaintWorkspaceService:
                 assertion_annotations=args.get("assertion_annotations"),
                 authority_links=args.get("authority_links"),
                 sync_provenance=args.get("sync_provenance"),
+            )
+        if tool_name == "complaint.get_draft_proof_report":
+            return self.get_draft_proof_report(
+                args.get("user_id"),
+                state_code=args.get("state_code"),
+                allow_live_scrape_fallback=bool(args.get("allow_live_scrape_fallback", False)),
+            )
+        if tool_name == "complaint.render_draft_proof_report":
+            return self.render_draft_proof_report(
+                args.get("user_id"),
+                state_code=args.get("state_code"),
+                claim_id=str(args.get("claim_id") or ""),
+            )
+        if tool_name == "complaint.pin_draft_proof_report":
+            return self.pin_draft_proof_report(
+                args.get("user_id"),
+                state_code=args.get("state_code"),
+                claim_id=str(args.get("claim_id") or ""),
             )
         if tool_name == "complaint.generate_complaint":
             return self.generate_complaint(

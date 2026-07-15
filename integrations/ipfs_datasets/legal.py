@@ -162,6 +162,12 @@ _state_code_map, _state_code_map_error = import_attr_optional(
     "ipfs_datasets_py.processors.legal_scrapers.state_laws_scraper",
     "US_STATES",
 )
+# Live IPFS streaming backend — optional; available when ipfs_datasets_py
+# exposes the state_laws IPFS-streaming dataset adapter.
+_stream_ipfs_state_laws_async, _ipfs_stream_state_laws_error = import_attr_optional(
+    "ipfs_datasets_py.datasets.state_laws_ipfs_stream",
+    "stream_state_laws_from_ipfs",
+)
 
 
 def _resolve_state_code(value: Optional[str], *, default: str = "OR") -> str:
@@ -181,8 +187,13 @@ LEGAL_SOURCE_AVAILABILITY = {
     "federal_statutes": _search_us_code_async is not None,
     "federal_regulations": _search_federal_register_async is not None,
     "case_law": _search_recap_documents_async is not None,
-    "state_statutes": _search_state_law_corpus_async is not None or _scrape_state_laws_async is not None,
+    "state_statutes": (
+        _search_state_law_corpus_async is not None
+        or _scrape_state_laws_async is not None
+        or _stream_ipfs_state_laws_async is not None
+    ),
     "administrative_rules": _search_state_law_corpus_async is not None or _scrape_state_admin_rules_async is not None,
+    "state_laws_ipfs_stream": _stream_ipfs_state_laws_async is not None,
 }
 
 LEGAL_SCRAPERS_AVAILABLE = any(LEGAL_SOURCE_AVAILABILITY.values())
@@ -196,6 +207,54 @@ LEGAL_SCRAPERS_ERROR = (
     or _state_admin_rules_scrape_error
     or _state_code_map_error
 )
+
+# Environment variable that enables the IPFS streaming live-lookup pass.
+# Set to "1" to allow search_state_laws to attempt IPFS streaming when the
+# HuggingFace corpus / parquet backends return no results and the
+# ipfs_datasets_py state_laws_ipfs_stream adapter is importable.
+_IPFS_STREAM_STATE_LAWS_ENV = "COMPLAINT_ENABLE_IPFS_STATE_LAWS_STREAM"
+
+
+def _search_ipfs_state_laws_stream(
+    query: str,
+    *,
+    state_code: str,
+    max_results: int,
+) -> List[Dict[str, Any]]:
+    """Attempt a live IPFS-streaming search of the state-laws dataset.
+
+    Uses the ``ipfs_datasets_py.datasets.state_laws_ipfs_stream`` adapter when
+    available.  Returns an empty list if the adapter is absent, the IPFS
+    backend is unavailable, or any error occurs.  Guarded by
+    ``COMPLAINT_ENABLE_IPFS_STATE_LAWS_STREAM=1``.
+    """
+    import os
+
+    if os.environ.get(_IPFS_STREAM_STATE_LAWS_ENV, "").strip() not in {"1", "true", "yes", "on"}:
+        return []
+    if _stream_ipfs_state_laws_async is None:
+        return []
+    try:
+        payload = run_async_compat(
+            _stream_ipfs_state_laws_async(
+                {
+                    "query": query,
+                    "state": state_code,
+                    "top_k": max_results,
+                    "output_format": "json",
+                }
+            )
+        )
+        return _normalize_payload_results(
+            payload,
+            "statute",
+            "state_law_ipfs_stream",
+            query=query,
+            operation="search_state_laws_ipfs_stream",
+            max_results=max_results,
+        )
+    except Exception:
+        return []
 
 
 def _extract_payload_items(payload: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
@@ -797,6 +856,23 @@ def search_state_laws(
         diagnostics["selected_backend"] = "huggingface_parquet"
         _set_last_legal_search_diagnostic("search_state_laws", diagnostics)
         return parquet_results
+
+    # Try live IPFS streaming before falling back to full live scrape.
+    # Gated by COMPLAINT_ENABLE_IPFS_STATE_LAWS_STREAM=1.
+    diagnostics["attempted_backends"].append("ipfs_stream")
+    ipfs_stream_results = _search_ipfs_state_laws_stream(
+        query,
+        state_code=state_code,
+        max_results=max_results,
+    )
+    if ipfs_stream_results:
+        diagnostics["selected_backend"] = "ipfs_stream"
+        _set_last_legal_search_diagnostic("search_state_laws", diagnostics)
+        return _attach_hf_corpus_metadata(
+            ipfs_stream_results,
+            hf_dataset_id=DEFAULT_STATE_LAWS_DATASET_ID,
+            retrieval_backend="ipfs_stream",
+        )
 
     if not allow_live_scrape_fallback:
         diagnostics["selected_backend"] = ""

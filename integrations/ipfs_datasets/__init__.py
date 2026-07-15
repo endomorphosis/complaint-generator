@@ -126,6 +126,10 @@ from .draft_logic_pipeline import (
 from .policy_rules import (
 	check_policy_rules_with_deontic_norms,
 )
+from .quality import (
+	QUALITY_SCORER_VERSION,
+	score_draft_quality,
+)
 
 __all__ = [
 	"CapabilityStatus",
@@ -235,4 +239,7 @@ __all__ = [
 	"pin_proof_report_to_ipfs",
 	# Policy rules
 	"check_policy_rules_with_deontic_norms",
+	# Draft quality scorer
+	"QUALITY_SCORER_VERSION",
+	"score_draft_quality",
 ]
