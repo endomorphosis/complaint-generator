@@ -92,6 +92,40 @@ from .theorem_export import (
 	export_proof_result_to_theorems,
 	THEOREM_EXPORT_VERSION,
 )
+from .logic import (
+	LOGIC_AVAILABLE,
+	LOGIC_ERROR,
+	Z3_AVAILABLE,
+	REASONER_BRIDGE_AVAILABLE,
+	REASONER_BRIDGE_ERROR,
+	LOCAL_FORMAL_LOGIC_AVAILABLE,
+	LOCAL_FORMAL_LOGIC_PATH,
+	text_to_fol,
+	legal_text_to_deontic,
+	prove_claim_elements,
+	check_contradictions,
+	run_hybrid_reasoning,
+)
+from .legal import (
+	LEGAL_SCRAPERS_AVAILABLE,
+	LEGAL_SCRAPERS_ERROR,
+	LEGAL_SOURCE_AVAILABILITY,
+	search_us_code,
+	search_federal_register,
+	search_recap_documents,
+	search_state_laws,
+	search_state_administrative_rules,
+	constrain_assertions_to_corpus,
+)
+from .draft_logic_pipeline import (
+	DRAFT_LOGIC_PIPELINE_VERSION,
+	run_pipeline as run_draft_logic_pipeline,
+	render_proof_report,
+	pin_proof_report_to_ipfs,
+)
+from .policy_rules import (
+	check_policy_rules_with_deontic_norms,
+)
 
 __all__ = [
 	"CapabilityStatus",
@@ -171,4 +205,34 @@ __all__ = [
 	"export_formulas_to_coq",
 	"export_proof_result_to_theorems",
 	"THEOREM_EXPORT_VERSION",
+	# Logic pipeline
+	"LOGIC_AVAILABLE",
+	"LOGIC_ERROR",
+	"Z3_AVAILABLE",
+	"REASONER_BRIDGE_AVAILABLE",
+	"REASONER_BRIDGE_ERROR",
+	"LOCAL_FORMAL_LOGIC_AVAILABLE",
+	"LOCAL_FORMAL_LOGIC_PATH",
+	"text_to_fol",
+	"legal_text_to_deontic",
+	"prove_claim_elements",
+	"check_contradictions",
+	"run_hybrid_reasoning",
+	# Legal corpus
+	"LEGAL_SCRAPERS_AVAILABLE",
+	"LEGAL_SCRAPERS_ERROR",
+	"LEGAL_SOURCE_AVAILABILITY",
+	"search_us_code",
+	"search_federal_register",
+	"search_recap_documents",
+	"search_state_laws",
+	"search_state_administrative_rules",
+	"constrain_assertions_to_corpus",
+	# Draft logic pipeline
+	"DRAFT_LOGIC_PIPELINE_VERSION",
+	"run_draft_logic_pipeline",
+	"render_proof_report",
+	"pin_proof_report_to_ipfs",
+	# Policy rules
+	"check_policy_rules_with_deontic_norms",
 ]

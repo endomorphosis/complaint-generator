@@ -967,12 +967,59 @@ def search_state_administrative_rules(
 # Legal corpus containment — constrain FOL assertions to grounded citations
 # ---------------------------------------------------------------------------
 
+# Environment variable that points to a local vector index directory built from
+# the legal corpus.  When set, constrain_assertions_to_corpus will try a
+# semantic (embedding-based) similarity search as a fourth grounding pass.
+_LEGAL_VECTOR_INDEX_DIR_ENV = "COMPLAINT_LEGAL_VECTOR_INDEX_DIR"
+
+
+def _search_legal_vector_index(
+    query: str,
+    *,
+    index_dir: str,
+    max_results: int,
+) -> List[Dict[str, Any]]:
+    """Try a semantic vector search against a pre-built legal corpus index.
+
+    Returns a list of normalised authority dicts (same shape as other
+    ``search_*`` helpers) or an empty list when the index is absent / not
+    set up.
+    """
+    from .vector_store import search_vector_index
+
+    result = search_vector_index(
+        query,
+        index_name="legal_corpus",
+        index_dir=index_dir,
+        top_k=max_results,
+    )
+    if not isinstance(result, dict) or result.get("status") not in {"success", "available"}:
+        return []
+    raw_hits: List[Dict[str, Any]] = list(result.get("results") or [])
+    normalised: List[Dict[str, Any]] = []
+    for item in raw_hits[:max_results]:
+        if not isinstance(item, dict):
+            continue
+        normalised.append(
+            _normalize_authority(
+                item,
+                str(item.get("type") or "legal_corpus"),
+                str(item.get("source") or "vector_index"),
+                query=query,
+                operation="search_legal_vector_index",
+                upstream_collection="results",
+            )
+        )
+    return normalised
+
+
 def constrain_assertions_to_corpus(
     assertions: List[Dict[str, Any]],
     *,
     state: Optional[str] = None,
     max_results_per_assertion: int = 3,
     allow_live_scrape_fallback: bool = False,
+    legal_vector_index_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Ground *assertions* against the legal corpus and classify each one.
 
@@ -1002,7 +1049,21 @@ def constrain_assertions_to_corpus(
         Whether to permit live-scrape calls when IPFS backends are absent.
         Defaults to *False* to keep the function fast in offline / test
         environments.
+    legal_vector_index_dir:
+        Path to a directory that contains a pre-built legal corpus vector index
+        (``legal_corpus.vectors.npy`` + ``legal_corpus.records.jsonl``).
+        When ``None`` the function falls back to the
+        ``COMPLAINT_LEGAL_VECTOR_INDEX_DIR`` environment variable.  If neither
+        is set the semantic search pass is skipped.
     """
+    import os
+
+    _vector_index_dir: Optional[str] = (
+        legal_vector_index_dir
+        or os.environ.get(_LEGAL_VECTOR_INDEX_DIR_ENV, "").strip()
+        or None
+    )
+
     grounded: List[Dict[str, Any]] = []
     ungrounded: List[Dict[str, Any]] = []
     details: List[Dict[str, Any]] = []
@@ -1040,6 +1101,18 @@ def constrain_assertions_to_corpus(
                     state=state,
                     max_results=max_results_per_assertion,
                     allow_live_scrape_fallback=allow_live_scrape_fallback,
+                )
+                corpus_hits.extend(hits or [])
+            except Exception:
+                pass
+
+        # 4. Semantic vector similarity search (optional, requires pre-built index)
+        if not corpus_hits and _vector_index_dir:
+            try:
+                hits = _search_legal_vector_index(
+                    text,
+                    index_dir=_vector_index_dir,
+                    max_results=max_results_per_assertion,
                 )
                 corpus_hits.extend(hits or [])
             except Exception:

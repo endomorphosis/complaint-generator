@@ -11,10 +11,19 @@ Orchestrates the full proof pipeline for a complaint draft body:
 The result is a :class:`DraftProofReport` (plain dict) that the workspace
 injects into ``_build_mike_sync_diagnostics()`` via the ``logic_review``
 parameter.
+
+Additional utilities:
+
+* :func:`render_proof_report` — render a ``DraftProofReport`` as a human-readable
+  Markdown document suitable for display in the complaint editor or export.
+* :func:`pin_proof_report_to_ipfs` — pin a ``DraftProofReport`` (plus its
+  Lean 4 / Coq theorem exports) to IPFS for immutable provenance tracking.
 """
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .legal import constrain_assertions_to_corpus
@@ -196,7 +205,276 @@ def run_pipeline(
     }
 
 
+# ---------------------------------------------------------------------------
+# Proof report renderer
+# ---------------------------------------------------------------------------
+
+def render_proof_report(
+    report: Dict[str, Any],
+    *,
+    claim_id: str = "",
+    rendered_at: Optional[str] = None,
+) -> str:
+    """Render a ``DraftProofReport`` as a human-readable Markdown document.
+
+    Parameters
+    ----------
+    report:
+        The dict returned by :func:`run_pipeline`.
+    claim_id:
+        Optional claim or case identifier embedded in the report header.
+    rendered_at:
+        ISO-8601 timestamp.  Defaults to the current UTC time.
+
+    Returns
+    -------
+    str
+        Markdown-formatted proof report suitable for display or export.
+    """
+    timestamp = rendered_at or datetime.now(tz=timezone.utc).isoformat()
+    lines: List[str] = []
+
+    # Header
+    lines.append("# Complaint Draft Proof Report")
+    if claim_id:
+        lines.append(f"**Claim ID:** {claim_id}")
+    lines.append(f"**Generated:** {timestamp}")
+    lines.append(f"**Pipeline version:** {report.get('pipeline_version', DRAFT_LOGIC_PIPELINE_VERSION)}")
+    lines.append("")
+
+    # Status summary
+    proof_status = str(report.get("proof_status") or "needs_review")
+    status_icon = {"passed": "✅", "needs_review": "⚠️", "error": "❌", "failed": "❌"}.get(
+        proof_status, "⚠️"
+    )
+    lines.append(f"## Status: {status_icon} `{proof_status}`")
+    lines.append("")
+
+    has_blockers = bool(report.get("has_blockers"))
+    if has_blockers:
+        lines.append("> **⛔ This draft has blockers that must be resolved before filing.**")
+    else:
+        lines.append("> **✔ No blockers found.  Draft may proceed.**")
+    lines.append("")
+
+    # Key metrics
+    lines.append("## Metrics")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    lines.append(f"| Predicates extracted | {report.get('predicate_count', 0)} |")
+    contradiction_count = int(report.get("contradiction_count") or 0)
+    lines.append(f"| Contradictions | {contradiction_count} |")
+    chronology_blocked = bool(report.get("chronology_blocked"))
+    lines.append(f"| Chronology blocked | {'Yes' if chronology_blocked else 'No'} |")
+    coverage = report.get("corpus_coverage_percent")
+    lines.append(f"| Corpus coverage | {f'{coverage}%' if coverage is not None else 'n/a'} |")
+    norms = list(report.get("norms") or [])
+    lines.append(f"| Deontic norms found | {len(norms)} |")
+    violations = list(report.get("policy_violations") or [])
+    warnings = list(report.get("policy_warnings") or [])
+    lines.append(f"| Policy violations | {len(violations)} |")
+    lines.append(f"| Policy warnings | {len(warnings)} |")
+    lines.append("")
+
+    # Ungrounded assertions
+    ungrounded = list(report.get("ungrounded_assertions") or [])
+    if ungrounded:
+        lines.append("## ⚠ Ungrounded Assertions")
+        lines.append("")
+        lines.append(
+            "The following assertions could not be matched to any authoritative legal corpus document."
+        )
+        lines.append("Each must be grounded in a statute, regulation, or case before filing.")
+        lines.append("")
+        for item in ungrounded:
+            assertion_id = str(item.get("assertion_id") or item.get("id") or "")
+            text = str(item.get("text") or "").strip()
+            prefix = f"**[{assertion_id}]** " if assertion_id else ""
+            lines.append(f"- {prefix}{text}")
+        lines.append("")
+
+    # Contradictions
+    if contradiction_count:
+        lines.append("## ❌ Contradictions")
+        lines.append("")
+        proof_result = dict(report.get("proof_result") or {})
+        contradiction_list = list(proof_result.get("contradictions") or [])
+        if contradiction_list:
+            for c in contradiction_list:
+                cid = str(c.get("contradiction_id") or "")
+                summary = str(c.get("summary") or "")
+                severity = str(c.get("severity") or "warning")
+                icon = "❌" if severity == "error" else "⚠️"
+                lines.append(f"- {icon} **[{cid}]** {summary}")
+        else:
+            lines.append(f"- {contradiction_count} contradiction(s) detected.")
+        lines.append("")
+
+    # Policy violations
+    if violations:
+        lines.append("## ❌ Policy Violations")
+        lines.append("")
+        for v in violations:
+            vtype = str(v.get("violation_type") or "violation")
+            offending = str(v.get("offending_sentence") or "").strip()
+            lines.append(f"- **{vtype}**: _{offending}_")
+        lines.append("")
+
+    # Policy warnings
+    if warnings:
+        lines.append("## ⚠ Policy Warnings")
+        lines.append("")
+        for w in warnings:
+            wtype = str(w.get("warning_type") or "warning")
+            formula = str(w.get("formula") or "").strip()
+            suffix = f" (`{formula}`)" if formula else ""
+            lines.append(f"- **{wtype}**{suffix}")
+        lines.append("")
+
+    # Deontic norms summary
+    if norms:
+        lines.append("## Deontic Norms Detected")
+        lines.append("")
+        for norm in norms:
+            norm_type = str(norm.get("norm_type") or "").capitalize()
+            formula = str(norm.get("formula") or "").strip()
+            trigger = str(norm.get("trigger_keyword") or "").strip()
+            detail = formula or trigger
+            lines.append(f"- **{norm_type}**: `{detail}`")
+        lines.append("")
+
+    # Theorem export summary
+    theorem_export = dict(report.get("theorem_export") or {})
+    tdfol_count = int(theorem_export.get("tdfol_formula_count") or 0)
+    dcec_count = int(theorem_export.get("dcec_formula_count") or 0)
+    if tdfol_count or dcec_count:
+        lines.append("## Theorem Export")
+        lines.append("")
+        lines.append(f"- TDFOL formulas: {tdfol_count}")
+        lines.append(f"- DCEC formulas: {dcec_count}")
+        export_version = str(theorem_export.get("export_version") or "")
+        if export_version:
+            lines.append(f"- Export version: `{export_version}`")
+        lean4_present = bool(theorem_export.get("lean4"))
+        coq_present = bool(theorem_export.get("coq"))
+        if lean4_present:
+            lines.append("- Lean 4 stub: available")
+        if coq_present:
+            lines.append("- Coq stub: available")
+        lines.append("")
+
+    # Pipeline errors
+    errors = list(report.get("errors") or [])
+    if errors:
+        lines.append("## Pipeline Errors")
+        lines.append("")
+        for err in errors:
+            lines.append(f"- `{err}`")
+        lines.append("")
+
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# IPFS provenance pinning
+# ---------------------------------------------------------------------------
+
+def pin_proof_report_to_ipfs(
+    report: Dict[str, Any],
+    *,
+    claim_id: str = "",
+) -> Dict[str, Any]:
+    """Pin a ``DraftProofReport`` and its theorem exports to IPFS.
+
+    Serialises the report as JSON and pins it via the workspace IPFS backend
+    (``integrations.ipfs_datasets.storage``).  The Lean 4 and Coq theorem
+    export strings are pinned as separate blobs so each artifact has its own
+    CID.
+
+    When the IPFS backend is unavailable (e.g. in offline / test
+    environments) the function falls back gracefully to a local content-hash
+    record without raising an exception.
+
+    Parameters
+    ----------
+    report:
+        The dict returned by :func:`run_pipeline`.
+    claim_id:
+        Optional claim identifier embedded in the pinned JSON envelope.
+
+    Returns
+    -------
+    dict
+        ``{"report_cid": str, "lean4_cid": str, "coq_cid": str,
+           "pinned": bool, "backend": str, "pinned_at": str}``
+    """
+    from .storage import store_bytes, pin_cid, IPFS_AVAILABLE
+
+    pinned_at = datetime.now(tz=timezone.utc).isoformat()
+    backend = "ipfs" if IPFS_AVAILABLE else "local_content_hash"
+
+    # Serialise the report envelope (exclude large sub-results to keep the
+    # primary blob focused on the DraftProofReport keys).
+    envelope: Dict[str, Any] = {
+        "claim_id": claim_id,
+        "pinned_at": pinned_at,
+        "pipeline_version": report.get("pipeline_version", DRAFT_LOGIC_PIPELINE_VERSION),
+        "proof_status": report.get("proof_status"),
+        "contradiction_count": report.get("contradiction_count"),
+        "chronology_blocked": report.get("chronology_blocked"),
+        "corpus_coverage_percent": report.get("corpus_coverage_percent"),
+        "ungrounded_assertion_count": report.get("ungrounded_assertion_count"),
+        "has_blockers": report.get("has_blockers"),
+        "predicate_count": report.get("predicate_count"),
+        "policy_violation_count": len(list(report.get("policy_violations") or [])),
+        "policy_warning_count": len(list(report.get("policy_warnings") or [])),
+        "norm_count": len(list(report.get("norms") or [])),
+        "errors": list(report.get("errors") or []),
+    }
+
+    theorem_export = dict(report.get("theorem_export") or {})
+    lean4_src = str(theorem_export.get("lean4") or "")
+    coq_src = str(theorem_export.get("coq") or "")
+
+    def _pin_blob(data: bytes, description: str) -> str:
+        import hashlib
+        try:
+            result = store_bytes(data)
+            cid = str(
+                (result.get("cid") if isinstance(result, dict) else result) or ""
+            ).strip()
+            if cid:
+                try:
+                    pin_cid(cid)
+                except Exception:
+                    pass
+                return cid
+        except Exception:
+            pass
+        # IPFS unavailable or returned an empty CID — fall back to a local
+        # content-addressed hash so callers always get a non-empty identifier.
+        return "sha256:" + hashlib.sha256(data).hexdigest()
+
+    report_bytes = json.dumps(envelope, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    report_cid = _pin_blob(report_bytes, "DraftProofReport")
+    lean4_cid = _pin_blob(lean4_src.encode("utf-8"), "Lean4Export") if lean4_src else ""
+    coq_cid = _pin_blob(coq_src.encode("utf-8"), "CoqExport") if coq_src else ""
+
+    return {
+        "report_cid": report_cid,
+        "lean4_cid": lean4_cid,
+        "coq_cid": coq_cid,
+        "pinned": bool(report_cid),
+        "backend": backend,
+        "pinned_at": pinned_at,
+        "claim_id": claim_id,
+    }
+
+
 __all__ = [
     "DRAFT_LOGIC_PIPELINE_VERSION",
     "run_pipeline",
+    "render_proof_report",
+    "pin_proof_report_to_ipfs",
 ]
