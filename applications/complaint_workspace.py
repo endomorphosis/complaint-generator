@@ -7522,6 +7522,11 @@ class ComplaintWorkspaceService:
         """
         from integrations.ipfs_datasets.llm import generate_text_with_metadata
 
+        # Minimum character count for an LLM response to be treated as a valid
+        # revised draft body.  Responses shorter than this are likely refusals,
+        # error messages, or incomplete outputs and should be discarded.
+        _MIN_REVISED_DRAFT_LENGTH = 50
+
         resolved_user_id = str(user_id or DEFAULT_USER_ID)
         state = self._load_state(resolved_user_id)
         draft = dict(state.get("draft") or {})
@@ -7580,7 +7585,7 @@ class ComplaintWorkspaceService:
                     backend_id=backend_id,
                 )
                 revised = str((llm_result or {}).get("text") or "").strip()
-                if revised and len(revised) > 50:
+                if revised and len(revised) > _MIN_REVISED_DRAFT_LENGTH:
                     improved_body = revised
                     applied_suggestions.append(suggestion)
             except Exception as exc:
@@ -7651,14 +7656,16 @@ class ComplaintWorkspaceService:
         history = list(state.get("proof_history") or [])
         trend: Optional[str] = None
         if len(history) >= 2:
-            first_score = (history[0].get("overall_score") or 0)
-            last_score = (history[-1].get("overall_score") or 0)
-            if last_score > first_score + 5:
-                trend = "improving"
-            elif last_score < first_score - 5:
-                trend = "declining"
-            else:
-                trend = "stable"
+            first_score = history[0].get("overall_score")
+            last_score = history[-1].get("overall_score")
+            # Only compute trend when both endpoints have a numeric quality score.
+            if first_score is not None and last_score is not None:
+                if last_score > first_score + 5:
+                    trend = "improving"
+                elif last_score < first_score - 5:
+                    trend = "declining"
+                else:
+                    trend = "stable"
         return {
             "status": "ok",
             "user_id": resolved_user_id,
