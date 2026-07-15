@@ -477,6 +477,9 @@ _PACKAGE_EXPORT_CONTRACT: List[str] = [
     "get_draft_proof_report",
     "render_draft_proof_report",
     "pin_draft_proof_report",
+    "score_draft_quality",
+    "improve_draft",
+    "get_proof_history",
     "generate_complaint",
     "export_complaint_packet",
     "export_complaint_markdown",
@@ -521,6 +524,10 @@ _CLI_COMMAND_CONTRACT: List[str] = [
     "build-mike-handoff",
     "mike-status",
     "sync-mike-draft",
+    "draft-proof-report",
+    "score-draft-quality",
+    "improve-draft",
+    "proof-history",
     "generate",
     "export-packet",
     "export-markdown",
@@ -566,6 +573,10 @@ _BROWSER_SDK_METHOD_CONTRACT: List[str] = [
     "buildMikeHandoff",
     "getMikeIntegrationStatus",
     "syncMikeFinalDraft",
+    "getDraftProofReport",
+    "scoreDraftQuality",
+    "improveDraft",
+    "getProofHistory",
     "generateComplaint",
     "exportComplaintPacket",
     "exportComplaintMarkdown",
@@ -773,6 +784,24 @@ _CORE_FLOW_CONTRACT: Dict[str, Dict[str, str]] = {
         "cli_command": "pin-draft-proof-report",
         "mcp_tool": "complaint.pin_draft_proof_report",
         "browser_sdk_method": "pinDraftProofReport",
+    },
+    "score_draft_quality": {
+        "package_export": "score_draft_quality",
+        "cli_command": "score-draft-quality",
+        "mcp_tool": "complaint.score_draft_quality",
+        "browser_sdk_method": "scoreDraftQuality",
+    },
+    "improve_draft": {
+        "package_export": "improve_draft",
+        "cli_command": "improve-draft",
+        "mcp_tool": "complaint.improve_draft",
+        "browser_sdk_method": "improveDraft",
+    },
+    "get_proof_history": {
+        "package_export": "get_proof_history",
+        "cli_command": "proof-history",
+        "mcp_tool": "complaint.get_proof_history",
+        "browser_sdk_method": "getProofHistory",
     },
     "export_critic": {
         "package_export": "review_generated_exports",
@@ -3402,10 +3431,26 @@ class ComplaintWorkspaceService:
         current_draft = dict(state.get("draft") or {})
         complaint_output_gate = _build_local_client_release_gate_for_state(state, self._build_review(state))
 
+        # Pull the most recent proof-quality run from proof_history if available.
+        proof_history = list(state.get("proof_history") or [])
+        latest_proof_entry = dict(proof_history[-1]) if proof_history else {}
+        proof_overall_score: Optional[int] = latest_proof_entry.get("overall_score")
+        proof_has_blockers: bool = bool(latest_proof_entry.get("has_blockers"))
+
         complaint_score = int(complaint_readiness.get("score") or 0)
         ui_score = int(ui_readiness.get("score") or 35) if ui_readiness.get("score") is not None else 35
         output_score = _release_gate_score_from_verdict(complaint_output_gate.get("verdict"))
-        score = round((complaint_score * 0.3) + (ui_score * 0.3) + (output_score * 0.4))
+        # Weight the proof quality score into the composite if it is available
+        # (15 % proof quality, redistributed from the other three inputs).
+        if proof_overall_score is not None:
+            score = round(
+                complaint_score * 0.25
+                + ui_score * 0.25
+                + output_score * 0.35
+                + int(proof_overall_score) * 0.15
+            )
+        else:
+            score = round((complaint_score * 0.3) + (ui_score * 0.3) + (output_score * 0.4))
 
         ui_verdict = str(ui_readiness.get("verdict") or "").strip().lower()
         output_verdict = str(complaint_output_gate.get("verdict") or "").strip().lower()
@@ -3424,6 +3469,11 @@ class ComplaintWorkspaceService:
                 blockers.append("The dashboard UI still needs repair before it should be treated as client-safe.")
         if complaint_verdict in {"not ready to draft", "still building the record"}:
             blockers.append(str(complaint_readiness.get("detail") or "The complaint record is not ready for drafting."))
+        if proof_has_blockers:
+            blockers.append(
+                "The latest proof-quality check found blockers (contradictions, policy violations, or ungrounded assertions). "
+                "Run complaint.improve_draft or complaint.score_draft_quality for details."
+            )
 
         if output_verdict == "pass" and ui_verdict == "client-safe" and complaint_verdict in {"ready for first draft", "draft in progress"}:
             verdict = "client_safe"
@@ -3475,6 +3525,13 @@ class ComplaintWorkspaceService:
             "complaint_readiness": complaint_readiness,
             "ui_readiness": ui_readiness,
             "complaint_output_release_gate": complaint_output_gate,
+            "proof_quality": {
+                "overall_score": proof_overall_score,
+                "grade": latest_proof_entry.get("grade"),
+                "has_blockers": proof_has_blockers,
+                "run_at": latest_proof_entry.get("run_at"),
+                "proof_status": latest_proof_entry.get("proof_status"),
+            },
             "mike_grounding": deepcopy(((current_draft.get("sync_metadata") or {}).get("legal_corpus_review") or {})),
             "mike_logic": deepcopy(((current_draft.get("sync_metadata") or {}).get("logic_review") or {})),
         }
@@ -7240,6 +7297,8 @@ class ComplaintWorkspaceService:
             quality_score = score_draft_quality(proof_report, claim_id=resolved_user_id)
         except Exception:
             pass
+        self._persist_proof_run(state, proof_report=proof_report, quality_score=quality_score)
+        self._save_state(state)
         return {
             "status": "ok",
             "user_id": resolved_user_id,
@@ -7328,6 +7387,285 @@ class ComplaintWorkspaceService:
             "pin_result": pin_result,
             "proof_report": proof_report,
             "quality_score": proof_result.get("quality_score"),
+        }
+
+    # ------------------------------------------------------------------
+    # Proof history persistence helpers
+    # ------------------------------------------------------------------
+
+    _PROOF_HISTORY_MAX_ENTRIES: int = 20
+
+    def _persist_proof_run(
+        self,
+        state: Dict[str, Any],
+        *,
+        proof_report: Dict[str, Any],
+        quality_score: Optional[Dict[str, Any]],
+    ) -> None:
+        """Append a compact proof-run summary to ``state["proof_history"]``."""
+        import datetime as _dt
+
+        history: List[Dict[str, Any]] = list(state.get("proof_history") or [])
+        entry: Dict[str, Any] = {
+            "run_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+            "proof_status": str(proof_report.get("proof_status") or "needs_review"),
+            "contradiction_count": int(proof_report.get("contradiction_count") or 0),
+            "corpus_coverage_percent": proof_report.get("corpus_coverage_percent"),
+            "ungrounded_assertion_count": int(proof_report.get("ungrounded_assertion_count") or 0),
+            "has_blockers": bool(proof_report.get("has_blockers")),
+            "predicate_count": int(proof_report.get("predicate_count") or 0),
+            "pipeline_version": str(proof_report.get("pipeline_version") or ""),
+            "pipeline_errors": list(proof_report.get("errors") or []),
+        }
+        if quality_score:
+            entry["overall_score"] = quality_score.get("overall_score")
+            entry["grade"] = quality_score.get("grade")
+            entry["dimensions"] = dict(quality_score.get("dimensions") or {})
+        history.append(entry)
+        # Keep only the most recent N entries.
+        state["proof_history"] = history[-self._PROOF_HISTORY_MAX_ENTRIES:]
+
+    # ------------------------------------------------------------------
+    # score_draft_quality
+    # ------------------------------------------------------------------
+
+    def score_draft_quality(
+        self,
+        user_id: Optional[str],
+        *,
+        state_code: Optional[str] = None,
+        persist: bool = True,
+    ) -> Dict[str, Any]:
+        """Run the draft-logic pipeline and return a quality score.
+
+        Unlike :meth:`get_draft_proof_report`, this method returns only the
+        quality score (overall score, grade, dimension breakdown, and
+        suggestions) — not the full proof report — making it lightweight enough
+        to call on every draft save.  It also persists the run to proof history
+        so progress can be tracked over time.
+
+        Parameters
+        ----------
+        user_id:
+            Workspace user identifier.
+        state_code:
+            Optional two-letter US state abbreviation for corpus searches.
+        persist:
+            Whether to append a compact proof-run summary to
+            ``state["proof_history"]``.  Defaults to ``True``.
+        """
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        draft = dict(state.get("draft") or {})
+        body = str(draft.get("body") or "").strip()
+        if not body:
+            return {
+                "status": "no_draft",
+                "message": "No complaint draft is available.  Run complaint.generate_complaint first.",
+                "quality_score": None,
+            }
+        proof_report = _run_draft_logic_pipeline_safely(
+            body,
+            state=state_code or str(state.get("intake_answers", {}).get("state") or "").strip() or None,
+        )
+        quality_score: Optional[Dict[str, Any]] = None
+        try:
+            from integrations.ipfs_datasets.quality import score_draft_quality as _score
+            quality_score = _score(proof_report, claim_id=resolved_user_id)
+        except Exception:
+            pass
+        if persist:
+            self._persist_proof_run(state, proof_report=proof_report, quality_score=quality_score)
+            self._save_state(state)
+        return {
+            "status": "ok",
+            "user_id": resolved_user_id,
+            "quality_score": quality_score,
+            "draft_body_length": len(body),
+        }
+
+    # ------------------------------------------------------------------
+    # improve_draft
+    # ------------------------------------------------------------------
+
+    def improve_draft(
+        self,
+        user_id: Optional[str],
+        *,
+        state_code: Optional[str] = None,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        config_path: Optional[str] = None,
+        backend_id: Optional[str] = None,
+        max_suggestions: int = 3,
+    ) -> Dict[str, Any]:
+        """Apply quality-scorer suggestions to the draft via the LLM router.
+
+        Runs the draft-logic pipeline, extracts the highest-priority suggestions
+        from :func:`~integrations.ipfs_datasets.quality.score_draft_quality`,
+        and sends a targeted improvement prompt through the workspace
+        ``llm_router`` for each suggestion.  The improved draft body is
+        persisted back to the workspace state.
+
+        Parameters
+        ----------
+        user_id:
+            Workspace user identifier.
+        state_code:
+            Optional two-letter US state abbreviation for corpus searches.
+        provider / model / config_path / backend_id:
+            LLM router provider overrides forwarded to
+            :func:`~integrations.ipfs_datasets.llm.generate_text_with_metadata`.
+        max_suggestions:
+            Maximum number of suggestions to apply in a single call.
+            Defaults to 3 to keep prompts focused.
+        """
+        from integrations.ipfs_datasets.llm import generate_text_with_metadata
+
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        draft = dict(state.get("draft") or {})
+        body = str(draft.get("body") or "").strip()
+        if not body:
+            return {
+                "status": "no_draft",
+                "message": "No complaint draft is available.  Run complaint.generate_complaint first.",
+                "improved": False,
+                "quality_before": None,
+                "quality_after": None,
+            }
+
+        # 1. Score the current draft.
+        proof_report = _run_draft_logic_pipeline_safely(
+            body,
+            state=state_code or str(state.get("intake_answers", {}).get("state") or "").strip() or None,
+        )
+        quality_before: Optional[Dict[str, Any]] = None
+        suggestions: List[Dict[str, Any]] = []
+        try:
+            from integrations.ipfs_datasets.quality import score_draft_quality as _score
+            quality_before = _score(proof_report, claim_id=resolved_user_id)
+            suggestions = list(quality_before.get("suggestions") or [])
+        except Exception:
+            pass
+
+        # 2. Apply the top N suggestions via the LLM router.
+        high_priority = [s for s in suggestions if str(s.get("priority") or "") == "high"]
+        medium_priority = [s for s in suggestions if str(s.get("priority") or "") == "medium"]
+        ordered = (high_priority + medium_priority)[:max_suggestions]
+
+        applied_suggestions: List[Dict[str, Any]] = []
+        improved_body = body
+        llm_errors: List[str] = []
+
+        for suggestion in ordered:
+            action = str(suggestion.get("action") or "").strip()
+            dimension = str(suggestion.get("dimension") or "").strip()
+            if not action:
+                continue
+            prompt = (
+                "You are a legal document editor.  The following complaint draft has a quality issue.\n\n"
+                f"Issue ({dimension}): {action}\n\n"
+                "Please revise the draft to address this issue.  Keep the legal language, "
+                "paragraph numbering, and filing-ready format intact.  Return ONLY the revised "
+                "complaint body text, with no preamble, commentary, or markdown fences.\n\n"
+                f"DRAFT:\n{improved_body}"
+            )
+            try:
+                llm_result = generate_text_with_metadata(
+                    prompt,
+                    provider=provider,
+                    model=model,
+                    config_path=config_path,
+                    backend_id=backend_id,
+                )
+                revised = str((llm_result or {}).get("text") or "").strip()
+                if revised and len(revised) > 50:
+                    improved_body = revised
+                    applied_suggestions.append(suggestion)
+            except Exception as exc:
+                llm_errors.append(f"{dimension}: {exc}")
+
+        improved = bool(applied_suggestions)
+        if improved:
+            import datetime as _dt
+            draft["body"] = improved_body
+            draft["updated_at"] = _dt.datetime.now(_dt.timezone.utc).isoformat()
+            draft["improvement_history"] = list(draft.get("improvement_history") or []) + [
+                {
+                    "improved_at": draft["updated_at"],
+                    "applied_suggestions": applied_suggestions,
+                    "quality_before_grade": str((quality_before or {}).get("grade") or ""),
+                }
+            ]
+            state["draft"] = draft
+            self._save_state(state)
+
+        # 3. Re-score the improved draft.
+        quality_after: Optional[Dict[str, Any]] = None
+        if improved:
+            after_report = _run_draft_logic_pipeline_safely(
+                improved_body,
+                state=state_code or str(state.get("intake_answers", {}).get("state") or "").strip() or None,
+            )
+            try:
+                from integrations.ipfs_datasets.quality import score_draft_quality as _score
+                quality_after = _score(after_report, claim_id=resolved_user_id)
+            except Exception:
+                pass
+            if quality_after:
+                self._persist_proof_run(state, proof_report=after_report, quality_score=quality_after)
+                self._save_state(state)
+
+        return {
+            "status": "ok",
+            "user_id": resolved_user_id,
+            "improved": improved,
+            "applied_suggestion_count": len(applied_suggestions),
+            "applied_suggestions": applied_suggestions,
+            "quality_before": quality_before,
+            "quality_after": quality_after,
+            "llm_errors": llm_errors,
+            "draft_body_length": len(improved_body),
+        }
+
+    # ------------------------------------------------------------------
+    # get_proof_history
+    # ------------------------------------------------------------------
+
+    def get_proof_history(
+        self,
+        user_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Return the history of proof-pipeline runs for this session.
+
+        Each entry in ``history`` is a compact snapshot produced by
+        :meth:`_persist_proof_run` and includes ``run_at``, ``proof_status``,
+        ``contradiction_count``, ``corpus_coverage_percent``,
+        ``overall_score``, and ``grade`` (when a quality score was computed).
+
+        The most recent entry is last.
+        """
+        resolved_user_id = str(user_id or DEFAULT_USER_ID)
+        state = self._load_state(resolved_user_id)
+        history = list(state.get("proof_history") or [])
+        trend: Optional[str] = None
+        if len(history) >= 2:
+            first_score = (history[0].get("overall_score") or 0)
+            last_score = (history[-1].get("overall_score") or 0)
+            if last_score > first_score + 5:
+                trend = "improving"
+            elif last_score < first_score - 5:
+                trend = "declining"
+            else:
+                trend = "stable"
+        return {
+            "status": "ok",
+            "user_id": resolved_user_id,
+            "history": history,
+            "run_count": len(history),
+            "trend": trend,
+            "latest": history[-1] if history else None,
         }
 
     def update_filing_metadata(
@@ -8865,6 +9203,9 @@ class ComplaintWorkspaceService:
                 {"name": "complaint.get_draft_proof_report", "description": "Run the draft-logic pipeline on the current complaint draft and return the full DraftProofReport with proof status, contradictions, corpus coverage, and deontic norms."},
                 {"name": "complaint.render_draft_proof_report", "description": "Run the draft-logic pipeline on the current draft and render a human-readable Markdown proof report."},
                 {"name": "complaint.pin_draft_proof_report", "description": "Run the draft-logic pipeline, then pin the DraftProofReport and its Lean 4 / Coq theorem exports to IPFS for immutable provenance."},
+                {"name": "complaint.score_draft_quality", "description": "Score the current complaint draft across five quality dimensions (corpus grounding, proof completeness, policy compliance, contradiction-free, theorem readiness) and return a grade and prioritised improvement suggestions."},
+                {"name": "complaint.improve_draft", "description": "Apply the top quality-scorer suggestions to the complaint draft via the LLM router and persist the improved body back to the workspace."},
+                {"name": "complaint.get_proof_history", "description": "Return the history of draft proof-pipeline runs for this session showing proof status, quality score, and grade over time."},
                 {"name": "complaint.generate_complaint", "description": "Generate a complaint draft from intake and evidence."},
                 {"name": "complaint.update_draft", "description": "Persist edits to the generated complaint draft."},
                 {"name": "complaint.export_complaint_packet", "description": "Export the current lawsuit complaint packet with intake, evidence, review, and draft content."},
@@ -9166,6 +9507,24 @@ class ComplaintWorkspaceService:
                 state_code=args.get("state_code"),
                 claim_id=str(args.get("claim_id") or ""),
             )
+        if tool_name == "complaint.score_draft_quality":
+            return self.score_draft_quality(
+                args.get("user_id"),
+                state_code=args.get("state_code"),
+                persist=bool(args.get("persist", True)),
+            )
+        if tool_name == "complaint.improve_draft":
+            return self.improve_draft(
+                args.get("user_id"),
+                state_code=args.get("state_code"),
+                provider=args.get("provider"),
+                model=args.get("model"),
+                config_path=args.get("config_path"),
+                backend_id=args.get("backend_id"),
+                max_suggestions=int(args.get("max_suggestions") or 3),
+            )
+        if tool_name == "complaint.get_proof_history":
+            return self.get_proof_history(args.get("user_id"))
         if tool_name == "complaint.generate_complaint":
             return self.generate_complaint(
                 args.get("user_id"),
