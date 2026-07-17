@@ -7598,12 +7598,14 @@ class Mediator:
 					# empty for profiles that were registered but not yet evaluated.
 					summary['temporal_rule_profile_available_element_count'] += 1
 					element_temporal_rule_status = str(element.get('temporal_rule_status') or '').strip().lower()
-					if element_temporal_rule_status == 'satisfied':
-						summary['temporal_rule_profile_satisfied_element_count'] += 1
-					elif element_temporal_rule_status == 'partial':
-						summary['temporal_rule_profile_partial_element_count'] += 1
-					elif element_temporal_rule_status == 'failed':
-						summary['temporal_rule_profile_failed_element_count'] += 1
+					_status_counter_map = {
+						'satisfied': 'temporal_rule_profile_satisfied_element_count',
+						'partial': 'temporal_rule_profile_partial_element_count',
+						'failed': 'temporal_rule_profile_failed_element_count',
+					}
+					status_counter_key = _status_counter_map.get(element_temporal_rule_status)
+					if status_counter_key:
+						summary[status_counter_key] += 1
 					# Elements with a profile ID but an unrecognized or empty status
 					# contribute to the available count only; they represent profiles
 					# that are pending evaluation or have not yet produced a result.
