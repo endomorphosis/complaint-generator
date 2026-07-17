@@ -4222,6 +4222,92 @@ class TestMediatorThreePhaseIntegration:
         assert shared, 'expected shared elements in alignment summary'
         assert shared[0]['support_lane_label'] == 'testimony_only'
 
+    def test_alignment_summary_exposes_per_claim_lane_and_quality_counts(self):
+        """Per-claim entry in alignment summary should include support_lane_label_counts and support_quality_counts."""
+        from mediator.mediator import Mediator
+
+        class MockBackend:
+            id = 'mock_backend'
+
+            def __call__(self, prompt):
+                return 'Mock response'
+
+        mediator = Mediator([MockBackend()])
+        intake_case_file = {
+            'candidate_claims': [
+                {
+                    'claim_type': 'retaliation',
+                    'required_elements': [
+                        {
+                            'element_id': 'adverse_action',
+                            'label': 'Adverse action',
+                            'blocking': True,
+                            'evidence_classes': ['testimony'],
+                        },
+                        {
+                            'element_id': 'protected_activity',
+                            'label': 'Protected activity',
+                            'blocking': True,
+                            'evidence_classes': ['testimony'],
+                        },
+                    ],
+                }
+            ],
+            'proof_leads': [],
+            'open_items': [],
+            'event_ledger': [],
+            'temporal_issue_registry': [],
+            'temporal_relation_registry': [],
+        }
+        claim_support_packets = {
+            'retaliation': {
+                'claim_type': 'retaliation',
+                'overall_status': 'partially_supported',
+                'elements': [
+                    {
+                        'element_id': 'adverse_action',
+                        'element_text': 'Adverse action taken',
+                        'support_status': 'supported',
+                        'support_quality': 'credible',
+                        'support_lane_label': 'testimony_only',
+                        'supporting_testimony_ids': ['t1'],
+                        'supporting_artifact_ids': [],
+                        'supporting_authority_ids': [],
+                        'canonical_fact_ids': [],
+                        'required_fact_bundle': [],
+                        'satisfied_fact_bundle': [],
+                        'missing_fact_bundle': [],
+                        'missing_support_kinds': [],
+                    },
+                    {
+                        'element_id': 'protected_activity',
+                        'element_text': 'Protected activity',
+                        'support_status': 'supported',
+                        'support_quality': 'draft_ready',
+                        'support_lane_label': 'corroborated',
+                        'supporting_testimony_ids': ['t2'],
+                        'supporting_artifact_ids': ['a1'],
+                        'supporting_authority_ids': [],
+                        'canonical_fact_ids': [],
+                        'required_fact_bundle': [],
+                        'satisfied_fact_bundle': [],
+                        'missing_fact_bundle': [],
+                        'missing_support_kinds': [],
+                    },
+                ],
+            }
+        }
+        summary = mediator._summarize_intake_evidence_alignment(intake_case_file, claim_support_packets)
+        claim_entry = summary['claims']['retaliation']
+        assert claim_entry['support_lane_label_counts'] == {
+            'testimony_only': 1,
+            'corroborated': 1,
+        }
+        assert claim_entry['support_quality_counts'] == {
+            'credible': 1,
+            'draft_ready': 1,
+        }
+
     # ------------------------------------------------------------------
     # Batch 6: Proof-readiness gates (evidence_readiness)
     # ------------------------------------------------------------------

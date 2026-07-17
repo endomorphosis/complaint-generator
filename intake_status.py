@@ -1010,6 +1010,13 @@ def build_intake_status_summary(
     if document_grounding_improvement_next_action:
         compact_next_action["document_grounding_improvement_next_action"] = dict(document_grounding_improvement_next_action)
 
+    raw_claim_support_packet_summary = raw_status.get("claim_support_packet_summary")
+    claim_support_packet_summary = (
+        raw_claim_support_packet_summary
+        if isinstance(raw_claim_support_packet_summary, dict)
+        else {}
+    )
+
     summary = {
         "current_phase": str(raw_status.get("current_phase") or "").strip(),
         "ready_to_advance": bool(readiness.get("ready_to_advance", False)),
@@ -1036,6 +1043,19 @@ def build_intake_status_summary(
         "canonical_fact_count": int(readiness.get("canonical_fact_count", 0) or 0),
         "proof_lead_count": int(readiness.get("proof_lead_count", 0) or 0),
     }
+    if claim_support_packet_summary:
+        try:
+            summary["proof_readiness_score"] = float(
+                claim_support_packet_summary.get("proof_readiness_score", 0.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            pass
+        support_quality_counts = claim_support_packet_summary.get("support_quality_counts")
+        if isinstance(support_quality_counts, dict) and support_quality_counts:
+            summary["support_quality_counts"] = dict(support_quality_counts)
+        support_lane_label_counts = claim_support_packet_summary.get("support_lane_label_counts")
+        if isinstance(support_lane_label_counts, dict) and support_lane_label_counts:
+            summary["support_lane_label_counts"] = dict(support_lane_label_counts)
     if document_grounding_recovery_action:
         summary["document_grounding_recovery_action"] = document_grounding_recovery_action
     if document_grounding_improvement_next_action:
@@ -1148,6 +1168,28 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
     claim_support_packet_summary_value = (
         claim_support_packet_summary if isinstance(claim_support_packet_summary, dict) else {}
     )
+    # Aggregate lane label and quality counts from per-claim alignment summaries
+    # so the packet summary exposes a cross-claim distribution without requiring
+    # consumers to iterate individual claim entries.
+    _alignment_summary_dict = (
+        intake_evidence_alignment_summary
+        if isinstance(intake_evidence_alignment_summary, dict)
+        else {}
+    )
+    _alignment_claims = (
+        _alignment_summary_dict.get("claims", {})
+        if isinstance(_alignment_summary_dict.get("claims"), dict)
+        else {}
+    )
+    _agg_lane_counts: Dict[str, int] = {}
+    _agg_quality_counts: Dict[str, int] = {}
+    for _claim_entry in _alignment_claims.values():
+        if not isinstance(_claim_entry, dict):
+            continue
+        for _lane, _cnt in (_claim_entry.get("support_lane_label_counts") or {}).items():
+            _agg_lane_counts[_lane] = _agg_lane_counts.get(_lane, 0) + int(_cnt or 0)
+        for _qual, _cnt in (_claim_entry.get("support_quality_counts") or {}).items():
+            _agg_quality_counts[_qual] = _agg_quality_counts.get(_qual, 0) + int(_cnt or 0)
     claim_support_packet_summary_value = {
         **claim_support_packet_summary_value,
         "temporal_gap_task_count": int(alignment_task_summary.get("temporal_gap_task_count", 0) or 0),
@@ -1156,6 +1198,10 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
         "temporal_rule_blocking_reason_counts": dict(alignment_task_summary.get("temporal_rule_blocking_reason_counts", {}) or {}),
         "temporal_resolution_status_counts": dict(alignment_task_summary.get("temporal_resolution_status_counts", {}) or {}),
     }
+    if _agg_lane_counts and "support_lane_label_counts" not in claim_support_packet_summary_value:
+        claim_support_packet_summary_value["support_lane_label_counts"] = _agg_lane_counts
+    if _agg_quality_counts and "support_quality_counts" not in claim_support_packet_summary_value:
+        claim_support_packet_summary_value["support_quality_counts"] = _agg_quality_counts
 
     summary = {
         "candidate_claims": candidate_claims if isinstance(candidate_claims, list) else [],

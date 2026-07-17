@@ -7988,6 +7988,16 @@ class Mediator:
 				'unsupported': 0,
 				'contradicted': 0,
 			},
+			'support_lane_label_counts': {
+				'corroborated': 0,
+				'partially_corroborated': 0,
+				'testimony_only': 0,
+				'documentary': 0,
+				'authority_only': 0,
+				'uncorroborated': 0,
+				'unsupported': 0,
+				'contradicted': 0,
+			},
 			'recommended_actions': [],
 			'credible_support_ratio': 0.0,
 			'draft_ready_element_ratio': 0.0,
@@ -8042,6 +8052,15 @@ class Mediator:
 					credible_count += 1
 				elif support_quality == 'credible':
 					credible_count += 1
+				lane_label = str(
+					element.get('support_lane_label') or self._derive_support_lane_label(element)
+				).strip().lower()
+				if lane_label in summary['support_lane_label_counts']:
+					summary['support_lane_label_counts'][lane_label] += 1
+				elif lane_label:
+					summary['support_lane_label_counts'][lane_label] = (
+						summary['support_lane_label_counts'].get(lane_label, 0) + 1
+					)
 				if bool(element.get('hybrid_bridge_used')):
 					summary['hybrid_bridge_element_count'] += 1
 				if bool(element.get('hybrid_bridge_available')):
@@ -8805,6 +8824,17 @@ class Mediator:
 				for element_id in intake_element_ids
 				if element_id not in packet_status_by_element
 			]
+			lane_label_counts: Dict[str, int] = {}
+			quality_counts: Dict[str, int] = {}
+			for elem in shared_elements:
+				if not isinstance(elem, dict):
+					continue
+				lane = str(elem.get('support_lane_label') or '').strip().lower()
+				if lane:
+					lane_label_counts[lane] = lane_label_counts.get(lane, 0) + 1
+				quality = str(elem.get('support_quality') or '').strip().lower()
+				if quality:
+					quality_counts[quality] = quality_counts.get(quality, 0) + 1
 			summary['claim_count'] += 1
 			summary['claims'][str(claim_type)] = {
 				'intake_required_element_ids': intake_element_ids,
@@ -8812,6 +8842,8 @@ class Mediator:
 				'shared_elements': shared_elements,
 				'intake_only_element_ids': intake_only_element_ids,
 				'evidence_only_element_ids': evidence_only_element_ids,
+				'support_lane_label_counts': lane_label_counts,
+				'support_quality_counts': quality_counts,
 			}
 		return summary
 

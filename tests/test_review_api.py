@@ -35,6 +35,28 @@ from applications.review_api import (
 )
 
 
+def _iter_app_routes(app):
+    """Yield all routes from an app, including those nested inside _IncludedRouter objects.
+
+    Newer versions of FastAPI (0.100+) represent routers added via include_router
+    as _IncludedRouter objects rather than unrolling them into top-level APIRoute entries.
+    This helper flattens the hierarchy so tests can check path/methods uniformly.
+    """
+    for route in app.routes:
+        if hasattr(route, "path") and hasattr(route, "methods"):
+            yield route
+        elif hasattr(route, "original_router"):
+            yield from _iter_router_routes(route.original_router)
+
+
+def _iter_router_routes(router):
+    for route in router.routes:
+        if hasattr(route, "path") and hasattr(route, "methods"):
+            yield route
+        elif hasattr(route, "original_router"):
+            yield from _iter_router_routes(route.original_router)
+
+
 def _build_hook_backed_review_api_mediator(db_path: str):
     try:
         from mediator.claim_support_hooks import ClaimSupportHook
@@ -1906,13 +1928,8 @@ def test_claim_support_review_payload_reuses_persisted_diagnostic_snapshots():
         "temporal_rule_profile_failed_element_count": 0,
         "temporal_proof_bundle_count": 0,
         "temporal_proof_bundle_status_counts": {},
-        "theorem_export_blocked_element_count": 0,
-        "theorem_export_chronology_task_count": 0,
-        "proof_artifact_element_count": 0,
-        "proof_artifact_available_element_count": 0,
-        "proof_artifact_status_counts": {},
-        "proof_artifact_explanation_element_count": 0,
-        "proof_artifact_preview": [],
+        "proof_bundles": {},
+        "timeline_gap_follow_ups": [],
         "claim_temporal_issue_count": 0,
         "claim_unresolved_temporal_issue_count": 0,
         "claim_resolved_temporal_issue_count": 0,
@@ -1920,6 +1937,13 @@ def test_claim_support_review_payload_reuses_persisted_diagnostic_snapshots():
         "claim_temporal_issue_ids": [],
         "claim_missing_temporal_predicates": [],
         "claim_required_provenance_kinds": [],
+        "theorem_export_blocked_element_count": 0,
+        "theorem_export_chronology_task_count": 0,
+        "proof_artifact_element_count": 0,
+        "proof_artifact_available_element_count": 0,
+        "proof_artifact_status_counts": {},
+        "proof_artifact_explanation_element_count": 0,
+        "proof_artifact_preview": [],
         "flagged_elements": [],
     }
     mediator.get_claim_support_diagnostic_snapshots.assert_called_once_with(
@@ -2048,13 +2072,8 @@ def test_claim_support_review_payload_recomputes_stale_diagnostic_snapshots():
         "temporal_rule_profile_failed_element_count": 0,
         "temporal_proof_bundle_count": 0,
         "temporal_proof_bundle_status_counts": {},
-        "theorem_export_blocked_element_count": 0,
-        "theorem_export_chronology_task_count": 0,
-        "proof_artifact_element_count": 0,
-        "proof_artifact_available_element_count": 0,
-        "proof_artifact_status_counts": {},
-        "proof_artifact_explanation_element_count": 0,
-        "proof_artifact_preview": [],
+        "proof_bundles": {},
+        "timeline_gap_follow_ups": [],
         "claim_temporal_issue_count": 0,
         "claim_unresolved_temporal_issue_count": 0,
         "claim_resolved_temporal_issue_count": 0,
@@ -2062,6 +2081,13 @@ def test_claim_support_review_payload_recomputes_stale_diagnostic_snapshots():
         "claim_temporal_issue_ids": [],
         "claim_missing_temporal_predicates": [],
         "claim_required_provenance_kinds": [],
+        "theorem_export_blocked_element_count": 0,
+        "theorem_export_chronology_task_count": 0,
+        "proof_artifact_element_count": 0,
+        "proof_artifact_available_element_count": 0,
+        "proof_artifact_status_counts": {},
+        "proof_artifact_explanation_element_count": 0,
+        "proof_artifact_preview": [],
         "flagged_elements": [],
     }
     mediator.get_claim_support_gaps.assert_called_once_with(
@@ -2366,6 +2392,8 @@ def test_claim_support_follow_up_execution_payload_returns_post_execution_review
         "temporal_gap_task_count": 0,
         "fact_gap_task_count": 0,
         "adverse_authority_task_count": 0,
+        "confirm_good_law_task_count": 0,
+        "find_better_authority_task_count": 0,
         "parse_quality_task_count": 1,
         "quality_gap_targeted_task_count": 1,
         "temporal_gap_targeted_task_count": 0,
@@ -4077,59 +4105,51 @@ def test_claim_support_review_endpoint_is_registered_on_app():
     mediator = Mock()
 
     app = create_review_api_app(mediator)
+    all_routes = list(_iter_app_routes(app))
 
     assert any(
         route.path == "/api/claim-support/review" and "POST" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
     assert any(
         route.path == "/api/claim-support/execute-follow-up"
         and "POST" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
     assert any(
         route.path == "/api/claim-support/confirm-intake-summary"
         and "POST" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
     assert any(
         route.path == "/api/claim-support/resolve-manual-review"
         and "POST" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
     assert any(
         route.path == "/api/claim-support/save-testimony"
         and "POST" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
     assert any(
         route.path == "/api/claim-support/save-document"
         and "POST" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
     assert any(
         route.path == "/api/claim-support/upload-document"
         and "POST" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
     assert any(
         route.path == "/api/documents/formal-complaint"
         and "POST" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
     assert any(
         route.path == "/api/documents/download"
         and "GET" in route.methods
-        for route in app.routes
-        if hasattr(route, "methods")
+        for route in all_routes
     )
 
 
@@ -5758,8 +5778,8 @@ async def test_claim_support_review_route_marks_execute_follow_up_as_deprecated(
     app = create_review_api_app(mediator)
     review_route = next(
         route
-        for route in app.routes
-        if getattr(route, "path", None) == "/api/claim-support/review"
+        for route in _iter_app_routes(app)
+        if route.path == "/api/claim-support/review"
     )
     response = Response()
 

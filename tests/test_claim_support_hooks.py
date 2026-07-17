@@ -2432,6 +2432,15 @@ class TestClaimSupportHook:
                 'theorem_exports': {
                     'tdfol_formulas': ['ProtectedActivity(fact_1)', 'AdverseAction(fact_2)', 'Before(fact_1,fact_2)'],
                     'dcec_formulas': ['Happens(fact_1,t_2025_03_01)', 'Happens(fact_2,t_2025_04_15)'],
+                    'tdfol_formula_certainties': {
+                        'ProtectedActivity(fact_1)': 'certain',
+                        'AdverseAction(fact_2)': 'certain',
+                        'Before(fact_1,fact_2)': 'certain',
+                    },
+                    'dcec_formula_certainties': {
+                        'Happens(fact_1,t_2025_03_01)': 'certain',
+                        'Happens(fact_2,t_2025_04_15)': 'certain',
+                    },
                     'theorem_export_metadata': {
                         'contract_version': 'claim_support_temporal_handoff_v1',
                         'claim_type': 'retaliation',
@@ -2555,6 +2564,10 @@ class TestClaimSupportHook:
                 {
                     'lane': 'clarify_with_complainant',
                     'reason': 'Clarify whether the protected activity occurred before the adverse action.',
+                    'follow_up_target': 'clarification',
+                    'follow_up_lane': 'clarify_with_complainant',
+                    'proof_criticality': 'high',
+                    'question_objective': 'anchor_capture',
                 }
             ],
             'has_contradictory_dates': False,

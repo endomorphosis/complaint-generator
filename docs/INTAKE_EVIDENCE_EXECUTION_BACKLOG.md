@@ -225,7 +225,7 @@ Make documentary evidence, testimony, authority, and web captures comparable sup
 
 - [x] normalize provenance fields across artifact and testimony records
 - [x] add support-quality labels that distinguish testimony-only, documentary, corroborated, and contradicted states
-- [ ] preserve lane identity and quality through support summaries and snapshots
+- [x] preserve lane identity and quality through support summaries and snapshots (`support_lane_label_counts` and `support_quality_counts` added to per-claim alignment summary and aggregated in `build_intake_case_review_summary`)
 - [ ] persist meaningful case-theory or support-packet snapshots through the IPFS-backed path when state materially changes
 
 ### Router dependencies
@@ -276,7 +276,7 @@ Make Phase 1 and Phase 2 transitions depend on semantic readiness, not just coar
 
 ## Batch 7: Review and Trace Surfaces
 
-Status: Planned
+Status: In Progress
 Priority: P1
 
 ### Goal
@@ -294,7 +294,8 @@ Expose the new intake and evidence state cleanly to operators and optimizer trac
 
 ### Tasks
 
-- [ ] expose new confidence, ambiguity, and proof-quality fields in normalized summaries
+- [x] expose `proof_readiness_score`, `support_lane_label_counts`, and `support_quality_counts` in `build_intake_status_summary` (top-level fields)
+- [x] expose `support_lane_label_counts` and `support_quality_counts` aggregated across claims in `build_intake_case_review_summary` (inside `claim_support_packet_summary`)
 - [ ] show blocking tasks, contradiction lanes, and proof-readiness signals on review surfaces
 - [ ] preserve architecture boundaries by keeping payload shaping out of application-only logic where possible
 - [ ] ensure optimizer traces retain the expanded intake and evidence state
