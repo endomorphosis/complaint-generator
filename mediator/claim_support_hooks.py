@@ -5751,7 +5751,7 @@ class ClaimSupportHook:
         try:
             conn = duckdb.connect(self.db_path)
             self._ensure_enrichment_queue_table(conn)
-            conn.execute(
+            inserted = conn.execute(
                 """
                 INSERT INTO claim_enrichment_queue
                     (user_id, claim_type, enrichment_type, status, priority, metadata)
@@ -5759,8 +5759,7 @@ class ClaimSupportHook:
                 RETURNING id
                 """,
                 [user_id, claim_type, enrichment_type, priority, json.dumps(metadata or {})],
-            )
-            inserted = conn.fetchone()
+            ).fetchone()
             conn.close()
             job_id = inserted[0] if inserted else None
         except Exception as exc:
