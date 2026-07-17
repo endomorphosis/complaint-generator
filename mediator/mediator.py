@@ -7592,18 +7592,18 @@ class Mediator:
 				summary['temporal_warning_count'] += int(element.get('temporal_warning_count', 0) or 0)
 				if bool(element.get('temporal_partial_order_ready')):
 					summary['temporal_partial_order_ready_element_count'] += 1
-				element_temporal_rule_profile_id = str(element.get('temporal_rule_profile_id') or '').strip()
-				if element_temporal_rule_profile_id:
+				rule_profile_id = str(element.get('temporal_rule_profile_id') or '').strip()
+				if rule_profile_id:
 					# Count elements that have an actual rule profile ID; status may be
 					# empty for profiles that were registered but not yet evaluated.
 					summary['temporal_rule_profile_available_element_count'] += 1
-					element_temporal_rule_status = str(element.get('temporal_rule_status') or '').strip().lower()
+					rule_status = str(element.get('temporal_rule_status') or '').strip().lower()
 					status_counter_map = {
 						'satisfied': 'temporal_rule_profile_satisfied_element_count',
 						'partial': 'temporal_rule_profile_partial_element_count',
 						'failed': 'temporal_rule_profile_failed_element_count',
 					}
-					status_counter_key = status_counter_map.get(element_temporal_rule_status)
+					status_counter_key = status_counter_map.get(rule_status)
 					if status_counter_key:
 						summary[status_counter_key] += 1
 					# Elements with a profile ID but an unrecognized or empty status
