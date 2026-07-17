@@ -6335,18 +6335,11 @@ class Mediator:
 			proof_leads = []
 			intake_case_file['proof_leads'] = proof_leads
 		normalized_text = self._normalize_intake_text(text)
-		claim_types_from_context = [
-			str(ct).strip().lower()
-			for ct in (
-				list(intake_case_file.get('candidate_claims') or [])
-				if isinstance(intake_case_file.get('candidate_claims'), list)
-				else []
-			)[:0]  # placeholder – merged below
-		]
+		normalized_text_lower = normalized_text.lower()
 		for lead in proof_leads:
 			if not isinstance(lead, dict):
 				continue
-			if self._normalize_intake_text(lead.get('description')).lower() == normalized_text.lower():
+			if self._normalize_intake_text(lead.get('description')).lower() == normalized_text_lower:
 				lead['related_fact_ids'] = list(dict.fromkeys(list(lead.get('related_fact_ids', []) or []) + list(related_fact_ids or [])))
 				lead['fact_targets'] = list(dict.fromkeys(list(lead.get('fact_targets', []) or []) + list(fact_targets or [])))
 				lead['element_targets'] = list(dict.fromkeys(list(lead.get('element_targets', []) or []) + list(element_targets or [])))
@@ -6584,6 +6577,7 @@ class Mediator:
 			# considered the same event when their normalised text matches exactly (a revision)
 			# or when both share the same non-empty `event_id` (a direct ID match).
 			target_event_id = str(context.get('event_id') or '').strip()
+			normalized_answer_lower = normalized_answer.lower()
 			matched_existing: Dict[str, Any] | None = None
 			for ef in existing_timeline_facts:
 				if not isinstance(ef, dict):
@@ -6593,7 +6587,7 @@ class Mediator:
 				if target_event_id and ef_event_id and ef_event_id == target_event_id:
 					matched_existing = ef
 					break
-				if ef_text and ef_text.lower() == normalized_answer.lower():
+				if ef_text and ef_text.lower() == normalized_answer_lower:
 					matched_existing = ef
 					break
 			if matched_existing is not None:

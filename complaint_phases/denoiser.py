@@ -24,6 +24,16 @@ from .intake_claim_registry import (
 
 logger = logging.getLogger(__name__)
 
+# Question types that are inherently non-specific and should bypass objective-key deduplication.
+# These are open-ended or clarification asks that don't target a discrete legal element.
+_NON_DEDUPLICATED_QUESTION_TYPES: frozenset = frozenset({
+    'clarification',
+    'general',
+    'open_ended',
+    'open-ended',
+    'general_intake_clarification',
+})
+
 
 class ComplaintDenoiser:
     """
@@ -2589,7 +2599,7 @@ class ComplaintDenoiser:
             ).strip().lower()
             # Only deduplicate candidates that explicitly target a specific element;
             # generic/clarification questions are always kept.
-            if q_element and q_type not in {'clarification', 'general', 'open_ended'}:
+            if q_element and q_type not in _NON_DEDUPLICATED_QUESTION_TYPES:
                 objective_key = f'{q_type}::{q_element}'
                 if objective_key in seen_objective_keys:
                     continue
