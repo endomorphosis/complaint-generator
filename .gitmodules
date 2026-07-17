@@ -1,7 +1,3 @@
-[submodule "ipfs_datasets_py"]
-	path = ipfs_datasets_py
-	url = https://github.com/endomorphosis/ipfs_datasets_py.git
-	branch = main
 
 [submodule "mike"]
 	path = mike
