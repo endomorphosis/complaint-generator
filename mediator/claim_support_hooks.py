@@ -32,8 +32,8 @@ _ENRICHMENT_QUEUE_DDL = """
         status VARCHAR NOT NULL DEFAULT 'pending',
         priority INTEGER DEFAULT 0,
         metadata JSON,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
 """
 
@@ -5756,15 +5756,13 @@ class ClaimSupportHook:
                 INSERT INTO claim_enrichment_queue
                     (user_id, claim_type, enrichment_type, status, priority, metadata)
                 VALUES (?, ?, ?, 'pending', ?, ?)
+                RETURNING id
                 """,
                 [user_id, claim_type, enrichment_type, priority, json.dumps(metadata or {})],
             )
-            job_id_row = conn.execute(
-                "SELECT MAX(id) FROM claim_enrichment_queue WHERE user_id = ? AND enrichment_type = ?",
-                [user_id, enrichment_type],
-            ).fetchone()
+            inserted = conn.fetchone()
             conn.close()
-            job_id = job_id_row[0] if job_id_row else None
+            job_id = inserted[0] if inserted else None
         except Exception as exc:
             self.mediator.log('enrichment_queue_submit_error', error=str(exc))
             return {
