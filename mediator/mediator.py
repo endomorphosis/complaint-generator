@@ -6015,8 +6015,14 @@ class Mediator:
 	})
 	_AMBIGUITY_VAGUE_INJURY_TOKENS = frozenset({
 		'i was hurt', 'harmed somehow', 'suffered', 'it was bad', 'something bad',
-		'various harms', 'multiple harms', 'unclear harm', 'not sure about', 'i don\'t know',
+		'various harms', 'multiple harms', 'unclear harm', 'not sure about', "i don't know",
 	})
+
+	# Minimum word-count thresholds below which actor/conduct/injury text is
+	# considered too vague to be unambiguous.
+	_AMBIGUITY_MIN_ACTOR_WORD_COUNT: int = 3
+	_AMBIGUITY_MIN_CONDUCT_WORD_COUNT: int = 4
+	_AMBIGUITY_MIN_INJURY_WORD_COUNT: int = 3
 
 	def _detect_claim_ambiguity_flags(
 		self,
@@ -6089,7 +6095,7 @@ class Mediator:
 				for f in actor_facts:
 					text_lower = str(f.get('text') or '').lower()
 					word_count = len(text_lower.split())
-					if word_count <= 2 or any(token in text_lower for token in self._AMBIGUITY_VAGUE_ACTOR_TOKENS):
+					if word_count < self._AMBIGUITY_MIN_ACTOR_WORD_COUNT or any(token in text_lower for token in self._AMBIGUITY_VAGUE_ACTOR_TOKENS):
 						vague_actor = True
 						break
 				if vague_actor:
@@ -6106,7 +6112,7 @@ class Mediator:
 				vague_conduct = 0
 				for f in conduct_facts:
 					text_lower = str(f.get('text') or '').lower()
-					if len(text_lower.split()) <= 3 or any(token in text_lower for token in self._AMBIGUITY_VAGUE_CONDUCT_TOKENS):
+					if len(text_lower.split()) < self._AMBIGUITY_MIN_CONDUCT_WORD_COUNT or any(token in text_lower for token in self._AMBIGUITY_VAGUE_CONDUCT_TOKENS):
 						vague_conduct += 1
 				if vague_conduct >= len(conduct_facts):
 					flags.append('conduct_vague')
@@ -6119,7 +6125,7 @@ class Mediator:
 				vague_injury = 0
 				for f in impact_facts:
 					text_lower = str(f.get('text') or '').lower()
-					if len(text_lower.split()) <= 2 or any(token in text_lower for token in self._AMBIGUITY_VAGUE_INJURY_TOKENS):
+					if len(text_lower.split()) < self._AMBIGUITY_MIN_INJURY_WORD_COUNT or any(token in text_lower for token in self._AMBIGUITY_VAGUE_INJURY_TOKENS):
 						vague_injury += 1
 				if vague_injury >= len(impact_facts):
 					flags.append('injury_unspecified')
