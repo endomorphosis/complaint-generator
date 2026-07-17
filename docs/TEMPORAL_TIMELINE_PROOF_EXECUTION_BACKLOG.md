@@ -281,7 +281,7 @@ Make temporal proof state a first-class readiness input across the review dashbo
 - [x] add operator drilldowns from packet summaries to blocking facts and relations — `proof_bundles` indexed by `claim_type:element_id` with blocking_reasons, follow-ups, and fact/relation IDs
 - [x] gate drafting readiness on legal temporal sufficiency, not only aggregate proof-readiness score — `_build_chronology_blocker_summary` now reads `temporal_rule_profile_failed_element_count` from `claim_reasoning_review` and sets `chronology_blocked=True` independently of issue counts
 - [x] show chronology-specific blockers in `/document` and `/document/optimization-trace` — `renderChronologyBlockerSummary()` in both `templates/document.html` and `templates/optimization_trace.html`; `document.html` reads from `draft.source_context.chronology_blocker_summary`, trace template derives from `claimReasoningReview` and `claimSupportPacketSummary`
-- [ ] preserve UX parity between packet summary chips and detailed proof-handoff panels
+- [x] preserve UX parity between packet summary chips and detailed proof-handoff panels
 
 ### Acceptance criteria
 

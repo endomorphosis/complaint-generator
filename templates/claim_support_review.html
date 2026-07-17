@@ -4160,6 +4160,18 @@
             if (claimSupportPacketSummary.temporal_warning_count !== undefined) {
                 packetChips.push(`<span class="chip">packet temporal warnings: ${Number(claimSupportPacketSummary.temporal_warning_count || 0)}</span>`);
             }
+            if (claimSupportPacketSummary.temporal_rule_profile_available_element_count !== undefined) {
+                packetChips.push(`<span class="chip">packet rule profiles: ${Number(claimSupportPacketSummary.temporal_rule_profile_available_element_count || 0)}</span>`);
+            }
+            if (claimSupportPacketSummary.temporal_rule_profile_satisfied_element_count !== undefined) {
+                packetChips.push(`<span class="chip">packet rule satisfied: ${Number(claimSupportPacketSummary.temporal_rule_profile_satisfied_element_count || 0)}</span>`);
+            }
+            if (claimSupportPacketSummary.temporal_rule_profile_partial_element_count !== undefined) {
+                packetChips.push(`<span class="chip">packet rule partial: ${Number(claimSupportPacketSummary.temporal_rule_profile_partial_element_count || 0)}</span>`);
+            }
+            if (claimSupportPacketSummary.temporal_rule_profile_failed_element_count !== undefined) {
+                packetChips.push(`<span class="chip">packet rule failed: ${Number(claimSupportPacketSummary.temporal_rule_profile_failed_element_count || 0)}</span>`);
+            }
             const packetChronologyTaskCount = claimSupportPacketSummary.temporal_gap_task_count !== undefined
                 ? Number(claimSupportPacketSummary.temporal_gap_task_count || 0)
                 : Number(alignmentTaskSummary.temporal_gap_task_count || 0);

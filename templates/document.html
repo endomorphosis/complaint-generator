@@ -4294,6 +4294,18 @@
                 claimSupportPacketSummary.temporal_warning_count != null
                     ? `Packet temporal warnings: ${Number(claimSupportPacketSummary.temporal_warning_count || 0)}`
                     : '',
+                claimSupportPacketSummary.temporal_rule_profile_available_element_count != null
+                    ? `Packet rule profiles: ${Number(claimSupportPacketSummary.temporal_rule_profile_available_element_count || 0)}`
+                    : '',
+                claimSupportPacketSummary.temporal_rule_profile_satisfied_element_count != null
+                    ? `Packet rule satisfied: ${Number(claimSupportPacketSummary.temporal_rule_profile_satisfied_element_count || 0)}`
+                    : '',
+                claimSupportPacketSummary.temporal_rule_profile_partial_element_count != null
+                    ? `Packet rule partial: ${Number(claimSupportPacketSummary.temporal_rule_profile_partial_element_count || 0)}`
+                    : '',
+                claimSupportPacketSummary.temporal_rule_profile_failed_element_count != null
+                    ? `Packet rule failed: ${Number(claimSupportPacketSummary.temporal_rule_profile_failed_element_count || 0)}`
+                    : '',
                 claimSupportPacketSummary.temporal_gap_task_count != null
                     ? `Packet chronology tasks: ${Number(claimSupportPacketSummary.temporal_gap_task_count || 0)}`
                     : '',
