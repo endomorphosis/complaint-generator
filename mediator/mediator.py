@@ -7559,6 +7559,11 @@ class Mediator:
 		credible_count = 0
 		draft_ready_count = 0
 		high_quality_supported_count = 0
+		rule_profile_status_counter_map = {
+			'satisfied': 'temporal_rule_profile_satisfied_element_count',
+			'partial': 'temporal_rule_profile_partial_element_count',
+			'failed': 'temporal_rule_profile_failed_element_count',
+		}
 		for packet in packets.values():
 			if not isinstance(packet, dict):
 				continue
@@ -7598,12 +7603,7 @@ class Mediator:
 					# empty for profiles that were registered but not yet evaluated.
 					summary['temporal_rule_profile_available_element_count'] += 1
 					rule_status = str(element.get('temporal_rule_status') or '').strip().lower()
-					status_counter_map = {
-						'satisfied': 'temporal_rule_profile_satisfied_element_count',
-						'partial': 'temporal_rule_profile_partial_element_count',
-						'failed': 'temporal_rule_profile_failed_element_count',
-					}
-					status_counter_key = status_counter_map.get(rule_status)
+					status_counter_key = rule_profile_status_counter_map.get(rule_status)
 					if status_counter_key:
 						summary[status_counter_key] += 1
 					# Elements with a profile ID but an unrecognized or empty status
