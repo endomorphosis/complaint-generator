@@ -2403,6 +2403,8 @@ class TestClaimSupportHook:
                 'blocking_reasons': [],
                 'warnings': [],
                 'recommended_follow_ups': [],
+                'has_contradictory_dates': False,
+                'has_limitations_risk': False,
             }
             assert diagnostics['temporal_proof_bundle'] == {
                 'proof_bundle_id': 'retaliation:retaliation_1:retaliation_temporal_profile_v1',
@@ -2555,6 +2557,8 @@ class TestClaimSupportHook:
                     'reason': 'Clarify whether the protected activity occurred before the adverse action.',
                 }
             ],
+            'has_contradictory_dates': False,
+            'has_limitations_risk': False,
         }
 
     def test_get_temporal_reasoning_context_prefers_temporal_registries(self):

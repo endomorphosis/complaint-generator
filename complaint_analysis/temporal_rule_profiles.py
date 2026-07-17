@@ -1,11 +1,36 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set
+from datetime import date
+from typing import Any, Dict, List, Optional, Set
 
 
 def _normalize_key(value: Any) -> str:
     text = str(value or "").strip().lower()
     return "".join(ch if ch.isalnum() else "_" for ch in text).strip("_")
+
+
+def _days_since_date(date_str: Any) -> Optional[int]:
+    """Return the number of days since the given ISO date string, or None if unparseable."""
+    try:
+        event_date = date.fromisoformat(str(date_str or "").strip()[:10])
+        return (date.today() - event_date).days
+    except (ValueError, TypeError):
+        return None
+
+
+def _latest_anchored_date(facts: List[Dict[str, Any]]) -> Optional[str]:
+    """Return the latest start_date found across a list of temporal facts, or None."""
+    best: Optional[str] = None
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        tc = fact.get("temporal_context") if isinstance(fact.get("temporal_context"), dict) else {}
+        start = str(tc.get("start_date") or "").strip()
+        if not start:
+            continue
+        if best is None or start > best:
+            best = start
+    return best
 
 
 def _is_retaliation_claim_type(claim_type: Any) -> bool:
@@ -44,6 +69,8 @@ def evaluate_temporal_rule_profile(
     claim_type: Any,
     element: Dict[str, Any],
     temporal_context: Dict[str, Any],
+    *,
+    reference_date: Optional[date] = None,
 ) -> Dict[str, Any]:
     if not _is_retaliation_claim_type(claim_type):
         return {
@@ -189,6 +216,59 @@ def evaluate_temporal_rule_profile(
     if role in {"protected_activity", "adverse_action"} and "relative_only_ordering" in relevant_issue_types:
         warnings.append("Relevant chronology still relies on relative-only ordering.")
 
+    # T2: Contradictory-dates detection — applies primarily to causal_connection but checked for all roles.
+    has_contradictory_dates = "contradictory_dates" in relevant_issue_types
+    if has_contradictory_dates:
+        warnings.append("Contradictory date records are present; chronological ordering is uncertain.")
+        if role not in {"protected_activity", "adverse_action"} and status == "satisfied":
+            # A satisfied causal ordering claim is weakened when dates contradict.
+            status = "partial"
+            blocking_reasons.append("Contradictory dates prevent confident ordering confirmation.")
+        if role not in {"protected_activity", "adverse_action"}:
+            recommended_follow_ups.append({
+                "lane": "request_document",
+                "reason": "Resolve date contradictions with a dated document or authoritative record.",
+            })
+
+    # T2: Limitations-risk detection.  Check both the issue registry and, where anchored
+    # adverse-action dates are available, compute the elapsed days against the standard
+    # EEOC 300-day filing window.  The 300-day window applies in states with a deferral
+    # agency (Title VII, ADA, ADEA); the 180-day window applies in non-deferral states.
+    # Because the system cannot always know whether the complainant's state has a deferral
+    # agency, we flag a warning at 300 days and note the 180-day threshold as a secondary
+    # risk.  This is a warning, not a hard blocker, because the exact limitations period
+    # depends on jurisdiction and filing date facts that are not always in the record.
+    has_limitations_risk = "limitations_risk" in relevant_issue_types
+    limitations_risk_days: Optional[int] = None
+    if not has_limitations_risk and reference_date is not None and anchored_adverse_fact_ids:
+        latest_adverse_date = _latest_anchored_date(adverse_facts)
+        if latest_adverse_date:
+            try:
+                event_date = date.fromisoformat(latest_adverse_date[:10])
+                days_elapsed = (reference_date - event_date).days
+                if days_elapsed > 180:
+                    has_limitations_risk = True
+                    limitations_risk_days = days_elapsed
+            except (ValueError, TypeError):
+                pass
+    if has_limitations_risk:
+        if limitations_risk_days is not None:
+            warnings.append(
+                f"Adverse action occurred approximately {limitations_risk_days} days ago, "
+                "which may be outside the standard EEOC filing window (300 days in deferral "
+                "states, 180 days in non-deferral states)."
+            )
+        else:
+            warnings.append(
+                "A limitations risk issue is present; the adverse action may be outside the "
+                "standard EEOC filing window (300 days in deferral states, 180 days in "
+                "non-deferral states)."
+            )
+        recommended_follow_ups.append({
+            "lane": "seek_external_record",
+            "reason": "Verify the adverse action date against applicable filing deadlines to assess limitations risk.",
+        })
+
     return {
         "available": True,
         "evaluated": True,
@@ -202,4 +282,6 @@ def evaluate_temporal_rule_profile(
         "blocking_reasons": blocking_reasons,
         "warnings": warnings,
         "recommended_follow_ups": recommended_follow_ups,
+        "has_contradictory_dates": has_contradictory_dates,
+        "has_limitations_risk": has_limitations_risk,
     }
