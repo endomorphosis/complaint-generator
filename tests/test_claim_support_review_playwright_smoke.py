@@ -5614,6 +5614,118 @@ def test_document_preview_smoke_renders_claim_reasoning_chronology_rollups():
             browser.close()
 
 
+def test_document_preview_smoke_renders_chronology_blocker_summary():
+    """T6/T5: chronology_blocker_summary in draft.source_context renders a chip panel."""
+    if not PLAYWRIGHT_AVAILABLE:
+        pytest.skip("Playwright not available")
+
+    payload = {
+        "generated_at": "2026-03-22T14:00:00+00:00",
+        "draft": {
+            "court_header": "IN THE UNITED STATES DISTRICT COURT",
+            "case_caption": {
+                "plaintiffs": ["Jane Doe"],
+                "defendants": ["Acme Corporation"],
+            },
+            "summary_of_facts": ["Plaintiff reported discrimination before termination."],
+            "factual_allegation_paragraphs": [],
+            "legal_standards": [],
+            "claims_for_relief": [],
+            "requested_relief": ["Compensatory damages."],
+            "draft_text": "Sample draft.",
+            "exhibits": [],
+            "source_context": {
+                "chronology_blocker_summary": {
+                    "chronology_blocked": True,
+                    "proof_readiness_score": 0.35,
+                    "temporal_gap_task_count": 2,
+                    "unresolved_temporal_issue_count": 3,
+                    "unresolved_temporal_issue_ids": ["ti-001", "ti-002", "ti-003"],
+                    "temporal_rule_profile_failed_element_count": 1,
+                    "temporal_rule_profile_partial_element_count": 0,
+                    "failed_rule_frame_ids": ["retaliation_temporal_frame"],
+                    "summary": "Chronology blockers remain: 2 pending chronology gap tasks; 3 unresolved temporal issues; 1 element with failed temporal rule profile.",
+                }
+            },
+        },
+        "drafting_readiness": {"sections": {}, "claims": [], "warnings": []},
+        "filing_checklist": [],
+        "review_links": {},
+    }
+
+    app = _build_document_browser_smoke_app()
+    with _serve_app(app) as base_url:
+        with sync_playwright() as playwright_context:
+            browser = playwright_context.chromium.launch()
+            page = browser.new_page()
+            page.goto(f"{base_url}/document")
+            page.evaluate("payload => window.renderPreview(payload)", payload)
+            page.wait_for_function(
+                "() => document.getElementById('document-chronology-blocker-summary') !== null"
+            )
+
+            blocker_el = page.locator("#document-chronology-blocker-summary")
+            assert blocker_el.count() == 1, "Expected chronology blocker summary card"
+
+            card_text = blocker_el.inner_text().lower()
+            # Card heading
+            assert "chronology blockers present" in card_text
+            # Chips: failed elements, unresolved issues, tasks
+            assert "failed rule elements: 1" in card_text
+            assert "unresolved issues: 3" in card_text
+            assert "chronology tasks: 2" in card_text
+            # Proof readiness score chip
+            assert "proof readiness:" in card_text
+            # Failed rule frame id chip
+            assert "retaliation_temporal_frame" in card_text
+
+            browser.close()
+
+
+def test_document_preview_smoke_chronology_blocker_absent_when_no_blockers():
+    """T6/T5: chronology_blocker_summary panel is absent when no blockers exist."""
+    if not PLAYWRIGHT_AVAILABLE:
+        pytest.skip("Playwright not available")
+
+    payload = {
+        "generated_at": "2026-03-22T14:00:00+00:00",
+        "draft": {
+            "court_header": "IN THE UNITED STATES DISTRICT COURT",
+            "case_caption": {
+                "plaintiffs": ["Jane Doe"],
+                "defendants": ["Acme Corporation"],
+            },
+            "summary_of_facts": [],
+            "factual_allegation_paragraphs": [],
+            "legal_standards": [],
+            "claims_for_relief": [],
+            "requested_relief": [],
+            "draft_text": "Sample draft.",
+            "exhibits": [],
+            # No source_context / no chronology_blocker_summary → panel should not appear.
+        },
+        "drafting_readiness": {"sections": {}, "claims": [], "warnings": []},
+        "filing_checklist": [],
+        "review_links": {},
+    }
+
+    app = _build_document_browser_smoke_app()
+    with _serve_app(app) as base_url:
+        with sync_playwright() as playwright_context:
+            browser = playwright_context.chromium.launch()
+            page = browser.new_page()
+            page.goto(f"{base_url}/document")
+            page.evaluate("payload => window.renderPreview(payload)", payload)
+            page.wait_for_function(
+                "() => document.getElementById('previewRoot').children.length > 0"
+            )
+
+            blocker_els = page.locator("#document-chronology-blocker-summary")
+            assert blocker_els.count() == 0, "Chronology blocker panel should not render when no blockers"
+
+            browser.close()
+
+
 def test_document_builder_question_review_link_click_preserves_focus_on_review_page():
     if not PLAYWRIGHT_AVAILABLE:
         pytest.skip("Playwright not available")

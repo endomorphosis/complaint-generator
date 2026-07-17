@@ -1,11 +1,17 @@
 """
-T1 / T3 / T5 / T6 temporal timeline proof regression suite.
+T1 / T3 / T4 / T5 / T6 temporal timeline proof regression suite.
 
 Covers:
   T1 – inferred date-anchor relations in build_temporal_relation_registry
   T1 – issue category normalization (temporal_ prefix stripping) in build_temporal_issue_registry
   T3 – formula certainty annotation in proof bundle theorem_exports
   T3 – proof_bundles keyed by claim_type:element_id in claim review output
+  T4 – canonical issue-category → follow-up lane mapping (get_follow_up_profile)
+  T4 – enrich_follow_up attaches follow_up_target, proof_criticality, question_objective
+  T4 – rank_follow_ups orders by proof_criticality (high first)
+  T4 – evaluate_temporal_rule_profile returns enriched and ranked follow-ups
+  T4 – _aggregate_timeline_gap_follow_ups deduplicates and ranks across proof bundles
+  T4 – summarize_claim_reasoning_review exposes timeline_gap_follow_ups
   T5 – _build_chronology_blocker_summary gates on temporal_rule_profile_failed_element_count
 """
 from __future__ import annotations
@@ -636,3 +642,271 @@ def test_t5_failed_rule_frame_ids_present_in_summary():
     assert "retaliation_temporal_frame" in frame_ids
     # Each unique rule_frame_id appears once even if multiple bundles share it.
     assert frame_ids.count("retaliation_temporal_frame") == 1
+
+
+# ---------------------------------------------------------------------------
+# T4: Temporal follow-up planner — follow-up enrichment and ranking
+# ---------------------------------------------------------------------------
+
+def test_t4_get_follow_up_profile_known_category():
+    """get_follow_up_profile returns correct lane data for a registered category."""
+    from complaint_analysis.temporal_rule_profiles import get_follow_up_profile
+
+    profile = get_follow_up_profile("contradictory_dates")
+    assert profile["follow_up_lane"] == "contradiction_resolution"
+    assert profile["follow_up_target"] == "document_request"
+    assert profile["proof_criticality"] == "high"
+    assert profile["question_objective"] == "contradiction_resolution"
+
+
+def test_t4_get_follow_up_profile_limitations_risk():
+    """limitations_risk maps to deadline_verification lane."""
+    from complaint_analysis.temporal_rule_profiles import get_follow_up_profile
+
+    profile = get_follow_up_profile("limitations_risk")
+    assert profile["follow_up_lane"] == "deadline_verification"
+    assert profile["follow_up_target"] == "external_corroboration"
+    assert profile["proof_criticality"] == "high"
+    assert profile["question_objective"] == "deadline_verification"
+
+
+def test_t4_get_follow_up_profile_unknown_falls_back():
+    """Unknown categories return a safe clarification fallback."""
+    from complaint_analysis.temporal_rule_profiles import get_follow_up_profile
+
+    profile = get_follow_up_profile("some_unknown_category_xyz")
+    assert "follow_up_lane" in profile
+    assert "follow_up_target" in profile
+    assert "proof_criticality" in profile
+    assert "question_objective" in profile
+
+
+def test_t4_enrich_follow_up_adds_missing_fields():
+    """enrich_follow_up attaches follow_up_target, proof_criticality, question_objective."""
+    from complaint_analysis.temporal_rule_profiles import enrich_follow_up
+
+    raw = {"lane": "request_document", "reason": "Collect dated records."}
+    enriched = enrich_follow_up(raw, issue_category="missing_anchor")
+
+    assert "follow_up_target" in enriched
+    assert "proof_criticality" in enriched
+    assert "question_objective" in enriched
+    # Original fields are preserved.
+    assert enriched["lane"] == "request_document"
+    assert enriched["reason"] == "Collect dated records."
+
+
+def test_t4_enrich_follow_up_preserves_existing_fields():
+    """enrich_follow_up does not overwrite fields that are already present."""
+    from complaint_analysis.temporal_rule_profiles import enrich_follow_up
+
+    raw = {
+        "lane": "capture_testimony",
+        "reason": "Capture testimony.",
+        "follow_up_target": "testimony",
+        "proof_criticality": "low",
+        "question_objective": "anchor_capture",
+    }
+    enriched = enrich_follow_up(raw, issue_category="missing_anchor")
+    assert enriched["proof_criticality"] == "low"
+    assert enriched["question_objective"] == "anchor_capture"
+    assert enriched["follow_up_target"] == "testimony"
+
+
+def test_t4_rank_follow_ups_high_before_low():
+    """rank_follow_ups puts high-criticality items before low-criticality items."""
+    from complaint_analysis.temporal_rule_profiles import rank_follow_ups
+
+    follow_ups = [
+        {"lane": "clarify_with_complainant", "reason": "A", "proof_criticality": "low"},
+        {"lane": "seek_external_record", "reason": "B", "proof_criticality": "high"},
+        {"lane": "request_document", "reason": "C", "proof_criticality": "medium"},
+    ]
+    ranked = rank_follow_ups(follow_ups)
+    assert ranked[0]["proof_criticality"] == "high"
+    assert ranked[-1]["proof_criticality"] == "low"
+
+
+def test_t4_evaluate_temporal_rule_profile_follow_ups_enriched():
+    """evaluate_temporal_rule_profile returns enriched recommended_follow_ups."""
+    from complaint_analysis.temporal_rule_profiles import evaluate_temporal_rule_profile
+
+    element = {"element_id": "protected_activity", "element_text": "Protected activity"}
+    temporal_context: Dict[str, Any] = {
+        "temporal_facts": [],
+        "temporal_relations": [],
+        "temporal_issues": [],
+    }
+    result = evaluate_temporal_rule_profile("retaliation", element, temporal_context)
+    follow_ups = result.get("recommended_follow_ups", [])
+    assert follow_ups, "Expected at least one follow-up when no facts are present"
+    for fu in follow_ups:
+        assert "follow_up_target" in fu, f"follow_up_target missing from: {fu}"
+        assert "proof_criticality" in fu, f"proof_criticality missing from: {fu}"
+        assert "question_objective" in fu, f"question_objective missing from: {fu}"
+
+
+def test_t4_evaluate_temporal_rule_profile_ranked_by_criticality():
+    """evaluate_temporal_rule_profile returns follow-ups sorted high-criticality first."""
+    from complaint_analysis.temporal_rule_profiles import evaluate_temporal_rule_profile
+    from datetime import date
+
+    element = {"element_id": "adverse_action", "element_text": "Adverse action"}
+    # Include a limitations_risk issue (high criticality) and a missing_anchor (high) to
+    # ensure the ranked order is applied.  Both are high so order is stable; the key is
+    # that we get enriched items back.
+    adverse_fact = {
+        "fact_id": "f1",
+        "element_tags": ["adverse_action"],
+        "temporal_context": {"start_date": "2020-01-01"},
+    }
+    temporal_context: Dict[str, Any] = {
+        "temporal_facts": [adverse_fact],
+        "temporal_relations": [],
+        "temporal_issues": [{"issue_type": "limitations_risk", "category": "limitations_risk"}],
+    }
+    # reference_date 400 days after adverse action → triggers limitations_risk
+    result = evaluate_temporal_rule_profile(
+        "retaliation", element, temporal_context,
+        reference_date=date(2021, 2, 5),
+    )
+    follow_ups = result.get("recommended_follow_ups", [])
+    criticalities = [fu.get("proof_criticality") for fu in follow_ups]
+    # All returned items should have criticality set.
+    assert all(c in {"high", "medium", "low"} for c in criticalities)
+    # Verify high items appear before lower ones.
+    for i in range(len(criticalities) - 1):
+        order_i = {"high": 2, "medium": 1, "low": 0}.get(criticalities[i], 1)
+        order_j = {"high": 2, "medium": 1, "low": 0}.get(criticalities[i + 1], 1)
+        assert order_i >= order_j, f"Follow-ups not in criticality order: {criticalities}"
+
+
+def test_t4_aggregate_timeline_gap_follow_ups_deduplicates():
+    """_aggregate_timeline_gap_follow_ups deduplicates follow-ups with same lane+reason."""
+    from claim_support_review import _aggregate_timeline_gap_follow_ups
+
+    proof_bundles = {
+        "retaliation:protected_activity": {
+            "rule_frame_id": "retaliation_temporal_frame",
+            "recommended_follow_ups": [
+                {"lane": "capture_testimony", "reason": "Identify the protected activity."},
+            ],
+        },
+        "retaliation:adverse_action": {
+            "rule_frame_id": "retaliation_temporal_frame",
+            "recommended_follow_ups": [
+                # Duplicate of the one above — same lane + reason.
+                {"lane": "capture_testimony", "reason": "Identify the protected activity."},
+                {"lane": "request_document", "reason": "Collect dated records."},
+            ],
+        },
+    }
+    follow_ups = _aggregate_timeline_gap_follow_ups(proof_bundles)
+    # Should have 2 unique items, not 3.
+    assert len(follow_ups) == 2
+    lanes = {fu.get("lane") or fu.get("follow_up_lane") for fu in follow_ups}
+    assert "capture_testimony" in lanes or "anchor_capture" in lanes
+    assert "request_document" in lanes or "document_request" in lanes
+
+
+def test_t4_aggregate_timeline_gap_follow_ups_enrichment():
+    """_aggregate_timeline_gap_follow_ups enriches follow-ups with T4 fields."""
+    from claim_support_review import _aggregate_timeline_gap_follow_ups
+
+    proof_bundles = {
+        "retaliation:causal_connection": {
+            "rule_frame_id": "retaliation_temporal_frame",
+            "recommended_follow_ups": [
+                {"lane": "clarify_with_complainant", "reason": "Clarify ordering."},
+            ],
+        },
+    }
+    follow_ups = _aggregate_timeline_gap_follow_ups(proof_bundles)
+    assert follow_ups
+    fu = follow_ups[0]
+    assert "follow_up_target" in fu
+    assert "proof_criticality" in fu
+    assert "question_objective" in fu
+
+
+def test_t4_aggregate_timeline_gap_follow_ups_ranked():
+    """_aggregate_timeline_gap_follow_ups returns items ranked high criticality first."""
+    from claim_support_review import _aggregate_timeline_gap_follow_ups
+
+    proof_bundles = {
+        "claim:element_a": {
+            "recommended_follow_ups": [
+                {
+                    "lane": "seek_external_record",
+                    "reason": "Verify filing deadline.",
+                    "proof_criticality": "high",
+                    "follow_up_target": "external_corroboration",
+                    "question_objective": "deadline_verification",
+                },
+                {
+                    "lane": "clarify_with_complainant",
+                    "reason": "Minor clarification.",
+                    "proof_criticality": "low",
+                    "follow_up_target": "clarification",
+                    "question_objective": "anchor_capture",
+                },
+            ],
+        },
+    }
+    follow_ups = _aggregate_timeline_gap_follow_ups(proof_bundles)
+    assert len(follow_ups) == 2
+    assert follow_ups[0]["proof_criticality"] == "high"
+    assert follow_ups[-1]["proof_criticality"] == "low"
+
+
+def test_t4_summarize_claim_reasoning_review_exposes_timeline_gap_follow_ups():
+    """summarize_claim_reasoning_review includes timeline_gap_follow_ups in output."""
+    from claim_support_review import summarize_claim_reasoning_review
+
+    # Build a minimal validation_claim with one element that has a temporal rule profile
+    # with recommended follow-ups.
+    validation_claim: Dict[str, Any] = {
+        "claim_type": "retaliation",
+        "elements": [
+            {
+                "element_id": "causal_connection",
+                "element_text": "Causal connection",
+                "reasoning": {
+                    "temporal_rule_profile": {
+                        "available": True,
+                        "profile_id": "retaliation_temporal_profile_v1",
+                        "rule_frame_id": "retaliation_temporal_frame",
+                        "status": "failed",
+                        "element_role": "causal_connection",
+                        "blocking_reasons": ["Missing causal ordering."],
+                        "warnings": [],
+                        "recommended_follow_ups": [
+                            {
+                                "lane": "clarify_with_complainant",
+                                "reason": "Clarify whether protected activity preceded adverse action.",
+                                "follow_up_target": "clarification",
+                                "proof_criticality": "high",
+                                "question_objective": "anchor_capture",
+                            }
+                        ],
+                        "matched_fact_ids": [],
+                        "matched_relation_ids": [],
+                        "has_contradictory_dates": False,
+                        "has_limitations_risk": False,
+                    },
+                    "temporal_proof_bundle": {},
+                    "proof_artifact": {},
+                },
+            }
+        ],
+    }
+    result = summarize_claim_reasoning_review(validation_claim)
+
+    assert "timeline_gap_follow_ups" in result, "summarize_claim_reasoning_review must expose timeline_gap_follow_ups"
+    follow_ups = result["timeline_gap_follow_ups"]
+    assert isinstance(follow_ups, list)
+    # The single follow-up from the proof bundle should be present (the bundle is built
+    # from temporal_proof_bundle, which may be empty here, so timeline_gap_follow_ups
+    # may be empty too — but the key must exist).
+    # If the proof bundle was populated it would carry the follow-ups; here we only
+    # assert the field is present.

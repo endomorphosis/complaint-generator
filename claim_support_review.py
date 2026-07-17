@@ -2,6 +2,15 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 try:
+    from complaint_analysis.temporal_rule_profiles import enrich_follow_up, rank_follow_ups
+except Exception:  # pragma: no cover — degraded if complaint_analysis is unavailable
+    def enrich_follow_up(follow_up: Dict[str, Any], issue_category: str = "") -> Dict[str, Any]:  # type: ignore[misc]
+        return dict(follow_up)
+
+    def rank_follow_ups(follow_ups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:  # type: ignore[misc]
+        return list(follow_ups)
+
+try:
     from pydantic import BaseModel, Field
 except ModuleNotFoundError:
     print("Info: claim support review pydantic is unavailable; using fallback BaseModel.")
@@ -1587,6 +1596,47 @@ def summarize_claim_support_snapshot_lifecycle(
     }
 
 
+def _aggregate_timeline_gap_follow_ups(
+    proof_bundles: Dict[str, Any],
+    max_items: int = 20,
+) -> List[Dict[str, Any]]:
+    """Aggregate and deduplicate temporal follow-ups from all proof bundles.
+
+    T4: Collects ``recommended_follow_ups`` from every bundle, enriches any
+    that are missing ``follow_up_target``, ``proof_criticality``, or
+    ``question_objective``, and returns the ranked deduplicated list.
+
+    Deduplication is keyed on ``(follow_up_lane, reason)`` so that follow-ups
+    with the same intent are not surfaced multiple times even when multiple
+    proof bundles share the same issue.
+    """
+    seen: set = set()
+    combined: List[Dict[str, Any]] = []
+    for bundle in proof_bundles.values():
+        if not isinstance(bundle, dict):
+            continue
+        rule_frame_id = str(bundle.get("rule_frame_id") or "").strip()
+        for follow_up in bundle.get("recommended_follow_ups") or []:
+            if not isinstance(follow_up, dict):
+                continue
+            enriched = enrich_follow_up(follow_up)
+            lane = str(enriched.get("follow_up_lane") or enriched.get("lane") or "").strip()
+            reason = str(enriched.get("reason") or "").strip()
+            dedup_key = (lane, reason)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            if rule_frame_id and "rule_frame_id" not in enriched:
+                enriched = dict(enriched)
+                enriched["rule_frame_id"] = rule_frame_id
+            combined.append(enriched)
+            if len(combined) >= max_items:
+                break
+        if len(combined) >= max_items:
+            break
+    return rank_follow_ups(combined)
+
+
 def summarize_claim_reasoning_review(
     validation_claim: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -2079,6 +2129,9 @@ def summarize_claim_reasoning_review(
         "temporal_proof_bundle_status_counts": temporal_proof_bundle_status_counts,
         # T3: proof_bundles indexed by "claim_type:element_id" for direct drilldown.
         "proof_bundles": proof_bundles,
+        # T4: aggregated, deduplicated, ranked follow-ups from all temporal proof bundles
+        # so review surfaces can surface actionable next steps without scanning bundles manually.
+        "timeline_gap_follow_ups": _aggregate_timeline_gap_follow_ups(proof_bundles),
         "claim_temporal_issue_count": claim_temporal_issue_count,
         "claim_unresolved_temporal_issue_count": claim_unresolved_temporal_issue_count,
         "claim_resolved_temporal_issue_count": claim_resolved_temporal_issue_count,

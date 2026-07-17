@@ -4,6 +4,209 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Set
 
 
+# ---------------------------------------------------------------------------
+# T4: Canonical issue-category → follow-up lane mapping.
+#
+# Each entry maps a normalised issue_category key to a dict with:
+#   - follow_up_lane: canonical lane identifier for routing and deduplication
+#   - follow_up_target: the kind of resource the follow-up seeks
+#       "testimony"              — an oral or written statement from the complainant
+#       "document_request"       — a dated document from the respondent or third party
+#       "external_corroboration" — a public record, agency file, or external source
+#       "clarification"          — a clarifying question back to the complainant
+#   - proof_criticality: how urgently the gap blocks legal sufficiency
+#       "high"   — blocks a required element; must be resolved before drafting
+#       "medium" — weakens element satisfaction; should be resolved before filing
+#       "low"    — informational; helps but does not block drafting readiness
+#   - question_objective: the concrete goal of any follow-up question generated
+#       "anchor_capture"         — get a specific date or time anchor
+#       "contradiction_resolution" — resolve conflicting date records
+#       "deadline_verification"  — verify whether a filing deadline has passed
+#       "testimony_capture"      — collect the event narrative and date together
+#       "document_verification"  — confirm a document and its date exist
+#
+# Only issue categories that require differentiated routing are listed.  All
+# others fall back to the generic "clarify_with_complainant" / "clarification"
+# profile so that new issue types degrade gracefully.
+# ---------------------------------------------------------------------------
+_TEMPORAL_ISSUE_FOLLOW_UP_PROFILES: Dict[str, Dict[str, str]] = {
+    # ---- anchor gaps -------------------------------------------------------
+    "missing_anchor": {
+        "follow_up_lane": "anchor_capture",
+        "follow_up_target": "testimony",
+        "proof_criticality": "high",
+        "question_objective": "anchor_capture",
+    },
+    "missing_start_date": {
+        "follow_up_lane": "anchor_capture",
+        "follow_up_target": "testimony",
+        "proof_criticality": "high",
+        "question_objective": "anchor_capture",
+    },
+    "missing_end_date": {
+        "follow_up_lane": "anchor_capture",
+        "follow_up_target": "testimony",
+        "proof_criticality": "medium",
+        "question_objective": "anchor_capture",
+    },
+    "relative_only_ordering": {
+        "follow_up_lane": "anchor_capture",
+        "follow_up_target": "document_request",
+        "proof_criticality": "medium",
+        "question_objective": "anchor_capture",
+    },
+    # ---- contradiction categories ------------------------------------------
+    "contradictory_dates": {
+        "follow_up_lane": "contradiction_resolution",
+        "follow_up_target": "document_request",
+        "proof_criticality": "high",
+        "question_objective": "contradiction_resolution",
+    },
+    "temporal_reverse_before": {
+        "follow_up_lane": "contradiction_resolution",
+        "follow_up_target": "document_request",
+        "proof_criticality": "high",
+        "question_objective": "contradiction_resolution",
+    },
+    "conflicting_sequence": {
+        "follow_up_lane": "contradiction_resolution",
+        "follow_up_target": "document_request",
+        "proof_criticality": "high",
+        "question_objective": "contradiction_resolution",
+    },
+    # ---- limitations / deadline -------------------------------------------
+    "limitations_risk": {
+        "follow_up_lane": "deadline_verification",
+        "follow_up_target": "external_corroboration",
+        "proof_criticality": "high",
+        "question_objective": "deadline_verification",
+    },
+    # ---- retaliation-specific gaps ----------------------------------------
+    "retaliation_missing_causation": {
+        "follow_up_lane": "anchor_capture",
+        "follow_up_target": "testimony",
+        "proof_criticality": "high",
+        "question_objective": "testimony_capture",
+    },
+    "retaliation_missing_causation_link": {
+        "follow_up_lane": "anchor_capture",
+        "follow_up_target": "testimony",
+        "proof_criticality": "high",
+        "question_objective": "testimony_capture",
+    },
+    "retaliation_missing_sequence": {
+        "follow_up_lane": "anchor_capture",
+        "follow_up_target": "document_request",
+        "proof_criticality": "high",
+        "question_objective": "anchor_capture",
+    },
+    "retaliation_missing_sequencing_dates": {
+        "follow_up_lane": "anchor_capture",
+        "follow_up_target": "document_request",
+        "proof_criticality": "high",
+        "question_objective": "anchor_capture",
+    },
+    # ---- document-date gaps -----------------------------------------------
+    "missing_hearing_request_date": {
+        "follow_up_lane": "document_request",
+        "follow_up_target": "document_request",
+        "proof_criticality": "medium",
+        "question_objective": "document_verification",
+    },
+    "missing_hearing_timing": {
+        "follow_up_lane": "document_request",
+        "follow_up_target": "document_request",
+        "proof_criticality": "medium",
+        "question_objective": "document_verification",
+    },
+    "missing_response_dates": {
+        "follow_up_lane": "document_request",
+        "follow_up_target": "document_request",
+        "proof_criticality": "medium",
+        "question_objective": "document_verification",
+    },
+    "missing_decision_timeline": {
+        "follow_up_lane": "document_request",
+        "follow_up_target": "document_request",
+        "proof_criticality": "medium",
+        "question_objective": "document_verification",
+    },
+    "missing_written_notice": {
+        "follow_up_lane": "document_request",
+        "follow_up_target": "document_request",
+        "proof_criticality": "medium",
+        "question_objective": "document_verification",
+    },
+}
+
+# Map legacy lane names from proof-rule follow-ups to canonical follow_up_target values.
+_LANE_TO_TARGET: Dict[str, str] = {
+    "clarify_with_complainant": "clarification",
+    "capture_testimony": "testimony",
+    "request_document": "document_request",
+    "seek_external_record": "external_corroboration",
+    "anchor_capture": "testimony",
+    "contradiction_resolution": "document_request",
+    "deadline_verification": "external_corroboration",
+    "document_request": "document_request",
+}
+
+# Criticality ordering for ranking (higher index = higher priority).
+_CRITICALITY_ORDER = {"high": 2, "medium": 1, "low": 0}
+
+
+def get_follow_up_profile(issue_category: str) -> Dict[str, str]:
+    """Return the canonical follow-up profile for *issue_category*.
+
+    Falls back to a generic clarification profile when the category is not
+    registered in ``_TEMPORAL_ISSUE_FOLLOW_UP_PROFILES``.
+    """
+    normalised = _normalize_key(issue_category)
+    if normalised in _TEMPORAL_ISSUE_FOLLOW_UP_PROFILES:
+        return dict(_TEMPORAL_ISSUE_FOLLOW_UP_PROFILES[normalised])
+    return {
+        "follow_up_lane": "clarify_with_complainant",
+        "follow_up_target": "clarification",
+        "proof_criticality": "medium",
+        "question_objective": "anchor_capture",
+    }
+
+
+def enrich_follow_up(follow_up: Dict[str, Any], issue_category: str = "") -> Dict[str, Any]:
+    """Attach T4 enrichment fields to a follow-up dict if they are absent.
+
+    Safe to call on already-enriched dicts; existing values are preserved.
+    """
+    profile = get_follow_up_profile(issue_category)
+    enriched = dict(follow_up)
+    if "follow_up_target" not in enriched:
+        # Derive from existing lane if present, else use the canonical profile.
+        existing_lane = str(enriched.get("lane") or enriched.get("follow_up_lane") or "").strip()
+        enriched["follow_up_target"] = (
+            _LANE_TO_TARGET.get(existing_lane)
+            or _LANE_TO_TARGET.get(profile["follow_up_lane"])
+            or profile["follow_up_target"]
+        )
+    if "follow_up_lane" not in enriched and "lane" in enriched:
+        enriched["follow_up_lane"] = str(enriched["lane"])
+    elif "follow_up_lane" not in enriched:
+        enriched["follow_up_lane"] = profile["follow_up_lane"]
+    if "proof_criticality" not in enriched:
+        enriched["proof_criticality"] = profile["proof_criticality"]
+    if "question_objective" not in enriched:
+        enriched["question_objective"] = profile["question_objective"]
+    return enriched
+
+
+def rank_follow_ups(follow_ups: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return *follow_ups* sorted by proof_criticality (high first), stable."""
+    return sorted(
+        follow_ups,
+        key=lambda fu: _CRITICALITY_ORDER.get(str(fu.get("proof_criticality") or "medium"), 1),
+        reverse=True,
+    )
+
+
 def _normalize_key(value: Any) -> str:
     text = str(value or "").strip().lower()
     return "".join(ch if ch.isalnum() else "_" for ch in text).strip("_")
@@ -140,16 +343,16 @@ def evaluate_temporal_rule_profile(
         elif protected_fact_ids:
             status = "partial"
             blocking_reasons.append("Protected activity is identified but lacks a normalized time anchor.")
-            recommended_follow_ups.append({
+            recommended_follow_ups.append(enrich_follow_up({
                 "lane": "clarify_with_complainant",
                 "reason": "Anchor when the protected activity occurred.",
-            })
+            }, issue_category="missing_anchor"))
         else:
             blocking_reasons.append("No temporally identified protected activity event is present.")
-            recommended_follow_ups.append({
+            recommended_follow_ups.append(enrich_follow_up({
                 "lane": "capture_testimony",
                 "reason": "Identify the protected activity and when it occurred.",
-            })
+            }, issue_category="retaliation_missing_causation"))
     elif role == "adverse_action":
         matched_fact_ids = adverse_fact_ids
         if anchored_adverse_fact_ids:
@@ -157,16 +360,16 @@ def evaluate_temporal_rule_profile(
         elif adverse_fact_ids:
             status = "partial"
             blocking_reasons.append("Adverse action is identified but lacks a normalized time anchor.")
-            recommended_follow_ups.append({
+            recommended_follow_ups.append(enrich_follow_up({
                 "lane": "request_document",
                 "reason": "Anchor the adverse action with a dated document or testimony.",
-            })
+            }, issue_category="missing_anchor"))
         else:
             blocking_reasons.append("No temporally identified adverse action event is present.")
-            recommended_follow_ups.append({
+            recommended_follow_ups.append(enrich_follow_up({
                 "lane": "request_document",
                 "reason": "Collect dated records showing the adverse action.",
-            })
+            }, issue_category="missing_anchor"))
     else:
         matched_fact_ids = list(dict.fromkeys(protected_fact_ids + adverse_fact_ids))
         matched_relation_ids = [
@@ -177,10 +380,10 @@ def evaluate_temporal_rule_profile(
         if reverse_before_relations or "temporal_reverse_before" in relevant_issue_types:
             status = "failed"
             blocking_reasons.append("Available chronology places the adverse action before the protected activity.")
-            recommended_follow_ups.append({
+            recommended_follow_ups.append(enrich_follow_up({
                 "lane": "request_document",
                 "reason": "Resolve the reverse-order chronology with dated records.",
-            })
+            }, issue_category="temporal_reverse_before"))
         elif before_relations:
             status = "satisfied"
         elif protected_fact_ids and adverse_fact_ids:
@@ -190,19 +393,19 @@ def evaluate_temporal_rule_profile(
             else:
                 warnings.append("Protected activity and adverse action are both present but lack an ordering relation.")
             blocking_reasons.append("Retaliation causation lacks a clear temporal ordering from protected activity to adverse action.")
-            recommended_follow_ups.append({
+            recommended_follow_ups.append(enrich_follow_up({
                 "lane": "clarify_with_complainant",
                 "reason": "Clarify whether the protected activity occurred before the adverse action.",
-            })
+            }, issue_category="retaliation_missing_sequence"))
         else:
             if not protected_fact_ids:
                 blocking_reasons.append("Retaliation chronology is missing a protected activity event.")
             if not adverse_fact_ids:
                 blocking_reasons.append("Retaliation chronology is missing an adverse action event.")
-            recommended_follow_ups.append({
+            recommended_follow_ups.append(enrich_follow_up({
                 "lane": "capture_testimony",
                 "reason": "Collect the missing retaliation chronology events and their dates.",
-            })
+            }, issue_category="retaliation_missing_causation"))
 
     if role in {"protected_activity", "adverse_action"} and "relative_only_ordering" in relevant_issue_types:
         warnings.append("Relevant chronology still relies on relative-only ordering.")
@@ -216,10 +419,10 @@ def evaluate_temporal_rule_profile(
             status = "partial"
             blocking_reasons.append("Contradictory dates prevent confident ordering confirmation.")
         if role not in {"protected_activity", "adverse_action"}:
-            recommended_follow_ups.append({
+            recommended_follow_ups.append(enrich_follow_up({
                 "lane": "request_document",
                 "reason": "Resolve date contradictions with a dated document or authoritative record.",
-            })
+            }, issue_category="contradictory_dates"))
 
     # T2: Limitations-risk detection.  Check both the issue registry and, where anchored
     # adverse-action dates are available, compute the elapsed days against the EEOC filing
@@ -256,10 +459,13 @@ def evaluate_temporal_rule_profile(
                 "standard EEOC filing window (300 days in deferral states, 180 days in "
                 "non-deferral states)."
             )
-        recommended_follow_ups.append({
+        recommended_follow_ups.append(enrich_follow_up({
             "lane": "seek_external_record",
             "reason": "Verify the adverse action date against applicable filing deadlines to assess limitations risk.",
-        })
+        }, issue_category="limitations_risk"))
+
+    # T4: rank follow-ups by proof criticality (high first) before returning.
+    ranked_follow_ups = rank_follow_ups(recommended_follow_ups)
 
     return {
         "available": True,
@@ -273,7 +479,7 @@ def evaluate_temporal_rule_profile(
         "matched_relation_ids": matched_relation_ids,
         "blocking_reasons": blocking_reasons,
         "warnings": warnings,
-        "recommended_follow_ups": recommended_follow_ups,
+        "recommended_follow_ups": ranked_follow_ups,
         "has_contradictory_dates": has_contradictory_dates,
         "has_limitations_risk": has_limitations_risk,
     }

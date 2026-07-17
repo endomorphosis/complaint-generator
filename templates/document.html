@@ -3678,7 +3678,59 @@
             `;
         }
 
-        function renderReadiness(readiness, exhibits, reviewLinks, intakeCaseSummary) {
+        function renderChronologyBlockerSummary(chronologyBlockerSummary) {
+            if (!chronologyBlockerSummary || typeof chronologyBlockerSummary !== 'object') {
+                return '';
+            }
+            const blocked = Boolean(chronologyBlockerSummary.chronology_blocked);
+            const summary = String(chronologyBlockerSummary.summary || '').trim();
+            const failedCount = Number(chronologyBlockerSummary.temporal_rule_profile_failed_element_count || 0);
+            const unresolvedCount = Number(chronologyBlockerSummary.unresolved_temporal_issue_count || 0);
+            const gapTaskCount = Number(chronologyBlockerSummary.temporal_gap_task_count || 0);
+            const proofScore = Number(chronologyBlockerSummary.proof_readiness_score || 0);
+            const failedRuleFrameIds = Array.isArray(chronologyBlockerSummary.failed_rule_frame_ids)
+                ? chronologyBlockerSummary.failed_rule_frame_ids.filter((id) => String(id || '').trim())
+                : [];
+
+            if (!blocked && !unresolvedCount && !gapTaskCount && !failedCount) {
+                return '';
+            }
+
+            const tone = blocked ? 'critical' : 'important';
+            const statusLabel = blocked ? 'blocked' : 'pending';
+            const chips = [];
+            if (failedCount > 0) {
+                chips.push(`<span class="triage-chip" data-tone="critical">failed rule elements: ${escapeHtml(String(failedCount))}</span>`);
+            }
+            if (unresolvedCount > 0) {
+                chips.push(`<span class="triage-chip" data-tone="${escapeHtml(tone)}">unresolved issues: ${escapeHtml(String(unresolvedCount))}</span>`);
+            }
+            if (gapTaskCount > 0) {
+                chips.push(`<span class="triage-chip" data-tone="${escapeHtml(tone)}">chronology tasks: ${escapeHtml(String(gapTaskCount))}</span>`);
+            }
+            chips.push(`<span class="triage-chip">proof readiness: ${escapeHtml(proofScore.toFixed(2))}</span>`);
+            if (failedRuleFrameIds.length) {
+                chips.push(`<span class="triage-chip">failed frames: ${escapeHtml(failedRuleFrameIds.join(', '))}</span>`);
+            }
+
+            const claimSupportUrl = '/claim-support-review';
+            return `
+                <div class="intake-handoff-card" id="document-chronology-blocker-summary" data-tone="${escapeHtml(tone)}">
+                    <div class="readiness-subtitle">Chronology</div>
+                    <div class="readiness-card-header">
+                        <h3>${blocked ? 'Chronology blockers present' : 'Chronology issues pending'}</h3>
+                        ${renderStatusPill(statusLabel)}
+                    </div>
+                    ${summary ? `<div class="preview-meta">${escapeHtml(summary)}</div>` : ''}
+                    <div class="triage-chip-row">${chips.join('')}</div>
+                    <div class="inline-link-row" style="margin-top: 12px;">
+                        <a class="inline-link" data-review-intent-link="true" href="${escapeHtml(claimSupportUrl)}">Review Claim Support</a>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderReadiness(readiness, exhibits, reviewLinks, intakeCaseSummary, chronologyBlockerSummary) {
             if (!readiness || typeof readiness !== 'object') {
                 return '';
             }
@@ -3701,6 +3753,7 @@
                     ${renderMikeWorkflowJourney(getEffectiveUserId())}
                     ${renderReviewLinks(reviewLinks)}
                     ${renderWorkflowPriority(reviewLinks, workflowPhasePlan)}
+                    ${renderChronologyBlockerSummary(chronologyBlockerSummary)}
                     ${renderIntakeSummaryConfirmation(reviewLinks, intakeCaseSummary)}
                     ${renderWorkflowPhaseGuidance(workflowPhasePlan)}
                     <div class="readiness-grid">${sectionCards}</div>
@@ -4670,6 +4723,10 @@
                     ? payload.intake_case_summary
                     : (reviewLinks.intake_case_summary && typeof reviewLinks.intake_case_summary === 'object' ? reviewLinks.intake_case_summary : {}));
             const { manualReviewClaims, pendingReviewClaims } = buildClaimQueueIntentSets(optimizationReport && optimizationReport.intake_case_summary);
+            const draftSourceContext = draft.source_context && typeof draft.source_context === 'object' ? draft.source_context : {};
+            const chronologyBlockerSummary = draftSourceContext.chronology_blocker_summary && typeof draftSourceContext.chronology_blocker_summary === 'object'
+                ? draftSourceContext.chronology_blocker_summary
+                : null;
             const payloadReviewIntent = normalizeReviewIntent(payload.review_intent);
             if (payloadReviewIntent) {
                 persistReviewIntent(payloadReviewIntent);
@@ -4698,7 +4755,7 @@
             const html = `
                 ${renderArtifacts(payload.artifacts || {})}
                 <div class="draft-shell">
-                    ${renderReadiness(readiness, draft.exhibits || [], reviewLinks, readinessIntakeCaseSummary)}
+                    ${renderReadiness(readiness, draft.exhibits || [], reviewLinks, readinessIntakeCaseSummary, chronologyBlockerSummary)}
                     ${renderFilingChecklist(filingChecklist, manualReviewClaims, pendingReviewClaims)}
                     ${renderOptimizationReport(optimizationReport, reviewLinks)}
                     <div class="court-header">${escapeHtml(draft.court_header || '')}</div>
