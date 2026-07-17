@@ -1515,6 +1515,11 @@ def build_temporal_relation_registry(
     # When two timeline-capable facts both carry a start_date, derive before/same_time/after
     # so that proof-bundle and rule-profile evaluation can use a complete partial-order graph
     # even when the upstream relation extractor missed the pair.
+    #
+    # Guard: skip inference when the anchored-fact set is large to avoid O(n²) overhead.
+    # Typical temporal-capable sets are small (≤ ~20 facts); a 50-fact ceiling keeps the
+    # worst-case below 1 250 pairs while protecting against degenerate inputs.
+    _MAX_INFERRED_ANCHOR_FACTS = 50
     anchored_facts = [
         (
             _normalize_text(fact.get("fact_id") or ""),
@@ -1526,65 +1531,71 @@ def build_temporal_relation_registry(
         and str(_coerce_dict(fact.get("temporal_context")).get("start_date") or "").strip()
     ]
     inferred_index = len(registry)
-    for (id_a, date_a, fact_a), (id_b, date_b, fact_b) in combinations(anchored_facts, 2):
-        pair_key = (id_a, id_b)
-        if pair_key in explicit_pairs:
-            continue
-        if date_a < date_b:
-            relation_type = "before"
-            source_fact_id, target_fact_id = id_a, id_b
-            source_fact, target_fact = fact_a, fact_b
-        elif date_a > date_b:
-            relation_type = "before"
-            source_fact_id, target_fact_id = id_b, id_a
-            source_fact, target_fact = fact_b, fact_a
-        else:
-            relation_type = "same_time"
-            source_fact_id, target_fact_id = id_a, id_b
-            source_fact, target_fact = fact_a, fact_b
-        inferred_index += 1
-        relation_id = f"inferred_relation_{inferred_index:03d}"
-        claim_types = _unique_normalized_strings(
-            list(source_fact.get("claim_types") or []) + list(target_fact.get("claim_types") or [])
-        )
-        element_tags = _unique_normalized_strings(
-            list(source_fact.get("element_tags") or []) + list(target_fact.get("element_tags") or [])
-        )
-        source_artifact_ids = _unique_normalized_strings(
-            list(source_fact.get("source_artifact_ids") or [])
-            + list(target_fact.get("source_artifact_ids") or [])
-        )
-        testimony_record_ids = _unique_normalized_strings(
-            list(source_fact.get("testimony_record_ids") or [])
-            + list(target_fact.get("testimony_record_ids") or [])
-        )
-        registry.append(
-            {
-                "relation_id": relation_id,
-                "registry_version": "temporal_relation_registry.v1",
-                "relation_type": relation_type,
-                "source_fact_id": source_fact_id,
-                "target_fact_id": target_fact_id,
-                "source_temporal_fact_id": str(source_fact.get("temporal_fact_id") or source_fact_id or "") or None,
-                "target_temporal_fact_id": str(target_fact.get("temporal_fact_id") or target_fact_id or "") or None,
-                "claim_types": claim_types,
-                "element_tags": element_tags,
-                "source_fact_text": _normalize_text(source_fact.get("text") or "") or None,
-                "target_fact_text": _normalize_text(target_fact.get("text") or "") or None,
-                "source_artifact_ids": source_artifact_ids,
-                "testimony_record_ids": testimony_record_ids,
-                "source_span_refs": _coerce_provenance_refs(
-                    list(source_fact.get("source_span_refs") or [])
-                    + list(target_fact.get("source_span_refs") or [])
-                ),
-                "inference_mode": "derived_from_date_anchors",
-                "inference_basis": f"{source_fact_id}.start_date:{date_a if source_fact_id == id_a else date_b} vs {target_fact_id}.start_date:{date_b if target_fact_id == id_b else date_a}",
-                "explanation": (
-                    f"{source_fact_id} {relation_type} {target_fact_id} inferred from date anchors "
-                    f"({date_a if source_fact_id == id_a else date_b} vs {date_b if target_fact_id == id_b else date_a})."
-                ),
-            }
-        )
+    if len(anchored_facts) <= _MAX_INFERRED_ANCHOR_FACTS:
+        for (id_a, date_a, fact_a), (id_b, date_b, fact_b) in combinations(anchored_facts, 2):
+            pair_key = (id_a, id_b)
+            if pair_key in explicit_pairs:
+                continue
+            if date_a < date_b:
+                relation_type = "before"
+                source_fact_id, target_fact_id = id_a, id_b
+                source_fact, target_fact = fact_a, fact_b
+                source_date, target_date = date_a, date_b
+            elif date_a > date_b:
+                relation_type = "before"
+                source_fact_id, target_fact_id = id_b, id_a
+                source_fact, target_fact = fact_b, fact_a
+                source_date, target_date = date_b, date_a
+            else:
+                relation_type = "same_time"
+                source_fact_id, target_fact_id = id_a, id_b
+                source_fact, target_fact = fact_a, fact_b
+                source_date, target_date = date_a, date_b
+            inferred_index += 1
+            relation_id = f"inferred_relation_{inferred_index:03d}"
+            claim_types = _unique_normalized_strings(
+                list(source_fact.get("claim_types") or []) + list(target_fact.get("claim_types") or [])
+            )
+            element_tags = _unique_normalized_strings(
+                list(source_fact.get("element_tags") or []) + list(target_fact.get("element_tags") or [])
+            )
+            source_artifact_ids = _unique_normalized_strings(
+                list(source_fact.get("source_artifact_ids") or [])
+                + list(target_fact.get("source_artifact_ids") or [])
+            )
+            testimony_record_ids = _unique_normalized_strings(
+                list(source_fact.get("testimony_record_ids") or [])
+                + list(target_fact.get("testimony_record_ids") or [])
+            )
+            registry.append(
+                {
+                    "relation_id": relation_id,
+                    "registry_version": "temporal_relation_registry.v1",
+                    "relation_type": relation_type,
+                    "source_fact_id": source_fact_id,
+                    "target_fact_id": target_fact_id,
+                    "source_temporal_fact_id": str(source_fact.get("temporal_fact_id") or source_fact_id or "") or None,
+                    "target_temporal_fact_id": str(target_fact.get("temporal_fact_id") or target_fact_id or "") or None,
+                    "claim_types": claim_types,
+                    "element_tags": element_tags,
+                    "source_fact_text": _normalize_text(source_fact.get("text") or "") or None,
+                    "target_fact_text": _normalize_text(target_fact.get("text") or "") or None,
+                    "source_artifact_ids": source_artifact_ids,
+                    "testimony_record_ids": testimony_record_ids,
+                    "source_span_refs": _coerce_provenance_refs(
+                        list(source_fact.get("source_span_refs") or [])
+                        + list(target_fact.get("source_span_refs") or [])
+                    ),
+                    "inference_mode": "derived_from_date_anchors",
+                    "inference_basis": (
+                        f"{source_fact_id}.start_date:{source_date} vs {target_fact_id}.start_date:{target_date}"
+                    ),
+                    "explanation": (
+                        f"{source_fact_id} {relation_type} {target_fact_id} inferred from date anchors "
+                        f"({source_date} vs {target_date})."
+                    ),
+                }
+            )
     return registry
 
 

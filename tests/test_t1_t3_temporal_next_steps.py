@@ -10,6 +10,7 @@ Covers:
 """
 from __future__ import annotations
 
+import types
 from typing import Any, Dict, List
 
 from complaint_phases.intake_case_file import (
@@ -31,6 +32,35 @@ def _anchored_fact(fact_id: str, start_date: str, element_tags: List[str]) -> Di
         "temporal_context": {"start_date": start_date, "raw_text": start_date},
         "claim_types": ["retaliation"],
     }
+
+
+def _make_claim_support_hook_stub():
+    """Return a minimal stub that exposes the pure utility methods needed by T3 tests.
+
+    Uses a SimpleNamespace bound to the real implementations so tests do not
+    reach the complex database and mediator initialisation path.
+    """
+    from mediator import claim_support_hooks as _hooks_mod
+
+    # Grab the unbound method implementation so we can bind it to a namespace.
+    real_normalize = _hooks_mod.ClaimSupportHook._normalize_reasoning_key
+    real_build_bundle = _hooks_mod.ClaimSupportHook._build_temporal_proof_bundle
+
+    stub = types.SimpleNamespace()
+    stub._normalize_reasoning_key = lambda value: real_normalize(stub, value)
+    stub._build_temporal_proof_bundle = lambda *a, **kw: real_build_bundle(stub, *a, **kw)
+    return stub
+
+
+def _make_document_builder_stub():
+    """Return a minimal stub exposing _build_chronology_blocker_summary."""
+    from document_pipeline import FormalComplaintDocumentBuilder
+
+    real_method = FormalComplaintDocumentBuilder._build_chronology_blocker_summary
+
+    stub = types.SimpleNamespace()
+    stub._build_chronology_blocker_summary = lambda **kw: real_method(stub, **kw)
+    return stub
 
 
 # ---------------------------------------------------------------------------
@@ -282,9 +312,7 @@ def test_t1_normalised_issue_type_used_in_evaluate_temporal_rule_profile():
 
 def test_t3_certain_fact_formulas_annotated_as_certain():
     """TDFOL formulas for directly asserted facts are marked 'certain'."""
-    from mediator.claim_support_hooks import ClaimSupportHook
-
-    hooks = ClaimSupportHook.__new__(ClaimSupportHook)
+    hooks = _make_claim_support_hook_stub()
 
     element = {"element_id": "causal_connection", "element_text": "causal connection"}
     temporal_context: Dict[str, Any] = {
@@ -335,9 +363,7 @@ def test_t3_certain_fact_formulas_annotated_as_certain():
 
 def test_t3_inferred_relation_formula_annotated_as_inferred():
     """TDFOL formulas for inferred ordering relations are marked 'inferred'."""
-    from mediator.claim_support_hooks import ClaimSupportHook
-
-    hooks = ClaimSupportHook.__new__(ClaimSupportHook)
+    hooks = _make_claim_support_hook_stub()
 
     element = {"element_id": "causal_connection", "element_text": "causal connection"}
     temporal_context: Dict[str, Any] = {
@@ -384,9 +410,7 @@ def test_t3_inferred_relation_formula_annotated_as_inferred():
 
 def test_t3_dcec_formula_certainties_present():
     """DCEC Happens() formulas are included in dcec_formula_certainties."""
-    from mediator.claim_support_hooks import ClaimSupportHook
-
-    hooks = ClaimSupportHook.__new__(ClaimSupportHook)
+    hooks = _make_claim_support_hook_stub()
 
     element = {"element_id": "adverse_action", "element_text": "adverse action"}
     temporal_context: Dict[str, Any] = {
@@ -507,9 +531,7 @@ def test_t3_proof_bundles_keyed_by_claim_element():
 
 def test_t5_chronology_blocked_when_rule_profile_fails():
     """chronology_blocked is True when temporal_rule_profile_failed_element_count > 0."""
-    from document_pipeline import FormalComplaintDocumentBuilder
-
-    pipeline = FormalComplaintDocumentBuilder.__new__(FormalComplaintDocumentBuilder)
+    pipeline = _make_document_builder_stub()
 
     claim_reasoning_review = {
         "retaliation": {
@@ -547,9 +569,7 @@ def test_t5_chronology_blocked_when_rule_profile_fails():
 
 def test_t5_chronology_not_blocked_when_all_profiles_satisfied():
     """chronology_blocked is False when no temporal rule profile failures or issues."""
-    from document_pipeline import FormalComplaintDocumentBuilder
-
-    pipeline = FormalComplaintDocumentBuilder.__new__(FormalComplaintDocumentBuilder)
+    pipeline = _make_document_builder_stub()
 
     intake_case_summary = {
         "claim_support_packet_summary": {
@@ -577,9 +597,7 @@ def test_t5_chronology_not_blocked_when_all_profiles_satisfied():
 
 def test_t5_failed_rule_frame_ids_present_in_summary():
     """failed_rule_frame_ids lists all rule frame IDs from failed/partial proof bundles."""
-    from document_pipeline import FormalComplaintDocumentBuilder
-
-    pipeline = FormalComplaintDocumentBuilder.__new__(FormalComplaintDocumentBuilder)
+    pipeline = _make_document_builder_stub()
 
     claim_reasoning_review = {
         "retaliation": {
