@@ -2155,6 +2155,37 @@ def build_open_items(intake_case_file: Dict[str, Any]) -> List[Dict[str, Any]]:
         normalized_id = _normalize_text(item.get("open_item_id") or "")
         if not normalized_id:
             return
+        target_claim_type = _normalize_text(item.get("target_claim_type") or "")
+        target_element_id = _normalize_text(item.get("target_element_id") or "")
+        # Build target_element_metadata: look up the matching element in candidate_claims so the
+        # caller gets a richer object with label, blocking status, and evidence classes.
+        resolved_element_metadata: Dict[str, Any] = {}
+        if target_element_id and target_claim_type:
+            for claim in candidate_claims:
+                if not isinstance(claim, dict):
+                    continue
+                if _normalize_text(str(claim.get("claim_type") or "")).lower() != target_claim_type.lower():
+                    continue
+                for element in (claim.get("required_elements") or []):
+                    if not isinstance(element, dict):
+                        continue
+                    if _normalize_text(str(element.get("element_id") or "")).lower() == target_element_id.lower():
+                        resolved_element_metadata = {
+                            "element_id": _normalize_text(str(element.get("element_id") or "")),
+                            "label": _normalize_text(str(element.get("label") or element.get("element_id") or "")),
+                            "blocking": bool(element.get("blocking", True)),
+                            "evidence_classes": list(element.get("evidence_classes") or []),
+                            "claim_type": target_claim_type,
+                        }
+                        break
+                if resolved_element_metadata:
+                    break
+        if not resolved_element_metadata and target_element_id:
+            resolved_element_metadata = {
+                "element_id": target_element_id,
+                "label": target_element_id,
+                "claim_type": target_claim_type,
+            }
         normalized_item = {
             **item,
             "open_item_id": normalized_id,
@@ -2163,8 +2194,9 @@ def build_open_items(intake_case_file: Dict[str, Any]) -> List[Dict[str, Any]]:
             "blocking_level": _normalize_text(item.get("blocking_level") or "important").lower() or "important",
             "section": _normalize_text(item.get("section") or "general").lower() or "general",
             "reason": _normalize_text(item.get("reason") or "Follow-up required."),
-            "target_claim_type": _normalize_text(item.get("target_claim_type") or ""),
-            "target_element_id": _normalize_text(item.get("target_element_id") or ""),
+            "target_claim_type": target_claim_type,
+            "target_element_id": target_element_id,
+            "target_element_metadata": resolved_element_metadata,
             "next_question_strategy": _normalize_text(item.get("next_question_strategy") or "targeted_blocker_follow_up").lower() or "targeted_blocker_follow_up",
             "recommended_support_kind": _normalize_text(item.get("recommended_support_kind") or "intake_clarification").lower() or "intake_clarification",
             "proof_path_status": _normalize_text(item.get("proof_path_status") or "missing").lower() or "missing",

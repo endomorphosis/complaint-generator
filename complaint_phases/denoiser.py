@@ -2572,7 +2572,30 @@ class ComplaintDenoiser:
                 priority_order.get(q.get('priority', 'low'), 3),
             )
         )
-        return questions[:max_questions]
+        # Suppress duplicate question objectives: keep only the highest-priority representative
+        # for each (question_type, target_element_id) pair to avoid flooding the candidate list
+        # with redundant asks.
+        deduped: List[Dict[str, Any]] = []
+        seen_objective_keys: set = set()
+        for q in questions:
+            if not isinstance(q, dict):
+                continue
+            q_type = str(q.get('type') or q.get('question_type') or '').strip().lower()
+            q_element = str(
+                (q.get('context') or {}).get('requirement_id')
+                or (q.get('context') or {}).get('claim_element_id')
+                or (q.get('context') or {}).get('target_element_id')
+                or ''
+            ).strip().lower()
+            # Only deduplicate candidates that explicitly target a specific element;
+            # generic/clarification questions are always kept.
+            if q_element and q_type not in {'clarification', 'general', 'open_ended'}:
+                objective_key = f'{q_type}::{q_element}'
+                if objective_key in seen_objective_keys:
+                    continue
+                seen_objective_keys.add(objective_key)
+            deduped.append(q)
+        return deduped[:max_questions]
 
     def _default_candidate_sort_key(self, candidate: Dict[str, Any]) -> Tuple[int, int, int]:
         priority_order = {'high': 0, 'medium': 1, 'low': 2}

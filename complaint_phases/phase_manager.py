@@ -333,6 +333,7 @@ class PhaseManager:
         issue_count = len(temporal_issue_registry)
         open_issue_count = 0
         blocking_issue_count = 0
+        unsupported_order_assumption_count = 0
         missing_temporal_predicates: List[str] = []
         required_provenance_kinds: List[str] = []
         for issue in temporal_issue_registry:
@@ -343,6 +344,15 @@ class PhaseManager:
                 open_issue_count += 1
             if bool(issue.get('blocking')) or str(issue.get('severity') or '').strip().lower() == 'blocking':
                 blocking_issue_count += 1
+            # Detect unsupported ordering assumptions (relative-only or order-gap issues)
+            issue_type = str(issue.get('issue_type') or issue.get('category') or '').strip().lower()
+            if status_value != 'resolved' and issue_type in {
+                'relative_only_ordering',
+                'unsupported_ordering',
+                'order_gap',
+                'missing_absolute_date',
+            }:
+                unsupported_order_assumption_count += 1
             for predicate in issue.get('missing_temporal_predicates') or []:
                 normalized_predicate = str(predicate or '').strip()
                 if normalized_predicate and normalized_predicate not in missing_temporal_predicates:
@@ -372,6 +382,10 @@ class PhaseManager:
             failure_reasons.append(f'{blocking_issue_count} blocking chronology issue(s) remain open')
         elif open_issue_count > 0:
             failure_reasons.append(f'{open_issue_count} chronology issue(s) remain unresolved')
+        if unsupported_order_assumption_count > 0:
+            failure_reasons.append(
+                f'{unsupported_order_assumption_count} unsupported ordering assumption(s) must be anchored'
+            )
         if missing_temporal_predicates:
             failure_reasons.append(f'missing temporal predicates: {", ".join(missing_temporal_predicates[:3])}')
         if required_provenance_kinds:
@@ -386,6 +400,7 @@ class PhaseManager:
             'unanchored_event_count': unanchored_event_count,
             'open_issue_count': open_issue_count,
             'blocking_issue_count': blocking_issue_count,
+            'unsupported_order_assumption_count': unsupported_order_assumption_count,
             'missing_temporal_predicates': missing_temporal_predicates,
             'required_provenance_kinds': required_provenance_kinds,
             'failure_reasons': failure_reasons,
@@ -466,6 +481,8 @@ class PhaseManager:
                 blockers.append('chronology_provenance_coverage_incomplete')
             if chronology_readiness.get('open_issue_count', 0) > 0:
                 blockers.append('chronology_open_issues')
+            if chronology_readiness.get('unsupported_order_assumption_count', 0) > 0:
+                blockers.append('order_assumption_unsupported')
 
         for blocker in data.get('intake_blockers', []) or []:
             normalized = str(blocker or '').strip()

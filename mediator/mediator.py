@@ -1487,6 +1487,15 @@ class Mediator:
 		intake_priority_match_count = len(intake_priority_match)
 		priority_anchor_uncovered = 'anchor_selection_criteria' in uncovered_objectives
 
+		# Derive an explicit claim_criticality label from coverage signals so callers can
+		# filter or display it without re-deriving it themselves.
+		if satisfaction_ratio < 0.3 or missing_count >= 3 or question_type == 'contradiction':
+			claim_criticality = 'critical'
+		elif satisfaction_ratio < 0.7 or missing_count >= 1:
+			claim_criticality = 'important'
+		else:
+			claim_criticality = 'supplemental'
+
 		score = 0.0
 		score += max(0, 10 - proof_priority) * 2.0
 		score += {
@@ -1618,10 +1627,13 @@ class Mediator:
 			'workflow_action_rank': workflow_action_rank,
 			'workflow_action_phase': workflow_action_matches.get('workflow_action_phase', ''),
 			'workflow_action_focus_areas': list(workflow_action_matches.get('workflow_action_focus_areas') or []),
+			'claim_criticality': claim_criticality,
 		}
 		annotated['selector_score'] = score
+		annotated['claim_criticality'] = claim_criticality
 		annotated['selector_signals'] = selector_signals
 		explanation['selector_score'] = score
+		explanation['claim_criticality'] = claim_criticality
 		explanation['selector_signals'] = selector_signals
 		explanation['actor_critic_score'] = actor_critic_score
 		explanation['date_anchor_timeline_match'] = date_anchor_timeline_match
@@ -6271,6 +6283,31 @@ class Mediator:
 				refs.append(normalized_candidate)
 		return refs
 
+	def _build_proof_lead_target_linkage(
+		self,
+		*,
+		element_targets: List[str] | None,
+		related_fact_ids: List[str] | None,
+		claim_types: List[str] | None = None,
+	) -> Dict[str, Any]:
+		"""Build the target_linkage summary for a proof lead record."""
+		normalized_element_targets = [
+			str(t).strip() for t in (element_targets or []) if str(t or '').strip()
+		]
+		normalized_fact_ids = [
+			str(f).strip() for f in (related_fact_ids or []) if str(f or '').strip()
+		]
+		normalized_claim_types = [
+			str(c).strip().lower() for c in (claim_types or []) if str(c or '').strip()
+		]
+		return {
+			'element_ids': normalized_element_targets,
+			'fact_ids': normalized_fact_ids,
+			'claim_types': normalized_claim_types,
+			'has_element_target': len(normalized_element_targets) > 0,
+			'has_fact_target': len(normalized_fact_ids) > 0,
+		}
+
 	def _append_proof_lead(
 		self,
 		intake_case_file: Dict[str, Any],
@@ -6298,6 +6335,14 @@ class Mediator:
 			proof_leads = []
 			intake_case_file['proof_leads'] = proof_leads
 		normalized_text = self._normalize_intake_text(text)
+		claim_types_from_context = [
+			str(ct).strip().lower()
+			for ct in (
+				list(intake_case_file.get('candidate_claims') or [])
+				if isinstance(intake_case_file.get('candidate_claims'), list)
+				else []
+			)[:0]  # placeholder – merged below
+		]
 		for lead in proof_leads:
 			if not isinstance(lead, dict):
 				continue
@@ -6318,7 +6363,18 @@ class Mediator:
 					lead.get('intake_question_intent'),
 					intake_question_intent,
 				)
+				# Refresh the target_linkage so it reflects latest element_targets / fact IDs
+				lead['target_linkage'] = self._build_proof_lead_target_linkage(
+					element_targets=lead['element_targets'],
+					related_fact_ids=lead['related_fact_ids'],
+					claim_types=list(lead.get('claim_types') or []),
+				)
 				return lead
+		resolved_claim_types = [
+			str(claim.get('claim_type') or '').strip().lower()
+			for claim in (intake_case_file.get('candidate_claims') or [])
+			if isinstance(claim, dict) and claim.get('claim_type')
+		]
 		lead_record = {
 			'lead_id': self._next_intake_record_id('lead', proof_leads),
 			'lead_type': lead_type,
@@ -6341,6 +6397,11 @@ class Mediator:
 			'source_kind': 'complainant_answer',
 			'source_ref': lead_type,
 			'intake_question_intent': self._merge_intake_question_intent({}, intake_question_intent),
+			'target_linkage': self._build_proof_lead_target_linkage(
+				element_targets=list(element_targets or []),
+				related_fact_ids=list(related_fact_ids or []),
+				claim_types=resolved_claim_types,
+			),
 		}
 		proof_leads.append(lead_record)
 		return lead_record
@@ -6485,6 +6546,8 @@ class Mediator:
 			timeline_relations,
 		)
 		intake_case_file['temporal_issue_registry'] = temporal_issue_registry
+		# Canonical alias so callers can reference timeline issues under the stable key `timeline_issues`
+		intake_case_file['timeline_issues'] = temporal_issue_registry
 
 	def _apply_intake_answer_to_case_file(
 		self,
@@ -6516,33 +6579,77 @@ class Mediator:
 				fact for fact in intake_case_file.get('canonical_facts', [])
 				if isinstance(fact, dict) and str(fact.get('fact_type') or '').strip().lower() == 'timeline'
 			]
-			created_fact = self._append_canonical_fact(
-				intake_case_file,
-				text=normalized_answer,
-				fact_type='timeline',
-				question_type=question_type,
-				event_date_or_range=self._extract_date_or_range_from_text(normalized_answer),
-				actor_ids=[actor_ref] if actor_ref else None,
-				target_ids=[target_ref] if target_ref else None,
-				location=location_ref,
-				claim_types=resolved_claim_types,
-				element_tags=resolved_element_targets,
-				materiality='high',
-				corroboration_priority='high',
-				fact_participants=fact_participants,
-				event_support_refs=self._build_authored_event_support_refs(
-					fact_id='',
+			# Try to find an existing stable event record for the same timeline topic so we can
+			# update it in place instead of always appending a new record.  Two facts are
+			# considered the same event when their normalised text matches exactly (a revision)
+			# or when both share the same non-empty `event_id` (a direct ID match).
+			target_event_id = str(context.get('event_id') or '').strip()
+			matched_existing: Dict[str, Any] | None = None
+			for ef in existing_timeline_facts:
+				if not isinstance(ef, dict):
+					continue
+				ef_event_id = str(ef.get('event_id') or '').strip()
+				ef_text = self._normalize_intake_text(ef.get('text') or ef.get('event_label') or '')
+				if target_event_id and ef_event_id and ef_event_id == target_event_id:
+					matched_existing = ef
+					break
+				if ef_text and ef_text.lower() == normalized_answer.lower():
+					matched_existing = ef
+					break
+			if matched_existing is not None:
+				# Update the stable record in place: refresh the text and any date/participant fields
+				# so the event record retains its stable fact_id / event_id.
+				new_date = self._extract_date_or_range_from_text(normalized_answer)
+				if new_date:
+					matched_existing['event_date_or_range'] = new_date
+				if actor_ref:
+					existing_actors = list(matched_existing.get('actor_ids') or [])
+					if actor_ref not in existing_actors:
+						existing_actors.append(actor_ref)
+					matched_existing['actor_ids'] = existing_actors
+				matched_existing['text'] = normalized_answer
+				matched_existing['event_label'] = normalized_answer
+				matched_existing['intake_question_intent'] = self._merge_intake_question_intent(
+					matched_existing.get('intake_question_intent'),
+					intake_question_intent,
+				)
+				for claim_type in resolved_claim_types:
+					if claim_type not in (matched_existing.get('claim_types') or []):
+						matched_existing.setdefault('claim_types', []).append(claim_type)
+				for element_tag in resolved_element_targets:
+					if element_tag not in (matched_existing.get('element_tags') or []):
+						matched_existing.setdefault('element_tags', []).append(element_tag)
+				created_fact = matched_existing
+			else:
+				created_fact = self._append_canonical_fact(
+					intake_case_file,
+					text=normalized_answer,
+					fact_type='timeline',
 					question_type=question_type,
+					event_date_or_range=self._extract_date_or_range_from_text(normalized_answer),
+					actor_ids=[actor_ref] if actor_ref else None,
+					target_ids=[target_ref] if target_ref else None,
+					location=location_ref,
+					claim_types=resolved_claim_types,
+					element_tags=resolved_element_targets,
+					materiality='high',
+					corroboration_priority='high',
+					fact_participants=fact_participants,
+					event_support_refs=self._build_authored_event_support_refs(
+						fact_id='',
+						question_type=question_type,
+						intake_question_intent=intake_question_intent,
+					),
 					intake_question_intent=intake_question_intent,
-				),
-				intake_question_intent=intake_question_intent,
-			)
+				)
 			created_fact['event_support_refs'] = self._build_authored_event_support_refs(
 				fact_id=str(created_fact.get('fact_id') or '').strip(),
 				question_type=question_type,
 				intake_question_intent=intake_question_intent,
 			)
 			for existing_fact in existing_timeline_facts:
+				if existing_fact is created_fact:
+					continue
 				existing_text = self._normalize_intake_text(existing_fact.get('text'))
 				if existing_text and existing_text.lower() != normalized_answer.lower():
 					self._record_case_file_contradiction(
@@ -10542,6 +10649,14 @@ class Mediator:
 		temporal_fact_registry = intake_case_file.get('temporal_fact_registry', []) if isinstance(intake_case_file, dict) else []
 		temporal_relation_registry = intake_case_file.get('temporal_relation_registry', []) if isinstance(intake_case_file, dict) else []
 		temporal_issue_registry = intake_case_file.get('temporal_issue_registry', []) if isinstance(intake_case_file, dict) else []
+		# `timeline_issues` is a stable canonical alias for `temporal_issue_registry`
+		timeline_issues = (
+			intake_case_file.get('timeline_issues', temporal_issue_registry)
+			if isinstance(intake_case_file, dict)
+			else temporal_issue_registry
+		)
+		if not isinstance(timeline_issues, list):
+			timeline_issues = temporal_issue_registry
 		question_candidates = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'question_candidates') or []
 		adversarial_intake_priority_summary = (
 			self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'adversarial_intake_priority_summary') or {}
@@ -10672,6 +10787,16 @@ class Mediator:
 				'relations': timeline_relations if isinstance(timeline_relations, list) else [],
 			},
 			'temporal_issue_registry': temporal_issue_registry if isinstance(temporal_issue_registry, list) else [],
+			# Stable canonical alias – always in sync with temporal_issue_registry
+			'timeline_issues': timeline_issues if isinstance(timeline_issues, list) else [],
+			'timeline_issues_summary': {
+				'count': len(timeline_issues) if isinstance(timeline_issues, list) else 0,
+				'issues': timeline_issues if isinstance(timeline_issues, list) else [],
+				'status_counts': temporal_issue_status_counts,
+				'severity_counts': temporal_issue_severity_counts,
+				'lane_counts': temporal_issue_lane_counts,
+				'issue_type_counts': temporal_issue_type_counts,
+			},
 			'temporal_issue_registry_summary': {
 				'count': len(temporal_issue_registry) if isinstance(temporal_issue_registry, list) else 0,
 				'issues': temporal_issue_registry if isinstance(temporal_issue_registry, list) else [],

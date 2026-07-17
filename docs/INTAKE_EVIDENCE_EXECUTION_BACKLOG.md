@@ -56,11 +56,11 @@ Make chronology a durable cross-phase object instead of a collection of summarie
 
 ### Tasks
 
-- [ ] add canonical `event_ledger`, `timeline_relations`, `timeline_anchors`, and `timeline_issues` state to the intake case file
-- [ ] update `_apply_intake_answer_to_case_file(...)` so chronology answers create or update stable event and anchor records instead of only appending free-standing facts
-- [ ] update `advance_to_evidence_phase(...)`, `_summarize_intake_evidence_alignment(...)`, and `_build_alignment_evidence_tasks(...)` so temporal tasks carry event IDs, relation IDs, issue IDs, and proof objectives
-- [ ] extend readiness and packet summaries so unresolved timeline issues and unsupported order assumptions appear as first-class blockers
-- [ ] preserve the new ledger fields through `get_three_phase_status()` and `intake_status` review builders without recomputation loss
+- [x] add canonical `event_ledger`, `timeline_relations`, `timeline_anchors`, and `timeline_issues` state to the intake case file
+- [x] update `_apply_intake_answer_to_case_file(...)` so chronology answers create or update stable event and anchor records instead of only appending free-standing facts
+- [x] update `advance_to_evidence_phase(...)`, `_summarize_intake_evidence_alignment(...)`, and `_build_alignment_evidence_tasks(...)` so temporal tasks carry event IDs, relation IDs, issue IDs, and proof objectives
+- [x] extend readiness and packet summaries so unresolved timeline issues and unsupported order assumptions appear as first-class blockers
+- [x] preserve the new ledger fields through `get_three_phase_status()` and `intake_status` review builders without recomputation loss
 
 ### Acceptance criteria
 
@@ -90,10 +90,10 @@ Make Phase 1 emit structured state that can drive evidence tasks directly.
 
 ### Tasks
 
-- [ ] expand `proof_leads` with owner, availability, expected format, retrieval path, and target linkage
-- [ ] expand `open_items` with blocking level, next-question strategy, and target element metadata
-- [ ] add stable `fact_id` and element-link fields to canonical facts
-- [ ] preserve new intake fields in `get_three_phase_status()` outputs and `intake_status` summaries
+- [x] expand `proof_leads` with owner, availability, expected format, retrieval path, and target linkage
+- [x] expand `open_items` with blocking level, next-question strategy, and target element metadata
+- [x] add stable `fact_id` and element-link fields to canonical facts
+- [x] preserve new intake fields in `get_three_phase_status()` outputs and `intake_status` summaries
 
 ### Acceptance criteria
 
@@ -121,10 +121,10 @@ Make question selection optimize for proof gain, not only generic gap reduction.
 
 ### Tasks
 
-- [ ] add expected update kind and proof-gain metadata to question candidates
-- [ ] rank questions by claim criticality, contradiction risk, and novelty
-- [ ] suppress duplicate question objectives using semantic similarity or recent-objective tracking
-- [ ] emit question reasons for UI, traces, and adversarial scoring
+- [x] add expected update kind and proof-gain metadata to question candidates
+- [x] rank questions by claim criticality, contradiction risk, and novelty
+- [x] suppress duplicate question objectives using semantic similarity or recent-objective tracking
+- [x] emit question reasons for UI, traces, and adversarial scoring
 
 ### Router dependencies
 
