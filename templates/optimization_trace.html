@@ -2180,6 +2180,14 @@
                     claimSupportPacketSummary.proof_readiness_score != null
                         ? `Packet proof readiness: ${Number(claimSupportPacketSummary.proof_readiness_score || 0).toFixed(2)}`
                         : '',
+                    (() => {
+                        const laneLine = formatSummaryCountLine(normalizeSummaryCountMap(claimSupportPacketSummary.support_lane_label_counts));
+                        return laneLine ? `Packet support lanes: ${laneLine}` : '';
+                    })(),
+                    (() => {
+                        const qualityLine = formatSummaryCountLine(normalizeSummaryCountMap(claimSupportPacketSummary.support_quality_counts));
+                        return qualityLine ? `Packet support quality: ${qualityLine}` : '';
+                    })(),
                     claimSupportPacketSummary.claim_support_unresolved_without_review_path_count != null
                         ? `Packet unresolved without path: ${Number(claimSupportPacketSummary.claim_support_unresolved_without_review_path_count || 0)}`
                         : '',

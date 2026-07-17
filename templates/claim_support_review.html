@@ -4142,6 +4142,14 @@
             if (claimSupportPacketSummary.proof_readiness_score !== undefined) {
                 packetChips.push(`<span class="chip">packet proof readiness: ${Number(claimSupportPacketSummary.proof_readiness_score || 0).toFixed(2)}</span>`);
             }
+            const packetLaneCounts = normalizeSummaryCountMap(claimSupportPacketSummary.support_lane_label_counts);
+            if (Object.keys(packetLaneCounts).length) {
+                packetChips.push(`<span class="chip">support lanes: ${formatSummaryCountLine(packetLaneCounts)}</span>`);
+            }
+            const packetQualityCounts = normalizeSummaryCountMap(claimSupportPacketSummary.support_quality_counts);
+            if (Object.keys(packetQualityCounts).length) {
+                packetChips.push(`<span class="chip">support quality: ${formatSummaryCountLine(packetQualityCounts)}</span>`);
+            }
             if (claimSupportPacketSummary.evidence_completion_ready !== undefined) {
                 packetChips.push(`<span class="chip">packet completion ready: ${claimSupportPacketSummary.evidence_completion_ready ? 'yes' : 'no'}</span>`);
             }
@@ -4226,7 +4234,17 @@
                     const detailChips = [];
                     sharedElements.forEach((element) => {
                         detailChips.push(`<span class="chip">aligned ${element.element_id}: ${element.support_status || 'unknown'}</span>`);
+                        if (element.support_lane_label) {
+                            detailChips.push(`<span class="chip">${element.element_id} lane: ${element.support_lane_label}</span>`);
+                        }
+                        if (element.support_quality) {
+                            detailChips.push(`<span class="chip">${element.element_id} quality: ${element.support_quality}</span>`);
+                        }
                     });
+                    const claimLaneCounts = normalizeSummaryCountMap(claim.support_lane_label_counts);
+                    if (Object.keys(claimLaneCounts).length) {
+                        detailChips.push(`<span class="chip">lane distribution: ${formatSummaryCountLine(claimLaneCounts)}</span>`);
+                    }
                     intakeOnlyIds.forEach((elementId) => {
                         detailChips.push(`<span class="chip">intake only: ${elementId}</span>`);
                     });

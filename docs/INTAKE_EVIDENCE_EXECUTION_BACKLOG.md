@@ -296,7 +296,7 @@ Expose the new intake and evidence state cleanly to operators and optimizer trac
 
 - [x] expose `proof_readiness_score`, `support_lane_label_counts`, and `support_quality_counts` in `build_intake_status_summary` (top-level fields)
 - [x] expose `support_lane_label_counts` and `support_quality_counts` aggregated across claims in `build_intake_case_review_summary` (inside `claim_support_packet_summary`)
-- [ ] show blocking tasks, contradiction lanes, and proof-readiness signals on review surfaces
+- [x] surface lane distribution and quality chips in claim_support_review.html, document.html, and optimization_trace.html
 - [ ] preserve architecture boundaries by keeping payload shaping out of application-only logic where possible
 - [ ] ensure optimizer traces retain the expanded intake and evidence state
 
