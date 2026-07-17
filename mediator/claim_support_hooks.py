@@ -5607,6 +5607,24 @@ class ClaimSupportHook:
             'graph_summary': graph_summary_totals,
         }
 
+    _ENRICHMENT_QUEUE_DDL = """
+        CREATE TABLE IF NOT EXISTS claim_enrichment_queue (
+            id INTEGER PRIMARY KEY,
+            user_id VARCHAR NOT NULL,
+            claim_type VARCHAR,
+            enrichment_type VARCHAR NOT NULL,
+            status VARCHAR NOT NULL DEFAULT 'pending',
+            priority INTEGER DEFAULT 0,
+            metadata JSON,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+    """
+
+    def _ensure_enrichment_queue_table(self, conn: Any) -> None:
+        """Create the enrichment queue table if it does not already exist."""
+        conn.execute(self._ENRICHMENT_QUEUE_DDL)
+
     def get_enrichment_queue_state(
         self,
         user_id: str,
@@ -5638,21 +5656,7 @@ class ClaimSupportHook:
         try:
             conn = duckdb.connect(self.db_path)
             # Ensure the queue table exists (created lazily).
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS claim_enrichment_queue (
-                    id INTEGER PRIMARY KEY,
-                    user_id VARCHAR NOT NULL,
-                    claim_type VARCHAR,
-                    enrichment_type VARCHAR NOT NULL,
-                    status VARCHAR NOT NULL DEFAULT 'pending',
-                    priority INTEGER DEFAULT 0,
-                    metadata JSON,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-                """
-            )
+            self._ensure_enrichment_queue_table(conn)
             where_clauses = ['user_id = ?']
             parameters: List[Any] = [user_id]
             if claim_type:
@@ -5745,21 +5749,7 @@ class ClaimSupportHook:
 
         try:
             conn = duckdb.connect(self.db_path)
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS claim_enrichment_queue (
-                    id INTEGER PRIMARY KEY,
-                    user_id VARCHAR NOT NULL,
-                    claim_type VARCHAR,
-                    enrichment_type VARCHAR NOT NULL,
-                    status VARCHAR NOT NULL DEFAULT 'pending',
-                    priority INTEGER DEFAULT 0,
-                    metadata JSON,
-                    created_at TIMESTAMPTZ DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                )
-                """
-            )
+            self._ensure_enrichment_queue_table(conn)
             conn.execute(
                 """
                 INSERT INTO claim_enrichment_queue

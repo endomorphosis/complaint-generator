@@ -86,6 +86,7 @@ def test_get_templates_supported_types_list():
     assert "employment_discrimination" in result["supported_complaint_types"]
     assert "housing_discrimination" in result["supported_complaint_types"]
     assert "retaliation" in result["supported_complaint_types"]
+    assert "fair_housing" in result["supported_complaint_types"]
 
 
 # ---------------------------------------------------------------------------
@@ -202,3 +203,4 @@ def test_predicate_templates_registry_has_all_types():
     assert "employment_discrimination" in _COMPLAINT_PREDICATE_TEMPLATES
     assert "housing_discrimination" in _COMPLAINT_PREDICATE_TEMPLATES
     assert "retaliation" in _COMPLAINT_PREDICATE_TEMPLATES
+    assert "fair_housing" in _COMPLAINT_PREDICATE_TEMPLATES

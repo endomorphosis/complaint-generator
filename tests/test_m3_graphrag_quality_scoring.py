@@ -56,11 +56,11 @@ def test_score_non_dict_ontology_returns_error():
 def test_score_good_employment_ontology():
     ontology = {
         "entities": [
-            {"name": "Employee", "frequency": 5},
-            {"name": "Employer", "frequency": 3},
-            {"name": "Supervisor", "frequency": 2},
-            {"name": "HR", "frequency": 1},
-            {"name": "Complainant", "frequency": 4},
+            {"name": "Employee"},
+            {"name": "Employer"},
+            {"name": "Supervisor"},
+            {"name": "HR"},
+            {"name": "Complainant"},
         ],
         "relations": [
             {"subject": "Employee", "predicate": "terminated", "object": "Complainant"},
@@ -68,12 +68,12 @@ def test_score_good_employment_ontology():
             {"subject": "Complainant", "predicate": "reported", "object": "HR"},
         ],
         "concepts": [
-            {"name": "discrimination", "frequency": 4},
-            {"name": "retaliation", "frequency": 2},
-            {"name": "termination", "frequency": 3},
-            {"name": "protected", "frequency": 2},
-            {"name": "race", "frequency": 1},
-            {"name": "employment", "frequency": 3},
+            {"name": "discrimination"},
+            {"name": "retaliation"},
+            {"name": "termination"},
+            {"name": "protected"},
+            {"name": "race"},
+            {"name": "employment"},
         ],
     }
     result = score_ontology_support_paths(ontology, claim_type="employment_discrimination")

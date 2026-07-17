@@ -1480,14 +1480,80 @@ _COMPLAINT_PREDICATE_TEMPLATES: Dict[str, Dict[str, Any]] = {
             },
         ],
     },
+    "fair_housing": {
+        "label": "Fair Housing",
+        "elements": [
+            {
+                "element_id": "protected_trait",
+                "element_text": "Protected trait or class",
+                "fol_template": "exists x (Person(x) & HasProtectedTrait(x, {trait}) & MemberOf(x, ProtectedClass))",
+                "dcec_template": "Believes(Claimant, HasProtectedTrait(Person, {trait}))",
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "Person(complainant) & HasProtectedTrait(complainant, race)",
+                    "Person(complainant) & HasProtectedTrait(complainant, disability)",
+                ],
+                "expected_supporting_evidence": ["application_record", "testimony"],
+            },
+            {
+                "element_id": "housing_activity",
+                "element_text": "Covered housing activity",
+                "fol_template": (
+                    "exists x y (Person(x) & HousingProvider(y) & "
+                    "HousingActivity(y, x, {activity_type}))"
+                ),
+                "dcec_template": "Knows(HousingProvider, HousingActivity(HousingProvider, Person, {activity_type}))",
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "HousingActivity(respondent, complainant, rental_application)",
+                    "HousingActivity(respondent, complainant, loan_application)",
+                ],
+                "expected_supporting_evidence": ["application_record", "lease", "loan_document"],
+            },
+            {
+                "element_id": "adverse_action",
+                "element_text": "Discriminatory or adverse housing action",
+                "fol_template": (
+                    "exists x y (HousingProvider(y) & Person(x) & "
+                    "AdverseHousingAction(y, x, {action_type}) & OccurredAt({action_type}, {date}))"
+                ),
+                "dcec_template": "Happens(AdverseHousingAction(HousingProvider, Person, {action_type}), {date})",
+                "predicate_types": ["factual_statement", "claim_element", "temporal_fact"],
+                "grounded_facts": [
+                    "AdverseHousingAction(respondent, complainant, denial)",
+                    "AdverseHousingAction(respondent, complainant, steering)",
+                ],
+                "expected_supporting_evidence": ["denial_notice", "correspondence", "witness_statement"],
+            },
+            {
+                "element_id": "discriminatory_motive",
+                "element_text": "Facts suggesting discriminatory motive",
+                "fol_template": (
+                    "exists x y (AdverseHousingAction(y, x, {action_type}) & "
+                    "HasProtectedTrait(x, {trait}) & "
+                    "CausedBy({action_type}, HasProtectedTrait(x, {trait})))"
+                ),
+                "dcec_template": (
+                    "Causes(HasProtectedTrait(Person, {trait}), AdverseHousingAction(HousingProvider, Person, {action_type}))"
+                ),
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "CausedBy(denial, HasProtectedTrait(complainant, race))",
+                    "DiscriminatoryMotive(respondent, complainant, disability)",
+                ],
+                "expected_supporting_evidence": ["correspondence", "witness_statement", "comparator_record"],
+            },
+        ],
+    },
 }
 
 
 def get_predicate_templates(complaint_type: str) -> Dict[str, Any]:
     """Return grounded predicate templates for *complaint_type*.
 
-    Supports ``employment_discrimination``, ``housing_discrimination``, and
-    ``retaliation``.  Returns an empty elements list for unknown types.
+    Supports ``employment_discrimination``, ``housing_discrimination``,
+    ``retaliation``, and ``fair_housing``.  Returns an empty elements list
+    for unknown types.
 
     Each element in the result carries ``fol_template``, ``dcec_template``,
     ``predicate_types``, and ``grounded_facts`` ready for use in
