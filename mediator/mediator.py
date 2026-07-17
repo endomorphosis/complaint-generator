@@ -6335,7 +6335,7 @@ class Mediator:
 			proof_leads = []
 			intake_case_file['proof_leads'] = proof_leads
 		normalized_text = self._normalize_intake_text(text)
-		normalized_text_lower = normalized_text.lower() if proof_leads else ''
+		normalized_text_lower = normalized_text.lower()
 		for lead in proof_leads:
 			if not isinstance(lead, dict):
 				continue
@@ -6577,7 +6577,7 @@ class Mediator:
 			# considered the same event when their normalised text matches exactly (a revision)
 			# or when both share the same non-empty `event_id` (a direct ID match).
 			target_event_id = str(context.get('event_id') or '').strip()
-			normalized_answer_lower = normalized_answer.lower() if existing_timeline_facts else ''
+			normalized_answer_lower = normalized_answer.lower()
 			matched_existing: Dict[str, Any] | None = None
 			for ef in existing_timeline_facts:
 				if not isinstance(ef, dict):
