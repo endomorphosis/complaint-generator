@@ -44,7 +44,7 @@ class CircuitBreakerMetrics:
         self.success_count: int = 0
         self.failure_count: int = 0
         self.state_transitions: int = 0
-        self.latencies: list = []
+        self.latencies: List[float] = []
 
     @property
     def total_calls(self) -> int:
@@ -70,7 +70,7 @@ class CircuitBreakerMetrics:
             self.success_count = 0
             self.failure_count = 0
             self.state_transitions = 0
-            self.latencies = []
+            self.latencies: List[float] = []
 
 
 # ---------------------------------------------------------------------------

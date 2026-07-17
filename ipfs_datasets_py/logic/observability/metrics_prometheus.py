@@ -49,7 +49,7 @@ class _ComponentData:
         self.failed_calls: int = 0
 
         # Latency samples (capped ring-buffer)
-        self._latencies: deque = deque(maxlen=max_latency_samples)
+        self._latencies: deque[float] = deque(maxlen=max_latency_samples)
 
         # State
         self.current_state: Optional[str] = None

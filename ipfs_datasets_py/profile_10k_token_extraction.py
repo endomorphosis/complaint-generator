@@ -113,7 +113,7 @@ def generate_recommendations(
     if timing["tokens_per_second"] < 50_000:
         recs.append(
             "Extraction throughput is below 50k tokens/sec. "
-            "Consider parallelising the pipeline."
+            "Consider parallelizing the pipeline."
         )
     if memory["approx_bytes"] > 10 * 1024 * 1024:
         recs.append(
@@ -121,7 +121,7 @@ def generate_recommendations(
             "Switch to a streaming / chunk-based extraction mode."
         )
     if not recs:
-        recs.append("Performance looks good — no immediate optimisations required.")
+        recs.append("Performance looks good — no immediate optimizations required.")
     return recs
 
 
