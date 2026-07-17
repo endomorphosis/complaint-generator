@@ -2547,7 +2547,8 @@ def test_drafting_readiness_flags_claim_contradicted_as_blocked():
     assert retaliation is not None
     warning_codes = [w["code"] for w in retaliation["warnings"]]
     assert "claim_contradicted" in warning_codes
-    contradicted_warning = next(w for w in retaliation["warnings"] if w["code"] == "claim_contradicted")
+    contradicted_warning = next((w for w in retaliation["warnings"] if w["code"] == "claim_contradicted"), None)
+    assert contradicted_warning is not None, "expected claim_contradicted warning not found in warnings"
     assert contradicted_warning["severity"] == "blocked"
     assert retaliation["status"] == "blocked"
     assert readiness["status"] == "blocked"
