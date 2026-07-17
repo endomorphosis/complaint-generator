@@ -1732,12 +1732,13 @@ def build_temporal_issue_registry(
     # T1: canonical issue type aliases so that contradiction-queue entries tagged with
     # the "temporal_" prefix resolve to the same canonical category that rule profiles
     # and downstream consumers (e.g. evaluate_temporal_rule_profile) expect.
+    # Entries not present in this mapping pass through unchanged — they are already
+    # in canonical form (e.g. "temporal_reverse_before" is not normalised further).
     _TEMPORAL_ISSUE_CATEGORY_ALIASES: Dict[str, str] = {
         "temporal_contradictory_dates": "contradictory_dates",
         "temporal_limitations_risk": "limitations_risk",
         "temporal_missing_anchor": "missing_anchor",
         "temporal_relative_only_ordering": "relative_only_ordering",
-        "temporal_reverse_before": "temporal_reverse_before",
     }
 
     for contradiction in contradiction_queue if isinstance(contradiction_queue, list) else []:

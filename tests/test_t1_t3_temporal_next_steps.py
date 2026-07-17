@@ -1,5 +1,5 @@
 """
-T1 / T3 / T5 temporal timeline proof regression suite.
+T1 / T3 / T5 / T6 temporal timeline proof regression suite.
 
 Covers:
   T1 – inferred date-anchor relations in build_temporal_relation_registry
@@ -38,7 +38,7 @@ def _make_claim_support_hook_stub():
     """Return a minimal stub that exposes the pure utility methods needed by T3 tests.
 
     Uses a SimpleNamespace bound to the real implementations so tests do not
-    reach the complex database and mediator initialisation path.
+    reach the complex database and mediator initialization path.
     """
     from mediator import claim_support_hooks as _hooks_mod
 
