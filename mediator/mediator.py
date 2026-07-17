@@ -7905,12 +7905,12 @@ class Mediator:
 
 		Labels:
 		- ``contradicted``          – element has contradicting support
-		- ``corroborated``          – element has both testimony and documentary/authority support
-		- ``testimony_only``        – element has only testimony support
-		- ``authority_only``        – element has only authority support
-		- ``documentary``           – element has only documentary artifact support
-		- ``partially_corroborated``– element is partially supported with multiple source families present
-		- ``uncorroborated``        – element is partially supported with only one source family
+		- ``corroborated``          – fully supported by both testimony and documentary/authority
+		- ``testimony_only``        – fully supported by testimony only
+		- ``authority_only``        – fully supported by authority only
+		- ``documentary``           – fully supported by documentary artifact evidence only
+		- ``partially_corroborated``– partially supported with multiple source families present
+		- ``uncorroborated``        – partially supported with only one source family
 		- ``unsupported``           – element has no support
 
 		Note: ``supporting_artifact_ids`` contains all source refs (including testimony),
@@ -7929,18 +7929,23 @@ class Mediator:
 		authority_refs: set = set(element.get('supporting_authority_ids') or [])
 		artifact_ids = list(element.get('supporting_artifact_ids') or [])
 		has_artifact = any(ref for ref in artifact_ids if ref not in testimony_refs and ref not in authority_refs)
+		# Canonical facts without an explicit source family also count as documentary support
+		# only when no testimony or authority is present (otherwise they're ambiguous).
 		has_facts = bool(element.get('canonical_fact_ids'))
 		has_any = has_testimony or has_artifact or has_authority or has_facts
 		if not has_any:
 			return 'unsupported'
 		has_documentary = has_artifact or (has_facts and not has_testimony and not has_authority)
-		if has_testimony and (has_documentary or has_authority):
-			if status == 'supported':
-				return 'corroborated'
-			return 'partially_corroborated'
+		has_multiple_families = has_testimony and (has_documentary or has_authority)
+		is_fully_supported = status == 'supported'
+		if has_multiple_families:
+			return 'corroborated' if is_fully_supported else 'partially_corroborated'
+		if not is_fully_supported:
+			# Single-family partial support has no cross-family corroboration.
+			return 'uncorroborated'
 		if has_testimony:
 			return 'testimony_only'
-		if has_authority and not has_documentary:
+		if has_authority:
 			return 'authority_only'
 		return 'documentary'
 

@@ -4134,6 +4134,20 @@ class TestMediatorThreePhaseIntegration:
         }
         assert mediator._derive_support_lane_label(fake_element) == 'contradicted'
 
+    def test_support_lane_label_uncorroborated_when_partially_supported_single_family(self):
+        """Partially supported element with only one source family should get uncorroborated label."""
+        from mediator.mediator import Mediator
+
+        mediator = Mediator.__new__(Mediator)
+        fake_element = {
+            'support_status': 'partially_supported',
+            'supporting_testimony_ids': ['t1'],
+            'supporting_artifact_ids': ['t1'],  # same ref included as artifact_ids (pre-existing behaviour)
+            'supporting_authority_ids': [],
+            'canonical_fact_ids': [],
+        }
+        assert mediator._derive_support_lane_label(fake_element) == 'uncorroborated'
+
     def test_support_lane_label_authority_only(self):
         """Element backed only by authority sources should get authority_only label."""
         from mediator.mediator import Mediator
