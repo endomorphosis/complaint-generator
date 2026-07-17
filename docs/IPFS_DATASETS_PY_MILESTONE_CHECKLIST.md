@@ -179,13 +179,13 @@ Primary files:
 
 Checklist:
 
-- [ ] GraphRAG exposes ontology-quality or support-path scoring in a mediator-consumable shape
+- [x] GraphRAG exposes ontology-quality or support-path scoring in a mediator-consumable shape
 - [x] support overviews surface quality signals rather than raw support counts alone
 - [x] proof-gap and contradiction outputs are persisted or exposed through review surfaces
 - [x] follow-up planning consumes proof-decision and reasoning-gap signals from the current validation layer
-- [ ] logic adapter wraps text-to-predicate, contradiction, and proof workflows behind stable normalized outputs rather than placeholder-heavy capability output
-- [ ] GraphRAG-driven graph-quality or ontology-gap signals are consumable by follow-up planning
-- [ ] at least one complaint type has explicit predicate templates and grounded fact mapping
+- [x] logic adapter wraps text-to-predicate, contradiction, and proof workflows behind stable normalized outputs rather than placeholder-heavy capability output
+- [x] GraphRAG-driven graph-quality or ontology-gap signals are consumable by follow-up planning
+- [x] at least one complaint type has explicit predicate templates and grounded fact mapping
 
 Acceptance criteria:
 
@@ -222,11 +222,11 @@ Primary files:
 
 Checklist:
 
-- [ ] review payloads expose full support packets with evidence, authority, fact, provenance, and graph-support detail
+- [x] review payloads expose full support packets with evidence, authority, fact, provenance, and graph-support detail
 - [x] contradiction and missing-support summaries are operator-visible
-- [ ] timeline, archive-history, and graph-trace drilldowns are operator-visible
-- [ ] queued acquisition and enrichment state can be inspected from review surfaces
-- [ ] long-running archive, graph, and validation work can move into explicit background workflows where necessary
+- [x] timeline, archive-history, and graph-trace drilldowns are operator-visible
+- [x] queued acquisition and enrichment state can be inspected from review surfaces
+- [x] long-running archive, graph, and validation work can move into explicit background workflows where necessary
 - [x] documentation for review and execution routes is aligned with actual payloads and compatibility behavior
 
 Acceptance criteria:

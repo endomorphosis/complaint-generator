@@ -2977,6 +2977,91 @@ class Mediator:
 			required_support_kinds=required_support_kinds,
 		)
 
+	def get_support_timeline(
+		self,
+		claim_type: str = None,
+		user_id: str = None,
+		claim_element_id: str = None,
+		limit: int = 100,
+	) -> Dict[str, Any]:
+		"""Return support links in chronological order for operator timeline review."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_support_timeline(
+			user_id,
+			claim_type=claim_type,
+			claim_element_id=claim_element_id,
+			limit=limit,
+		)
+
+	def get_archive_history(
+		self,
+		user_id: str = None,
+		claim_type: str = None,
+		domain: str = None,
+		limit: int = 50,
+	) -> Dict[str, Any]:
+		"""Return archive captures grouped by domain for operator inspection."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_archive_history(
+			user_id,
+			claim_type=claim_type,
+			domain=domain,
+			limit=limit,
+		)
+
+	def get_graph_trace_drilldown(
+		self,
+		user_id: str = None,
+		claim_type: str = None,
+		claim_element_id: str = None,
+		support_ref: str = None,
+	) -> Dict[str, Any]:
+		"""Return full graph trace detail for a specific element or support reference."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_graph_trace_drilldown(
+			user_id,
+			claim_type=claim_type,
+			claim_element_id=claim_element_id,
+			support_ref=support_ref,
+		)
+
+	def get_enrichment_queue_state(
+		self,
+		user_id: str = None,
+		claim_type: str = None,
+		status: str = None,
+	) -> Dict[str, Any]:
+		"""Return pending enrichment jobs for operator queue inspection."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_enrichment_queue_state(
+			user_id,
+			claim_type=claim_type,
+			status=status,
+		)
+
+	def submit_background_enrichment_job(
+		self,
+		enrichment_type: str,
+		user_id: str = None,
+		claim_type: str = None,
+		priority: int = 0,
+		metadata: Dict[str, Any] = None,
+	) -> Dict[str, Any]:
+		"""Submit a background enrichment job for asynchronous processing."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.submit_background_enrichment_job(
+			user_id,
+			enrichment_type,
+			claim_type=claim_type,
+			priority=priority,
+			metadata=metadata,
+		)
+
 	def get_recent_claim_follow_up_execution(
 		self,
 		claim_type: str = None,

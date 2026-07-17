@@ -652,6 +652,298 @@ def query_pdf_knowledge_graph(
     )
 
 
+# ---------------------------------------------------------------------------
+# Claim-type ontology quality profiles
+# Maps complaint type to expected entity keywords, relation predicates, and
+# legal concept keywords used for scoring and gap detection.
+# ---------------------------------------------------------------------------
+
+_CLAIM_ONTOLOGY_PROFILES: Dict[str, Dict[str, Any]] = {
+    "employment_discrimination": {
+        "expected_entity_keywords": [
+            "employee", "employer", "supervisor", "manager", "hr",
+            "complainant", "company", "coworker", "plaintiff", "defendant",
+        ],
+        "expected_relation_predicates": [
+            "terminated", "discriminated", "harassed", "demoted",
+            "reported", "employed", "notified", "violated",
+        ],
+        "expected_concept_keywords": [
+            "discrimination", "retaliation", "harassment", "termination",
+            "demotion", "protected", "race", "gender", "disability",
+            "religion", "age", "employment", "adverse",
+        ],
+    },
+    "housing_discrimination": {
+        "expected_entity_keywords": [
+            "tenant", "landlord", "property", "applicant", "complainant",
+            "housing", "manager", "unit", "plaintiff", "defendant",
+        ],
+        "expected_relation_predicates": [
+            "denied", "evicted", "discriminated", "violated", "refused",
+            "harassed", "reported", "notified",
+        ],
+        "expected_concept_keywords": [
+            "discrimination", "housing", "eviction", "protected", "race",
+            "disability", "familial", "religion", "national origin",
+            "lease", "denial", "accommodation",
+        ],
+    },
+    "retaliation": {
+        "expected_entity_keywords": [
+            "employee", "employer", "complainant", "supervisor", "plaintiff",
+            "defendant", "manager", "company",
+        ],
+        "expected_relation_predicates": [
+            "retaliated", "terminated", "demoted", "reported", "complained",
+            "violated", "harassed", "notified",
+        ],
+        "expected_concept_keywords": [
+            "retaliation", "protected", "complaint", "termination",
+            "discrimination", "whistleblower", "adverse", "causation",
+        ],
+    },
+    "fair_housing": {
+        "expected_entity_keywords": [
+            "tenant", "landlord", "applicant", "housing", "complainant",
+            "property", "unit",
+        ],
+        "expected_relation_predicates": [
+            "denied", "discriminated", "violated", "refused",
+            "harassed", "reported",
+        ],
+        "expected_concept_keywords": [
+            "fair housing", "discrimination", "protected", "accommodation",
+            "disability", "familial", "race", "national origin",
+        ],
+    },
+}
+
+_DEFAULT_CLAIM_PROFILE: Dict[str, Any] = {
+    "expected_entity_keywords": [
+        "complainant", "defendant", "respondent", "plaintiff",
+    ],
+    "expected_relation_predicates": [
+        "violated", "harassed", "discriminated", "reported",
+    ],
+    "expected_concept_keywords": [
+        "discrimination", "violation", "complaint", "protected",
+    ],
+}
+
+_QUALITY_GRADE_THRESHOLDS = [
+    (0.85, "A"),
+    (0.70, "B"),
+    (0.55, "C"),
+    (0.40, "D"),
+    (0.0,  "F"),
+]
+
+
+def _ontology_quality_grade(score: float) -> str:
+    for threshold, grade in _QUALITY_GRADE_THRESHOLDS:
+        if score >= threshold:
+            return grade
+    return "F"
+
+
+def _score_coverage(
+    items: List[str],
+    expected_keywords: List[str],
+) -> Tuple[float, List[str], List[str]]:
+    """Return (coverage_ratio, matched, missing) for *items* against *expected_keywords*."""
+    if not expected_keywords:
+        return 1.0, [], []
+    lowered = [str(i).lower() for i in items]
+    matched = []
+    missing = []
+    for keyword in expected_keywords:
+        kl = keyword.lower()
+        if any(kl in item for item in lowered):
+            matched.append(keyword)
+        else:
+            missing.append(keyword)
+    return len(matched) / len(expected_keywords), matched, missing
+
+
+def score_ontology_support_paths(
+    ontology: Any,
+    claim_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Score an ontology's support quality for *claim_type*.
+
+    Returns a mediator-consumable quality payload with per-dimension scores
+    (entity coverage, relation density, concept completeness), an
+    ``overall_quality_score`` (0.0–1.0), a letter ``grade``, and a list of
+    ``gap_signals`` identifying weak areas.
+
+    Works in degraded mode — passes through to the local ontology helpers
+    when the upstream GraphRAG backend is unavailable.
+    """
+    operation = "score_ontology_support_paths"
+    if not isinstance(ontology, dict) or not ontology:
+        return with_adapter_metadata(
+            {
+                "status": "error",
+                "error": "ontology must be a non-empty dict",
+                "overall_quality_score": 0.0,
+                "grade": "F",
+                "gap_signals": [{"gap_type": "empty_ontology", "description": "Ontology is empty or not a dict", "follow_up_action": "build_ontology_from_evidence"}],
+            },
+            operation=operation,
+            backend_available=GRAPHRAG_AVAILABLE,
+            degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+            implementation_status="implemented",
+        )
+
+    profile = _CLAIM_ONTOLOGY_PROFILES.get(str(claim_type or "").lower(), _DEFAULT_CLAIM_PROFILE)
+
+    entities = ontology.get("entities") or []
+    relations = ontology.get("relations") or []
+    concepts = ontology.get("concepts") or []
+
+    entity_names = [str(e.get("name") or e) for e in entities if e]
+    relation_predicates = [str(r.get("predicate") or r) for r in relations if r]
+    concept_names = [str(c.get("name") or c) for c in concepts if c]
+
+    entity_score, entity_matched, entity_missing = _score_coverage(
+        entity_names, profile["expected_entity_keywords"]
+    )
+    relation_score, relation_matched, relation_missing = _score_coverage(
+        relation_predicates, profile["expected_relation_predicates"]
+    )
+    concept_score, concept_matched, concept_missing = _score_coverage(
+        concept_names, profile["expected_concept_keywords"]
+    )
+
+    # Relation density: ratio of relation triples to max possible entity pairs.
+    entity_count = max(len(entities), 1)
+    max_pairs = max(entity_count * (entity_count - 1), 1)
+    relation_density_raw = len(relations) / max_pairs
+    relation_density_score = min(relation_density_raw, 1.0)
+
+    # Weighted composite score: entity 35%, concept 35%, relation quality 20%, density 10%
+    overall_quality_score = round(
+        entity_score * 0.35
+        + concept_score * 0.35
+        + relation_score * 0.20
+        + relation_density_score * 0.10,
+        4,
+    )
+    grade = _ontology_quality_grade(overall_quality_score)
+
+    # Build gap signals
+    gap_signals: List[Dict[str, Any]] = []
+    if entity_missing:
+        gap_signals.append({
+            "gap_type": "missing_entity_coverage",
+            "description": f"Ontology is missing expected entity types: {', '.join(entity_missing[:5])}",
+            "missing_keywords": entity_missing,
+            "follow_up_action": "enrich_entities_from_evidence",
+        })
+    if concept_missing:
+        gap_signals.append({
+            "gap_type": "missing_concept_coverage",
+            "description": f"Ontology is missing expected legal concepts: {', '.join(concept_missing[:5])}",
+            "missing_keywords": concept_missing,
+            "follow_up_action": "acquire_legal_authority_for_concept",
+        })
+    if relation_missing:
+        gap_signals.append({
+            "gap_type": "missing_relation_predicates",
+            "description": f"Ontology is missing expected relation predicates: {', '.join(relation_missing[:5])}",
+            "missing_keywords": relation_missing,
+            "follow_up_action": "extract_relations_from_evidence",
+        })
+    if relation_density_score < 0.1 and len(entities) > 1:
+        gap_signals.append({
+            "gap_type": "low_relation_density",
+            "description": "Ontology has very few relations relative to entity count; graph is sparse",
+            "follow_up_action": "run_graphrag_relation_extraction",
+        })
+
+    return with_adapter_metadata(
+        {
+            "status": "success",
+            "claim_type": claim_type,
+            "entity_coverage_score": round(entity_score, 4),
+            "relation_score": round(relation_score, 4),
+            "concept_completeness_score": round(concept_score, 4),
+            "relation_density_score": round(relation_density_score, 4),
+            "overall_quality_score": overall_quality_score,
+            "grade": grade,
+            "entity_matched": entity_matched,
+            "entity_missing": entity_missing,
+            "relation_matched": relation_matched,
+            "relation_missing": relation_missing,
+            "concept_matched": concept_matched,
+            "concept_missing": concept_missing,
+            "gap_signal_count": len(gap_signals),
+            "gap_signals": gap_signals,
+            "entity_count": len(entities),
+            "relation_count": len(relations),
+            "concept_count": len(concepts),
+        },
+        operation=operation,
+        backend_available=GRAPHRAG_AVAILABLE,
+        degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+        implementation_status="implemented",
+        extra_metadata={"claim_type": claim_type},
+    )
+
+
+def identify_ontology_gaps(
+    ontology: Any,
+    claim_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Identify gaps in *ontology* relative to the expected profile for *claim_type*.
+
+    Returns a structured payload with a ``gaps`` list suitable for consumption
+    by follow-up planning.  Each gap entry carries ``gap_type``, ``description``,
+    ``severity`` (blocking/moderate/minor), and ``follow_up_action``.
+    """
+    operation = "identify_ontology_gaps"
+    scored = score_ontology_support_paths(ontology, claim_type=claim_type)
+
+    gap_signals = scored.get("gap_signals") or []
+    overall_score = float(scored.get("overall_quality_score") or 0.0)
+
+    enriched_gaps: List[Dict[str, Any]] = []
+    for signal in gap_signals:
+        gap_type = signal.get("gap_type", "unknown")
+        severity = "blocking" if gap_type in ("empty_ontology", "missing_entity_coverage") and overall_score < 0.3 else (
+            "moderate" if gap_type in ("missing_concept_coverage", "missing_relation_predicates") else "minor"
+        )
+        enriched_gaps.append({
+            "gap_type": gap_type,
+            "description": signal.get("description", ""),
+            "severity": severity,
+            "follow_up_action": signal.get("follow_up_action", ""),
+            "missing_keywords": signal.get("missing_keywords", []),
+        })
+
+    return with_adapter_metadata(
+        {
+            "status": "success",
+            "claim_type": claim_type,
+            "overall_quality_score": overall_score,
+            "grade": scored.get("grade", "F"),
+            "gap_count": len(enriched_gaps),
+            "gaps": enriched_gaps,
+            "has_blocking_gaps": any(g["severity"] == "blocking" for g in enriched_gaps),
+            "has_gaps": len(enriched_gaps) > 0,
+            "entity_coverage_score": scored.get("entity_coverage_score", 0.0),
+            "concept_completeness_score": scored.get("concept_completeness_score", 0.0),
+            "relation_density_score": scored.get("relation_density_score", 0.0),
+        },
+        operation=operation,
+        backend_available=GRAPHRAG_AVAILABLE,
+        degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+        implementation_status="implemented",
+        extra_metadata={"claim_type": claim_type},
+    )
+
+
 __all__ = [
     "OntologyGenerator",
     "LogicValidator",
@@ -668,4 +960,7 @@ __all__ = [
     "cross_analyze_pdf_documents",
     "batch_process_pdfs",
     "query_pdf_knowledge_graph",
+    "score_ontology_support_paths",
+    "identify_ontology_gaps",
+    "_CLAIM_ONTOLOGY_PROFILES",
 ]

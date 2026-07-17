@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from claim_support_review import (
     ClaimSupportDocumentSaveRequest,
     ClaimSupportFollowUpExecuteRequest,
@@ -157,6 +157,84 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
                     "Install it to enable multipart evidence uploads."
                 ),
             )
+
+    # -----------------------------------------------------------------------
+    # M4: Operator drilldown routes (timeline, archive-history, graph-trace,
+    #     enrichment-queue, background enrichment submission).
+    # -----------------------------------------------------------------------
+
+    @router.get("/api/claim-support/support-timeline")
+    async def claim_support_timeline(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=1000),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_support_timeline(
+            claim_type=claim_type,
+            user_id=resolved_user,
+            claim_element_id=claim_element_id,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/archive-history")
+    async def claim_support_archive_history(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        domain: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_archive_history(
+            user_id=resolved_user,
+            claim_type=claim_type,
+            domain=domain,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/graph-trace")
+    async def claim_support_graph_trace(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        support_ref: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_graph_trace_drilldown(
+            user_id=resolved_user,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            support_ref=support_ref,
+        )
+
+    @router.get("/api/claim-support/enrichment-queue")
+    async def claim_support_enrichment_queue(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        status: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_enrichment_queue_state(
+            user_id=resolved_user,
+            claim_type=claim_type,
+            status=status,
+        )
+
+    @router.post("/api/claim-support/enrich-background")
+    async def claim_support_enrich_background(
+        enrichment_type: str = Query(...),
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        priority: int = Query(default=0, ge=0, le=10),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.submit_background_enrichment_job(
+            enrichment_type=enrichment_type,
+            user_id=resolved_user,
+            claim_type=claim_type,
+            priority=priority,
+        )
 
     return router
 

@@ -974,6 +974,42 @@ class ClaimSupportHook:
 
     def _build_support_packet(self, trace: Dict[str, Any]) -> Dict[str, Any]:
         record_summary = trace.get('record_summary', {}) if isinstance(trace.get('record_summary'), dict) else {}
+        lineage_summary = self._build_support_packet_lineage_summary(trace=trace)
+
+        # --- evidence sub-object ---
+        parse_summary = record_summary.get('parse_summary', {}) if isinstance(record_summary.get('parse_summary'), dict) else {}
+        evidence = {
+            'parsed_text_length': int(record_summary.get('text_length') or parse_summary.get('text_length') or 0),
+            'extraction_method': str(record_summary.get('extraction_method') or parse_summary.get('extraction_method') or lineage_summary.get('artifact_family') or ''),
+            'parse_quality_tier': str(parse_summary.get('quality_tier') or record_summary.get('quality_tier') or ''),
+            'parse_quality_score': float(parse_summary.get('quality_score') or record_summary.get('quality_score') or 0.0),
+            'chunk_count': int(parse_summary.get('chunk_count') or record_summary.get('chunk_count') or 0),
+            'source_url': str(record_summary.get('source_url') or lineage_summary.get('source_url') or ''),
+            'mime_type': str(record_summary.get('mime_type') or parse_summary.get('mime_type') or ''),
+        }
+
+        # --- authority sub-object ---
+        graph_summary = trace.get('graph_summary', {}) if isinstance(trace.get('graph_summary'), dict) else {}
+        authority = {
+            'authority_id': str(trace.get('authority_id') or record_summary.get('authority_id') or ''),
+            'citation': str(record_summary.get('citation') or record_summary.get('authority_citation') or ''),
+            'treatment_signal': str(graph_summary.get('treatment_signal') or record_summary.get('treatment_signal') or ''),
+            'rule_candidates': list(graph_summary.get('rule_candidates') or record_summary.get('rule_candidates') or []),
+            'jurisdiction': str(record_summary.get('jurisdiction') or ''),
+            'authority_type': str(record_summary.get('authority_type') or record_summary.get('source_type') or ''),
+        }
+
+        # --- provenance sub-object ---
+        provenance = {
+            'content_hash': str(lineage_summary.get('content_hash') or record_summary.get('content_hash') or ''),
+            'capture_timestamp': str(lineage_summary.get('captured_at') or record_summary.get('captured_at') or ''),
+            'archive_url': str(lineage_summary.get('archive_url') or record_summary.get('archive_url') or trace.get('archive_url') or ''),
+            'source_domain': str(lineage_summary.get('source_domain') or record_summary.get('source_domain') or ''),
+            'capture_source': str(lineage_summary.get('capture_source') or ''),
+            'historical_capture': bool(lineage_summary.get('historical_capture', False)),
+            'fallback_mode': str(lineage_summary.get('fallback_mode') or ''),
+        }
+
         return {
             'trace_kind': str(trace.get('trace_kind') or 'link'),
             'support_kind': trace.get('support_kind'),
@@ -993,10 +1029,13 @@ class ClaimSupportHook:
                 'text': trace.get('fact_text', ''),
                 'confidence': trace.get('confidence', 0.0),
             },
+            'evidence': evidence,
+            'authority': authority,
+            'provenance': provenance,
             'record_summary': record_summary,
-            'lineage_summary': self._build_support_packet_lineage_summary(trace=trace),
+            'lineage_summary': lineage_summary,
             'source_lineage_ref': trace.get('source_lineage_ref', ''),
-            'graph_summary': trace.get('graph_summary', {}),
+            'graph_summary': graph_summary,
             'graph_trace': trace.get('graph_trace', {}),
             'graph_id': trace.get('graph_id', ''),
         }
@@ -1553,6 +1592,37 @@ class ClaimSupportHook:
             return {}
         return temporal_handoff
 
+    def _extract_graphrag_quality_signal(
+        self,
+        reasoning_diagnostics: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Extract GraphRAG ontology quality and gap signals from *reasoning_diagnostics*.
+
+        Returns a dict with ``quality_score``, ``grade``, ``has_gaps``,
+        ``has_blocking_gaps``, and ``gaps`` (list of gap dicts).
+        """
+        reasoning = reasoning_diagnostics if isinstance(reasoning_diagnostics, dict) else {}
+        graphrag_quality = reasoning.get('graphrag_quality', {})
+        if not isinstance(graphrag_quality, dict) or not graphrag_quality:
+            return {
+                'quality_score': None,
+                'grade': None,
+                'has_gaps': False,
+                'has_blocking_gaps': False,
+                'gaps': [],
+                'available': False,
+            }
+        return {
+            'quality_score': graphrag_quality.get('overall_quality_score'),
+            'grade': graphrag_quality.get('grade'),
+            'has_gaps': bool(graphrag_quality.get('has_gaps', False)),
+            'has_blocking_gaps': bool(graphrag_quality.get('has_blocking_gaps', False)),
+            'gaps': list(graphrag_quality.get('gaps') or []),
+            'entity_coverage_score': graphrag_quality.get('entity_coverage_score'),
+            'concept_completeness_score': graphrag_quality.get('concept_completeness_score'),
+            'available': True,
+        }
+
     def _build_validation_decision_trace(
         self,
         element: Dict[str, Any],
@@ -1569,6 +1639,8 @@ class ClaimSupportHook:
         ontology_validation_signal = self._extract_ontology_validation_signal(reasoning)
         temporal_rule_profile = self._extract_temporal_rule_profile(reasoning)
         temporal_rule_status = str(temporal_rule_profile.get('status') or '')
+        graphrag_quality_signal = self._extract_graphrag_quality_signal(reasoning)
+        graphrag_has_blocking_gaps = graphrag_quality_signal.get('has_blocking_gaps', False)
         missing_support_kind_count = len(element.get('missing_support_kinds', []) or [])
         total_links = int(element.get('total_links', 0) or 0)
         coverage_status = str(element.get('status') or '')
@@ -1599,6 +1671,9 @@ class ClaimSupportHook:
             validation_status = 'incomplete'
         elif coverage_status == 'covered' and total_links > 0 and self._element_has_parse_quality_gap(element):
             decision_source = 'low_quality_parse'
+            validation_status = 'incomplete'
+        elif graphrag_has_blocking_gaps and total_links > 0:
+            decision_source = 'graphrag_quality_gap'
             validation_status = 'incomplete'
         elif ontology_validation_signal == 'valid' and coverage_status == 'covered' and missing_support_kind_count == 0:
             decision_source = 'ontology_validation_supported'
@@ -1632,6 +1707,8 @@ class ClaimSupportHook:
             notes.append('Ontology validation reported a valid or consistent result for this element.')
         if validation_status == 'incomplete' and decision_source == 'low_quality_parse':
             notes.append('Available support was parsed with low extraction quality and should be refreshed from a better source copy.')
+        if decision_source == 'graphrag_quality_gap':
+            notes.append('GraphRAG ontology has blocking quality gaps that need to be resolved before this element can be fully validated.')
         if missing_support_kind_count:
             notes.append('Required support kinds are still missing for this element.')
         if reasoning.get('used_fallback_ontology'):
@@ -1650,6 +1727,8 @@ class ClaimSupportHook:
             'temporal_rule_status': temporal_rule_status,
             'temporal_rule_blocking_reason_count': len(temporal_rule_profile.get('blocking_reasons', []) or []),
             'temporal_rule_follow_up_count': len(temporal_rule_profile.get('recommended_follow_ups', []) or []),
+            'graphrag_quality_signal': graphrag_quality_signal,
+            'graphrag_has_blocking_gaps': graphrag_has_blocking_gaps,
             'missing_support_kind_count': missing_support_kind_count,
             'total_links': total_links,
             'used_fallback_ontology': bool(reasoning.get('used_fallback_ontology')),
@@ -1726,6 +1805,21 @@ class ClaimSupportHook:
                     'message': 'Ontology validation reported an invalid or inconsistent reasoning graph for this element.',
                 }
             )
+        graphrag_quality_signal = self._extract_graphrag_quality_signal(reasoning_diagnostics)
+        if graphrag_quality_signal.get('available') and graphrag_quality_signal.get('has_blocking_gaps'):
+            blocking_gaps = [
+                g for g in (graphrag_quality_signal.get('gaps') or [])
+                if g.get('severity') == 'blocking'
+            ]
+            proof_gaps.append(
+                {
+                    'gap_type': 'graphrag_quality_gap',
+                    'gap_count': len(graphrag_quality_signal.get('gaps') or []),
+                    'blocking_gap_count': len(blocking_gaps),
+                    'message': 'GraphRAG ontology has blocking quality gaps for this element.',
+                    'follow_up_action': blocking_gaps[0].get('follow_up_action', '') if blocking_gaps else 'improve_ontology_quality',
+                }
+            )
         return proof_gaps
 
     def _recommended_validation_action(
@@ -1739,11 +1833,15 @@ class ClaimSupportHook:
         if validation_status == 'missing':
             return 'collect_initial_support'
         if validation_status == 'incomplete':
+            proof_gap_types = self._extract_proof_gap_types(proof_gaps or [])
+            decision_trace = element.get('proof_decision_trace', {}) if isinstance(element.get('proof_decision_trace'), dict) else {}
+            if 'graphrag_quality_gap' in proof_gap_types or bool(decision_trace.get('graphrag_has_blocking_gaps', False)):
+                return 'improve_graph_quality'
             if (
                 not (element.get('missing_support_kinds', []) or [])
                 and not self._has_reasoning_gap_signals(
-                    self._extract_proof_gap_types(proof_gaps or []),
-                    element.get('proof_decision_trace', {}) if isinstance(element.get('proof_decision_trace'), dict) else {},
+                    proof_gap_types,
+                    decision_trace,
                 )
                 and self._element_has_parse_quality_gap(element)
             ):
@@ -1797,13 +1895,16 @@ class ClaimSupportHook:
         decision_trace = proof_decision_trace if isinstance(proof_decision_trace, dict) else {}
         decision_source = str(decision_trace.get('decision_source') or '')
         ontology_validation_signal = str(decision_trace.get('ontology_validation_signal') or '')
+        graphrag_has_blocking_gaps = bool(decision_trace.get('graphrag_has_blocking_gaps', False))
         return (
             'logic_unprovable' in (proof_gap_types or [])
             or 'temporal_rule_failed' in (proof_gap_types or [])
             or 'temporal_rule_partial' in (proof_gap_types or [])
             or 'ontology_validation_failed' in (proof_gap_types or [])
-            or decision_source in {'logic_unprovable', 'logic_proof_partial', 'ontology_validation_failed', 'temporal_rule_failed', 'temporal_rule_partial'}
+            or 'graphrag_quality_gap' in (proof_gap_types or [])
+            or decision_source in {'logic_unprovable', 'logic_proof_partial', 'ontology_validation_failed', 'temporal_rule_failed', 'temporal_rule_partial', 'graphrag_quality_gap'}
             or ontology_validation_signal == 'invalid'
+            or graphrag_has_blocking_gaps
         )
 
     def _normalize_reasoning_key(self, value: Any) -> str:
@@ -5307,3 +5408,387 @@ class ClaimSupportHook:
                 for current_claim, entries in claim_entries.items()
             },
         })
+
+    def get_support_timeline(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+        *,
+        claim_element_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Return support links sorted chronologically by capture/event date.
+
+        Surfaces evidence, web archive captures, and authority records in a
+        single timeline view ordered by ``captured_at`` then ``created_at``.
+        Each entry includes a ``provenance`` sub-object, ``support_kind``, and
+        ``support_label`` for operator drilldown.
+        """
+        links = self._get_enriched_claim_support_links(user_id, claim_type)
+        if claim_element_id:
+            links = [l for l in links if l.get('claim_element_id') == claim_element_id]
+
+        timeline_entries: List[Dict[str, Any]] = []
+        for link in links:
+            traces = self._collect_support_traces_from_links([link])
+            for trace in traces:
+                record_summary = trace.get('record_summary', {}) if isinstance(trace.get('record_summary'), dict) else {}
+                lineage_summary = self._build_support_packet_lineage_summary(trace=trace)
+                captured_at = str(
+                    lineage_summary.get('captured_at')
+                    or record_summary.get('captured_at')
+                    or trace.get('captured_at')
+                    or ''
+                )
+                timeline_entries.append({
+                    'captured_at': captured_at,
+                    'support_kind': trace.get('support_kind'),
+                    'support_label': trace.get('support_label'),
+                    'support_ref': trace.get('support_ref'),
+                    'source_family': trace.get('source_family', ''),
+                    'claim_element_id': link.get('claim_element_id', ''),
+                    'claim_element_text': link.get('claim_element_text', ''),
+                    'fact': {
+                        'fact_id': trace.get('fact_id', ''),
+                        'text': trace.get('fact_text', ''),
+                        'confidence': trace.get('confidence', 0.0),
+                    },
+                    'provenance': {
+                        'archive_url': str(lineage_summary.get('archive_url') or record_summary.get('archive_url') or ''),
+                        'capture_source': str(lineage_summary.get('capture_source') or ''),
+                        'historical_capture': bool(lineage_summary.get('historical_capture', False)),
+                        'content_hash': str(lineage_summary.get('content_hash') or record_summary.get('content_hash') or ''),
+                        'source_domain': str(lineage_summary.get('source_domain') or record_summary.get('source_domain') or ''),
+                    },
+                })
+
+        # Sort by captured_at descending (non-empty timestamps first)
+        def _timeline_sort_key(entry: Dict[str, Any]) -> tuple:
+            ts = str(entry.get('captured_at') or '')
+            return (0 if ts else 1, ts)
+
+        timeline_entries.sort(key=_timeline_sort_key)
+        if limit:
+            timeline_entries = timeline_entries[:limit]
+
+        return {
+            'available': True,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'claim_element_id': claim_element_id,
+            'entry_count': len(timeline_entries),
+            'timeline': timeline_entries,
+        }
+
+    def get_archive_history(
+        self,
+        user_id: str,
+        *,
+        claim_type: Optional[str] = None,
+        domain: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """Return archive captures associated with the user's web evidence.
+
+        Aggregates archive captures from support links, grouped by source
+        domain.  Useful for operator inspection of which web sources have
+        been captured and when.
+        """
+        links = self._get_enriched_claim_support_links(user_id, claim_type)
+        captures_by_domain: Dict[str, List[Dict[str, Any]]] = {}
+        seen_archive_urls: set = set()
+
+        for link in links:
+            traces = self._collect_support_traces_from_links([link])
+            for trace in traces:
+                record_summary = trace.get('record_summary', {}) if isinstance(trace.get('record_summary'), dict) else {}
+                lineage_summary = self._build_support_packet_lineage_summary(trace=trace)
+                archive_url = str(
+                    lineage_summary.get('archive_url')
+                    or record_summary.get('archive_url')
+                    or trace.get('archive_url')
+                    or ''
+                )
+                if not archive_url or archive_url in seen_archive_urls:
+                    continue
+                seen_archive_urls.add(archive_url)
+
+                capture_source = str(lineage_summary.get('capture_source') or record_summary.get('capture_source') or 'unknown')
+                captured_at = str(lineage_summary.get('captured_at') or record_summary.get('captured_at') or '')
+                source_domain = str(lineage_summary.get('source_domain') or record_summary.get('source_domain') or '')
+
+                if domain and source_domain and domain.lower() not in source_domain.lower():
+                    continue
+
+                capture_entry = {
+                    'archive_url': archive_url,
+                    'capture_source': capture_source,
+                    'captured_at': captured_at,
+                    'source_domain': source_domain,
+                    'support_kind': trace.get('support_kind'),
+                    'support_ref': trace.get('support_ref'),
+                    'historical_capture': bool(lineage_summary.get('historical_capture', False)),
+                }
+                captures_by_domain.setdefault(source_domain or 'unknown', []).append(capture_entry)
+
+        all_captures = [
+            entry
+            for entries in captures_by_domain.values()
+            for entry in entries
+        ]
+        all_captures.sort(key=lambda e: str(e.get('captured_at') or ''), reverse=True)
+        if limit:
+            all_captures = all_captures[:limit]
+
+        return {
+            'available': True,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'domain_filter': domain,
+            'capture_count': len(all_captures),
+            'domain_count': len(captures_by_domain),
+            'captures': all_captures,
+            'captures_by_domain': {
+                d: entries[:limit]
+                for d, entries in captures_by_domain.items()
+            },
+        }
+
+    def get_graph_trace_drilldown(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+        *,
+        claim_element_id: Optional[str] = None,
+        support_ref: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return full graph trace details for a specific claim element or support reference.
+
+        Provides complete entity/relation/graph-path context for operator
+        investigation of why a particular support link was (or was not)
+        matched through the knowledge graph.
+        """
+        links = self._get_enriched_claim_support_links(user_id, claim_type)
+        if claim_element_id:
+            links = [l for l in links if l.get('claim_element_id') == claim_element_id]
+        if support_ref:
+            links = [l for l in links if l.get('support_ref') == support_ref]
+
+        graph_traces: List[Dict[str, Any]] = []
+        for link in links:
+            traces = self._collect_support_traces_from_links([link])
+            for trace in traces:
+                gt = trace.get('graph_trace', {}) if isinstance(trace.get('graph_trace'), dict) else {}
+                gs = trace.get('graph_summary', {}) if isinstance(trace.get('graph_summary'), dict) else {}
+                if not gt and not gs:
+                    continue
+                graph_traces.append({
+                    'support_ref': trace.get('support_ref'),
+                    'support_kind': trace.get('support_kind'),
+                    'claim_element_id': link.get('claim_element_id', ''),
+                    'claim_element_text': link.get('claim_element_text', ''),
+                    'graph_id': trace.get('graph_id', ''),
+                    'graph_trace': gt,
+                    'graph_summary': gs,
+                    'fact_id': trace.get('fact_id', ''),
+                    'fact_text': trace.get('fact_text', ''),
+                    'confidence': trace.get('confidence', 0.0),
+                })
+
+        graph_summary_totals = self._summarize_graph_traces(links)
+        return {
+            'available': True,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'claim_element_id': claim_element_id,
+            'support_ref': support_ref,
+            'graph_trace_count': len(graph_traces),
+            'graph_traces': graph_traces,
+            'graph_summary': graph_summary_totals,
+        }
+
+    def get_enrichment_queue_state(
+        self,
+        user_id: str,
+        *,
+        claim_type: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return the state of pending enrichment jobs for *user_id*.
+
+        Queries the ``claim_enrichment_queue`` table when available.  Falls
+        back to a degraded-mode empty-queue response when the table does not
+        exist, preserving backwards compatibility.
+        """
+        if not self._check_duckdb_availability():
+            return {
+                'available': False,
+                'user_id': user_id,
+                'claim_type': claim_type,
+                'status_filter': status,
+                'queue': [],
+                'queue_count': 0,
+                'pending_count': 0,
+                'running_count': 0,
+                'completed_count': 0,
+            }
+
+        self._prepare_duckdb_path()
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            # Ensure the queue table exists (created lazily).
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS claim_enrichment_queue (
+                    id INTEGER PRIMARY KEY,
+                    user_id VARCHAR NOT NULL,
+                    claim_type VARCHAR,
+                    enrichment_type VARCHAR NOT NULL,
+                    status VARCHAR NOT NULL DEFAULT 'pending',
+                    priority INTEGER DEFAULT 0,
+                    metadata JSON,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+                """
+            )
+            where_clauses = ['user_id = ?']
+            parameters: List[Any] = [user_id]
+            if claim_type:
+                where_clauses.append('claim_type = ?')
+                parameters.append(claim_type)
+            if status:
+                where_clauses.append('status = ?')
+                parameters.append(status)
+
+            rows = conn.execute(
+                f"""
+                SELECT id, user_id, claim_type, enrichment_type, status, priority, metadata, created_at, updated_at
+                FROM claim_enrichment_queue
+                WHERE {' AND '.join(where_clauses)}
+                ORDER BY priority DESC, created_at ASC
+                """,
+                parameters,
+            ).fetchall()
+            conn.close()
+        except Exception as exc:
+            self.mediator.log('enrichment_queue_query_error', error=str(exc))
+            return {
+                'available': False,
+                'user_id': user_id,
+                'claim_type': claim_type,
+                'status_filter': status,
+                'queue': [],
+                'queue_count': 0,
+                'pending_count': 0,
+                'running_count': 0,
+                'completed_count': 0,
+                'error': str(exc),
+            }
+
+        queue: List[Dict[str, Any]] = []
+        status_counts: Dict[str, int] = {}
+        for row in rows:
+            entry_status = str(row[4] or 'pending')
+            status_counts[entry_status] = status_counts.get(entry_status, 0) + 1
+            metadata = json.loads(row[6]) if row[6] else {}
+            queue.append({
+                'id': row[0],
+                'user_id': row[1],
+                'claim_type': row[2],
+                'enrichment_type': row[3],
+                'status': entry_status,
+                'priority': row[5],
+                'metadata': metadata,
+                'created_at': row[7].isoformat() if hasattr(row[7], 'isoformat') else str(row[7] or ''),
+                'updated_at': row[8].isoformat() if hasattr(row[8], 'isoformat') else str(row[8] or ''),
+            })
+
+        return {
+            'available': True,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'status_filter': status,
+            'queue': queue,
+            'queue_count': len(queue),
+            'pending_count': status_counts.get('pending', 0),
+            'running_count': status_counts.get('running', 0),
+            'completed_count': status_counts.get('completed', 0),
+            'failed_count': status_counts.get('failed', 0),
+        }
+
+    def submit_background_enrichment_job(
+        self,
+        user_id: str,
+        enrichment_type: str,
+        *,
+        claim_type: Optional[str] = None,
+        priority: int = 0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Submit a background enrichment job for *user_id*.
+
+        Inserts into the ``claim_enrichment_queue`` table with ``status='pending'``.
+        The job can be inspected via :meth:`get_enrichment_queue_state` and
+        consumed by background worker processes.
+        """
+        if not self._check_duckdb_availability():
+            return {
+                'submitted': False,
+                'user_id': user_id,
+                'enrichment_type': enrichment_type,
+                'error': 'DuckDB not available',
+            }
+
+        self._prepare_duckdb_path()
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS claim_enrichment_queue (
+                    id INTEGER PRIMARY KEY,
+                    user_id VARCHAR NOT NULL,
+                    claim_type VARCHAR,
+                    enrichment_type VARCHAR NOT NULL,
+                    status VARCHAR NOT NULL DEFAULT 'pending',
+                    priority INTEGER DEFAULT 0,
+                    metadata JSON,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO claim_enrichment_queue
+                    (user_id, claim_type, enrichment_type, status, priority, metadata)
+                VALUES (?, ?, ?, 'pending', ?, ?)
+                """,
+                [user_id, claim_type, enrichment_type, priority, json.dumps(metadata or {})],
+            )
+            job_id_row = conn.execute(
+                "SELECT MAX(id) FROM claim_enrichment_queue WHERE user_id = ? AND enrichment_type = ?",
+                [user_id, enrichment_type],
+            ).fetchone()
+            conn.close()
+            job_id = job_id_row[0] if job_id_row else None
+        except Exception as exc:
+            self.mediator.log('enrichment_queue_submit_error', error=str(exc))
+            return {
+                'submitted': False,
+                'user_id': user_id,
+                'enrichment_type': enrichment_type,
+                'error': str(exc),
+            }
+
+        return {
+            'submitted': True,
+            'job_id': job_id,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'enrichment_type': enrichment_type,
+            'priority': priority,
+            'status': 'pending',
+        }

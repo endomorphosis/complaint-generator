@@ -59,6 +59,8 @@ from .graphrag import (
 	cross_analyze_pdf_documents,
 	batch_process_pdfs,
 	query_pdf_knowledge_graph,
+	score_ontology_support_paths,
+	identify_ontology_gaps,
 )
 from .policy_rules import (
 	build_policy_rule_corpus,
@@ -105,6 +107,8 @@ from .logic import (
 	prove_claim_elements,
 	check_contradictions,
 	run_hybrid_reasoning,
+	get_predicate_templates,
+	map_claim_elements_to_predicates,
 )
 from .legal import (
 	LEGAL_SCRAPERS_AVAILABLE,
@@ -174,6 +178,8 @@ __all__ = [
 	"cross_analyze_pdf_documents",
 	"batch_process_pdfs",
 	"query_pdf_knowledge_graph",
+	"score_ontology_support_paths",
+	"identify_ontology_gaps",
 	"extract_policy_rules_from_pdf",
 	"build_policy_rule_corpus",
 	"store_bytes",
@@ -222,6 +228,8 @@ __all__ = [
 	"prove_claim_elements",
 	"check_contradictions",
 	"run_hybrid_reasoning",
+	"get_predicate_templates",
+	"map_claim_elements_to_predicates",
 	# Legal corpus
 	"LEGAL_SCRAPERS_AVAILABLE",
 	"LEGAL_SCRAPERS_ERROR",

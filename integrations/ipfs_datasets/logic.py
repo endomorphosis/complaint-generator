@@ -1270,6 +1270,337 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
 
 
+
+
+# ---------------------------------------------------------------------------
+# Complaint-type predicate templates
+#
+# Each template maps a claim element to:
+#   - fol_template: First-Order Logic formula template (use {subject}/{object} placeholders)
+#   - dcec_template: DCEC formula template
+#   - predicate_types: list of expected predicate types for the element
+#   - grounded_facts: example grounded predicate strings for the element
+# ---------------------------------------------------------------------------
+
+_COMPLAINT_PREDICATE_TEMPLATES: Dict[str, Dict[str, Any]] = {
+    "employment_discrimination": {
+        "label": "Employment Discrimination",
+        "elements": [
+            {
+                "element_id": "protected_trait",
+                "element_text": "Protected trait or class",
+                "fol_template": "exists x (Employee(x) & HasProtectedTrait(x, {trait}) & MemberOf(x, ProtectedClass))",
+                "dcec_template": "Believes(Claimant, HasProtectedTrait(Employee, {trait}))",
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "Employee(complainant) & HasProtectedTrait(complainant, race)",
+                    "Employee(complainant) & HasProtectedTrait(complainant, disability)",
+                ],
+                "expected_supporting_evidence": ["personnel_record", "testimony", "hire_record"],
+            },
+            {
+                "element_id": "employment_relationship",
+                "element_text": "Employment relationship or workplace context",
+                "fol_template": "exists x y (Employee(x) & Employer(y) & EmployedBy(x, y) & At(x, Workplace))",
+                "dcec_template": "Knows(Employer, EmployedBy(Employee, Employer))",
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "EmployedBy(complainant, respondent)",
+                    "WorkplaceContext(complainant, respondent, {start_date})",
+                ],
+                "expected_supporting_evidence": ["offer_letter", "pay_stub", "org_chart"],
+            },
+            {
+                "element_id": "adverse_action",
+                "element_text": "Adverse employment action or harassment",
+                "fol_template": (
+                    "exists x y (Employee(x) & Employer(y) & "
+                    "AdverseAction(y, x, {action_type}) & OccurredAt({action_type}, {date}))"
+                ),
+                "dcec_template": "Happens(AdverseAction(Employer, Employee, {action_type}), {date})",
+                "predicate_types": ["factual_statement", "claim_element", "temporal_fact"],
+                "grounded_facts": [
+                    "AdverseAction(respondent, complainant, termination)",
+                    "AdverseAction(respondent, complainant, demotion)",
+                ],
+                "expected_supporting_evidence": ["termination_notice", "discipline_record", "performance_review"],
+            },
+            {
+                "element_id": "discriminatory_motive",
+                "element_text": "Facts suggesting discriminatory motive",
+                "fol_template": (
+                    "exists x y t (AdverseAction(y, x, {action_type}) & "
+                    "HasProtectedTrait(x, {trait}) & "
+                    "CausedBy({action_type}, HasProtectedTrait(x, {trait})))"
+                ),
+                "dcec_template": (
+                    "Causes(HasProtectedTrait(Employee, {trait}), AdverseAction(Employer, Employee, {action_type}))"
+                ),
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "CausedBy(termination, HasProtectedTrait(complainant, race))",
+                    "DiscriminatoryMotive(respondent, complainant, disability)",
+                ],
+                "expected_supporting_evidence": ["email", "witness_statement", "comparator_record"],
+            },
+        ],
+    },
+    "housing_discrimination": {
+        "label": "Housing Discrimination",
+        "elements": [
+            {
+                "element_id": "protected_trait",
+                "element_text": "Protected trait or class",
+                "fol_template": "exists x (Tenant(x) & HasProtectedTrait(x, {trait}) & MemberOf(x, ProtectedClass))",
+                "dcec_template": "Believes(Claimant, HasProtectedTrait(Tenant, {trait}))",
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "Tenant(complainant) & HasProtectedTrait(complainant, race)",
+                    "Tenant(complainant) & HasProtectedTrait(complainant, disability)",
+                ],
+                "expected_supporting_evidence": ["application_record", "testimony"],
+            },
+            {
+                "element_id": "housing_context",
+                "element_text": "Housing relationship or tenancy context",
+                "fol_template": (
+                    "exists x y (Tenant(x) & Landlord(y) & "
+                    "HasHousingRelationship(x, y, {relationship_type}))"
+                ),
+                "dcec_template": "Knows(Landlord, HasHousingRelationship(Tenant, Landlord, {relationship_type}))",
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "HasHousingRelationship(complainant, respondent, tenant)",
+                    "HasHousingRelationship(complainant, respondent, applicant)",
+                ],
+                "expected_supporting_evidence": ["lease", "application_record", "rent_record"],
+            },
+            {
+                "element_id": "adverse_action",
+                "element_text": "Discriminatory housing action",
+                "fol_template": (
+                    "exists x y (Landlord(y) & Tenant(x) & "
+                    "HousingAdverseAction(y, x, {action_type}) & OccurredAt({action_type}, {date}))"
+                ),
+                "dcec_template": "Happens(HousingAdverseAction(Landlord, Tenant, {action_type}), {date})",
+                "predicate_types": ["factual_statement", "claim_element", "temporal_fact"],
+                "grounded_facts": [
+                    "HousingAdverseAction(respondent, complainant, eviction)",
+                    "HousingAdverseAction(respondent, complainant, denial)",
+                ],
+                "expected_supporting_evidence": ["denial_notice", "eviction_notice", "witness_statement"],
+            },
+            {
+                "element_id": "discriminatory_motive",
+                "element_text": "Facts suggesting discriminatory motive",
+                "fol_template": (
+                    "exists x y (HousingAdverseAction(y, x, {action_type}) & "
+                    "HasProtectedTrait(x, {trait}) & "
+                    "CausedBy({action_type}, HasProtectedTrait(x, {trait})))"
+                ),
+                "dcec_template": (
+                    "Causes(HasProtectedTrait(Tenant, {trait}), HousingAdverseAction(Landlord, Tenant, {action_type}))"
+                ),
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "CausedBy(denial, HasProtectedTrait(complainant, race))",
+                    "DiscriminatoryMotive(respondent, complainant, disability)",
+                ],
+                "expected_supporting_evidence": ["landlord_message", "witness_statement"],
+            },
+        ],
+    },
+    "retaliation": {
+        "label": "Retaliation",
+        "elements": [
+            {
+                "element_id": "protected_activity",
+                "element_text": "Protected activity",
+                "fol_template": (
+                    "exists x (Employee(x) & ProtectedActivity(x, {activity_type}) & "
+                    "OccurredAt({activity_type}, {date}))"
+                ),
+                "dcec_template": "Happens(ProtectedActivity(Employee, {activity_type}), {date})",
+                "predicate_types": ["factual_statement", "claim_element", "temporal_fact"],
+                "grounded_facts": [
+                    "ProtectedActivity(complainant, discrimination_complaint)",
+                    "ProtectedActivity(complainant, safety_report)",
+                ],
+                "expected_supporting_evidence": ["hr_complaint", "eeoc_filing", "email"],
+            },
+            {
+                "element_id": "knowledge_of_activity",
+                "element_text": "Employer knowledge of protected activity",
+                "fol_template": (
+                    "exists x y (Employee(x) & Employer(y) & "
+                    "Knows(y, ProtectedActivity(x, {activity_type})))"
+                ),
+                "dcec_template": "Knows(Employer, ProtectedActivity(Employee, {activity_type}))",
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "Knows(respondent, ProtectedActivity(complainant, discrimination_complaint))",
+                ],
+                "expected_supporting_evidence": ["acknowledgment", "email", "witness_statement"],
+            },
+            {
+                "element_id": "adverse_action",
+                "element_text": "Adverse action following protected activity",
+                "fol_template": (
+                    "exists x y (Employee(x) & Employer(y) & "
+                    "AdverseAction(y, x, {action_type}) & "
+                    "After(AdverseAction(y, x, {action_type}), ProtectedActivity(x, {activity_type})))"
+                ),
+                "dcec_template": (
+                    "Happens(AdverseAction(Employer, Employee, {action_type}), {date}) & "
+                    "After({date}, {activity_date})"
+                ),
+                "predicate_types": ["factual_statement", "claim_element", "temporal_fact", "temporal_relation"],
+                "grounded_facts": [
+                    "AdverseAction(respondent, complainant, termination)",
+                    "After(termination_date, complaint_date)",
+                ],
+                "expected_supporting_evidence": ["termination_notice", "schedule_change", "witness_statement"],
+            },
+            {
+                "element_id": "causal_connection",
+                "element_text": "Causal connection between protected activity and adverse action",
+                "fol_template": (
+                    "exists x y (CausedBy(AdverseAction(y, x, {action_type}), ProtectedActivity(x, {activity_type})) & "
+                    "TemporalProximity(AdverseAction(y, x, {action_type}), ProtectedActivity(x, {activity_type})))"
+                ),
+                "dcec_template": (
+                    "Causes(ProtectedActivity(Employee, {activity_type}), AdverseAction(Employer, Employee, {action_type}))"
+                ),
+                "predicate_types": ["factual_statement", "claim_element"],
+                "grounded_facts": [
+                    "CausedBy(termination, discrimination_complaint)",
+                    "TemporalProximity(termination_date, complaint_date)",
+                ],
+                "expected_supporting_evidence": ["email", "witness_statement", "timeline_record"],
+            },
+        ],
+    },
+}
+
+
+def get_predicate_templates(complaint_type: str) -> Dict[str, Any]:
+    """Return grounded predicate templates for *complaint_type*.
+
+    Supports ``employment_discrimination``, ``housing_discrimination``, and
+    ``retaliation``.  Returns an empty elements list for unknown types.
+
+    Each element in the result carries ``fol_template``, ``dcec_template``,
+    ``predicate_types``, and ``grounded_facts`` ready for use in
+    :func:`map_claim_elements_to_predicates`.
+    """
+    normalized_type = str(complaint_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    template = _COMPLAINT_PREDICATE_TEMPLATES.get(normalized_type)
+    if template is None:
+        return with_adapter_metadata(
+            {
+                "status": "not_found",
+                "complaint_type": complaint_type,
+                "label": "",
+                "elements": [],
+                "element_count": 0,
+                "supported_complaint_types": list(_COMPLAINT_PREDICATE_TEMPLATES.keys()),
+            },
+            operation="get_predicate_templates",
+            backend_available=True,
+            implementation_status="implemented",
+        )
+    return with_adapter_metadata(
+        {
+            "status": "success",
+            "complaint_type": complaint_type,
+            "label": template.get("label", ""),
+            "elements": template["elements"],
+            "element_count": len(template["elements"]),
+            "supported_complaint_types": list(_COMPLAINT_PREDICATE_TEMPLATES.keys()),
+        },
+        operation="get_predicate_templates",
+        backend_available=True,
+        implementation_status="implemented",
+        extra_metadata={"complaint_type": complaint_type},
+    )
+
+
+def map_claim_elements_to_predicates(
+    claim_type: str,
+    elements: Iterable[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Map claim *elements* to FOL/DCEC predicates using the template for *claim_type*.
+
+    Each input element should be a dict with at least ``element_id`` or
+    ``element_text``.  The function enriches each element with its matching
+    template (``fol_template``, ``dcec_template``) and produces a
+    ``predicates`` list ready for :func:`prove_claim_elements`.
+
+    Returns a structured payload with ``predicates`` (list of predicate dicts)
+    and ``template_match_count`` (how many elements matched a template entry).
+    """
+    templates_result = get_predicate_templates(claim_type)
+    element_templates = {
+        t["element_id"]: t
+        for t in (templates_result.get("elements") or [])
+        if isinstance(t, dict) and t.get("element_id")
+    }
+
+    predicates: List[Dict[str, Any]] = []
+    template_match_count = 0
+    unmapped_element_ids: List[str] = []
+
+    for element in (list(elements) if not isinstance(elements, list) else elements):
+        if not isinstance(element, dict):
+            continue
+        element_id = str(element.get("element_id") or "")
+        element_text = str(element.get("element_text") or element.get("label") or "")
+        coverage_status = str(element.get("status") or element.get("coverage_status") or "missing")
+        predicate_id = element.get("predicate_id") or f"{claim_type}:{element_id}" if element_id else f"{claim_type}:unknown"
+
+        tmpl = element_templates.get(element_id)
+        if tmpl:
+            template_match_count += 1
+            fol_template = tmpl.get("fol_template", "")
+            dcec_template = tmpl.get("dcec_template", "")
+        else:
+            fol_template = ""
+            dcec_template = ""
+            if element_id:
+                unmapped_element_ids.append(element_id)
+
+        predicate: Dict[str, Any] = {
+            "predicate_type": "claim_element",
+            "claim_type": claim_type,
+            "predicate_id": predicate_id,
+            "claim_element_id": element_id,
+            "claim_element_text": element_text,
+            "coverage_status": coverage_status,
+            "formula": fol_template,
+            "fol_template": fol_template,
+            "dcec_template": dcec_template,
+            "grounded_facts": tmpl.get("grounded_facts", []) if tmpl else [],
+            "expected_predicate_types": tmpl.get("predicate_types", ["claim_element"]) if tmpl else ["claim_element"],
+            "template_matched": bool(tmpl),
+        }
+        predicates.append(predicate)
+
+    return with_adapter_metadata(
+        {
+            "status": "success",
+            "claim_type": claim_type,
+            "predicates": predicates,
+            "predicate_count": len(predicates),
+            "template_match_count": template_match_count,
+            "unmapped_element_ids": unmapped_element_ids,
+        },
+        operation="map_claim_elements_to_predicates",
+        backend_available=True,
+        implementation_status="implemented",
+        extra_metadata={"claim_type": claim_type, "element_count": len(predicates)},
+    )
+
+
 __all__ = [
     "LOGIC_AVAILABLE",
     "LOGIC_ERROR",
@@ -1283,4 +1614,7 @@ __all__ = [
     "prove_claim_elements",
     "check_contradictions",
     "run_hybrid_reasoning",
+    "get_predicate_templates",
+    "map_claim_elements_to_predicates",
+    "_COMPLAINT_PREDICATE_TEMPLATES",
 ]
