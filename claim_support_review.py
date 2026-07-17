@@ -1654,6 +1654,8 @@ def summarize_claim_reasoning_review(
     temporal_rule_profile_failed_element_count = 0
     temporal_proof_bundle_count = 0
     temporal_proof_bundle_status_counts: Dict[str, int] = {}
+    # T3: proof_bundles keyed by "claim_type:element_id" for direct drilldown access.
+    proof_bundles: Dict[str, Any] = {}
     theorem_export_blocked_element_count = 0
     theorem_export_chronology_task_count = 0
     proof_artifact_element_count = 0
@@ -1890,6 +1892,31 @@ def summarize_claim_reasoning_review(
                 )
                 + 1
             )
+            # T3: build proof_bundles keyed by "claim_type:element_id" so callers can
+            # look up a specific element's proof bundle without scanning flagged_elements.
+            element_id = str(element.get("element_id") or "").strip()
+            proof_bundle_claim_type = str(claim_validation.get("claim_type") or "").strip()
+            if element_id and proof_bundle_claim_type:
+                bundle_key = f"{proof_bundle_claim_type}:{element_id}"
+            elif element_temporal_proof_bundle_id:
+                bundle_key = element_temporal_proof_bundle_id
+            else:
+                bundle_key = ""
+            if bundle_key:
+                proof_bundles[bundle_key] = {
+                    "proof_bundle_id": element_temporal_proof_bundle_id,
+                    "status": element_temporal_proof_bundle_status,
+                    "rule_frame_id": element_temporal_rule_frame_id,
+                    "fact_ids": element_temporal_proof_bundle_fact_ids,
+                    "relation_ids": element_temporal_proof_bundle_relation_ids,
+                    "issue_ids": element_temporal_proof_bundle_issue_ids,
+                    "tdfol_preview": element_temporal_proof_bundle_tdfol_preview,
+                    "dcec_preview": element_temporal_proof_bundle_dcec_preview,
+                    "theorem_export_metadata": element_theorem_export_metadata,
+                    "blocking_reasons": element_temporal_rule_blocking_reasons,
+                    "warnings": element_temporal_rule_warnings,
+                    "recommended_follow_ups": element_temporal_rule_follow_ups,
+                }
         if bool(element_theorem_export_metadata.get("chronology_blocked", False)):
             theorem_export_blocked_element_count += 1
         theorem_export_chronology_task_count += int(
@@ -2050,6 +2077,8 @@ def summarize_claim_reasoning_review(
         "temporal_rule_profile_failed_element_count": temporal_rule_profile_failed_element_count,
         "temporal_proof_bundle_count": temporal_proof_bundle_count,
         "temporal_proof_bundle_status_counts": temporal_proof_bundle_status_counts,
+        # T3: proof_bundles indexed by "claim_type:element_id" for direct drilldown.
+        "proof_bundles": proof_bundles,
         "claim_temporal_issue_count": claim_temporal_issue_count,
         "claim_unresolved_temporal_issue_count": claim_unresolved_temporal_issue_count,
         "claim_resolved_temporal_issue_count": claim_resolved_temporal_issue_count,

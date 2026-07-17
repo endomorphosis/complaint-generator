@@ -3087,7 +3087,43 @@ class FormalComplaintDocumentBuilder:
             or 0
         )
         proof_readiness_score = float(packet_summary.get("proof_readiness_score", 0.0) or 0.0)
-        chronology_blocked = bool(unresolved_issue_count > 0 or temporal_gap_task_count > 0)
+
+        # T5: Gate drafting readiness on legal temporal rule profile failures, not
+        # only on aggregate proof-readiness score and unresolved issue counts.  If any
+        # claim element has a failed or partial temporal rule-profile evaluation the
+        # chronology is legally insufficient and the summary must surface that clearly.
+        claim_reasoning_review = summary.get("claim_reasoning_review")
+        if not isinstance(claim_reasoning_review, dict):
+            claim_reasoning_review = {}
+        temporal_rule_profile_failed_element_count = 0
+        temporal_rule_profile_partial_element_count = 0
+        failed_rule_frame_ids: List[str] = []
+        for _claim_key, claim_review in claim_reasoning_review.items():
+            if not isinstance(claim_review, dict):
+                continue
+            temporal_rule_profile_failed_element_count += int(
+                claim_review.get("temporal_rule_profile_failed_element_count") or 0
+            )
+            temporal_rule_profile_partial_element_count += int(
+                claim_review.get("temporal_rule_profile_partial_element_count") or 0
+            )
+            # Collect rule-frame IDs from failed proof bundles for the summary text.
+            proof_bundles = claim_review.get("proof_bundles")
+            if isinstance(proof_bundles, dict):
+                for bundle in proof_bundles.values():
+                    if not isinstance(bundle, dict):
+                        continue
+                    bundle_status = str(bundle.get("status") or "").strip()
+                    if bundle_status in {"failed", "partial"}:
+                        rule_frame_id = str(bundle.get("rule_frame_id") or "").strip()
+                        if rule_frame_id and rule_frame_id not in failed_rule_frame_ids:
+                            failed_rule_frame_ids.append(rule_frame_id)
+
+        chronology_blocked = bool(
+            unresolved_issue_count > 0
+            or temporal_gap_task_count > 0
+            or temporal_rule_profile_failed_element_count > 0
+        )
         if not chronology_blocked and proof_readiness_score <= 0.0 and not unresolved_issue_ids:
             return {}
 
@@ -3098,20 +3134,35 @@ class FormalComplaintDocumentBuilder:
         if unresolved_issue_count > 0:
             issue_label = "issue" if unresolved_issue_count == 1 else "issues"
             summary_parts.append(f"{unresolved_issue_count} unresolved temporal {issue_label}")
+        if temporal_rule_profile_failed_element_count > 0:
+            element_label = "element" if temporal_rule_profile_failed_element_count == 1 else "elements"
+            summary_parts.append(
+                f"{temporal_rule_profile_failed_element_count} {element_label} with failed temporal rule profile"
+            )
+        if temporal_rule_profile_partial_element_count > 0 and not temporal_rule_profile_failed_element_count:
+            element_label = "element" if temporal_rule_profile_partial_element_count == 1 else "elements"
+            summary_parts.append(
+                f"{temporal_rule_profile_partial_element_count} {element_label} with partial temporal rule profile"
+            )
         summary_text = (
             f"Chronology blockers remain: {'; '.join(summary_parts)}."
             if summary_parts
             else "No chronology blockers currently reduce proof readiness."
         )
 
-        return {
+        result: Dict[str, Any] = {
             "chronology_blocked": chronology_blocked,
             "proof_readiness_score": round(proof_readiness_score, 3),
             "temporal_gap_task_count": temporal_gap_task_count,
             "unresolved_temporal_issue_count": unresolved_issue_count,
             "unresolved_temporal_issue_ids": unresolved_issue_ids,
+            "temporal_rule_profile_failed_element_count": temporal_rule_profile_failed_element_count,
+            "temporal_rule_profile_partial_element_count": temporal_rule_profile_partial_element_count,
             "summary": summary_text,
         }
+        if failed_rule_frame_ids:
+            result["failed_rule_frame_ids"] = failed_rule_frame_ids
+        return result
 
     def _build_claim_reasoning_review(self, document_optimization: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         optimization_report = document_optimization if isinstance(document_optimization, dict) else {}

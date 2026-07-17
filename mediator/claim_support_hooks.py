@@ -1387,6 +1387,11 @@ class ClaimSupportHook:
         }
         tdfol_formulas: List[str] = []
         dcec_formulas: List[str] = []
+        # T3: track certainty per formula so operators and downstream consumers can
+        # distinguish facts asserted directly from the record ("certain") versus
+        # ordering relations inferred from date comparisons ("inferred").
+        tdfol_formula_certainties: Dict[str, str] = {}
+        dcec_formula_certainties: Dict[str, str] = {}
         role = str(profile.get('element_role') or '').strip()
 
         for fact in facts:
@@ -1397,10 +1402,12 @@ class ClaimSupportHook:
                 formula = f'ProtectedActivity({fact_id})'
                 if formula not in tdfol_formulas:
                     tdfol_formulas.append(formula)
+                    tdfol_formula_certainties[formula] = 'certain'
             if 'adverse_action' in [self._normalize_reasoning_key(tag) for tag in (fact.get('element_tags', []) or [])]:
                 formula = f'AdverseAction({fact_id})'
                 if formula not in tdfol_formulas:
                     tdfol_formulas.append(formula)
+                    tdfol_formula_certainties[formula] = 'certain'
             temporal_context = fact.get('temporal_context', {}) if isinstance(fact.get('temporal_context'), dict) else {}
             start_date = str(temporal_context.get('start_date') or '').strip()
             if start_date:
@@ -1408,6 +1415,7 @@ class ClaimSupportHook:
                 formula = f'Happens({fact_id},{time_symbol})'
                 if formula not in dcec_formulas:
                     dcec_formulas.append(formula)
+                    dcec_formula_certainties[formula] = 'certain'
 
         for relation in relations:
             source_fact_id = str(relation.get('source_fact_id') or '').strip()
@@ -1420,6 +1428,11 @@ class ClaimSupportHook:
                 formula = f'{relation_predicate}({source_fact_id},{target_fact_id})'
                 if formula not in tdfol_formulas:
                     tdfol_formulas.append(formula)
+                    # T3: inferred relations carry inference_mode "derived_from_date_anchors";
+                    # all other explicit or context-derived relations are treated as certain.
+                    inference_mode = str(relation.get('inference_mode') or '').strip()
+                    certainty = 'inferred' if inference_mode == 'derived_from_date_anchors' else 'certain'
+                    tdfol_formula_certainties[formula] = certainty
 
         proof_bundle_id = ':'.join(
             part
@@ -1497,6 +1510,16 @@ class ClaimSupportHook:
             'theorem_exports': {
                 'tdfol_formulas': tdfol_formulas[:10],
                 'dcec_formulas': dcec_formulas[:10],
+                # T3: per-formula certainty maps so consumers can distinguish facts asserted
+                # directly ("certain") from relations inferred from date anchors ("inferred").
+                'tdfol_formula_certainties': {
+                    formula: tdfol_formula_certainties.get(formula, 'certain')
+                    for formula in tdfol_formulas[:10]
+                },
+                'dcec_formula_certainties': {
+                    formula: dcec_formula_certainties.get(formula, 'certain')
+                    for formula in dcec_formulas[:10]
+                },
                 'theorem_export_metadata': theorem_export_metadata,
             },
             'theorem_export_counts': {

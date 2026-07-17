@@ -1454,6 +1454,10 @@ def build_temporal_relation_registry(
         if _normalize_text(fact.get("fact_id") or "")
     }
     registry: List[Dict[str, Any]] = []
+
+    # Track explicit fact pairs so inferred relations only fill gaps.
+    explicit_pairs: set = set()
+
     for index, relation in enumerate(timeline_relations if isinstance(timeline_relations, list) else [], start=1):
         if not isinstance(relation, dict):
             continue
@@ -1495,11 +1499,89 @@ def build_temporal_relation_registry(
                     list(source_fact.get("source_span_refs") or [])
                     + list(target_fact.get("source_span_refs") or [])
                 ),
-                "inference_mode": _normalize_text(relation.get("inference_mode") or "derived_from_temporal_context"),
+                "inference_mode": "explicit",
                 "inference_basis": _normalize_text(relation.get("inference_basis") or "normalized_temporal_context"),
                 "explanation": (
                     f"{source_fact_id or 'unknown_fact'} {str(relation.get('relation_type') or 'related_to')} "
                     f"{target_fact_id or 'unknown_fact'} based on normalized temporal context."
+                ),
+            }
+        )
+        if source_fact_id and target_fact_id:
+            explicit_pairs.add((source_fact_id, target_fact_id))
+            explicit_pairs.add((target_fact_id, source_fact_id))
+
+    # T1: Infer ordering relations from date anchors for pairs without an explicit relation.
+    # When two timeline-capable facts both carry a start_date, derive before/same_time/after
+    # so that proof-bundle and rule-profile evaluation can use a complete partial-order graph
+    # even when the upstream relation extractor missed the pair.
+    anchored_facts = [
+        (
+            _normalize_text(fact.get("fact_id") or ""),
+            str(_coerce_dict(fact.get("temporal_context")).get("start_date") or "").strip(),
+            fact,
+        )
+        for fact in _timeline_capable_facts(canonical_facts)
+        if _normalize_text(fact.get("fact_id") or "")
+        and str(_coerce_dict(fact.get("temporal_context")).get("start_date") or "").strip()
+    ]
+    inferred_index = len(registry)
+    for (id_a, date_a, fact_a), (id_b, date_b, fact_b) in combinations(anchored_facts, 2):
+        pair_key = (id_a, id_b)
+        if pair_key in explicit_pairs:
+            continue
+        if date_a < date_b:
+            relation_type = "before"
+            source_fact_id, target_fact_id = id_a, id_b
+            source_fact, target_fact = fact_a, fact_b
+        elif date_a > date_b:
+            relation_type = "before"
+            source_fact_id, target_fact_id = id_b, id_a
+            source_fact, target_fact = fact_b, fact_a
+        else:
+            relation_type = "same_time"
+            source_fact_id, target_fact_id = id_a, id_b
+            source_fact, target_fact = fact_a, fact_b
+        inferred_index += 1
+        relation_id = f"inferred_relation_{inferred_index:03d}"
+        claim_types = _unique_normalized_strings(
+            list(source_fact.get("claim_types") or []) + list(target_fact.get("claim_types") or [])
+        )
+        element_tags = _unique_normalized_strings(
+            list(source_fact.get("element_tags") or []) + list(target_fact.get("element_tags") or [])
+        )
+        source_artifact_ids = _unique_normalized_strings(
+            list(source_fact.get("source_artifact_ids") or [])
+            + list(target_fact.get("source_artifact_ids") or [])
+        )
+        testimony_record_ids = _unique_normalized_strings(
+            list(source_fact.get("testimony_record_ids") or [])
+            + list(target_fact.get("testimony_record_ids") or [])
+        )
+        registry.append(
+            {
+                "relation_id": relation_id,
+                "registry_version": "temporal_relation_registry.v1",
+                "relation_type": relation_type,
+                "source_fact_id": source_fact_id,
+                "target_fact_id": target_fact_id,
+                "source_temporal_fact_id": str(source_fact.get("temporal_fact_id") or source_fact_id or "") or None,
+                "target_temporal_fact_id": str(target_fact.get("temporal_fact_id") or target_fact_id or "") or None,
+                "claim_types": claim_types,
+                "element_tags": element_tags,
+                "source_fact_text": _normalize_text(source_fact.get("text") or "") or None,
+                "target_fact_text": _normalize_text(target_fact.get("text") or "") or None,
+                "source_artifact_ids": source_artifact_ids,
+                "testimony_record_ids": testimony_record_ids,
+                "source_span_refs": _coerce_provenance_refs(
+                    list(source_fact.get("source_span_refs") or [])
+                    + list(target_fact.get("source_span_refs") or [])
+                ),
+                "inference_mode": "derived_from_date_anchors",
+                "inference_basis": f"{source_fact_id}.start_date:{date_a if source_fact_id == id_a else date_b} vs {target_fact_id}.start_date:{date_b if target_fact_id == id_b else date_a}",
+                "explanation": (
+                    f"{source_fact_id} {relation_type} {target_fact_id} inferred from date anchors "
+                    f"({date_a if source_fact_id == id_a else date_b} vs {date_b if target_fact_id == id_b else date_a})."
                 ),
             }
         )
@@ -1636,11 +1718,24 @@ def build_temporal_issue_registry(
         )
         issue_index_by_signature[signature] = len(registry) - 1
 
+    # T1: canonical issue type aliases so that contradiction-queue entries tagged with
+    # the "temporal_" prefix resolve to the same canonical category that rule profiles
+    # and downstream consumers (e.g. evaluate_temporal_rule_profile) expect.
+    _TEMPORAL_ISSUE_CATEGORY_ALIASES: Dict[str, str] = {
+        "temporal_contradictory_dates": "contradictory_dates",
+        "temporal_limitations_risk": "limitations_risk",
+        "temporal_missing_anchor": "missing_anchor",
+        "temporal_relative_only_ordering": "relative_only_ordering",
+        "temporal_reverse_before": "temporal_reverse_before",
+    }
+
     for contradiction in contradiction_queue if isinstance(contradiction_queue, list) else []:
         candidate = _coerce_dict(contradiction)
-        category = _normalize_text(candidate.get("category") or candidate.get("type") or "").lower()
-        if not category.startswith("temporal"):
+        raw_category = _normalize_text(candidate.get("category") or candidate.get("type") or "").lower()
+        if not raw_category.startswith("temporal"):
             continue
+        # Normalise to the canonical category expected by rule profiles.
+        category = _TEMPORAL_ISSUE_CATEGORY_ALIASES.get(raw_category, raw_category)
         issue_id = _normalize_text(candidate.get("contradiction_id") or candidate.get("dependency_id") or "")
         issue_id = issue_id or f"temporal_issue:{category}:{len(registry) + 1}"
         if issue_id in seen_issue_ids:

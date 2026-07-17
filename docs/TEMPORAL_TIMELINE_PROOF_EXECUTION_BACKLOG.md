@@ -64,7 +64,7 @@ Still shallow or incomplete:
 
 ## T0: Canonical Temporal Registry
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -79,12 +79,12 @@ Create one durable schema for temporal facts, relations, anchors, and issues acr
 
 ### Checklist
 
-- [ ] define canonical `temporal_fact_registry` payload shape
-- [ ] define canonical `temporal_relation_registry` payload shape
-- [ ] define canonical `temporal_issue_registry` payload shape
-- [ ] add provenance fields for artifact IDs, testimony IDs, chunk refs, and source spans
-- [ ] map current `temporal_context` records into the canonical registry without breaking existing payload consumers
-- [ ] preserve uncertainty fields such as `is_approximate`, `is_range`, `relative_markers`, and `granularity`
+- [x] define canonical `temporal_fact_registry` payload shape
+- [x] define canonical `temporal_relation_registry` payload shape
+- [x] define canonical `temporal_issue_registry` payload shape
+- [x] add provenance fields for artifact IDs, testimony IDs, chunk refs, and source spans
+- [x] map current `temporal_context` records into the canonical registry without breaking existing payload consumers
+- [x] preserve uncertainty fields such as `is_approximate`, `is_range`, `relative_markers`, and `granularity`
 
 ### Acceptance criteria
 
@@ -105,7 +105,7 @@ Create one durable schema for temporal facts, relations, anchors, and issues acr
 
 ## T1: Claim-Scoped Temporal Graph Assembly
 
-Status: Planned
+Status: In Progress
 Priority: P0
 
 ### Goal
@@ -120,11 +120,11 @@ Build deterministic claim-level and element-level partial-order graphs from the 
 
 ### Checklist
 
-- [ ] normalize relation inference for explicit and inferred `before`, `after`, `during`, `overlaps`, and `same_time`
-- [ ] formalize issue categories such as `missing_anchor`, `contradictory_dates`, `relative_only_ordering`, and `limitations_risk`
-- [ ] add issue severity and blocking metadata
-- [ ] emit deterministic claim-level temporal graph summaries for packets and review payloads
-- [ ] preserve relation previews and type counts from the graph, not from UI formatting logic
+- [x] normalize relation inference for explicit and inferred `before`, `after`, `during`, `overlaps`, and `same_time` — `build_temporal_relation_registry` now marks explicit relations as `inference_mode="explicit"` and generates inferred `before`/`same_time` relations from date anchors with `inference_mode="derived_from_date_anchors"` for pairs not already covered by an explicit relation
+- [x] formalize issue categories such as `missing_anchor`, `contradictory_dates`, `relative_only_ordering`, and `limitations_risk` — `build_temporal_issue_registry` now normalises `temporal_contradictory_dates` → `contradictory_dates`, `temporal_limitations_risk` → `limitations_risk`, etc. from the contradiction queue so rule profiles and downstream consumers see canonical category names
+- [x] add issue severity and blocking metadata — `severity` and `blocking` fields on every issue registry entry
+- [x] emit deterministic claim-level temporal graph summaries for packets and review payloads — `temporal_summary` with `relation_type_counts` and `relation_preview` from graph data in `_get_claim_reasoning_diagnostics`
+- [x] preserve relation previews and type counts from the graph, not from UI formatting logic — `relation_type_counts` carried through `consistency_summary` → `temporal_summary` → review payload
 
 ### Acceptance criteria
 
@@ -139,12 +139,13 @@ Build deterministic claim-level and element-level partial-order graphs from the 
 
 ### Suggested focused validation
 
+- `.venv/bin/python -m pytest tests/test_t1_t3_temporal_next_steps.py -q`
 - `.venv/bin/python -m pytest tests/test_claim_support_hooks.py tests/test_mediator_three_phase.py -q`
 - `.venv/bin/python -m pytest tests/test_review_api.py -q`
 
 ## T2: Legal Temporal Rule Profiles
 
-Status: Planned
+Status: In Progress
 Priority: P0
 
 ### Goal
@@ -159,10 +160,10 @@ Define explicit legal timing rules per claim type so chronology can be evaluated
 
 ### Checklist
 
-- [ ] define a temporal rule profile contract with required events, optional events, deadlines, and defenses
-- [ ] implement the first rule profile for retaliation
-- [ ] add legal windows for causal proximity, filing, notice, or exhaustion where relevant
-- [ ] expose rule-frame IDs in proof payloads so failures can be explained against concrete legal rules
+- [x] define a temporal rule profile contract with required events, optional events, deadlines, and defenses
+- [x] implement the first rule profile for retaliation
+- [x] add legal windows for causal proximity, filing, notice, or exhaustion where relevant — EEOC 180/300-day window via `has_limitations_risk` and `limitations_risk_days`
+- [x] expose rule-frame IDs in proof payloads so failures can be explained against concrete legal rules — `rule_frame_id` in proof bundles and `temporal_rule_frame_id` in element review items
 - [ ] document how claim-type timing rules differ from generic timeline consistency warnings
 
 ### Acceptance criteria
@@ -182,7 +183,7 @@ Define explicit legal timing rules per claim type so chronology can be evaluated
 
 ## T3: Theorem Export And Proof Bundles
 
-Status: Planned
+Status: In Progress
 Priority: P0
 
 ### Goal
@@ -197,11 +198,11 @@ Compile chronology into durable theorem-ready proof bundles with provenance-awar
 
 ### Checklist
 
-- [ ] define `proof_bundles` keyed by claim type and element ID
-- [ ] emit theorem exports that reference fact IDs, relation IDs, and rule-frame IDs
-- [ ] distinguish certain facts from inferred relations in theorem export metadata
-- [ ] attach blocking explanation payloads to failed proof bundles
-- [ ] expose the same proof bundle previews through review payloads and operator UI
+- [x] define `proof_bundles` keyed by claim type and element ID — `summarize_claim_reasoning_review` now returns `proof_bundles: {"claim_type:element_id": {...}}` with status, rule_frame_id, fact_ids, relation_ids, issue_ids, tdfol_preview, dcec_preview, theorem_export_metadata, and follow-ups
+- [x] emit theorem exports that reference fact IDs, relation IDs, and rule-frame IDs — `theorem_export_metadata` in `_build_temporal_proof_bundle` carries all of these
+- [x] distinguish certain facts from inferred relations in theorem export metadata — `tdfol_formula_certainties` and `dcec_formula_certainties` maps in `theorem_exports`; `inference_mode="derived_from_date_anchors"` relations are marked `inferred`, all others `certain`
+- [x] attach blocking explanation payloads to failed proof bundles — `blocking_reasons` and `recommended_follow_ups` are in every proof bundle entry
+- [x] expose the same proof bundle previews through review payloads and operator UI — `temporal_proof_bundle_tdfol_preview` and `temporal_proof_bundle_dcec_preview` in flagged element items; `proof_bundles` dict for direct drilldown
 
 ### Acceptance criteria
 
@@ -259,7 +260,7 @@ Route temporal proof failures into specific testimony, document, or external-rec
 
 ## T5: Review, Drafting, And Optimization Integration
 
-Status: Planned
+Status: In Progress
 Priority: P1
 
 ### Goal
@@ -276,10 +277,10 @@ Make temporal proof state a first-class readiness input across the review dashbo
 
 ### Checklist
 
-- [ ] expose proof bundle IDs and legal temporal frame references in review payloads
-- [ ] add operator drilldowns from packet summaries to blocking facts and relations
-- [ ] gate drafting readiness on legal temporal sufficiency, not only aggregate proof-readiness score
-- [ ] show chronology-specific blockers in `/document` and `/document/optimization-trace`
+- [x] expose proof bundle IDs and legal temporal frame references in review payloads — `temporal_proof_bundle_id`, `temporal_rule_frame_id`, `proof_bundles` dict all present in review output
+- [x] add operator drilldowns from packet summaries to blocking facts and relations — `proof_bundles` indexed by `claim_type:element_id` with blocking_reasons, follow-ups, and fact/relation IDs
+- [x] gate drafting readiness on legal temporal sufficiency, not only aggregate proof-readiness score — `_build_chronology_blocker_summary` now reads `temporal_rule_profile_failed_element_count` from `claim_reasoning_review` and sets `chronology_blocked=True` independently of issue counts
+- [ ] show chronology-specific blockers in `/document` and `/document/optimization-trace` — `chronology_blocker_summary` now carries `temporal_rule_profile_failed_element_count` and `failed_rule_frame_ids`; template rendering not yet updated
 - [ ] preserve UX parity between packet summary chips and detailed proof-handoff panels
 
 ### Acceptance criteria
@@ -299,7 +300,7 @@ Make temporal proof state a first-class readiness input across the review dashbo
 
 ## T6: Regression And Gold-Case Enforcement
 
-Status: Planned
+Status: In Progress
 Priority: P0
 
 ### Goal
@@ -308,6 +309,8 @@ Protect chronology behavior with targeted regressions and legal gold cases.
 
 ### Primary files
 
+- [tests/test_t1_t3_temporal_next_steps.py](../tests/test_t1_t3_temporal_next_steps.py)
+- [tests/test_temporal_rule_profiles.py](../tests/test_temporal_rule_profiles.py)
 - [tests/test_claim_support_hooks.py](../tests/test_claim_support_hooks.py)
 - [tests/test_review_api.py](../tests/test_review_api.py)
 - [tests/test_mediator_three_phase.py](../tests/test_mediator_three_phase.py)
@@ -317,10 +320,10 @@ Protect chronology behavior with targeted regressions and legal gold cases.
 
 ### Checklist
 
-- [ ] add canonical regression cases for retaliation chronology
-- [ ] add contradictory-date and relative-only-ordering cases
-- [ ] add deadline and limitations-window cases
-- [ ] add theorem-export regression cases tied to proof bundles
+- [x] add canonical regression cases for retaliation chronology — `test_temporal_rule_profiles.py` (T6.1–T6.13) plus `test_t1_t3_temporal_next_steps.py` inferred-relation and issue-normalisation cases
+- [x] add contradictory-date and relative-only-ordering cases — covered in `test_temporal_rule_profiles.py` (T6.5/T6.5b/T6.5c, T6.6, T6.7)
+- [x] add deadline and limitations-window cases — covered in `test_temporal_rule_profiles.py` (T6.8/T6.8b, T6.9/T6.9b/T6.9c)
+- [x] add theorem-export regression cases tied to proof bundles — `test_t1_t3_temporal_next_steps.py` (test_t3_certain_fact_formulas_annotated_as_certain, test_t3_inferred_relation_formula_annotated_as_inferred, test_t3_dcec_formula_certainties_present, test_t3_proof_bundles_keyed_by_claim_element)
 - [ ] keep browser smoke coverage for operator-visible timeline and packet readiness state
 
 ### Acceptance criteria
