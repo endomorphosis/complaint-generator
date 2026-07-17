@@ -596,6 +596,8 @@ class LegalGraphBuilder:
     # W9.4: Authority graph integration                                   #
     # ------------------------------------------------------------------ #
 
+    _MAX_RULE_NAME_LENGTH = 120
+
     def build_from_authorities(
         self,
         authorities: List[Dict[str, Any]],
@@ -641,7 +643,7 @@ class LegalGraphBuilder:
             node = LegalElement(
                 id=self._get_element_id(),
                 element_type='claim_element',
-                name=elem_text or elem_id,
+                name=elem_text or f'Element {elem_id}',
                 description=elem_text,
                 attributes={'source_element_id': elem_id},
             )
@@ -783,7 +785,7 @@ class LegalGraphBuilder:
             rule_node = LegalElement(
                 id=self._get_element_id(),
                 element_type='rule_candidate',
-                name=rule_text[:120],
+                name=rule_text[:self._MAX_RULE_NAME_LENGTH],
                 description=rule_text,
                 attributes={
                     'rule_type': rule_type,
