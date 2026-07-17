@@ -3665,6 +3665,20 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
                 if task.get("follow_up_focus") == "adverse_authority_review"
             ]
         ),
+        "confirm_good_law_task_count": len(
+            [
+                task
+                for task in tasks
+                if task.get("follow_up_focus") == "confirm_good_law"
+            ]
+        ),
+        "find_better_authority_task_count": len(
+            [
+                task
+                for task in tasks
+                if task.get("follow_up_focus") == "find_better_authority"
+            ]
+        ),
         "parse_quality_task_count": len(
             [
                 task
@@ -3849,6 +3863,12 @@ def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dic
                 for task in all_tasks
                 if task.get("follow_up_focus") == "adverse_authority_review"
             ]
+        ),
+        "confirm_good_law_task_count": len(
+            [task for task in all_tasks if task.get("follow_up_focus") == "confirm_good_law"]
+        ),
+        "find_better_authority_task_count": len(
+            [task for task in all_tasks if task.get("follow_up_focus") == "find_better_authority"]
         ),
         "parse_quality_task_count": len(
             [task for task in all_tasks if task.get("follow_up_focus") == "parse_quality_improvement"]

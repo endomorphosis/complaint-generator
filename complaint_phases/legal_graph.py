@@ -591,3 +591,232 @@ class LegalGraphBuilder:
         """Generate unique relation ID."""
         self.relation_counter += 1
         return f"legal_rel_{self.relation_counter}"
+
+    # ------------------------------------------------------------------ #
+    # W9.4: Authority graph integration                                   #
+    # ------------------------------------------------------------------ #
+
+    def build_from_authorities(
+        self,
+        authorities: List[Dict[str, Any]],
+        claim_elements: Optional[List[Dict[str, Any]]] = None,
+    ) -> 'LegalGraph':
+        """Build a LegalGraph from stored authority records with treatment edges.
+
+        Creates three layers of graph structure:
+        1. Authority elements (``authority_source``) for each record.
+        2. Authority-to-authority treatment edges (``supports``, ``adverse``,
+           ``limits``, ``distinguishes``, ``questioned``, ``superseded``,
+           ``good_law_unconfirmed``) derived from each authority's
+           ``treatment_records`` or ``treatment_summary``.
+        3. Rule-to-claim-element edges (``governs``) linking extracted rule
+           candidates to the claim elements they cover.
+
+        Args:
+            authorities: Authority dicts as returned by legal-authority hooks.
+                Each dict should have at minimum ``authority_id`` or ``id``,
+                ``name`` or ``title``, and optionally ``treatment_records``,
+                ``treatment_summary``, and ``rule_candidates``.
+            claim_elements: Optional list of claim-element dicts with
+                ``element_id`` / ``claim_element_id`` and ``element_text`` /
+                ``claim_element_text``.  When provided, rule candidates whose
+                ``claim_element_id`` matches will have a ``governs`` edge added.
+
+        Returns:
+            A populated :class:`LegalGraph` instance.
+        """
+        graph = LegalGraph()
+
+        # Index claim elements by ID for fast lookup
+        element_id_to_graph_id: Dict[str, str] = {}
+        for elem in claim_elements or []:
+            if not isinstance(elem, dict):
+                continue
+            elem_id = str(elem.get('element_id') or elem.get('claim_element_id') or '').strip()
+            elem_text = str(
+                elem.get('element_text') or elem.get('claim_element_text') or ''
+            ).strip()
+            if not elem_id and not elem_text:
+                continue
+            node = LegalElement(
+                id=self._get_element_id(),
+                element_type='claim_element',
+                name=elem_text or elem_id,
+                description=elem_text,
+                attributes={'source_element_id': elem_id},
+            )
+            graph.add_element(node)
+            if elem_id:
+                element_id_to_graph_id[elem_id] = node.id
+
+        # Build authority nodes and treatment edges
+        authority_node_ids: Dict[str, str] = {}
+        for authority in authorities or []:
+            if not isinstance(authority, dict):
+                continue
+            raw_id = str(
+                authority.get('authority_id')
+                or authority.get('id')
+                or ''
+            ).strip()
+            name = str(
+                authority.get('name') or authority.get('title') or authority.get('authority_name') or ''
+            ).strip() or raw_id or 'unknown_authority'
+            citation = str(authority.get('citation') or authority.get('cite') or '').strip()
+            jurisdiction = str(authority.get('jurisdiction') or '').strip()
+            authority_family = str(
+                authority.get('authority_family') or authority.get('source_type') or ''
+            ).strip()
+
+            node = LegalElement(
+                id=self._get_element_id(),
+                element_type='authority_source',
+                name=name,
+                citation=citation,
+                jurisdiction=jurisdiction,
+                attributes={
+                    'source_authority_id': raw_id,
+                    'authority_family': authority_family,
+                },
+            )
+            graph.add_element(node)
+            if raw_id:
+                authority_node_ids[raw_id] = node.id
+
+        # Second pass: add treatment edges and rule candidate edges now that all
+        # authority nodes are registered (so cross-authority treatment targets resolve).
+        for authority in authorities or []:
+            if not isinstance(authority, dict):
+                continue
+            raw_id = str(
+                authority.get('authority_id') or authority.get('id') or ''
+            ).strip()
+            source_node_id = authority_node_ids.get(raw_id)
+            if not source_node_id:
+                continue
+
+            # Treatment edges: authority → authority
+            self._add_treatment_edges(graph, source_node_id, authority, authority_node_ids)
+
+            # Rule candidate → claim element edges
+            self._add_rule_candidate_edges(
+                graph, source_node_id, authority, element_id_to_graph_id
+            )
+
+        logger.debug(
+            "built authority legal graph: %d elements, %d relations",
+            len(graph.elements),
+            len(graph.relations),
+        )
+        return graph
+
+    def _add_treatment_edges(
+        self,
+        graph: 'LegalGraph',
+        source_node_id: str,
+        authority: Dict[str, Any],
+        authority_node_ids: Dict[str, str],
+    ) -> None:
+        """Add authority-to-authority treatment relation edges.
+
+        Reads ``treatment_records`` (list of dicts with ``treatment_type``,
+        ``treated_authority_id``) or ``treatment_summary`` from *authority* and
+        inserts a :class:`LegalRelation` for each valid treatment pair.
+        """
+        _VALID_TREATMENT_TYPES = {
+            'supports', 'adverse', 'limits', 'distinguishes',
+            'questioned', 'superseded', 'good_law_unconfirmed',
+        }
+        treatment_records = authority.get('treatment_records')
+        if not isinstance(treatment_records, list):
+            summary = authority.get('treatment_summary') if isinstance(authority.get('treatment_summary'), dict) else {}
+            treatment_records = summary.get('records', []) if isinstance(summary, dict) else []
+        for record in treatment_records or []:
+            if not isinstance(record, dict):
+                continue
+            treatment_type = str(record.get('treatment_type') or record.get('type') or '').strip()
+            if treatment_type not in _VALID_TREATMENT_TYPES:
+                continue
+            treated_id = str(record.get('treated_authority_id') or record.get('target_id') or '').strip()
+            target_node_id = authority_node_ids.get(treated_id)
+            if not target_node_id:
+                continue
+            confidence = float(record.get('treatment_confidence', 0.0) or 0.0)
+            rel = LegalRelation(
+                id=self._get_relation_id(),
+                source_id=source_node_id,
+                target_id=target_node_id,
+                relation_type=treatment_type,
+                attributes={
+                    'confidence': confidence,
+                    'explanation': str(record.get('treatment_explanation') or ''),
+                    'treatment_date': str(record.get('treatment_date') or ''),
+                    'treatment_source': str(record.get('treatment_source') or ''),
+                },
+            )
+            graph.add_relation(rel)
+
+    def _add_rule_candidate_edges(
+        self,
+        graph: 'LegalGraph',
+        authority_node_id: str,
+        authority: Dict[str, Any],
+        element_id_to_graph_id: Dict[str, str],
+    ) -> None:
+        """Add rule-to-claim-element ``governs`` edges from rule candidates.
+
+        Reads ``rule_candidates`` from *authority*.  For each candidate, adds a
+        ``rule_candidate`` element and, when the candidate's
+        ``claim_element_id`` is in *element_id_to_graph_id*, adds a
+        ``governs`` edge from the rule to the matched claim-element node.
+        An ``extracted_from`` edge is always added from the authority to the
+        rule candidate node.
+        """
+        for candidate in authority.get('rule_candidates') or []:
+            if not isinstance(candidate, dict):
+                continue
+            rule_text = str(candidate.get('rule_text') or candidate.get('text') or '').strip()
+            if not rule_text:
+                continue
+            rule_type = str(candidate.get('rule_type') or 'rule').strip()
+            confidence = float(candidate.get('extraction_confidence', 0.0) or 0.0)
+            rule_node = LegalElement(
+                id=self._get_element_id(),
+                element_type='rule_candidate',
+                name=rule_text[:120],
+                description=rule_text,
+                attributes={
+                    'rule_type': rule_type,
+                    'extraction_confidence': confidence,
+                    'source_authority_node': authority_node_id,
+                },
+            )
+            graph.add_element(rule_node)
+            # authority → rule candidate
+            graph.add_relation(
+                LegalRelation(
+                    id=self._get_relation_id(),
+                    source_id=authority_node_id,
+                    target_id=rule_node.id,
+                    relation_type='extracted_from',
+                    attributes={'confidence': confidence},
+                )
+            )
+            # rule candidate → claim element (governs) when linked
+            claim_element_id = str(
+                candidate.get('claim_element_id') or candidate.get('element_id') or ''
+            ).strip()
+            target_elem_graph_id = element_id_to_graph_id.get(claim_element_id)
+            if target_elem_graph_id:
+                graph.add_relation(
+                    LegalRelation(
+                        id=self._get_relation_id(),
+                        source_id=rule_node.id,
+                        target_id=target_elem_graph_id,
+                        relation_type='governs',
+                        attributes={
+                            'confidence': confidence,
+                            'rule_type': rule_type,
+                        },
+                    )
+                )

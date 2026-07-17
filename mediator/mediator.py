@@ -3165,6 +3165,10 @@ class Mediator:
 			return 'reasoning_gap_requires_operator_review'
 		if focus == 'adverse_authority_review':
 			return 'adverse_authority_requires_review'
+		if focus == 'confirm_good_law':
+			return 'authority_good_law_status_unconfirmed'
+		if focus == 'find_better_authority':
+			return 'authority_support_limited_by_treatment'
 		return 'manual_review_required'
 
 	def _normalized_fact_bundle(self, fact_bundle: Any) -> List[str]:
@@ -3426,6 +3430,38 @@ class Mediator:
 			or temporal_rule_status in {'partial', 'failed'}
 		)
 
+	def _is_authority_treatment_weak_follow_up(
+		self,
+		authority_treatment_summary: Dict[str, Any],
+	) -> str:
+		"""Return a follow-up focus when authority support is legally weak rather than absent.
+
+		Returns:
+			'confirm_good_law' when supporting authorities exist but some carry uncertain
+			treatment (e.g. ``good_law_unconfirmed``).
+			'find_better_authority' when existing authority is present but is legally limited
+			by ``limits`` or ``distinguishes`` treatment without being fully adverse.
+			Empty string when no legally-weak authority signal is detected.
+		"""
+		summary = authority_treatment_summary if isinstance(authority_treatment_summary, dict) else {}
+		supportive_count = int(summary.get('supportive_authority_link_count', 0) or 0)
+		adverse_count = int(summary.get('adverse_authority_link_count', 0) or 0)
+		uncertain_count = int(summary.get('uncertain_authority_link_count', 0) or 0)
+		treatment_type_counts = summary.get('treatment_type_counts', {}) if isinstance(summary.get('treatment_type_counts'), dict) else {}
+		limiting_count = sum(
+			int(treatment_type_counts.get(t, 0) or 0)
+			for t in ('limits', 'distinguishes')
+		)
+		unconfirmed_count = int(treatment_type_counts.get('good_law_unconfirmed', 0) or 0)
+
+		# Confirm-good-law: supportive or uncertain authorities exist but confidence is weak
+		if (supportive_count > 0 or uncertain_count > 0) and adverse_count == 0 and unconfirmed_count > 0:
+			return 'confirm_good_law'
+		# Find-better-authority: authority exists but is primarily limiting/distinguishing
+		if supportive_count > 0 and adverse_count == 0 and limiting_count > 0:
+			return 'find_better_authority'
+		return ''
+
 	def _preferred_support_kind_for_temporal_rule_profile(
 		self,
 		temporal_rule_profile: Dict[str, Any],
@@ -3569,6 +3605,8 @@ class Mediator:
 			return {'logic_unprovable', 'ontology_validation_failed'}
 		if follow_up_focus == 'temporal_gap_closure':
 			return {'temporal_rule_partial', 'temporal_rule_failed'}
+		if follow_up_focus in {'confirm_good_law', 'find_better_authority'}:
+			return {'authority_treatment_weak'}
 		return set()
 
 	def _normalized_support_gap_decision_source(self, task: Dict[str, Any]) -> str:
@@ -3875,6 +3913,12 @@ class Mediator:
 			follow_up_focus = 'reasoning_gap_closure'
 		elif recommended_action == 'improve_parse_quality':
 			follow_up_focus = 'parse_quality_improvement'
+		else:
+			# Detect legally-weak authority support: present but uncertain or limited.
+			# Only apply when no higher-priority focus already applies.
+			weak_focus = self._is_authority_treatment_weak_follow_up(authority_treatment_summary)
+			if weak_focus:
+				follow_up_focus = weak_focus
 		query_strategy = 'standard_gap_targeted'
 		if follow_up_focus == 'contradiction_resolution' and execution_mode == 'review_and_retrieve':
 			query_strategy = 'contradiction_targeted'
@@ -3888,6 +3932,10 @@ class Mediator:
 			query_strategy = 'reasoning_gap_targeted'
 		elif follow_up_focus == 'parse_quality_improvement':
 			query_strategy = 'quality_gap_targeted'
+		elif follow_up_focus == 'confirm_good_law':
+			query_strategy = 'confirm_good_law_targeted'
+		elif follow_up_focus == 'find_better_authority':
+			query_strategy = 'find_better_authority_targeted'
 		preferred_support_kind = str(
 			element.get('preferred_support_kind')
 			or self._default_preferred_support_kind(missing_support_kinds)
@@ -4230,7 +4278,7 @@ class Mediator:
 				'suppress': False,
 				'reason': '',
 			}
-		if task.get('follow_up_focus') == 'adverse_authority_review':
+		if task.get('follow_up_focus') in {'adverse_authority_review', 'confirm_good_law', 'find_better_authority'}:
 			return {
 				'suppress': False,
 				'reason': '',
