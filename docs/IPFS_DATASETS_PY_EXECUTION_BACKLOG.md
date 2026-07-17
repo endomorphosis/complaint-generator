@@ -706,7 +706,7 @@ Acceptance criteria:
 
 ## W9: Legal Corpus Search and Authority Treatment
 
-Status: Planned
+Status: In Progress
 Priority: P0
 
 ### Why this matters
@@ -715,7 +715,7 @@ The system already finds and stores authorities, but it still treats legal resea
 
 ### Work Package W9.1: Claim-aware legal search programs
 
-Status: Planned
+Status: In Progress
 Target files:
 
 - `integrations/ipfs_datasets/legal.py`
@@ -733,7 +733,7 @@ Acceptance criteria:
 
 ### Work Package W9.2: Authority treatment persistence
 
-Status: Planned
+Status: In Progress
 Target files:
 
 - `integrations/ipfs_datasets/types.py`
@@ -753,7 +753,7 @@ Acceptance criteria:
 
 ### Work Package W9.3: Rule-candidate extraction and fact-pattern matching
 
-Status: Planned
+Status: In Progress
 Target files:
 
 - `integrations/ipfs_datasets/types.py`
@@ -775,7 +775,7 @@ Acceptance criteria:
 
 ### Work Package W9.4: Authority graph and review integration
 
-Status: Planned
+Status: Complete
 Target files:
 
 - `complaint_phases/legal_graph.py`
@@ -844,7 +844,7 @@ Acceptance criteria:
 
 ## W10: Drafting and Filing Readiness
 
-Status: Planned
+Status: In Progress
 Priority: P0
 
 ### Why this matters
@@ -853,7 +853,7 @@ The repository already has a formal complaint document builder, export API, and 
 
 ### Work Package W10.1: Claim-section support packets
 
-Status: Planned
+Status: In Progress
 Target files:
 
 - `document_pipeline.py`
@@ -874,7 +874,7 @@ Acceptance criteria:
 
 ### Work Package W10.2: Drafting-time authority and proof guardrails
 
-Status: Planned
+Status: In Progress
 Target files:
 
 - `document_pipeline.py`
@@ -895,7 +895,7 @@ Acceptance criteria:
 
 ### Work Package W10.3: Browser builder and export workflow integration
 
-Status: Planned
+Status: In Progress
 Target files:
 
 - `applications/document_api.py`
@@ -916,10 +916,11 @@ Acceptance criteria:
 
 ### Work Package W10.4: Filing-readiness tests and docs
 
-Status: Planned
+Status: In Progress
 Target files:
 
 - `tests/test_document_pipeline.py`
+- `tests/test_formal_document_pipeline.py`
 - `tests/test_review_api.py`
 - `tests/test_claim_support_review_template.py`
 - `docs/APPLICATIONS.md`

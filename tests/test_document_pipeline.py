@@ -4408,3 +4408,125 @@ def test_review_surface_document_builder_can_suppress_mirrored_affidavit_exhibit
     assert payload['artifacts']['txt']['download_url'].startswith('/api/documents/download?path=')
 
     Path(payload['artifacts']['txt']['path']).unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# W10.4 – Round-trip API test for authority-related drafting warnings
+# ---------------------------------------------------------------------------
+
+def test_review_api_preserves_adverse_authority_and_reliability_warnings():
+    """W10.4 – round-trip: adverse_authority_present and authority_reliability_uncertain
+    warning codes survive the full review-API document endpoint response."""
+    mediator = Mock()
+    mediator.get_three_phase_status.return_value = {
+        "current_phase": "intake",
+        "intake_readiness": {
+            "score": 0.72,
+            "ready_to_advance": True,
+            "remaining_gap_count": 0,
+            "contradiction_count": 0,
+            "blockers": [],
+        },
+        "intake_contradictions": [],
+    }
+    DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    artifact_path = DEFAULT_OUTPUT_DIR / "authority-warning-test.docx"
+    artifact_path.write_bytes(b"test artifact")
+    try:
+        mediator.build_formal_complaint_document_package.return_value = {
+            "draft": {"title": "Jane Doe v. Employer"},
+            "filing_checklist": [
+                {
+                    "scope": "claim",
+                    "key": "retaliation",
+                    "title": "Retaliation",
+                    "status": "warning",
+                    "summary": "Review Retaliation before filing.",
+                },
+            ],
+            "drafting_readiness": {
+                "status": "warning",
+                "sections": {
+                    "claims_for_relief": {
+                        "title": "Claims for Relief",
+                        "status": "warning",
+                        "warnings": [],
+                    },
+                },
+                "claims": [
+                    {
+                        "claim_type": "retaliation",
+                        "status": "warning",
+                        "temporal_gap_hint_count": 0,
+                        "proof_gap_count": 0,
+                        "unresolved_element_count": 0,
+                        "contradiction_candidate_count": 0,
+                        "claim_unresolved_temporal_issue_count": 0,
+                        "claim_missing_temporal_predicates": [],
+                        "claim_required_provenance_kinds": [],
+                        "authority_treatment_summary": {
+                            "adverse_authority_link_count": 1,
+                            "uncertain_authority_link_count": 2,
+                            "treatment_type_counts": {"adverse": 1, "questioned": 2},
+                        },
+                        "warnings": [
+                            {
+                                "code": "adverse_authority_present",
+                                "severity": "warning",
+                                "message": "Retaliation includes adverse or limiting authority that should be reviewed before relying on it in the draft.",
+                            },
+                            {
+                                "code": "authority_reliability_uncertain",
+                                "severity": "warning",
+                                "message": "Retaliation has authority support with unresolved treatment or good-law uncertainty.",
+                            },
+                        ],
+                    },
+                ],
+                "warning_count": 2,
+            },
+            "artifacts": {
+                "docx": {
+                    "path": str(artifact_path),
+                    "filename": artifact_path.name,
+                    "size_bytes": artifact_path.stat().st_size,
+                }
+            },
+            "output_formats": ["docx"],
+            "generated_at": "2026-03-12T12:00:00+00:00",
+        }
+
+        app = create_review_api_app(mediator)
+        client = TestClient(app)
+
+        response = client.post(
+            "/api/documents/formal-complaint",
+            json={
+                "district": "District of Columbia",
+                "plaintiff_names": ["Jane Doe"],
+                "defendant_names": ["Acme Corporation"],
+                "output_formats": ["docx"],
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        claim_payload = payload["drafting_readiness"]["claims"][0]
+        assert claim_payload["claim_type"] == "retaliation"
+        assert claim_payload["status"] == "warning"
+
+        warning_codes = {w["code"] for w in claim_payload["warnings"]}
+        assert "adverse_authority_present" in warning_codes
+        assert "authority_reliability_uncertain" in warning_codes
+
+        # chip_labels should surface adverse and uncertain authority counts
+        chip_labels = claim_payload.get("chip_labels", [])
+        assert "adverse authorities: 1" in chip_labels
+        assert "uncertain authorities: 2" in chip_labels
+
+        # review_links must also carry the updated chip_labels
+        review_claim = payload["review_links"]["claims"][0]
+        assert "adverse authorities: 1" in review_claim.get("chip_labels", [])
+        assert "uncertain authorities: 2" in review_claim.get("chip_labels", [])
+    finally:
+        artifact_path.unlink(missing_ok=True)

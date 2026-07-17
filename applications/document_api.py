@@ -1028,6 +1028,16 @@ def _build_claim_review_chip_labels(claim: Dict[str, Any]) -> List[str]:
     if contradiction_candidate_count > 0:
         chip_labels.append(f"contradiction candidates: {contradiction_candidate_count}")
 
+    authority_treatment_summary = claim.get("authority_treatment_summary")
+    if isinstance(authority_treatment_summary, dict):
+        adverse_authority_link_count = int(authority_treatment_summary.get("adverse_authority_link_count") or 0)
+        if adverse_authority_link_count > 0:
+            chip_labels.append(f"adverse authorities: {adverse_authority_link_count}")
+
+        uncertain_authority_link_count = int(authority_treatment_summary.get("uncertain_authority_link_count") or 0)
+        if uncertain_authority_link_count > 0:
+            chip_labels.append(f"uncertain authorities: {uncertain_authority_link_count}")
+
     return chip_labels
 
 

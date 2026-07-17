@@ -3428,6 +3428,21 @@ Interpretation notes:
 - `drafting_readiness.sections[*].review_url`, `drafting_readiness.sections[*].review_context`, and `drafting_readiness.sections[*].review_intent` are added by the document API layer so clients can link section warnings back to the review dashboard with stable query context.
 - `drafting_readiness.sections[*].claim_links` is present when a section maps to one or more claim types; multi-claim drafts can use those targeted links instead of relying on a single generic section URL, and each claim link carries its own `review_intent`.
 - `drafting_readiness.sections[*].warnings[*].severity` distinguishes soft filing warnings from harder blockers so degraded-mode drafting can remain usable.
+- `drafting_readiness.claims[*].chip_labels` includes compact signal labels drawn from proof, chronology, authority-treatment, and element-coverage signals. Authority chip labels include `adverse authorities: N` (when adverse-treatment links exist) and `uncertain authorities: N` (when uncertain-treatment links such as `questioned`, `limits`, `superseded`, or `good_law_unconfirmed` are present).
+- `drafting_readiness` warning codes for claim-level entries:
+  - `claim_contradicted` (severity `blocked`) — the claim has active contradiction signals; the draft should not be filed until contradictions are resolved.
+  - `proof_gaps_present` (severity `warning`) — one or more proof-gap or failed-premise signals remain for this claim type.
+  - `chronology_gaps_present` (severity `warning`) — one or more chronology gaps or unresolved temporal predicates remain.
+  - `adverse_authority_present` (severity `warning`) — at least one authority linked to this claim has an adverse or limiting treatment type; the draft should be reviewed before relying on those authorities.
+  - `authority_reliability_uncertain` (severity `warning`) — at least one authority has unresolved treatment uncertainty such as `questioned`, `limits`, `superseded`, or `good_law_unconfirmed`.
+  - `unresolved_elements` (severity `warning`) — one or more claim elements remain uncovered or only partially supported.
+- `drafting_readiness` warning codes for section-level entries:
+  - `fact_support_thin` (severity `warning`) — the summary-of-facts section has limited or zero fact-backed support.
+  - `document_provenance_grounding_thin` (severity `warning`) — the document overall has a low fact-backed ratio; provenance grounding should be improved before formalization.
+  - `procedural_prerequisites_identified` (severity `warning`) — the jurisdiction-and-venue section has identified procedural prerequisites that may not yet be satisfied.
+  - `jurisdiction_or_venue_incomplete` (severity `warning`) — jurisdiction or venue statements are missing or incomplete.
+  - `relief_missing` (severity `warning`) — no requested-relief items are present.
+  - `exhibits_missing` (severity `warning`) — no exhibits are attached to the draft.
 - `review_links.dashboard_url` points to the review dashboard for the current user context, while `review_links.claims[*]` and `review_links.sections[*]` provide claim-specific and section-specific review URLs for non-browser consumers, each paired with normalized `review_intent` metadata.
 - `review_intent` is a top-level server-rendered review focus chosen from the current readiness warnings so the browser can restore the most relevant review destination before the operator clicks a follow-up link.
 - `document_optimization` is present only when agentic optimization is enabled. It records the actor/mediator/critic loop outcome, selected backend (`upstream_agentic` when the `ipfs_datasets_py.optimizers.agentic` classes are importable, otherwise `local_fallback`), accepted iteration count, final score, optimized sections, packet-projection render context, section-level support history, router availability, concrete router usage diagnostics (`router_usage`), and optional IPFS trace metadata.
