@@ -175,7 +175,7 @@ Separate missingness from ambiguity and contradiction, and route each one differ
 
 ## Batch 4: Minimum Fact Bundles and Evidence Task Board
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -191,10 +191,10 @@ Turn support gaps into concrete, element-level evidence tasks.
 
 ### Tasks
 
-- [ ] emit `missing_fact_bundle` and `satisfied_fact_bundle` per claim element during support validation
-- [ ] enrich `alignment_evidence_tasks` with task id, fallback lanes, source-quality target, and resolution notes
-- [ ] connect proof leads to target tasks through stable references
-- [ ] use prioritized tasks as the canonical Phase 2 next-action source
+- [x] emit `missing_fact_bundle` and `satisfied_fact_bundle` per claim element during support validation
+- [x] enrich `alignment_evidence_tasks` with task id, fallback lanes, source-quality target, and resolution notes
+- [x] connect proof leads to target tasks through stable references
+- [x] use prioritized tasks as the canonical Phase 2 next-action source
 
 ### Acceptance criteria
 
@@ -208,7 +208,7 @@ Turn support gaps into concrete, element-level evidence tasks.
 
 ## Batch 5: Support Lane Unification and Provenance Quality
 
-Status: Planned
+Status: In Progress
 Priority: P1
 
 ### Goal
@@ -223,8 +223,8 @@ Make documentary evidence, testimony, authority, and web captures comparable sup
 
 ### Tasks
 
-- [ ] normalize provenance fields across artifact and testimony records
-- [ ] add support-quality labels that distinguish testimony-only, documentary, corroborated, and contradicted states
+- [x] normalize provenance fields across artifact and testimony records
+- [x] add support-quality labels that distinguish testimony-only, documentary, corroborated, and contradicted states
 - [ ] preserve lane identity and quality through support summaries and snapshots
 - [ ] persist meaningful case-theory or support-packet snapshots through the IPFS-backed path when state materially changes
 
@@ -245,7 +245,7 @@ Make documentary evidence, testimony, authority, and web captures comparable sup
 
 ## Batch 6: Proof-Readiness Gates
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -259,10 +259,10 @@ Make Phase 1 and Phase 2 transitions depend on semantic readiness, not just coar
 
 ### Tasks
 
-- [ ] add semantic intake gates such as `case_theory_coherent` and `minimum_proof_path_present`
-- [ ] add evidence metrics such as `credible_support_ratio` and `draft_ready_element_ratio`
-- [ ] gate formalization on proof-readiness score and explicit blocker lists
-- [ ] preserve these metrics through review and optimization summaries
+- [x] add semantic intake gates such as `case_theory_coherent` and `minimum_proof_path_present`
+- [x] add evidence metrics such as `credible_support_ratio` and `draft_ready_element_ratio`
+- [x] gate formalization on proof-readiness score and explicit blocker lists
+- [x] preserve these metrics through review and optimization summaries
 
 ### Acceptance criteria
 

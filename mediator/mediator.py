@@ -7797,6 +7797,7 @@ class Mediator:
 						'contradiction_count': int(element.get('contradiction_candidate_count', 0) or 0),
 					}
 					packet_element['support_quality'] = self._derive_packet_support_quality(packet_element)
+					packet_element['support_lane_label'] = self._derive_support_lane_label(packet_element)
 					elements.append(packet_element)
 			else:
 				for gap_element in gap_claim.get('unresolved_elements', []) if isinstance(gap_claim, dict) else []:
@@ -7829,6 +7830,7 @@ class Mediator:
 						'contradiction_count': 0,
 					}
 					packet_element['support_quality'] = self._derive_packet_support_quality(packet_element)
+					packet_element['support_lane_label'] = self._derive_support_lane_label(packet_element)
 					elements.append(packet_element)
 			packets[claim_type] = {
 				'claim_type': claim_type,
@@ -7896,6 +7898,51 @@ class Mediator:
 		if status == 'unsupported' and (has_material_support or satisfied_fact_bundle):
 			return 'suggestive'
 		return 'unsupported'
+
+	@staticmethod
+	def _derive_support_lane_label(element: Dict[str, Any]) -> str:
+		"""Classify the dominant support lane for a claim-support packet element.
+
+		Labels:
+		- ``contradicted``          – element has contradicting support
+		- ``corroborated``          – element has both testimony and documentary/authority support
+		- ``testimony_only``        – element has only testimony support
+		- ``authority_only``        – element has only authority support
+		- ``documentary``           – element has only documentary artifact support
+		- ``partially_corroborated``– element is partially supported with multiple source families present
+		- ``uncorroborated``        – element is partially supported with only one source family
+		- ``unsupported``           – element has no support
+
+		Note: ``supporting_artifact_ids`` contains all source refs (including testimony),
+		so documentary presence is derived by subtracting testimony and authority refs.
+		"""
+		if not isinstance(element, dict):
+			return 'unsupported'
+		status = str(element.get('support_status') or '').strip().lower()
+		if status == 'contradicted':
+			return 'contradicted'
+		has_testimony = bool(element.get('supporting_testimony_ids'))
+		has_authority = bool(element.get('supporting_authority_ids'))
+		# supporting_artifact_ids includes all trace source_refs; subtract testimony/authority
+		# to identify genuinely documentary (non-testimony, non-authority) artifact support.
+		testimony_refs: set = set(element.get('supporting_testimony_ids') or [])
+		authority_refs: set = set(element.get('supporting_authority_ids') or [])
+		artifact_ids = list(element.get('supporting_artifact_ids') or [])
+		has_artifact = any(ref for ref in artifact_ids if ref not in testimony_refs and ref not in authority_refs)
+		has_facts = bool(element.get('canonical_fact_ids'))
+		has_any = has_testimony or has_artifact or has_authority or has_facts
+		if not has_any:
+			return 'unsupported'
+		has_documentary = has_artifact or (has_facts and not has_testimony and not has_authority)
+		if has_testimony and (has_documentary or has_authority):
+			if status == 'supported':
+				return 'corroborated'
+			return 'partially_corroborated'
+		if has_testimony:
+			return 'testimony_only'
+		if has_authority and not has_documentary:
+			return 'authority_only'
+		return 'documentary'
 
 	@staticmethod
 	def _accumulate_temporal_rule_profile_counts(
@@ -8700,6 +8747,7 @@ class Mediator:
 						'blocking': intake_element['blocking'],
 						'support_status': support_status,
 						'support_quality': str(packet_element.get('support_quality') or self._derive_packet_support_quality(packet_element)).strip().lower(),
+						'support_lane_label': str(packet_element.get('support_lane_label') or self._derive_support_lane_label(packet_element)).strip().lower(),
 						'preferred_evidence_classes': list(packet_element.get('preferred_evidence_classes', []) or intake_element.get('evidence_classes', []) or []),
 						'required_fact_bundle': list(packet_element.get('required_fact_bundle', []) or []),
 						'satisfied_fact_bundle': list(packet_element.get('satisfied_fact_bundle', []) or []),
@@ -11157,6 +11205,7 @@ class Mediator:
 				'evidence': self.phase_manager.is_phase_complete(ComplaintPhase.EVIDENCE),
 				'formalization': self.phase_manager.is_phase_complete(ComplaintPhase.FORMALIZATION)
 			},
+			'evidence_readiness': self.phase_manager.get_evidence_readiness(),
 			'reranking_metrics': self.get_reranker_metrics(),
 			'next_action': self.phase_manager.get_next_action()
 		}
