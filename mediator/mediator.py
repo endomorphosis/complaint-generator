@@ -5998,6 +5998,280 @@ class Mediator:
 			return True
 		return bool(left_fact.get('needs_corroboration', False)) and resolution_lane == 'capture_testimony'
 
+	# --- Batch 3: Claim Ambiguity Detection ---------------------------------
+
+	_AMBIGUITY_VAGUE_DATE_TOKENS = frozenset({
+		'sometime', 'at some point', 'a while', 'a few', 'several', 'recently', 'long ago',
+		'not sure when', 'approximately', 'around', 'about', 'unclear', 'unknown',
+		'eventually', 'later', 'earlier', 'before', 'after that',
+	})
+	_AMBIGUITY_VAGUE_ACTOR_TOKENS = frozenset({
+		'someone', 'they', 'them', 'management', 'the company', 'a person',
+		'somebody', 'another person', 'a manager', 'an official', 'unknown', 'unclear',
+	})
+	_AMBIGUITY_VAGUE_CONDUCT_TOKENS = frozenset({
+		'something happened', 'bad thing', 'incident', 'situation', 'problem', 'issue',
+		'unclear what', 'not sure what', 'various things', 'multiple issues',
+	})
+	_AMBIGUITY_VAGUE_INJURY_TOKENS = frozenset({
+		'i was hurt', 'harmed somehow', 'suffered', 'it was bad', 'something bad',
+		'various harms', 'multiple harms', 'unclear harm', 'not sure about', 'i don\'t know',
+	})
+
+	def _detect_claim_ambiguity_flags(
+		self,
+		intake_case_file: Dict[str, Any],
+	) -> Dict[str, List[str]]:
+		"""Detect ambiguity categories per claim type from canonical facts.
+
+		Returns a mapping of {claim_type: [flag, ...]} where flags are one or
+		more of: 'date_ambiguous', 'actor_unclear', 'conduct_vague',
+		'injury_unspecified'.
+		"""
+		canonical_facts = intake_case_file.get('canonical_facts') or []
+		candidate_claims = intake_case_file.get('candidate_claims') or []
+		if not isinstance(canonical_facts, list) or not isinstance(candidate_claims, list):
+			return {}
+
+		claim_types: List[str] = [
+			str(c.get('claim_type') or '').strip().lower()
+			for c in candidate_claims
+			if isinstance(c, dict) and c.get('claim_type')
+		]
+		if not claim_types:
+			return {}
+
+		# Aggregate fact_types across all canonical facts, keyed by claim_type
+		facts_by_claim_type: Dict[str, List[Dict[str, Any]]] = {ct: [] for ct in claim_types}
+		for fact in canonical_facts:
+			if not isinstance(fact, dict):
+				continue
+			fact_claim_types = fact.get('claim_types') or []
+			if not isinstance(fact_claim_types, list):
+				fact_claim_types = []
+			if not fact_claim_types:
+				# Fall back to attaching to all known claim types
+				fact_claim_types = list(claim_types)
+			for ct in fact_claim_types:
+				normalized_ct = str(ct or '').strip().lower()
+				if normalized_ct in facts_by_claim_type:
+					facts_by_claim_type[normalized_ct].append(fact)
+
+		flags_by_claim_type: Dict[str, List[str]] = {}
+		for claim_type, facts in facts_by_claim_type.items():
+			flags: List[str] = []
+
+			# --- date_ambiguous: timeline facts exist but none have a specific date
+			timeline_facts = [f for f in facts if str(f.get('fact_type') or '').strip().lower() == 'timeline']
+			if timeline_facts:
+				dateless_count = 0
+				vague_date_count = 0
+				for f in timeline_facts:
+					date_val = str(f.get('event_date_or_range') or '').strip()
+					if not date_val:
+						dateless_count += 1
+					else:
+						lower_date = date_val.lower()
+						if any(token in lower_date for token in self._AMBIGUITY_VAGUE_DATE_TOKENS):
+							vague_date_count += 1
+					text_lower = str(f.get('text') or '').lower()
+					if any(token in text_lower for token in self._AMBIGUITY_VAGUE_DATE_TOKENS):
+						vague_date_count += 1
+				if dateless_count >= len(timeline_facts) or vague_date_count > 0:
+					flags.append('date_ambiguous')
+
+			# --- actor_unclear: no responsible_party facts OR actor text is vague
+			actor_facts = [f for f in facts if str(f.get('fact_type') or '').strip().lower() == 'responsible_party']
+			if not actor_facts:
+				flags.append('actor_unclear')
+			else:
+				vague_actor = False
+				for f in actor_facts:
+					text_lower = str(f.get('text') or '').lower()
+					word_count = len(text_lower.split())
+					if word_count <= 2 or any(token in text_lower for token in self._AMBIGUITY_VAGUE_ACTOR_TOKENS):
+						vague_actor = True
+						break
+				if vague_actor:
+					flags.append('actor_unclear')
+
+			# --- conduct_vague: no claim_element facts, or only very short/generic ones
+			conduct_facts = [
+				f for f in facts
+				if str(f.get('fact_type') or '').strip().lower() in {'claim_element', 'clarification'}
+			]
+			if not conduct_facts:
+				flags.append('conduct_vague')
+			else:
+				vague_conduct = 0
+				for f in conduct_facts:
+					text_lower = str(f.get('text') or '').lower()
+					if len(text_lower.split()) <= 3 or any(token in text_lower for token in self._AMBIGUITY_VAGUE_CONDUCT_TOKENS):
+						vague_conduct += 1
+				if vague_conduct >= len(conduct_facts):
+					flags.append('conduct_vague')
+
+			# --- injury_unspecified: no impact facts at all, or only generic ones
+			impact_facts = [f for f in facts if str(f.get('fact_type') or '').strip().lower() in {'impact', 'remedy'}]
+			if not impact_facts:
+				flags.append('injury_unspecified')
+			else:
+				vague_injury = 0
+				for f in impact_facts:
+					text_lower = str(f.get('text') or '').lower()
+					if len(text_lower.split()) <= 2 or any(token in text_lower for token in self._AMBIGUITY_VAGUE_INJURY_TOKENS):
+						vague_injury += 1
+				if vague_injury >= len(impact_facts):
+					flags.append('injury_unspecified')
+
+			if flags:
+				flags_by_claim_type[claim_type] = flags
+
+		return flags_by_claim_type
+
+	def _apply_claim_ambiguity_flags(self, intake_case_file: Dict[str, Any]) -> None:
+		"""Detect and write structured ambiguity flags onto candidate_claim records.
+
+		Flags added: 'date_ambiguous', 'actor_unclear', 'conduct_vague',
+		'injury_unspecified'.  Pre-existing flags not in this set are
+		preserved so that external callers can add their own flag kinds.
+		"""
+		candidate_claims = intake_case_file.get('candidate_claims')
+		if not isinstance(candidate_claims, list):
+			return
+		flags_by_claim_type = self._detect_claim_ambiguity_flags(intake_case_file)
+		_MANAGED_FLAGS = frozenset({'date_ambiguous', 'actor_unclear', 'conduct_vague', 'injury_unspecified'})
+		for claim in candidate_claims:
+			if not isinstance(claim, dict):
+				continue
+			claim_type = str(claim.get('claim_type') or '').strip().lower()
+			if not claim_type:
+				continue
+			detected = flags_by_claim_type.get(claim_type, [])
+			existing = [f for f in (claim.get('ambiguity_flags') or []) if f not in _MANAGED_FLAGS]
+			claim['ambiguity_flags'] = existing + detected
+
+	# --- Batch 3: Contradiction-to-task routing -----------------------------
+
+	_RESOLUTION_LANE_TO_SUPPORT_KIND: Dict[str, str] = {
+		'capture_testimony': 'testimony',
+		'request_document': 'document',
+		'seek_external_record': 'external_record',
+		'clarify_with_complainant': 'testimony',
+		'manual_review': 'document',
+	}
+
+	def _build_contradiction_tasks_from_queue(
+		self,
+		intake_case_file: Dict[str, Any],
+	) -> List[Dict[str, Any]]:
+		"""Convert unresolved contradiction queue entries into alignment-style tasks.
+
+		Each task uses 'resolve_contradiction' as its action and carries the
+		resolution lane, affected elements, and success criteria so that
+		Phase 2 evidence questioning can target the contradiction directly.
+		"""
+		contradiction_queue = intake_case_file.get('contradiction_queue') or []
+		if not isinstance(contradiction_queue, list):
+			return []
+		tasks: List[Dict[str, Any]] = []
+		seen_ids: set = set()
+		for entry in contradiction_queue:
+			if not isinstance(entry, dict):
+				continue
+			resolution_status = str(entry.get('current_resolution_status') or entry.get('status') or '').strip().lower()
+			if resolution_status in {'resolved', 'escalated', 'dismissed'}:
+				continue
+			contradiction_id = str(entry.get('contradiction_id') or '').strip()
+			if not contradiction_id or contradiction_id in seen_ids:
+				continue
+			seen_ids.add(contradiction_id)
+			severity = str(entry.get('severity') or 'blocking').strip().lower()
+			is_blocking = severity == 'blocking'
+			task_priority = 'high' if is_blocking else 'medium'
+			resolution_lane = str(entry.get('recommended_resolution_lane') or 'clarify_with_complainant').strip().lower()
+			preferred_support_kind = self._RESOLUTION_LANE_TO_SUPPORT_KIND.get(resolution_lane, 'testimony')
+			source_quality_target = (
+				'credible_testimony' if preferred_support_kind == 'testimony' else 'high_quality_document'
+			)
+			affected_claim_types: List[str] = [
+				str(ct).strip().lower()
+				for ct in (entry.get('affected_claim_types') or [])
+				if str(ct).strip()
+			]
+			affected_element_ids: List[str] = [
+				str(eid).strip().lower()
+				for eid in (entry.get('affected_element_ids') or [])
+				if str(eid).strip()
+			]
+			claim_type = affected_claim_types[0] if affected_claim_types else ''
+			claim_element_id = affected_element_ids[0] if affected_element_ids else ''
+			topic = str(entry.get('topic') or '').strip()
+			existing_text = str(entry.get('existing_text') or '').strip()
+			new_text = str(entry.get('new_text') or '').strip()
+			summary = topic or existing_text or 'Unresolved contradiction'
+			success_criteria = [f'Contradiction resolved: {summary}']
+			if entry.get('external_corroboration_required'):
+				success_criteria.append('External corroboration or document support obtained')
+			task_id = f'contradiction:{contradiction_id}'
+			tasks.append({
+				'task_id': task_id,
+				'action': 'resolve_contradiction',
+				'claim_type': claim_type,
+				'claim_element_id': claim_element_id,
+				'claim_element_label': claim_element_id or topic,
+				'support_status': 'contradicted',
+				'blocking': is_blocking,
+				'preferred_support_kind': preferred_support_kind,
+				'preferred_evidence_classes': [],
+				'fallback_support_kinds': [],
+				'fallback_lanes': [],
+				'source_quality_target': source_quality_target,
+				'task_priority': task_priority,
+				'missing_fact_bundle': [topic] if topic else [],
+				'satisfied_fact_bundle': [],
+				'temporal_proof_objective': '',
+				'event_ids': [],
+				'temporal_fact_ids': [],
+				'anchor_ids': [],
+				'required_anchor_ids': [],
+				'temporal_relation_ids': [],
+				'timeline_issue_ids': [],
+				'temporal_issue_ids': [],
+				'authored_temporal_issue_ids': [],
+				'proof_temporal_issue_ids': [],
+				'closure_issue_ids': [],
+				'chronology_source': '',
+				'missing_temporal_predicates': [],
+				'required_temporal_predicates': [],
+				'required_provenance_kinds': [],
+				'closure_ready_when': [f'Contradiction {contradiction_id} resolved via {resolution_lane}'],
+				'intake_chronology_readiness': {},
+				'temporal_proof_bundle_id': '',
+				'temporal_rule_profile_id': '',
+				'temporal_rule_status': '',
+				'temporal_rule_blocking_reasons': [],
+				'temporal_rule_follow_ups': [],
+				'intake_origin_refs': [f'contradiction:{contradiction_id}'],
+				'intake_proof_leads': [],
+				'recommended_queries': [],
+				'recommended_witness_prompts': (
+					[f'Who can resolve the contradiction about {topic}?'] if topic else []
+				),
+				'success_criteria': success_criteria,
+				'resolution_status': 'open',
+				'resolution_notes': str(entry.get('resolution_notes') or '').strip(),
+				'contradiction_id': contradiction_id,
+				'contradiction_severity': severity,
+				'contradiction_resolution_lane': resolution_lane,
+				'existing_text': existing_text,
+				'new_text': new_text,
+				'affected_claim_types': affected_claim_types,
+				'affected_element_ids': affected_element_ids,
+				'external_corroboration_required': bool(entry.get('external_corroboration_required')),
+			})
+		return tasks
+
 	def _resolve_answer_claim_types(self, intake_case_file: Dict[str, Any], context: Dict[str, Any]) -> List[str]:
 		claim_types: List[str] = []
 		context_claim_type = self._normalize_intake_text(context.get('claim_type') or context.get('target_claim_type')).lower()
@@ -6820,6 +7094,8 @@ class Mediator:
 				intake_case_file,
 				focus_fact_id=str(created_fact.get('fact_id') or '').strip(),
 			)
+
+		self._apply_claim_ambiguity_flags(intake_case_file)
 
 		return refresh_intake_case_file(intake_case_file, knowledge_graph, append_snapshot=True)
 	
@@ -8671,7 +8947,11 @@ class Mediator:
 				required_kinds.append('testimony_record')
 		return required_kinds
 
-	def _build_alignment_evidence_tasks(self, alignment_summary: Any) -> List[Dict[str, Any]]:
+	def _build_alignment_evidence_tasks(
+		self,
+		alignment_summary: Any,
+		intake_case_file: Optional[Dict[str, Any]] = None,
+	) -> List[Dict[str, Any]]:
 		tasks: List[Dict[str, Any]] = []
 		if not isinstance(alignment_summary, dict):
 			return tasks
@@ -8858,6 +9138,16 @@ class Mediator:
 						'resolution_notes': '',
 					}
 				)
+
+		# Merge in contradiction tasks from intake queue (Batch 3)
+		if isinstance(intake_case_file, dict):
+			contradiction_tasks = self._build_contradiction_tasks_from_queue(intake_case_file)
+			existing_task_ids = {str(t.get('task_id') or '') for t in tasks}
+			for ctask in contradiction_tasks:
+				ctask_id = str(ctask.get('task_id') or '')
+				if ctask_id not in existing_task_ids:
+					tasks.append(ctask)
+					existing_task_ids.add(ctask_id)
 
 		tasks.sort(
 			key=lambda task: (
@@ -9568,7 +9858,7 @@ class Mediator:
 		self.phase_manager.update_phase_data(ComplaintPhase.EVIDENCE, 'claim_support_packets', claim_support_packets)
 		intake_case_file = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or {}
 		alignment_summary = self._summarize_intake_evidence_alignment(intake_case_file, claim_support_packets)
-		alignment_tasks = self._build_alignment_evidence_tasks(alignment_summary)
+		alignment_tasks = self._build_alignment_evidence_tasks(alignment_summary, intake_case_file)
 		evidence_workflow_action_queue = self._build_evidence_workflow_action_queue(alignment_tasks, unsatisfied)
 		self.phase_manager.update_phase_data(ComplaintPhase.EVIDENCE, 'intake_evidence_alignment_summary', alignment_summary)
 		self.phase_manager.update_phase_data(ComplaintPhase.EVIDENCE, 'alignment_evidence_tasks', alignment_tasks)
@@ -10055,7 +10345,7 @@ class Mediator:
 		self.phase_manager.update_phase_data(ComplaintPhase.EVIDENCE, 'claim_support_packets', claim_support_packets)
 		intake_case_file = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'intake_case_file') or {}
 		alignment_summary = self._summarize_intake_evidence_alignment(intake_case_file, claim_support_packets)
-		alignment_tasks = self._build_alignment_evidence_tasks(alignment_summary)
+		alignment_tasks = self._build_alignment_evidence_tasks(alignment_summary, intake_case_file)
 		evidence_workflow_action_queue = self._build_evidence_workflow_action_queue(
 			alignment_tasks,
 			self.phase_manager.get_phase_data(ComplaintPhase.EVIDENCE, 'evidence_gaps') or [],

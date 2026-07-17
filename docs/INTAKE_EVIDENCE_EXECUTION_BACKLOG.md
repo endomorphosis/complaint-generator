@@ -143,7 +143,7 @@ Make question selection optimize for proof gain, not only generic gap reduction.
 
 ## Batch 3: Claim Ambiguity and Contradiction Workflow
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -158,10 +158,10 @@ Separate missingness from ambiguity and contradiction, and route each one differ
 
 ### Tasks
 
-- [ ] add contradiction severity and resolution-lane metadata
-- [ ] add ambiguity flags for dates, actors, conduct, and injury
-- [ ] add readiness blockers for unresolved blocking contradictions and unresolved claim disambiguation
-- [ ] route contradictions into testimony, document, or external-record tasks where appropriate
+- [x] add contradiction severity and resolution-lane metadata
+- [x] add ambiguity flags for dates, actors, conduct, and injury
+- [x] add readiness blockers for unresolved blocking contradictions and unresolved claim disambiguation
+- [x] route contradictions into testimony, document, or external-record tasks where appropriate
 
 ### Acceptance criteria
 
