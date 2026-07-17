@@ -7514,6 +7514,28 @@ class Mediator:
 			return 'suggestive'
 		return 'unsupported'
 
+	@staticmethod
+	def _accumulate_temporal_rule_profile_counts(
+		element: Dict[str, Any],
+		summary: Dict[str, Any],
+		status_counter_map: Dict[str, str],
+	) -> None:
+		"""Increment rule-profile availability and status counters for one packet element.
+
+		Only elements with a non-empty ``temporal_rule_profile_id`` are counted as
+		having an available rule profile. Elements with a profile ID but an
+		unrecognized or empty status (e.g. profiles registered but not yet
+		evaluated) contribute to the available count only.
+		"""
+		rule_profile_id = str(element.get('temporal_rule_profile_id') or '').strip()
+		if not rule_profile_id:
+			return
+		summary['temporal_rule_profile_available_element_count'] += 1
+		rule_status = str(element.get('temporal_rule_status') or '').strip().lower()
+		status_counter_key = status_counter_map.get(rule_status)
+		if status_counter_key:
+			summary[status_counter_key] += 1
+
 	def _summarize_claim_support_packets(self, packets: Dict[str, Any]) -> Dict[str, Any]:
 		summary = {
 			'claim_count': 0,
@@ -7597,18 +7619,7 @@ class Mediator:
 				summary['temporal_warning_count'] += int(element.get('temporal_warning_count', 0) or 0)
 				if bool(element.get('temporal_partial_order_ready')):
 					summary['temporal_partial_order_ready_element_count'] += 1
-				rule_profile_id = str(element.get('temporal_rule_profile_id') or '').strip()
-				if rule_profile_id:
-					# Count elements that have an actual rule profile ID; status may be
-					# empty for profiles that were registered but not yet evaluated.
-					summary['temporal_rule_profile_available_element_count'] += 1
-					rule_status = str(element.get('temporal_rule_status') or '').strip().lower()
-					status_counter_key = rule_profile_status_counter_map.get(rule_status)
-					if status_counter_key:
-						summary[status_counter_key] += 1
-					# Elements with a profile ID but an unrecognized or empty status
-					# contribute to the available count only; they represent profiles
-					# that are pending evaluation or have not yet produced a result.
+				self._accumulate_temporal_rule_profile_counts(element, summary, rule_profile_status_counter_map)
 				if status == 'supported':
 					parse_quality_flags = element.get('parse_quality_flags', [])
 					if not (parse_quality_flags if isinstance(parse_quality_flags, list) else []):
