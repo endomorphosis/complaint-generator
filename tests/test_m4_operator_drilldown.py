@@ -30,7 +30,7 @@ def _make_minimal_mediator(db_path: str = ":memory:") -> MagicMock:
     return mediator
 
 
-def _make_hooks(db_path: str = ":memory:"):
+def _make_claim_support_hook(db_path: str = ":memory:"):
     from mediator.claim_support_hooks import ClaimSupportHook
     mediator = _make_minimal_mediator(db_path)
     return ClaimSupportHook(mediator, db_path=db_path)
@@ -41,7 +41,7 @@ def _make_hooks(db_path: str = ":memory:"):
 # ---------------------------------------------------------------------------
 
 def test_build_support_packet_has_evidence_sub_object():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     trace = {
         "trace_kind": "fact",
         "support_kind": "evidence",
@@ -68,7 +68,7 @@ def test_build_support_packet_has_evidence_sub_object():
 
 
 def test_build_support_packet_has_authority_sub_object():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     trace = {
         "trace_kind": "link",
         "support_kind": "authority",
@@ -95,7 +95,7 @@ def test_build_support_packet_has_authority_sub_object():
 
 
 def test_build_support_packet_has_provenance_sub_object():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     trace = {
         "trace_kind": "fact",
         "support_kind": "web_evidence",
@@ -117,7 +117,7 @@ def test_build_support_packet_has_provenance_sub_object():
 
 
 def test_build_support_packet_fact_sub_object_preserved():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     trace = {
         "trace_kind": "fact",
         "fact_id": "fact:999",
@@ -131,7 +131,7 @@ def test_build_support_packet_fact_sub_object_preserved():
 
 
 def test_build_support_packet_empty_trace_does_not_raise():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     packet = hooks._build_support_packet({})
     assert "evidence" in packet
     assert "authority" in packet
@@ -144,7 +144,7 @@ def test_build_support_packet_empty_trace_does_not_raise():
 # ---------------------------------------------------------------------------
 
 def test_get_support_timeline_returns_required_keys():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     # Patch _get_enriched_claim_support_links to return empty list
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_support_timeline("test_user", claim_type="employment_discrimination")
@@ -155,7 +155,7 @@ def test_get_support_timeline_returns_required_keys():
 
 
 def test_get_support_timeline_empty_links():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_support_timeline("test_user")
     assert result["timeline"] == []
@@ -163,7 +163,7 @@ def test_get_support_timeline_empty_links():
 
 
 def test_get_support_timeline_with_links():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     links = [
         {
             "support_ref": "Qm1",
@@ -188,7 +188,7 @@ def test_get_support_timeline_with_links():
 
 
 def test_get_support_timeline_respects_limit():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_support_timeline("test_user", limit=5)
     assert len(result["timeline"]) <= 5
@@ -199,7 +199,7 @@ def test_get_support_timeline_respects_limit():
 # ---------------------------------------------------------------------------
 
 def test_get_archive_history_returns_required_keys():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_archive_history("test_user")
     assert result["available"] is True
@@ -210,7 +210,7 @@ def test_get_archive_history_returns_required_keys():
 
 
 def test_get_archive_history_empty():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_archive_history("test_user")
     assert result["capture_count"] == 0
@@ -218,7 +218,7 @@ def test_get_archive_history_empty():
 
 
 def test_get_archive_history_domain_filter():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_archive_history("test_user", domain="example.com")
     assert result["domain_filter"] == "example.com"
@@ -229,7 +229,7 @@ def test_get_archive_history_domain_filter():
 # ---------------------------------------------------------------------------
 
 def test_get_graph_trace_drilldown_returns_required_keys():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_graph_trace_drilldown("test_user")
     assert result["available"] is True
@@ -239,7 +239,7 @@ def test_get_graph_trace_drilldown_returns_required_keys():
 
 
 def test_get_graph_trace_drilldown_empty():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_graph_trace_drilldown("test_user", claim_type="employment_discrimination")
     assert result["graph_trace_count"] == 0
@@ -247,7 +247,7 @@ def test_get_graph_trace_drilldown_empty():
 
 
 def test_get_graph_trace_drilldown_filters_by_element():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[
         {"claim_element_id": "adverse_action", "support_ref": "Qm1", "facts": []},
         {"claim_element_id": "protected_trait", "support_ref": "Qm2", "facts": []},
@@ -261,7 +261,7 @@ def test_get_graph_trace_drilldown_filters_by_element():
 # ---------------------------------------------------------------------------
 
 def test_get_enrichment_queue_state_no_duckdb():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._check_duckdb_availability = MagicMock(return_value=False)
     result = hooks.get_enrichment_queue_state("test_user")
     assert result["available"] is False
@@ -274,7 +274,7 @@ def test_get_enrichment_queue_state_with_duckdb():
         import duckdb  # noqa: F401
     except ImportError:
         pytest.skip("duckdb not installed")
-    hooks = _make_hooks(db_path=":memory:")
+    hooks = _make_claim_support_hook(db_path=":memory:")
     hooks._check_duckdb_availability = MagicMock(return_value=True)
     hooks._prepare_duckdb_path = MagicMock()
     result = hooks.get_enrichment_queue_state("test_user")
@@ -288,7 +288,7 @@ def test_get_enrichment_queue_state_returns_counts():
         import duckdb  # noqa: F401
     except ImportError:
         pytest.skip("duckdb not installed")
-    hooks = _make_hooks(db_path=":memory:")
+    hooks = _make_claim_support_hook(db_path=":memory:")
     hooks._check_duckdb_availability = MagicMock(return_value=True)
     hooks._prepare_duckdb_path = MagicMock()
     result = hooks.get_enrichment_queue_state("test_user")
@@ -302,7 +302,7 @@ def test_get_enrichment_queue_state_returns_counts():
 # ---------------------------------------------------------------------------
 
 def test_submit_enrichment_job_no_duckdb():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     hooks._check_duckdb_availability = MagicMock(return_value=False)
     result = hooks.submit_background_enrichment_job("test_user", "graph_enrichment")
     assert result["submitted"] is False
@@ -314,7 +314,7 @@ def test_submit_enrichment_job_with_duckdb():
         import duckdb  # noqa: F401
     except ImportError:
         pytest.skip("duckdb not installed")
-    hooks = _make_hooks(db_path=":memory:")
+    hooks = _make_claim_support_hook(db_path=":memory:")
     hooks._check_duckdb_availability = MagicMock(return_value=True)
     hooks._prepare_duckdb_path = MagicMock()
     result = hooks.submit_background_enrichment_job(
@@ -336,7 +336,7 @@ def test_submit_then_query_enrichment_queue():
         import duckdb  # noqa: F401
     except ImportError:
         pytest.skip("duckdb not installed")
-    hooks = _make_hooks(db_path=":memory:")
+    hooks = _make_claim_support_hook(db_path=":memory:")
     hooks._check_duckdb_availability = MagicMock(return_value=True)
     hooks._prepare_duckdb_path = MagicMock()
 
@@ -360,7 +360,7 @@ def test_submit_then_query_enrichment_queue():
 # ---------------------------------------------------------------------------
 
 def test_build_validation_decision_trace_includes_graphrag_signal():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     element = {
         "status": "covered",
         "total_links": 3,
@@ -393,7 +393,7 @@ def test_build_validation_decision_trace_includes_graphrag_signal():
 
 
 def test_has_reasoning_gap_signals_detects_graphrag_gap():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     proof_decision_trace = {
         "decision_source": "graphrag_quality_gap",
         "graphrag_has_blocking_gaps": True,
@@ -405,7 +405,7 @@ def test_has_reasoning_gap_signals_detects_graphrag_gap():
 
 
 def test_recommended_action_for_graphrag_gap():
-    hooks = _make_hooks()
+    hooks = _make_claim_support_hook()
     element = {
         "status": "covered",
         "total_links": 3,

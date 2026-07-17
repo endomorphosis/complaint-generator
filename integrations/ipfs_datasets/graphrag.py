@@ -788,7 +788,13 @@ def score_ontology_support_paths(
                 "error": "ontology must be a non-empty dict",
                 "overall_quality_score": 0.0,
                 "grade": "F",
-                "gap_signals": [{"gap_type": "empty_ontology", "description": "Ontology is empty or not a dict", "follow_up_action": "build_ontology_from_evidence"}],
+                "gap_signals": [
+                    {
+                        "gap_type": "empty_ontology",
+                        "description": "Ontology is empty or not a dict",
+                        "follow_up_action": "build_ontology_from_evidence",
+                    }
+                ],
             },
             operation=operation,
             backend_available=GRAPHRAG_AVAILABLE,
@@ -911,9 +917,12 @@ def identify_ontology_gaps(
     enriched_gaps: List[Dict[str, Any]] = []
     for signal in gap_signals:
         gap_type = signal.get("gap_type", "unknown")
-        severity = "blocking" if gap_type in ("empty_ontology", "missing_entity_coverage") and overall_score < 0.3 else (
-            "moderate" if gap_type in ("missing_concept_coverage", "missing_relation_predicates") else "minor"
-        )
+        if gap_type in ("empty_ontology", "missing_entity_coverage") and overall_score < 0.3:
+            severity = "blocking"
+        elif gap_type in ("missing_concept_coverage", "missing_relation_predicates"):
+            severity = "moderate"
+        else:
+            severity = "minor"
         enriched_gaps.append({
             "gap_type": gap_type,
             "description": signal.get("description", ""),

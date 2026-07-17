@@ -1616,7 +1616,7 @@ def map_claim_elements_to_predicates(
     template_match_count = 0
     unmapped_element_ids: List[str] = []
 
-    for element in (list(elements) if not isinstance(elements, list) else elements):
+    for element in list(elements):
         if not isinstance(element, dict):
             continue
         element_id = str(element.get("element_id") or "")

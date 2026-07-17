@@ -23,6 +23,21 @@ except ImportError:
     duckdb = None
 
 
+_ENRICHMENT_QUEUE_DDL = """
+    CREATE TABLE IF NOT EXISTS claim_enrichment_queue (
+        id INTEGER PRIMARY KEY,
+        user_id VARCHAR NOT NULL,
+        claim_type VARCHAR,
+        enrichment_type VARCHAR NOT NULL,
+        status VARCHAR NOT NULL DEFAULT 'pending',
+        priority INTEGER DEFAULT 0,
+        metadata JSON,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+"""
+
+
 class ClaimSupportHook:
     """Track which evidence and authorities support each claim type."""
 
@@ -5607,23 +5622,9 @@ class ClaimSupportHook:
             'graph_summary': graph_summary_totals,
         }
 
-    _ENRICHMENT_QUEUE_DDL = """
-        CREATE TABLE IF NOT EXISTS claim_enrichment_queue (
-            id INTEGER PRIMARY KEY,
-            user_id VARCHAR NOT NULL,
-            claim_type VARCHAR,
-            enrichment_type VARCHAR NOT NULL,
-            status VARCHAR NOT NULL DEFAULT 'pending',
-            priority INTEGER DEFAULT 0,
-            metadata JSON,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
-        )
-    """
-
     def _ensure_enrichment_queue_table(self, conn: Any) -> None:
         """Create the enrichment queue table if it does not already exist."""
-        conn.execute(self._ENRICHMENT_QUEUE_DDL)
+        conn.execute(_ENRICHMENT_QUEUE_DDL)
 
     def get_enrichment_queue_state(
         self,
