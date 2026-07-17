@@ -848,6 +848,15 @@ class EvidenceStateHook:
                 evidence_info.get('metadata', {}),
                 self.mediator,
             )
+            provenance_payload = (
+                dict(normalized_evidence_metadata.get('provenance') or {})
+                if isinstance(normalized_evidence_metadata.get('provenance'), dict)
+                else {}
+            )
+            provenance_metadata = _merge_intake_summary_handoff_metadata(
+                provenance_payload.get('metadata', {}),
+                self.mediator,
+            )
             document_parse = evidence_info.get('document_parse') if isinstance(evidence_info.get('document_parse'), dict) else {}
             document_graph = evidence_info.get('document_graph') if isinstance(evidence_info.get('document_graph'), dict) else {}
             parse_contract = build_document_parse_contract(
@@ -925,57 +934,79 @@ class EvidenceStateHook:
                 'fact_count': 0,
             }
             memory_facts: List[Dict[str, Any]] = []
-            for index, fact in enumerate(list(document_graph.get('facts', []) or []), start=1):
-                if not isinstance(fact, dict):
+            artifact_id = str(evidence_info.get('artifact_id') or evidence_info.get('cid') or '')
+            cid = str(evidence_info.get('cid') or '')
+            # Iterate over graph entities with type='fact' (same approach as _store_document_facts)
+            for entity in list(document_graph.get('entities', []) or []):
+                if not isinstance(entity, dict) or entity.get('type') != 'fact':
                     continue
-                text = str(fact.get('text') or '').strip()
+                attributes = entity.get('attributes', {}) if isinstance(entity.get('attributes'), dict) else {}
+                text = str(attributes.get('text') or entity.get('name') or '').strip()
                 if not text:
                     continue
-                memory_facts.append(
-                    {
-                        'fact_id': fact.get('fact_id') or f'evidence:{record_id}:fact:{index}',
-                        'text': text,
-                        'source_artifact_id': evidence_info.get('artifact_id') or evidence_info.get('cid'),
-                        'confidence': float(fact.get('confidence') or 0.0),
-                        'metadata': dict(fact.get('metadata') or {}),
-                        'provenance': dict(fact.get('provenance') or {}),
-                        'source_family': 'evidence',
-                        'source_record_id': record_id,
-                        'source_ref': str(evidence_info.get('cid') or ''),
-                        'record_scope': 'evidence',
-                        'artifact_family': '',
-                        'corpus_family': '',
-                        'content_origin': '',
-                        'parse_source': '',
-                        'input_format': '',
-                        'quality_tier': '',
-                        'quality_score': 0.0,
-                        'page_count': 0,
-                    }
+                fact_metadata = _merge_intake_summary_handoff_metadata(
+                    build_fact_lineage_metadata(
+                        attributes,
+                        parse_contract=parse_contract,
+                        record_scope='evidence',
+                        source_ref=artifact_id,
+                    ),
+                    self.mediator,
                 )
+                fact_provenance = build_provenance(
+                    source_url=str(provenance_payload.get('source_url', '')),
+                    acquisition_method=str(provenance_payload.get('acquisition_method', '')),
+                    source_type=str(provenance_payload.get('source_type', '')),
+                    acquired_at=str(provenance_payload.get('acquired_at', '')),
+                    content_hash=str(provenance_payload.get('content_hash', '')),
+                    source_system=str(provenance_payload.get('source_system', '')),
+                    jurisdiction=str(provenance_payload.get('jurisdiction', '')),
+                    metadata=provenance_metadata,
+                )
+                fact = CaseFact(
+                    fact_id=str(entity.get('id') or ''),
+                    text=text,
+                    source_artifact_id=artifact_id,
+                    source_family='evidence',
+                    source_record_id=record_id,
+                    source_ref=artifact_id,
+                    record_scope='evidence',
+                    confidence=float(entity.get('confidence', 0.0) or 0.0),
+                    metadata=fact_metadata,
+                    provenance=fact_provenance,
+                )
+                memory_facts.append(fact.as_dict())
             if not memory_facts and parsed_text_preview:
-                memory_facts.append(
-                    {
-                        'fact_id': f'evidence:{record_id}:fact:1',
-                        'text': parsed_text_preview,
-                        'source_artifact_id': evidence_info.get('artifact_id') or evidence_info.get('cid'),
-                        'confidence': 0.5,
-                        'metadata': {},
-                        'provenance': {},
-                        'source_family': 'evidence',
-                        'source_record_id': record_id,
-                        'source_ref': str(evidence_info.get('cid') or ''),
-                        'record_scope': 'evidence',
-                        'artifact_family': '',
-                        'corpus_family': '',
-                        'content_origin': '',
-                        'parse_source': '',
-                        'input_format': '',
-                        'quality_tier': '',
-                        'quality_score': 0.0,
-                        'page_count': 0,
-                    }
+                fact = CaseFact(
+                    fact_id=f'fact:{hashlib.sha256(parsed_text_preview.encode()).hexdigest()[:16]}',
+                    text=parsed_text_preview,
+                    source_artifact_id=artifact_id,
+                    source_family='evidence',
+                    source_record_id=record_id,
+                    source_ref=cid,
+                    record_scope='evidence',
+                    confidence=0.5,
+                    metadata=_merge_intake_summary_handoff_metadata(
+                        build_fact_lineage_metadata(
+                            {},
+                            parse_contract=parse_contract,
+                            record_scope='evidence',
+                            source_ref=artifact_id,
+                        ),
+                        self.mediator,
+                    ),
+                    provenance=build_provenance(
+                        source_url=str(provenance_payload.get('source_url', '')),
+                        acquisition_method=str(provenance_payload.get('acquisition_method', '')),
+                        source_type=str(provenance_payload.get('source_type', '')),
+                        acquired_at=str(provenance_payload.get('acquired_at', '')),
+                        content_hash=str(provenance_payload.get('content_hash', '')),
+                        source_system=str(provenance_payload.get('source_system', '')),
+                        jurisdiction=str(provenance_payload.get('jurisdiction', '')),
+                        metadata=provenance_metadata,
+                    ),
                 )
+                memory_facts.append(fact.as_dict())
             record['fact_count'] = len(memory_facts)
             self._memory_records.append(record)
             self._memory_graphs[record_id] = document_graph if isinstance(document_graph, dict) else {'status': 'unavailable', 'entities': [], 'relationships': []}

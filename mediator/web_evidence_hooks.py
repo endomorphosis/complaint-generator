@@ -23,7 +23,11 @@ from .integrations import (
     VectorRetrievalAugmentor,
     GraphAwareRetrievalReranker,
 )
-from integrations.ipfs_datasets.documents import detect_document_input_format
+from integrations.ipfs_datasets.documents import (
+    detect_document_input_format,
+    extraction_method_for_format,
+    quality_score_for_format,
+)
 from integrations.ipfs_datasets.provenance import build_document_parse_contract, enrich_document_parse
 from integrations.ipfs_datasets.search import (
     BRAVE_SEARCH_AVAILABLE,
@@ -936,35 +940,16 @@ class WebEvidenceIntegrationHook:
 
         extraction_method = str(parse_summary.get('extraction_method') or lineage.get('normalization') or '')
         if not extraction_method:
-            extraction_method = {
-                'html': 'html_to_text',
-                'email': 'email_to_text',
-                'rtf': 'rtf_to_text',
-                'docx': 'docx_xml_to_text',
-                'pdf': 'pdf_text_fallback',
-            }.get(input_format, 'text_normalization' if text_length > 0 else '')
+            extraction_method = extraction_method_for_format(input_format, text_present=bool(text_length))
 
         quality_score = float(parse_summary.get('quality_score', parse_quality.get('quality_score', 0.0)) or 0.0)
-        if quality_score == 0.0 and text_length > 0:
-            quality_score = {
-                'text': 98.0,
-                'html': 95.0,
-                'email': 93.0,
-                'docx': 88.0,
-                'rtf': 82.0,
-                'pdf': 68.0,
-            }.get(input_format, 75.0)
-
         quality_tier = str(parse_summary.get('quality_tier') or parse_quality.get('quality_tier') or '')
-        if not quality_tier:
-            if quality_score >= 90.0:
-                quality_tier = 'high'
-            elif quality_score >= 75.0:
-                quality_tier = 'medium'
-            elif quality_score > 0.0:
-                quality_tier = 'low'
-            else:
-                quality_tier = 'empty'
+        if quality_score == 0.0 and text_length > 0 or not quality_tier:
+            _qs = quality_score_for_format(input_format, text_present=bool(text_length))
+            if quality_score == 0.0 and text_length > 0:
+                quality_score = _qs['quality_score']
+            if not quality_tier:
+                quality_tier = _qs['quality_tier']
 
         return {
             'cid': storage_result.get('cid', ''),

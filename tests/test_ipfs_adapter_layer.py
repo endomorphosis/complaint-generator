@@ -1445,3 +1445,78 @@ def test_ensure_ipfs_backend_uses_local_fallback_when_kubo_missing():
     assert isinstance(backend, LocalCacheIPFSBackend)
     mock_set_default.assert_called_once()
     mock_clear.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# extraction_method_for_format and quality_score_for_format helpers
+# ---------------------------------------------------------------------------
+
+def test_extraction_method_for_format_returns_canonical_labels():
+    from integrations.ipfs_datasets.documents import extraction_method_for_format
+
+    assert extraction_method_for_format("html") == "html_to_text"
+    assert extraction_method_for_format("email") == "email_to_text"
+    assert extraction_method_for_format("rtf") == "rtf_to_text"
+    assert extraction_method_for_format("docx") == "docx_xml_to_text"
+    assert extraction_method_for_format("pdf", text_present=True) == "pdf_text_fallback"
+    assert extraction_method_for_format("pdf", text_present=False) == "pdf_unparsed"
+    assert extraction_method_for_format("text") == "text_normalization"
+    assert extraction_method_for_format("unknown") == "text_normalization"
+
+
+def test_quality_score_for_format_returns_expected_scores():
+    from integrations.ipfs_datasets.documents import quality_score_for_format
+
+    html_qs = quality_score_for_format("html")
+    assert html_qs["quality_score"] == 95.0
+    assert html_qs["quality_tier"] == "high"
+
+    email_qs = quality_score_for_format("email")
+    assert email_qs["quality_score"] == 93.0
+    assert email_qs["quality_tier"] == "high"
+
+    docx_qs = quality_score_for_format("docx")
+    assert docx_qs["quality_score"] == 88.0
+    assert docx_qs["quality_tier"] == "medium"
+
+    rtf_qs = quality_score_for_format("rtf")
+    assert rtf_qs["quality_score"] == 82.0
+    assert rtf_qs["quality_tier"] == "medium"
+
+    pdf_qs = quality_score_for_format("pdf")
+    assert pdf_qs["quality_score"] == 68.0
+    assert pdf_qs["quality_tier"] == "low"
+
+    empty_qs = quality_score_for_format("pdf", text_present=False)
+    assert empty_qs["quality_score"] == 0.0
+    assert empty_qs["quality_tier"] == "empty"
+
+
+def test_extraction_method_for_format_matches_parse_document_bytes_output():
+    """extraction_method_for_format must agree with the value embedded in parse results."""
+    from integrations.ipfs_datasets.documents import (
+        extraction_method_for_format,
+        parse_document_bytes,
+    )
+
+    for fmt, payload, mime in [
+        ("html", b"<html><body><p>Hello</p></body></html>", "text/html"),
+        ("text", b"Plain text evidence.", "text/plain"),
+    ]:
+        parse_result = parse_document_bytes(payload, mime_type=mime)
+        expected = extraction_method_for_format(fmt, text_present=True)
+        assert parse_result["summary"]["extraction_method"] == expected
+
+
+def test_quality_score_for_format_matches_parse_document_bytes_output():
+    """quality_score_for_format must agree with the quality_score in parse results."""
+    from integrations.ipfs_datasets.documents import (
+        quality_score_for_format,
+        parse_document_bytes,
+    )
+
+    html_payload = b"<html><body><p>Evidence content.</p></body></html>"
+    parse_result = parse_document_bytes(html_payload, mime_type="text/html")
+    expected = quality_score_for_format("html", text_present=True)
+    assert parse_result["summary"]["quality_score"] == expected["quality_score"]
+    assert parse_result["summary"]["quality_tier"] == expected["quality_tier"]

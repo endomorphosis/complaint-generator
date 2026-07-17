@@ -1038,6 +1038,60 @@ def summarize_document_parse(document_parse: Dict[str, Any]) -> Dict[str, Any]:
     ).as_dict()
 
 
+def extraction_method_for_format(input_format: str, text_present: bool = True) -> str:
+    """Return the canonical extraction-method label for a given input format.
+
+    This is the single source of truth for the format→extraction-method mapping
+    used by all parse pipelines and hooks.  Callers should import this helper
+    instead of maintaining local lookup tables.
+
+    Args:
+        input_format: Normalised input format string (e.g. ``"html"``, ``"pdf"``).
+        text_present: Whether usable text was extracted from the document.  Only
+            relevant for PDF inputs where the absence of text implies the document
+            needs OCR rather than a text-extraction fallback.
+
+    Returns:
+        A human-readable extraction-method label string.
+    """
+    return _determine_normalization_label(input_format, text_present)
+
+
+def quality_score_for_format(input_format: str, text_present: bool = True) -> Dict[str, Any]:
+    """Return the canonical quality-score and quality-tier for a given input format.
+
+    Like :func:`extraction_method_for_format`, this is the authoritative source
+    for the format→quality mapping so that hooks and downstream consumers do not
+    maintain their own duplicate lookup tables.
+
+    Args:
+        input_format: Normalised input format string (e.g. ``"html"``, ``"pdf"``).
+        text_present: Whether usable text was extracted.  When ``False`` the
+            returned quality score is 0.0 and the tier is ``"empty"``.
+
+    Returns:
+        A dict with keys ``quality_score`` (float) and ``quality_tier`` (str).
+    """
+    _base_scores: Dict[str, float] = {
+        "text": 98.0,
+        "html": 95.0,
+        "email": 93.0,
+        "docx": 88.0,
+        "rtf": 82.0,
+        "pdf": 68.0,
+    }
+    quality_score = 0.0 if not text_present else _base_scores.get(input_format, 75.0)
+    if quality_score >= 90.0:
+        quality_tier = "high"
+    elif quality_score >= 75.0:
+        quality_tier = "medium"
+    elif quality_score > 0.0:
+        quality_tier = "low"
+    else:
+        quality_tier = "empty"
+    return {"quality_score": round(quality_score, 2), "quality_tier": quality_tier}
+
+
 __all__ = [
     "InputDetector",
     "BatchProcessor",
@@ -1046,6 +1100,7 @@ __all__ = [
     "PARSER_VERSION",
     "chunk_text",
     "detect_document_input_format",
+    "extraction_method_for_format",
     "extract_text_content",
     "ingest_download_manifest",
     "ingest_local_document",
@@ -1053,6 +1108,7 @@ __all__ = [
     "parse_document_bytes",
     "parse_document_file",
     "parse_pdf_to_record",
+    "quality_score_for_format",
     "should_parse_document_input",
     "summarize_document_parse",
 ]
