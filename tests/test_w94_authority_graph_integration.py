@@ -80,7 +80,6 @@ def test_treatment_edges_added_between_authorities():
     assert len(relations) == 1
     rel = relations[0]
     assert float(rel.attributes.get("confidence", 0)) == 0.8
-    assert "limits" in rel.attributes.get("explanation", "").lower() or True
 
 
 def test_treatment_edge_types_accepted():
@@ -136,7 +135,10 @@ def test_rule_candidates_create_rule_candidate_elements():
 
 
 def test_rule_candidate_extracted_from_edge():
-    """A rule candidate node has an extracted_from edge back to its authority."""
+    """A rule candidate node has an extracted_from edge pointing to its authority.
+
+    The edge models 'rule extracted_from authority', so source=rule, target=authority.
+    """
     authority = {
         "authority_id": "A1",
         "name": "Title VII",
@@ -148,7 +150,10 @@ def test_rule_candidate_extracted_from_edge():
     extracted_rels = [r for r in graph.relations.values() if r.relation_type == "extracted_from"]
     assert len(extracted_rels) == 1
     rule_nodes = graph.get_elements_by_type("rule_candidate")
-    assert extracted_rels[0].target_id == rule_nodes[0].id
+    authority_nodes = graph.get_elements_by_type("authority_source")
+    rel = extracted_rels[0]
+    assert rel.source_id == rule_nodes[0].id
+    assert rel.target_id == authority_nodes[0].id
 
 
 def test_rule_candidate_governs_claim_element():

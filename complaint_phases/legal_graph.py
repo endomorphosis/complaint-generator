@@ -769,8 +769,8 @@ class LegalGraphBuilder:
         ``rule_candidate`` element and, when the candidate's
         ``claim_element_id`` is in *element_id_to_graph_id*, adds a
         ``governs`` edge from the rule to the matched claim-element node.
-        An ``extracted_from`` edge is always added from the authority to the
-        rule candidate node.
+        An ``extracted_from`` edge is always added from the rule candidate to the
+        authority node (rule *extracted_from* authority).
         """
         for candidate in authority.get('rule_candidates') or []:
             if not isinstance(candidate, dict):
@@ -792,12 +792,12 @@ class LegalGraphBuilder:
                 },
             )
             graph.add_element(rule_node)
-            # authority → rule candidate
+            # rule candidate extracted_from authority (rule → authority direction)
             graph.add_relation(
                 LegalRelation(
                     id=self._get_relation_id(),
-                    source_id=authority_node_id,
-                    target_id=rule_node.id,
+                    source_id=rule_node.id,
+                    target_id=authority_node_id,
                     relation_type='extracted_from',
                     attributes={'confidence': confidence},
                 )
