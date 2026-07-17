@@ -9,15 +9,6 @@ def _normalize_key(value: Any) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in text).strip("_")
 
 
-def _days_since_date(date_str: Any) -> Optional[int]:
-    """Return the number of days since the given ISO date string, or None if unparseable."""
-    try:
-        event_date = date.fromisoformat(str(date_str or "").strip()[:10])
-        return (date.today() - event_date).days
-    except (ValueError, TypeError):
-        return None
-
-
 def _latest_anchored_date(facts: List[Dict[str, Any]]) -> Optional[str]:
     """Return the latest start_date found across a list of temporal facts, or None."""
     best: Optional[str] = None
@@ -231,13 +222,14 @@ def evaluate_temporal_rule_profile(
             })
 
     # T2: Limitations-risk detection.  Check both the issue registry and, where anchored
-    # adverse-action dates are available, compute the elapsed days against the standard
-    # EEOC 300-day filing window.  The 300-day window applies in states with a deferral
-    # agency (Title VII, ADA, ADEA); the 180-day window applies in non-deferral states.
-    # Because the system cannot always know whether the complainant's state has a deferral
-    # agency, we flag a warning at 300 days and note the 180-day threshold as a secondary
-    # risk.  This is a warning, not a hard blocker, because the exact limitations period
-    # depends on jurisdiction and filing date facts that are not always in the record.
+    # adverse-action dates are available, compute the elapsed days against the EEOC filing
+    # window.  Two thresholds exist in practice: 180 days in non-deferral states (no state
+    # or local fair employment practices agency) and 300 days in deferral states (where a
+    # state or local agency exists).  We flag the risk at 180 days so that both non-deferral
+    # and deferral cases are caught early; callers can inspect limitations_risk_days to
+    # determine which window applies.  This is a warning, not a hard blocker, because the
+    # exact limitations period depends on jurisdiction and filing date facts that may not
+    # always be in the record.
     has_limitations_risk = "limitations_risk" in relevant_issue_types
     limitations_risk_days: Optional[int] = None
     if not has_limitations_risk and reference_date is not None and anchored_adverse_fact_ids:
