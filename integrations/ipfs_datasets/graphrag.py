@@ -823,11 +823,13 @@ def score_ontology_support_paths(
     )
 
     # Relation density: ratio of actual relation triples to all possible ordered entity
-    # pairs (excluding self-loops), treating the graph as directed.  A directed model
-    # is used here because legal-ontology relations (e.g. "employer→employee",
-    # "policy→violation") are inherently asymmetric, so the directed pair count
-    # (n*(n-1)) better reflects the space of meaningful predicate assertions than the
-    # undirected formula (n*(n-1)/2).  The score is capped at 1.0 for outlier inputs.
+    # pairs (excluding self-loops), treating the graph as directed.  Self-loops are
+    # excluded because an entity pointing to itself carries no meaningful relational
+    # information in a legal ontology.  A directed model is used because legal-ontology
+    # relations (e.g. "employer→employee", "policy→violation") are inherently
+    # asymmetric, so the directed pair count (n*(n-1)) better reflects the space of
+    # meaningful predicate assertions than the undirected formula (n*(n-1)/2).  The
+    # score is capped at 1.0 for outlier inputs.
     entity_count = max(len(entities), 1)
     max_pairs = max(entity_count * (entity_count - 1), 1)
     relation_density_raw = len(relations) / max_pairs
