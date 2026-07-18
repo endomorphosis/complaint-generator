@@ -236,7 +236,19 @@ class ClaimSupportTestimonySaveRequest(BaseModel):
     include_follow_up_plan: bool = True
 
 
-class ClaimSupportDocumentSaveRequest(BaseModel):
+class _ClaimSupportPostSaveReviewMixin(BaseModel):
+    """Shared fields that control which sections are included in post-action review payloads."""
+
+    required_support_kinds: List[str] = Field(
+        default_factory=lambda: list(DEFAULT_REQUIRED_SUPPORT_KINDS)
+    )
+    include_post_save_review: bool = True
+    include_support_summary: bool = True
+    include_overview: bool = True
+    include_follow_up_plan: bool = True
+
+
+class ClaimSupportDocumentSaveRequest(_ClaimSupportPostSaveReviewMixin):
     user_id: Optional[str] = None
     claim_type: Optional[str] = None
     claim_element_id: Optional[str] = None
@@ -249,27 +261,13 @@ class ClaimSupportDocumentSaveRequest(BaseModel):
     evidence_type: str = "document"
     testimony_id: Optional[str] = None
     document_metadata: Dict[str, Any] = Field(default_factory=dict)
-    required_support_kinds: List[str] = Field(
-        default_factory=lambda: list(DEFAULT_REQUIRED_SUPPORT_KINDS)
-    )
-    include_post_save_review: bool = True
-    include_support_summary: bool = True
-    include_overview: bool = True
-    include_follow_up_plan: bool = True
 
 
-class ClaimSupportReparseDocumentRequest(BaseModel):
+class ClaimSupportReparseDocumentRequest(_ClaimSupportPostSaveReviewMixin):
     user_id: Optional[str] = None
     claim_type: Optional[str] = None
     record_id: int
     force_ocr: bool = False
-    required_support_kinds: List[str] = Field(
-        default_factory=lambda: list(DEFAULT_REQUIRED_SUPPORT_KINDS)
-    )
-    include_post_save_review: bool = True
-    include_support_summary: bool = True
-    include_overview: bool = True
-    include_follow_up_plan: bool = True
 
 
 class ClaimSupportIntakeSummaryConfirmRequest(BaseModel):
@@ -3000,7 +2998,13 @@ def _collect_claim_document_records(
 
         record_meta = dict(record.get("parse_metadata") or {})
         remediation = _derive_remediation_flags(record_meta, str(record.get("parse_status") or ""))
-        linked_testimony_id = str((record.get("metadata") or {}).get("testimony_id") or "") if isinstance(record.get("metadata"), dict) else ""
+        record_metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        linked_testimony_id = str((record_metadata or {}).get("testimony_id") or "")
+        record_filename = str((record_metadata or {}).get("filename") or "")
+        record_mime_type = (
+            str((record_metadata or {}).get("mime_type") or "")
+            or str(record_meta.get("mime_type") or "")
+        )
 
         entry = {
             "record_id": record_id,
@@ -3012,12 +3016,8 @@ def _collect_claim_document_records(
             "description": record.get("description"),
             "timestamp": record.get("timestamp"),
             "source_url": record.get("source_url"),
-            "filename": (record.get("metadata") or {}).get("filename") if isinstance(record.get("metadata"), dict) else "",
-            "mime_type": (
-                ((record.get("metadata") or {}).get("mime_type"))
-                if isinstance(record.get("metadata"), dict)
-                else ""
-            ) or str((record.get("parse_metadata") or {}).get("mime_type") or ""),
+            "filename": record_filename,
+            "mime_type": record_mime_type,
             "parse_status": record.get("parse_status"),
             "chunk_count": int(record.get("chunk_count", 0) or 0),
             "fact_count": int(record.get("fact_count", 0) or 0),
