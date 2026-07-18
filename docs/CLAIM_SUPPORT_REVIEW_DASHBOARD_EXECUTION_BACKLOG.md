@@ -77,7 +77,7 @@ The goal now is not to redesign the system abstractly. The goal is to deliver a 
 
 ## M0: Question And Testimony Foundation
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -96,14 +96,14 @@ Make `/claim-support-review` a guided intake and clarification workflow instead 
 
 ### Checklist
 
-- [ ] add question recommendation payloads with `question_id`, `target_claim_element_id`, `question_lane`, `question_reason`, and `expected_proof_gain`
-- [ ] rank questions by unresolved legal value, contradiction impact, and evidentiary weakness
-- [ ] distinguish testimony questions from document-request questions
-- [ ] add a structured testimony composer with event date, actor, act, target, harm, confidence, and firsthand status
-- [ ] preserve raw narrative alongside structured testimony extraction preview
-- [ ] persist testimony records and revisions through mediator-backed storage
-- [ ] link testimony items to candidate claim elements before or at save time
-- [ ] surface testimony-backed support counts in existing coverage summaries
+- [x] add question recommendation payloads with `question_id`, `target_claim_element_id`, `question_lane`, `question_reason`, and `expected_proof_gain`
+- [x] rank questions by unresolved legal value, contradiction impact, and evidentiary weakness
+- [x] distinguish testimony questions from document-request questions
+- [x] add a structured testimony composer with event date, actor, act, target, harm, confidence, and firsthand status
+- [x] preserve raw narrative alongside structured testimony extraction preview
+- [x] persist testimony records and revisions through mediator-backed storage
+- [x] link testimony items to candidate claim elements before or at save time
+- [x] surface testimony-backed support counts in existing coverage summaries
 
 ### Acceptance criteria
 

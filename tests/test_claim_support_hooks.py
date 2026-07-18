@@ -4167,3 +4167,206 @@ class TestClaimSupportHook:
         finally:
             if os.path.exists(db_path):
                 os.unlink(db_path)
+
+
+class TestQuestionRecommendationsM0:
+    """Tests for M0: get_question_recommendations and testimony_backed_count."""
+
+    def _make_hook(self, db_path):
+        try:
+            from mediator.claim_support_hooks import ClaimSupportHook
+        except ImportError as e:
+            pytest.skip(f"ClaimSupportHook requires dependencies: {e}")
+        mock_mediator = Mock()
+        mock_mediator.log = Mock()
+        mock_mediator.get_three_phase_status = Mock(return_value={})
+        return ClaimSupportHook(mock_mediator, db_path=db_path)
+
+    def test_get_question_recommendations_no_data_returns_empty(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            result = hook.get_question_recommendations('testuser', claim_type='employment')
+            assert result['available'] is True
+            assert result['total_recommendations'] == 0
+            assert result['recommendations'] == []
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_get_question_recommendations_produces_recs_for_gaps(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {
+                    'employment': [
+                        'Protected activity',
+                        'Adverse employment action',
+                        'Causal connection',
+                    ]
+                },
+            )
+            result = hook.get_question_recommendations('testuser', claim_type='employment')
+            recs = result['recommendations']
+            assert result['total_recommendations'] > 0
+            assert len(recs) > 0
+            # All three elements have no support → missing_element lane
+            for rec in recs:
+                assert rec['question_id'].startswith('qrec:')
+                assert rec['question_lane'] in hook._QUESTION_LANE_WEIGHTS
+                assert rec['question_type'] in ('testimony', 'document_request')
+                assert 0.0 < rec['expected_proof_gain'] <= 1.0
+                assert isinstance(rec['question_text'], str) and len(rec['question_text']) > 10
+                assert rec['target_claim_element_id']
+                assert rec['question_reason']
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_get_question_recommendations_ranked_by_proof_gain(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {'employment': ['Protected activity', 'Adverse employment action']},
+            )
+            # Add partial support to one element so it differs from zero-support
+            hook.add_support_link(
+                user_id='testuser',
+                claim_type='employment',
+                claim_element_id='employment:2',
+                claim_element_text='Adverse employment action',
+                support_kind='authority',
+                support_ref='42 U.S.C. § 2000e',
+                support_label='Title VII',
+                source_table='legal_authorities',
+            )
+            result = hook.get_question_recommendations('testuser', claim_type='employment')
+            recs = result['recommendations']
+            # Gains should be non-increasing
+            gains = [r['expected_proof_gain'] for r in recs]
+            assert gains == sorted(gains, reverse=True)
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_get_question_recommendations_distinguishes_testimony_vs_doc_request(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {'employment': ['Protected activity', 'Adverse employment action']},
+            )
+            # Give element 2 authority support but no evidence → testimony_gap lane
+            hook.add_support_link(
+                user_id='testuser',
+                claim_type='employment',
+                claim_element_id='employment:2',
+                claim_element_text='Adverse employment action',
+                support_kind='authority',
+                support_ref='42 U.S.C. § 2000e',
+                source_table='legal_authorities',
+                support_label='Title VII',
+            )
+            result = hook.get_question_recommendations('testuser', claim_type='employment')
+            recs = result['recommendations']
+            types = {r['question_type'] for r in recs}
+            # At minimum we should see 'testimony' type
+            assert 'testimony' in types
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_get_question_recommendations_max_recommendations_respected(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {'employment': [f'Element {i}' for i in range(10)]},
+            )
+            result = hook.get_question_recommendations(
+                'testuser', claim_type='employment', max_recommendations=3
+            )
+            assert len(result['recommendations']) <= 3
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_summarize_claim_support_includes_testimony_backed_count(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {'employment': ['Protected activity', 'Adverse employment action']},
+            )
+            # Save a testimony record
+            hook.save_testimony_record(
+                'testuser',
+                'employment',
+                claim_element_id='employment:1',
+                claim_element_text='Protected activity',
+                raw_narrative='I filed a complaint with HR on March 5.',
+                actor='testuser',
+                firsthand_status='firsthand',
+            )
+            summary = hook.summarize_claim_support('testuser', 'employment')
+            claim = summary['claims']['employment']
+            assert 'testimony_backed_count' in claim
+            assert claim['testimony_backed_count'] >= 1
+            assert 'testimony_backed_elements' in claim
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_summarize_element_includes_testimony_backed_count(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {'employment': ['Protected activity']},
+            )
+            hook.save_testimony_record(
+                'testuser',
+                'employment',
+                claim_element_id='employment:1',
+                claim_element_text='Protected activity',
+                raw_narrative='Reported the violation on July 1.',
+                firsthand_status='firsthand',
+            )
+            summary = hook.summarize_claim_support('testuser', 'employment')
+            elements = summary['claims']['employment']['elements']
+            assert len(elements) == 1
+            assert 'testimony_backed_count' in elements[0]
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_question_recommendations_testimony_count_and_doc_request_count(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {'employment': ['Protected activity', 'Adverse employment action']},
+            )
+            result = hook.get_question_recommendations('testuser', claim_type='employment')
+            total = result['testimony_recommendations'] + result['document_request_recommendations']
+            assert total == result['total_recommendations']
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)

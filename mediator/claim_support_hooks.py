@@ -3929,16 +3929,26 @@ class ClaimSupportHook:
                         'total_links': len(requirement_links),
                         'fact_count': element_fact_count,
                         'support_by_kind': element_support_by_kind,
+                        'testimony_backed_count': element_support_by_kind.get('testimony', 0),
                         'authority_treatment_summary': authority_treatment_summary,
                         'authority_rule_candidate_summary': authority_rule_candidate_summary,
                         'links': requirement_links,
                     }
                 )
 
+            testimony_backed_links = sum(1 for link in claim_links if link.get('support_kind') == 'testimony')
+            testimony_backed_elements = sum(
+                1
+                for req in claim_requirements
+                for link in links_by_element.get(req['element_id'], links_by_element.get(req['element_text'], []))
+                if link.get('support_kind') == 'testimony'
+            )
             summary['claims'][current_claim] = {
                 'total_links': len(claim_links),
                 'total_facts': total_facts,
                 'support_by_kind': support_by_kind,
+                'testimony_backed_count': testimony_backed_links,
+                'testimony_backed_elements': testimony_backed_elements,
                 'total_elements': len(claim_requirements),
                 'covered_elements': covered_elements,
                 'uncovered_elements': max(len(claim_requirements) - covered_elements, 0),
@@ -5803,3 +5813,214 @@ class ClaimSupportHook:
             'priority': priority,
             'status': 'pending',
         }
+
+    # -----------------------------------------------------------------------
+    # M0: Question And Testimony Foundation
+    # -----------------------------------------------------------------------
+
+    _QUESTION_LANE_WEIGHTS: Dict[str, float] = {
+        'contradiction_resolution': 1.0,
+        'missing_element': 0.9,
+        'adverse_authority': 0.85,
+        'testimony_gap': 0.8,
+        'document_request': 0.7,
+        'authority_gap': 0.65,
+        'coverage_improvement': 0.5,
+    }
+
+    def _question_lane_for_element(self, element: Dict[str, Any]) -> str:
+        """Determine the most important question lane for an unresolved element."""
+        action = str(element.get('recommended_action') or '')
+        authority_treatment = element.get('authority_treatment_summary', {}) if isinstance(
+            element.get('authority_treatment_summary'), dict
+        ) else {}
+        if int(authority_treatment.get('adverse_authority_link_count', 0) or 0) > 0:
+            return 'adverse_authority'
+        if action == 'collect_initial_support':
+            return 'missing_element'
+        if action == 'collect_fact_support':
+            return 'testimony_gap'
+        if action == 'collect_missing_support_kind':
+            missing = list(element.get('missing_support_kinds', []) or [])
+            if 'evidence' in missing or 'testimony' in missing:
+                return 'document_request'
+            if 'authority' in missing:
+                return 'authority_gap'
+        return 'coverage_improvement'
+
+    def _question_type_for_lane(self, lane: str) -> str:
+        """Map a question lane to testimony vs. document_request."""
+        if lane in ('missing_element', 'testimony_gap', 'contradiction_resolution'):
+            return 'testimony'
+        if lane in ('document_request',):
+            return 'document_request'
+        if lane in ('adverse_authority', 'authority_gap'):
+            return 'document_request'
+        return 'testimony'
+
+    def _question_reason_for_element(
+        self, element: Dict[str, Any], lane: str, contradiction_element_ids: List[str]
+    ) -> str:
+        """Build a human-readable explanation for why this question is recommended."""
+        element_text = str(element.get('element_text') or '')
+        missing = list(element.get('missing_support_kinds', []) or [])
+        if lane == 'contradiction_resolution' or element.get('element_id') in contradiction_element_ids:
+            return f"Contradictory evidence has been detected for '{element_text}'. Testimony is needed to resolve the conflict."
+        if lane == 'missing_element':
+            return f"'{element_text}' has no supporting evidence yet. Initial testimony is required to establish this element."
+        if lane == 'testimony_gap':
+            return f"'{element_text}' has authority support but lacks firsthand testimony to corroborate the rule application."
+        if lane == 'document_request':
+            missing_str = ', '.join(missing) if missing else 'evidence'
+            return f"'{element_text}' is missing {missing_str}. A document request or records request would fill this gap."
+        if lane == 'adverse_authority':
+            return f"'{element_text}' has adverse authority that must be distinguished. Targeted factual testimony is needed."
+        if lane == 'authority_gap':
+            return f"'{element_text}' has factual support but no legal authority. A legal research task or case law citation would strengthen the claim."
+        return f"'{element_text}' has incomplete support. Additional information would improve claim strength."
+
+    def _expected_proof_gain_for_element(self, element: Dict[str, Any], lane: str) -> float:
+        """Estimate how much proof progress a question in this lane would yield (0–1)."""
+        base = self._QUESTION_LANE_WEIGHTS.get(lane, 0.5)
+        total_links = int(element.get('total_links', 0) or 0)
+        fact_count = int(element.get('fact_count', 0) or 0)
+        # Bonus for zero-evidence elements (any answer is net-positive)
+        if total_links == 0 and fact_count == 0:
+            base = min(base + 0.1, 1.0)
+        # Small penalty for elements that already have partial support
+        elif total_links > 2 and lane not in ('contradiction_resolution', 'adverse_authority'):
+            base = max(base - 0.1, 0.1)
+        return round(base, 3)
+
+    def get_question_recommendations(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+        *,
+        required_support_kinds: Optional[List[str]] = None,
+        max_recommendations: int = 20,
+    ) -> Dict[str, Any]:
+        """Return ranked question recommendations for *user_id* based on proof gaps.
+
+        Each recommendation includes:
+        - ``question_id`` — stable deterministic identifier
+        - ``target_claim_element_id`` — element the question targets
+        - ``question_lane`` — category of question (e.g. ``missing_element``, ``testimony_gap``)
+        - ``question_type`` — ``testimony`` or ``document_request``
+        - ``question_reason`` — human-readable explanation of why the question is recommended
+        - ``expected_proof_gain`` — estimated improvement in proof readiness (0–1)
+        - ``question_text`` — draft question text the operator can use directly
+        """
+        gaps = self.get_claim_support_gaps(
+            user_id,
+            claim_type=claim_type,
+            required_support_kinds=required_support_kinds,
+        )
+        contradictions = self.get_claim_contradiction_candidates(user_id, claim_type=claim_type)
+
+        # Collect element IDs that have active contradictions
+        contradiction_element_ids: List[str] = []
+        for claim_contradictions in (contradictions.get('claims') or {}).values():
+            for candidate in (claim_contradictions.get('candidates') or []):
+                for ref_id in (candidate.get('element_ids') or []):
+                    contradiction_element_ids.append(str(ref_id))
+
+        recommendations: List[Dict[str, Any]] = []
+        max_int = max_recommendations if isinstance(max_recommendations, int) and max_recommendations > 0 else 20
+
+        for current_claim, claim_gaps in (gaps.get('claims') or {}).items():
+            for element in (claim_gaps.get('unresolved_elements') or []):
+                if not isinstance(element, dict):
+                    continue
+                element_id = str(element.get('element_id') or '')
+                element_text = str(element.get('element_text') or '')
+                if not element_text:
+                    continue
+
+                is_contradicted = element_id in contradiction_element_ids
+                lane = 'contradiction_resolution' if is_contradicted else self._question_lane_for_element(element)
+                question_type = self._question_type_for_lane(lane)
+                reason = self._question_reason_for_element(element, lane, contradiction_element_ids)
+                gain = self._expected_proof_gain_for_element(element, lane)
+
+                # Build a draft question text appropriate for the lane
+                question_text = self._draft_question_text(element_text, lane, element)
+
+                # Deterministic ID from user, claim, element, and lane
+                qid_src = f'{user_id}:{current_claim}:{element_id}:{lane}'
+                question_id = 'qrec:' + hashlib.sha1(qid_src.encode()).hexdigest()[:12]
+
+                recommendations.append({
+                    'question_id': question_id,
+                    'claim_type': current_claim,
+                    'target_claim_element_id': element_id,
+                    'target_claim_element_text': element_text,
+                    'question_lane': lane,
+                    'question_type': question_type,
+                    'question_reason': reason,
+                    'expected_proof_gain': gain,
+                    'question_text': question_text,
+                    'element_status': element.get('status', ''),
+                    'element_total_links': int(element.get('total_links', 0) or 0),
+                    'element_missing_support_kinds': list(element.get('missing_support_kinds', []) or []),
+                })
+
+        # Rank by expected_proof_gain descending, then by lane priority
+        recommendations.sort(key=lambda r: (-r['expected_proof_gain'], r['question_lane']))
+        recommendations = recommendations[:max_int]
+
+        return self._with_intake_summary_handoff({
+            'available': True,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'total_recommendations': len(recommendations),
+            'testimony_recommendations': sum(1 for r in recommendations if r['question_type'] == 'testimony'),
+            'document_request_recommendations': sum(
+                1 for r in recommendations if r['question_type'] == 'document_request'
+            ),
+            'contradiction_resolution_count': sum(
+                1 for r in recommendations if r['question_lane'] == 'contradiction_resolution'
+            ),
+            'recommendations': recommendations,
+        })
+
+    def _draft_question_text(self, element_text: str, lane: str, element: Dict[str, Any]) -> str:
+        """Generate a draft question text for an operator to use directly."""
+        element_lower = element_text.lower()
+        if lane == 'contradiction_resolution':
+            return (
+                f"We have conflicting information about {element_text}. "
+                "Could you describe exactly what happened, in your own words, so we can clarify the record?"
+            )
+        if lane == 'missing_element':
+            return (
+                f"To support your claim regarding {element_text}, "
+                "please describe what happened, when it occurred, and who was involved."
+            )
+        if lane == 'testimony_gap':
+            return (
+                f"We have some legal authority supporting your position on {element_text}. "
+                "Can you describe a specific incident or situation that directly demonstrates this in your case?"
+            )
+        if lane == 'document_request':
+            missing = list(element.get('missing_support_kinds', []) or [])
+            doc_kind = missing[0] if missing else 'documents'
+            return (
+                f"Do you have any {doc_kind} — such as records, correspondence, or reports — "
+                f"that relate to {element_text}? If so, please provide or describe them."
+            )
+        if lane == 'adverse_authority':
+            return (
+                f"There is case law that may present a challenge to your position on {element_text}. "
+                "Are there facts in your situation that you believe would distinguish your case from that precedent?"
+            )
+        if lane == 'authority_gap':
+            return (
+                f"Your factual account addresses {element_text}, "
+                "but we do not yet have legal authority supporting this element. "
+                "Are you aware of any prior cases, statutes, or regulations that apply to your situation?"
+            )
+        return (
+            f"Can you provide any additional information or documentation related to {element_text} "
+            "that would help establish or strengthen this aspect of your claim?"
+        )

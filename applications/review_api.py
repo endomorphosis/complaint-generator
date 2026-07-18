@@ -169,6 +169,23 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
             )
 
     # -----------------------------------------------------------------------
+    # M0: Question And Testimony Foundation
+    # -----------------------------------------------------------------------
+
+    @router.get("/api/claim-support/question-recommendations")
+    async def claim_support_question_recommendations(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        max_recommendations: int = Query(default=20, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_question_recommendations(
+            resolved_user,
+            claim_type=claim_type,
+            max_recommendations=max_recommendations,
+        )
+
+    # -----------------------------------------------------------------------
     # M4: Operator drilldown routes (timeline, archive-history, graph-trace,
     #     enrichment-queue, background enrichment submission).
     # -----------------------------------------------------------------------
