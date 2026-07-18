@@ -230,7 +230,7 @@ Create one durable substrate for testimony facts, document facts, authority fact
 
 ## M3: Graph Snapshot Persistence And Support Paths
 
-Status: Planned
+Status: Complete
 Priority: P1
 
 ### Goal
@@ -247,11 +247,11 @@ Make support paths queryable and reusable across review, follow-up, and drafting
 
 ### Checklist
 
-- [ ] persist testimony, evidence, and law-adjacent graph snapshots with stable IDs
-- [ ] add query helpers for support-path and contradiction-path lookups per element
-- [ ] resolve duplicate or near-duplicate actors and entities across testimony and document graphs
-- [ ] attach provenance edges from facts to chunks and chunks to artifacts
-- [ ] expose graph snapshot references and support-path summaries in review payloads
+- [x] persist testimony, evidence, and law-adjacent graph snapshots with stable IDs
+- [x] add query helpers for support-path and contradiction-path lookups per element
+- [x] resolve duplicate or near-duplicate actors and entities across testimony and document graphs
+- [x] attach provenance edges from facts to chunks and chunks to artifacts
+- [x] expose graph snapshot references and support-path summaries in review payloads
 
 ### Acceptance criteria
 

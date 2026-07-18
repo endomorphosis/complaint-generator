@@ -200,6 +200,63 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
         )
 
     # -----------------------------------------------------------------------
+    # M3: Graph snapshot persistence and support-path query routes.
+    # -----------------------------------------------------------------------
+
+    @router.get("/api/claim-support/support-paths")
+    async def claim_support_paths(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        path_kind: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_support_paths_for_element(
+            claim_type or "",
+            user_id=resolved_user,
+            claim_element_id=claim_element_id,
+            path_kind=path_kind,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/contradiction-paths")
+    async def claim_contradiction_paths(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_contradiction_paths_for_element(
+            claim_type or "",
+            user_id=resolved_user,
+            claim_element_id=claim_element_id,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/graph-snapshots")
+    async def claim_support_graph_snapshots(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        refs = mediator.get_graph_snapshot_refs_for_element(
+            claim_type or "",
+            user_id=resolved_user,
+            claim_element_id=claim_element_id,
+        )
+        return {
+            'available': True,
+            'user_id': resolved_user,
+            'claim_type': claim_type,
+            'claim_element_id': claim_element_id,
+            'graph_snapshot_refs': refs,
+            'graph_snapshot_count': len(refs),
+        }
+
+    # -----------------------------------------------------------------------
     # M4: Operator drilldown routes (timeline, archive-history, graph-trace,
     #     enrichment-queue, background enrichment submission).
     # -----------------------------------------------------------------------

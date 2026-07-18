@@ -519,6 +519,162 @@ def persist_graph_snapshot(
     )
 
 
+def resolve_duplicate_entities(
+    entities: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Resolve near-duplicate actors and entities across testimony and document graphs.
+
+    Groups entities by normalised name using :func:`_texts_semantically_similar`.
+    Returns a mapping of canonical entity IDs to the merged entity record plus
+    a list of absorbed duplicates, and a summary of how many were merged.
+
+    ``entities`` should be dicts with at least ``entity_id`` (or ``id``) and
+    ``name`` (or ``text``) keys.  The ``source_kind`` field is used to label
+    whether the entity came from ``testimony``, ``evidence``, or ``law``.
+    """
+    clusters: List[Dict[str, Any]] = []
+
+    for entity in entities or []:
+        name = str(entity.get("name") or entity.get("text") or "")
+        eid = str(entity.get("entity_id") or entity.get("id") or "")
+        source_kind = str(entity.get("source_kind") or "unknown")
+
+        matched: Optional[Dict[str, Any]] = None
+        for cluster in clusters:
+            if _texts_semantically_similar(cluster["canonical_name"], name):
+                matched = cluster
+                break
+
+        if matched is None:
+            clusters.append(
+                {
+                    "canonical_entity_id": eid or _stable_identifier("entity", name),
+                    "canonical_name": name,
+                    "source_kinds": [source_kind] if source_kind else [],
+                    "entity_ids": [eid] if eid else [],
+                    "names": [name] if name else [],
+                    "duplicate_count": 1,
+                    "absorbed": [],
+                }
+            )
+            continue
+
+        matched["duplicate_count"] += 1
+        if eid and eid not in matched["entity_ids"]:
+            matched["entity_ids"].append(eid)
+        if name and name not in matched["names"]:
+            matched["names"].append(name)
+        if source_kind and source_kind not in matched["source_kinds"]:
+            matched["source_kinds"].append(source_kind)
+        matched["absorbed"].append(
+            {
+                "entity_id": eid,
+                "name": name,
+                "source_kind": source_kind,
+            }
+        )
+
+    entity_map: Dict[str, Dict[str, Any]] = {c["canonical_entity_id"]: c for c in clusters}
+    merged_count = sum(len(c["absorbed"]) for c in clusters)
+
+    return {
+        "resolved": True,
+        "entity_count": len(clusters),
+        "input_count": len(entities or []),
+        "merged_count": merged_count,
+        "entity_map": entity_map,
+        "clusters": clusters,
+    }
+
+
+def attach_provenance_edges(
+    facts: List[Dict[str, Any]],
+    chunks: List[Dict[str, Any]],
+    artifacts: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build provenance edges linking facts → chunks → artifacts.
+
+    Each edge has a stable ``edge_id``, ``from_id``, ``to_id``, and
+    ``edge_kind`` (``fact_to_chunk`` or ``chunk_to_artifact``).  Only edges
+    where both ends are present are emitted.
+
+    Returns ``{edges, fact_to_chunk_count, chunk_to_artifact_count,
+    unresolved_fact_count, unresolved_chunk_count}``.
+    """
+    chunk_by_ref: Dict[str, Dict[str, Any]] = {}
+    for chunk in chunks or []:
+        cref = str(chunk.get("chunk_ref") or chunk.get("chunk_id") or chunk.get("id") or "")
+        if cref:
+            chunk_by_ref[cref] = chunk
+
+    artifact_by_id: Dict[str, Dict[str, Any]] = {}
+    for artifact in artifacts or []:
+        aid = str(artifact.get("artifact_id") or artifact.get("id") or "")
+        if aid:
+            artifact_by_id[aid] = artifact
+
+    edges: List[Dict[str, Any]] = []
+    fact_to_chunk_count = 0
+    chunk_to_artifact_count = 0
+    unresolved_fact_count = 0
+    unresolved_chunk_count = 0
+    seen_chunk_artifact_edges: set = set()
+
+    for fact in facts or []:
+        fid = str(fact.get("fact_id") or fact.get("id") or "")
+        cref = str(fact.get("chunk_ref") or "")
+
+        if not cref or cref not in chunk_by_ref:
+            unresolved_fact_count += 1
+            continue
+
+        edge_id = _stable_identifier("edge_fc", fid, cref)
+        edges.append(
+            {
+                "edge_id": edge_id,
+                "edge_kind": "fact_to_chunk",
+                "from_id": fid,
+                "from_kind": "fact",
+                "to_id": cref,
+                "to_kind": "chunk",
+            }
+        )
+        fact_to_chunk_count += 1
+
+        chunk = chunk_by_ref[cref]
+        aid = str(chunk.get("artifact_id") or chunk.get("source_artifact_id") or "")
+        if not aid or aid not in artifact_by_id:
+            unresolved_chunk_count += 1
+            continue
+
+        ca_key = f"{cref}|{aid}"
+        if ca_key in seen_chunk_artifact_edges:
+            continue
+        seen_chunk_artifact_edges.add(ca_key)
+        ca_edge_id = _stable_identifier("edge_ca", cref, aid)
+        edges.append(
+            {
+                "edge_id": ca_edge_id,
+                "edge_kind": "chunk_to_artifact",
+                "from_id": cref,
+                "from_kind": "chunk",
+                "to_id": aid,
+                "to_kind": "artifact",
+            }
+        )
+        chunk_to_artifact_count += 1
+
+    return {
+        "attached": True,
+        "edge_count": len(edges),
+        "fact_to_chunk_count": fact_to_chunk_count,
+        "chunk_to_artifact_count": chunk_to_artifact_count,
+        "unresolved_fact_count": unresolved_fact_count,
+        "unresolved_chunk_count": unresolved_chunk_count,
+        "edges": edges,
+    }
+
+
 def get_authority_graph_api_version() -> Dict[str, Any]:
     """Return a snapshot of the authority graph API version information.
 
@@ -559,5 +715,7 @@ __all__ = [
     "extract_graph_from_text",
     "query_graph_support",
     "persist_graph_snapshot",
+    "resolve_duplicate_entities",
+    "attach_provenance_edges",
     "get_authority_graph_api_version",
 ]

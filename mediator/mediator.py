@@ -3055,6 +3055,86 @@ class Mediator:
 			required_support_kinds=required_support_kinds,
 		)
 
+	# ------------------------------------------------------------------
+	# M3: Graph snapshot persistence and support-path query delegation
+	# ------------------------------------------------------------------
+
+	def persist_typed_graph_snapshot(
+		self,
+		claim_type: str,
+		source_kind: str,
+		graph_payload: Dict[str, Any],
+		*,
+		user_id: str = None,
+		graph_id: str = None,
+		metadata: Dict[str, Any] = None,
+	) -> Dict[str, Any]:
+		"""Persist a typed graph snapshot (testimony/evidence/law) with a stable ID."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.persist_typed_graph_snapshot(
+			user_id,
+			claim_type,
+			source_kind,
+			graph_payload,
+			graph_id=graph_id,
+			metadata=metadata,
+		)
+
+	def get_support_paths_for_element(
+		self,
+		claim_type: str,
+		*,
+		user_id: str = None,
+		claim_element_id: str = None,
+		path_kind: str = None,
+		limit: int = 50,
+	) -> Dict[str, Any]:
+		"""Return persisted support-path records for a claim element."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_support_paths_for_element(
+			user_id,
+			claim_type,
+			claim_element_id=claim_element_id,
+			path_kind=path_kind,
+			limit=limit,
+		)
+
+	def get_contradiction_paths_for_element(
+		self,
+		claim_type: str,
+		*,
+		user_id: str = None,
+		claim_element_id: str = None,
+		limit: int = 50,
+	) -> Dict[str, Any]:
+		"""Return persisted contradiction-path records for a claim element."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_contradiction_paths_for_element(
+			user_id,
+			claim_type,
+			claim_element_id=claim_element_id,
+			limit=limit,
+		)
+
+	def get_graph_snapshot_refs_for_element(
+		self,
+		claim_type: str,
+		*,
+		user_id: str = None,
+		claim_element_id: str = None,
+	) -> list:
+		"""Return graph snapshot references for a claim element."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_graph_snapshot_refs_for_element(
+			user_id,
+			claim_type,
+			claim_element_id=claim_element_id,
+		)
+
 	def get_support_timeline(
 		self,
 		claim_type: str = None,

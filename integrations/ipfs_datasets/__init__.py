@@ -5,6 +5,16 @@ from .capabilities import (
 	summarize_ipfs_datasets_capabilities,
 	summarize_ipfs_datasets_startup_payload,
 )
+from .graphs import (
+	KNOWLEDGE_GRAPHS_AVAILABLE,
+	GRAPHS_ERROR,
+	extract_graph_from_text,
+	query_graph_support,
+	persist_graph_snapshot,
+	resolve_duplicate_entities,
+	attach_provenance_edges,
+	get_authority_graph_api_version,
+)
 from .types import (
 	CaseArtifact,
 	CaseAuthority,
@@ -141,6 +151,15 @@ __all__ = [
 	"summarize_ipfs_datasets_capability_report",
 	"summarize_ipfs_datasets_capabilities",
 	"summarize_ipfs_datasets_startup_payload",
+	# Graph adapter
+	"KNOWLEDGE_GRAPHS_AVAILABLE",
+	"GRAPHS_ERROR",
+	"extract_graph_from_text",
+	"query_graph_support",
+	"persist_graph_snapshot",
+	"resolve_duplicate_entities",
+	"attach_provenance_edges",
+	"get_authority_graph_api_version",
 	"CaseArtifact",
 	"CaseAuthority",
 	"CaseClaimElement",

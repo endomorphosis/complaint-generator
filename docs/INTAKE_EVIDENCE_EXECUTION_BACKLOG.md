@@ -208,7 +208,7 @@ Turn support gaps into concrete, element-level evidence tasks.
 
 ## Batch 5: Support Lane Unification and Provenance Quality
 
-Status: In Progress
+Status: Complete
 Priority: P1
 
 ### Goal
@@ -226,7 +226,7 @@ Make documentary evidence, testimony, authority, and web captures comparable sup
 - [x] normalize provenance fields across artifact and testimony records
 - [x] add support-quality labels that distinguish testimony-only, documentary, corroborated, and contradicted states
 - [x] preserve lane identity and quality through support summaries and snapshots (`support_lane_label_counts` and `support_quality_counts` added to per-claim alignment summary and aggregated in `build_intake_case_review_summary`)
-- [ ] persist meaningful case-theory or support-packet snapshots through the IPFS-backed path when state materially changes
+- [x] persist meaningful case-theory or support-packet snapshots through the IPFS-backed path when state materially changes
 
 ### Router dependencies
 

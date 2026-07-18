@@ -4262,6 +4262,17 @@ class ClaimSupportHook:
                     claim_element_text=element.get('element_text') if not element_id else None,
                 )
 
+                graph_snapshot_refs = self.get_graph_snapshot_refs_for_element(
+                    user_id,
+                    current_claim,
+                    claim_element_id=element_id if element_id else None,
+                )
+                support_path_summary = self.get_support_paths_for_element(
+                    user_id,
+                    current_claim,
+                    claim_element_id=element_id if element_id else None,
+                )
+
                 elements.append(
                     {
                         'element_id': element.get('element_id'),
@@ -4282,6 +4293,8 @@ class ClaimSupportHook:
                         'support_packets': support_packets,
                         'support_packet_summary': self._summarize_support_packets(support_packets),
                         'element_support_ledger': element_support_ledger,
+                        'graph_snapshot_refs': graph_snapshot_refs,
+                        'support_path_summary': support_path_summary,
                         'links': element.get('links', []),
                     }
                 )
@@ -6200,6 +6213,283 @@ class ClaimSupportHook:
                 'claim_type': claim_type,
                 'error': str(exc),
             }
+
+    # ------------------------------------------------------------------
+    # M3: Graph Snapshot Persistence and Support Path Queries
+    # ------------------------------------------------------------------
+
+    def persist_typed_graph_snapshot(
+        self,
+        user_id: str,
+        claim_type: str,
+        source_kind: str,
+        graph_payload: Dict[str, Any],
+        *,
+        graph_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Persist a graph snapshot for a typed source (testimony, evidence, law).
+
+        Stores the snapshot in ``claim_support_snapshot`` with a stable
+        ``snapshot_kind`` derived from *source_kind* and returns the snapshot ID.
+        Falls back gracefully when DuckDB is unavailable.
+        """
+        source_kind_clean = str(source_kind or 'unknown').strip().lower()
+        snapshot_kind = f'graph:{source_kind_clean}'
+
+        entity_count = len(graph_payload.get('entities', []) or []) if isinstance(graph_payload, dict) else 0
+        relationship_count = len(graph_payload.get('relationships', []) or []) if isinstance(graph_payload, dict) else 0
+        source_id = str(graph_payload.get('source_id') or '') if isinstance(graph_payload, dict) else ''
+
+        stable_graph_id = graph_id or (
+            'graph:' + hashlib.sha256(
+                '|'.join([user_id, claim_type, source_kind_clean, source_id, str(entity_count), str(relationship_count)]).encode('utf-8')
+            ).hexdigest()[:16]
+        )
+
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'recorded': False,
+                'graph_id': stable_graph_id,
+                'snapshot_kind': snapshot_kind,
+                'source_kind': source_kind_clean,
+                'claim_type': claim_type,
+                'error': 'duckdb_unavailable',
+            }
+
+        snapshot_payload = {
+            'graph_id': stable_graph_id,
+            'source_kind': source_kind_clean,
+            'entity_count': entity_count,
+            'relationship_count': relationship_count,
+            'source_id': source_id,
+            'entities': graph_payload.get('entities', []) if isinstance(graph_payload, dict) else [],
+            'relationships': graph_payload.get('relationships', []) if isinstance(graph_payload, dict) else [],
+        }
+        snapshot_metadata = dict(metadata or {})
+        snapshot_metadata['graph_id'] = stable_graph_id
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            row = conn.execute(
+                """
+                INSERT INTO claim_support_snapshot (
+                    user_id, claim_type, snapshot_kind,
+                    required_support_kinds, payload, metadata
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id, timestamp
+                """,
+                [
+                    user_id,
+                    claim_type,
+                    snapshot_kind,
+                    json.dumps([], default=str),
+                    json.dumps(snapshot_payload, default=str),
+                    json.dumps(snapshot_metadata, default=str),
+                ],
+            ).fetchone()
+            conn.close()
+            self.mediator.log(
+                'typed_graph_snapshot_persisted',
+                graph_id=stable_graph_id,
+                snapshot_kind=snapshot_kind,
+                claim_type=claim_type,
+                entity_count=entity_count,
+            )
+            return {
+                'available': True,
+                'recorded': True,
+                'graph_id': stable_graph_id,
+                'snapshot_kind': snapshot_kind,
+                'source_kind': source_kind_clean,
+                'snapshot_id': row[0] if row else None,
+                'claim_type': claim_type,
+                'entity_count': entity_count,
+                'relationship_count': relationship_count,
+                'created': True,
+                'reused': False,
+            }
+        except Exception as exc:
+            self.mediator.log('typed_graph_snapshot_error', error=str(exc), claim_type=claim_type)
+            return {
+                'available': False,
+                'recorded': False,
+                'graph_id': stable_graph_id,
+                'snapshot_kind': snapshot_kind,
+                'source_kind': source_kind_clean,
+                'claim_type': claim_type,
+                'error': str(exc),
+            }
+
+    def get_support_paths_for_element(
+        self,
+        user_id: str,
+        claim_type: str,
+        *,
+        claim_element_id: Optional[str] = None,
+        path_kind: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """Return persisted support-path records for a claim element.
+
+        Queries ``claim_support_paths`` and returns a structured summary
+        with all matching proof-path records sorted by timestamp descending.
+        Falls back gracefully when DuckDB is unavailable.
+        """
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'user_id': user_id,
+                'claim_type': claim_type,
+                'claim_element_id': claim_element_id,
+                'path_kind': path_kind,
+                'paths': [],
+                'path_count': 0,
+            }
+
+        paths: List[Dict[str, Any]] = []
+        try:
+            conn = duckdb.connect(self.db_path)
+            where_clauses = ['user_id = ?', 'claim_type = ?']
+            params: List[Any] = [user_id, claim_type]
+            if claim_element_id:
+                where_clauses.append('claim_element_id = ?')
+                params.append(claim_element_id)
+            if path_kind:
+                where_clauses.append('path_kind = ?')
+                params.append(path_kind)
+            where_sql = ' AND '.join(where_clauses)
+            rows = conn.execute(
+                f"""
+                SELECT proof_path_id, claim_element_id, fact_ids, path_kind, metadata, timestamp
+                FROM claim_support_paths
+                WHERE {where_sql}
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                params + [limit],
+            ).fetchall()
+            conn.close()
+            for row in rows:
+                proof_path_id, elem_id, fact_ids_json, pk, meta_json, ts = row
+                try:
+                    fact_ids = json.loads(fact_ids_json) if fact_ids_json else []
+                except Exception:
+                    fact_ids = []
+                try:
+                    path_meta = json.loads(meta_json) if meta_json else {}
+                except Exception:
+                    path_meta = {}
+                paths.append({
+                    'proof_path_id': proof_path_id or '',
+                    'claim_element_id': elem_id or '',
+                    'fact_ids': fact_ids,
+                    'fact_count': len(fact_ids),
+                    'path_kind': pk or 'support',
+                    'metadata': path_meta,
+                    'timestamp': ts.isoformat() if hasattr(ts, 'isoformat') else str(ts or ''),
+                })
+        except Exception as exc:
+            self.mediator.log('get_support_paths_error', error=str(exc), claim_type=claim_type)
+            return {
+                'available': False,
+                'user_id': user_id,
+                'claim_type': claim_type,
+                'claim_element_id': claim_element_id,
+                'path_kind': path_kind,
+                'paths': [],
+                'path_count': 0,
+                'error': str(exc),
+            }
+
+        return {
+            'available': True,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'claim_element_id': claim_element_id,
+            'path_kind': path_kind,
+            'paths': paths,
+            'path_count': len(paths),
+        }
+
+    def get_contradiction_paths_for_element(
+        self,
+        user_id: str,
+        claim_type: str,
+        *,
+        claim_element_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """Return persisted contradiction-path records for a claim element.
+
+        Convenience wrapper around :meth:`get_support_paths_for_element`
+        filtered to ``path_kind='contradiction'``.
+        """
+        return self.get_support_paths_for_element(
+            user_id,
+            claim_type,
+            claim_element_id=claim_element_id,
+            path_kind='contradiction',
+            limit=limit,
+        )
+
+    def get_graph_snapshot_refs_for_element(
+        self,
+        user_id: str,
+        claim_type: str,
+        *,
+        claim_element_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return graph snapshot references relevant to a claim element.
+
+        Queries ``claim_support_snapshot`` for snapshots with kind prefixed
+        ``graph:`` and returns lightweight reference records (snapshot_id,
+        graph_id, source_kind, entity_count, relationship_count, timestamp).
+        """
+        if not DUCKDB_AVAILABLE:
+            return []
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            rows = conn.execute(
+                """
+                SELECT id, snapshot_kind, payload, timestamp
+                FROM claim_support_snapshot
+                WHERE user_id = ? AND claim_type = ?
+                  AND snapshot_kind LIKE 'graph:%'
+                ORDER BY timestamp DESC
+                LIMIT 200
+                """,
+                [user_id, claim_type],
+            ).fetchall()
+            conn.close()
+        except Exception as exc:
+            self.mediator.log('get_graph_snapshot_refs_error', error=str(exc))
+            return []
+
+        refs: List[Dict[str, Any]] = []
+        for row in rows:
+            snapshot_id, kind, payload_json, ts = row
+            try:
+                payload = json.loads(payload_json) if payload_json else {}
+            except Exception:
+                payload = {}
+            if claim_element_id:
+                elem_ids = payload.get('claim_element_ids') or []
+                if elem_ids and claim_element_id not in elem_ids:
+                    continue
+            refs.append({
+                'snapshot_id': snapshot_id,
+                'snapshot_kind': str(kind or ''),
+                'source_kind': str(kind or '').replace('graph:', '', 1),
+                'graph_id': payload.get('graph_id', ''),
+                'entity_count': int(payload.get('entity_count', 0) or 0),
+                'relationship_count': int(payload.get('relationship_count', 0) or 0),
+                'timestamp': ts.isoformat() if hasattr(ts, 'isoformat') else str(ts or ''),
+            })
+        return refs
 
     def get_support_timeline(
         self,
