@@ -5986,7 +5986,6 @@ class ClaimSupportHook:
 
     def _draft_question_text(self, element_text: str, lane: str, element: Dict[str, Any]) -> str:
         """Generate a draft question text for an operator to use directly."""
-        element_lower = element_text.lower()
         if lane == 'contradiction_resolution':
             return (
                 f"We have conflicting information about {element_text}. "

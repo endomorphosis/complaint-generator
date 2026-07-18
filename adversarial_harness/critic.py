@@ -191,10 +191,7 @@ Score:"""
 3. Empathy (0-1): How empathetic and rapport-building was the interaction?
 4. Efficiency (0-1): How efficiently was information gathered (not repetitive or redundant)?
 5. Coverage (0-1): How comprehensively were important legal topics and elements covered?
-6. Proof Progress (0-1): How much did questioning advance the legal proof state — were questions
-   directed at unresolved claim elements, contradictions, or missing proof leads rather than
-   generic clarifications? Higher scores reward questions that produce concrete proof leads,
-   resolve contradictions, or fill named element gaps.
+6. Proof Progress (0-1): How much did questioning advance the legal proof state? Questions should be directed at unresolved claim elements, contradictions, or missing proof leads rather than generic clarifications. Higher scores reward questions that produce concrete proof leads, resolve contradictions, or fill named element gaps.
 """
         
         anchor_text = self._format_anchor_coverage(anchor_coverage or {})

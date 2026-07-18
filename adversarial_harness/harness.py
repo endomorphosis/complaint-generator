@@ -1253,7 +1253,7 @@ class AdversarialHarness:
                 total_candidates = int(question_summary.get('count') or 0)
                 goal_counts = dict(question_summary.get('question_goal_counts') or {})
                 if total_candidates > 0 and goal_counts:
-                    # duplicate = candidates beyond the first per goal
+                    # Count duplicates as (count - 1) per goal: the first candidate per goal is not a duplicate
                     duplicate_count = sum(max(0, cnt - 1) for cnt in goal_counts.values())
                     duplicate_question_rate_values.append(duplicate_count / total_candidates)
                 elif total_candidates > 0:
