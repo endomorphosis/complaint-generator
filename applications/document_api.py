@@ -8,7 +8,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from document_pipeline import DEFAULT_OUTPUT_DIR
+from document_pipeline import DEFAULT_OUTPUT_DIR, _build_claim_checklist_chip_labels as _pipeline_claim_chip_labels
 from integrations.ipfs_datasets.storage import retrieve_bytes
 from intake_status import (
     build_intake_case_review_summary,
@@ -1004,41 +1004,14 @@ def _section_claim_types(section_key: str, claim_types: List[str]) -> List[str]:
 
 
 def _build_claim_review_chip_labels(claim: Dict[str, Any]) -> List[str]:
-    if not isinstance(claim, dict):
-        return []
+    """Build chip labels for claim review using the canonical pipeline implementation.
 
-    chip_labels: List[str] = []
-    claim_status = str(claim.get("status") or "").strip().lower()
-    if claim_status:
-        chip_labels.append(f"claim status: {humanize_workflow_priority_label(claim_status)}")
-
-    temporal_gap_hint_count = int(claim.get("temporal_gap_hint_count") or 0)
-    if temporal_gap_hint_count > 0:
-        chip_labels.append(f"chronology gaps: {temporal_gap_hint_count}")
-
-    proof_gap_count = int(claim.get("proof_gap_count") or 0)
-    if proof_gap_count > 0:
-        chip_labels.append(f"proof gaps: {proof_gap_count}")
-
-    unresolved_element_count = int(claim.get("unresolved_element_count") or 0)
-    if unresolved_element_count > 0:
-        chip_labels.append(f"unresolved elements: {unresolved_element_count}")
-
-    contradiction_candidate_count = int(claim.get("contradiction_candidate_count") or 0)
-    if contradiction_candidate_count > 0:
-        chip_labels.append(f"contradiction candidates: {contradiction_candidate_count}")
-
-    authority_treatment_summary = claim.get("authority_treatment_summary")
-    if isinstance(authority_treatment_summary, dict):
-        adverse_authority_link_count = int(authority_treatment_summary.get("adverse_authority_link_count") or 0)
-        if adverse_authority_link_count > 0:
-            chip_labels.append(f"adverse authorities: {adverse_authority_link_count}")
-
-        uncertain_authority_link_count = int(authority_treatment_summary.get("uncertain_authority_link_count") or 0)
-        if uncertain_authority_link_count > 0:
-            chip_labels.append(f"uncertain authorities: {uncertain_authority_link_count}")
-
-    return chip_labels
+    Delegates to ``_pipeline_claim_chip_labels`` so that the application layer
+    stays in sync with the richer set of chip signals maintained by
+    ``document_pipeline`` (temporal predicates, provenance kinds, authority
+    treatment, etc.) rather than duplicating a simplified version here.
+    """
+    return _pipeline_claim_chip_labels(claim)
 
 
 def _annotate_checklist_review_links(

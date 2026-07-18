@@ -1890,6 +1890,7 @@
                 ? intakeCaseSummary.temporal_issue_registry_summary
                 : {};
             const claimSupportPacketSummary = intakeCaseSummary.claim_support_packet_summary && typeof intakeCaseSummary.claim_support_packet_summary === 'object' ? intakeCaseSummary.claim_support_packet_summary : {};
+            const intakeChronologyReadiness = intakeCaseSummary.intake_chronology_readiness && typeof intakeCaseSummary.intake_chronology_readiness === 'object' ? intakeCaseSummary.intake_chronology_readiness : {};
             const questionGoalCounts = questionCandidateSummary.question_goal_counts && typeof questionCandidateSummary.question_goal_counts === 'object' ? questionCandidateSummary.question_goal_counts : {};
             const questionSectionCounts = questionCandidateSummary.phase1_section_counts && typeof questionCandidateSummary.phase1_section_counts === 'object' ? questionCandidateSummary.phase1_section_counts : {};
             const questionBlockingCounts = questionCandidateSummary.blocking_level_counts && typeof questionCandidateSummary.blocking_level_counts === 'object' ? questionCandidateSummary.blocking_level_counts : {};
@@ -2153,6 +2154,24 @@
                         : '',
                     Array.isArray(temporalIssueRegistrySummary.issue_ids) && temporalIssueRegistrySummary.issue_ids.length
                         ? `Chronology history issue ids: ${temporalIssueRegistrySummary.issue_ids.join(', ')}`
+                        : '',
+                    intakeChronologyReadiness.event_count != null
+                        ? `Chronology events: ${Number(intakeChronologyReadiness.event_count || 0)}`
+                        : '',
+                    intakeChronologyReadiness.anchored_event_count != null
+                        ? `Chronology anchored: ${Number(intakeChronologyReadiness.anchored_event_count || 0)}`
+                        : '',
+                    intakeChronologyReadiness.anchor_coverage_ratio != null
+                        ? `Chronology anchor coverage: ${Number(intakeChronologyReadiness.anchor_coverage_ratio || 0).toFixed(2)}`
+                        : '',
+                    intakeChronologyReadiness.issue_count != null
+                        ? `Chronology readiness issues: ${Number(intakeChronologyReadiness.issue_count || 0)}`
+                        : '',
+                    intakeChronologyReadiness.blocking_issue_count != null && intakeChronologyReadiness.blocking_issue_count > 0
+                        ? `Chronology blocking issues: ${Number(intakeChronologyReadiness.blocking_issue_count || 0)}`
+                        : '',
+                    intakeChronologyReadiness.open_issue_count != null && intakeChronologyReadiness.open_issue_count > 0
+                        ? `Chronology open issues: ${Number(intakeChronologyReadiness.open_issue_count || 0)}`
                         : '',
                     claimSupportPacketSummary.claim_count != null ? `Packet claims: ${claimSupportPacketSummary.claim_count}` : '',
                     claimSupportPacketSummary.element_count != null ? `Packet elements: ${claimSupportPacketSummary.element_count}` : '',

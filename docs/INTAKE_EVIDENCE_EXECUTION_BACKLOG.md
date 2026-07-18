@@ -276,7 +276,7 @@ Make Phase 1 and Phase 2 transitions depend on semantic readiness, not just coar
 
 ## Batch 7: Review and Trace Surfaces
 
-Status: In Progress
+Status: Complete
 Priority: P1
 
 ### Goal
@@ -297,8 +297,8 @@ Expose the new intake and evidence state cleanly to operators and optimizer trac
 - [x] expose `proof_readiness_score`, `support_lane_label_counts`, and `support_quality_counts` in `build_intake_status_summary` (top-level fields)
 - [x] expose `support_lane_label_counts` and `support_quality_counts` aggregated across claims in `build_intake_case_review_summary` (inside `claim_support_packet_summary`)
 - [x] surface lane distribution and quality chips in claim_support_review.html, document.html, and optimization_trace.html
-- [ ] preserve architecture boundaries by keeping payload shaping out of application-only logic where possible
-- [ ] ensure optimizer traces retain the expanded intake and evidence state
+- [x] preserve architecture boundaries by keeping payload shaping out of application-only logic where possible
+- [x] ensure optimizer traces retain the expanded intake and evidence state
 
 ### Acceptance criteria
 
@@ -312,7 +312,7 @@ Expose the new intake and evidence state cleanly to operators and optimizer trac
 
 ## Batch 8: Validation Harness and Metrics
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -327,10 +327,10 @@ Make the improvements measurable in automated runs.
 
 ### Tasks
 
-- [ ] add Phase 1 metrics for chronology completeness, contradiction count, duplicate-question rate, and proof-lead density
-- [ ] add Phase 2 metrics for support sufficiency, support quality, and proof readiness
-- [ ] add fixtures for retaliation, discrimination, housing, and consumer scenarios with distinct proof burdens
-- [ ] update critic prompts or scoring rubrics to reward question relevance and proof progress instead of verbosity
+- [x] add Phase 1 metrics for chronology completeness, contradiction count, duplicate-question rate, and proof-lead density
+- [x] add Phase 2 metrics for support sufficiency, support quality, and proof readiness
+- [x] add fixtures for retaliation, discrimination, housing, and consumer scenarios with distinct proof burdens
+- [x] update critic prompts or scoring rubrics to reward question relevance and proof progress instead of verbosity
 
 ### Acceptance criteria
 
