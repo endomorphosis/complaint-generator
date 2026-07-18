@@ -7054,8 +7054,10 @@ class ClaimSupportHook:
                 has_retrieval_context = retrieval_context.get('has_retrieval_context', False)
                 top_retrieval_results = retrieval_context.get('top_results', [])
                 if has_retrieval_context and gain > 0:
-                    # Dampen gain if we already have retrieval context (evidence exists)
-                    gain = round(gain * 0.85, 3)
+                    # Dampen gain: existing retrieval context means some evidence is already
+                    # present, so the incremental value of a new question is lower (15% reduction).
+                    _RETRIEVAL_CONTEXT_GAIN_DAMPENING = 0.85
+                    gain = round(gain * _RETRIEVAL_CONTEXT_GAIN_DAMPENING, 3)
 
                 recommendations.append({
                     'question_id': question_id,
@@ -7155,10 +7157,16 @@ class ClaimSupportHook:
         return 'rsession:' + hashlib.sha1(src.encode()).hexdigest()[:16]
 
     def _make_duplicate_cluster_id(self, text: str) -> str:
-        """Return a short cluster key for near-duplicate detection based on normalized text."""
+        """Return a short cluster key for near-duplicate detection based on normalized text.
+
+        Uses the first 12 sorted unique tokens of the normalized text as the fingerprint.
+        12 tokens provides enough signal to distinguish near-duplicates (same incident described
+        in slightly different words) while tolerating minor phrasing variations.
+        """
         normalized = re.sub(r'\s+', ' ', str(text or '').lower().strip())
         tokens = sorted(set(re.findall(r'[a-z0-9]+', normalized)))
-        token_key = ' '.join(tokens[:12])
+        _MAX_CLUSTER_TOKENS = 12  # sufficient for near-duplicate fingerprinting
+        token_key = ' '.join(tokens[:_MAX_CLUSTER_TOKENS])
         return 'dc:' + hashlib.sha1(token_key.encode()).hexdigest()[:12]
 
     def _score_retrieval_chunk(
