@@ -3220,6 +3220,106 @@ class Mediator:
 			metadata=metadata,
 		)
 
+	# M4: Retrieval Sessions and Evidence Ranking
+	def create_retrieval_session(
+		self,
+		claim_type: str,
+		user_id: str = None,
+		claim_element_id: str = '',
+		claim_element_text: str = '',
+		query_text: str = '',
+		retrieval_plane: str = 'unified',
+		metadata: Dict[str, Any] = None,
+	) -> Dict[str, Any]:
+		"""Create a claim-element-scoped retrieval session with a stable session ID."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.create_retrieval_session(
+			user_id,
+			claim_type,
+			claim_element_id=claim_element_id,
+			claim_element_text=claim_element_text,
+			query_text=query_text,
+			retrieval_plane=retrieval_plane,
+			metadata=metadata,
+		)
+
+	def run_retrieval_session(
+		self,
+		claim_type: str,
+		user_id: str = None,
+		claim_element_id: str = '',
+		claim_element_text: str = '',
+		query_text: str = '',
+		chunks: list = None,
+		max_results: int = 20,
+		metadata: Dict[str, Any] = None,
+	) -> Dict[str, Any]:
+		"""Run a retrieval session, scoring and ranking provided chunks, and persist results."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.run_retrieval_session(
+			user_id,
+			claim_type,
+			claim_element_id=claim_element_id,
+			claim_element_text=claim_element_text,
+			query_text=query_text,
+			chunks=chunks or [],
+			max_results=max_results,
+			metadata=metadata,
+		)
+
+	def get_retrieval_session(
+		self,
+		session_id: str,
+		user_id: str = None,
+		claim_type: str = None,
+		max_results: int = 50,
+	) -> Dict[str, Any]:
+		"""Return a persisted retrieval session and its ranked results."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_retrieval_session(
+			user_id,
+			session_id,
+			claim_type=claim_type,
+			max_results=max_results,
+		)
+
+	def list_retrieval_sessions(
+		self,
+		user_id: str = None,
+		claim_type: str = None,
+		claim_element_id: str = None,
+		limit: int = 50,
+	) -> Dict[str, Any]:
+		"""List retrieval sessions for the current user."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.list_retrieval_sessions(
+			user_id,
+			claim_type=claim_type,
+			claim_element_id=claim_element_id,
+			limit=limit,
+		)
+
+	def get_retrieval_context_for_element(
+		self,
+		claim_type: str,
+		claim_element_id: str,
+		user_id: str = None,
+		max_results: int = 10,
+	) -> Dict[str, Any]:
+		"""Return the best available retrieval results for a claim element."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_retrieval_context_for_element(
+			user_id,
+			claim_type,
+			claim_element_id,
+			max_results=max_results,
+		)
+
 	def get_recent_claim_follow_up_execution(
 		self,
 		claim_type: str = None,

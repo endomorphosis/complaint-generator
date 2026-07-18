@@ -334,6 +334,67 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
             priority=priority,
         )
 
+    # M4: Retrieval session routes
+    @router.post("/api/claim-support/retrieval-session")
+    async def create_retrieval_session(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: str = Query(...),
+        claim_element_id: Optional[str] = Query(default=None),
+        claim_element_text: Optional[str] = Query(default=None),
+        query_text: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.create_retrieval_session(
+            claim_type,
+            user_id=resolved_user,
+            claim_element_id=claim_element_id or '',
+            claim_element_text=claim_element_text or '',
+            query_text=query_text or '',
+        )
+
+    @router.get("/api/claim-support/retrieval-session")
+    async def get_retrieval_session(
+        session_id: str = Query(...),
+        user_id: Optional[str] = Query(default=None),
+        max_results: int = Query(default=50, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_retrieval_session(
+            session_id,
+            user_id=resolved_user,
+            max_results=max_results,
+        )
+
+    @router.get("/api/claim-support/retrieval-sessions")
+    async def list_retrieval_sessions(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+        claim_element_id: Optional[str] = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.list_retrieval_sessions(
+            user_id=resolved_user,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            limit=limit,
+        )
+
+    @router.get("/api/claim-support/retrieval-context")
+    async def get_retrieval_context(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: str = Query(...),
+        claim_element_id: str = Query(...),
+        max_results: int = Query(default=10, ge=1, le=50),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_retrieval_context_for_element(
+            claim_type,
+            claim_element_id,
+            user_id=resolved_user,
+            max_results=max_results,
+        )
+
     return router
 
 

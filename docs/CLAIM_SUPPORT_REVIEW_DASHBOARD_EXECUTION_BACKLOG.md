@@ -277,7 +277,7 @@ Make support paths queryable and reusable across review, follow-up, and drafting
 
 ## M4: Retrieval Sessions And Evidence Ranking
 
-Status: Planned
+Status: Complete
 Priority: P1
 
 ### Goal
@@ -294,11 +294,11 @@ Make chunk retrieval a first-class review tool for question planning, contradict
 
 ### Checklist
 
-- [ ] index testimony and document chunks in one retrieval plane
-- [ ] add claim-element-scoped retrieval sessions with stable session IDs
-- [ ] expose retrieval explanations, scores, and duplicate-cluster hints in the review payload
-- [ ] use retrieval context to improve question recommendations and follow-up planning
-- [ ] store enough retrieval metadata to replay or debug a review session
+- [x] index testimony and document chunks in one retrieval plane
+- [x] add claim-element-scoped retrieval sessions with stable session IDs
+- [x] expose retrieval explanations, scores, and duplicate-cluster hints in the review payload
+- [x] use retrieval context to improve question recommendations and follow-up planning
+- [x] store enough retrieval metadata to replay or debug a review session
 
 ### Acceptance criteria
 
@@ -319,7 +319,7 @@ Make chunk retrieval a first-class review tool for question planning, contradict
 
 ### Suggested focused validation
 
-- `./.venv/bin/python -m pytest tests/test_ipfs_vector_store.py -q`
+- `./.venv/bin/python -m pytest tests/test_m4_retrieval_sessions.py -q`
 - `./.venv/bin/python -m pytest tests/test_claim_support_hooks.py -q`
 
 ## M5: Legal Proof And Contradiction Engine

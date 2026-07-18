@@ -295,6 +295,63 @@ class ClaimSupportHook:
                 CREATE INDEX IF NOT EXISTS idx_claim_support_paths_user_element
                 ON claim_support_paths(user_id, claim_type, claim_element_id)
             """)
+            # M4: claim-element-scoped retrieval sessions
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS claim_retrieval_sessions (
+                    id BIGINT PRIMARY KEY DEFAULT nextval('claim_support_id_seq'),
+                    session_id VARCHAR NOT NULL,
+                    user_id VARCHAR,
+                    claim_type VARCHAR NOT NULL,
+                    claim_element_id VARCHAR,
+                    claim_element_text TEXT,
+                    query_text TEXT NOT NULL,
+                    query_hash VARCHAR NOT NULL,
+                    retrieval_plane VARCHAR DEFAULT 'unified',
+                    result_count INTEGER DEFAULT 0,
+                    status VARCHAR DEFAULT 'pending',
+                    metadata JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_retrieval_sessions_session_id
+                ON claim_retrieval_sessions(session_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_claim_retrieval_sessions_user_element
+                ON claim_retrieval_sessions(user_id, claim_type, claim_element_id)
+            """)
+            # M4: retrieval result records (one row per ranked chunk/document)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS claim_retrieval_results (
+                    id BIGINT PRIMARY KEY DEFAULT nextval('claim_support_id_seq'),
+                    session_id VARCHAR NOT NULL,
+                    user_id VARCHAR,
+                    claim_type VARCHAR NOT NULL,
+                    claim_element_id VARCHAR,
+                    rank INTEGER DEFAULT 0,
+                    source_kind VARCHAR NOT NULL,
+                    source_ref VARCHAR NOT NULL,
+                    source_label TEXT,
+                    chunk_text TEXT,
+                    retrieval_score FLOAT DEFAULT 0.0,
+                    confidence FLOAT DEFAULT 0.0,
+                    explanation TEXT,
+                    duplicate_cluster_id VARCHAR,
+                    is_duplicate_representative BOOLEAN DEFAULT FALSE,
+                    metadata JSON,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_claim_retrieval_results_session
+                ON claim_retrieval_results(session_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_claim_retrieval_results_user_element
+                ON claim_retrieval_results(user_id, claim_type, claim_element_id)
+            """)
             conn.close()
             self.mediator.log('claim_support_schema_initialized', db_path=self.db_path)
         except Exception as exc:
@@ -6946,6 +7003,7 @@ class ClaimSupportHook:
         - ``question_reason`` — human-readable explanation of why the question is recommended
         - ``expected_proof_gain`` — estimated improvement in proof readiness (0–1)
         - ``question_text`` — draft question text the operator can use directly
+        - ``retrieval_context`` — best available retrieval results for this element (M4)
         """
         gaps = self.get_claim_support_gaps(
             user_id,
@@ -6986,6 +7044,19 @@ class ClaimSupportHook:
                 qid_src = f'{user_id}:{current_claim}:{element_id}:{lane}'
                 question_id = 'qrec:' + hashlib.sha1(qid_src.encode()).hexdigest()[:12]
 
+                # M4: Enrich with retrieval context when available
+                retrieval_context = self.get_retrieval_context_for_element(
+                    user_id,
+                    current_claim,
+                    element_id,
+                    max_results=3,
+                )
+                has_retrieval_context = retrieval_context.get('has_retrieval_context', False)
+                top_retrieval_results = retrieval_context.get('top_results', [])
+                if has_retrieval_context and gain > 0:
+                    # Dampen gain if we already have retrieval context (evidence exists)
+                    gain = round(gain * 0.85, 3)
+
                 recommendations.append({
                     'question_id': question_id,
                     'claim_type': current_claim,
@@ -6999,6 +7070,13 @@ class ClaimSupportHook:
                     'element_status': element.get('status', ''),
                     'element_total_links': int(element.get('total_links', 0) or 0),
                     'element_missing_support_kinds': list(element.get('missing_support_kinds', []) or []),
+                    'retrieval_context': {
+                        'has_retrieval_context': has_retrieval_context,
+                        'result_count': retrieval_context.get('result_count', 0),
+                        'top_score': retrieval_context.get('top_score', 0.0),
+                        'duplicate_cluster_count': retrieval_context.get('duplicate_cluster_count', 0),
+                        'top_results': top_retrieval_results,
+                    },
                 })
 
         # Rank by expected_proof_gain descending, then by lane priority
@@ -7059,3 +7137,628 @@ class ClaimSupportHook:
             f"Can you provide any additional information or documentation related to {element_text} "
             "that would help establish or strengthen this aspect of your claim?"
         )
+
+    # ------------------------------------------------------------------
+    # M4: Retrieval Sessions and Evidence Ranking
+    # ------------------------------------------------------------------
+
+    def _make_retrieval_session_id(
+        self,
+        *,
+        user_id: str,
+        claim_type: str,
+        claim_element_id: str,
+        query_text: str,
+        created_at: str,
+    ) -> str:
+        src = f'{user_id}|{claim_type}|{claim_element_id}|{query_text}|{created_at}'
+        return 'rsession:' + hashlib.sha1(src.encode()).hexdigest()[:16]
+
+    def _make_duplicate_cluster_id(self, text: str) -> str:
+        """Return a short cluster key for near-duplicate detection based on normalized text."""
+        normalized = re.sub(r'\s+', ' ', str(text or '').lower().strip())
+        tokens = sorted(set(re.findall(r'[a-z0-9]+', normalized)))
+        token_key = ' '.join(tokens[:12])
+        return 'dc:' + hashlib.sha1(token_key.encode()).hexdigest()[:12]
+
+    def _score_retrieval_chunk(
+        self,
+        chunk: Dict[str, Any],
+        query_tokens: List[str],
+        element_text: str,
+    ) -> float:
+        """Return a heuristic retrieval score [0–1] for *chunk* against *query_tokens*."""
+        text = ' '.join([
+            str(chunk.get('text') or chunk.get('chunk_text') or ''),
+            str(chunk.get('label') or chunk.get('source_label') or ''),
+            str(chunk.get('title') or ''),
+        ]).lower()
+        chunk_tokens = set(re.findall(r'[a-z0-9]+', text))
+        q_tokens = set(str(t).lower() for t in query_tokens)
+        element_tokens = set(re.findall(r'[a-z0-9]+', str(element_text or '').lower()))
+
+        overlap = len(q_tokens & chunk_tokens)
+        element_overlap = len(element_tokens & chunk_tokens)
+        denom = max(1, len(q_tokens) + len(element_tokens) // 2)
+        raw_score = (overlap + element_overlap * 0.5) / denom
+        # Preserve any pre-computed score if provided and better than heuristic
+        existing = float(chunk.get('score') or chunk.get('retrieval_score') or 0.0)
+        return round(min(1.0, max(existing, raw_score)), 4)
+
+    def _explain_retrieval_result(
+        self,
+        chunk: Dict[str, Any],
+        query_tokens: List[str],
+        score: float,
+        element_text: str,
+    ) -> str:
+        """Return a concise explanation for why this chunk was retrieved."""
+        text = ' '.join([
+            str(chunk.get('text') or chunk.get('chunk_text') or ''),
+            str(chunk.get('label') or chunk.get('source_label') or ''),
+        ]).lower()
+        chunk_tokens = set(re.findall(r'[a-z0-9]+', text))
+        matched = sorted(set(str(t).lower() for t in query_tokens) & chunk_tokens)
+        source_kind = str(chunk.get('source_kind') or chunk.get('kind') or 'chunk')
+        if matched:
+            terms = ', '.join(matched[:5])
+            return f'Matched {source_kind} on query terms: {terms} (score {score:.2f})'
+        return f'Retrieved {source_kind} with heuristic score {score:.2f} for {element_text[:60]}'
+
+    def _normalize_chunk_for_indexing(self, chunk: Any, source_kind: str) -> Dict[str, Any]:
+        """Normalize a testimony record or document chunk to a common dict shape."""
+        if not isinstance(chunk, dict):
+            return {}
+        normalized: Dict[str, Any] = {}
+        normalized['source_kind'] = str(chunk.get('source_kind') or source_kind or 'chunk')
+        normalized['source_ref'] = str(
+            chunk.get('source_ref')
+            or chunk.get('testimony_id')
+            or chunk.get('chunk_ref')
+            or chunk.get('fact_id')
+            or chunk.get('support_ref')
+            or ''
+        )
+        normalized['source_label'] = str(
+            chunk.get('source_label')
+            or chunk.get('label')
+            or chunk.get('title')
+            or ''
+        )
+        normalized['chunk_text'] = str(
+            chunk.get('chunk_text')
+            or chunk.get('text')
+            or chunk.get('raw_narrative')
+            or chunk.get('proposition_text')
+            or ''
+        )
+        normalized['score'] = float(chunk.get('score') or chunk.get('retrieval_score') or 0.0)
+        normalized['confidence'] = float(chunk.get('confidence') or chunk.get('source_confidence') or 0.0)
+        normalized['metadata'] = dict(chunk.get('metadata') or {})
+        return normalized
+
+    def _ensure_retrieval_schema(self, conn: Any) -> None:
+        """Create retrieval tables if they do not already exist (idempotent)."""
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS claim_retrieval_sessions (
+                id BIGINT PRIMARY KEY DEFAULT nextval('claim_support_id_seq'),
+                session_id VARCHAR NOT NULL,
+                user_id VARCHAR,
+                claim_type VARCHAR NOT NULL,
+                claim_element_id VARCHAR,
+                claim_element_text TEXT,
+                query_text TEXT NOT NULL,
+                query_hash VARCHAR NOT NULL,
+                retrieval_plane VARCHAR DEFAULT 'unified',
+                result_count INTEGER DEFAULT 0,
+                status VARCHAR DEFAULT 'pending',
+                metadata JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        try:
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_retrieval_sessions_session_id
+                ON claim_retrieval_sessions(session_id)
+            """)
+        except Exception:
+            pass
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS claim_retrieval_results (
+                id BIGINT PRIMARY KEY DEFAULT nextval('claim_support_id_seq'),
+                session_id VARCHAR NOT NULL,
+                user_id VARCHAR,
+                claim_type VARCHAR NOT NULL,
+                claim_element_id VARCHAR,
+                rank INTEGER DEFAULT 0,
+                source_kind VARCHAR NOT NULL,
+                source_ref VARCHAR NOT NULL,
+                source_label TEXT,
+                chunk_text TEXT,
+                retrieval_score FLOAT DEFAULT 0.0,
+                confidence FLOAT DEFAULT 0.0,
+                explanation TEXT,
+                duplicate_cluster_id VARCHAR,
+                is_duplicate_representative BOOLEAN DEFAULT FALSE,
+                metadata JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        try:
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_claim_retrieval_results_session
+                ON claim_retrieval_results(session_id)
+            """)
+        except Exception:
+            pass
+
+    def create_retrieval_session(
+        self,
+        user_id: str,
+        claim_type: str,
+        *,
+        claim_element_id: str = '',
+        claim_element_text: str = '',
+        query_text: str = '',
+        retrieval_plane: str = 'unified',
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Create a claim-element-scoped retrieval session and return its stable session ID.
+
+        The session tracks the query, element scope, and (later) ranked results so that
+        operators can replay or debug any retrieval pass without re-running the world.
+        """
+        if not DUCKDB_AVAILABLE:
+            return {'created': False, 'error': 'duckdb unavailable', 'session_id': ''}
+        try:
+            self._prepare_duckdb_path()
+            conn = duckdb.connect(self.db_path)
+            self._ensure_retrieval_schema(conn)
+            created_at = datetime.now(timezone.utc).isoformat()
+            query_hash = hashlib.sha256(str(query_text or '').encode()).hexdigest()[:16]
+            session_id = self._make_retrieval_session_id(
+                user_id=user_id,
+                claim_type=claim_type,
+                claim_element_id=claim_element_id,
+                query_text=query_text,
+                created_at=created_at,
+            )
+            conn.execute(
+                """
+                INSERT INTO claim_retrieval_sessions
+                    (session_id, user_id, claim_type, claim_element_id, claim_element_text,
+                     query_text, query_hash, retrieval_plane, result_count, status, metadata,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    session_id, user_id, claim_type, claim_element_id, claim_element_text,
+                    query_text, query_hash, retrieval_plane, 0, 'pending',
+                    json.dumps(dict(metadata or {})), created_at, created_at,
+                ],
+            )
+            conn.close()
+            self.mediator.log('retrieval_session_created', session_id=session_id)
+            return {
+                'created': True,
+                'session_id': session_id,
+                'user_id': user_id,
+                'claim_type': claim_type,
+                'claim_element_id': claim_element_id,
+                'claim_element_text': claim_element_text,
+                'query_text': query_text,
+                'query_hash': query_hash,
+                'retrieval_plane': retrieval_plane,
+                'status': 'pending',
+                'created_at': created_at,
+            }
+        except Exception as exc:
+            self.mediator.log('retrieval_session_create_error', error=str(exc))
+            return {'created': False, 'error': str(exc), 'session_id': ''}
+
+    def index_chunks_for_retrieval(
+        self,
+        user_id: str,
+        claim_type: str,
+        chunks: List[Dict[str, Any]],
+        *,
+        claim_element_id: str = '',
+        source_kind: str = 'chunk',
+        session_id: str = '',
+        max_chunks: int = 200,
+    ) -> Dict[str, Any]:
+        """Index testimony and document chunks into the unified retrieval plane.
+
+        Each chunk is normalized, hashed for duplicate detection, and stored so that
+        retrieval sessions can query them without re-parsing.  Accepts mixed lists
+        containing testimony records, document chunks, or fact records.
+        """
+        if not DUCKDB_AVAILABLE:
+            return {'indexed': False, 'error': 'duckdb unavailable', 'indexed_count': 0}
+        try:
+            self._prepare_duckdb_path()
+            conn = duckdb.connect(self.db_path)
+            self._ensure_retrieval_schema(conn)
+            # Ensure a session row exists when session_id is provided
+            if session_id:
+                existing = conn.execute(
+                    'SELECT session_id FROM claim_retrieval_sessions WHERE session_id = ?',
+                    [session_id],
+                ).fetchone()
+                if not existing:
+                    session_id = ''  # ignore unknown session reference
+            now = datetime.now(timezone.utc).isoformat()
+            safe_chunks = list(chunks or [])[:max_chunks]
+            indexed_count = 0
+            cluster_map: Dict[str, str] = {}  # cluster_id -> first source_ref (representative)
+            for chunk in safe_chunks:
+                normalized = self._normalize_chunk_for_indexing(chunk, source_kind)
+                if not normalized.get('source_ref') and not normalized.get('chunk_text'):
+                    continue
+                chunk_text = normalized['chunk_text']
+                cluster_id = self._make_duplicate_cluster_id(chunk_text)
+                is_representative = cluster_id not in cluster_map
+                if is_representative:
+                    cluster_map[cluster_id] = normalized['source_ref']
+                conn.execute(
+                    """
+                    INSERT INTO claim_retrieval_results
+                        (session_id, user_id, claim_type, claim_element_id, rank,
+                         source_kind, source_ref, source_label, chunk_text,
+                         retrieval_score, confidence, explanation,
+                         duplicate_cluster_id, is_duplicate_representative,
+                         metadata, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        session_id or '', user_id, claim_type, claim_element_id,
+                        indexed_count,
+                        normalized['source_kind'],
+                        normalized['source_ref'],
+                        normalized['source_label'],
+                        chunk_text,
+                        normalized['score'],
+                        normalized['confidence'],
+                        '',  # explanation set during retrieval scoring
+                        cluster_id,
+                        is_representative,
+                        json.dumps(normalized['metadata']),
+                        now,
+                    ],
+                )
+                indexed_count += 1
+            if session_id and indexed_count > 0:
+                conn.execute(
+                    "UPDATE claim_retrieval_sessions SET result_count = ?, updated_at = ? WHERE session_id = ?",
+                    [indexed_count, now, session_id],
+                )
+            conn.close()
+            self.mediator.log('chunks_indexed_for_retrieval', indexed_count=indexed_count)
+            return {
+                'indexed': True,
+                'indexed_count': indexed_count,
+                'session_id': session_id,
+                'duplicate_cluster_count': len(cluster_map),
+                'claim_type': claim_type,
+                'claim_element_id': claim_element_id,
+            }
+        except Exception as exc:
+            self.mediator.log('index_chunks_error', error=str(exc))
+            return {'indexed': False, 'error': str(exc), 'indexed_count': 0}
+
+    def run_retrieval_session(
+        self,
+        user_id: str,
+        claim_type: str,
+        *,
+        claim_element_id: str = '',
+        claim_element_text: str = '',
+        query_text: str = '',
+        chunks: Optional[List[Dict[str, Any]]] = None,
+        max_results: int = 20,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Create a retrieval session, score/rank provided chunks, and persist results.
+
+        This is the main entry point for M4 retrieval.  It:
+        1. Creates a stable session record.
+        2. Scores each chunk against *query_text* and *claim_element_text*.
+        3. Annotates duplicate-cluster hints.
+        4. Generates a concise explanation for each ranked result.
+        5. Persists all results for later replay or drilldown.
+
+        Returns the session metadata and the ranked result list.
+        """
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'error': 'duckdb unavailable',
+                'session_id': '',
+                'results': [],
+                'result_count': 0,
+            }
+        session = self.create_retrieval_session(
+            user_id,
+            claim_type,
+            claim_element_id=claim_element_id,
+            claim_element_text=claim_element_text,
+            query_text=query_text,
+            retrieval_plane='unified',
+            metadata=metadata,
+        )
+        if not session.get('created'):
+            return {
+                'available': False,
+                'error': session.get('error', 'session creation failed'),
+                'session_id': '',
+                'results': [],
+                'result_count': 0,
+            }
+        session_id = session['session_id']
+        query_tokens = re.findall(r'[a-z0-9]+', str(query_text or '').lower())
+        safe_chunks = list(chunks or [])[:max_results * 2]
+        # Score and annotate
+        scored: List[Dict[str, Any]] = []
+        cluster_map: Dict[str, str] = {}
+        for chunk in safe_chunks:
+            normalized = self._normalize_chunk_for_indexing(chunk, 'chunk')
+            if not normalized.get('source_ref') and not normalized.get('chunk_text'):
+                continue
+            score = self._score_retrieval_chunk(normalized, query_tokens, claim_element_text)
+            explanation = self._explain_retrieval_result(normalized, query_tokens, score, claim_element_text)
+            cluster_id = self._make_duplicate_cluster_id(normalized['chunk_text'])
+            is_representative = cluster_id not in cluster_map
+            if is_representative:
+                cluster_map[cluster_id] = normalized['source_ref']
+            scored.append({
+                'source_kind': normalized['source_kind'],
+                'source_ref': normalized['source_ref'],
+                'source_label': normalized['source_label'],
+                'chunk_text': normalized['chunk_text'],
+                'retrieval_score': score,
+                'confidence': normalized['confidence'],
+                'explanation': explanation,
+                'duplicate_cluster_id': cluster_id,
+                'is_duplicate_representative': is_representative,
+                'metadata': normalized['metadata'],
+            })
+        # Rank by retrieval_score descending, representatives before duplicates
+        scored.sort(key=lambda r: (-r['retrieval_score'], not r['is_duplicate_representative']))
+        top_results = scored[:max_results]
+        # Persist ranked results
+        try:
+            self._prepare_duckdb_path()
+            conn = duckdb.connect(self.db_path)
+            self._ensure_retrieval_schema(conn)
+            now = datetime.now(timezone.utc).isoformat()
+            for rank, result in enumerate(top_results):
+                conn.execute(
+                    """
+                    INSERT INTO claim_retrieval_results
+                        (session_id, user_id, claim_type, claim_element_id, rank,
+                         source_kind, source_ref, source_label, chunk_text,
+                         retrieval_score, confidence, explanation,
+                         duplicate_cluster_id, is_duplicate_representative,
+                         metadata, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        session_id, user_id, claim_type, claim_element_id, rank,
+                        result['source_kind'], result['source_ref'], result['source_label'],
+                        result['chunk_text'], result['retrieval_score'], result['confidence'],
+                        result['explanation'], result['duplicate_cluster_id'],
+                        result['is_duplicate_representative'],
+                        json.dumps(result['metadata']), now,
+                    ],
+                )
+            conn.execute(
+                "UPDATE claim_retrieval_sessions SET result_count = ?, status = ?, updated_at = ? WHERE session_id = ?",
+                [len(top_results), 'complete', now, session_id],
+            )
+            conn.close()
+        except Exception as exc:
+            self.mediator.log('run_retrieval_session_persist_error', error=str(exc))
+
+        duplicate_count = sum(1 for r in top_results if not r['is_duplicate_representative'])
+        cluster_ids = list({r['duplicate_cluster_id'] for r in top_results})
+        return {
+            'available': True,
+            'session_id': session_id,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'claim_element_id': claim_element_id,
+            'claim_element_text': claim_element_text,
+            'query_text': query_text,
+            'status': 'complete',
+            'result_count': len(top_results),
+            'duplicate_count': duplicate_count,
+            'duplicate_cluster_count': len(cluster_ids),
+            'results': top_results,
+        }
+
+    def get_retrieval_session(
+        self,
+        user_id: str,
+        session_id: str,
+        *,
+        claim_type: Optional[str] = None,
+        max_results: int = 50,
+    ) -> Dict[str, Any]:
+        """Return a persisted retrieval session and its ranked results for replay or drilldown."""
+        if not DUCKDB_AVAILABLE:
+            return {'available': False, 'error': 'duckdb unavailable', 'session_id': session_id, 'results': []}
+        try:
+            self._prepare_duckdb_path()
+            conn = duckdb.connect(self.db_path)
+            self._ensure_retrieval_schema(conn)
+            rows = conn.execute(
+                "SELECT * FROM claim_retrieval_sessions WHERE session_id = ? AND user_id = ?",
+                [session_id, user_id],
+            ).fetchall()
+            cols = [d[0] for d in conn.description] if conn.description else []
+            if not rows:
+                conn.close()
+                return {'available': True, 'session_id': session_id, 'found': False, 'results': []}
+            session_row = dict(zip(cols, rows[0]))
+            # Fetch results
+            result_rows = conn.execute(
+                "SELECT * FROM claim_retrieval_results WHERE session_id = ? ORDER BY rank ASC LIMIT ?",
+                [session_id, max_results],
+            ).fetchall()
+            result_cols = [d[0] for d in conn.description] if conn.description else []
+            conn.close()
+            results = []
+            for rrow in result_rows:
+                rdict = dict(zip(result_cols, rrow))
+                raw_meta = rdict.get('metadata')
+                if isinstance(raw_meta, str):
+                    try:
+                        rdict['metadata'] = json.loads(raw_meta)
+                    except Exception:
+                        rdict['metadata'] = {}
+                results.append(rdict)
+            duplicate_count = sum(1 for r in results if not r.get('is_duplicate_representative', True))
+            cluster_ids = list({str(r.get('duplicate_cluster_id') or '') for r in results if r.get('duplicate_cluster_id')})
+            meta = session_row.get('metadata')
+            if isinstance(meta, str):
+                try:
+                    session_row['metadata'] = json.loads(meta)
+                except Exception:
+                    session_row['metadata'] = {}
+            return {
+                'available': True,
+                'found': True,
+                'session_id': session_id,
+                'user_id': user_id,
+                'claim_type': str(session_row.get('claim_type') or ''),
+                'claim_element_id': str(session_row.get('claim_element_id') or ''),
+                'claim_element_text': str(session_row.get('claim_element_text') or ''),
+                'query_text': str(session_row.get('query_text') or ''),
+                'retrieval_plane': str(session_row.get('retrieval_plane') or 'unified'),
+                'status': str(session_row.get('status') or ''),
+                'result_count': int(session_row.get('result_count') or len(results)),
+                'duplicate_count': duplicate_count,
+                'duplicate_cluster_count': len(cluster_ids),
+                'duplicate_cluster_ids': cluster_ids,
+                'created_at': str(session_row.get('created_at') or ''),
+                'updated_at': str(session_row.get('updated_at') or ''),
+                'results': results,
+                'session_metadata': dict(session_row.get('metadata') or {}),
+            }
+        except Exception as exc:
+            self.mediator.log('get_retrieval_session_error', error=str(exc))
+            return {'available': False, 'error': str(exc), 'session_id': session_id, 'results': []}
+
+    def list_retrieval_sessions(
+        self,
+        user_id: str,
+        *,
+        claim_type: Optional[str] = None,
+        claim_element_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> Dict[str, Any]:
+        """List retrieval sessions for *user_id*, optionally scoped to a claim type and element."""
+        if not DUCKDB_AVAILABLE:
+            return {'available': False, 'sessions': [], 'session_count': 0}
+        try:
+            self._prepare_duckdb_path()
+            conn = duckdb.connect(self.db_path)
+            self._ensure_retrieval_schema(conn)
+            predicates = ['user_id = ?']
+            params: List[Any] = [user_id]
+            if claim_type:
+                predicates.append('claim_type = ?')
+                params.append(claim_type)
+            if claim_element_id:
+                predicates.append('claim_element_id = ?')
+                params.append(claim_element_id)
+            where = ' AND '.join(predicates)
+            rows = conn.execute(
+                f"SELECT session_id, claim_type, claim_element_id, claim_element_text, "
+                f"query_text, retrieval_plane, result_count, status, created_at, updated_at "
+                f"FROM claim_retrieval_sessions WHERE {where} ORDER BY created_at DESC LIMIT ?",
+                params + [limit],
+            ).fetchall()
+            cols = ['session_id', 'claim_type', 'claim_element_id', 'claim_element_text',
+                    'query_text', 'retrieval_plane', 'result_count', 'status', 'created_at', 'updated_at']
+            conn.close()
+            sessions = [dict(zip(cols, row)) for row in rows]
+            return {
+                'available': True,
+                'user_id': user_id,
+                'claim_type': claim_type,
+                'claim_element_id': claim_element_id,
+                'session_count': len(sessions),
+                'sessions': sessions,
+            }
+        except Exception as exc:
+            self.mediator.log('list_retrieval_sessions_error', error=str(exc))
+            return {'available': False, 'error': str(exc), 'sessions': [], 'session_count': 0}
+
+    def get_retrieval_context_for_element(
+        self,
+        user_id: str,
+        claim_type: str,
+        claim_element_id: str,
+        *,
+        max_results: int = 10,
+    ) -> Dict[str, Any]:
+        """Return the best available retrieval results for a claim element across all sessions.
+
+        Used by question recommendations and follow-up planning to cite retrieval context
+        rather than generic gap labels alone.
+        """
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'claim_element_id': claim_element_id,
+                'top_results': [],
+                'has_retrieval_context': False,
+            }
+        try:
+            self._prepare_duckdb_path()
+            conn = duckdb.connect(self.db_path)
+            self._ensure_retrieval_schema(conn)
+            rows = conn.execute(
+                """
+                SELECT source_kind, source_ref, source_label, chunk_text,
+                       retrieval_score, confidence, explanation,
+                       duplicate_cluster_id, is_duplicate_representative
+                FROM claim_retrieval_results
+                WHERE user_id = ? AND claim_type = ? AND claim_element_id = ?
+                ORDER BY retrieval_score DESC
+                LIMIT ?
+                """,
+                [user_id, claim_type, claim_element_id, max_results],
+            ).fetchall()
+            cols = [
+                'source_kind', 'source_ref', 'source_label', 'chunk_text',
+                'retrieval_score', 'confidence', 'explanation',
+                'duplicate_cluster_id', 'is_duplicate_representative',
+            ]
+            conn.close()
+            results = [dict(zip(cols, row)) for row in rows]
+            has_context = bool(results)
+            top_score = max((r['retrieval_score'] for r in results), default=0.0)
+            duplicate_cluster_ids = list({r['duplicate_cluster_id'] for r in results if r.get('duplicate_cluster_id')})
+            return {
+                'available': True,
+                'claim_element_id': claim_element_id,
+                'claim_type': claim_type,
+                'has_retrieval_context': has_context,
+                'result_count': len(results),
+                'top_score': top_score,
+                'duplicate_cluster_count': len(duplicate_cluster_ids),
+                'duplicate_cluster_hints': duplicate_cluster_ids,
+                'top_results': results,
+            }
+        except Exception as exc:
+            self.mediator.log('get_retrieval_context_error', error=str(exc))
+            return {
+                'available': False,
+                'error': str(exc),
+                'claim_element_id': claim_element_id,
+                'top_results': [],
+                'has_retrieval_context': False,
+            }
