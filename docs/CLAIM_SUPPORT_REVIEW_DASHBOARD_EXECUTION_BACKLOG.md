@@ -131,7 +131,7 @@ Make `/claim-support-review` a guided intake and clarification workflow instead 
 
 ## M1: Document Intake And Decomposition Plane
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -149,12 +149,12 @@ Make uploaded or linked materials first-class evidence artifacts routed through 
 
 ### Checklist
 
-- [ ] add dashboard document upload and URL intake controls
-- [ ] route dashboard-ingested materials through `integrations/ipfs_datasets/documents.py`
-- [ ] persist parse summary, transform lineage, chunk references, and remediation flags
-- [ ] expose chunk previews, page or span provenance, and parse-quality indicators in review payloads
-- [ ] add reparsing or OCR retry actions for low-quality document parses
-- [ ] link created artifacts to claim-support context and testimony threads where applicable
+- [x] add dashboard document upload and URL intake controls
+- [x] route dashboard-ingested materials through `integrations/ipfs_datasets/documents.py`
+- [x] persist parse summary, transform lineage, chunk references, and remediation flags
+- [x] expose chunk previews, page or span provenance, and parse-quality indicators in review payloads
+- [x] add reparsing or OCR retry actions for low-quality document parses
+- [x] link created artifacts to claim-support context and testimony threads where applicable
 
 ### Acceptance criteria
 

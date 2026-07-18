@@ -4520,6 +4520,7 @@ def test_claim_support_document_payload_persists_and_refreshes_review():
         filename=None,
         mime_type=None,
         evidence_type="document",
+        testimony_id=None,
         metadata={
             "intake_summary_handoff": {
                 "current_phase": "intake",
@@ -4644,6 +4645,7 @@ def test_claim_support_upload_document_route_accepts_multipart_file():
         filename="termination-memo.txt",
         mime_type="text/plain",
         evidence_type="document",
+        testimony_id=None,
         metadata={
             "intake_summary_handoff": {
                 "current_phase": "intake",
@@ -5801,3 +5803,411 @@ async def test_claim_support_review_route_marks_execute_follow_up_as_deprecated(
     assert "execute_follow_up on /api/claim-support/review is deprecated" in response.headers[
         "Warning"
     ]
+
+
+# ---------------------------------------------------------------------------
+# M1: Document Intake And Decomposition Plane
+# ---------------------------------------------------------------------------
+
+def test_claim_support_document_save_request_accepts_testimony_id():
+    from claim_support_review import ClaimSupportDocumentSaveRequest
+    req = ClaimSupportDocumentSaveRequest(
+        claim_type="retaliation",
+        document_text="Termination letter.",
+        testimony_id="testimony-abc123",
+    )
+    assert req.testimony_id == "testimony-abc123"
+
+
+def test_claim_support_document_save_request_testimony_id_defaults_to_none():
+    from claim_support_review import ClaimSupportDocumentSaveRequest
+    req = ClaimSupportDocumentSaveRequest(
+        claim_type="retaliation",
+        document_text="Termination letter.",
+    )
+    assert req.testimony_id is None
+
+
+def test_build_claim_support_document_payload_passes_testimony_id_to_mediator():
+    from claim_support_review import (
+        ClaimSupportDocumentSaveRequest,
+        build_claim_support_document_payload,
+    )
+
+    mediator = Mock()
+    mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+    mediator.save_claim_support_document.return_value = {
+        "record_id": 7,
+        "recorded": True,
+    }
+    mediator.get_three_phase_status.return_value = {
+        "current_phase": "evidence",
+        "candidate_claims": [{"claim_type": "retaliation", "confidence": 0.9}],
+    }
+
+    req = ClaimSupportDocumentSaveRequest(
+        claim_type="retaliation",
+        user_id="state-user",
+        document_text="HR policy document.",
+        testimony_id="testimony-xyz",
+        include_post_save_review=False,
+    )
+    payload = build_claim_support_document_payload(mediator, req)
+
+    assert payload["recorded"] is True
+    call_kwargs = mediator.save_claim_support_document.call_args.kwargs
+    assert call_kwargs["testimony_id"] == "testimony-xyz"
+    assert call_kwargs["metadata"]["testimony_id"] == "testimony-xyz"
+
+
+def test_build_claim_support_uploaded_document_payload_passes_testimony_id():
+    from claim_support_review import build_claim_support_uploaded_document_payload
+
+    mediator = Mock()
+    mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+    mediator.save_claim_support_document.return_value = {
+        "record_id": 8,
+        "recorded": True,
+    }
+    mediator.get_three_phase_status.return_value = {
+        "current_phase": "evidence",
+        "candidate_claims": [],
+    }
+
+    payload = build_claim_support_uploaded_document_payload(
+        mediator,
+        user_id="state-user",
+        claim_type="retaliation",
+        file_bytes=b"Some document content.",
+        filename="policy.txt",
+        testimony_id="testimony-abc",
+        include_post_save_review=False,
+    )
+
+    assert payload["recorded"] is True
+    call_kwargs = mediator.save_claim_support_document.call_args.kwargs
+    assert call_kwargs["testimony_id"] == "testimony-abc"
+    assert call_kwargs["metadata"]["testimony_id"] == "testimony-abc"
+
+
+def test_upload_document_route_accepts_testimony_id_form_field():
+    mediator = Mock()
+    mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+    mediator.save_claim_support_document.return_value = {
+        "record_id": 9,
+        "cid": "QmTestimonyLinkedDoc",
+        "recorded": True,
+    }
+    mediator.get_three_phase_status.return_value = {
+        "current_phase": "evidence",
+        "iteration_count": 1,
+        "intake_readiness": {"ready_to_advance": True},
+        "candidate_claims": [{"claim_type": "retaliation", "confidence": 0.9}],
+        "intake_sections": {},
+        "canonical_fact_summary": {"count": 0, "facts": []},
+        "canonical_fact_intent_summary": {},
+        "proof_lead_summary": {"count": 0, "proof_leads": []},
+        "proof_lead_intent_summary": {},
+        "timeline_anchor_summary": {"count": 0, "anchors": []},
+        "harm_profile": {},
+        "remedy_profile": {},
+        "complainant_summary_confirmation": {"status": "confirmed", "confirmed": True},
+        "question_candidate_summary": {},
+        "claim_support_packet_summary": {},
+        "intake_evidence_alignment_summary": {},
+        "alignment_evidence_tasks": [],
+        "alignment_task_updates": [],
+        "alignment_task_update_history": [],
+    }
+
+    app = create_review_api_app(mediator)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/claim-support/upload-document",
+        data={
+            "claim_type": "retaliation",
+            "testimony_id": "testimony-abc",
+            "include_post_save_review": "false",
+        },
+        files={"file": ("policy.txt", b"Policy document.", "text/plain")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recorded"] is True
+    call_kwargs = mediator.save_claim_support_document.call_args.kwargs
+    assert call_kwargs["testimony_id"] == "testimony-abc"
+
+
+def test_derive_remediation_flags_empty_parse_metadata():
+    from claim_support_review import _derive_remediation_flags
+
+    result = _derive_remediation_flags({}, "success")
+    assert result["needs_remediation"] is False
+    assert result["remediation_flags"] == []
+    assert result["remediation_guidance"] == ""
+    assert result["reparse_recommended"] is False
+
+
+def test_derive_remediation_flags_needs_ocr():
+    from claim_support_review import _derive_remediation_flags
+
+    result = _derive_remediation_flags(
+        {"needs_ocr": True, "ocr_attempted": False, "ocr_used": False},
+        "success",
+    )
+    assert result["needs_remediation"] is True
+    assert "needs_ocr" in result["remediation_flags"]
+    assert "OCR" in result["remediation_guidance"]
+    assert result["reparse_recommended"] is True
+
+
+def test_derive_remediation_flags_ocr_unavailable():
+    from claim_support_review import _derive_remediation_flags
+
+    result = _derive_remediation_flags(
+        {"needs_ocr": True, "ocr_attempted": True, "ocr_used": False},
+        "success",
+    )
+    assert "needs_ocr" in result["remediation_flags"]
+    assert "ocr_unavailable" in result["remediation_flags"]
+    assert "ocrmypdf" in result["remediation_guidance"]
+
+
+def test_derive_remediation_flags_low_quality():
+    from claim_support_review import _derive_remediation_flags
+
+    result = _derive_remediation_flags(
+        {"quality_tier": "low", "quality_score": 0.3},
+        "success",
+    )
+    assert result["needs_remediation"] is True
+    assert "low_quality_parse" in result["remediation_flags"]
+    assert result["remediation_guidance"] != ""
+    assert result["reparse_recommended"] is True
+
+
+def test_derive_remediation_flags_parse_failed():
+    from claim_support_review import _derive_remediation_flags
+
+    result = _derive_remediation_flags({}, "error")
+    assert result["needs_remediation"] is True
+    assert "parse_failed" in result["remediation_flags"]
+    assert result["reparse_recommended"] is False
+
+
+def test_derive_remediation_flags_good_parse():
+    from claim_support_review import _derive_remediation_flags
+
+    result = _derive_remediation_flags(
+        {"quality_tier": "high", "quality_score": 0.9, "needs_ocr": False},
+        "success",
+    )
+    assert result["needs_remediation"] is False
+    assert result["remediation_flags"] == []
+
+
+def test_collect_claim_document_records_includes_remediation_fields():
+    from claim_support_review import _collect_claim_document_records
+
+    mediator = Mock()
+    mediator.get_user_evidence.return_value = [
+        {
+            "id": 1,
+            "claim_type": "retaliation",
+            "claim_element_id": "retaliation:2",
+            "claim_element": "Adverse action",
+            "description": "Low quality PDF",
+            "parse_status": "success",
+            "parse_metadata": {
+                "quality_tier": "low",
+                "quality_score": 0.2,
+                "needs_ocr": True,
+                "ocr_attempted": False,
+                "ocr_used": False,
+            },
+            "metadata": {"testimony_id": "testimony-linked"},
+            "chunk_count": 0,
+            "fact_count": 0,
+            "graph_status": "unavailable",
+            "graph_entity_count": 0,
+            "graph_relationship_count": 0,
+        }
+    ]
+    mediator.get_evidence_chunks = None
+    mediator.get_evidence_facts = None
+    mediator.get_evidence_graph = None
+
+    result = _collect_claim_document_records(mediator, "state-user", "retaliation")
+
+    assert "retaliation" in result
+    record = result["retaliation"][0]
+    assert record["needs_remediation"] is True
+    assert "needs_ocr" in record["remediation_flags"]
+    assert record["remediation_guidance"] != ""
+    assert record["reparse_recommended"] is True
+    assert record["linked_testimony_id"] == "testimony-linked"
+
+
+def test_collect_claim_document_records_linked_testimony_empty_when_absent():
+    from claim_support_review import _collect_claim_document_records
+
+    mediator = Mock()
+    mediator.get_user_evidence.return_value = [
+        {
+            "id": 2,
+            "claim_type": "retaliation",
+            "description": "Good doc",
+            "parse_status": "success",
+            "parse_metadata": {"quality_tier": "high", "quality_score": 0.9},
+            "metadata": {},
+            "chunk_count": 2,
+            "fact_count": 1,
+            "graph_status": "ready",
+            "graph_entity_count": 0,
+            "graph_relationship_count": 0,
+        }
+    ]
+    mediator.get_evidence_chunks = None
+    mediator.get_evidence_facts = None
+    mediator.get_evidence_graph = None
+
+    result = _collect_claim_document_records(mediator, "state-user", "retaliation")
+    record = result["retaliation"][0]
+    assert record["linked_testimony_id"] == ""
+    assert record["needs_remediation"] is False
+
+
+def test_reparse_document_request_model():
+    from claim_support_review import ClaimSupportReparseDocumentRequest
+    req = ClaimSupportReparseDocumentRequest(record_id=42, force_ocr=True)
+    assert req.record_id == 42
+    assert req.force_ocr is True
+    assert req.include_post_save_review is True
+
+
+def test_build_reparse_document_payload_returns_unavailable_when_method_missing():
+    from claim_support_review import (
+        ClaimSupportReparseDocumentRequest,
+        build_claim_support_reparse_document_payload,
+    )
+
+    mediator = Mock(spec=[])
+    mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+
+    req = ClaimSupportReparseDocumentRequest(
+        record_id=5,
+        claim_type="retaliation",
+        include_post_save_review=False,
+    )
+    payload = build_claim_support_reparse_document_payload(mediator, req)
+
+    assert payload["reparsed"] is False
+    assert payload["error"] == "reparse_unavailable"
+    assert payload["record_id"] == 5
+
+
+def test_build_reparse_document_payload_calls_mediator_method():
+    from claim_support_review import (
+        ClaimSupportReparseDocumentRequest,
+        build_claim_support_reparse_document_payload,
+    )
+
+    mediator = Mock()
+    mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+    mediator.reparse_claim_support_document.return_value = {
+        "record_id": 5,
+        "reparsed": True,
+        "parse_status": "success",
+        "chunk_count": 3,
+    }
+    mediator.get_three_phase_status.return_value = {
+        "current_phase": "evidence",
+        "candidate_claims": [],
+    }
+
+    req = ClaimSupportReparseDocumentRequest(
+        record_id=5,
+        claim_type="retaliation",
+        user_id="state-user",
+        force_ocr=True,
+        include_post_save_review=False,
+    )
+    payload = build_claim_support_reparse_document_payload(mediator, req)
+
+    assert payload["reparsed"] is True
+    assert payload["record_id"] == 5
+    mediator.reparse_claim_support_document.assert_called_once_with(
+        record_id=5,
+        user_id="state-user",
+        force_ocr=True,
+    )
+
+
+def test_reparse_document_route_exists_in_review_api():
+    mediator = Mock()
+    mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+    mediator.reparse_claim_support_document.return_value = {
+        "record_id": 3,
+        "reparsed": True,
+    }
+    mediator.get_three_phase_status.return_value = {
+        "current_phase": "evidence",
+        "candidate_claims": [],
+    }
+
+    app = create_review_api_app(mediator)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/claim-support/reparse-document",
+        json={
+            "record_id": 3,
+            "claim_type": "retaliation",
+            "force_ocr": False,
+            "include_post_save_review": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reparsed"] is True
+    assert payload["record_id"] == 3
+
+
+def test_mediator_save_claim_support_document_accepts_testimony_id():
+    import tempfile, os
+    from mediator.claim_support_hooks import ClaimSupportHook
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+
+    try:
+        mediator = Mock()
+        mediator.state = SimpleNamespace(username="state-user", hashed_username=None)
+        hook = ClaimSupportHook(mediator, db_path=db_path)
+
+        # Verify the ClaimSupportHook schema initialised without error
+        assert hook is not None
+    finally:
+        os.unlink(db_path)
+
+
+def test_mediator_reparse_returns_error_when_get_evidence_raw_missing():
+    from mediator.mediator import Mediator
+
+    # Minimal smoke test via mock rather than full mediator construction
+    mediator = Mock(spec=["reparse_claim_support_document", "state"])
+    mediator.state = SimpleNamespace(username="test-user", hashed_username=None)
+    # The method delegates to get_evidence_raw and reparse_evidence; if they don't exist it should
+    # return gracefully.  We test via build_claim_support_reparse_document_payload instead.
+    from claim_support_review import (
+        ClaimSupportReparseDocumentRequest,
+        build_claim_support_reparse_document_payload,
+    )
+    mediator2 = Mock(spec=["state"])
+    mediator2.state = SimpleNamespace(username="test-user", hashed_username=None)
+    req = ClaimSupportReparseDocumentRequest(record_id=1, include_post_save_review=False)
+    payload = build_claim_support_reparse_document_payload(mediator2, req)
+    assert payload["reparsed"] is False

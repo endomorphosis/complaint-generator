@@ -1262,6 +1262,10 @@
                             <input id="document-mime-type" type="text" placeholder="text/plain or application/pdf">
                         </div>
                         <div>
+                            <label for="document-testimony-id">Linked Testimony ID</label>
+                            <input id="document-testimony-id" type="text" placeholder="testimony-abc123 (optional)">
+                        </div>
+                        <div>
                             <label for="document-file-input">Document File</label>
                             <input id="document-file-input" type="file" accept=".txt,.md,.html,.pdf,.doc,.docx,.rtf,.csv,.json">
                         </div>
@@ -5938,8 +5942,14 @@
                 const graphPreview = record.graph_preview || {};
                 const graphEntities = Array.isArray(graphPreview.entities) ? graphPreview.entities : [];
                 const graphRelationships = Array.isArray(graphPreview.relationships) ? graphPreview.relationships : [];
+                const needsRemediation = Boolean(record.needs_remediation);
+                const remediationFlags = Array.isArray(record.remediation_flags) ? record.remediation_flags : [];
+                const remediationGuidance = String(record.remediation_guidance || '');
+                const reparseRecommended = Boolean(record.reparse_recommended);
+                const linkedTestimonyId = String(record.linked_testimony_id || '');
+                const needsOcr = remediationFlags.includes('needs_ocr');
                 return `
-                    <article class="history-card">
+                    <article class="history-card${needsRemediation ? ' history-card--warning' : ''}">
                         <div class="row-head">
                             <div>
                                 <div class="row-title">${record.description || record.filename || record.source_url || record.cid || 'Document artifact'}</div>
@@ -5954,7 +5964,22 @@
                             ${parseMetadata.quality_tier ? `<span class="chip">quality: ${parseMetadata.quality_tier}</span>` : ''}
                             ${record.graph_status ? `<span class="chip">graph: ${record.graph_status}</span>` : ''}
                             ${record.fact_count !== null && record.fact_count !== undefined ? `<span class="chip">facts: ${record.fact_count}</span>` : ''}
+                            ${linkedTestimonyId ? `<span class="chip">testimony: ${linkedTestimonyId}</span>` : ''}
+                            ${remediationFlags.map((f) => `<span class="chip chip--warning">${f}</span>`).join('')}
                         </div>
+                        ${needsRemediation && remediationGuidance ? `
+                            <div class="resolution-feedback" style="margin-top: 10px;">
+                                <div class="resolution-feedback-body">${remediationGuidance}</div>
+                                ${reparseRecommended && record.record_id != null ? `
+                                    <div class="button-row" style="margin-top: 8px;">
+                                        <button class="button-tertiary" type="button"
+                                            onclick="reparseDocument(${record.record_id}, false)">Reparse</button>
+                                        ${needsOcr ? `<button class="button-tertiary" type="button"
+                                            onclick="reparseDocument(${record.record_id}, true)">Reparse with OCR</button>` : ''}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
                         <div style="margin-top: 10px;">${record.parsed_text_preview || 'No parsed preview available.'}</div>
                         ${chunkPreviews.length ? `
                             <details class="packet-details" style="margin-top: 12px;">
@@ -6018,6 +6043,7 @@
             document.getElementById('document-filename').value = '';
             document.getElementById('document-source-url').value = '';
             document.getElementById('document-mime-type').value = '';
+            document.getElementById('document-testimony-id').value = '';
             document.getElementById('document-text').value = '';
             document.getElementById('document-file-input').value = '';
         }
@@ -6038,6 +6064,9 @@
                     documentText.value = values.documentText;
                 }
             }
+            if (values.testimonyId) {
+                document.getElementById('document-testimony-id').value = values.testimonyId;
+            }
         }
 
         function buildDocumentRequest() {
@@ -6050,6 +6079,7 @@
                 filename: document.getElementById('document-filename').value.trim() || null,
                 source_url: document.getElementById('document-source-url').value.trim() || null,
                 mime_type: document.getElementById('document-mime-type').value.trim() || null,
+                testimony_id: document.getElementById('document-testimony-id').value.trim() || null,
                 document_text: document.getElementById('document-text').value.trim() || null,
                 required_support_kinds: parseRequiredSupportKinds(),
                 include_support_summary: document.getElementById('include-support').checked,
@@ -6057,6 +6087,34 @@
                 include_follow_up_plan: document.getElementById('include-plan').checked,
                 include_post_save_review: true,
             };
+        }
+
+        async function reparseDocument(recordId, forceOcr) {
+            if (!recordId) { return; }
+            setStatus('Reparsing document…');
+            try {
+                const payload = {
+                    record_id: Number(recordId),
+                    claim_type: document.getElementById('claim-type').value.trim() || null,
+                    user_id: document.getElementById('user-id').value.trim() || null,
+                    force_ocr: Boolean(forceOcr),
+                    include_post_save_review: true,
+                    include_support_summary: document.getElementById('include-support').checked,
+                    include_overview: document.getElementById('include-overview').checked,
+                    include_follow_up_plan: document.getElementById('include-plan').checked,
+                };
+                const result = await postJson('/api/claim-support/reparse-document', payload);
+                document.getElementById('raw-output').textContent = JSON.stringify(result, null, 2);
+                if (result && result.reparsed) {
+                    renderPayload(result.post_save_review || result);
+                    setStatus('Document reparsed successfully.');
+                } else {
+                    const error = (result && result.reparse_result && result.reparse_result.error) || result.error || 'unknown error';
+                    setStatus(`Reparse did not complete: ${error}`);
+                }
+            } catch (err) {
+                setStatus(`Reparse failed: ${err.message}`);
+            }
         }
 
         function buildDocumentUploadFormData(file, payload) {

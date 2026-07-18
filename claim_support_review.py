@@ -247,7 +247,22 @@ class ClaimSupportDocumentSaveRequest(BaseModel):
     filename: Optional[str] = None
     mime_type: Optional[str] = None
     evidence_type: str = "document"
+    testimony_id: Optional[str] = None
     document_metadata: Dict[str, Any] = Field(default_factory=dict)
+    required_support_kinds: List[str] = Field(
+        default_factory=lambda: list(DEFAULT_REQUIRED_SUPPORT_KINDS)
+    )
+    include_post_save_review: bool = True
+    include_support_summary: bool = True
+    include_overview: bool = True
+    include_follow_up_plan: bool = True
+
+
+class ClaimSupportReparseDocumentRequest(BaseModel):
+    user_id: Optional[str] = None
+    claim_type: Optional[str] = None
+    record_id: int
+    force_ocr: bool = False
     required_support_kinds: List[str] = Field(
         default_factory=lambda: list(DEFAULT_REQUIRED_SUPPORT_KINDS)
     )
@@ -2432,6 +2447,64 @@ def _attach_testimony_to_claim_matrix(
     return claim_matrix
 
 
+def _derive_remediation_flags(
+    parse_metadata: Dict[str, Any],
+    parse_status: Optional[str],
+) -> Dict[str, Any]:
+    """Return remediation flags and human-readable guidance for a document parse record.
+
+    The flags indicate what kind of remediation would improve extraction quality,
+    and guidance gives a concise actionable message for the operator.
+    """
+    parse_metadata = parse_metadata if isinstance(parse_metadata, dict) else {}
+    quality_tier = str(parse_metadata.get("quality_tier") or "unknown")
+    quality_score = float(parse_metadata.get("quality_score") or 0.0)
+    needs_ocr = bool(parse_metadata.get("needs_ocr") or False)
+    ocr_attempted = bool(parse_metadata.get("ocr_attempted") or False)
+    ocr_used = bool(parse_metadata.get("ocr_used") or False)
+    quality_flags = list(parse_metadata.get("quality_flags") or [])
+    extraction_method = str(parse_metadata.get("extraction_method") or "")
+    status = str(parse_status or parse_metadata.get("status") or "")
+
+    flags: List[str] = []
+    guidance = ""
+
+    if status in {"error", "failed"}:
+        flags.append("parse_failed")
+        guidance = "Document parsing failed. Try re-uploading or converting the file to plain text or PDF."
+    elif needs_ocr and not ocr_used:
+        flags.append("needs_ocr")
+        if ocr_attempted:
+            flags.append("ocr_unavailable")
+            guidance = "OCR was attempted but unavailable. Install ocrmypdf to enable OCR on image-based PDFs."
+        else:
+            guidance = "This document appears to be an image-based PDF. Use the Reparse action to attempt OCR extraction."
+    elif quality_tier in {"low", "empty"}:
+        flags.append("low_quality_parse")
+        if quality_score < 0.2:
+            guidance = "Very low extraction quality. The document may be image-based or use an unsupported format. Consider converting to text or PDF."
+        else:
+            guidance = "Low parse quality. Re-uploading as plain text or a text-based PDF may improve extraction."
+    elif "pdf_binary_fallback" in quality_flags:
+        flags.append("pdf_binary_fallback")
+        guidance = "PDF text was extracted using a binary fallback. Quality may be reduced. Try a text-layer PDF if available."
+
+    if not ocr_used and extraction_method and "fallback" in extraction_method.lower():
+        if not any("fallback" in f for f in flags):
+            flags.append("extraction_fallback")
+            if not guidance:
+                guidance = "Text was extracted using a fallback method. Consider providing a higher-quality source format."
+
+    needs_remediation = bool(flags)
+    return {
+        "needs_remediation": needs_remediation,
+        "remediation_flags": flags,
+        "remediation_guidance": guidance,
+        "ocr_available": ocr_used,
+        "reparse_recommended": needs_remediation and status not in {"error", "failed"},
+    }
+
+
 def summarize_claim_document_artifacts_claim(
     document_records: Optional[List[Dict[str, Any]]],
 ) -> Dict[str, Any]:
@@ -2925,6 +2998,10 @@ def _collect_claim_document_records(
                 preview_graph_limit=preview_graph_limit,
             )
 
+        record_meta = dict(record.get("parse_metadata") or {})
+        remediation = _derive_remediation_flags(record_meta, str(record.get("parse_status") or ""))
+        linked_testimony_id = str((record.get("metadata") or {}).get("testimony_id") or "") if isinstance(record.get("metadata"), dict) else ""
+
         entry = {
             "record_id": record_id,
             "cid": record.get("cid"),
@@ -2945,13 +3022,18 @@ def _collect_claim_document_records(
             "chunk_count": int(record.get("chunk_count", 0) or 0),
             "fact_count": int(record.get("fact_count", 0) or 0),
             "parsed_text_preview": record.get("parsed_text_preview") or "",
-            "parse_metadata": dict(record.get("parse_metadata") or {}),
+            "parse_metadata": record_meta,
             "graph_status": record.get("graph_status"),
             "graph_entity_count": int(record.get("graph_entity_count", 0) or 0),
             "graph_relationship_count": int(record.get("graph_relationship_count", 0) or 0),
             "chunk_previews": chunk_previews,
             "fact_previews": fact_previews,
             "graph_preview": graph_preview,
+            "needs_remediation": remediation["needs_remediation"],
+            "remediation_flags": remediation["remediation_flags"],
+            "remediation_guidance": remediation["remediation_guidance"],
+            "reparse_recommended": remediation["reparse_recommended"],
+            "linked_testimony_id": linked_testimony_id,
         }
         current_claim = str(record.get("claim_type") or "")
         claim_entries.setdefault(current_claim, []).append(entry)
@@ -4583,6 +4665,8 @@ def build_claim_support_document_payload(
             claim_type=request.claim_type,
             claim_element_id=request.claim_element_id,
         )
+        if request.testimony_id:
+            document_metadata["testimony_id"] = request.testimony_id
         document_result = save_claim_support_document(
             claim_type=request.claim_type,
             user_id=resolved_user_id,
@@ -4594,6 +4678,7 @@ def build_claim_support_document_payload(
             filename=request.filename,
             mime_type=request.mime_type,
             evidence_type=request.evidence_type,
+            testimony_id=request.testimony_id,
             metadata=document_metadata,
         )
         payload = {
@@ -4633,6 +4718,7 @@ def build_claim_support_uploaded_document_payload(
     source_url: Optional[str] = None,
     mime_type: Optional[str] = None,
     evidence_type: str = "document",
+    testimony_id: Optional[str] = None,
     document_metadata: Optional[Dict[str, Any]] = None,
     required_support_kinds: Optional[List[str]] = None,
     include_post_save_review: bool = True,
@@ -4660,6 +4746,8 @@ def build_claim_support_uploaded_document_payload(
             claim_type=claim_type,
             claim_element_id=claim_element_id,
         )
+        if testimony_id:
+            merged_document_metadata["testimony_id"] = testimony_id
         document_result = save_claim_support_document(
             claim_type=claim_type,
             user_id=resolved_user_id,
@@ -4672,6 +4760,7 @@ def build_claim_support_uploaded_document_payload(
             filename=filename,
             mime_type=mime_type,
             evidence_type=evidence_type,
+            testimony_id=testimony_id,
             metadata=merged_document_metadata,
         )
         payload = {
@@ -4884,6 +4973,55 @@ def build_claim_support_manual_review_resolution_payload(
 
     if request.include_post_resolution_review:
         payload["post_resolution_review"] = build_claim_support_review_payload(
+            mediator,
+            ClaimSupportReviewRequest(
+                user_id=resolved_user_id,
+                claim_type=request.claim_type,
+                required_support_kinds=required_support_kinds,
+                include_support_summary=request.include_support_summary,
+                include_overview=request.include_overview,
+                include_follow_up_plan=request.include_follow_up_plan,
+                execute_follow_up=False,
+            ),
+        )
+
+    return payload
+
+
+def build_claim_support_reparse_document_payload(
+    mediator: Any,
+    request: "ClaimSupportReparseDocumentRequest",
+) -> Dict[str, Any]:
+    resolved_user_id = _resolve_user_id(mediator, request.user_id)
+    required_support_kinds = (
+        request.required_support_kinds or list(DEFAULT_REQUIRED_SUPPORT_KINDS)
+    )
+
+    reparse_claim_support_document = getattr(mediator, "reparse_claim_support_document", None)
+    if not callable(reparse_claim_support_document):
+        payload: Dict[str, Any] = {
+            "user_id": resolved_user_id,
+            "claim_type": request.claim_type,
+            "record_id": request.record_id,
+            "reparsed": False,
+            "error": "reparse_unavailable",
+        }
+    else:
+        reparse_result = reparse_claim_support_document(
+            record_id=request.record_id,
+            user_id=resolved_user_id,
+            force_ocr=request.force_ocr,
+        )
+        payload = {
+            "user_id": resolved_user_id,
+            "claim_type": request.claim_type,
+            "record_id": request.record_id,
+            "reparse_result": reparse_result,
+            "reparsed": bool((reparse_result or {}).get("reparsed")),
+        }
+
+    if request.include_post_save_review:
+        payload["post_save_review"] = build_claim_support_review_payload(
             mediator,
             ClaimSupportReviewRequest(
                 user_id=resolved_user_id,

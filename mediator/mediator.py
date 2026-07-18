@@ -2859,6 +2859,7 @@ class Mediator:
 		filename: str = None,
 		mime_type: str = None,
 		evidence_type: str = 'document',
+		testimony_id: str = None,
 		metadata: Dict[str, Any] = None,
 	):
 		"""Persist a dashboard-provided document through the shared evidence pipeline."""
@@ -2889,6 +2890,8 @@ class Mediator:
 			provenance.setdefault('source_url', source_url)
 			provenance.setdefault('acquisition_method', 'claim_support_dashboard')
 			storage_metadata['provenance'] = provenance
+		if testimony_id:
+			storage_metadata['testimony_id'] = testimony_id
 
 		result = self.submit_evidence(
 			data=data_bytes,
@@ -2905,6 +2908,8 @@ class Mediator:
 			'claim_element_id': claim_element_id or result.get('claim_element_id'),
 			'claim_element_text': claim_element_text or result.get('claim_element_text'),
 		}
+		if testimony_id:
+			payload['testimony_id'] = testimony_id
 		if payload['recorded']:
 			self._promote_alignment_task_update(
 				claim_type=claim_type or '',
@@ -2914,6 +2919,67 @@ class Mediator:
 				answer_preview=normalized_text,
 			)
 		return payload
+
+	def reparse_claim_support_document(
+		self,
+		record_id: int = None,
+		user_id: str = None,
+		force_ocr: bool = False,
+	) -> Dict[str, Any]:
+		"""Re-parse an existing evidence record to improve extraction quality.
+
+		Fetches the raw bytes for *record_id* from the evidence store and
+		re-runs document parsing through the shared evidence pipeline,
+		optionally forcing OCR on the second pass.  The evidence row is
+		updated in place; existing chunks and facts are replaced.
+		"""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+
+		if record_id is None:
+			return {
+				'reparsed': False,
+				'error': 'missing_record_id',
+				'user_id': user_id,
+			}
+
+		get_evidence_raw = getattr(self, 'get_evidence_raw', None)
+		reparse_evidence = getattr(self, 'reparse_evidence', None)
+
+		if not callable(get_evidence_raw) or not callable(reparse_evidence):
+			return {
+				'reparsed': False,
+				'error': 'reparse_not_supported',
+				'record_id': record_id,
+				'user_id': user_id,
+			}
+
+		raw = get_evidence_raw(int(record_id))
+		if not raw or not raw.get('data'):
+			return {
+				'reparsed': False,
+				'error': 'raw_bytes_unavailable',
+				'record_id': record_id,
+				'user_id': user_id,
+			}
+
+		reparse_metadata = dict(raw.get('metadata') or {})
+		reparse_metadata['parse_document'] = True
+		if force_ocr:
+			reparse_metadata['force_ocr'] = True
+
+		result = reparse_evidence(
+			record_id=int(record_id),
+			data=raw['data'],
+			metadata=reparse_metadata,
+		)
+		return {
+			**result,
+			'reparsed': bool(result.get('record_id')),
+			'record_id': record_id,
+			'user_id': user_id,
+			'force_ocr': force_ocr,
+		}
 
 	def get_claim_contradiction_candidates(
 		self,

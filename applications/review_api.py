@@ -16,12 +16,14 @@ from claim_support_review import (
     ClaimSupportFollowUpExecuteRequest,
     ClaimSupportIntakeSummaryConfirmRequest,
     ClaimSupportManualReviewResolveRequest,
+    ClaimSupportReparseDocumentRequest,
     ClaimSupportReviewRequest,
     ClaimSupportTestimonySaveRequest,
     build_claim_support_document_payload,
     build_claim_support_follow_up_execution_payload,
     build_claim_support_intake_summary_confirmation_payload,
     build_claim_support_manual_review_resolution_payload,
+    build_claim_support_reparse_document_payload,
     build_claim_support_review_payload,
     build_claim_support_testimony_payload,
     build_claim_support_uploaded_document_payload,
@@ -130,6 +132,7 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
             source_url: Optional[str] = Form(default=None),
             mime_type: Optional[str] = Form(default=None),
             evidence_type: str = Form(default="document"),
+            testimony_id: Optional[str] = Form(default=None),
             required_support_kinds: Optional[str] = Form(default=None),
             include_post_save_review: bool = Form(default=True),
             include_support_summary: bool = Form(default=True),
@@ -149,6 +152,7 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
                 source_url=source_url,
                 mime_type=mime_type or file.content_type,
                 evidence_type=evidence_type,
+                testimony_id=testimony_id,
                 document_metadata={},
                 required_support_kinds=_normalize_required_support_kinds_form(required_support_kinds),
                 include_post_save_review=include_post_save_review,
@@ -167,6 +171,16 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
                     "Install it to enable multipart evidence uploads."
                 ),
             )
+
+    # -----------------------------------------------------------------------
+    # M1: Document Intake And Decomposition — reparse action
+    # -----------------------------------------------------------------------
+
+    @router.post("/api/claim-support/reparse-document")
+    async def claim_support_reparse_document(
+        request: ClaimSupportReparseDocumentRequest,
+    ) -> Dict[str, Any]:
+        return build_claim_support_reparse_document_payload(mediator, request)
 
     # -----------------------------------------------------------------------
     # M0: Question And Testimony Foundation
