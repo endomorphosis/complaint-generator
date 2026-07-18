@@ -182,7 +182,7 @@ Make uploaded or linked materials first-class evidence artifacts routed through 
 
 ## M2: Fact Registry And Element Support Ledger
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -199,12 +199,12 @@ Create one durable substrate for testimony facts, document facts, authority fact
 
 ### Checklist
 
-- [ ] formalize durable fact records with source artifact, chunk or span, proposition text, confidence, and validation state
-- [ ] add fact-to-element, fact-to-authority, and fact-to-testimony link records
-- [ ] normalize uncertainty and contradiction flags on facts
-- [ ] add stable support-packet or proof-path identifiers for review drilldowns
-- [ ] expose an element support ledger in the review payload keyed by concrete fact IDs
-- [ ] ensure dashboard summaries can be recomputed from persisted fact records instead of transient parser outputs
+- [x] formalize durable fact records with source artifact, chunk or span, proposition text, confidence, and validation state
+- [x] add fact-to-element, fact-to-authority, and fact-to-testimony link records
+- [x] normalize uncertainty and contradiction flags on facts
+- [x] add stable support-packet or proof-path identifiers for review drilldowns
+- [x] expose an element support ledger in the review payload keyed by concrete fact IDs
+- [x] ensure dashboard summaries can be recomputed from persisted fact records instead of transient parser outputs
 
 ### Acceptance criteria
 

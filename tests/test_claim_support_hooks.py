@@ -4370,3 +4370,290 @@ class TestQuestionRecommendationsM0:
         finally:
             if os.path.exists(db_path):
                 os.unlink(db_path)
+
+    # --- M2: Fact Registry And Element Support Ledger ---
+
+    def test_persist_fact_record_creates_and_deduplicates(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            result = hook.persist_fact_record(
+                'testuser',
+                'employment',
+                claim_element_id='employment:1',
+                claim_element_text='Protected activity',
+                proposition_text='Claimant reported a code violation to HR on 2025-03-01.',
+                source_testimony_id='testimony:employment:abc123',
+                confidence=0.85,
+                validation_state='unvalidated',
+            )
+            assert result['available'] is True
+            assert result['recorded'] is True
+            assert result['fact_id'].startswith('fact:')
+            assert result['created'] is True
+            fact_id = result['fact_id']
+
+            result2 = hook.persist_fact_record(
+                'testuser',
+                'employment',
+                claim_element_id='employment:1',
+                claim_element_text='Protected activity',
+                proposition_text='Claimant reported a code violation to HR on 2025-03-01.',
+                source_testimony_id='testimony:employment:abc123',
+                confidence=0.85,
+                validation_state='unvalidated',
+            )
+            assert result2['reused'] is True
+            assert result2['fact_id'] == fact_id
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_persist_fact_record_rejects_empty_proposition_text(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            result = hook.persist_fact_record(
+                'testuser',
+                'employment',
+                proposition_text='   ',
+            )
+            assert result['recorded'] is False
+            assert result['error'] == 'empty_proposition_text'
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_persist_fact_record_normalizes_invalid_validation_state(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            result = hook.persist_fact_record(
+                'testuser',
+                'employment',
+                proposition_text='Something happened.',
+                validation_state='invalid_state',
+            )
+            assert result['recorded'] is True
+            assert result['validation_state'] == 'unvalidated'
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_add_fact_link_creates_and_deduplicates(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            fact_result = hook.persist_fact_record(
+                'testuser',
+                'employment',
+                proposition_text='Manager sent a termination letter on 2025-04-01.',
+                source_artifact_id='artifact:doc123',
+            )
+            fact_id = fact_result['fact_id']
+
+            link_result = hook.add_fact_link(
+                fact_id,
+                'to_element',
+                'employment:1',
+                target_type='claim_element',
+            )
+            assert link_result['available'] is True
+            assert link_result['recorded'] is True
+            assert link_result['link_id'].startswith('fact_link:')
+            assert link_result['created'] is True
+
+            link_result2 = hook.add_fact_link(
+                fact_id,
+                'to_element',
+                'employment:1',
+                target_type='claim_element',
+            )
+            assert link_result2['reused'] is True
+            assert link_result2['link_id'] == link_result['link_id']
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_get_fact_records_returns_facts_with_links(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            r1 = hook.persist_fact_record(
+                'testuser',
+                'employment',
+                claim_element_id='employment:1',
+                proposition_text='Claimant submitted a formal complaint in writing.',
+                source_testimony_id='testimony:employment:t001',
+                confidence=0.9,
+                validation_state='confirmed',
+            )
+            r2 = hook.persist_fact_record(
+                'testuser',
+                'employment',
+                claim_element_id='employment:1',
+                proposition_text='HR responded with denial within 48 hours.',
+                source_artifact_id='artifact:hr_response',
+                confidence=0.7,
+                uncertainty_flag=True,
+            )
+            hook.add_fact_link(r1['fact_id'], 'to_element', 'employment:1', target_type='claim_element')
+            hook.add_fact_link(r1['fact_id'], 'to_testimony', 'testimony:employment:t001', target_type='testimony')
+            hook.add_fact_link(r2['fact_id'], 'to_element', 'employment:1', target_type='claim_element')
+            hook.add_fact_link(r2['fact_id'], 'to_chunk', 'artifact:hr_response:chunk:0', target_type='document_chunk')
+
+            records = hook.get_fact_records('testuser', 'employment', claim_element_id='employment:1')
+            assert len(records) == 2
+            fids = {rec['fact_id'] for rec in records}
+            assert r1['fact_id'] in fids
+            assert r2['fact_id'] in fids
+
+            r1_record = next(rec for rec in records if rec['fact_id'] == r1['fact_id'])
+            assert r1_record['validation_state'] == 'confirmed'
+            assert len(r1_record['links']) == 2
+            link_kinds = {lnk['link_kind'] for lnk in r1_record['links']}
+            assert 'to_element' in link_kinds
+            assert 'to_testimony' in link_kinds
+
+            r2_record = next(rec for rec in records if rec['fact_id'] == r2['fact_id'])
+            assert r2_record['uncertainty_flag'] is True
+            assert len(r2_record['links']) == 2
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_get_element_support_ledger_computes_overall_status(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.persist_fact_record(
+                'testuser', 'employment',
+                claim_element_id='employment:1',
+                proposition_text='Fact A.',
+                validation_state='confirmed',
+            )
+            hook.persist_fact_record(
+                'testuser', 'employment',
+                claim_element_id='employment:1',
+                proposition_text='Fact B - contradicted by employer record.',
+                validation_state='contradicted',
+                contradiction_flag=True,
+            )
+
+            ledger = hook.get_element_support_ledger('testuser', 'employment', claim_element_id='employment:1')
+            assert ledger['available'] is True
+            assert ledger['total_facts'] == 2
+            assert ledger['confirmed_count'] == 1
+            assert ledger['contradicted_count'] == 1
+            assert ledger['contradiction_flagged_count'] == 1
+            assert ledger['overall_status'] == 'contradicted'
+            assert len(ledger['facts']) == 2
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_get_element_support_ledger_empty_returns_missing(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            ledger = hook.get_element_support_ledger('testuser', 'employment', claim_element_id='employment:1')
+            assert ledger['total_facts'] == 0
+            assert ledger['overall_status'] == 'missing'
+            assert ledger['facts'] == {}
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_persist_support_path_creates_and_deduplicates(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            r = hook.persist_fact_record(
+                'testuser', 'employment',
+                claim_element_id='employment:1',
+                proposition_text='Termination notice issued.',
+                source_artifact_id='artifact:termination',
+            )
+            traces = [{'fact_id': r['fact_id'], 'support_kind': 'evidence'}]
+
+            path_result = hook.persist_support_path(
+                'testuser', 'employment', 'employment:1', traces,
+            )
+            assert path_result['available'] is True
+            assert path_result['recorded'] is True
+            assert path_result['proof_path_id'].startswith('path:')
+            assert path_result['created'] is True
+            assert r['fact_id'] in path_result['fact_ids']
+
+            path_result2 = hook.persist_support_path(
+                'testuser', 'employment', 'employment:1', traces,
+            )
+            assert path_result2['reused'] is True
+            assert path_result2['proof_path_id'] == path_result['proof_path_id']
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_get_claim_coverage_matrix_includes_element_support_ledger(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {'employment': ['Protected activity']},
+            )
+            hook.persist_fact_record(
+                'testuser', 'employment',
+                claim_element_id='employment:1',
+                proposition_text='Claimant engaged in protected activity.',
+                validation_state='confirmed',
+                confidence=0.8,
+            )
+            matrix = hook.get_claim_coverage_matrix('testuser', 'employment')
+            elements = matrix['claims']['employment']['elements']
+            assert len(elements) == 1
+            ledger = elements[0]['element_support_ledger']
+            assert 'available' in ledger
+            assert 'total_facts' in ledger
+            assert 'overall_status' in ledger
+            assert 'facts' in ledger
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)
+
+    def test_support_packet_has_proof_path_id_field(self):
+        with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+            db_path = f.name
+        try:
+            hook = self._make_hook(db_path)
+            hook.register_claim_requirements(
+                'testuser',
+                {'employment': ['Protected activity']},
+            )
+            hook.upsert_support_link(
+                user_id='testuser',
+                claim_type='employment',
+                claim_element_id='employment:1',
+                claim_element_text='Protected activity',
+                support_kind='evidence',
+                support_ref='artifact:doc1',
+                support_label='Termination letter',
+            )
+            matrix = hook.get_claim_coverage_matrix('testuser', 'employment')
+            elements = matrix['claims']['employment']['elements']
+            assert len(elements) == 1
+            packets = elements[0].get('support_packets', [])
+            assert len(packets) >= 1
+            assert 'proof_path_id' in packets[0]
+        finally:
+            if os.path.exists(db_path):
+                os.unlink(db_path)

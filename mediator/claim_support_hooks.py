@@ -221,6 +221,80 @@ class ClaimSupportHook:
             """)
             conn.execute("ALTER TABLE claim_support ADD COLUMN IF NOT EXISTS claim_element_id VARCHAR")
             conn.execute("ALTER TABLE claim_support ADD COLUMN IF NOT EXISTS claim_element_text TEXT")
+            # M2: durable fact registry
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS claim_facts (
+                    id BIGINT PRIMARY KEY DEFAULT nextval('claim_support_id_seq'),
+                    fact_id VARCHAR NOT NULL,
+                    user_id VARCHAR,
+                    claim_type VARCHAR NOT NULL,
+                    claim_element_id VARCHAR,
+                    claim_element_text TEXT,
+                    proposition_text TEXT NOT NULL,
+                    source_artifact_id VARCHAR,
+                    source_authority_id VARCHAR,
+                    source_testimony_id VARCHAR,
+                    chunk_ref VARCHAR,
+                    span_ref VARCHAR,
+                    confidence FLOAT DEFAULT 0.0,
+                    validation_state VARCHAR DEFAULT 'unvalidated',
+                    uncertainty_flag BOOLEAN DEFAULT FALSE,
+                    contradiction_flag BOOLEAN DEFAULT FALSE,
+                    metadata JSON,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_facts_fact_id
+                ON claim_facts(fact_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_claim_facts_user_element
+                ON claim_facts(user_id, claim_type, claim_element_id)
+            """)
+            # M2: fact link records
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS claim_fact_links (
+                    id BIGINT PRIMARY KEY DEFAULT nextval('claim_support_id_seq'),
+                    link_id VARCHAR NOT NULL,
+                    fact_id VARCHAR NOT NULL,
+                    link_kind VARCHAR NOT NULL,
+                    target_id VARCHAR NOT NULL,
+                    target_type VARCHAR,
+                    metadata JSON,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_fact_links_link_id
+                ON claim_fact_links(link_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_claim_fact_links_fact_id
+                ON claim_fact_links(fact_id)
+            """)
+            # M2: stable support-path records
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS claim_support_paths (
+                    id BIGINT PRIMARY KEY DEFAULT nextval('claim_support_id_seq'),
+                    proof_path_id VARCHAR NOT NULL,
+                    user_id VARCHAR,
+                    claim_type VARCHAR NOT NULL,
+                    claim_element_id VARCHAR,
+                    fact_ids JSON,
+                    path_kind VARCHAR DEFAULT 'support',
+                    metadata JSON,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_support_paths_proof_path_id
+                ON claim_support_paths(proof_path_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_claim_support_paths_user_element
+                ON claim_support_paths(user_id, claim_type, claim_element_id)
+            """)
             conn.close()
             self.mediator.log('claim_support_schema_initialized', db_path=self.db_path)
         except Exception as exc:
@@ -244,6 +318,46 @@ class ClaimSupportHook:
             f'{user_id}|{claim_type}|{claim_element_id}|{raw_narrative}|{created_at}'.encode('utf-8')
         ).hexdigest()[:12]
         return f'testimony:{normalized_claim}:{digest}'
+
+    def _make_fact_id(
+        self,
+        *,
+        user_id: str,
+        claim_type: str,
+        claim_element_id: str = '',
+        proposition_text: str = '',
+        source_artifact_id: str = '',
+        source_authority_id: str = '',
+        source_testimony_id: str = '',
+        chunk_ref: str = '',
+    ) -> str:
+        normalized_claim = ''.join(ch.lower() if ch.isalnum() else '_' for ch in claim_type).strip('_') or 'claim'
+        digest = hashlib.sha256(
+            f'{user_id}|{claim_type}|{claim_element_id}|{proposition_text}|{source_artifact_id}|{source_authority_id}|{source_testimony_id}|{chunk_ref}'.encode('utf-8')
+        ).hexdigest()[:16]
+        return f'fact:{normalized_claim}:{digest}'
+
+    def _make_fact_link_id(self, fact_id: str, link_kind: str, target_id: str) -> str:
+        digest = hashlib.sha256(
+            f'{fact_id}|{link_kind}|{target_id}'.encode('utf-8')
+        ).hexdigest()[:16]
+        return f'fact_link:{digest}'
+
+    def _make_proof_path_id(
+        self,
+        *,
+        user_id: str,
+        claim_type: str,
+        claim_element_id: str = '',
+        fact_ids: List[str],
+        path_kind: str = 'support',
+    ) -> str:
+        normalized_claim = ''.join(ch.lower() if ch.isalnum() else '_' for ch in claim_type).strip('_') or 'claim'
+        sorted_facts = '|'.join(sorted(fact_ids))
+        digest = hashlib.sha256(
+            f'{user_id}|{claim_type}|{claim_element_id}|{sorted_facts}|{path_kind}'.encode('utf-8')
+        ).hexdigest()[:16]
+        return f'path:{normalized_claim}:{digest}'
 
     def _summarize_testimony_records(self, records: List[Dict[str, Any]]) -> Dict[str, Any]:
         normalized_records = [record for record in (records or []) if isinstance(record, dict)]
@@ -1044,6 +1158,7 @@ class ClaimSupportHook:
                 'text': trace.get('fact_text', ''),
                 'confidence': trace.get('confidence', 0.0),
             },
+            'proof_path_id': str(trace.get('proof_path_id') or ''),
             'evidence': evidence,
             'authority': authority,
             'provenance': provenance,
@@ -4139,6 +4254,14 @@ class ClaimSupportHook:
                 support_trace_summary = self._summarize_support_traces(support_traces)
                 support_packets = [self._build_support_packet(trace) for trace in support_traces]
 
+                element_id = element.get('element_id') or ''
+                element_support_ledger = self.get_element_support_ledger(
+                    user_id,
+                    current_claim,
+                    claim_element_id=element_id if element_id else None,
+                    claim_element_text=element.get('element_text') if not element_id else None,
+                )
+
                 elements.append(
                     {
                         'element_id': element.get('element_id'),
@@ -4158,6 +4281,7 @@ class ClaimSupportHook:
                         'support_trace_summary': support_trace_summary,
                         'support_packets': support_packets,
                         'support_packet_summary': self._summarize_support_packets(support_packets),
+                        'element_support_ledger': element_support_ledger,
                         'links': element.get('links', []),
                     }
                 )
@@ -5456,6 +5580,626 @@ class ClaimSupportHook:
                 for current_claim, entries in claim_entries.items()
             },
         })
+
+    # --- M2: Fact Registry and Element Support Ledger ---
+
+    def persist_fact_record(
+        self,
+        user_id: str,
+        claim_type: str,
+        *,
+        claim_element_id: Optional[str] = None,
+        claim_element_text: Optional[str] = None,
+        proposition_text: str,
+        source_artifact_id: str = '',
+        source_authority_id: str = '',
+        source_testimony_id: str = '',
+        chunk_ref: str = '',
+        span_ref: str = '',
+        confidence: float = 0.0,
+        validation_state: str = 'unvalidated',
+        uncertainty_flag: bool = False,
+        contradiction_flag: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Persist a durable fact record linked to a claim element.
+
+        Returns ``{fact_id, record_id, created}`` whether or not DuckDB is
+        available.  When DuckDB is unavailable the record is held in memory so
+        that callers can still obtain a stable ``fact_id`` for the session.
+        """
+        if not proposition_text or not proposition_text.strip():
+            return {
+                'available': DUCKDB_AVAILABLE,
+                'recorded': False,
+                'claim_type': claim_type,
+                'error': 'empty_proposition_text',
+            }
+
+        resolved_element = self.resolve_claim_element(
+            user_id,
+            claim_type,
+            claim_element_id=claim_element_id,
+            claim_element_text=claim_element_text,
+        )
+        resolved_element_id = claim_element_id or resolved_element.get('claim_element_id', '')
+        resolved_element_text = claim_element_text or resolved_element.get('claim_element_text', '')
+
+        normalized_validation_state = str(validation_state or 'unvalidated') or 'unvalidated'
+        if normalized_validation_state not in (
+            'unvalidated', 'confirmed', 'contradicted', 'uncertain', 'exception_barred'
+        ):
+            normalized_validation_state = 'unvalidated'
+
+        fact_id = self._make_fact_id(
+            user_id=user_id,
+            claim_type=claim_type,
+            claim_element_id=resolved_element_id,
+            proposition_text=proposition_text.strip(),
+            source_artifact_id=source_artifact_id,
+            source_authority_id=source_authority_id,
+            source_testimony_id=source_testimony_id,
+            chunk_ref=chunk_ref,
+        )
+
+        normalized_metadata = _merge_intake_summary_handoff_metadata(
+            dict(metadata or {}),
+            self.mediator,
+        )
+
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'recorded': False,
+                'fact_id': fact_id,
+                'claim_type': claim_type,
+                'error': 'duckdb_unavailable',
+            }
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            existing = conn.execute(
+                'SELECT id FROM claim_facts WHERE fact_id = ? LIMIT 1',
+                [fact_id],
+            ).fetchone()
+            if existing:
+                conn.close()
+                return {
+                    'available': True,
+                    'recorded': False,
+                    'fact_id': fact_id,
+                    'record_id': existing[0],
+                    'claim_type': claim_type,
+                    'created': False,
+                    'reused': True,
+                }
+            row = conn.execute(
+                """
+                INSERT INTO claim_facts (
+                    fact_id, user_id, claim_type,
+                    claim_element_id, claim_element_text,
+                    proposition_text,
+                    source_artifact_id, source_authority_id, source_testimony_id,
+                    chunk_ref, span_ref,
+                    confidence, validation_state,
+                    uncertainty_flag, contradiction_flag,
+                    metadata
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id, timestamp
+                """,
+                [
+                    fact_id,
+                    user_id,
+                    claim_type,
+                    resolved_element_id or None,
+                    resolved_element_text or None,
+                    proposition_text.strip(),
+                    source_artifact_id or None,
+                    source_authority_id or None,
+                    source_testimony_id or None,
+                    chunk_ref or None,
+                    span_ref or None,
+                    float(confidence or 0.0),
+                    normalized_validation_state,
+                    bool(uncertainty_flag),
+                    bool(contradiction_flag),
+                    json.dumps(normalized_metadata, default=str),
+                ],
+            ).fetchone()
+            conn.close()
+            self.mediator.log(
+                'claim_fact_persisted',
+                fact_id=fact_id,
+                claim_type=claim_type,
+                claim_element_id=resolved_element_id,
+                validation_state=normalized_validation_state,
+            )
+            return {
+                'available': True,
+                'recorded': True,
+                'fact_id': fact_id,
+                'record_id': row[0],
+                'timestamp': row[1].isoformat() if hasattr(row[1], 'isoformat') else row[1],
+                'claim_type': claim_type,
+                'claim_element_id': resolved_element_id,
+                'claim_element_text': resolved_element_text,
+                'proposition_text': proposition_text.strip(),
+                'validation_state': normalized_validation_state,
+                'uncertainty_flag': bool(uncertainty_flag),
+                'contradiction_flag': bool(contradiction_flag),
+                'confidence': float(confidence or 0.0),
+                'created': True,
+                'reused': False,
+            }
+        except Exception as exc:
+            self.mediator.log('claim_fact_persist_error', error=str(exc), claim_type=claim_type)
+            return {
+                'available': False,
+                'recorded': False,
+                'fact_id': fact_id,
+                'claim_type': claim_type,
+                'error': str(exc),
+            }
+
+    def add_fact_link(
+        self,
+        fact_id: str,
+        link_kind: str,
+        target_id: str,
+        *,
+        target_type: str = '',
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Create a link record from a fact to an element, authority, or testimony.
+
+        ``link_kind`` should be one of ``to_element``, ``to_authority``,
+        ``to_testimony``, or ``to_chunk``.
+        """
+        if not fact_id or not target_id:
+            return {'recorded': False, 'error': 'missing_fact_id_or_target_id'}
+
+        normalized_link_kind = str(link_kind or '').strip()
+        if normalized_link_kind not in ('to_element', 'to_authority', 'to_testimony', 'to_chunk'):
+            normalized_link_kind = str(link_kind or 'to_element')
+
+        link_id = self._make_fact_link_id(fact_id, normalized_link_kind, target_id)
+
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'recorded': False,
+                'link_id': link_id,
+                'fact_id': fact_id,
+                'error': 'duckdb_unavailable',
+            }
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            existing = conn.execute(
+                'SELECT id FROM claim_fact_links WHERE link_id = ? LIMIT 1',
+                [link_id],
+            ).fetchone()
+            if existing:
+                conn.close()
+                return {
+                    'available': True,
+                    'recorded': False,
+                    'link_id': link_id,
+                    'fact_id': fact_id,
+                    'created': False,
+                    'reused': True,
+                }
+            row = conn.execute(
+                """
+                INSERT INTO claim_fact_links (
+                    link_id, fact_id, link_kind, target_id, target_type, metadata
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
+                """,
+                [
+                    link_id,
+                    fact_id,
+                    normalized_link_kind,
+                    target_id,
+                    target_type or None,
+                    json.dumps(metadata or {}, default=str),
+                ],
+            ).fetchone()
+            conn.close()
+            self.mediator.log(
+                'claim_fact_link_added',
+                link_id=link_id,
+                fact_id=fact_id,
+                link_kind=normalized_link_kind,
+                target_id=target_id,
+            )
+            return {
+                'available': True,
+                'recorded': True,
+                'link_id': link_id,
+                'record_id': row[0],
+                'fact_id': fact_id,
+                'link_kind': normalized_link_kind,
+                'target_id': target_id,
+                'target_type': target_type,
+                'created': True,
+                'reused': False,
+            }
+        except Exception as exc:
+            self.mediator.log('claim_fact_link_error', error=str(exc), fact_id=fact_id)
+            return {
+                'available': False,
+                'recorded': False,
+                'link_id': link_id,
+                'fact_id': fact_id,
+                'error': str(exc),
+            }
+
+    def get_fact_records(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+        *,
+        claim_element_id: Optional[str] = None,
+        include_links: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Return persisted durable fact records, optionally filtered to one element.
+
+        When ``include_links`` is True each fact entry includes a ``links``
+        list of the associated link records (element, authority, testimony,
+        chunk linkages).
+        """
+        if not DUCKDB_AVAILABLE:
+            return []
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            if claim_type and claim_element_id:
+                rows = conn.execute(
+                    """
+                    SELECT id, fact_id, user_id, claim_type,
+                           claim_element_id, claim_element_text,
+                           proposition_text,
+                           source_artifact_id, source_authority_id, source_testimony_id,
+                           chunk_ref, span_ref,
+                           confidence, validation_state,
+                           uncertainty_flag, contradiction_flag,
+                           metadata, timestamp
+                    FROM claim_facts
+                    WHERE user_id = ?
+                      AND claim_type = ?
+                      AND COALESCE(claim_element_id, '') = COALESCE(?, '')
+                    ORDER BY id ASC
+                    """,
+                    [user_id, claim_type, claim_element_id],
+                ).fetchall()
+            elif claim_type:
+                rows = conn.execute(
+                    """
+                    SELECT id, fact_id, user_id, claim_type,
+                           claim_element_id, claim_element_text,
+                           proposition_text,
+                           source_artifact_id, source_authority_id, source_testimony_id,
+                           chunk_ref, span_ref,
+                           confidence, validation_state,
+                           uncertainty_flag, contradiction_flag,
+                           metadata, timestamp
+                    FROM claim_facts
+                    WHERE user_id = ?
+                      AND claim_type = ?
+                    ORDER BY id ASC
+                    """,
+                    [user_id, claim_type],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, fact_id, user_id, claim_type,
+                           claim_element_id, claim_element_text,
+                           proposition_text,
+                           source_artifact_id, source_authority_id, source_testimony_id,
+                           chunk_ref, span_ref,
+                           confidence, validation_state,
+                           uncertainty_flag, contradiction_flag,
+                           metadata, timestamp
+                    FROM claim_facts
+                    WHERE user_id = ?
+                    ORDER BY id ASC
+                    """,
+                    [user_id],
+                ).fetchall()
+
+            facts: List[Dict[str, Any]] = []
+            for row in rows:
+                raw_meta = row[16]
+                try:
+                    meta = json.loads(raw_meta) if isinstance(raw_meta, str) else (raw_meta or {})
+                except Exception:
+                    meta = {}
+                entry: Dict[str, Any] = {
+                    'record_id': row[0],
+                    'fact_id': row[1],
+                    'user_id': row[2],
+                    'claim_type': row[3],
+                    'claim_element_id': row[4] or '',
+                    'claim_element_text': row[5] or '',
+                    'proposition_text': row[6] or '',
+                    'source_artifact_id': row[7] or '',
+                    'source_authority_id': row[8] or '',
+                    'source_testimony_id': row[9] or '',
+                    'chunk_ref': row[10] or '',
+                    'span_ref': row[11] or '',
+                    'confidence': float(row[12] or 0.0),
+                    'validation_state': row[13] or 'unvalidated',
+                    'uncertainty_flag': bool(row[14]),
+                    'contradiction_flag': bool(row[15]),
+                    'metadata': meta,
+                    'timestamp': row[17].isoformat() if hasattr(row[17], 'isoformat') else row[17],
+                    'links': [],
+                }
+                facts.append(entry)
+
+            if include_links and facts:
+                fact_ids = [f['fact_id'] for f in facts]
+                placeholders = ', '.join('?' * len(fact_ids))
+                link_rows = conn.execute(
+                    f"""
+                    SELECT id, link_id, fact_id, link_kind, target_id, target_type, metadata, timestamp
+                    FROM claim_fact_links
+                    WHERE fact_id IN ({placeholders})
+                    ORDER BY id ASC
+                    """,
+                    fact_ids,
+                ).fetchall()
+
+                links_by_fact: Dict[str, List[Dict[str, Any]]] = {}
+                for lr in link_rows:
+                    raw_lmeta = lr[6]
+                    try:
+                        lmeta = json.loads(raw_lmeta) if isinstance(raw_lmeta, str) else (raw_lmeta or {})
+                    except Exception:
+                        lmeta = {}
+                    link_entry = {
+                        'record_id': lr[0],
+                        'link_id': lr[1],
+                        'fact_id': lr[2],
+                        'link_kind': lr[3],
+                        'target_id': lr[4],
+                        'target_type': lr[5] or '',
+                        'metadata': lmeta,
+                        'timestamp': lr[7].isoformat() if hasattr(lr[7], 'isoformat') else lr[7],
+                    }
+                    links_by_fact.setdefault(lr[2], []).append(link_entry)
+
+                for fact_entry in facts:
+                    fact_entry['links'] = links_by_fact.get(fact_entry['fact_id'], [])
+
+            conn.close()
+            return facts
+        except Exception as exc:
+            self.mediator.log('claim_fact_records_error', error=str(exc), claim_type=claim_type)
+            return []
+
+    def get_element_support_ledger(
+        self,
+        user_id: str,
+        claim_type: str,
+        *,
+        claim_element_id: Optional[str] = None,
+        claim_element_text: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return a support ledger for an element keyed by concrete fact IDs.
+
+        The ledger can be used to explain element status without re-parsing:
+        every entry is a persisted durable fact record with its source
+        provenance and link records.  Falls back to an empty ledger when
+        DuckDB is unavailable.
+        """
+        resolved_element_id = claim_element_id
+        if not resolved_element_id and claim_element_text:
+            resolved = self.resolve_claim_element(
+                user_id,
+                claim_type,
+                claim_element_text=claim_element_text,
+            )
+            resolved_element_id = resolved.get('claim_element_id', '')
+
+        facts = self.get_fact_records(
+            user_id,
+            claim_type,
+            claim_element_id=resolved_element_id,
+            include_links=True,
+        )
+
+        confirmed_count = 0
+        contradicted_count = 0
+        uncertain_count = 0
+        exception_barred_count = 0
+        unvalidated_count = 0
+        uncertainty_flagged_count = 0
+        contradiction_flagged_count = 0
+        ledger_entries: Dict[str, Dict[str, Any]] = {}
+
+        for fact in facts:
+            vs = fact.get('validation_state', 'unvalidated')
+            if vs == 'confirmed':
+                confirmed_count += 1
+            elif vs == 'contradicted':
+                contradicted_count += 1
+            elif vs == 'uncertain':
+                uncertain_count += 1
+            elif vs == 'exception_barred':
+                exception_barred_count += 1
+            else:
+                unvalidated_count += 1
+            if fact.get('uncertainty_flag'):
+                uncertainty_flagged_count += 1
+            if fact.get('contradiction_flag'):
+                contradiction_flagged_count += 1
+
+            fid = fact['fact_id']
+            ledger_entries[fid] = {
+                'fact_id': fid,
+                'proposition_text': fact.get('proposition_text', ''),
+                'claim_element_id': fact.get('claim_element_id', ''),
+                'claim_element_text': fact.get('claim_element_text', ''),
+                'source_artifact_id': fact.get('source_artifact_id', ''),
+                'source_authority_id': fact.get('source_authority_id', ''),
+                'source_testimony_id': fact.get('source_testimony_id', ''),
+                'chunk_ref': fact.get('chunk_ref', ''),
+                'span_ref': fact.get('span_ref', ''),
+                'confidence': fact.get('confidence', 0.0),
+                'validation_state': vs,
+                'uncertainty_flag': fact.get('uncertainty_flag', False),
+                'contradiction_flag': fact.get('contradiction_flag', False),
+                'links': fact.get('links', []),
+                'timestamp': fact.get('timestamp', ''),
+            }
+
+        total_facts = len(facts)
+        overall_status: str
+        if total_facts == 0:
+            overall_status = 'missing'
+        elif contradicted_count > 0 or contradiction_flagged_count > 0:
+            overall_status = 'contradicted'
+        elif exception_barred_count > 0:
+            overall_status = 'exception_barred'
+        elif uncertain_count > 0 or uncertainty_flagged_count > 0:
+            overall_status = 'uncertain'
+        elif confirmed_count > 0:
+            overall_status = 'confirmed'
+        else:
+            overall_status = 'unvalidated'
+
+        return {
+            'available': DUCKDB_AVAILABLE,
+            'claim_type': claim_type,
+            'claim_element_id': resolved_element_id or '',
+            'claim_element_text': claim_element_text or '',
+            'total_facts': total_facts,
+            'confirmed_count': confirmed_count,
+            'contradicted_count': contradicted_count,
+            'uncertain_count': uncertain_count,
+            'exception_barred_count': exception_barred_count,
+            'unvalidated_count': unvalidated_count,
+            'uncertainty_flagged_count': uncertainty_flagged_count,
+            'contradiction_flagged_count': contradiction_flagged_count,
+            'overall_status': overall_status,
+            'facts': ledger_entries,
+        }
+
+    def persist_support_path(
+        self,
+        user_id: str,
+        claim_type: str,
+        claim_element_id: str,
+        support_traces: List[Dict[str, Any]],
+        *,
+        path_kind: str = 'support',
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Persist a stable proof-path record for a set of support traces.
+
+        Collects all fact IDs from the traces, generates a stable
+        ``proof_path_id``, and upserts a record in ``claim_support_paths``.
+        Returns ``{proof_path_id, record_id, created}``.
+        """
+        fact_ids: List[str] = []
+        for trace in support_traces or []:
+            fid = str(trace.get('fact_id') or '')
+            if fid and fid not in fact_ids:
+                fact_ids.append(fid)
+
+        proof_path_id = self._make_proof_path_id(
+            user_id=user_id,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id,
+            fact_ids=fact_ids,
+            path_kind=path_kind,
+        )
+
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'recorded': False,
+                'proof_path_id': proof_path_id,
+                'claim_type': claim_type,
+                'error': 'duckdb_unavailable',
+            }
+
+        normalized_metadata = _merge_intake_summary_handoff_metadata(
+            dict(metadata or {}),
+            self.mediator,
+        )
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            existing = conn.execute(
+                'SELECT id FROM claim_support_paths WHERE proof_path_id = ? LIMIT 1',
+                [proof_path_id],
+            ).fetchone()
+            if existing:
+                conn.close()
+                return {
+                    'available': True,
+                    'recorded': False,
+                    'proof_path_id': proof_path_id,
+                    'record_id': existing[0],
+                    'claim_type': claim_type,
+                    'created': False,
+                    'reused': True,
+                }
+            row = conn.execute(
+                """
+                INSERT INTO claim_support_paths (
+                    proof_path_id, user_id, claim_type, claim_element_id,
+                    fact_ids, path_kind, metadata
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                RETURNING id, timestamp
+                """,
+                [
+                    proof_path_id,
+                    user_id,
+                    claim_type,
+                    claim_element_id or None,
+                    json.dumps(fact_ids),
+                    path_kind or 'support',
+                    json.dumps(normalized_metadata, default=str),
+                ],
+            ).fetchone()
+            conn.close()
+            self.mediator.log(
+                'claim_support_path_persisted',
+                proof_path_id=proof_path_id,
+                claim_type=claim_type,
+                claim_element_id=claim_element_id,
+                fact_count=len(fact_ids),
+            )
+            return {
+                'available': True,
+                'recorded': True,
+                'proof_path_id': proof_path_id,
+                'record_id': row[0],
+                'timestamp': row[1].isoformat() if hasattr(row[1], 'isoformat') else row[1],
+                'claim_type': claim_type,
+                'claim_element_id': claim_element_id,
+                'fact_ids': fact_ids,
+                'path_kind': path_kind,
+                'created': True,
+                'reused': False,
+            }
+        except Exception as exc:
+            self.mediator.log('claim_support_path_error', error=str(exc), claim_type=claim_type)
+            return {
+                'available': False,
+                'recorded': False,
+                'proof_path_id': proof_path_id,
+                'claim_type': claim_type,
+                'error': str(exc),
+            }
 
     def get_support_timeline(
         self,
