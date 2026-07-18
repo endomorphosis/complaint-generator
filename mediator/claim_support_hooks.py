@@ -6984,7 +6984,11 @@ class ClaimSupportHook:
         """Build a concise human-readable proof explanation for an element."""
         if proof_state == 'contradicted':
             count = len(contradiction_sources)
-            src_summary = f"{count} contradiction source{'s' if count != 1 else ''}" if count else "a contradiction"
+            # If proof_state is 'contradicted', count should always be > 0; guard defensively.
+            if count > 0:
+                src_summary = f"{count} contradiction source{'s' if count != 1 else ''}"
+            else:
+                src_summary = "contradictory evidence in the record"
             return (
                 f"'{element_text}' is contradicted by {src_summary}. "
                 "Resolve the conflicting evidence before this element can be proved."
@@ -7088,16 +7092,16 @@ class ClaimSupportHook:
         predicates = list(predicate_map.get('predicates') or [])
         predicate = predicates[0] if predicates else element_dict
 
-        # Extract template fields
+        # Extract template fields — when a FOL template exists use it directly as
+        # the single required predicate; fall back to expected_predicate_types otherwise.
         fol_template = str(predicate.get('fol_template') or '')
         dcec_template = str(predicate.get('dcec_template') or '')
         grounded_facts = list(predicate.get('grounded_facts') or [])
-        required_predicates: List[str] = [
-            str(pt) for pt in (predicate.get('expected_predicate_types') or ['claim_element'])
-        ]
         if fol_template:
-            required_predicates = [fol_template] + [
-                p for p in required_predicates if p not in ('claim_element',)
+            required_predicates: List[str] = [fol_template]
+        else:
+            required_predicates = [
+                str(pt) for pt in (predicate.get('expected_predicate_types') or ['claim_element'])
             ]
 
         # 3. Run prove_claim_elements on this element's predicates
@@ -7120,16 +7124,19 @@ class ClaimSupportHook:
             ledger, prove_result, contradiction_result, predicate
         )
 
-        # 6. Derive satisfied vs. missing predicates from provable elements + ledger
+        # 6. Derive satisfied vs. missing predicates.
+        # An element is fully satisfied when the reasoner flagged it as provable
+        # OR all its ledger facts are confirmed.  Otherwise all required predicates
+        # are treated as missing to avoid misleading partial mappings.
         provable_element_ids = {
             str(p.get('claim_element_id') or '') for p in (prove_result.get('provable_elements') or [])
         }
         elem_id = resolved_element_id or ''
-        is_provable = elem_id in provable_element_ids or confirmed_count > 0
-        satisfied_predicates: List[str] = required_predicates if is_provable else []
-        if not is_provable and confirmed_count > 0 and required_predicates:
-            # Partial: at least one fact confirmed means at least one predicate applies
-            satisfied_predicates = required_predicates[:confirmed_count]
+        is_fully_satisfied = (
+            (elem_id and elem_id in provable_element_ids)
+            or (confirmed_count > 0 and confirmed_count >= total_facts and total_facts > 0)
+        )
+        satisfied_predicates: List[str] = required_predicates if is_fully_satisfied else []
         missing_predicates: List[str] = [
             p for p in required_predicates if p not in satisfied_predicates
         ]

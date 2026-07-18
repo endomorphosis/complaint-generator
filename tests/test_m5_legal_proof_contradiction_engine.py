@@ -516,16 +516,8 @@ def _make_test_mediator_with_hooks() -> MagicMock:
     state = MagicMock()
     state.username = "api_test_user"
     mediator.state = state
-    mediator.get_element_proof_cards = lambda user_id, claim_type=None: hook.get_element_proof_cards(
-        user_id, claim_type=claim_type
-    )
-    mediator.get_element_proof_card = lambda user_id, claim_type, claim_element_id=None, claim_element_text=None: (
-        hook.get_element_proof_card(
-            user_id, claim_type,
-            claim_element_id=claim_element_id,
-            claim_element_text=claim_element_text,
-        )
-    )
+    mediator.get_element_proof_cards = hook.get_element_proof_cards
+    mediator.get_element_proof_card = hook.get_element_proof_card
     return mediator
 
 
