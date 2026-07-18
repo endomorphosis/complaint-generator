@@ -6352,6 +6352,8 @@ class ClaimSupportHook:
         paths: List[Dict[str, Any]] = []
         try:
             conn = duckdb.connect(self.db_path)
+            # where_clauses contains only static column-name strings; all user
+            # values are passed as parameterized bind arguments in `params`.
             where_clauses = ['user_id = ?', 'claim_type = ?']
             params: List[Any] = [user_id, claim_type]
             if claim_element_id:
