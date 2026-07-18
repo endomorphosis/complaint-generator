@@ -6908,6 +6908,367 @@ class ClaimSupportHook:
         }
 
     # -----------------------------------------------------------------------
+    # M5: Legal Proof And Contradiction Engine
+    # -----------------------------------------------------------------------
+
+    _PROOF_STATE_NEXT_ACTIONS: Dict[str, str] = {
+        'contradicted': 'resolve_contradiction',
+        'exception_barred': 'address_exception',
+        'missing': 'gather_evidence',
+        'uncertain': 'validate_facts',
+        'partially_supported': 'complete_proof',
+        'supported': 'no_action_needed',
+        'unvalidated': 'validate_facts',
+    }
+
+    def _derive_element_proof_state(
+        self,
+        ledger: Dict[str, Any],
+        prove_result: Dict[str, Any],
+        contradiction_result: Dict[str, Any],
+        predicate: Dict[str, Any],
+    ) -> str:
+        """Classify the proof state of a single claim element.
+
+        Priority order: contradicted > exception_barred > uncertain >
+        partially_supported > supported > missing > unvalidated.
+        """
+        overall_ledger_status = str(ledger.get('overall_status') or 'missing')
+        contradiction_count = int(contradiction_result.get('contradiction_count') or 0)
+        has_contradictions = contradiction_count > 0 or contradiction_result.get('has_contradictions')
+        total_facts = int(ledger.get('total_facts') or 0)
+        confirmed_count = int(ledger.get('confirmed_count') or 0)
+        exception_barred_count = int(ledger.get('exception_barred_count') or 0)
+        uncertain_count = int(ledger.get('uncertain_count') or 0)
+        unvalidated_count = int(ledger.get('unvalidated_count') or 0)
+
+        # A contradiction anywhere in the element's predicates overrides other states.
+        if has_contradictions or overall_ledger_status == 'contradicted':
+            return 'contradicted'
+        if exception_barred_count > 0 or overall_ledger_status == 'exception_barred':
+            return 'exception_barred'
+        if total_facts == 0:
+            return 'missing'
+
+        # Determine satisfaction from prove_result
+        provable_elements: List[Dict[str, Any]] = list(prove_result.get('provable_elements') or [])
+        unprovable_elements: List[Dict[str, Any]] = list(prove_result.get('unprovable_elements') or [])
+        elem_id = str(predicate.get('claim_element_id') or '')
+        is_provable = any(
+            str(p.get('claim_element_id') or '') == elem_id for p in provable_elements
+        ) or overall_ledger_status == 'confirmed'
+        is_unprovable = any(
+            str(p.get('claim_element_id') or '') == elem_id for p in unprovable_elements
+        )
+
+        if uncertain_count > 0 or unvalidated_count > 0:
+            if confirmed_count > 0 or is_provable:
+                return 'partially_supported'
+            return 'uncertain'
+        if is_unprovable and not is_provable and confirmed_count == 0:
+            return 'missing'
+        if is_provable or confirmed_count > 0:
+            return 'supported'
+        if unvalidated_count > 0:
+            return 'unvalidated'
+        return 'missing'
+
+    def _build_element_proof_explanation(
+        self,
+        element_text: str,
+        proof_state: str,
+        missing_predicates: List[str],
+        contradiction_sources: List[Dict[str, Any]],
+        supporting_fact_count: int,
+    ) -> str:
+        """Build a concise human-readable proof explanation for an element."""
+        if proof_state == 'contradicted':
+            count = len(contradiction_sources)
+            src_summary = f"{count} contradiction source{'s' if count != 1 else ''}" if count else "a contradiction"
+            return (
+                f"'{element_text}' is contradicted by {src_summary}. "
+                "Resolve the conflicting evidence before this element can be proved."
+            )
+        if proof_state == 'exception_barred':
+            return (
+                f"'{element_text}' may be barred by an exception or affirmative defense. "
+                "Review the exception sources and address them in the complaint narrative."
+            )
+        if proof_state == 'missing':
+            if missing_predicates:
+                preds = ', '.join(missing_predicates[:3])
+                return (
+                    f"'{element_text}' has no supporting facts. "
+                    f"Missing required predicates: {preds}."
+                )
+            return f"'{element_text}' has no supporting facts. Initial testimony or documentary evidence is required."
+        if proof_state == 'uncertain':
+            return (
+                f"'{element_text}' has {supporting_fact_count} fact{'s' if supporting_fact_count != 1 else ''} "
+                "with uncertain or unvalidated state. Validate these facts to confirm proof."
+            )
+        if proof_state == 'partially_supported':
+            if missing_predicates:
+                preds = ', '.join(missing_predicates[:3])
+                return (
+                    f"'{element_text}' is partially supported. "
+                    f"Still missing: {preds}."
+                )
+            return f"'{element_text}' is partially supported. Additional evidence would strengthen the claim."
+        if proof_state == 'supported':
+            return (
+                f"'{element_text}' is supported by {supporting_fact_count} "
+                f"confirmed fact{'s' if supporting_fact_count != 1 else ''}."
+            )
+        return f"'{element_text}' proof state is {proof_state}."
+
+    def get_element_proof_card(
+        self,
+        user_id: str,
+        claim_type: str,
+        *,
+        claim_element_id: Optional[str] = None,
+        claim_element_text: Optional[str] = None,
+        coverage_status: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return a proof card for a single claim element.
+
+        The proof card includes:
+        - ``proof_state`` — one of supported / partially_supported / missing /
+          contradicted / uncertain / exception_barred / unvalidated
+        - ``required_predicates`` — FOL/DCEC predicate names from the claim template
+        - ``satisfied_predicates`` — predicates satisfied by confirmed facts
+        - ``missing_predicates`` — required predicates not yet satisfied
+        - ``supporting_facts`` — confirmed/unvalidated fact records from the ledger
+        - ``contradiction_sources`` — contradiction dicts from check_contradictions
+        - ``next_action`` — recommended operator action
+        - ``explanation`` — concise human-readable explanation
+
+        Degrades gracefully when logic tooling or DuckDB are unavailable.
+        """
+        from integrations.ipfs_datasets.logic import (
+            map_claim_elements_to_predicates,
+            prove_claim_elements,
+            check_contradictions,
+        )
+
+        element_text = str(claim_element_text or claim_element_id or '')
+        resolved_element_id = claim_element_id
+
+        # Resolve element ID from text when not supplied
+        if not resolved_element_id and claim_element_text:
+            try:
+                resolved = self.resolve_claim_element(
+                    user_id,
+                    claim_type,
+                    claim_element_text=claim_element_text,
+                )
+                resolved_element_id = resolved.get('claim_element_id', '')
+            except Exception:
+                pass
+
+        # 1. Fetch the support ledger for this element
+        ledger = self.get_element_support_ledger(
+            user_id,
+            claim_type,
+            claim_element_id=resolved_element_id or None,
+            claim_element_text=claim_element_text or None,
+        )
+        total_facts = int(ledger.get('total_facts') or 0)
+        confirmed_count = int(ledger.get('confirmed_count') or 0)
+        supporting_facts = list(ledger.get('facts', {}).values())
+
+        # 2. Map element to predicates using the claim template
+        element_dict = {
+            'element_id': resolved_element_id or '',
+            'element_text': element_text,
+            'coverage_status': coverage_status or ledger.get('overall_status') or 'missing',
+        }
+        predicate_map = map_claim_elements_to_predicates(claim_type, [element_dict])
+        predicates = list(predicate_map.get('predicates') or [])
+        predicate = predicates[0] if predicates else element_dict
+
+        # Extract template fields
+        fol_template = str(predicate.get('fol_template') or '')
+        dcec_template = str(predicate.get('dcec_template') or '')
+        grounded_facts = list(predicate.get('grounded_facts') or [])
+        required_predicates: List[str] = [
+            str(pt) for pt in (predicate.get('expected_predicate_types') or ['claim_element'])
+        ]
+        if fol_template:
+            required_predicates = [fol_template] + [
+                p for p in required_predicates if p not in ('claim_element',)
+            ]
+
+        # 3. Run prove_claim_elements on this element's predicates
+        prove_result: Dict[str, Any] = {}
+        try:
+            prove_result = prove_claim_elements(predicates)
+        except Exception as exc:
+            self.mediator.log('get_element_proof_card_prove_error', error=str(exc))
+
+        # 4. Run check_contradictions against the element's predicate payload
+        contradiction_result: Dict[str, Any] = {}
+        try:
+            contradiction_result = check_contradictions(predicates)
+        except Exception as exc:
+            self.mediator.log('get_element_proof_card_contradiction_error', error=str(exc))
+        contradiction_sources = list(contradiction_result.get('contradictions') or [])
+
+        # 5. Classify proof state
+        proof_state = self._derive_element_proof_state(
+            ledger, prove_result, contradiction_result, predicate
+        )
+
+        # 6. Derive satisfied vs. missing predicates from provable elements + ledger
+        provable_element_ids = {
+            str(p.get('claim_element_id') or '') for p in (prove_result.get('provable_elements') or [])
+        }
+        elem_id = resolved_element_id or ''
+        is_provable = elem_id in provable_element_ids or confirmed_count > 0
+        satisfied_predicates: List[str] = required_predicates if is_provable else []
+        if not is_provable and confirmed_count > 0 and required_predicates:
+            # Partial: at least one fact confirmed means at least one predicate applies
+            satisfied_predicates = required_predicates[:confirmed_count]
+        missing_predicates: List[str] = [
+            p for p in required_predicates if p not in satisfied_predicates
+        ]
+
+        # 7. Build explanation
+        explanation = self._build_element_proof_explanation(
+            element_text,
+            proof_state,
+            missing_predicates,
+            contradiction_sources,
+            confirmed_count if confirmed_count > 0 else total_facts,
+        )
+
+        next_action = self._PROOF_STATE_NEXT_ACTIONS.get(proof_state, 'validate_facts')
+
+        return {
+            'claim_type': claim_type,
+            'claim_element_id': resolved_element_id or '',
+            'claim_element_text': element_text,
+            'proof_state': proof_state,
+            'required_predicates': required_predicates,
+            'satisfied_predicates': satisfied_predicates,
+            'missing_predicates': missing_predicates,
+            'supporting_facts': supporting_facts,
+            'supporting_fact_count': total_facts,
+            'confirmed_fact_count': confirmed_count,
+            'contradiction_sources': contradiction_sources,
+            'contradiction_count': len(contradiction_sources),
+            'next_action': next_action,
+            'explanation': explanation,
+            'fol_template': fol_template,
+            'dcec_template': dcec_template,
+            'grounded_facts': grounded_facts,
+            'template_matched': bool(predicate.get('template_matched')),
+            'ledger_overall_status': ledger.get('overall_status', 'missing'),
+            'proof_engine_status': str(prove_result.get('proof_status') or 'skipped'),
+            'logic_available': True,
+        }
+
+    def get_element_proof_cards(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return proof cards for all elements of *claim_type* (or all claims).
+
+        Builds proof cards for every element in the coverage matrix and feeds
+        the aggregate proof state back into a summary suitable for operator
+        review and dashboard display.
+
+        Each proof card contains the same fields as :meth:`get_element_proof_card`.
+        """
+        matrix = self.get_claim_coverage_matrix(user_id, claim_type=claim_type)
+        all_cards: Dict[str, List[Dict[str, Any]]] = {}
+        proof_state_totals: Dict[str, int] = {}
+        total_elements = 0
+        total_cards = 0
+
+        for ct, claim_data in (matrix.get('claims') or {}).items():
+            cards: List[Dict[str, Any]] = []
+            for element in (claim_data.get('elements') or []):
+                if not isinstance(element, dict):
+                    continue
+                element_id = str(element.get('element_id') or '')
+                element_text = str(element.get('element_text') or '')
+                coverage_status = str(element.get('status') or 'missing')
+                try:
+                    card = self.get_element_proof_card(
+                        user_id,
+                        ct,
+                        claim_element_id=element_id or None,
+                        claim_element_text=element_text or None,
+                        coverage_status=coverage_status,
+                    )
+                except Exception as exc:
+                    self.mediator.log('get_element_proof_cards_card_error', error=str(exc))
+                    card = {
+                        'claim_type': ct,
+                        'claim_element_id': element_id,
+                        'claim_element_text': element_text,
+                        'proof_state': 'missing',
+                        'error': str(exc),
+                        'next_action': 'gather_evidence',
+                        'explanation': f"Proof card generation failed for '{element_text}'.",
+                        'required_predicates': [],
+                        'satisfied_predicates': [],
+                        'missing_predicates': [],
+                        'supporting_facts': [],
+                        'contradiction_sources': [],
+                        'supporting_fact_count': 0,
+                        'confirmed_fact_count': 0,
+                        'contradiction_count': 0,
+                    }
+                proof_state_totals[card['proof_state']] = proof_state_totals.get(card['proof_state'], 0) + 1
+                cards.append(card)
+                total_cards += 1
+            total_elements += len(cards)
+            all_cards[ct] = cards
+
+        # Derive overall case readiness from proof states
+        contradicted_count = proof_state_totals.get('contradicted', 0)
+        supported_count = proof_state_totals.get('supported', 0)
+        missing_count = proof_state_totals.get('missing', 0) + proof_state_totals.get('unvalidated', 0)
+        exception_barred_count = proof_state_totals.get('exception_barred', 0)
+        incomplete_count = (
+            proof_state_totals.get('partially_supported', 0)
+            + proof_state_totals.get('uncertain', 0)
+        )
+
+        if contradicted_count > 0:
+            overall_proof_readiness = 'contradicted'
+        elif exception_barred_count > 0:
+            overall_proof_readiness = 'exception_barred'
+        elif total_cards > 0 and supported_count == total_cards:
+            overall_proof_readiness = 'ready'
+        elif supported_count > 0 or incomplete_count > 0:
+            overall_proof_readiness = 'incomplete'
+        elif missing_count > 0:
+            overall_proof_readiness = 'missing'
+        else:
+            overall_proof_readiness = 'unknown'
+
+        return self._with_intake_summary_handoff({
+            'available': True,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'total_elements': total_elements,
+            'total_cards': total_cards,
+            'proof_state_totals': proof_state_totals,
+            'overall_proof_readiness': overall_proof_readiness,
+            'supported_count': supported_count,
+            'missing_count': missing_count,
+            'contradicted_count': contradicted_count,
+            'exception_barred_count': exception_barred_count,
+            'incomplete_count': incomplete_count,
+            'cards': all_cards,
+        })
+
+    # -----------------------------------------------------------------------
     # M0: Question And Testimony Foundation
     # -----------------------------------------------------------------------
 
@@ -7004,6 +7365,7 @@ class ClaimSupportHook:
         - ``expected_proof_gain`` — estimated improvement in proof readiness (0–1)
         - ``question_text`` — draft question text the operator can use directly
         - ``retrieval_context`` — best available retrieval results for this element (M4)
+        - ``proof_state`` — current element proof state from M5 proof card
         """
         gaps = self.get_claim_support_gaps(
             user_id,
@@ -7059,6 +7421,32 @@ class ClaimSupportHook:
                     _RETRIEVAL_CONTEXT_GAIN_DAMPENING = 0.85
                     gain = round(gain * _RETRIEVAL_CONTEXT_GAIN_DAMPENING, 3)
 
+                # M5: Attach proof state from element proof card
+                proof_state_context: Dict[str, Any] = {}
+                try:
+                    proof_card = self.get_element_proof_card(
+                        user_id,
+                        current_claim,
+                        claim_element_id=element_id or None,
+                        claim_element_text=element_text or None,
+                        coverage_status=element.get('status') or None,
+                    )
+                    proof_state_context = {
+                        'proof_state': proof_card.get('proof_state', 'missing'),
+                        'missing_predicates': proof_card.get('missing_predicates', []),
+                        'contradiction_count': proof_card.get('contradiction_count', 0),
+                        'next_action': proof_card.get('next_action', 'gather_evidence'),
+                        'proof_explanation': proof_card.get('explanation', ''),
+                    }
+                except Exception:
+                    proof_state_context = {
+                        'proof_state': 'missing',
+                        'missing_predicates': [],
+                        'contradiction_count': 0,
+                        'next_action': 'gather_evidence',
+                        'proof_explanation': '',
+                    }
+
                 recommendations.append({
                     'question_id': question_id,
                     'claim_type': current_claim,
@@ -7079,6 +7467,7 @@ class ClaimSupportHook:
                         'duplicate_cluster_count': retrieval_context.get('duplicate_cluster_count', 0),
                         'top_results': top_retrieval_results,
                     },
+                    'proof_state_context': proof_state_context,
                 })
 
         # Rank by expected_proof_gain descending, then by lane priority

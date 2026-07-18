@@ -395,6 +395,29 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
             max_results=max_results,
         )
 
+    @router.get("/api/claim-support/element-proof-cards")
+    async def get_element_proof_cards(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_element_proof_cards(resolved_user, claim_type=claim_type)
+
+    @router.get("/api/claim-support/element-proof-card")
+    async def get_element_proof_card(
+        user_id: Optional[str] = Query(default=None),
+        claim_type: str = Query(...),
+        claim_element_id: Optional[str] = Query(default=None),
+        claim_element_text: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_element_proof_card(
+            resolved_user,
+            claim_type,
+            claim_element_id=claim_element_id,
+            claim_element_text=claim_element_text,
+        )
+
     return router
 
 

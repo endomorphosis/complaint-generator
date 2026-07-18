@@ -3320,6 +3320,38 @@ class Mediator:
 			max_results=max_results,
 		)
 
+	def get_element_proof_card(
+		self,
+		user_id: str,
+		claim_type: str,
+		claim_element_id: str = None,
+		claim_element_text: str = None,
+		coverage_status: str = None,
+	) -> Dict[str, Any]:
+		"""Return a proof card for a single claim element (M5)."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_element_proof_card(
+			user_id,
+			claim_type,
+			claim_element_id=claim_element_id,
+			claim_element_text=claim_element_text,
+			coverage_status=coverage_status,
+		)
+
+	def get_element_proof_cards(
+		self,
+		user_id: str,
+		claim_type: str = None,
+	) -> Dict[str, Any]:
+		"""Return proof cards for all elements of a claim type (M5)."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_element_proof_cards(
+			user_id,
+			claim_type=claim_type,
+		)
+
 	def get_recent_claim_follow_up_execution(
 		self,
 		claim_type: str = None,

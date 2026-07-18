@@ -324,7 +324,7 @@ Make chunk retrieval a first-class review tool for question planning, contradict
 
 ## M5: Legal Proof And Contradiction Engine
 
-Status: Planned
+Status: Complete
 Priority: P0
 
 ### Goal
@@ -343,12 +343,12 @@ Turn coverage review into facts-applied-to-law validation with proof gaps, excep
 
 ### Checklist
 
-- [ ] implement `prove_claim_elements` behind the existing adapter contract
-- [ ] implement contradiction and exception checks with concise proof explanations
-- [ ] normalize law-element, predicate, and authority-rule references used by proof results
-- [ ] distinguish missing support, contradiction, exception-barred, and uncertain states per element
-- [ ] expose element proof cards with required predicates, satisfied predicates, missing predicates, supporting facts, contradiction sources, and next action
-- [ ] feed proof-state outputs back into question planning and follow-up planning
+- [x] implement `prove_claim_elements` behind the existing adapter contract
+- [x] implement contradiction and exception checks with concise proof explanations
+- [x] normalize law-element, predicate, and authority-rule references used by proof results
+- [x] distinguish missing support, contradiction, exception-barred, and uncertain states per element
+- [x] expose element proof cards with required predicates, satisfied predicates, missing predicates, supporting facts, contradiction sources, and next action
+- [x] feed proof-state outputs back into question planning and follow-up planning
 
 ### Acceptance criteria
 
