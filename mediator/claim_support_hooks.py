@@ -10,7 +10,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from integrations.ipfs_datasets.graphrag import build_ontology, validate_ontology
+from integrations.ipfs_datasets.graphrag import (
+    build_ontology,
+    validate_ontology,
+    build_validate_score_ontology,
+    score_support_path_quality,
+)
+from integrations.ipfs_datasets.graphs import persist_graph_snapshot, query_graph_snapshot
 from integrations.ipfs_datasets.logic import check_contradictions, prove_claim_elements, run_hybrid_reasoning
 from complaint_analysis.temporal_rule_profiles import evaluate_temporal_rule_profile
 from claim_support_review import _merge_intake_summary_handoff_metadata
@@ -25,7 +31,7 @@ except ImportError:
 
 _ENRICHMENT_QUEUE_DDL = """
     CREATE TABLE IF NOT EXISTS claim_enrichment_queue (
-        id INTEGER PRIMARY KEY,
+        id BIGINT PRIMARY KEY DEFAULT nextval('claim_support_id_seq'),
         user_id VARCHAR NOT NULL,
         claim_type VARCHAR,
         enrichment_type VARCHAR NOT NULL,
@@ -58,6 +64,7 @@ class ClaimSupportHook:
     def __init__(self, mediator, db_path: Optional[str] = None):
         self.mediator = mediator
         self.db_path = db_path or self._get_default_db_path()
+        self._enrichment_queue_memory_conn: Optional[Any] = None
         self._memory_requirements: Dict[str, List[Dict[str, Any]]] = {}
         self._memory_support_links: List[Dict[str, Any]] = []
         self._check_duckdb_availability()
@@ -413,6 +420,32 @@ class ClaimSupportHook:
         sorted_facts = '|'.join(sorted(fact_ids))
         digest = hashlib.sha256(
             f'{user_id}|{claim_type}|{claim_element_id}|{sorted_facts}|{path_kind}'.encode('utf-8')
+        ).hexdigest()[:16]
+        return f'path:{normalized_claim}:{digest}'
+
+    def _make_trace_path_id(
+        self,
+        *,
+        user_id: str,
+        claim_type: str,
+        claim_element_id: str = '',
+        fact_ids: List[str],
+        support_refs: List[str],
+        path_kind: str = 'support',
+    ) -> str:
+        if fact_ids:
+            return self._make_proof_path_id(
+                user_id=user_id,
+                claim_type=claim_type,
+                claim_element_id=claim_element_id,
+                fact_ids=fact_ids,
+                path_kind=path_kind,
+            )
+        normalized_claim = ''.join(ch.lower() if ch.isalnum() else '_' for ch in claim_type).strip('_') or 'claim'
+        sorted_facts = '|'.join(sorted(fid for fid in fact_ids if fid))
+        sorted_refs = '|'.join(sorted(ref for ref in support_refs if ref))
+        digest = hashlib.sha256(
+            f'{user_id}|{claim_type}|{claim_element_id}|{sorted_facts}|{sorted_refs}|{path_kind}'.encode('utf-8')
         ).hexdigest()[:16]
         return f'path:{normalized_claim}:{digest}'
 
@@ -824,11 +857,19 @@ class ClaimSupportHook:
             link for link in (links or [])
             if isinstance(link, dict) and link.get('support_kind') == 'authority'
         ]
+        fact_support_by_element = self._collect_fact_support_text_by_element(links)
 
         rule_type_counts: Dict[str, int] = {}
+        deontic_operator_counts: Dict[str, int] = {}
+        operator_family_counts: Dict[str, int] = {}
+        grounding_status_counts: Dict[str, int] = {}
         authority_links_with_rule_candidates = 0
         total_rule_candidate_count = 0
         matched_claim_element_rule_count = 0
+        fact_satisfied_rule_count = 0
+        fact_unsatisfied_rule_count = 0
+        fact_satisfaction_status_counts: Dict[str, int] = {}
+        adverse_treatment_count = 0
         max_extraction_confidence = 0.0
 
         for link in authority_links:
@@ -844,6 +885,20 @@ class ClaimSupportHook:
                     rule_type = str(candidate.get('rule_type') or '')
                     if rule_type:
                         rule_type_counts[rule_type] = rule_type_counts.get(rule_type, 0) + 1
+                    grounded_rule = candidate.get('grounded_rule', {})
+                    if not isinstance(grounded_rule, dict):
+                        metadata = candidate.get('metadata', {}) if isinstance(candidate.get('metadata'), dict) else {}
+                        grounded_rule = metadata.get('grounded_rule', {}) if isinstance(metadata.get('grounded_rule'), dict) else {}
+                    deontic_operator = str(grounded_rule.get('deontic_operator') or '')
+                    if deontic_operator:
+                        deontic_operator_counts[deontic_operator] = deontic_operator_counts.get(deontic_operator, 0) + 1
+                    operator_family = str(grounded_rule.get('operator_family') or '')
+                    if operator_family:
+                        operator_family_counts[operator_family] = operator_family_counts.get(operator_family, 0) + 1
+                    grounding_status = str(grounded_rule.get('grounding_status') or '')
+                    if grounding_status:
+                        grounding_status_counts[grounding_status] = grounding_status_counts.get(grounding_status, 0) + 1
+                    adverse_treatment_count += int(grounded_rule.get('adverse_treatment_count', 0) or 0)
                     candidate_element_id = str(candidate.get('claim_element_id') or '')
                     candidate_element_text = str(candidate.get('claim_element_text') or '')
                     if (
@@ -852,6 +907,18 @@ class ClaimSupportHook:
                         candidate_element_text and candidate_element_text == link_element_text
                     ):
                         matched_claim_element_rule_count += 1
+                        satisfaction_status = self._classify_rule_candidate_fact_satisfaction(
+                            candidate,
+                            fact_support_by_element.get(candidate_element_id or link_element_id, []),
+                            fact_support_by_element.get(candidate_element_text or link_element_text, []),
+                        )
+                        fact_satisfaction_status_counts[satisfaction_status] = (
+                            fact_satisfaction_status_counts.get(satisfaction_status, 0) + 1
+                        )
+                        if satisfaction_status == 'fact_satisfied':
+                            fact_satisfied_rule_count += 1
+                        elif satisfaction_status == 'fact_missing':
+                            fact_unsatisfied_rule_count += 1
                     max_extraction_confidence = max(
                         max_extraction_confidence,
                         float(candidate.get('extraction_confidence', 0.0) or 0.0),
@@ -875,6 +942,22 @@ class ClaimSupportHook:
                 normalized_type = str(rule_type or '')
                 if normalized_type:
                     rule_type_counts[normalized_type] = rule_type_counts.get(normalized_type, 0) + int(count or 0)
+            by_deontic = summary.get('by_deontic_operator', {}) if isinstance(summary.get('by_deontic_operator'), dict) else {}
+            for deontic_operator, count in by_deontic.items():
+                normalized_deontic = str(deontic_operator or '')
+                if normalized_deontic:
+                    deontic_operator_counts[normalized_deontic] = deontic_operator_counts.get(normalized_deontic, 0) + int(count or 0)
+            by_operator_family = summary.get('by_operator_family', {}) if isinstance(summary.get('by_operator_family'), dict) else {}
+            for operator_family, count in by_operator_family.items():
+                normalized_family = str(operator_family or '')
+                if normalized_family:
+                    operator_family_counts[normalized_family] = operator_family_counts.get(normalized_family, 0) + int(count or 0)
+            by_grounding_status = summary.get('by_grounding_status', {}) if isinstance(summary.get('by_grounding_status'), dict) else {}
+            for grounding_status, count in by_grounding_status.items():
+                normalized_status = str(grounding_status or '')
+                if normalized_status:
+                    grounding_status_counts[normalized_status] = grounding_status_counts.get(normalized_status, 0) + int(count or 0)
+            adverse_treatment_count += int(summary.get('adverse_treatment_count', 0) or 0)
             max_extraction_confidence = max(
                 max_extraction_confidence,
                 float(summary.get('max_confidence', 0.0) or 0.0),
@@ -885,9 +968,97 @@ class ClaimSupportHook:
             'authority_links_with_rule_candidates': authority_links_with_rule_candidates,
             'total_rule_candidate_count': total_rule_candidate_count,
             'matched_claim_element_rule_count': matched_claim_element_rule_count,
+            'fact_satisfied_rule_count': fact_satisfied_rule_count,
+            'fact_unsatisfied_rule_count': fact_unsatisfied_rule_count,
+            'fact_satisfaction_status_counts': fact_satisfaction_status_counts,
             'rule_type_counts': rule_type_counts,
+            'deontic_operator_counts': deontic_operator_counts,
+            'operator_family_counts': operator_family_counts,
+            'grounding_status_counts': grounding_status_counts,
+            'adverse_treatment_count': adverse_treatment_count,
             'max_extraction_confidence': max_extraction_confidence,
         }
+
+    def _collect_fact_support_text_by_element(self, links: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+        support_text_by_element: Dict[str, List[str]] = {}
+        for link in links or []:
+            if not isinstance(link, dict) or link.get('support_kind') == 'authority':
+                continue
+            texts = [
+                str(link.get('support_ref') or ''),
+                str(link.get('support_label') or ''),
+            ]
+            record_summary = link.get('record_summary') if isinstance(link.get('record_summary'), dict) else {}
+            texts.extend([
+                str(record_summary.get('title') or ''),
+                str(record_summary.get('content') or ''),
+                str(record_summary.get('parsed_text_preview') or ''),
+                str(record_summary.get('source_ref') or ''),
+            ])
+            combined = ' '.join(text for text in texts if text).strip()
+            if not combined:
+                continue
+            for key in [
+                str(link.get('claim_element_id') or '').strip(),
+                str(link.get('claim_element_text') or '').strip(),
+            ]:
+                if key:
+                    support_text_by_element.setdefault(key, []).append(combined)
+        return support_text_by_element
+
+    def _classify_rule_candidate_fact_satisfaction(
+        self,
+        candidate: Dict[str, Any],
+        support_texts_by_id: List[str],
+        support_texts_by_text: List[str],
+    ) -> str:
+        support_texts = list(support_texts_by_id or []) + list(support_texts_by_text or [])
+        if not support_texts:
+            return 'fact_missing'
+        predicate = str(candidate.get('predicate_template') or candidate.get('claim_element_text') or '').strip()
+        if not predicate:
+            return 'fact_unknown'
+        predicate_terms = {
+            term for term in re.findall(r'[a-z0-9]+', predicate.lower())
+            if len(term) > 3
+        }
+        if not predicate_terms:
+            return 'fact_unknown'
+        support_terms = {
+            term
+            for text in support_texts
+            for term in re.findall(r'[a-z0-9]+', str(text or '').lower())
+            if len(term) > 3
+        }
+        overlap = predicate_terms & support_terms
+        return 'fact_satisfied' if overlap else 'fact_missing'
+
+    def _classify_formal_premise_failure(self, element: Dict[str, Any], proof_gap_types: List[str]) -> str:
+        treatment_summary = (
+            element.get('authority_treatment_summary', {})
+            if isinstance(element.get('authority_treatment_summary'), dict)
+            else {}
+        )
+        rule_summary = (
+            element.get('authority_rule_candidate_summary', {})
+            if isinstance(element.get('authority_rule_candidate_summary'), dict)
+            else {}
+        )
+        if int(treatment_summary.get('adverse_authority_link_count', 0) or 0) > 0:
+            return 'adverse_authority'
+        if int(rule_summary.get('adverse_treatment_count', 0) or 0) > 0:
+            return 'adverse_authority'
+        if element.get('validation_status') == 'contradicted':
+            return 'contradictory_facts'
+        if 'missing_support_kind:authority' in proof_gap_types:
+            return 'missing_rules'
+        if int(rule_summary.get('matched_claim_element_rule_count', 0) or 0) <= 0 and element.get('validation_status') == 'missing':
+            return 'missing_rules'
+        if element.get('validation_status') == 'missing':
+            return 'missing_facts'
+        if 'logic_unprovable' in proof_gap_types:
+            return 'unprovable_rules_or_facts'
+        return ''
 
     def _recommended_support_gap_action(self, element: Dict[str, Any]) -> str:
         missing_support_kinds = list(element.get('missing_support_kinds', []) or [])
@@ -1066,7 +1237,8 @@ class ClaimSupportHook:
                 source_record_id = link.get('evidence_record_id')
 
         content_origin = str(
-            transform_lineage.get('content_origin')
+            payload.get('content_origin')
+            or transform_lineage.get('content_origin')
             or parse_lineage.get('content_origin')
             or record_parse_summary.get('content_origin')
             or provenance_metadata.get('content_origin')
@@ -1075,14 +1247,16 @@ class ClaimSupportHook:
         artifact_identity = self._resolve_artifact_identity(
             content_origin=content_origin,
             artifact_family=str(
-                transform_lineage.get('artifact_family')
+                payload.get('artifact_family')
+                or transform_lineage.get('artifact_family')
                 or parse_lineage.get('artifact_family')
                 or record_parse_summary.get('artifact_family')
                 or provenance_metadata.get('artifact_family')
                 or ''
             ),
             corpus_family=str(
-                transform_lineage.get('corpus_family')
+                payload.get('corpus_family')
+                or transform_lineage.get('corpus_family')
                 or parse_lineage.get('corpus_family')
                 or record_parse_summary.get('corpus_family')
                 or provenance_metadata.get('corpus_family')
@@ -1109,15 +1283,18 @@ class ClaimSupportHook:
                 or link.get('support_ref')
                 or ''
             ),
-            'record_scope': str(parse_lineage.get('record_scope') or source_family),
+            'record_scope': str(payload.get('record_scope') or parse_lineage.get('record_scope') or source_family),
             'artifact_family': artifact_identity['artifact_family'],
             'corpus_family': artifact_identity['corpus_family'],
             'content_origin': content_origin,
-            'parse_source': str(parse_lineage.get('source') or record_parse_summary.get('source') or ''),
-            'input_format': str(parse_lineage.get('input_format') or record_parse_summary.get('input_format') or ''),
-            'quality_tier': str(parse_lineage.get('quality_tier') or record_parse_summary.get('quality_tier') or ''),
-            'quality_score': float(parse_lineage.get('quality_score') or record_parse_summary.get('quality_score') or parse_quality.get('quality_score') or 0.0),
-            'page_count': int(parse_lineage.get('page_count') or record_parse_summary.get('page_count') or source_span.get('page_count') or 0),
+            'parse_source': str(payload.get('parse_source') or parse_lineage.get('source') or record_parse_summary.get('source') or ''),
+            'input_format': str(payload.get('input_format') or parse_lineage.get('input_format') or record_parse_summary.get('input_format') or ''),
+            'quality_tier': str(payload.get('quality_tier') or parse_lineage.get('quality_tier') or record_parse_summary.get('quality_tier') or ''),
+            'quality_score': float(payload.get('quality_score') or parse_lineage.get('quality_score') or record_parse_summary.get('quality_score') or parse_quality.get('quality_score') or 0.0),
+            'page_count': int(payload.get('page_count') or parse_lineage.get('page_count') or record_parse_summary.get('page_count') or source_span.get('page_count') or 0),
+            'chunk_id': str(payload.get('chunk_id') or metadata.get('chunk_id') or ''),
+            'chunk_index': int(payload.get('chunk_index') or metadata.get('chunk_index') or 0),
+            'source_passage': dict(payload.get('source_passage') or metadata.get('source_passage') or {}),
             'evidence_record_id': link.get('evidence_record_id'),
             'authority_record_id': link.get('authority_record_id'),
             'testimony_record_id': link.get('testimony_record_id'),
@@ -1288,6 +1465,74 @@ class ClaimSupportHook:
             traces.append(self._build_support_trace(link=link))
         return traces
 
+    def _summarize_fact_registry(self, facts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        source_family_counts: Dict[str, int] = {}
+        record_scope_counts: Dict[str, int] = {}
+        artifact_family_counts: Dict[str, int] = {}
+        corpus_family_counts: Dict[str, int] = {}
+        content_origin_counts: Dict[str, int] = {}
+        parse_source_counts: Dict[str, int] = {}
+        input_format_counts: Dict[str, int] = {}
+        quality_tier_counts: Dict[str, int] = {}
+        support_kind_counts: Dict[str, int] = {}
+        source_table_counts: Dict[str, int] = {}
+        unique_fact_ids = set()
+        unique_source_refs = set()
+        unique_record_keys = set()
+        passage_anchored_count = 0
+
+        def _count(target: Dict[str, int], value: Any) -> None:
+            text = str(value or '').strip()
+            if text:
+                target[text] = target.get(text, 0) + 1
+
+        for fact in facts or []:
+            if not isinstance(fact, dict):
+                continue
+            fact_id = str(fact.get('fact_id') or '').strip()
+            if fact_id:
+                unique_fact_ids.add(fact_id)
+            source_ref = str(fact.get('source_ref') or '').strip()
+            if source_ref:
+                unique_source_refs.add(source_ref)
+            source_family = str(fact.get('source_family') or '').strip()
+            source_record_id = fact.get('source_record_id')
+            if source_family and source_record_id not in (None, ''):
+                unique_record_keys.add((source_family, str(source_record_id)))
+            source_passage = fact.get('source_passage') if isinstance(fact.get('source_passage'), dict) else {}
+            if source_passage.get('chunk_id') or fact.get('chunk_id'):
+                passage_anchored_count += 1
+
+            _count(source_family_counts, source_family)
+            _count(record_scope_counts, fact.get('record_scope'))
+            _count(artifact_family_counts, fact.get('artifact_family'))
+            _count(corpus_family_counts, fact.get('corpus_family'))
+            _count(content_origin_counts, fact.get('content_origin'))
+            _count(parse_source_counts, fact.get('parse_source'))
+            _count(input_format_counts, fact.get('input_format'))
+            _count(quality_tier_counts, fact.get('quality_tier'))
+            _count(support_kind_counts, fact.get('support_kind'))
+            _count(source_table_counts, fact.get('source_table'))
+
+        fact_count = len([fact for fact in facts or [] if isinstance(fact, dict)])
+        return {
+            'fact_count': fact_count,
+            'unique_fact_count': len(unique_fact_ids),
+            'unique_source_ref_count': len(unique_source_refs),
+            'unique_source_record_count': len(unique_record_keys),
+            'passage_anchored_count': passage_anchored_count,
+            'source_family_counts': source_family_counts,
+            'record_scope_counts': record_scope_counts,
+            'artifact_family_counts': artifact_family_counts,
+            'corpus_family_counts': corpus_family_counts,
+            'content_origin_counts': content_origin_counts,
+            'parse_source_counts': parse_source_counts,
+            'input_format_counts': input_format_counts,
+            'quality_tier_counts': quality_tier_counts,
+            'support_kind_counts': support_kind_counts,
+            'source_table_counts': source_table_counts,
+        }
+
     def _summarize_support_traces(self, traces: List[Dict[str, Any]]) -> Dict[str, Any]:
         support_by_kind: Dict[str, int] = {}
         support_by_source: Dict[str, int] = {}
@@ -1384,6 +1629,237 @@ class ClaimSupportHook:
             'fallback_mode_counts': fallback_mode_counts,
             'avg_parse_quality_score': round(quality_score_total / parsed_record_count, 2) if parsed_record_count else 0.0,
             'graph_status_counts': graph_status_counts,
+        }
+
+    def _build_trace_path_detail(
+        self,
+        *,
+        user_id: str,
+        claim_type: str,
+        claim_element_id: Optional[str],
+        traces: List[Dict[str, Any]],
+        path_kind: str = 'support',
+    ) -> Dict[str, Any]:
+        fact_ids: List[str] = []
+        support_refs: List[str] = []
+        support_kinds: List[str] = []
+        source_families: List[str] = []
+        graph_ids: List[str] = []
+
+        for trace in traces or []:
+            if not isinstance(trace, dict):
+                continue
+            fact_id = str(trace.get('fact_id') or '')
+            if fact_id and fact_id not in fact_ids:
+                fact_ids.append(fact_id)
+            support_ref = str(trace.get('support_ref') or '')
+            if support_ref and support_ref not in support_refs:
+                support_refs.append(support_ref)
+            support_kind = str(trace.get('support_kind') or '')
+            if support_kind and support_kind not in support_kinds:
+                support_kinds.append(support_kind)
+            source_family = str(trace.get('source_family') or trace.get('record_scope') or '')
+            if source_family and source_family not in source_families:
+                source_families.append(source_family)
+            graph_id = str(trace.get('graph_id') or '')
+            if not graph_id:
+                graph_trace = trace.get('graph_trace', {}) if isinstance(trace.get('graph_trace'), dict) else {}
+                snapshot = graph_trace.get('snapshot', {}) if isinstance(graph_trace.get('snapshot'), dict) else {}
+                graph_id = str(snapshot.get('graph_id') or '')
+            if graph_id and graph_id not in graph_ids:
+                graph_ids.append(graph_id)
+
+        support_trace_summary = self._summarize_support_traces(traces)
+        support_fact_registry_summary = self._summarize_fact_registry(traces)
+        graph_trace_summary = self._summarize_graph_traces(traces)
+        proof_path_id = self._make_trace_path_id(
+            user_id=user_id,
+            claim_type=claim_type,
+            claim_element_id=claim_element_id or '',
+            fact_ids=fact_ids,
+            support_refs=support_refs,
+            path_kind=path_kind,
+        )
+        return {
+            'proof_path_id': proof_path_id,
+            'claim_element_id': claim_element_id or '',
+            'fact_ids': fact_ids,
+            'fact_count': len(fact_ids),
+            'support_refs': support_refs,
+            'support_ref_count': len(support_refs),
+            'support_kinds': support_kinds,
+            'source_families': source_families,
+            'graph_ids': graph_ids,
+            'graph_id_count': len(graph_ids),
+            'graph_trace_count': int(graph_trace_summary.get('traced_link_count', 0) or 0),
+            'support_fact_registry_summary': support_fact_registry_summary,
+            'trace_count': len(traces or []),
+            'path_kind': path_kind or 'support',
+            'source': 'current_traces',
+            'persisted': False,
+            'metadata': {
+                'support_fact_registry_summary': support_fact_registry_summary,
+                'support_trace_summary': support_trace_summary,
+                'graph_trace_summary': graph_trace_summary,
+            },
+            'timestamp': '',
+        }
+
+    def _build_support_path_drilldown_metadata(
+        self,
+        traces: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        fact_ids: List[str] = []
+        support_refs: List[str] = []
+        support_kinds: List[str] = []
+        source_families: List[str] = []
+        graph_ids: List[str] = []
+
+        for trace in traces or []:
+            if not isinstance(trace, dict):
+                continue
+            fact_id = str(trace.get('fact_id') or '')
+            if fact_id and fact_id not in fact_ids:
+                fact_ids.append(fact_id)
+            support_ref = str(trace.get('support_ref') or trace.get('source_ref') or '')
+            if support_ref and support_ref not in support_refs:
+                support_refs.append(support_ref)
+            support_kind = str(trace.get('support_kind') or '')
+            if support_kind and support_kind not in support_kinds:
+                support_kinds.append(support_kind)
+            source_family = str(trace.get('source_family') or trace.get('record_scope') or '')
+            if source_family and source_family not in source_families:
+                source_families.append(source_family)
+            graph_id = str(trace.get('graph_id') or '')
+            if not graph_id:
+                graph_trace = trace.get('graph_trace', {}) if isinstance(trace.get('graph_trace'), dict) else {}
+                snapshot = graph_trace.get('snapshot', {}) if isinstance(graph_trace.get('snapshot'), dict) else {}
+                graph_id = str(snapshot.get('graph_id') or '')
+            if graph_id and graph_id not in graph_ids:
+                graph_ids.append(graph_id)
+
+        graph_trace_summary = self._summarize_graph_traces(traces or [])
+        return {
+            'fact_ids': fact_ids,
+            'fact_count': len(fact_ids),
+            'support_refs': support_refs,
+            'support_ref_count': len(support_refs),
+            'support_kinds': support_kinds,
+            'source_families': source_families,
+            'graph_ids': graph_ids,
+            'graph_id_count': len(graph_ids),
+            'graph_trace_count': int(graph_trace_summary.get('traced_link_count', 0) or 0),
+            'graph_trace_summary': graph_trace_summary,
+        }
+
+    def _score_support_path_detail(
+        self,
+        path: Dict[str, Any],
+        *,
+        required_support_kinds: Optional[List[str]] = None,
+        ontology: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        scored = score_support_path_quality(
+            path,
+            ontology=ontology,
+            required_support_kinds=required_support_kinds,
+        )
+        path['support_quality'] = scored
+        path['support_quality_score'] = float(scored.get('support_quality_score', 0.0) or 0.0)
+        path['support_quality_tier'] = str(scored.get('support_quality_tier') or 'weak_support')
+        path['quality_signals'] = list(scored.get('quality_signals') or [])
+        return path
+
+    def _summarize_support_path_quality(self, paths: List[Dict[str, Any]]) -> Dict[str, Any]:
+        scored_paths = [
+            path for path in (paths or [])
+            if isinstance(path, dict) and isinstance(path.get('support_quality'), dict)
+        ]
+        tier_counts: Dict[str, int] = {}
+        signal_counts: Dict[str, int] = {}
+        total_score = 0.0
+        best_path: Dict[str, Any] = {}
+        weakest_path: Dict[str, Any] = {}
+
+        for path in scored_paths:
+            score = float(path.get('support_quality_score', 0.0) or 0.0)
+            total_score += score
+            tier = str(path.get('support_quality_tier') or 'unknown')
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+            for signal in path.get('quality_signals', []) or []:
+                if not isinstance(signal, dict):
+                    continue
+                signal_type = str(signal.get('signal_type') or 'unknown')
+                signal_counts[signal_type] = signal_counts.get(signal_type, 0) + 1
+            if not best_path or score > float(best_path.get('support_quality_score', 0.0) or 0.0):
+                best_path = path
+            if not weakest_path or score < float(weakest_path.get('support_quality_score', 0.0) or 0.0):
+                weakest_path = path
+
+        scored_count = len(scored_paths)
+        best_tier = str(best_path.get('support_quality_tier') or '') if best_path else ''
+        if tier_counts.get('structurally_missing', 0):
+            recommended_action = 'collect_initial_support'
+        elif tier_counts.get('weak_support', 0) or tier_counts.get('duplicate_support', 0):
+            recommended_action = 'strengthen_support_path'
+        elif best_tier in {'strong_support', 'moderate_support'}:
+            recommended_action = 'review_support_quality'
+        else:
+            recommended_action = 'collect_initial_support'
+
+        return {
+            'path_count': len([path for path in (paths or []) if isinstance(path, dict)]),
+            'scored_path_count': scored_count,
+            'avg_quality_score': round(total_score / scored_count, 4) if scored_count else 0.0,
+            'best_quality_score': round(float(best_path.get('support_quality_score', 0.0) or 0.0), 4) if best_path else 0.0,
+            'weakest_quality_score': round(float(weakest_path.get('support_quality_score', 0.0) or 0.0), 4) if weakest_path else 0.0,
+            'best_quality_tier': best_tier,
+            'tier_counts': tier_counts,
+            'quality_signal_counts': signal_counts,
+            'strong_support_path_count': tier_counts.get('strong_support', 0),
+            'weak_support_path_count': tier_counts.get('weak_support', 0),
+            'duplicate_support_path_count': tier_counts.get('duplicate_support', 0),
+            'structurally_missing_path_count': tier_counts.get('structurally_missing', 0),
+            'strongest_proof_path_id': str(best_path.get('proof_path_id') or '') if best_path else '',
+            'weakest_proof_path_id': str(weakest_path.get('proof_path_id') or '') if weakest_path else '',
+            'recommended_quality_action': recommended_action,
+        }
+
+    def _build_fact_record_trace(self, fact: Dict[str, Any], *, support_kind: str = '') -> Dict[str, Any]:
+        source_ref = (
+            fact.get('source_artifact_id')
+            or fact.get('source_authority_id')
+            or fact.get('source_testimony_id')
+            or fact.get('fact_id')
+            or ''
+        )
+        resolved_support_kind = support_kind
+        if not resolved_support_kind:
+            if fact.get('source_authority_id'):
+                resolved_support_kind = 'authority'
+            elif fact.get('source_testimony_id'):
+                resolved_support_kind = 'testimony'
+            else:
+                resolved_support_kind = 'evidence'
+        return {
+            'claim_type': fact.get('claim_type'),
+            'claim_element_id': fact.get('claim_element_id'),
+            'claim_element_text': fact.get('claim_element_text'),
+            'support_kind': resolved_support_kind,
+            'support_ref': source_ref,
+            'support_label': fact.get('proposition_text', ''),
+            'source_table': resolved_support_kind,
+            'source_family': resolved_support_kind,
+            'source_record_id': None,
+            'source_ref': source_ref,
+            'record_scope': resolved_support_kind,
+            'fact_id': fact.get('fact_id', ''),
+            'fact_text': fact.get('proposition_text', ''),
+            'confidence': fact.get('confidence', 0.0),
+            'trace_kind': 'fact',
+            'graph_summary': {},
+            'graph_trace': {},
+            'graph_id': '',
         }
 
     def _extract_logic_contradiction_count(
@@ -1850,7 +2326,10 @@ class ClaimSupportHook:
         temporal_rule_profile = self._extract_temporal_rule_profile(reasoning)
         temporal_rule_status = str(temporal_rule_profile.get('status') or '')
         graphrag_quality_signal = self._extract_graphrag_quality_signal(reasoning)
-        graphrag_has_blocking_gaps = graphrag_quality_signal.get('has_blocking_gaps', False)
+        graphrag_has_blocking_gaps = bool(
+            reasoning.get('graphrag_quality_enforces_proof_gaps', False)
+            and graphrag_quality_signal.get('has_blocking_gaps', False)
+        )
         missing_support_kind_count = len(element.get('missing_support_kinds', []) or [])
         total_links = int(element.get('total_links', 0) or 0)
         coverage_status = str(element.get('status') or '')
@@ -2016,7 +2495,12 @@ class ClaimSupportHook:
                 }
             )
         graphrag_quality_signal = self._extract_graphrag_quality_signal(reasoning_diagnostics)
-        if graphrag_quality_signal.get('available') and graphrag_quality_signal.get('has_blocking_gaps'):
+        reasoning = reasoning_diagnostics if isinstance(reasoning_diagnostics, dict) else {}
+        if (
+            reasoning.get('graphrag_quality_enforces_proof_gaps', False)
+            and graphrag_quality_signal.get('available')
+            and graphrag_quality_signal.get('has_blocking_gaps')
+        ):
             blocking_gaps = [
                 g for g in (graphrag_quality_signal.get('gaps') or [])
                 if g.get('severity') == 'blocking'
@@ -2808,6 +3292,17 @@ class ClaimSupportHook:
         logic_contradictions = check_contradictions(reasoning_payload)
         hybrid_reasoning = run_hybrid_reasoning(reasoning_payload)
         ontology_validation = validate_ontology(ontology_for_validation)
+        ontology_workflow = build_validate_score_ontology(
+            ontology_seed_text,
+            claim_type=claim_type,
+        )
+        ontology_quality = (
+            dict(ontology_workflow.get('ontology_quality', {}))
+            if isinstance(ontology_workflow, dict) and isinstance(ontology_workflow.get('ontology_quality'), dict)
+            else {}
+        )
+        if isinstance(ontology_workflow, dict) and isinstance(ontology_workflow.get('gaps'), dict):
+            ontology_quality['gaps'] = list(ontology_workflow['gaps'].get('gaps') or [])
 
         temporal_summary: Dict[str, Any] = {}
         if temporal_context:
@@ -2867,6 +3362,10 @@ class ClaimSupportHook:
                 ontology_validation,
                 count_fields=['result'],
             ),
+            'ontology_workflow': self._summarize_adapter_result(
+                ontology_workflow,
+                count_fields=['ontology', 'quality', 'gaps'],
+            ),
         }
 
         return {
@@ -2883,6 +3382,8 @@ class ClaimSupportHook:
             'logic_contradictions': logic_contradictions,
             'hybrid_reasoning': hybrid_reasoning,
             'ontology_validation': ontology_validation,
+            'ontology_workflow': ontology_workflow,
+            'graphrag_quality': ontology_quality,
             'temporal_summary': temporal_summary,
             'temporal_rule_profile': temporal_rule_profile,
             'temporal_proof_bundle': temporal_proof_bundle,
@@ -2896,6 +3397,7 @@ class ClaimSupportHook:
             'logic_contradictions': {},
             'hybrid_reasoning': {},
             'ontology_validation': {},
+            'ontology_workflow': {},
         }
         backend_available_count = 0
         predicate_count = 0
@@ -3118,6 +3620,11 @@ class ClaimSupportHook:
             if validation_status != 'supported' and element.get('element_text'):
                 elements_requiring_follow_up.append(element.get('element_text'))
 
+            support_quality_summary = (
+                element.get('support_quality_summary', {})
+                if isinstance(element.get('support_quality_summary'), dict)
+                else {}
+            )
             element_validation = {
                 'element_id': element.get('element_id'),
                 'element_text': element.get('element_text'),
@@ -3132,6 +3639,8 @@ class ClaimSupportHook:
                 'authority_rule_candidate_summary': element.get('authority_rule_candidate_summary', {}),
                 'support_trace_summary': element.get('support_trace_summary', {}),
                 'graph_trace_summary': self._summarize_graph_traces(element.get('links', [])),
+                'support_quality_summary': support_quality_summary,
+                'primary_quality_signal': self._primary_quality_signal_for_summary(support_quality_summary),
                 'contradiction_candidate_count': len(contradiction_candidates),
                 'contradiction_candidates': contradiction_candidates,
                 'proof_gap_count': len(proof_gaps),
@@ -3193,6 +3702,7 @@ class ClaimSupportHook:
                 'reasoning': self._summarize_claim_reasoning_diagnostics(elements),
                 'decision': self._summarize_claim_validation_decisions(elements),
             },
+            'support_quality_summary': dict(claim_matrix.get('support_quality_summary') or {}),
             'elements': elements,
         }
 
@@ -3260,6 +3770,73 @@ class ClaimSupportHook:
         except (TypeError, ValueError):
             normalized = default
         return max(1, normalized)
+
+    def _summarize_coverage_matrix_for_snapshot(self, claim_matrix: Dict[str, Any]) -> Dict[str, Any]:
+        """Build compact metadata for a persisted coverage-matrix payload."""
+        elements = [
+            element
+            for element in (claim_matrix.get('elements', []) or [])
+            if isinstance(element, dict)
+        ]
+        graph_snapshot_ref_count = sum(
+            len(element.get('graph_snapshot_refs', []) or [])
+            for element in elements
+        )
+        support_path_count = 0
+        current_trace_path_count = 0
+        persisted_path_count = 0
+        graph_linked_path_count = 0
+        support_ref_count = 0
+        unique_support_refs: set = set()
+        path_kind_counts: Dict[str, int] = {}
+        for element in elements:
+            path_summary = element.get('support_path_summary', {})
+            if not isinstance(path_summary, dict):
+                continue
+            paths = [
+                path
+                for path in (path_summary.get('paths', []) or [])
+                if isinstance(path, dict)
+            ]
+            support_path_count += int(path_summary.get('path_count', len(paths)) or 0)
+            for path in paths:
+                if path.get('source') == 'current_traces':
+                    current_trace_path_count += 1
+                if path.get('source') == 'persisted' or path.get('persisted'):
+                    persisted_path_count += 1
+                path_kind = str(path.get('path_kind') or 'support').strip() or 'support'
+                path_kind_counts[path_kind] = path_kind_counts.get(path_kind, 0) + 1
+                graph_ids = path.get('graph_ids') if isinstance(path.get('graph_ids'), list) else []
+                graph_id_count = int(path.get('graph_id_count', len(graph_ids)) or 0)
+                if graph_id_count:
+                    graph_linked_path_count += 1
+                support_refs = path.get('support_refs') if isinstance(path.get('support_refs'), list) else []
+                if support_refs:
+                    support_ref_count += len(support_refs)
+                    unique_support_refs.update(
+                        normalized_ref
+                        for ref in support_refs
+                        for normalized_ref in [str(ref or '').strip()]
+                        if normalized_ref
+                    )
+
+        return {
+            'claim_type': claim_matrix.get('claim_type', ''),
+            'element_count': len(elements),
+            'status_counts': dict(claim_matrix.get('status_counts') or {}),
+            'support_by_kind': dict(claim_matrix.get('support_by_kind') or {}),
+            'total_links': int(claim_matrix.get('total_links', 0) or 0),
+            'total_facts': int(claim_matrix.get('total_facts', 0) or 0),
+            'graph_snapshot_ref_count': graph_snapshot_ref_count,
+            'support_path_count': support_path_count,
+            'current_trace_path_count': current_trace_path_count,
+            'persisted_path_count': persisted_path_count,
+            'graph_linked_path_count': graph_linked_path_count,
+            'support_ref_count': support_ref_count,
+            'unique_support_ref_count': len(unique_support_refs),
+            'path_kind_counts': path_kind_counts,
+            'support_quality_summary': dict(claim_matrix.get('support_quality_summary') or {}),
+        }
 
     def _prune_snapshot_history(
         self,
@@ -3920,13 +4497,22 @@ class ClaimSupportHook:
                 'graph_relationship_count': authority_record.get('graph_relationship_count', 0),
                 'parse_summary': self._extract_record_parse_summary(authority_record),
                 'treatment_summary': authority_record.get('treatment_summary', {}),
+                'citation_history_summary': authority_record.get('citation_history_summary', {}),
                 'rule_candidate_summary': authority_record.get('rule_candidate_summary', {}),
-                'search_program_count': len(authority_record.get('metadata', {}).get('search_programs', []) or [])
-                if isinstance(authority_record.get('metadata'), dict)
-                else 0,
+                'search_program_summary': authority_record.get('search_program_summary', {}),
+                'search_program_count': int(
+                    (authority_record.get('search_program_summary') or {}).get('record_count', 0)
+                    if isinstance(authority_record.get('search_program_summary'), dict)
+                    else len(authority_record.get('metadata', {}).get('search_programs', []) or [])
+                    if isinstance(authority_record.get('metadata'), dict)
+                    else 0
+                ),
             }
+            enriched['search_programs'] = authority_record.get('search_programs', [])
+            enriched['search_program_summary'] = authority_record.get('search_program_summary', {})
             enriched['treatment_records'] = authority_record.get('treatment_records', [])
             enriched['treatment_summary'] = authority_record.get('treatment_summary', {})
+            enriched['citation_history_summary'] = authority_record.get('citation_history_summary', {})
             enriched['rule_candidates'] = authority_record.get('rule_candidates', [])
             enriched['rule_candidate_summary'] = authority_record.get('rule_candidate_summary', {})
 
@@ -4154,6 +4740,28 @@ class ClaimSupportHook:
 
         return facts
 
+    def get_claim_fact_registry_summary(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+        *,
+        claim_element_id: Optional[str] = None,
+        claim_element_text: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Return compact corpus/source counts for normalized claim-support facts."""
+        facts = self.get_claim_support_facts(
+            user_id,
+            claim_type,
+            claim_element_id=claim_element_id,
+            claim_element_text=claim_element_text,
+        )
+        return {
+            **self._summarize_fact_registry(facts),
+            'claim_type': claim_type,
+            'claim_element_id': claim_element_id or '',
+            'claim_element_text': claim_element_text or '',
+        }
+
     def get_claim_support_traces(
         self,
         user_id: str,
@@ -4248,21 +4856,37 @@ class ClaimSupportHook:
             covered: List[Dict[str, Any]] = []
             partially_supported: List[Dict[str, Any]] = []
             missing: List[Dict[str, Any]] = []
+            claim_quality_paths: List[Dict[str, Any]] = []
 
             for element in claim_summary.get('elements', []):
+                element_id = element.get('element_id') or ''
+                support_path_summary = self.get_support_paths_for_element(
+                    user_id,
+                    current_claim,
+                    claim_element_id=element_id if element_id else None,
+                    required_support_kinds=required_kinds,
+                )
+                enhanced_element = dict(element)
+                enhanced_element['support_path_summary'] = support_path_summary
+                enhanced_element['support_quality_summary'] = support_path_summary.get('quality_summary', {})
+                claim_quality_paths.extend([
+                    path for path in support_path_summary.get('paths', []) or []
+                    if isinstance(path, dict)
+                ])
                 kinds_present = set(element.get('support_by_kind', {}).keys())
                 if element.get('total_links', 0) == 0:
-                    missing.append(element)
+                    missing.append(enhanced_element)
                 elif all(kind in kinds_present for kind in required_kinds):
-                    covered.append(element)
+                    covered.append(enhanced_element)
                 else:
-                    partially_supported.append(element)
+                    partially_supported.append(enhanced_element)
 
             overview['claims'][current_claim] = {
                 'required_support_kinds': required_kinds,
                 'covered': covered,
                 'partially_supported': partially_supported,
                 'missing': missing,
+                'support_quality_summary': self._summarize_support_path_quality(claim_quality_paths),
                 'covered_count': len(covered),
                 'partially_supported_count': len(partially_supported),
                 'missing_count': len(missing),
@@ -4328,6 +4952,7 @@ class ClaimSupportHook:
                     user_id,
                     current_claim,
                     claim_element_id=element_id if element_id else None,
+                    required_support_kinds=required_kinds,
                 )
 
                 elements.append(
@@ -4352,12 +4977,19 @@ class ClaimSupportHook:
                         'element_support_ledger': element_support_ledger,
                         'graph_snapshot_refs': graph_snapshot_refs,
                         'support_path_summary': support_path_summary,
+                        'support_quality_summary': support_path_summary.get('quality_summary', {}),
                         'links': element.get('links', []),
                     }
                 )
 
             claim_support_traces = self._collect_support_traces_from_links(claim_summary.get('links', []))
             claim_support_packets = [self._build_support_packet(trace) for trace in claim_support_traces]
+            claim_support_paths = [
+                path
+                for element in elements
+                for path in (element.get('support_path_summary', {}).get('paths', []) or [])
+                if isinstance(path, dict)
+            ]
             matrix['claims'][current_claim] = {
                 'claim_type': current_claim,
                 'required_support_kinds': required_kinds,
@@ -4370,11 +5002,225 @@ class ClaimSupportHook:
                 'authority_rule_candidate_summary': claim_summary.get('authority_rule_candidate_summary', {}),
                 'support_trace_summary': self._summarize_support_traces(claim_support_traces),
                 'support_packet_summary': self._summarize_support_packets(claim_support_packets),
+                'support_quality_summary': self._summarize_support_path_quality(claim_support_paths),
                 'elements': elements,
                 'unassigned_links': claim_summary.get('unassigned_links', []),
             }
 
         return self._with_intake_summary_handoff(matrix)
+
+    def persist_claim_coverage_matrix_snapshot(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+        *,
+        required_support_kinds: Optional[List[str]] = None,
+        coverage_matrix: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        retention_limit: Optional[int] = 3,
+    ) -> Dict[str, Any]:
+        """Persist the current claim coverage matrix as an authoritative snapshot."""
+        normalized_kinds = self._normalize_required_support_kinds(required_support_kinds)
+        normalized_retention_limit = self._normalize_snapshot_retention_limit(retention_limit)
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'required_support_kinds': normalized_kinds,
+                'retention_limit': normalized_retention_limit,
+                'claims': {},
+                'error': 'duckdb_unavailable',
+            }
+
+        matrix = coverage_matrix if isinstance(coverage_matrix, dict) else self.get_claim_coverage_matrix(
+            user_id,
+            claim_type=claim_type,
+            required_support_kinds=normalized_kinds or None,
+        )
+        claim_matrices = matrix.get('claims', {}) if isinstance(matrix.get('claims'), dict) else {}
+        normalized_metadata = _merge_intake_summary_handoff_metadata(
+            metadata,
+            self.mediator,
+        )
+        persisted: Dict[str, Any] = {
+            'available': True,
+            'required_support_kinds': normalized_kinds,
+            'retention_limit': normalized_retention_limit,
+            'pruned_snapshot_count': 0,
+            'claims': {},
+        }
+
+        for current_claim, claim_matrix in sorted(claim_matrices.items()):
+            if claim_type and current_claim != claim_type:
+                continue
+            if not isinstance(claim_matrix, dict) or not claim_matrix:
+                continue
+            support_state_token = self._build_claim_support_state_token(
+                user_id,
+                current_claim,
+                normalized_kinds,
+            )
+            claim_metadata = {
+                **(normalized_metadata or {}),
+                'support_state_token': support_state_token,
+                'snapshot_source': 'claim_coverage_matrix',
+                'element_count': len(claim_matrix.get('elements', []) or []),
+                'total_links': int(claim_matrix.get('total_links', 0) or 0),
+                'total_facts': int(claim_matrix.get('total_facts', 0) or 0),
+                'coverage_matrix_summary': self._summarize_coverage_matrix_for_snapshot(claim_matrix),
+            }
+            try:
+                conn = duckdb.connect(self.db_path)
+                result = conn.execute(
+                    """
+                    INSERT INTO claim_support_snapshot (
+                        user_id, claim_type, snapshot_kind,
+                        required_support_kinds, payload, metadata
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    RETURNING id, timestamp
+                    """,
+                    [
+                        user_id,
+                        current_claim,
+                        'coverage_matrix',
+                        json.dumps(normalized_kinds, default=str),
+                        json.dumps(claim_matrix, default=str),
+                        json.dumps(claim_metadata, default=str),
+                    ],
+                ).fetchone()
+                conn.close()
+                prune_result = self._prune_snapshot_history(
+                    user_id=user_id,
+                    claim_type=current_claim,
+                    snapshot_kind='coverage_matrix',
+                    required_support_kinds=normalized_kinds,
+                    keep_latest=normalized_retention_limit,
+                )
+                persisted['pruned_snapshot_count'] += int(
+                    prune_result.get('pruned_snapshot_count', 0) or 0
+                )
+                persisted['claims'][current_claim] = {
+                    'coverage_matrix': claim_matrix,
+                    'snapshot': {
+                        'snapshot_id': result[0],
+                        'timestamp': result[1].isoformat() if hasattr(result[1], 'isoformat') else result[1],
+                        'required_support_kinds': normalized_kinds,
+                        'metadata': claim_metadata,
+                        'stored_support_state_token': support_state_token,
+                        'current_support_state_token': support_state_token,
+                        'is_stale': False,
+                        'retention_limit': normalized_retention_limit,
+                        'pruned_snapshot_count': int(prune_result.get('pruned_snapshot_count', 0) or 0),
+                    },
+                }
+            except Exception as exc:
+                self.mediator.log(
+                    'claim_coverage_matrix_snapshot_persist_error',
+                    error=str(exc),
+                    claim_type=current_claim,
+                )
+                persisted['claims'][current_claim] = {
+                    'coverage_matrix': claim_matrix,
+                    'snapshot': {
+                        'snapshot_id': -1,
+                        'required_support_kinds': normalized_kinds,
+                        'metadata': claim_metadata,
+                        'stored_support_state_token': support_state_token,
+                        'current_support_state_token': support_state_token,
+                        'is_stale': True,
+                        'retention_limit': normalized_retention_limit,
+                        'pruned_snapshot_count': 0,
+                        'error': str(exc),
+                    },
+                }
+
+        return persisted
+
+    def get_claim_coverage_matrix_snapshots(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+        *,
+        required_support_kinds: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Return latest persisted coverage-matrix snapshots by claim."""
+        normalized_kinds = self._normalize_required_support_kinds(required_support_kinds)
+        if not DUCKDB_AVAILABLE:
+            return {
+                'available': False,
+                'required_support_kinds': normalized_kinds,
+                'claims': {},
+                'error': 'duckdb_unavailable',
+            }
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            if claim_type:
+                rows = conn.execute(
+                    """
+                    SELECT claim_type, required_support_kinds, payload, metadata, timestamp, id
+                    FROM claim_support_snapshot
+                    WHERE user_id = ? AND claim_type = ? AND snapshot_kind = 'coverage_matrix'
+                    ORDER BY claim_type ASC, timestamp DESC, id DESC
+                    """,
+                    [user_id, claim_type],
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT claim_type, required_support_kinds, payload, metadata, timestamp, id
+                    FROM claim_support_snapshot
+                    WHERE user_id = ? AND snapshot_kind = 'coverage_matrix'
+                    ORDER BY claim_type ASC, timestamp DESC, id DESC
+                    """,
+                    [user_id],
+                ).fetchall()
+            conn.close()
+        except Exception as exc:
+            self.mediator.log('claim_coverage_matrix_snapshot_query_error', error=str(exc))
+            return {
+                'available': False,
+                'required_support_kinds': normalized_kinds,
+                'claims': {},
+                'error': str(exc),
+            }
+
+        snapshots: Dict[str, Any] = {
+            'available': True,
+            'required_support_kinds': normalized_kinds,
+            'claims': {},
+        }
+        seen_claims = set()
+        for row_claim_type, stored_required_kinds, payload_json, metadata_json, timestamp, snapshot_id in rows:
+            stored_kinds = json.loads(stored_required_kinds) if stored_required_kinds else []
+            if normalized_kinds and stored_kinds != normalized_kinds:
+                continue
+            if row_claim_type in seen_claims:
+                continue
+            seen_claims.add(row_claim_type)
+            payload = json.loads(payload_json) if payload_json else {}
+            metadata_payload = json.loads(metadata_json) if metadata_json else {}
+            current_support_state_token = self._build_claim_support_state_token(
+                user_id,
+                row_claim_type,
+                stored_kinds,
+            )
+            stored_support_state_token = str(metadata_payload.get('support_state_token') or '')
+            is_stale = bool(stored_support_state_token) and stored_support_state_token != current_support_state_token
+            snapshots['claims'][row_claim_type] = {
+                'coverage_matrix': payload,
+                'snapshot': {
+                    'snapshot_id': snapshot_id,
+                    'timestamp': timestamp.isoformat() if hasattr(timestamp, 'isoformat') else timestamp,
+                    'required_support_kinds': stored_kinds,
+                    'metadata': metadata_payload,
+                    'stored_support_state_token': stored_support_state_token,
+                    'current_support_state_token': current_support_state_token,
+                    'is_stale': is_stale,
+                },
+            }
+
+        return snapshots
 
     def get_claim_support_validation(
         self,
@@ -4416,6 +5262,228 @@ class ClaimSupportHook:
             )
 
         return self._with_intake_summary_handoff(validation)
+
+    def _build_formal_validation_element_report(self, element: Dict[str, Any]) -> Dict[str, Any]:
+        reasoning = element.get('reasoning_diagnostics', {}) if isinstance(element.get('reasoning_diagnostics'), dict) else {}
+        proof_diagnostics = element.get('proof_diagnostics', {}) if isinstance(element.get('proof_diagnostics'), dict) else {}
+        decision_trace = element.get('proof_decision_trace', {}) if isinstance(element.get('proof_decision_trace'), dict) else {}
+        logic_proof = reasoning.get('logic_proof', {}) if isinstance(reasoning.get('logic_proof'), dict) else {}
+        logic_contradictions = reasoning.get('logic_contradictions', {}) if isinstance(reasoning.get('logic_contradictions'), dict) else {}
+        hybrid_reasoning = reasoning.get('hybrid_reasoning', {}) if isinstance(reasoning.get('hybrid_reasoning'), dict) else {}
+        hybrid_result = hybrid_reasoning.get('result', {}) if isinstance(hybrid_reasoning.get('result'), dict) else {}
+        temporal_payload = hybrid_result.get('temporal_reasoning_payload', {}) if isinstance(hybrid_result.get('temporal_reasoning_payload'), dict) else {}
+        reasoner_artifact = hybrid_result.get('reasoner_proof_artifact', {}) if isinstance(hybrid_result.get('reasoner_proof_artifact'), dict) else {}
+        theorem_export_metadata = temporal_payload.get('theorem_export_metadata', {}) if isinstance(temporal_payload.get('theorem_export_metadata'), dict) else {}
+        proof_gap_types = self._extract_proof_gap_types(element.get('proof_gaps', []) or [])
+
+        if element.get('validation_status') == 'supported':
+            formal_status = 'passed'
+        elif element.get('validation_status') == 'contradicted':
+            formal_status = 'contradicted'
+        elif 'logic_unprovable' in proof_gap_types:
+            formal_status = 'unprovable'
+        elif 'ontology_validation_failed' in proof_gap_types:
+            formal_status = 'invalid_ontology'
+        elif element.get('validation_status') == 'missing':
+            formal_status = 'missing_premises'
+        else:
+            formal_status = 'needs_review'
+
+        predicate_count = int(reasoning.get('predicate_count', proof_diagnostics.get('reasoning_predicate_count', 0)) or 0)
+        premise_failure_category = self._classify_formal_premise_failure(element, proof_gap_types)
+        support_quality_summary = (
+            element.get('support_quality_summary', {})
+            if isinstance(element.get('support_quality_summary'), dict)
+            else {}
+        )
+        primary_quality_signal = (
+            element.get('primary_quality_signal')
+            if isinstance(element.get('primary_quality_signal'), dict)
+            else self._primary_quality_signal_for_summary(support_quality_summary)
+        )
+        return {
+            'element_id': element.get('element_id') or '',
+            'element_text': element.get('element_text') or '',
+            'validation_status': element.get('validation_status') or '',
+            'formal_status': formal_status,
+            'recommended_action': element.get('recommended_action') or '',
+            'decision_source': decision_trace.get('decision_source') or proof_diagnostics.get('decision_source') or '',
+            'predicate_count': predicate_count,
+            'logic_provable_count': int(decision_trace.get('logic_provable_count', 0) or 0),
+            'logic_unprovable_count': int(decision_trace.get('logic_unprovable_count', 0) or 0),
+            'logic_contradiction_count': int(decision_trace.get('logic_contradiction_count', 0) or 0),
+            'proof_gap_types': proof_gap_types,
+            'proof_gap_count': int(element.get('proof_gap_count', len(element.get('proof_gaps', []) or [])) or 0),
+            'proof_gaps': list(element.get('proof_gaps', []) or []),
+            'premise_failure_category': premise_failure_category,
+            'authority_rule_candidate_summary': element.get('authority_rule_candidate_summary', {}),
+            'authority_treatment_summary': element.get('authority_treatment_summary', {}),
+            'support_quality_summary': support_quality_summary,
+            'primary_quality_signal': primary_quality_signal,
+            'quality_follow_up_action': primary_quality_signal.get('follow_up_action', ''),
+            'adapter_statuses': dict(reasoning.get('adapter_statuses', {}) or {}),
+            'logic_proof_summary': self._summarize_adapter_result(
+                logic_proof,
+                count_fields=['predicate_count', 'provable_elements', 'unprovable_elements'],
+            ),
+            'logic_contradiction_summary': self._summarize_adapter_result(
+                logic_contradictions,
+                count_fields=['predicate_count', 'contradictions'],
+            ),
+            'hybrid_reasoning_summary': self._summarize_adapter_result(
+                hybrid_reasoning,
+                count_fields=['predicate_count', 'result', 'temporal_reasoning_payload'],
+            ),
+            'tdfol_formula_count': int(temporal_payload.get('tdfol_formula_count', 0) or 0),
+            'dcec_formula_count': int(temporal_payload.get('dcec_formula_count', 0) or 0),
+            'theorem_export_metadata': theorem_export_metadata,
+            'reasoner_proof_artifact': reasoner_artifact,
+            'formalization_ready': bool(predicate_count > 0 and formal_status in {'passed', 'needs_review', 'unprovable'}),
+        }
+
+    def get_formal_validation_report(
+        self,
+        user_id: str,
+        claim_type: Optional[str] = None,
+        required_support_kinds: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Return a draft-generation-ready formal validation report by claim."""
+        validation = self.get_claim_support_validation(
+            user_id,
+            claim_type=claim_type,
+            required_support_kinds=required_support_kinds,
+        )
+        validation_claims = validation.get('claims', {}) if isinstance(validation, dict) else {}
+        report_claims: Dict[str, Any] = {}
+        formal_status_counts: Counter[str] = Counter()
+        total_elements = 0
+        total_predicates = 0
+        total_proof_gaps = 0
+        theorem_ready_count = 0
+        support_quality_signal_counts: Counter[str] = Counter()
+        primary_quality_signal_counts: Counter[str] = Counter()
+        quality_follow_up_action_counts: Counter[str] = Counter()
+
+        for current_claim, claim_validation in validation_claims.items():
+            if not isinstance(claim_validation, dict):
+                continue
+            element_reports = [
+                self._build_formal_validation_element_report(element)
+                for element in claim_validation.get('elements', []) or []
+                if isinstance(element, dict)
+            ]
+            claim_status_counts: Counter[str] = Counter()
+            claim_predicate_count = 0
+            claim_proof_gap_count = 0
+            claim_theorem_ready_count = 0
+            claim_support_quality_signal_counts: Counter[str] = Counter()
+            claim_primary_quality_signal_counts: Counter[str] = Counter()
+            claim_quality_follow_up_action_counts: Counter[str] = Counter()
+            for element_report in element_reports:
+                status = str(element_report.get('formal_status') or 'needs_review')
+                claim_status_counts[status] += 1
+                formal_status_counts[status] += 1
+                claim_predicate_count += int(element_report.get('predicate_count', 0) or 0)
+                claim_proof_gap_count += int(element_report.get('proof_gap_count', 0) or 0)
+                if element_report.get('formalization_ready'):
+                    claim_theorem_ready_count += 1
+                quality_summary = (
+                    element_report.get('support_quality_summary', {})
+                    if isinstance(element_report.get('support_quality_summary'), dict)
+                    else {}
+                )
+                raw_signal_counts = (
+                    quality_summary.get('quality_signal_counts', {})
+                    if isinstance(quality_summary.get('quality_signal_counts'), dict)
+                    else {}
+                )
+                for signal_type, signal_count in raw_signal_counts.items():
+                    normalized_signal = str(signal_type or '').strip()
+                    if not normalized_signal:
+                        continue
+                    try:
+                        normalized_count = int(signal_count or 0)
+                    except (TypeError, ValueError):
+                        normalized_count = 0
+                    if normalized_count <= 0:
+                        continue
+                    claim_support_quality_signal_counts[normalized_signal] += normalized_count
+                    support_quality_signal_counts[normalized_signal] += normalized_count
+                primary_quality_signal = (
+                    element_report.get('primary_quality_signal')
+                    if isinstance(element_report.get('primary_quality_signal'), dict)
+                    else {}
+                )
+                primary_signal_type = str(primary_quality_signal.get('signal_type') or '').strip()
+                if primary_signal_type:
+                    claim_primary_quality_signal_counts[primary_signal_type] += 1
+                    primary_quality_signal_counts[primary_signal_type] += 1
+                follow_up_action = str(element_report.get('quality_follow_up_action') or '').strip()
+                if follow_up_action:
+                    claim_quality_follow_up_action_counts[follow_up_action] += 1
+                    quality_follow_up_action_counts[follow_up_action] += 1
+
+            total_elements += len(element_reports)
+            total_predicates += claim_predicate_count
+            total_proof_gaps += claim_proof_gap_count
+            theorem_ready_count += claim_theorem_ready_count
+            if claim_status_counts.get('contradicted', 0):
+                formal_status = 'blocked'
+            elif claim_status_counts.get('missing_premises', 0):
+                formal_status = 'missing_premises'
+            elif claim_status_counts.get('unprovable', 0) or claim_status_counts.get('invalid_ontology', 0):
+                formal_status = 'needs_review'
+            elif element_reports and claim_status_counts.get('passed', 0) == len(element_reports):
+                formal_status = 'passed'
+            else:
+                formal_status = 'needs_review'
+
+            report_claims[current_claim] = {
+                'claim_type': current_claim,
+                'validation_status': claim_validation.get('validation_status', ''),
+                'formal_status': formal_status,
+                'formal_status_counts': dict(sorted(claim_status_counts.items())),
+                'element_count': len(element_reports),
+                'predicate_count': claim_predicate_count,
+                'proof_gap_count': claim_proof_gap_count,
+                'formalization_ready_element_count': claim_theorem_ready_count,
+                'theorem_export_ready': claim_theorem_ready_count > 0,
+                'support_quality_summary': dict(claim_validation.get('support_quality_summary') or {}),
+                'support_quality_signal_counts': dict(sorted(claim_support_quality_signal_counts.items())),
+                'primary_quality_signal_counts': dict(sorted(claim_primary_quality_signal_counts.items())),
+                'quality_follow_up_action_counts': dict(sorted(claim_quality_follow_up_action_counts.items())),
+                'elements': element_reports,
+            }
+
+        if formal_status_counts.get('contradicted', 0):
+            overall_status = 'blocked'
+        elif formal_status_counts.get('missing_premises', 0):
+            overall_status = 'missing_premises'
+        elif formal_status_counts.get('unprovable', 0) or formal_status_counts.get('invalid_ontology', 0):
+            overall_status = 'needs_review'
+        elif total_elements and formal_status_counts.get('passed', 0) == total_elements:
+            overall_status = 'passed'
+        else:
+            overall_status = 'needs_review' if total_elements else 'unavailable'
+
+        return self._with_intake_summary_handoff({
+            'available': True,
+            'user_id': user_id,
+            'claim_type': claim_type,
+            'required_support_kinds': validation.get('required_support_kinds', required_support_kinds or ['evidence', 'authority'])
+            if isinstance(validation, dict) else (required_support_kinds or ['evidence', 'authority']),
+            'overall_status': overall_status,
+            'claim_count': len(report_claims),
+            'element_count': total_elements,
+            'predicate_count': total_predicates,
+            'proof_gap_count': total_proof_gaps,
+            'formalization_ready_element_count': theorem_ready_count,
+            'formal_status_counts': dict(sorted(formal_status_counts.items())),
+            'support_quality_signal_counts': dict(sorted(support_quality_signal_counts.items())),
+            'primary_quality_signal_counts': dict(sorted(primary_quality_signal_counts.items())),
+            'quality_follow_up_action_counts': dict(sorted(quality_follow_up_action_counts.items())),
+            'claims': report_claims,
+        })
 
     def get_claim_support_gaps(
         self,
@@ -4467,12 +5535,22 @@ class ClaimSupportHook:
                         'authority_rule_candidate_summary': element.get('authority_rule_candidate_summary', {}),
                         'links': element.get('links', []),
                         'support_facts': support_facts,
+                        'support_fact_registry_summary': self._summarize_fact_registry(support_facts),
                         'support_traces': support_traces,
                         'support_trace_summary': self._summarize_support_traces(support_traces),
                         'support_packets': support_packets,
                         'support_packet_summary': self._summarize_support_packets(support_packets),
+                        'support_path_summary': element.get('support_path_summary', {}),
+                        'support_quality_summary': element.get('support_quality_summary', {}),
                         'graph_trace_summary': self._summarize_graph_traces(element.get('links', [])),
                         'recommended_action': (
+                            element.get('support_quality_summary', {}).get('recommended_quality_action')
+                            if isinstance(element.get('support_quality_summary'), dict)
+                            and element.get('support_quality_summary', {}).get('recommended_quality_action') in {
+                                'strengthen_support_path',
+                                'collect_initial_support',
+                            }
+                            else
                             'improve_parse_quality'
                             if element.get('total_links', 0)
                             and not (element.get('missing_support_kinds', []) or [])
@@ -5199,6 +6277,9 @@ class ClaimSupportHook:
                 'validation_status': metadata.get('validation_status', ''),
                 'follow_up_focus': metadata.get('follow_up_focus', ''),
                 'query_strategy': metadata.get('query_strategy', ''),
+                'source_preferences': dict(metadata.get('source_preferences', {}) or {}),
+                'time_window': dict(metadata.get('time_window', {}) or {}),
+                'authority_intent': metadata.get('authority_intent', ''),
                 'adaptive_retry_applied': bool(metadata.get('adaptive_retry_applied', False)),
                 'adaptive_retry_reason': metadata.get('adaptive_retry_reason', ''),
                 'adaptive_query_strategy': metadata.get('adaptive_query_strategy', ''),
@@ -5208,6 +6289,14 @@ class ClaimSupportHook:
                 'zero_result': bool(metadata.get('zero_result', False)),
                 'resolution_applied': metadata.get('resolution_applied', ''),
                 'recommended_action': metadata.get('recommended_action', ''),
+                'support_quality_summary': dict(metadata.get('support_quality_summary', {}) or {}),
+                'quality_signal_counts': dict(metadata.get('quality_signal_counts', {}) or {}),
+                'primary_quality_signal': dict(metadata.get('primary_quality_signal', {}) or {}),
+                'quality_follow_up_action': metadata.get('quality_follow_up_action', ''),
+                'ontology_quality': dict(metadata.get('ontology_quality', {}) or {}),
+                'ontology_gap_types': list(metadata.get('ontology_gap_types', []) or []),
+                'ontology_quality_gap_count': int(metadata.get('ontology_quality_gap_count', 0) or 0),
+                'ontology_has_blocking_gaps': bool(metadata.get('ontology_has_blocking_gaps', False)),
                 'skip_reason': metadata.get('skip_reason', ''),
                 'resolution_status': metadata.get('resolution_status', ''),
                 'resolution_notes': metadata.get('resolution_notes', ''),
@@ -5216,6 +6305,7 @@ class ClaimSupportHook:
                 'selected_search_program_type': metadata.get('selected_search_program_type', ''),
                 'selected_search_program_bias': metadata.get('selected_search_program_bias', ''),
                 'selected_search_program_rule_bias': metadata.get('selected_search_program_rule_bias', ''),
+                'selected_search_program_graph_gap_bias': metadata.get('selected_search_program_graph_gap_bias', ''),
                 'selected_search_program_families': list(metadata.get('selected_search_program_families', []) or []),
                 'source_family': metadata.get('source_family', ''),
                 'record_scope': metadata.get('record_scope', ''),
@@ -5223,6 +6313,8 @@ class ClaimSupportHook:
                 'corpus_family': metadata.get('corpus_family', ''),
                 'content_origin': metadata.get('content_origin', ''),
                 'graph_support_summary': dict(metadata.get('graph_support_summary', {}) or {}),
+                'graph_gap_context': dict(metadata.get('graph_gap_context', {}) or {}),
+                'graph_gap_query': dict(metadata.get('graph_gap_query', {}) or {}),
             }
             current_claim = str(row[1] or '')
             claim_entries.setdefault(current_claim, []).append(entry)
@@ -6181,12 +7273,15 @@ class ClaimSupportHook:
             fid = str(trace.get('fact_id') or '')
             if fid and fid not in fact_ids:
                 fact_ids.append(fid)
+        path_drilldown_metadata = self._build_support_path_drilldown_metadata(support_traces or [])
+        support_refs = path_drilldown_metadata.get('support_refs', [])
 
-        proof_path_id = self._make_proof_path_id(
+        proof_path_id = self._make_trace_path_id(
             user_id=user_id,
             claim_type=claim_type,
             claim_element_id=claim_element_id,
             fact_ids=fact_ids,
+            support_refs=support_refs if isinstance(support_refs, list) else [],
             path_kind=path_kind,
         )
 
@@ -6203,6 +7298,21 @@ class ClaimSupportHook:
             dict(metadata or {}),
             self.mediator,
         )
+        support_fact_registry_summary = self._summarize_fact_registry(support_traces or [])
+        normalized_metadata.setdefault('support_fact_registry_summary', support_fact_registry_summary)
+        normalized_metadata.setdefault('support_trace_summary', self._summarize_support_traces(support_traces or []))
+        normalized_metadata.setdefault('graph_trace_summary', path_drilldown_metadata.get('graph_trace_summary', {}))
+        normalized_metadata.setdefault('path_drilldown', path_drilldown_metadata)
+        for key in (
+            'support_refs',
+            'support_ref_count',
+            'support_kinds',
+            'source_families',
+            'graph_ids',
+            'graph_id_count',
+            'graph_trace_count',
+        ):
+            normalized_metadata.setdefault(key, path_drilldown_metadata.get(key))
 
         try:
             conn = duckdb.connect(self.db_path)
@@ -6218,6 +7328,15 @@ class ClaimSupportHook:
                     'proof_path_id': proof_path_id,
                     'record_id': existing[0],
                     'claim_type': claim_type,
+                    'claim_element_id': claim_element_id,
+                    'fact_ids': fact_ids,
+                    'support_refs': support_refs if isinstance(support_refs, list) else [],
+                    'support_ref_count': int(path_drilldown_metadata.get('support_ref_count', 0) or 0),
+                    'support_kinds': path_drilldown_metadata.get('support_kinds', []),
+                    'source_families': path_drilldown_metadata.get('source_families', []),
+                    'graph_ids': path_drilldown_metadata.get('graph_ids', []),
+                    'graph_id_count': int(path_drilldown_metadata.get('graph_id_count', 0) or 0),
+                    'graph_trace_count': int(path_drilldown_metadata.get('graph_trace_count', 0) or 0),
                     'created': False,
                     'reused': True,
                 }
@@ -6257,6 +7376,14 @@ class ClaimSupportHook:
                 'claim_type': claim_type,
                 'claim_element_id': claim_element_id,
                 'fact_ids': fact_ids,
+                'support_refs': support_refs if isinstance(support_refs, list) else [],
+                'support_ref_count': int(path_drilldown_metadata.get('support_ref_count', 0) or 0),
+                'support_kinds': path_drilldown_metadata.get('support_kinds', []),
+                'source_families': path_drilldown_metadata.get('source_families', []),
+                'graph_ids': path_drilldown_metadata.get('graph_ids', []),
+                'graph_id_count': int(path_drilldown_metadata.get('graph_id_count', 0) or 0),
+                'graph_trace_count': int(path_drilldown_metadata.get('graph_trace_count', 0) or 0),
+                'support_fact_registry_summary': support_fact_registry_summary,
                 'path_kind': path_kind,
                 'created': True,
                 'reused': False,
@@ -6297,11 +7424,40 @@ class ClaimSupportHook:
         entity_count = len(graph_payload.get('entities', []) or []) if isinstance(graph_payload, dict) else 0
         relationship_count = len(graph_payload.get('relationships', []) or []) if isinstance(graph_payload, dict) else 0
         source_id = str(graph_payload.get('source_id') or '') if isinstance(graph_payload, dict) else ''
+        graph_metadata = graph_payload.get('metadata') if isinstance(graph_payload, dict) and isinstance(graph_payload.get('metadata'), dict) else {}
+        support_facts = graph_payload.get('support_facts') if isinstance(graph_payload, dict) and isinstance(graph_payload.get('support_facts'), list) else []
+        input_metadata = metadata if isinstance(metadata, dict) else {}
+        fact_registry_summary = (
+            dict(input_metadata.get('fact_registry_summary'))
+            if isinstance(input_metadata.get('fact_registry_summary'), dict)
+            else dict(graph_payload.get('fact_registry_summary'))
+            if isinstance(graph_payload, dict) and isinstance(graph_payload.get('fact_registry_summary'), dict)
+            else dict(graph_metadata.get('fact_registry_summary'))
+            if isinstance(graph_metadata.get('fact_registry_summary'), dict)
+            else self._summarize_fact_registry(support_facts)
+        )
 
         stable_graph_id = graph_id or (
             'graph:' + hashlib.sha256(
                 '|'.join([user_id, claim_type, source_kind_clean, source_id, str(entity_count), str(relationship_count)]).encode('utf-8')
             ).hexdigest()[:16]
+        )
+        snapshot_metadata = dict(metadata or {})
+        snapshot_metadata['graph_id'] = stable_graph_id
+        snapshot_metadata.setdefault('fact_registry_summary', fact_registry_summary)
+        adapter_graph_snapshot = persist_graph_snapshot(
+            graph_payload if isinstance(graph_payload, dict) else {},
+            graph_id=stable_graph_id,
+            graph_changed=True,
+            existing_graph=False,
+            persistence_metadata={
+                **snapshot_metadata,
+                'user_id': user_id,
+                'claim_type': claim_type,
+                'source_kind': source_kind_clean,
+                'record_scope': snapshot_metadata.get('record_scope') or source_kind_clean,
+                'fact_registry_summary': fact_registry_summary,
+            },
         )
 
         if not DUCKDB_AVAILABLE:
@@ -6313,6 +7469,7 @@ class ClaimSupportHook:
                 'source_kind': source_kind_clean,
                 'claim_type': claim_type,
                 'error': 'duckdb_unavailable',
+                'graph_snapshot': adapter_graph_snapshot,
             }
 
         snapshot_payload = {
@@ -6323,9 +7480,10 @@ class ClaimSupportHook:
             'source_id': source_id,
             'entities': graph_payload.get('entities', []) if isinstance(graph_payload, dict) else [],
             'relationships': graph_payload.get('relationships', []) if isinstance(graph_payload, dict) else [],
+            'fact_registry_summary': fact_registry_summary,
+            'graph_snapshot': adapter_graph_snapshot,
         }
-        snapshot_metadata = dict(metadata or {})
-        snapshot_metadata['graph_id'] = stable_graph_id
+        snapshot_metadata['graph_snapshot'] = adapter_graph_snapshot
 
         try:
             conn = duckdb.connect(self.db_path)
@@ -6365,6 +7523,8 @@ class ClaimSupportHook:
                 'claim_type': claim_type,
                 'entity_count': entity_count,
                 'relationship_count': relationship_count,
+                'fact_registry_summary': fact_registry_summary,
+                'graph_snapshot': adapter_graph_snapshot,
                 'created': True,
                 'reused': False,
             }
@@ -6378,6 +7538,7 @@ class ClaimSupportHook:
                 'source_kind': source_kind_clean,
                 'claim_type': claim_type,
                 'error': str(exc),
+                'graph_snapshot': adapter_graph_snapshot,
             }
 
     def get_support_paths_for_element(
@@ -6388,6 +7549,9 @@ class ClaimSupportHook:
         claim_element_id: Optional[str] = None,
         path_kind: Optional[str] = None,
         limit: int = 50,
+        include_current_traces: bool = True,
+        required_support_kinds: Optional[List[str]] = None,
+        ontology: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Return persisted support-path records for a claim element.
 
@@ -6404,6 +7568,7 @@ class ClaimSupportHook:
                 'path_kind': path_kind,
                 'paths': [],
                 'path_count': 0,
+                'quality_summary': self._summarize_support_path_quality([]),
             }
 
         paths: List[Dict[str, Any]] = []
@@ -6441,14 +7606,74 @@ class ClaimSupportHook:
                     path_meta = json.loads(meta_json) if meta_json else {}
                 except Exception:
                     path_meta = {}
+                support_fact_registry_summary = (
+                    path_meta.get('support_fact_registry_summary')
+                    if isinstance(path_meta.get('support_fact_registry_summary'), dict)
+                    else {}
+                )
+                path_drilldown = (
+                    path_meta.get('path_drilldown')
+                    if isinstance(path_meta.get('path_drilldown'), dict)
+                    else {}
+                )
+
+                def _path_list(key: str) -> List[str]:
+                    value = path_drilldown.get(key)
+                    if not isinstance(value, list):
+                        value = path_meta.get(key)
+                    if not isinstance(value, list):
+                        return []
+                    normalized: List[str] = []
+                    for item in value:
+                        text = str(item or '').strip()
+                        if text and text not in normalized:
+                            normalized.append(text)
+                    return normalized
+
+                support_refs = _path_list('support_refs')
+                support_kinds = _path_list('support_kinds')
+                source_families = _path_list('source_families')
+                graph_ids = _path_list('graph_ids')
+                graph_trace_summary = (
+                    path_drilldown.get('graph_trace_summary')
+                    if isinstance(path_drilldown.get('graph_trace_summary'), dict)
+                    else path_meta.get('graph_trace_summary')
+                )
+                graph_trace_summary = graph_trace_summary if isinstance(graph_trace_summary, dict) else {}
+                graph_trace_count = int(
+                    path_drilldown.get(
+                        'graph_trace_count',
+                        path_meta.get(
+                            'graph_trace_count',
+                            graph_trace_summary.get('traced_link_count', 0),
+                        ),
+                    )
+                    or 0
+                )
                 paths.append({
                     'proof_path_id': proof_path_id or '',
                     'claim_element_id': elem_id or '',
                     'fact_ids': fact_ids,
                     'fact_count': len(fact_ids),
+                    'support_refs': support_refs,
+                    'support_ref_count': int(
+                        path_drilldown.get('support_ref_count', path_meta.get('support_ref_count', len(support_refs)))
+                        or 0
+                    ),
+                    'support_kinds': support_kinds,
+                    'source_families': source_families,
+                    'graph_ids': graph_ids,
+                    'graph_id_count': int(
+                        path_drilldown.get('graph_id_count', path_meta.get('graph_id_count', len(graph_ids)))
+                        or 0
+                    ),
+                    'graph_trace_count': graph_trace_count,
                     'path_kind': pk or 'support',
+                    'support_fact_registry_summary': support_fact_registry_summary,
                     'metadata': path_meta,
                     'timestamp': ts.isoformat() if hasattr(ts, 'isoformat') else str(ts or ''),
+                    'source': 'persisted',
+                    'persisted': True,
                 })
         except Exception as exc:
             self.mediator.log('get_support_paths_error', error=str(exc), claim_type=claim_type)
@@ -6460,8 +7685,59 @@ class ClaimSupportHook:
                 'path_kind': path_kind,
                 'paths': [],
                 'path_count': 0,
+                'quality_summary': self._summarize_support_path_quality([]),
                 'error': str(exc),
             }
+
+        if include_current_traces and (path_kind is None or path_kind == 'support'):
+            try:
+                links = self._get_enriched_claim_support_links(user_id, claim_type)
+                if claim_element_id:
+                    links = [link for link in links if link.get('claim_element_id') == claim_element_id]
+                current_traces = self._collect_support_traces_from_links(links)
+                seen_fact_ids = {
+                    str(trace.get('fact_id') or '')
+                    for trace in current_traces
+                    if isinstance(trace, dict) and str(trace.get('fact_id') or '')
+                }
+                fact_records = self.get_fact_records(
+                    user_id,
+                    claim_type,
+                    claim_element_id=claim_element_id,
+                    include_links=True,
+                )
+                for fact in fact_records:
+                    fact_id = str(fact.get('fact_id') or '')
+                    if not fact_id or fact_id in seen_fact_ids:
+                        continue
+                    current_traces.append(self._build_fact_record_trace(fact))
+                    seen_fact_ids.add(fact_id)
+                if current_traces:
+                    current_path = self._build_trace_path_detail(
+                        user_id=user_id,
+                        claim_type=claim_type,
+                        claim_element_id=claim_element_id,
+                        traces=current_traces,
+                        path_kind='support',
+                    )
+                    if current_path['proof_path_id'] not in {path.get('proof_path_id') for path in paths}:
+                        paths.insert(0, current_path)
+            except Exception as exc:
+                self.mediator.log('get_current_support_paths_error', error=str(exc), claim_type=claim_type)
+
+        if limit:
+            paths = paths[:limit]
+
+        paths = [
+            self._score_support_path_detail(
+                path,
+                required_support_kinds=required_support_kinds,
+                ontology=ontology,
+            )
+            for path in paths
+            if isinstance(path, dict)
+        ]
+        quality_summary = self._summarize_support_path_quality(paths)
 
         return {
             'available': True,
@@ -6471,6 +7747,7 @@ class ClaimSupportHook:
             'path_kind': path_kind,
             'paths': paths,
             'path_count': len(paths),
+            'quality_summary': quality_summary,
         }
 
     def get_contradiction_paths_for_element(
@@ -6494,6 +7771,70 @@ class ClaimSupportHook:
             limit=limit,
         )
 
+    def _compact_adapter_graph_snapshot(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        metadata = snapshot.get('metadata', {}) if isinstance(snapshot.get('metadata'), dict) else {}
+        return {
+            'graph_id': snapshot.get('graph_id', ''),
+            'source_id': snapshot.get('source_id', ''),
+            'status': snapshot.get('status', ''),
+            'node_count': int(snapshot.get('node_count', 0) or 0),
+            'edge_count': int(snapshot.get('edge_count', 0) or 0),
+            'fact_registry_summary': (
+                snapshot.get('fact_registry_summary')
+                if isinstance(snapshot.get('fact_registry_summary'), dict)
+                else {}
+            ),
+            'metadata': {
+                'persistence_scope': metadata.get('persistence_scope', ''),
+                'backend_storage_available': bool(metadata.get('backend_storage_available', False)),
+                'claim_type': metadata.get('claim_type', ''),
+                'source_kind': metadata.get('source_kind', ''),
+                'record_scope': metadata.get('record_scope', ''),
+                'record_key': metadata.get('record_key', ''),
+                'fact_registry_summary': (
+                    metadata.get('fact_registry_summary')
+                    if isinstance(metadata.get('fact_registry_summary'), dict)
+                    else {}
+                ),
+            },
+        }
+
+    def _query_adapter_graph_snapshot_ref(self, graph_id: str) -> Dict[str, Any]:
+        if not graph_id:
+            return {
+                'found': False,
+                'snapshot_count': 0,
+                'fact_registry_summary': {},
+                'snapshot': {},
+            }
+        try:
+            lookup = query_graph_snapshot(graph_id)
+        except Exception as exc:
+            self.mediator.log('graph_snapshot_ref_adapter_query_error', graph_id=graph_id, error=str(exc))
+            return {
+                'status': 'error',
+                'found': False,
+                'snapshot_count': 0,
+                'fact_registry_summary': {},
+                'snapshot': {},
+                'error': str(exc),
+            }
+
+        snapshots = lookup.get('snapshots', []) if isinstance(lookup.get('snapshots'), list) else []
+        first_snapshot = next((snapshot for snapshot in snapshots if isinstance(snapshot, dict)), {})
+        return {
+            'status': lookup.get('status', ''),
+            'found': bool(lookup.get('found', False)),
+            'snapshot_count': int(lookup.get('snapshot_count', 0) or 0),
+            'fact_registry_summary': (
+                lookup.get('fact_registry_summary')
+                if isinstance(lookup.get('fact_registry_summary'), dict)
+                else {}
+            ),
+            'snapshot': self._compact_adapter_graph_snapshot(first_snapshot) if first_snapshot else {},
+            'metadata': lookup.get('metadata', {}) if isinstance(lookup.get('metadata'), dict) else {},
+        }
+
     def get_graph_snapshot_refs_for_element(
         self,
         user_id: str,
@@ -6505,7 +7846,8 @@ class ClaimSupportHook:
 
         Queries ``claim_support_snapshot`` for snapshots with kind prefixed
         ``graph:`` and returns lightweight reference records (snapshot_id,
-        graph_id, source_kind, entity_count, relationship_count, timestamp).
+        graph_id, source_kind, entity_count, relationship_count, timestamp,
+        and compact adapter registry drilldown fields when available).
         """
         if not DUCKDB_AVAILABLE:
             return []
@@ -6539,13 +7881,22 @@ class ClaimSupportHook:
                 elem_ids = payload.get('claim_element_ids') or []
                 if elem_ids and claim_element_id not in elem_ids:
                     continue
+            graph_id = str(payload.get('graph_id') or '')
+            graph_snapshot_query = self._query_adapter_graph_snapshot_ref(graph_id)
             refs.append({
                 'snapshot_id': snapshot_id,
                 'snapshot_kind': str(kind or ''),
                 'source_kind': str(kind or '').replace('graph:', '', 1),
-                'graph_id': payload.get('graph_id', ''),
+                'graph_id': graph_id,
                 'entity_count': int(payload.get('entity_count', 0) or 0),
                 'relationship_count': int(payload.get('relationship_count', 0) or 0),
+                'fact_registry_summary': (
+                    payload.get('fact_registry_summary')
+                    if isinstance(payload.get('fact_registry_summary'), dict)
+                    else {}
+                ),
+                'graph_snapshot_query': graph_snapshot_query,
+                'graph_snapshot': graph_snapshot_query.get('snapshot', {}),
                 'timestamp': ts.isoformat() if hasattr(ts, 'isoformat') else str(ts or ''),
             })
         return refs
@@ -6750,7 +8101,34 @@ class ClaimSupportHook:
 
     def _ensure_enrichment_queue_table(self, conn: Any) -> None:
         """Create the enrichment queue table if it does not already exist."""
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS claim_support_id_seq START 1")
         conn.execute(_ENRICHMENT_QUEUE_DDL)
+
+    def _connect_enrichment_queue_db(self) -> Any:
+        if self.db_path == ":memory:":
+            if self._enrichment_queue_memory_conn is None:
+                self._enrichment_queue_memory_conn = duckdb.connect(self.db_path)
+            return self._enrichment_queue_memory_conn
+        return duckdb.connect(self.db_path)
+
+    def _serialize_enrichment_queue_row(self, row: Any) -> Dict[str, Any]:
+        metadata = json.loads(row[6]) if row[6] else {}
+        entry_status = str(row[4] or 'pending')
+        return {
+            'id': row[0],
+            'job_id': row[0],
+            'user_id': row[1],
+            'claim_type': row[2],
+            'enrichment_type': row[3],
+            'status': entry_status,
+            'priority': row[5],
+            'metadata': metadata,
+            'progress': metadata.get('progress', {}),
+            'partial_results': metadata.get('partial_results', {}),
+            'error': metadata.get('error', ''),
+            'created_at': row[7].isoformat() if hasattr(row[7], 'isoformat') else str(row[7] or ''),
+            'updated_at': row[8].isoformat() if hasattr(row[8], 'isoformat') else str(row[8] or ''),
+        }
 
     def get_enrichment_queue_state(
         self,
@@ -6781,7 +8159,7 @@ class ClaimSupportHook:
         self._prepare_duckdb_path()
 
         try:
-            conn = duckdb.connect(self.db_path)
+            conn = self._connect_enrichment_queue_db()
             # Ensure the queue table exists (created lazily).
             self._ensure_enrichment_queue_table(conn)
             where_clauses = ['user_id = ?']
@@ -6802,7 +8180,8 @@ class ClaimSupportHook:
                 """,
                 parameters,
             ).fetchall()
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
         except Exception as exc:
             self.mediator.log('enrichment_queue_query_error', error=str(exc))
             return {
@@ -6823,18 +8202,7 @@ class ClaimSupportHook:
         for row in rows:
             entry_status = str(row[4] or 'pending')
             status_counts[entry_status] = status_counts.get(entry_status, 0) + 1
-            metadata = json.loads(row[6]) if row[6] else {}
-            queue.append({
-                'id': row[0],
-                'user_id': row[1],
-                'claim_type': row[2],
-                'enrichment_type': row[3],
-                'status': entry_status,
-                'priority': row[5],
-                'metadata': metadata,
-                'created_at': row[7].isoformat() if hasattr(row[7], 'isoformat') else str(row[7] or ''),
-                'updated_at': row[8].isoformat() if hasattr(row[8], 'isoformat') else str(row[8] or ''),
-            })
+            queue.append(self._serialize_enrichment_queue_row(row))
 
         return {
             'available': True,
@@ -6848,6 +8216,89 @@ class ClaimSupportHook:
             'completed_count': status_counts.get('completed', 0),
             'failed_count': status_counts.get('failed', 0),
         }
+
+    def get_background_enrichment_job(self, job_id: int, user_id: Optional[str] = None) -> Dict[str, Any]:
+        if not self._check_duckdb_availability():
+            return {'available': False, 'job_id': job_id}
+        self._prepare_duckdb_path()
+        try:
+            conn = self._connect_enrichment_queue_db()
+            self._ensure_enrichment_queue_table(conn)
+            clauses = ['id = ?']
+            parameters: List[Any] = [int(job_id)]
+            if user_id:
+                clauses.append('user_id = ?')
+                parameters.append(user_id)
+            row = conn.execute(
+                f"""
+                SELECT id, user_id, claim_type, enrichment_type, status, priority, metadata, created_at, updated_at
+                FROM claim_enrichment_queue
+                WHERE {' AND '.join(clauses)}
+                """,
+                parameters,
+            ).fetchone()
+            if self.db_path != ":memory:":
+                conn.close()
+            if not row:
+                return {'available': False, 'job_id': job_id}
+            return {'available': True, 'job': self._serialize_enrichment_queue_row(row)}
+        except Exception as exc:
+            self.mediator.log('enrichment_queue_job_query_error', error=str(exc), job_id=job_id)
+            return {'available': False, 'job_id': job_id, 'error': str(exc)}
+
+    def update_background_enrichment_job_status(
+        self,
+        job_id: int,
+        status: str,
+        *,
+        progress: Optional[Dict[str, Any]] = None,
+        partial_results: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not self._check_duckdb_availability():
+            return {'updated': False, 'job_id': job_id}
+        self._prepare_duckdb_path()
+        try:
+            conn = self._connect_enrichment_queue_db()
+            self._ensure_enrichment_queue_table(conn)
+            row = conn.execute(
+                """
+                SELECT metadata FROM claim_enrichment_queue WHERE id = ?
+                """,
+                [int(job_id)],
+            ).fetchone()
+            if not row:
+                if self.db_path != ":memory:":
+                    conn.close()
+                return {'updated': False, 'job_id': job_id}
+            merged_metadata = json.loads(row[0]) if row[0] else {}
+            if isinstance(metadata, dict):
+                merged_metadata.update(metadata)
+            if progress is not None:
+                merged_metadata['progress'] = progress
+            if partial_results is not None:
+                merged_metadata['partial_results'] = partial_results
+            if error is not None:
+                merged_metadata['error'] = error
+            updated = conn.execute(
+                """
+                UPDATE claim_enrichment_queue
+                SET status = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                RETURNING id, user_id, claim_type, enrichment_type, status, priority, metadata, created_at, updated_at
+                """,
+                [str(status or 'pending'), json.dumps(merged_metadata), int(job_id)],
+            ).fetchone()
+            if self.db_path != ":memory:":
+                conn.close()
+            return {
+                'updated': bool(updated),
+                'job': self._serialize_enrichment_queue_row(updated) if updated else {},
+            }
+        except Exception as exc:
+            self.mediator.log('enrichment_queue_job_update_error', error=str(exc), job_id=job_id)
+            return {'updated': False, 'job_id': job_id, 'error': str(exc)}
 
     def submit_background_enrichment_job(
         self,
@@ -6875,18 +8326,23 @@ class ClaimSupportHook:
         self._prepare_duckdb_path()
 
         try:
-            conn = duckdb.connect(self.db_path)
+            conn = self._connect_enrichment_queue_db()
             self._ensure_enrichment_queue_table(conn)
+            next_id_row = conn.execute(
+                "SELECT COALESCE(MAX(id), 0) + 1 FROM claim_enrichment_queue"
+            ).fetchone()
+            next_id = int(next_id_row[0]) if next_id_row else 1
             inserted = conn.execute(
                 """
                 INSERT INTO claim_enrichment_queue
-                    (user_id, claim_type, enrichment_type, status, priority, metadata)
-                VALUES (?, ?, ?, 'pending', ?, ?)
+                    (id, user_id, claim_type, enrichment_type, status, priority, metadata)
+                VALUES (?, ?, ?, ?, 'pending', ?, ?)
                 RETURNING id
                 """,
-                [user_id, claim_type, enrichment_type, priority, json.dumps(metadata or {})],
+                [next_id, user_id, claim_type, enrichment_type, priority, json.dumps(metadata or {})],
             ).fetchone()
-            conn.close()
+            if self.db_path != ":memory:":
+                conn.close()
             job_id = inserted[0] if inserted else None
         except Exception as exc:
             self.mediator.log('enrichment_queue_submit_error', error=str(exc))
@@ -7283,11 +8739,77 @@ class ClaimSupportHook:
         'contradiction_resolution': 1.0,
         'missing_element': 0.9,
         'adverse_authority': 0.85,
+        'graph_quality_gap': 0.82,
         'testimony_gap': 0.8,
+        'support_quality_gap': 0.76,
         'document_request': 0.7,
+        'source_quality_gap': 0.68,
         'authority_gap': 0.65,
+        'duplicate_support': 0.6,
         'coverage_improvement': 0.5,
     }
+
+    def _quality_gap_lane_for_element(self, element: Dict[str, Any]) -> str:
+        quality_summary = (
+            element.get('support_quality_summary', {})
+            if isinstance(element.get('support_quality_summary'), dict)
+            else {}
+        )
+        signal_counts = (
+            quality_summary.get('quality_signal_counts', {})
+            if isinstance(quality_summary.get('quality_signal_counts'), dict)
+            else {}
+        )
+        if int(quality_summary.get('structurally_missing_path_count', 0) or 0) > 0:
+            return 'missing_element'
+        if int(signal_counts.get('weak_graph_connectivity', 0) or 0) > 0:
+            return 'graph_quality_gap'
+        if int(signal_counts.get('weak_source_quality', 0) or 0) > 0:
+            return 'source_quality_gap'
+        if int(signal_counts.get('duplicate_support', 0) or 0) > 0:
+            return 'duplicate_support'
+        if (
+            int(quality_summary.get('weak_support_path_count', 0) or 0) > 0
+            or str(quality_summary.get('recommended_quality_action') or '') == 'strengthen_support_path'
+        ):
+            return 'support_quality_gap'
+        return ''
+
+    def _primary_quality_signal_for_summary(self, quality_summary: Dict[str, Any]) -> Dict[str, Any]:
+        signal_counts = (
+            quality_summary.get('quality_signal_counts', {})
+            if isinstance(quality_summary.get('quality_signal_counts'), dict)
+            else {}
+        )
+        prioritized = [
+            ('structurally_missing_support', 'missing_element', 'collect_initial_support'),
+            ('weak_graph_connectivity', 'graph_quality_gap', 'persist_or_query_graph_support'),
+            ('weak_source_quality', 'source_quality_gap', 'improve_source_parse_quality'),
+            ('duplicate_support', 'duplicate_support', 'collect_independent_support'),
+            ('weak_support_path', 'support_quality_gap', 'strengthen_support_path'),
+        ]
+        for signal, lane, action in prioritized:
+            count = int(signal_counts.get(signal, 0) or 0)
+            if signal == 'structurally_missing_support':
+                count = max(count, int(quality_summary.get('structurally_missing_path_count', 0) or 0))
+            if signal == 'weak_support_path':
+                count = max(count, int(quality_summary.get('weak_support_path_count', 0) or 0))
+            if count > 0:
+                return {
+                    'signal_type': signal,
+                    'question_lane': lane,
+                    'follow_up_action': action,
+                    'count': count,
+                }
+        recommended_action = str(quality_summary.get('recommended_quality_action') or '')
+        if recommended_action:
+            return {
+                'signal_type': 'recommended_quality_action',
+                'question_lane': 'support_quality_gap',
+                'follow_up_action': recommended_action,
+                'count': 1,
+            }
+        return {}
 
     def _question_lane_for_element(self, element: Dict[str, Any]) -> str:
         """Determine the most important question lane for an unresolved element."""
@@ -7301,6 +8823,9 @@ class ClaimSupportHook:
             return 'missing_element'
         if action == 'collect_fact_support':
             return 'testimony_gap'
+        quality_lane = self._quality_gap_lane_for_element(element)
+        if quality_lane:
+            return quality_lane
         if action == 'collect_missing_support_kind':
             missing = list(element.get('missing_support_kinds', []) or [])
             if 'evidence' in missing or 'testimony' in missing:
@@ -7311,9 +8836,9 @@ class ClaimSupportHook:
 
     def _question_type_for_lane(self, lane: str) -> str:
         """Map a question lane to testimony vs. document_request."""
-        if lane in ('missing_element', 'testimony_gap', 'contradiction_resolution'):
+        if lane in ('missing_element', 'testimony_gap', 'contradiction_resolution', 'graph_quality_gap', 'support_quality_gap'):
             return 'testimony'
-        if lane in ('document_request',):
+        if lane in ('document_request', 'source_quality_gap', 'duplicate_support'):
             return 'document_request'
         if lane in ('adverse_authority', 'authority_gap'):
             return 'document_request'
@@ -7338,6 +8863,14 @@ class ClaimSupportHook:
             return f"'{element_text}' has adverse authority that must be distinguished. Targeted factual testimony is needed."
         if lane == 'authority_gap':
             return f"'{element_text}' has factual support but no legal authority. A legal research task or case law citation would strengthen the claim."
+        if lane == 'graph_quality_gap':
+            return f"'{element_text}' has support, but graph connectivity is weak. A targeted follow-up should anchor the facts to clearer entities, relationships, or source context."
+        if lane == 'source_quality_gap':
+            return f"'{element_text}' has support from low-quality or weakly parsed source material. A cleaner document, excerpt, or source description would strengthen the path."
+        if lane == 'duplicate_support':
+            return f"'{element_text}' appears to rely on duplicate or non-independent support. A distinct source would improve proof quality."
+        if lane == 'support_quality_gap':
+            return f"'{element_text}' has support, but the support path is weak. A targeted factual or documentary follow-up would improve proof quality."
         return f"'{element_text}' has incomplete support. Additional information would improve claim strength."
 
     def _expected_proof_gain_for_element(self, element: Dict[str, Any], lane: str) -> float:
@@ -7351,6 +8884,11 @@ class ClaimSupportHook:
         # Small penalty for elements that already have partial support
         elif total_links > 2 and lane not in ('contradiction_resolution', 'adverse_authority'):
             base = max(base - 0.1, 0.1)
+        quality_summary = element.get('support_quality_summary', {}) if isinstance(element.get('support_quality_summary'), dict) else {}
+        if lane in {'graph_quality_gap', 'support_quality_gap', 'source_quality_gap', 'duplicate_support'}:
+            weakest_score = float(quality_summary.get('weakest_quality_score', quality_summary.get('avg_quality_score', 0.0)) or 0.0)
+            if 0.0 < weakest_score < 0.45:
+                base = min(base + 0.08, 1.0)
         return round(base, 3)
 
     def get_question_recommendations(
@@ -7392,6 +8930,7 @@ class ClaimSupportHook:
         max_int = max_recommendations if isinstance(max_recommendations, int) and max_recommendations > 0 else 20
 
         for current_claim, claim_gaps in (gaps.get('claims') or {}).items():
+            seen_element_lanes: set[tuple[str, str]] = set()
             for element in (claim_gaps.get('unresolved_elements') or []):
                 if not isinstance(element, dict):
                     continue
@@ -7402,6 +8941,7 @@ class ClaimSupportHook:
 
                 is_contradicted = element_id in contradiction_element_ids
                 lane = 'contradiction_resolution' if is_contradicted else self._question_lane_for_element(element)
+                seen_element_lanes.add((element_id, lane))
                 question_type = self._question_type_for_lane(lane)
                 reason = self._question_reason_for_element(element, lane, contradiction_element_ids)
                 gain = self._expected_proof_gain_for_element(element, lane)
@@ -7454,6 +8994,8 @@ class ClaimSupportHook:
                         'proof_explanation': '',
                     }
 
+                quality_summary = element.get('support_quality_summary', {}) if isinstance(element.get('support_quality_summary'), dict) else {}
+                primary_quality_signal = self._primary_quality_signal_for_summary(quality_summary)
                 recommendations.append({
                     'question_id': question_id,
                     'claim_type': current_claim,
@@ -7467,6 +9009,14 @@ class ClaimSupportHook:
                     'element_status': element.get('status', ''),
                     'element_total_links': int(element.get('total_links', 0) or 0),
                     'element_missing_support_kinds': list(element.get('missing_support_kinds', []) or []),
+                    'support_quality_summary': quality_summary,
+                    'quality_signal_counts': (
+                        quality_summary.get('quality_signal_counts', {})
+                        if isinstance(quality_summary.get('quality_signal_counts'), dict)
+                        else {}
+                    ),
+                    'primary_quality_signal': primary_quality_signal,
+                    'quality_follow_up_action': primary_quality_signal.get('follow_up_action', ''),
                     'retrieval_context': {
                         'has_retrieval_context': has_retrieval_context,
                         'result_count': retrieval_context.get('result_count', 0),
@@ -7476,6 +9026,68 @@ class ClaimSupportHook:
                     },
                     'proof_state_context': proof_state_context,
                 })
+
+            claim_matrix = self.get_claim_coverage_matrix(
+                user_id,
+                claim_type=current_claim,
+                required_support_kinds=required_support_kinds,
+            ).get('claims', {}).get(current_claim, {})
+            for element in (claim_matrix.get('elements') or []):
+                if not isinstance(element, dict):
+                    continue
+                element_id = str(element.get('element_id') or '')
+                element_text = str(element.get('element_text') or '')
+                if not element_text:
+                    continue
+                lane = self._quality_gap_lane_for_element(element)
+                if not lane or lane == 'missing_element' or (element_id, lane) in seen_element_lanes:
+                    continue
+                quality_summary = element.get('support_quality_summary', {}) if isinstance(element.get('support_quality_summary'), dict) else {}
+                if str(quality_summary.get('recommended_quality_action') or '') == 'review_support_quality' and lane != 'graph_quality_gap':
+                    continue
+                question_type = self._question_type_for_lane(lane)
+                reason = self._question_reason_for_element(element, lane, contradiction_element_ids)
+                gain = self._expected_proof_gain_for_element(element, lane)
+                question_text = self._draft_question_text(element_text, lane, element)
+                qid_src = f'{user_id}:{current_claim}:{element_id}:{lane}'
+                primary_quality_signal = self._primary_quality_signal_for_summary(quality_summary)
+                recommendations.append({
+                    'question_id': 'qrec:' + hashlib.sha1(qid_src.encode()).hexdigest()[:12],
+                    'claim_type': current_claim,
+                    'target_claim_element_id': element_id,
+                    'target_claim_element_text': element_text,
+                    'question_lane': lane,
+                    'question_type': question_type,
+                    'question_reason': reason,
+                    'expected_proof_gain': gain,
+                    'question_text': question_text,
+                    'element_status': element.get('status', ''),
+                    'element_total_links': int(element.get('total_links', 0) or 0),
+                    'element_missing_support_kinds': list(element.get('missing_support_kinds', []) or []),
+                    'support_quality_summary': quality_summary,
+                    'quality_signal_counts': (
+                        quality_summary.get('quality_signal_counts', {})
+                        if isinstance(quality_summary.get('quality_signal_counts'), dict)
+                        else {}
+                    ),
+                    'primary_quality_signal': primary_quality_signal,
+                    'quality_follow_up_action': primary_quality_signal.get('follow_up_action', ''),
+                    'retrieval_context': {
+                        'has_retrieval_context': False,
+                        'result_count': 0,
+                        'top_score': 0.0,
+                        'duplicate_cluster_count': 0,
+                        'top_results': [],
+                    },
+                    'proof_state_context': {
+                        'proof_state': 'quality_gap',
+                        'missing_predicates': [],
+                        'contradiction_count': 0,
+                        'next_action': str(quality_summary.get('recommended_quality_action') or 'strengthen_support_path'),
+                        'proof_explanation': reason,
+                    },
+                })
+                seen_element_lanes.add((element_id, lane))
 
         # Rank by expected_proof_gain descending, then by lane priority
         recommendations.sort(key=lambda r: (-r['expected_proof_gain'], r['question_lane']))
@@ -7531,6 +9143,26 @@ class ClaimSupportHook:
                 "but we do not yet have legal authority supporting this element. "
                 "Are you aware of any prior cases, statutes, or regulations that apply to your situation?"
             )
+        if lane == 'graph_quality_gap':
+            return (
+                f"For {element_text}, can you identify the people, documents, dates, or relationships "
+                "that connect the current support to this claim element more directly?"
+            )
+        if lane == 'source_quality_gap':
+            return (
+                f"Do you have a clearer copy, excerpt, or description of the source that supports {element_text}, "
+                "including where in the document the relevant facts appear?"
+            )
+        if lane == 'duplicate_support':
+            return (
+                f"Do you have an independent source, witness, or record that supports {element_text} "
+                "separately from the materials already provided?"
+            )
+        if lane == 'support_quality_gap':
+            return (
+                f"What additional fact, document, or witness detail would make the support for {element_text} "
+                "more direct and specific?"
+            )
         return (
             f"Can you provide any additional information or documentation related to {element_text} "
             "that would help establish or strengthen this aspect of your claim?"
@@ -7572,6 +9204,14 @@ class ClaimSupportHook:
         element_text: str,
     ) -> float:
         """Return a heuristic retrieval score [0–1] for *chunk* against *query_tokens*."""
+        return self._build_retrieval_ranking_payload(chunk, query_tokens, element_text)['score']
+
+    def _build_retrieval_ranking_payload(
+        self,
+        chunk: Dict[str, Any],
+        query_tokens: List[str],
+        element_text: str,
+    ) -> Dict[str, Any]:
         text = ' '.join([
             str(chunk.get('text') or chunk.get('chunk_text') or ''),
             str(chunk.get('label') or chunk.get('source_label') or ''),
@@ -7580,14 +9220,128 @@ class ClaimSupportHook:
         chunk_tokens = set(re.findall(r'[a-z0-9]+', text))
         q_tokens = set(str(t).lower() for t in query_tokens)
         element_tokens = set(re.findall(r'[a-z0-9]+', str(element_text or '').lower()))
+        metadata = dict(chunk.get('metadata') or {})
 
         overlap = len(q_tokens & chunk_tokens)
         element_overlap = len(element_tokens & chunk_tokens)
         denom = max(1, len(q_tokens) + len(element_tokens) // 2)
-        raw_score = (overlap + element_overlap * 0.5) / denom
-        # Preserve any pre-computed score if provided and better than heuristic
+        query_fit_score = (overlap + element_overlap * 0.5) / denom
         existing = float(chunk.get('score') or chunk.get('retrieval_score') or 0.0)
-        return round(min(1.0, max(existing, raw_score)), 4)
+        base_score = max(existing, query_fit_score)
+
+        source_kind = str(chunk.get('source_kind') or chunk.get('kind') or 'chunk').strip().lower()
+        source_kind_weight_map = {
+            'authority': 0.10,
+            'statute': 0.12,
+            'regulation': 0.11,
+            'case_law': 0.09,
+            'evidence': 0.08,
+            'document': 0.07,
+            'testimony': 0.06,
+            'web_archive': 0.05,
+            'web': 0.03,
+        }
+        authority_class = str(
+            metadata.get('authority_class')
+            or metadata.get('authority_family')
+            or metadata.get('authority_type')
+            or ''
+        ).strip().lower()
+        authority_class_weight = 0.0
+        if authority_class in {'statute', 'regulation', 'primary', 'mandatory_authority'}:
+            authority_class_weight = 0.08
+        elif authority_class in {'case_law', 'binding_case', 'precedent'}:
+            authority_class_weight = 0.06
+        elif authority_class in {'guidance', 'secondary', 'persuasive_authority'}:
+            authority_class_weight = 0.03
+
+        source_quality = metadata.get('quality_score', metadata.get('data_quality_score', metadata.get('source_quality_score', 0.0)))
+        try:
+            source_quality_weight = max(0.0, min(1.0, float(source_quality or 0.0))) * 0.10
+        except (TypeError, ValueError):
+            source_quality_weight = 0.0
+        quality_tier = str(metadata.get('quality_tier') or '').strip().lower()
+        if quality_tier in {'high', 'strong', 'excellent', 'verified'}:
+            source_quality_weight = max(source_quality_weight, 0.08)
+        elif quality_tier in {'low', 'weak'}:
+            source_quality_weight = min(source_quality_weight, 0.025)
+
+        temporal_terms = {
+            token for token in q_tokens
+            if token.isdigit() or token in {'before', 'after', 'during', 'within', 'deadline', 'notice', 'date'}
+        }
+        temporal_text = ' '.join([
+            text,
+            str(metadata.get('effective_date') or ''),
+            str(metadata.get('published_date') or ''),
+            str(metadata.get('temporal_scope') or ''),
+            str(metadata.get('date') or ''),
+        ]).lower()
+        temporal_overlap = len(temporal_terms & set(re.findall(r'[a-z0-9]+', temporal_text)))
+        temporal_relevance_weight = min(0.08, temporal_overlap * 0.025)
+        if re.search(r'\b(19|20)\d{2}\b', ' '.join(q_tokens)) and re.search(r'\b(19|20)\d{2}\b', temporal_text):
+            temporal_relevance_weight = max(temporal_relevance_weight, 0.04)
+
+        graph_signal_weight = 0.0
+        graph_summary = metadata.get('graph_trace_summary', {}) if isinstance(metadata.get('graph_trace_summary'), dict) else {}
+        support_quality = metadata.get('support_quality_summary', {}) if isinstance(metadata.get('support_quality_summary'), dict) else {}
+        if graph_summary:
+            graph_signal_weight += min(0.05, int(graph_summary.get('traced_link_count', 0) or graph_summary.get('graph_count', 0) or 1) * 0.02)
+        quality_tier_signal = str(metadata.get('path_quality_tier') or support_quality.get('dominant_quality_tier') or '').strip().lower()
+        if quality_tier_signal in {'strong_support', 'strong', 'high'}:
+            graph_signal_weight += 0.06
+        elif quality_tier_signal in {'moderate_support', 'moderate'}:
+            graph_signal_weight += 0.03
+        elif quality_tier_signal in {'weak_support', 'structurally_missing'}:
+            graph_signal_weight -= 0.025
+        graph_signal_weight = max(-0.025, min(0.10, graph_signal_weight))
+
+        content_origin = str(metadata.get('content_origin') or '').strip().lower()
+        artifact_family = str(metadata.get('artifact_family') or '').strip().lower()
+        archive_signal_weight = 0.0
+        if source_kind == 'web_archive' or content_origin == 'historical_archive_capture' or artifact_family == 'archived_web_page':
+            archive_signal_weight = 0.06
+        elif content_origin == 'live_web_capture':
+            archive_signal_weight = 0.025
+
+        factors = {
+            'query_fit_score': round(query_fit_score, 6),
+            'base_score': round(base_score, 6),
+            'source_kind_weight': round(source_kind_weight_map.get(source_kind, 0.0), 6),
+            'claim_element_fit_weight': round(min(0.14, element_overlap * 0.03), 6),
+            'source_quality_weight': round(source_quality_weight, 6),
+            'authority_class_weight': round(authority_class_weight, 6),
+            'temporal_relevance_weight': round(temporal_relevance_weight, 6),
+            'graph_signal_weight': round(graph_signal_weight, 6),
+            'archive_signal_weight': round(archive_signal_weight, 6),
+        }
+        final_score = min(1.0, base_score + sum(
+            value for key, value in factors.items()
+            if key not in {'query_fit_score', 'base_score'}
+        ))
+        explanation_parts = []
+        if overlap:
+            explanation_parts.append(f'matched {overlap} query term(s)')
+        if element_overlap:
+            explanation_parts.append(f'matched {element_overlap} claim-element term(s)')
+        for key in (
+            'source_kind_weight',
+            'source_quality_weight',
+            'authority_class_weight',
+            'temporal_relevance_weight',
+            'graph_signal_weight',
+            'archive_signal_weight',
+        ):
+            value = factors.get(key, 0.0)
+            if value:
+                explanation_parts.append(f'{key.replace("_", " ")} {value:+.2f}')
+        return {
+            'score': round(final_score, 4),
+            'factors': factors,
+            'matched_query_terms': sorted(q_tokens & chunk_tokens),
+            'matched_element_terms': sorted(element_tokens & chunk_tokens),
+            'explanation_parts': explanation_parts,
+        }
 
     def _explain_retrieval_result(
         self,
@@ -7597,16 +9351,14 @@ class ClaimSupportHook:
         element_text: str,
     ) -> str:
         """Return a concise explanation for why this chunk was retrieved."""
-        text = ' '.join([
-            str(chunk.get('text') or chunk.get('chunk_text') or ''),
-            str(chunk.get('label') or chunk.get('source_label') or ''),
-        ]).lower()
-        chunk_tokens = set(re.findall(r'[a-z0-9]+', text))
-        matched = sorted(set(str(t).lower() for t in query_tokens) & chunk_tokens)
+        ranking_payload = self._build_retrieval_ranking_payload(chunk, query_tokens, element_text)
+        matched = ranking_payload.get('matched_query_terms', [])
         source_kind = str(chunk.get('source_kind') or chunk.get('kind') or 'chunk')
+        signal_text = '; '.join(ranking_payload.get('explanation_parts', [])[:4])
         if matched:
             terms = ', '.join(matched[:5])
-            return f'Matched {source_kind} on query terms: {terms} (score {score:.2f})'
+            suffix = f'; {signal_text}' if signal_text else ''
+            return f'Matched {source_kind} on query terms: {terms} (score {score:.2f}{suffix})'
         return f'Retrieved {source_kind} with heuristic score {score:.2f} for {element_text[:60]}'
 
     def _normalize_chunk_for_indexing(self, chunk: Any, source_kind: str) -> Dict[str, Any]:
@@ -7909,12 +9661,20 @@ class ClaimSupportHook:
             normalized = self._normalize_chunk_for_indexing(chunk, 'chunk')
             if not normalized.get('source_ref') and not normalized.get('chunk_text'):
                 continue
-            score = self._score_retrieval_chunk(normalized, query_tokens, claim_element_text)
+            ranking_payload = self._build_retrieval_ranking_payload(normalized, query_tokens, claim_element_text)
+            score = ranking_payload['score']
             explanation = self._explain_retrieval_result(normalized, query_tokens, score, claim_element_text)
             cluster_id = self._make_duplicate_cluster_id(normalized['chunk_text'])
             is_representative = cluster_id not in cluster_map
             if is_representative:
                 cluster_map[cluster_id] = normalized['source_ref']
+            result_metadata = dict(normalized['metadata'])
+            result_metadata.update({
+                'retrieval_ranking_factors': ranking_payload['factors'],
+                'retrieval_ranking_explanation': ranking_payload['explanation_parts'],
+                'matched_query_terms': ranking_payload['matched_query_terms'],
+                'matched_claim_element_terms': ranking_payload['matched_element_terms'],
+            })
             scored.append({
                 'source_kind': normalized['source_kind'],
                 'source_ref': normalized['source_ref'],
@@ -7925,7 +9685,7 @@ class ClaimSupportHook:
                 'explanation': explanation,
                 'duplicate_cluster_id': cluster_id,
                 'is_duplicate_representative': is_representative,
-                'metadata': normalized['metadata'],
+                'metadata': result_metadata,
             })
         # Rank by retrieval_score descending, representatives before duplicates
         scored.sort(key=lambda r: (-r['retrieval_score'], not r['is_duplicate_representative']))
@@ -8128,7 +9888,7 @@ class ClaimSupportHook:
                 """
                 SELECT source_kind, source_ref, source_label, chunk_text,
                        retrieval_score, confidence, explanation,
-                       duplicate_cluster_id, is_duplicate_representative
+                       duplicate_cluster_id, is_duplicate_representative, metadata
                 FROM claim_retrieval_results
                 WHERE user_id = ? AND claim_type = ? AND claim_element_id = ?
                 ORDER BY retrieval_score DESC
@@ -8139,10 +9899,23 @@ class ClaimSupportHook:
             cols = [
                 'source_kind', 'source_ref', 'source_label', 'chunk_text',
                 'retrieval_score', 'confidence', 'explanation',
-                'duplicate_cluster_id', 'is_duplicate_representative',
+                'duplicate_cluster_id', 'is_duplicate_representative', 'metadata',
             ]
             conn.close()
-            results = [dict(zip(cols, row)) for row in rows]
+            results = []
+            for row in rows:
+                result = dict(zip(cols, row))
+                raw_metadata = result.get('metadata')
+                if isinstance(raw_metadata, str):
+                    try:
+                        result['metadata'] = json.loads(raw_metadata)
+                    except Exception:
+                        result['metadata'] = {}
+                elif not isinstance(raw_metadata, dict):
+                    result['metadata'] = {}
+                result['retrieval_ranking_factors'] = result['metadata'].get('retrieval_ranking_factors', {})
+                result['retrieval_ranking_explanation'] = result['metadata'].get('retrieval_ranking_explanation', [])
+                results.append(result)
             has_context = bool(results)
             top_score = max((r['retrieval_score'] for r in results), default=0.0)
             duplicate_cluster_ids = list({r['duplicate_cluster_id'] for r in results if r.get('duplicate_cluster_id')})

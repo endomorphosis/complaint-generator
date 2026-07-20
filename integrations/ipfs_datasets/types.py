@@ -264,8 +264,19 @@ class GraphSupportSummary:
     duplicate_fact_count: int = 0
     semantic_cluster_count: int = 0
     semantic_duplicate_count: int = 0
+    unique_source_ref_count: int = 0
+    unique_source_record_count: int = 0
+    passage_anchored_count: int = 0
     support_by_kind: Dict[str, int] = field(default_factory=dict)
     support_by_source: Dict[str, int] = field(default_factory=dict)
+    source_family_counts: Dict[str, int] = field(default_factory=dict)
+    record_scope_counts: Dict[str, int] = field(default_factory=dict)
+    artifact_family_counts: Dict[str, int] = field(default_factory=dict)
+    corpus_family_counts: Dict[str, int] = field(default_factory=dict)
+    content_origin_counts: Dict[str, int] = field(default_factory=dict)
+    parse_source_counts: Dict[str, int] = field(default_factory=dict)
+    input_format_counts: Dict[str, int] = field(default_factory=dict)
+    quality_tier_counts: Dict[str, int] = field(default_factory=dict)
     max_score: float = 0.0
 
     def as_dict(self) -> Dict[str, Any]:
@@ -396,6 +407,50 @@ class AuthorityTreatmentRecord:
 
     def as_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class AuthorityTreatmentEdge:
+    target_authority_id: str
+    relation_type: str
+    edge_id: str = ""
+    source_authority_id: str = ""
+    source_citation: str = ""
+    target_citation: str = ""
+    confidence: float = 0.0
+    treatment_source: str = ""
+    treatment_date: str = ""
+    explanation: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    provenance: ProvenanceRecord = field(default_factory=ProvenanceRecord)
+
+    def __post_init__(self) -> None:
+        if not self.edge_id:
+            object.__setattr__(
+                self,
+                "edge_id",
+                _stable_identifier(
+                    "authority_treatment_edge",
+                    self.source_authority_id,
+                    self.source_citation,
+                    self.target_authority_id,
+                    self.target_citation,
+                    self.relation_type,
+                    self.treatment_source,
+                    self.treatment_date,
+                ),
+            )
+
+    def as_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        payload["treatment_id"] = self.edge_id
+        payload["treatment_type"] = self.relation_type
+        payload["treated_by_authority_id"] = self.source_authority_id
+        payload["treated_authority_id"] = self.target_authority_id
+        payload["treated_by_citation"] = self.source_citation
+        payload["treatment_confidence"] = self.confidence
+        payload["treatment_explanation"] = self.explanation
+        return payload
 
 
 @dataclass(frozen=True)
@@ -676,6 +731,7 @@ __all__ = [
     "CaseArtifact",
     "CaseAuthority",
     "AuthorityTreatmentRecord",
+    "AuthorityTreatmentEdge",
     "RuleCandidate",
     "LegalSearchProgram",
     "CaseFact",

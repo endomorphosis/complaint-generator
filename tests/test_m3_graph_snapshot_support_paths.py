@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from integrations.ipfs_datasets.graphs import (
     resolve_duplicate_entities,
     attach_provenance_edges,
+    query_graph_snapshot,
 )
 
 
@@ -216,6 +217,26 @@ class TestPersistTypedGraphSnapshot:
             'source_id': 'ev1',
             'entities': [{'id': 'e1', 'name': 'HR Dept'}, {'id': 'e2', 'name': 'Employee'}],
             'relationships': [{'from': 'e1', 'to': 'e2', 'type': 'employs'}],
+            'support_facts': [
+                {
+                    'fact_id': 'fact-1',
+                    'text': 'Employee reported discrimination to HR.',
+                    'support_kind': 'evidence',
+                    'source_table': 'evidence_facts',
+                    'source_family': 'evidence',
+                    'source_record_id': 11,
+                    'source_ref': 'bafy-hr',
+                    'record_scope': 'claim',
+                    'artifact_family': 'archived_web_page',
+                    'corpus_family': 'web_archive',
+                    'content_origin': 'historical_archive_capture',
+                    'parse_source': 'ipfs_datasets_py',
+                    'input_format': 'html',
+                    'quality_tier': 'high',
+                    'chunk_id': 'chunk-hr',
+                    'source_passage': {'chunk_id': 'chunk-hr', 'text': 'reported discrimination'},
+                }
+            ],
         }
         result = hooks_db.persist_typed_graph_snapshot(
             'user1', 'employment_discrimination', 'evidence', graph_payload
@@ -224,6 +245,21 @@ class TestPersistTypedGraphSnapshot:
         assert result['source_kind'] == 'evidence'
         assert result['entity_count'] == 2
         assert result['relationship_count'] == 1
+        assert result['fact_registry_summary']['source_family_counts'] == {'evidence': 1}
+        assert result['fact_registry_summary']['corpus_family_counts'] == {'web_archive': 1}
+        assert result['fact_registry_summary']['passage_anchored_count'] == 1
+        assert result['graph_snapshot']['status'] == 'stored-fallback'
+        assert result['graph_snapshot']['persisted'] is True
+        snapshot_lookup = query_graph_snapshot(result['graph_id'])
+        assert snapshot_lookup['found'] is True
+        assert snapshot_lookup['fact_registry_summary']['snapshot_count'] == 1
+        assert snapshot_lookup['fact_registry_summary']['source_family_counts'] == {'evidence': 1}
+        assert snapshot_lookup['fact_registry_summary']['passage_anchored_count'] == 1
+        assert snapshot_lookup['snapshots'][0]['graph_id'] == result['graph_id']
+        assert snapshot_lookup['snapshots'][0]['source_id'] == 'ev1'
+        assert snapshot_lookup['snapshots'][0]['metadata']['claim_type'] == 'employment_discrimination'
+        assert snapshot_lookup['snapshots'][0]['fact_registry_summary']['source_family_counts'] == {'evidence': 1}
+        assert snapshot_lookup['snapshots'][0]['metadata']['fact_registry_summary']['passage_anchored_count'] == 1
 
     def test_persist_law_snapshot(self, hooks_db):
         graph_payload = {'source_id': 'law1', 'entities': [], 'relationships': []}
@@ -360,6 +396,42 @@ class TestGetGraphSnapshotRefsForElement:
         assert 'timestamp' in ref
         assert ref['source_kind'] == 'evidence'
         assert ref['entity_count'] == 2
+
+    def test_snapshot_ref_preserves_fact_registry_summary(self, hooks_db):
+        hooks_db.persist_typed_graph_snapshot(
+            'user1',
+            'retaliation',
+            'evidence',
+            {
+                'source_id': 'ev-registry',
+                'entities': [{'id': 'e1'}],
+                'relationships': [],
+                'fact_registry_summary': {
+                    'fact_count': 2,
+                    'source_family_counts': {'evidence': 2},
+                    'artifact_family_counts': {'archived_web_page': 2},
+                    'corpus_family_counts': {'web_archive': 2},
+                    'passage_anchored_count': 1,
+                },
+            },
+        )
+
+        refs = hooks_db.get_graph_snapshot_refs_for_element('user1', 'retaliation')
+
+        assert refs[0]['fact_registry_summary'] == {
+            'fact_count': 2,
+            'source_family_counts': {'evidence': 2},
+            'artifact_family_counts': {'archived_web_page': 2},
+            'corpus_family_counts': {'web_archive': 2},
+            'passage_anchored_count': 1,
+        }
+        assert refs[0]['graph_snapshot_query']['found'] is True
+        assert refs[0]['graph_snapshot_query']['snapshot_count'] == 1
+        assert refs[0]['graph_snapshot_query']['fact_registry_summary']['fact_count'] == 2
+        assert refs[0]['graph_snapshot_query']['fact_registry_summary']['source_family_counts'] == {'evidence': 2}
+        assert refs[0]['graph_snapshot']['graph_id'] == refs[0]['graph_id']
+        assert refs[0]['graph_snapshot']['source_id'] == 'ev-registry'
+        assert refs[0]['graph_snapshot']['fact_registry_summary']['passage_anchored_count'] == 1
 
 
 class TestCoverageMatrixM3Fields:

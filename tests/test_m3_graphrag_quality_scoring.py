@@ -13,7 +13,9 @@ import pytest
 
 from integrations.ipfs_datasets.graphrag import (
     _CLAIM_ONTOLOGY_PROFILES,
+    build_validate_score_ontology,
     identify_ontology_gaps,
+    score_support_path_quality,
     score_ontology_support_paths,
 )
 
@@ -242,3 +244,87 @@ def test_identify_gaps_follow_up_actions_are_actionable():
     # All actions should be non-empty strings
     for action in actions:
         assert isinstance(action, str) and len(action) > 0
+
+
+# ---------------------------------------------------------------------------
+# build_validate_score_ontology
+# ---------------------------------------------------------------------------
+
+def test_build_validate_score_ontology_returns_normalized_quality_payload():
+    result = build_validate_score_ontology(
+        "Employee reported discrimination to HR. Employer terminated Employee after the complaint.",
+        claim_type="retaliation",
+        refinement_rounds=1,
+    )
+
+    assert result["metadata"]["operation"] == "build_validate_score_ontology"
+    assert result["metadata"]["implementation_status"] == "implemented"
+    assert result["status"] in {"success", "degraded"}
+    assert isinstance(result["ontology"], dict)
+    assert result["build"]["metadata"]["operation"] == "build_ontology"
+    assert result["validation"]["metadata"]["operation"] == "validate_ontology"
+    assert result["quality"]["metadata"]["operation"] == "score_ontology_support_paths"
+    assert result["gaps"]["metadata"]["operation"] == "identify_ontology_gaps"
+
+    ontology_quality = result["ontology_quality"]
+    for key in (
+        "valid",
+        "validation_issues",
+        "overall_quality_score",
+        "grade",
+        "entity_count",
+        "relation_count",
+        "concept_count",
+        "gap_count",
+        "has_gaps",
+    ):
+        assert key in ontology_quality
+    assert ontology_quality["valid"] is True
+    assert ontology_quality["entity_count"] >= 1
+    assert ontology_quality["overall_quality_score"] == result["quality"]["overall_quality_score"]
+
+
+# ---------------------------------------------------------------------------
+# score_support_path_quality
+# ---------------------------------------------------------------------------
+
+def test_score_support_path_quality_distinguishes_weak_missing_required_support():
+    support_path = {
+        "proof_path_id": "path:test",
+        "fact_ids": ["fact:1"],
+        "fact_count": 1,
+        "support_refs": ["artifact:hr"],
+        "support_ref_count": 1,
+        "support_kinds": ["evidence"],
+        "source_families": ["evidence"],
+        "trace_count": 1,
+        "graph_id_count": 0,
+        "metadata": {
+            "support_trace_summary": {
+                "trace_count": 1,
+                "fact_trace_count": 1,
+                "avg_parse_quality_score": 60.0,
+                "support_by_kind": {"evidence": 1},
+            },
+            "graph_trace_summary": {"traced_link_count": 0},
+        },
+    }
+    ontology = {
+        "entities": [{"name": "Employee"}, {"name": "HR"}],
+        "relations": [{"subject": "Employee", "predicate": "reported", "object": "HR"}],
+        "concepts": [{"name": "evidence"}, {"name": "retaliation"}],
+    }
+
+    result = score_support_path_quality(
+        support_path,
+        ontology=ontology,
+        required_support_kinds=["evidence", "authority"],
+    )
+
+    assert result["metadata"]["operation"] == "score_support_path_quality"
+    assert result["metadata"]["implementation_status"] == "implemented"
+    assert result["status"] == "success"
+    assert 0.0 < result["support_quality_score"] < 1.0
+    assert result["support_quality_tier"] in {"weak_support", "moderate_support"}
+    assert result["missing_required_support_kinds"] == ["authority"]
+    assert any(signal["signal_type"] == "missing_required_support_kind" for signal in result["quality_signals"])

@@ -355,6 +355,39 @@ def test_submit_then_query_enrichment_queue():
     assert "ontology_enrichment" in job_types
 
 
+def test_update_and_get_background_enrichment_job_status():
+    try:
+        import duckdb  # noqa: F401
+    except ImportError:
+        pytest.skip("duckdb not installed")
+    hooks = _make_claim_support_hook(db_path=":memory:")
+    hooks._check_duckdb_availability = MagicMock(return_value=True)
+    hooks._prepare_duckdb_path = MagicMock()
+
+    submit_result = hooks.submit_background_enrichment_job(
+        "user_queue_test",
+        "graph_enrichment",
+        claim_type="retaliation",
+        priority=2,
+    )
+    update = hooks.update_background_enrichment_job_status(
+        submit_result["job_id"],
+        "running",
+        progress={"step": "parse", "completed": 1, "total": 3},
+        partial_results={"parsed_artifact_count": 1},
+    )
+    detail = hooks.get_background_enrichment_job(submit_result["job_id"], user_id="user_queue_test")
+    queue = hooks.get_enrichment_queue_state("user_queue_test")
+
+    assert update["updated"] is True
+    assert detail["available"] is True
+    assert detail["job"]["status"] == "running"
+    assert detail["job"]["progress"]["step"] == "parse"
+    assert detail["job"]["partial_results"]["parsed_artifact_count"] == 1
+    assert queue["running_count"] == 1
+    assert queue["queue"][0]["progress"]["completed"] == 1
+
+
 # ---------------------------------------------------------------------------
 # GraphRAG quality signal wiring in decision trace
 # ---------------------------------------------------------------------------

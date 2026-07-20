@@ -156,6 +156,92 @@ def test_map_elements_coverage_status_preserved():
     assert statuses["adverse_action"] == "incomplete"
 
 
+def test_map_elements_preserves_fact_registry_summary_for_predicates():
+    elements = [
+        {
+            "element_id": "protected_activity",
+            "element_text": "Protected activity",
+            "status": "supported",
+            "support_facts": [
+                {
+                    "fact_id": "fact-1",
+                    "text": "Plaintiff reported discrimination to HR.",
+                    "support_kind": "evidence",
+                    "source_table": "evidence_facts",
+                    "source_family": "evidence",
+                    "source_record_id": 7,
+                    "source_ref": "bafy-email",
+                    "record_scope": "claim",
+                    "artifact_family": "archived_web_page",
+                    "corpus_family": "web_archive",
+                    "content_origin": "historical_archive_capture",
+                    "parse_source": "ipfs_datasets_py",
+                    "input_format": "html",
+                    "quality_tier": "high",
+                    "chunk_id": "chunk-1",
+                    "source_passage": {"chunk_id": "chunk-1", "text": "reported discrimination"},
+                }
+            ],
+        }
+    ]
+
+    result = map_claim_elements_to_predicates("retaliation", elements)
+
+    predicate = result["predicates"][0]
+    assert predicate["support_facts"][0]["source_family"] == "evidence"
+    assert predicate["fact_registry_summary"]["source_family_counts"] == {"evidence": 1}
+    assert predicate["fact_registry_summary"]["corpus_family_counts"] == {"web_archive": 1}
+    assert predicate["fact_registry_summary"]["passage_anchored_count"] == 1
+    assert result["fact_registry_summary"]["artifact_family_counts"] == {"archived_web_page": 1}
+    assert result["metadata"]["fact_registry_summary"]["unique_source_record_count"] == 1
+
+
+def test_prove_claim_elements_preserves_fact_registry_summary():
+    from integrations.ipfs_datasets.logic import prove_claim_elements
+
+    mapped = map_claim_elements_to_predicates(
+        "retaliation",
+        [
+            {
+                "element_id": "protected_activity",
+                "status": "supported",
+                "support_facts": [
+                    {
+                        "fact_id": "fact-1",
+                        "text": "Plaintiff filed a discrimination complaint.",
+                        "support_kind": "evidence",
+                        "source_table": "evidence_facts",
+                        "source_family": "evidence",
+                        "source_record_id": 9,
+                        "source_ref": "bafy-complaint",
+                        "record_scope": "claim",
+                        "artifact_family": "archived_web_page",
+                        "corpus_family": "web_archive",
+                        "content_origin": "historical_archive_capture",
+                        "parse_source": "ipfs_datasets_py",
+                        "input_format": "html",
+                        "quality_tier": "high",
+                        "chunk_id": "chunk-9",
+                    }
+                ],
+            }
+        ],
+    )
+
+    proof_result = prove_claim_elements(mapped)
+
+    assert proof_result["fact_registry_summary"]["fact_count"] == 1
+    assert proof_result["fact_registry_summary"]["source_family_counts"] == {"evidence": 1}
+    assert proof_result["temporal_reasoning_payload"]["fact_registry_summary"]["corpus_family_counts"] == {
+        "web_archive": 1
+    }
+    assert proof_result["theorem_export"]["fact_registry_summary"]["source_family_counts"] == {
+        "evidence": 1
+    }
+    claim_element = proof_result["temporal_reasoning_payload"]["claim_elements"][0]
+    assert claim_element["fact_registry_summary"]["passage_anchored_count"] == 1
+
+
 def test_map_elements_predicate_id_format():
     elements = [
         {"element_id": "protected_trait"},

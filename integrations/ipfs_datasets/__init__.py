@@ -11,6 +11,7 @@ from .graphs import (
 	extract_graph_from_text,
 	query_graph_support,
 	persist_graph_snapshot,
+	query_graph_snapshot,
 	resolve_duplicate_entities,
 	attach_provenance_edges,
 	get_authority_graph_api_version,
@@ -18,6 +19,7 @@ from .graphs import (
 from .types import (
 	CaseArtifact,
 	CaseAuthority,
+	AuthorityTreatmentEdge,
 	CaseClaimElement,
 	CaseFact,
 	CaseSupportEdge,
@@ -39,6 +41,7 @@ from .types import (
 	with_adapter_metadata,
 )
 from .search import (
+	archive_url_snapshot,
 	discover_seeded_commoncrawl,
 	download_url,
 	download_with_recovery,
@@ -52,10 +55,16 @@ from .search import (
 from .documents import (
 	DOCUMENTS_AVAILABLE,
 	DOCUMENTS_ERROR,
+	detect_document_input_format,
 	extract_text_content,
 	ingest_download_manifest,
 	ingest_local_document,
+	parse_document_bytes,
+	parse_document_file,
+	parse_document_text,
 	parse_pdf_to_record,
+	should_parse_document_input,
+	summarize_document_parse,
 )
 from .llm import generate_text_with_metadata, llm_router_status
 from .router_status import get_router_status_report
@@ -71,6 +80,8 @@ from .graphrag import (
 	query_pdf_knowledge_graph,
 	score_ontology_support_paths,
 	identify_ontology_gaps,
+	score_support_path_quality,
+	build_validate_score_ontology,
 )
 from .policy_rules import (
 	build_policy_rule_corpus,
@@ -129,6 +140,7 @@ from .legal import (
 	search_recap_documents,
 	search_state_laws,
 	search_state_administrative_rules,
+	search_legal_authority_program,
 	constrain_assertions_to_corpus,
 )
 from .draft_logic_pipeline import (
@@ -157,11 +169,13 @@ __all__ = [
 	"extract_graph_from_text",
 	"query_graph_support",
 	"persist_graph_snapshot",
+	"query_graph_snapshot",
 	"resolve_duplicate_entities",
 	"attach_provenance_edges",
 	"get_authority_graph_api_version",
 	"CaseArtifact",
 	"CaseAuthority",
+	"AuthorityTreatmentEdge",
 	"CaseClaimElement",
 	"CaseFact",
 	"CaseSupportEdge",
@@ -199,6 +213,8 @@ __all__ = [
 	"query_pdf_knowledge_graph",
 	"score_ontology_support_paths",
 	"identify_ontology_gaps",
+	"score_support_path_quality",
+	"build_validate_score_ontology",
 	"extract_policy_rules_from_pdf",
 	"build_policy_rule_corpus",
 	"store_bytes",
@@ -212,14 +228,21 @@ __all__ = [
 	"scrape_archived_domain",
 	"scrape_web_content",
 	"recover_manifest_downloads",
+	"archive_url_snapshot",
 	"search_brave_web",
 	"search_multi_engine_web",
 	"extract_text_content",
 	"DOCUMENTS_AVAILABLE",
 	"DOCUMENTS_ERROR",
+	"detect_document_input_format",
 	"ingest_download_manifest",
 	"ingest_local_document",
+	"parse_document_bytes",
+	"parse_document_file",
+	"parse_document_text",
 	"parse_pdf_to_record",
+	"should_parse_document_input",
+	"summarize_document_parse",
 	"EMBEDDINGS_AVAILABLE",
 	"EMBEDDINGS_ERROR",
 	"VECTOR_STORE_AVAILABLE",
@@ -258,6 +281,7 @@ __all__ = [
 	"search_recap_documents",
 	"search_state_laws",
 	"search_state_administrative_rules",
+	"search_legal_authority_program",
 	"constrain_assertions_to_corpus",
 	# Draft logic pipeline
 	"DRAFT_LOGIC_PIPELINE_VERSION",

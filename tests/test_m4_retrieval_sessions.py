@@ -276,6 +276,48 @@ def test_run_retrieval_session_each_result_has_explanation():
         assert len(r["explanation"]) > 0
 
 
+def test_run_retrieval_session_persists_w7_ranking_factors():
+    try:
+        import duckdb  # noqa: F401
+    except ImportError:
+        pytest.skip("duckdb not installed")
+    hooks = _make_hooks()
+    result = hooks.run_retrieval_session(
+        "user1",
+        "employment_discrimination",
+        claim_element_id="adverse_action",
+        claim_element_text="Adverse employment action after protected activity",
+        query_text="termination retaliation 2025",
+        chunks=[
+            {
+                "source_kind": "document",
+                "source_ref": "doc:timeline",
+                "source_label": "Termination timeline",
+                "chunk_text": "Adverse employment action after protected activity in 2025.",
+                "metadata": {
+                    "quality_score": 0.9,
+                    "published_date": "2025-03-15",
+                    "graph_trace_summary": {"traced_link_count": 2},
+                    "support_quality_summary": {"dominant_quality_tier": "strong_support"},
+                },
+            }
+        ],
+    )
+
+    top = result["results"][0]
+    factors = top["metadata"]["retrieval_ranking_factors"]
+    assert factors["claim_element_fit_weight"] > 0.0
+    assert factors["source_quality_weight"] > 0.0
+    assert factors["temporal_relevance_weight"] > 0.0
+    assert factors["graph_signal_weight"] > 0.0
+    assert top["metadata"]["retrieval_ranking_explanation"]
+
+    context = hooks.get_retrieval_context_for_element(
+        "user1", "employment_discrimination", "adverse_action"
+    )
+    assert context["top_results"][0]["retrieval_ranking_factors"]["graph_signal_weight"] > 0.0
+
+
 def test_run_retrieval_session_marks_duplicate_representatives():
     try:
         import duckdb  # noqa: F401

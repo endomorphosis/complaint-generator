@@ -3,6 +3,7 @@ Unit tests for Legal Authority Hooks
 
 Tests for legal authority search, storage, and analysis functionality.
 """
+import json
 import pytest
 import tempfile
 import os
@@ -419,6 +420,13 @@ class TestLegalAuthoritySearchHook:
                 ],
                 jurisdiction='9th Circuit',
                 forum='federal',
+                time_window={
+                    'time_window_start': '2024-01-01',
+                    'time_window_end': '2024-12-31',
+                    'query_terms': ['temporal', 'before'],
+                },
+                defense_themes=['temporal_prerequisite'],
+                authority_families=['case_law', 'statute', 'regulation'],
             )
 
             assert len(programs) == 5
@@ -438,6 +446,15 @@ class TestLegalAuthoritySearchHook:
             assert all(program['claim_element_id'] == 'employment_retaliation:3' for program in programs)
             assert all(program['jurisdiction'] == '9th Circuit' for program in programs)
             assert all(program['forum'] == 'federal' for program in programs)
+            assert all(program['time_window_start'] == '2024-01-01' for program in programs)
+            assert all(program['time_window_end'] == '2024-12-31' for program in programs)
+            assert all(program['metadata']['time_window_terms'] == ['temporal', 'before'] for program in programs)
+            assert all(program['metadata']['defense_themes'] == ['temporal_prerequisite'] for program in programs)
+            assert all(set(program['authority_families']).issubset({'case_law', 'statute', 'regulation'}) for program in programs)
+            assert next(
+                program for program in programs
+                if program['program_type'] == 'procedural_search'
+            )['metadata']['defense_theme'] == 'procedural_prerequisite'
             assert all(program['program_id'].startswith('legal_search_program:') for program in programs)
         except ImportError as e:
             pytest.skip(f"Test requires dependencies: {e}")
@@ -737,12 +754,27 @@ class TestLegalAuthorityStorageHook:
                 reused_record_id = hook.add_authority(
                     {
                         **authority_data,
+                        'search_programs': [
+                            {
+                                'program_id': 'legal_search_program:dup',
+                                'program_type': 'treatment_check_search',
+                                'claim_type': 'employment retaliation',
+                                'authority_intent': 'confirm_good_law',
+                                'query_text': 'Smith v. Jones later treatment',
+                                'claim_element_id': 'employment_retaliation:3',
+                                'claim_element_text': 'Causal connection',
+                                'authority_families': ['case_law'],
+                                'search_terms': ['later treatment'],
+                            }
+                        ],
                         'treatment_records': [
                             {
                                 'treatment_type': 'questioned',
+                                'treated_by_authority_id': 'authority:later-case',
                                 'treated_by_citation': 'Jones v. Smith, 456 F.4th 789',
                                 'treatment_source': 'later_case_search',
                                 'treatment_confidence': 0.82,
+                                'treatment_date': '2025-02-14',
                             }
                         ],
                     },
@@ -753,12 +785,93 @@ class TestLegalAuthorityStorageHook:
 
                 authority = hook.get_authority_by_id(record_id)
                 treatments = hook.get_authority_treatments(record_id)
+                search_programs = hook.get_authority_search_programs(record_id)
 
                 assert reused_record_id == record_id
                 assert authority is not None
+                assert authority['search_program_summary']['record_count'] == 1
+                assert search_programs[0]['program_type'] == 'treatment_check_search'
+                assert search_programs[0]['authority_intent'] == 'confirm_good_law'
                 assert authority['treatment_summary']['record_count'] == 1
+                assert authority['citation_history_summary']['record_count'] == 1
+                assert authority['citation_history_summary']['related_authority_ids'] == ['authority:later-case']
+                assert authority['citation_history_summary']['related_citations'] == ['Jones v. Smith, 456 F.4th 789']
+                assert authority['citation_history_summary']['latest_treatment_date'] == '2025-02-14'
                 assert treatments[0]['treatment_type'] == 'questioned'
+                assert treatments[0]['treated_authority_id'] == 'authority:later-case'
+                assert treatments[0]['target_authority_id'] == 'authority:later-case'
                 assert treatments[0]['treated_by_citation'] == 'Jones v. Smith, 456 F.4th 789'
+                assert treatments[0]['target_citation'] == 'Jones v. Smith, 456 F.4th 789'
+            finally:
+                if os.path.exists(db_path):
+                    os.unlink(db_path)
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_add_authority_duplicate_can_persist_new_rule_candidates(self):
+        """Test duplicate authority upserts can attach later parsed rule candidates."""
+        try:
+            from mediator.legal_authority_hooks import LegalAuthorityStorageHook
+
+            mock_mediator = Mock()
+            mock_mediator.log = Mock()
+
+            with tempfile.NamedTemporaryFile(suffix='.duckdb', delete=False) as f:
+                db_path = f.name
+
+            try:
+                hook = LegalAuthorityStorageHook(mock_mediator, db_path=db_path)
+
+                authority_data = {
+                    'type': 'regulation',
+                    'source': 'federal_register',
+                    'citation': '91 Fed. Reg. 67890',
+                    'title': 'Workplace recordkeeping',
+                    'content': 'Short text.',
+                    'claim_element_id': 'employment:1',
+                    'claim_element': 'Protected activity',
+                }
+
+                record_id = hook.add_authority(
+                    authority_data,
+                    user_id='testuser',
+                    complaint_id='complaint-1',
+                    claim_type='employment',
+                )
+                assert hook.get_authority_rule_candidates(record_id) == []
+
+                richer_authority = {
+                    **authority_data,
+                    'content': (
+                        'Employers must preserve complaint records. '
+                        'Actions must be filed within 180 days of notice.'
+                    ),
+                }
+                reused_record_id = hook.add_authority(
+                    richer_authority,
+                    user_id='testuser',
+                    complaint_id='complaint-1',
+                    claim_type='employment',
+                )
+                repeated_record_id = hook.add_authority(
+                    richer_authority,
+                    user_id='testuser',
+                    complaint_id='complaint-1',
+                    claim_type='employment',
+                )
+
+                authority = hook.get_authority_by_id(record_id)
+                rule_candidates = hook.get_authority_rule_candidates(record_id)
+
+                assert reused_record_id == record_id
+                assert repeated_record_id == record_id
+                assert authority is not None
+                assert authority['rule_candidate_summary']['record_count'] == len(rule_candidates)
+                assert authority['rule_candidate_summary']['by_type']['procedural_prerequisite'] >= 1
+                assert len(rule_candidates) == 2
+                assert all(candidate['claim_element_id'] == 'employment:1' for candidate in rule_candidates)
+                assert all(candidate['claim_element_text'] == 'Protected activity' for candidate in rule_candidates)
+                assert len({candidate['rule_id'] for candidate in rule_candidates}) == len(rule_candidates)
             finally:
                 if os.path.exists(db_path):
                     os.unlink(db_path)
@@ -931,6 +1044,11 @@ class TestLegalAuthorityStorageHook:
                 assert authority['parse_metadata']['transform_lineage']['content_origin'] == 'authority_full_text'
                 assert len(chunks) >= 1
                 assert chunks[0]['chunk_id'] == 'chunk-0'
+                assert chunks[0]['metadata']['source_span']['char_start'] == chunks[0]['start']
+                assert chunks[0]['metadata']['source_span']['char_end'] == chunks[0]['end']
+                assert chunks[0]['metadata']['page_start'] == 1
+                assert chunks[0]['metadata']['page_end'] == 1
+                assert chunks[0]['metadata']['section_label'] == ''
                 assert chunks[0]['metadata']['source'] == 'legal_authority'
                 assert chunks[0]['metadata']['intake_summary_handoff'] == {
                     'current_phase': 'intake',
@@ -965,7 +1083,49 @@ class TestLegalAuthorityStorageHook:
                 assert facts[0]['corpus_family'] == 'legal_authority'
                 assert facts[0]['content_origin'] == 'authority_full_text'
                 assert facts[0]['parse_source'] == 'legal_authority'
+                assert facts[0]['chunk_id'] == 'chunk-0'
+                assert facts[0]['chunk_index'] == 0
+                assert facts[0]['source_passage']['chunk_id'] == 'chunk-0'
+                assert facts[0]['source_passage']['start'] >= 0
+                assert facts[0]['source_passage']['end'] > facts[0]['source_passage']['start']
+                assert facts[0]['source_passage']['text']
+                assert facts[0]['source_passage']['text'] in {
+                    facts[0]['text'],
+                    chunks[facts[0]['chunk_index']]['text'].strip(),
+                }
+                assert facts[0]['metadata']['source_passage']['chunk_id'] == 'chunk-0'
+                assert facts[0]['metadata']['source_passage']['text'] == facts[0]['source_passage']['text']
                 assert facts[0]['metadata']['parse_lineage']['source'] == 'legal_authority'
+                conn = duckdb.connect(db_path)
+                durable_row = conn.execute(
+                    """
+                    SELECT source_family, source_record_id, source_ref, record_scope,
+                           artifact_family, corpus_family, content_origin, parse_source,
+                           input_format, quality_tier, quality_score, chunk_id, chunk_index,
+                           CAST(source_passage AS VARCHAR)
+                    FROM legal_authority_facts
+                    WHERE authority_id = ?
+                    ORDER BY fact_id ASC
+                    LIMIT 1
+                    """,
+                    [record_id],
+                ).fetchone()
+                conn.close()
+                assert durable_row[0] == 'legal_authority'
+                assert durable_row[1] == record_id
+                assert durable_row[2] == f'authority:{record_id}'
+                assert '"text"' in durable_row[13]
+                assert durable_row[3] == 'legal_authority'
+                assert durable_row[4] == 'legal_authority_text'
+                assert durable_row[5] == 'legal_authority'
+                assert durable_row[6] == 'authority_full_text'
+                assert durable_row[7] == 'legal_authority'
+                assert durable_row[8] == 'text'
+                assert durable_row[9] == 'high'
+                assert durable_row[10] > 0.0
+                assert durable_row[11] == 'chunk-0'
+                assert durable_row[12] == 0
+                assert 'chunk-0' in durable_row[13]
                 assert facts[0]['metadata']['intake_summary_handoff'] == {
                     'current_phase': 'intake',
                     'ready_to_advance': True,
@@ -1010,6 +1170,92 @@ class TestLegalAuthorityStorageHook:
                         },
                     },
                 }
+            finally:
+                if os.path.exists(db_path):
+                    os.unlink(db_path)
+        except ImportError as e:
+            pytest.skip(f"Test requires dependencies: {e}")
+
+    def test_get_authority_facts_reads_legacy_json_only_fact_rows(self):
+        """Test old legal_authority_facts rows still expose the flattened corpus contract."""
+        try:
+            from mediator.legal_authority_hooks import LegalAuthorityStorageHook
+            import duckdb
+
+            fd, db_path = tempfile.mkstemp(suffix='.duckdb')
+            os.close(fd)
+            os.unlink(db_path)
+
+            try:
+                conn = duckdb.connect(db_path)
+                conn.execute(
+                    """
+                    CREATE TABLE legal_authority_facts (
+                        authority_id BIGINT,
+                        fact_id VARCHAR,
+                        fact_text TEXT,
+                        source_authority_id VARCHAR,
+                        confidence FLOAT,
+                        metadata JSON,
+                        provenance JSON
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO legal_authority_facts
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        13,
+                        'fact:authority-legacy',
+                        'Legacy authority fact',
+                        'authority:13',
+                        0.81,
+                        json.dumps({
+                            'parse_lineage': {
+                                'source': 'legal_authority',
+                                'input_format': 'text',
+                                'quality_tier': 'high',
+                                'quality_score': 95.0,
+                                'content_origin': 'authority_full_text',
+                                'artifact_family': 'legal_authority_text',
+                                'corpus_family': 'legal_authority',
+                            },
+                            'chunk_id': 'authority-chunk-0',
+                            'chunk_index': 0,
+                            'source_passage': {
+                                'chunk_id': 'authority-chunk-0',
+                                'chunk_index': 0,
+                            },
+                        }),
+                        json.dumps({'metadata': {}}),
+                    ],
+                )
+                conn.close()
+
+                mock_mediator = Mock()
+                mock_mediator.log = Mock()
+                hook = LegalAuthorityStorageHook.__new__(LegalAuthorityStorageHook)
+                hook.mediator = mock_mediator
+                hook.db_path = db_path
+
+                facts = hook.get_authority_facts(13)
+
+                assert len(facts) == 1
+                assert facts[0]['source_authority_id'] == 'authority:13'
+                assert facts[0]['source_family'] == 'legal_authority'
+                assert facts[0]['source_record_id'] == 13
+                assert facts[0]['source_ref'] == 'authority:13'
+                assert facts[0]['record_scope'] == 'legal_authority'
+                assert facts[0]['artifact_family'] == 'legal_authority_text'
+                assert facts[0]['corpus_family'] == 'legal_authority'
+                assert facts[0]['content_origin'] == 'authority_full_text'
+                assert facts[0]['parse_source'] == 'legal_authority'
+                assert facts[0]['input_format'] == 'text'
+                assert facts[0]['quality_tier'] == 'high'
+                assert facts[0]['chunk_id'] == 'authority-chunk-0'
+                assert facts[0]['source_passage']['chunk_id'] == 'authority-chunk-0'
             finally:
                 if os.path.exists(db_path):
                     os.unlink(db_path)
@@ -1077,6 +1323,7 @@ class TestLegalAuthorityStorageHook:
                 assert authority['parsed_text_preview'].startswith('Investigation duties')
                 assert chunks[0]['metadata']['input_format'] == 'html'
                 assert facts[0]['metadata']['parse_lineage']['input_format'] == 'html'
+                assert facts[0]['source_passage']['text']
             finally:
                 if os.path.exists(db_path):
                     os.unlink(db_path)
@@ -1327,6 +1574,7 @@ class TestLegalAuthorityStorageHook:
                     'treatment_records': [
                         {
                             'treatment_type': 'questioned',
+                            'treated_by_authority_id': 'authority:later-case',
                             'treated_by_citation': 'Jones v. Smith, 456 F.4th 789',
                             'treatment_source': 'later_case_search',
                             'treatment_confidence': 0.82,
@@ -1340,15 +1588,37 @@ class TestLegalAuthorityStorageHook:
                 record_id = hook.add_authority(authority_data, 'testuser', claim_type='employment retaliation')
                 authority = hook.get_authority_by_id(record_id)
                 treatments = hook.get_authority_treatments(record_id)
+                search_programs = hook.get_authority_search_programs(record_id)
 
                 assert record_id > 0
                 assert authority is not None
                 assert authority['metadata']['search_programs'][0]['program_type'] == 'fact_pattern_search'
                 assert authority['metadata']['search_programs'][0]['claim_element_id'] == 'employment_retaliation:3'
+                assert len(search_programs) == 1
+                assert search_programs[0]['program_id'] == 'legal_search_program:test'
+                assert search_programs[0]['program_type'] == 'fact_pattern_search'
+                assert search_programs[0]['claim_type'] == 'employment retaliation'
+                assert search_programs[0]['claim_element_id'] == 'employment_retaliation:3'
+                assert search_programs[0]['metadata']['authority_id'] == record_id
+                assert search_programs[0]['metadata']['authority_citation'] == 'Smith v. Jones, 123 F.3d 456'
+                assert authority['search_program_summary']['record_count'] == 1
+                assert authority['search_program_summary']['by_type']['fact_pattern_search'] == 1
+                assert authority['search_program_summary']['by_intent']['support'] == 1
+                assert authority['search_program_summary']['claim_element_count'] == 1
                 assert len(authority['treatment_records']) == 1
+                assert len(authority['authority_treatment_edges']) == 1
                 assert authority['treatment_summary']['record_count'] == 1
                 assert authority['treatment_summary']['by_type']['questioned'] == 1
+                assert authority['citation_history_summary']['related_authority_ids'] == ['authority:later-case']
+                assert authority['citation_history_summary']['related_citation_count'] == 1
+                assert authority['authority_treatment_edges'][0]['relation_type'] == 'questioned'
+                assert authority['authority_treatment_edges'][0]['source_authority_id'] == 'authority:later-case'
+                assert authority['authority_treatment_edges'][0]['target_authority_id'] == f"authority:{authority['id']}"
+                assert authority['authority_treatment_edges'][0]['source_citation'] == 'Jones v. Smith, 456 F.4th 789'
+                assert authority['authority_treatment_edges'][0]['target_citation'] == 'Smith v. Jones, 123 F.3d 456'
+                assert authority['authority_treatment_edges'][0]['confidence'] == pytest.approx(0.82)
                 assert treatments[0]['treatment_type'] == 'questioned'
+                assert treatments[0]['treated_authority_id'] == 'authority:later-case'
                 assert treatments[0]['treated_by_citation'] == 'Jones v. Smith, 456 F.4th 789'
                 assert treatments[0]['treatment_source'] == 'later_case_search'
                 assert treatments[0]['treatment_confidence'] == pytest.approx(0.82)
@@ -1472,6 +1742,21 @@ class TestLegalAuthorityStorageHook:
                 assert all(candidate['claim_element_text'] == 'Protected activity' for candidate in rule_candidates)
                 assert all(candidate['provenance']['source_system'] == 'federal_register' for candidate in rule_candidates)
                 assert all('chunk_index' in candidate['metadata'] for candidate in rule_candidates)
+                assert all(candidate['source_passage']['text'] == candidate['rule_text'] for candidate in rule_candidates)
+                assert all(candidate['metadata']['source_passage']['text'] == candidate['rule_text'] for candidate in rule_candidates)
+                assert all(candidate['source_passage']['chunk_id'] == candidate['metadata']['chunk_id'] for candidate in rule_candidates)
+                assert all(candidate['source_passage']['start'] == candidate['metadata']['source_span']['start'] for candidate in rule_candidates)
+                assert all(candidate['source_passage']['end'] == candidate['metadata']['source_span']['end'] for candidate in rule_candidates)
+                assert all(candidate['parse_lineage']['source'] == 'legal_authority' for candidate in rule_candidates)
+                assert all(candidate['parse_lineage']['record_scope'] == 'legal_authority' for candidate in rule_candidates)
+                assert all(candidate['parse_lineage']['source_ref'] == f'authority:{record_id}' for candidate in rule_candidates)
+                assert all(candidate['grounded_rule']['premise_type'] == 'legal_rule' for candidate in rule_candidates)
+                assert any(
+                    candidate['grounded_rule']['deontic_operator'] == 'obligation'
+                    for candidate in rule_candidates
+                )
+                assert authority['rule_candidate_summary']['by_deontic_operator']['obligation'] >= 1
+                assert authority['rule_candidate_summary']['by_grounding_status']['grounded'] >= 1
                 assert all(
                     candidate['metadata']['intake_summary_handoff'] == {
                         'current_phase': 'intake',
@@ -1924,6 +2209,11 @@ class TestMediatorLegalAuthorityIntegration:
                 assert auto_results['authorities_stored']['civil rights']['total_support_links_reused'] == 3
                 assert auto_results['claim_coverage_matrix']['civil rights']['status_counts']['partially_supported'] == 1
                 assert auto_results['claim_coverage_matrix']['civil rights']['status_counts']['missing'] == 1
+                assert auto_results['claim_coverage_matrix_snapshots']['civil rights']['snapshot_id'] > 0
+                assert auto_results['claim_coverage_matrix_snapshots']['civil rights']['is_stale'] is False
+                assert auto_results['claim_coverage_matrix_snapshot_summary']['civil rights']['total_snapshot_count'] == 1
+                assert auto_results['claim_coverage_matrix_snapshot_summary']['civil rights']['fresh_snapshot_count'] == 1
+                assert auto_results['claim_coverage_matrix_snapshot_summary']['civil rights']['snapshot_kinds'] == ['coverage_matrix']
                 assert auto_results['claim_coverage_summary']['civil rights']['status_counts']['partially_supported'] == 1
                 assert auto_results['claim_coverage_summary']['civil rights']['status_counts']['missing'] == 1
                 assert auto_results['claim_coverage_summary']['civil rights']['missing_elements'] == ['Adverse action']

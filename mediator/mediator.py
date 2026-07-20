@@ -2335,6 +2335,10 @@ class Mediator:
 	def get_authority_facts(self, authority_id: int):
 		"""Get stored fact records for a legal authority."""
 		return self.legal_authority_storage.get_authority_facts(authority_id)
+
+	def get_authority_search_programs(self, authority_id: int):
+		"""Get stored search-program records for a legal authority."""
+		return self.legal_authority_storage.get_authority_search_programs(authority_id)
 	
 	def retrieve_evidence(self, cid: str):
 		"""
@@ -2421,6 +2425,22 @@ class Mediator:
 			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
 		return self.evidence_state.get_scraper_queue(user_id=user_id, status=status, limit=limit)
 
+	def get_scraper_queue_state(self, user_id: str = None, status: str = None, limit: int = 20):
+		"""Inspect scraper queue state without claiming or running new jobs."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		if hasattr(self.evidence_state, 'get_scraper_queue_state'):
+			return self.evidence_state.get_scraper_queue_state(user_id=user_id, status=status, limit=limit)
+		jobs = self.evidence_state.get_scraper_queue(user_id=user_id, status=status, limit=limit)
+		return {
+			'available': True,
+			'user_id': user_id,
+			'status': status,
+			'jobs': jobs,
+			'job_count': len(jobs),
+			'inspection_only': True,
+		}
+
 	def get_scraper_queue_job(self, job_id: int):
 		"""Get one queued scraper job."""
 		return self.evidence_state.get_scraper_queue_job(job_id)
@@ -2461,7 +2481,11 @@ class Mediator:
 				metadata={
 					'final_result_count': len(run_result.get('final_results', []) or []),
 					'storage_summary': run_result.get('storage_summary', {}),
+					'worker_id': worker_id,
+					'claimed_job_id': job.get('id'),
+					'executed_from_queue': True,
 				},
+				worker_id=worker_id,
 			)
 			return {
 				'claimed': True,
@@ -2474,6 +2498,7 @@ class Mediator:
 			completion = self.evidence_state.complete_scraper_job(
 				job_id=job['id'],
 				error=str(exc),
+				worker_id=worker_id,
 			)
 			return {
 				'claimed': True,
@@ -2716,6 +2741,25 @@ class Mediator:
 			claim_element_text=resolved_claim_element_text,
 		)
 
+	def get_claim_fact_registry_summary(
+		self,
+		claim_type: str = None,
+		user_id: str = None,
+		claim_element_id: str = None,
+		claim_element_text: str = None,
+		claim_element: str = None,
+	):
+		"""Get compact source/corpus counts for claim-support facts."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		resolved_claim_element_text = claim_element_text or claim_element
+		return self.claim_support.get_claim_fact_registry_summary(
+			user_id,
+			claim_type,
+			claim_element_id=claim_element_id,
+			claim_element_text=resolved_claim_element_text,
+		)
+
 	def get_claim_overview(
 		self,
 		claim_type: str = None,
@@ -2746,6 +2790,46 @@ class Mediator:
 			required_support_kinds=required_support_kinds,
 		)
 
+	def persist_claim_coverage_matrix_snapshot(
+		self,
+		claim_type: str = None,
+		user_id: str = None,
+		required_support_kinds: List[str] = None,
+		coverage_matrix: Dict[str, Any] = None,
+		metadata: Dict[str, Any] = None,
+		retention_limit: int = 3,
+	):
+		"""Persist the current claim coverage matrix for review and drafting reuse."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		persist_metadata = dict(metadata or {})
+		handoff_metadata = _build_confirmed_intake_summary_handoff_metadata(self)
+		if handoff_metadata.get('intake_summary_handoff') and 'intake_summary_handoff' not in persist_metadata:
+			persist_metadata['intake_summary_handoff'] = handoff_metadata['intake_summary_handoff']
+		return self.claim_support.persist_claim_coverage_matrix_snapshot(
+			user_id,
+			claim_type=claim_type,
+			required_support_kinds=required_support_kinds,
+			coverage_matrix=coverage_matrix,
+			metadata=persist_metadata,
+			retention_limit=retention_limit,
+		)
+
+	def get_claim_coverage_matrix_snapshots(
+		self,
+		claim_type: str = None,
+		user_id: str = None,
+		required_support_kinds: List[str] = None,
+	):
+		"""Return latest persisted claim coverage matrix snapshots by claim."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_claim_coverage_matrix_snapshots(
+			user_id,
+			claim_type=claim_type,
+			required_support_kinds=required_support_kinds,
+		)
+
 	def get_claim_support_gaps(
 		self,
 		claim_type: str = None,
@@ -2762,12 +2846,33 @@ class Mediator:
 		)
 		for current_claim, claim_gap in gap_analysis.get('claims', {}).items():
 			for element in claim_gap.get('unresolved_elements', []):
-				element['graph_support'] = self.query_claim_graph_support(
+				missing_support_kinds = element.get('missing_support_kinds') or []
+				if not isinstance(missing_support_kinds, list):
+					missing_support_kinds = [missing_support_kinds]
+				graph_support = self.query_claim_graph_support(
 					claim_type=current_claim,
 					claim_element_id=element.get('element_id'),
 					claim_element=element.get('element_text'),
 					user_id=user_id,
 				)
+				graph_support_assessment = self._classify_graph_support(graph_support)
+				graph_gap_context = self._build_graph_gap_context(
+					graph_support,
+					graph_support_assessment,
+				)
+				element['graph_support'] = graph_support
+				element['graph_support_strength'] = graph_gap_context.get('strength', 'none')
+				element['graph_gap_context'] = graph_gap_context
+				element['graph_gap_query'] = self._build_graph_gap_query(
+					current_claim,
+					element.get('element_id'),
+					element.get('element_text'),
+					missing_support_kinds,
+					graph_gap_context,
+				)
+			claim_gap['graph_gap_query_summary'] = self._summarize_graph_gap_queries(
+				claim_gap.get('unresolved_elements', [])
+			)
 		return gap_analysis
 
 	def get_claim_support_validation(
@@ -2780,6 +2885,21 @@ class Mediator:
 		if user_id is None:
 			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
 		return self.claim_support.get_claim_support_validation(
+			user_id,
+			claim_type=claim_type,
+			required_support_kinds=required_support_kinds,
+		)
+
+	def get_formal_validation_report(
+		self,
+		claim_type: str = None,
+		user_id: str = None,
+		required_support_kinds: List[str] = None,
+	):
+		"""Return a formal validation report suitable for draft-generation review."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_formal_validation_report(
 			user_id,
 			claim_type=claim_type,
 			required_support_kinds=required_support_kinds,
@@ -3220,6 +3340,31 @@ class Mediator:
 			metadata=metadata,
 		)
 
+	def get_background_enrichment_job(self, job_id: int, user_id: str = None) -> Dict[str, Any]:
+		"""Return one background enrichment job with progress and partial results."""
+		if user_id is None:
+			user_id = getattr(self.state, 'username', None) or getattr(self.state, 'hashed_username', 'anonymous')
+		return self.claim_support.get_background_enrichment_job(job_id, user_id=user_id)
+
+	def update_background_enrichment_job_status(
+		self,
+		job_id: int,
+		status: str,
+		progress: Dict[str, Any] = None,
+		partial_results: Dict[str, Any] = None,
+		error: str = None,
+		metadata: Dict[str, Any] = None,
+	) -> Dict[str, Any]:
+		"""Update a background enrichment job's status/progress metadata."""
+		return self.claim_support.update_background_enrichment_job_status(
+			job_id,
+			status,
+			progress=progress,
+			partial_results=partial_results,
+			error=error,
+			metadata=metadata,
+		)
+
 	# M4: Retrieval Sessions and Evidence Ranking
 	def create_retrieval_session(
 		self,
@@ -3499,6 +3644,16 @@ class Mediator:
 						'claim_element_text': candidate.get('claim_element_text'),
 						'extraction_confidence': float(candidate.get('extraction_confidence', 0.0) or 0.0),
 						'support_ref': link.get('support_ref'),
+						'source_passage': (
+							dict(candidate.get('source_passage'))
+							if isinstance(candidate.get('source_passage'), dict)
+							else {}
+						),
+						'parse_lineage': (
+							dict(candidate.get('parse_lineage'))
+							if isinstance(candidate.get('parse_lineage'), dict)
+							else {}
+						),
 					}
 				)
 		candidates.sort(
@@ -3526,6 +3681,16 @@ class Mediator:
 				self._normalize_rule_query_text(candidate.get('rule_text'))
 				for candidate in top_candidates
 				if candidate.get('rule_text')
+			],
+			'top_rule_passages': [
+				dict(candidate.get('source_passage') or {})
+				for candidate in top_candidates
+				if isinstance(candidate.get('source_passage'), dict) and candidate.get('source_passage')
+			],
+			'parse_lineages': [
+				dict(candidate.get('parse_lineage') or {})
+				for candidate in top_candidates
+				if isinstance(candidate.get('parse_lineage'), dict) and candidate.get('parse_lineage')
 			],
 			'top_rule_types': top_rule_types[:3],
 			'has_exception_rules': int(by_type.get('exception', 0) or 0) > 0,
@@ -3631,8 +3796,11 @@ class Mediator:
 		)
 		fact_gap_targeted = recommended_action == 'collect_fact_support'
 		adverse_authority_targeted = recommended_action == 'review_adverse_authority'
+		ontology_quality_targeted = recommended_action == 'improve_ontology_quality' and not contradiction_targeted and not reasoning_targeted
 		quality_targeted = recommended_action == 'improve_parse_quality' and not contradiction_targeted and not reasoning_targeted
 		target_support_kinds = list(missing_support_kinds)
+		if ontology_quality_targeted and not target_support_kinds:
+			target_support_kinds = ['evidence']
 		if quality_targeted and not target_support_kinds:
 			target_support_kinds = [
 				kind for kind, count in support_kind_counts.items()
@@ -3670,6 +3838,12 @@ class Mediator:
 					_compose_query(f'"{claim_type}"', f'"{element_text}"', 'supporting evidence formal proof', gap_focus),
 					_compose_query(f'"{element_text}"', 'corroborating records legal elements', claim_type, gap_focus),
 					_compose_query(f'"{claim_type}"', f'"{element_text}"', 'evidence burden of proof'),
+				]
+			elif ontology_quality_targeted:
+				queries['evidence'] = [
+					_compose_query(f'"{claim_type}"', f'"{element_text}"', 'knowledge graph missing entity relationship source detail'),
+					_compose_query(f'"{element_text}"', 'support graph complete facts entities relationships', claim_type),
+					_compose_query(f'"{claim_type}"', f'"{element_text}"', 'document source context graph relation'),
 				]
 			elif quality_targeted:
 				queries['evidence'] = [
@@ -3713,6 +3887,12 @@ class Mediator:
 					_compose_query(f'"{claim_type}"', f'"{element_text}"', 'legal standard burden of proof', gap_focus),
 					_compose_query(f'"{element_text}"', 'formal elements precedent', claim_type),
 				]
+			elif ontology_quality_targeted:
+				queries['authority'] = [
+					_compose_query(f'"{claim_type}"', f'"{element_text}"', 'legal element relationship authority ontology'),
+					_compose_query(f'"{claim_type}"', f'"{element_text}"', 'case law fact pattern relationship elements'),
+					_compose_query(f'"{element_text}"', 'authority connects facts legal element', claim_type),
+				]
 			elif quality_targeted:
 				queries['authority'] = [
 					_compose_query(f'"{claim_type}"', f'"{element_text}"', 'official statute opinion PDF text'),
@@ -3732,12 +3912,15 @@ class Mediator:
 		adaptive_standard = bool(adaptive_retry_state.get('applied')) and str(adaptive_retry_state.get('adaptive_query_strategy') or '') == 'standard_gap_targeted'
 		resolved_standard = bool(task.get('manual_review_resolved')) and str(task.get('query_strategy') or '') == 'standard_gap_targeted'
 		use_standard_queries = adaptive_standard or resolved_standard
+		recommended_action = str(task.get('validation_recommended_action') or task.get('recommended_action') or '')
+		if task.get('follow_up_focus') == 'ontology_quality_gap_closure' and not recommended_action:
+			recommended_action = str(task.get('quality_follow_up_action') or 'improve_ontology_quality')
 		queries = self._build_follow_up_queries(
 			claim_type,
 			str(task.get('claim_element') or ''),
 			list(task.get('missing_support_kinds') or []),
 			support_by_kind=task.get('support_by_kind') if isinstance(task.get('support_by_kind'), dict) else {},
-			recommended_action='' if use_standard_queries else str(task.get('validation_recommended_action') or task.get('recommended_action') or ''),
+			recommended_action='' if use_standard_queries else recommended_action,
 			validation_status='' if use_standard_queries else str(task.get('validation_status') or ''),
 			proof_gaps=[] if use_standard_queries else list(task.get('proof_gaps') or []),
 			proof_decision_trace={}
@@ -3866,6 +4049,119 @@ class Mediator:
 				return 'awaiting_complainant_record'
 		return ''
 
+	def _build_follow_up_time_window(
+		self,
+		task: Dict[str, Any],
+		temporal_rule_profile: Dict[str, Any] = None,
+	) -> Dict[str, Any]:
+		profile = temporal_rule_profile if isinstance(temporal_rule_profile, dict) else {}
+		temporal_follow_ups = [
+			follow_up for follow_up in (profile.get('recommended_follow_ups') or [])
+			if isinstance(follow_up, dict)
+		]
+		blocking_reasons = [
+			str(reason).strip()
+			for reason in (profile.get('blocking_reasons') or [])
+			if str(reason).strip()
+		]
+		anchor_ids = list(dict.fromkeys([
+			*list(task.get('temporal_fact_ids') or []),
+			*list(task.get('temporal_relation_ids') or []),
+			*list(task.get('temporal_issue_ids') or []),
+		]))
+		window = {
+			'time_window_type': 'temporal_rule_window' if profile else '',
+			'profile_id': str(profile.get('profile_id') or task.get('temporal_rule_profile_id') or ''),
+			'status': str(profile.get('status') or task.get('temporal_rule_status') or ''),
+			'anchor_ids': anchor_ids,
+			'blocking_reasons': blocking_reasons,
+			'follow_up_count': len(temporal_follow_ups),
+			'query_terms': [],
+		}
+		terms: List[str] = []
+		for value in [
+			*blocking_reasons,
+			*(str(item.get('reason') or '') for item in temporal_follow_ups),
+		]:
+			for token in re.findall(r'[a-z0-9]+', value.lower()):
+				if token in {'temporal', 'ordering', 'before', 'after', 'during', 'within', 'deadline', 'notice', 'date', 'days', 'timeline', 'chronology'} and token not in terms:
+					terms.append(token)
+		window['query_terms'] = terms[:8]
+		if not any(window.values()):
+			return {}
+		return window
+
+	def _build_follow_up_source_preferences(
+		self,
+		task: Dict[str, Any],
+	) -> Dict[str, Any]:
+		focus = str(task.get('follow_up_focus') or '')
+		preferred_support_kind = str(task.get('preferred_support_kind') or '').strip().lower()
+		evidence_classes = [
+			str(item).strip().lower()
+			for item in (task.get('preferred_evidence_classes') or [])
+			if str(item).strip()
+		]
+		source_types: List[str] = []
+		artifact_families: List[str] = []
+		authority_families: List[str] = []
+		archive_first = False
+		live_web_ok = True
+
+		if preferred_support_kind == 'authority' or 'authority' in task.get('missing_support_kinds', []):
+			authority_families.extend(['statute', 'regulation', 'case_law'])
+		if preferred_support_kind in {'evidence', 'testimony'} or 'evidence' in task.get('missing_support_kinds', []):
+			source_types.extend(['evidence', 'web'])
+			artifact_families.extend(['archived_web_page', 'live_web_page'])
+			archive_first = True
+		if (
+			preferred_support_kind == 'testimony'
+			or focus == 'temporal_gap_closure'
+			or any('testimony' in item or 'witness' in item for item in evidence_classes)
+		):
+			source_types.insert(0, 'testimony')
+		if focus in {'temporal_gap_closure', 'contradiction_resolution'}:
+			source_types.extend(['evidence', 'testimony'])
+			artifact_families.insert(0, 'archived_web_page')
+			archive_first = True
+		if focus == 'ontology_quality_gap_closure':
+			source_types.extend(['evidence', 'testimony'])
+			artifact_families.extend(['archived_web_page', 'live_web_page'])
+			archive_first = True
+		if focus in {'adverse_authority_review', 'confirm_good_law', 'find_better_authority'}:
+			authority_families = ['case_law', 'statute', 'regulation']
+		if focus == 'parse_quality_improvement':
+			artifact_families = ['original_pdf', 'official_html', 'archived_web_page']
+			archive_first = True
+
+		return {
+			'preferred_support_kind': preferred_support_kind,
+			'source_types': list(dict.fromkeys([item for item in source_types if item])),
+			'artifact_families': list(dict.fromkeys([item for item in artifact_families if item])),
+			'authority_families': list(dict.fromkeys([item for item in authority_families if item])),
+			'evidence_classes': evidence_classes,
+			'archive_first': archive_first,
+			'live_web_allowed': live_web_ok,
+			'deduplicate_by': ['query_hash', 'url', 'citation', 'semantic_cluster'],
+		}
+
+	def _authority_intent_for_follow_up_task(self, task: Dict[str, Any]) -> str:
+		focus = str(task.get('follow_up_focus') or '')
+		if focus in {'adverse_authority_review', 'find_better_authority', 'contradiction_resolution'}:
+			return 'oppose'
+		if focus == 'confirm_good_law':
+			return 'confirm_good_law'
+		if focus == 'temporal_gap_closure':
+			return 'procedural'
+		if focus == 'fact_gap_closure':
+			return 'support'
+		if focus == 'ontology_quality_gap_closure':
+			return 'support'
+		primary_program = self._select_primary_authority_search_program(task)
+		if isinstance(primary_program, dict) and primary_program.get('authority_intent'):
+			return str(primary_program.get('authority_intent') or '')
+		return 'support'
+
 	def _build_follow_up_record_metadata(self, task: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
 		graph_summary = ((task.get('graph_support') or {}).get('summary', {})) if isinstance(task.get('graph_support'), dict) else {}
 		graph_results = ((task.get('graph_support') or {}).get('results', [])) if isinstance(task.get('graph_support'), dict) else []
@@ -3916,12 +4212,17 @@ class Mediator:
 			'primary_missing_fact': next((str(item).strip() for item in (task.get('missing_fact_bundle') or []) if str(item).strip()), ''),
 			'follow_up_focus': task.get('follow_up_focus', ''),
 			'query_strategy': task.get('query_strategy', ''),
+			'source_preferences': task.get('source_preferences', {}),
+			'time_window': task.get('time_window', {}),
+			'authority_intent': task.get('authority_intent', ''),
 			'adaptive_retry_applied': bool(adaptive_retry_state.get('applied', False)),
 			'adaptive_retry_reason': adaptive_retry_state.get('reason', ''),
 			'adaptive_query_strategy': adaptive_retry_state.get('adaptive_query_strategy', ''),
 			'adaptive_priority_penalty': int(adaptive_retry_state.get('priority_penalty', 0) or 0),
 			'adaptive_zero_result_attempt_count': int(adaptive_retry_state.get('zero_result_attempt_count', 0) or 0),
 			'adaptive_successful_result_attempt_count': int(adaptive_retry_state.get('successful_result_attempt_count', 0) or 0),
+			'graph_gap_context': dict(task.get('graph_gap_context') or {}),
+			'graph_gap_query': dict(task.get('graph_gap_query') or {}),
 			'graph_support_strength': task.get('graph_support_strength', ''),
 			'graph_support_summary': {
 				'total_fact_count': int(graph_summary.get('total_fact_count', 0) or 0),
@@ -3944,10 +4245,20 @@ class Mediator:
 			'content_origin': _primary_count_key(content_origin_counts),
 			'authority_treatment_summary': task.get('authority_treatment_summary', {}),
 			'authority_rule_candidate_summary': task.get('authority_rule_candidate_summary', {}),
+			'support_quality_summary': task.get('support_quality_summary', {}),
+			'quality_signal_counts': dict(task.get('quality_signal_counts') or {}),
+			'primary_quality_signal': dict(task.get('primary_quality_signal') or {}),
+			'quality_follow_up_action': task.get('quality_follow_up_action', ''),
+			'ontology_quality': dict(task.get('ontology_quality') or {}),
+			'ontology_gap_types': list(task.get('ontology_gap_types') or []),
+			'ontology_quality_gap_count': int(task.get('ontology_quality_gap_count', 0) or 0),
+			'ontology_has_blocking_gaps': bool(task.get('ontology_has_blocking_gaps', False)),
 			'rule_candidate_focus': {
 				'candidate_count': len(rule_candidate_context.get('rule_candidates', []) or []),
 				'top_rule_types': list(rule_candidate_context.get('top_rule_types', []) or []),
 				'top_rule_texts': list(rule_candidate_context.get('top_rule_texts', []) or []),
+				'top_rule_passages': list(rule_candidate_context.get('top_rule_passages', []) or []),
+				'parse_lineages': list(rule_candidate_context.get('parse_lineages', []) or []),
 			},
 		}
 		for key, value in extra.items():
@@ -4204,6 +4515,47 @@ class Mediator:
 			task['resolution_applied'] = 'manual_review_resolved'
 		return task
 
+	def _ontology_quality_follow_up_context(self, element: Dict[str, Any]) -> Dict[str, Any]:
+		reasoning = element.get('reasoning_diagnostics', {}) if isinstance(element.get('reasoning_diagnostics'), dict) else {}
+		quality = reasoning.get('graphrag_quality', {}) if isinstance(reasoning.get('graphrag_quality'), dict) else {}
+		gaps = quality.get('gaps', []) if isinstance(quality.get('gaps'), list) else []
+		has_gaps = bool(quality.get('has_gaps', False) or quality.get('has_blocking_gaps', False) or gaps)
+		if not quality or not has_gaps:
+			return {
+				'quality': {},
+				'gap_count': 0,
+				'gap_types': [],
+				'follow_up_action': '',
+				'has_blocking_gaps': False,
+			}
+		gap_types = [
+			str(gap.get('gap_type') or gap.get('type') or 'ontology_quality_gap').strip()
+			for gap in gaps
+			if isinstance(gap, dict) and str(gap.get('gap_type') or gap.get('type') or '').strip()
+		]
+		if not gap_types:
+			gap_types = ['ontology_quality_gap']
+		follow_up_action = next(
+			(
+				str(gap.get('follow_up_action') or '').strip()
+				for gap in gaps
+				if isinstance(gap, dict) and str(gap.get('follow_up_action') or '').strip()
+			),
+			'improve_ontology_quality',
+		)
+		try:
+			gap_count = int(quality.get('gap_count', 0) or 0)
+		except (TypeError, ValueError):
+			gap_count = 0
+		gap_count = max(len(gaps), gap_count, 1)
+		return {
+			'quality': dict(quality),
+			'gap_count': gap_count,
+			'gap_types': gap_types,
+			'follow_up_action': follow_up_action,
+			'has_blocking_gaps': bool(quality.get('has_blocking_gaps', False)),
+		}
+
 	def _build_follow_up_task(self, claim_type: str, element: Dict[str, Any], status: str,
 			required_support_kinds: List[str]) -> Dict[str, Any]:
 		element_text = element.get('element_text') or element.get('claim_element') or 'Unknown element'
@@ -4211,6 +4563,45 @@ class Mediator:
 		recommended_action = str(element.get('recommended_action') or '')
 		authority_treatment_summary = element.get('authority_treatment_summary', {}) if isinstance(element.get('authority_treatment_summary'), dict) else {}
 		authority_rule_candidate_summary = element.get('authority_rule_candidate_summary', {}) if isinstance(element.get('authority_rule_candidate_summary'), dict) else {}
+		support_quality_summary = element.get('support_quality_summary', {}) if isinstance(element.get('support_quality_summary'), dict) else {}
+		reasoning_diagnostics = element.get('reasoning_diagnostics', {}) if isinstance(element.get('reasoning_diagnostics'), dict) else {}
+		ontology_quality_context = self._ontology_quality_follow_up_context(element)
+		ontology_quality_gap_targeted = bool(ontology_quality_context.get('gap_count'))
+		quality_signal_counts = (
+			dict(support_quality_summary.get('quality_signal_counts', {}) or {})
+			if isinstance(support_quality_summary.get('quality_signal_counts'), dict)
+			else {}
+		)
+		if ontology_quality_gap_targeted:
+			quality_signal_counts['ontology_quality_gap'] = int(ontology_quality_context.get('gap_count', 1) or 1)
+		primary_quality_signal = (
+			element.get('primary_quality_signal')
+			if isinstance(element.get('primary_quality_signal'), dict)
+			else {}
+		)
+		if not primary_quality_signal and support_quality_summary:
+			primary_quality_signal_for_summary = getattr(
+				getattr(self, 'claim_support', None),
+				'_primary_quality_signal_for_summary',
+				None,
+			)
+			if callable(primary_quality_signal_for_summary):
+				primary_quality_signal = primary_quality_signal_for_summary(support_quality_summary)
+		if ontology_quality_gap_targeted and (
+			not primary_quality_signal or str(element.get('validation_status') or '') == 'supported'
+		):
+			primary_quality_signal = {
+				'signal_type': 'ontology_quality_gap',
+				'question_lane': 'ontology_quality_gap',
+				'follow_up_action': str(ontology_quality_context.get('follow_up_action') or 'improve_ontology_quality'),
+				'count': int(ontology_quality_context.get('gap_count', 1) or 1),
+			}
+		quality_follow_up_action = str(
+			element.get('quality_follow_up_action')
+			or primary_quality_signal.get('follow_up_action')
+			or (ontology_quality_context.get('follow_up_action') if ontology_quality_gap_targeted else '')
+			or ''
+		).strip()
 		rule_candidate_context = self._extract_rule_candidate_context(element)
 		missing_support_kinds = [
 			kind for kind in required_support_kinds
@@ -4221,7 +4612,6 @@ class Mediator:
 		proof_gaps = element.get('proof_gaps', []) if isinstance(element.get('proof_gaps'), list) else []
 		proof_gap_types = self._extract_proof_gap_types(proof_gaps)
 		proof_decision_trace = element.get('proof_decision_trace', {}) if isinstance(element.get('proof_decision_trace'), dict) else {}
-		reasoning_diagnostics = element.get('reasoning_diagnostics', {}) if isinstance(element.get('reasoning_diagnostics'), dict) else {}
 		temporal_rule_profile = reasoning_diagnostics.get('temporal_rule_profile', {}) if isinstance(reasoning_diagnostics.get('temporal_rule_profile'), dict) else {}
 		temporal_proof_bundle = (
 			reasoning_diagnostics.get('temporal_proof_bundle')
@@ -4234,12 +4624,17 @@ class Mediator:
 			proof_decision_trace,
 			temporal_rule_profile,
 		)
+		query_recommended_action = (
+			str(ontology_quality_context.get('follow_up_action') or 'improve_ontology_quality')
+			if ontology_quality_gap_targeted and not recommended_action
+			else recommended_action
+		)
 		queries = self._build_follow_up_queries(
 			claim_type,
 			element_text,
 			missing_support_kinds,
 			support_by_kind=support_by_kind,
-			recommended_action=recommended_action,
+			recommended_action=query_recommended_action,
 			validation_status=validation_status,
 			proof_gaps=proof_gaps,
 			proof_decision_trace=proof_decision_trace,
@@ -4255,6 +4650,8 @@ class Mediator:
 		elif temporal_gap_targeted:
 			priority = 'high'
 		elif reasoning_gap_targeted:
+			priority = 'high'
+		elif ontology_quality_gap_targeted and bool(ontology_quality_context.get('has_blocking_gaps', False)):
 			priority = 'high'
 		elif recommended_action == 'improve_parse_quality':
 			priority = 'high'
@@ -4275,6 +4672,10 @@ class Mediator:
 			execution_mode = 'review_and_retrieve'
 		elif reasoning_gap_targeted:
 			execution_mode = 'manual_review'
+		elif ontology_quality_gap_targeted and missing_support_kinds:
+			execution_mode = 'review_and_retrieve'
+		elif ontology_quality_gap_targeted:
+			execution_mode = 'retrieve_support'
 		follow_up_focus = 'support_gap_closure'
 		if validation_status == 'contradicted':
 			follow_up_focus = 'contradiction_resolution'
@@ -4286,6 +4687,8 @@ class Mediator:
 			follow_up_focus = 'temporal_gap_closure'
 		elif reasoning_gap_targeted:
 			follow_up_focus = 'reasoning_gap_closure'
+		elif ontology_quality_gap_targeted:
+			follow_up_focus = 'ontology_quality_gap_closure'
 		elif recommended_action == 'improve_parse_quality':
 			follow_up_focus = 'parse_quality_improvement'
 		else:
@@ -4305,6 +4708,8 @@ class Mediator:
 			query_strategy = 'temporal_gap_targeted'
 		elif follow_up_focus == 'reasoning_gap_closure':
 			query_strategy = 'reasoning_gap_targeted'
+		elif follow_up_focus == 'ontology_quality_gap_closure':
+			query_strategy = 'ontology_quality_gap_targeted'
 		elif follow_up_focus == 'parse_quality_improvement':
 			query_strategy = 'quality_gap_targeted'
 		elif follow_up_focus == 'confirm_good_law':
@@ -4322,6 +4727,14 @@ class Mediator:
 		resolution_status = str(element.get('resolution_status') or '').strip().lower()
 		if not resolution_status and temporal_gap_targeted:
 			resolution_status = self._temporal_rule_resolution_status(temporal_rule_profile)
+		time_window = self._build_follow_up_time_window(
+			{
+				'temporal_fact_ids': list(temporal_proof_bundle.get('temporal_fact_ids', []) or []),
+				'temporal_relation_ids': list(temporal_proof_bundle.get('temporal_relation_ids', []) or []),
+				'temporal_issue_ids': list(temporal_proof_bundle.get('temporal_issue_ids', []) or []),
+			},
+			temporal_rule_profile,
+		)
 		return {
 			'claim_type': claim_type,
 			'claim_element_id': element.get('element_id'),
@@ -4339,6 +4752,14 @@ class Mediator:
 			'validation_recommended_action': recommended_action,
 			'authority_treatment_summary': authority_treatment_summary,
 			'authority_rule_candidate_summary': authority_rule_candidate_summary,
+			'support_quality_summary': support_quality_summary,
+			'ontology_quality': dict(ontology_quality_context.get('quality') or {}),
+			'ontology_gap_types': list(ontology_quality_context.get('gap_types') or []),
+			'ontology_quality_gap_count': int(ontology_quality_context.get('gap_count', 0) or 0),
+			'ontology_has_blocking_gaps': bool(ontology_quality_context.get('has_blocking_gaps', False)),
+			'quality_signal_counts': quality_signal_counts,
+			'primary_quality_signal': primary_quality_signal,
+			'quality_follow_up_action': quality_follow_up_action,
 			'rule_candidate_context': rule_candidate_context,
 			'temporal_rule_profile': temporal_rule_profile,
 			'temporal_rule_profile_id': str(temporal_rule_profile.get('profile_id') or ''),
@@ -4349,6 +4770,7 @@ class Mediator:
 			'temporal_fact_ids': list(temporal_proof_bundle.get('temporal_fact_ids', []) or []),
 			'temporal_relation_ids': list(temporal_proof_bundle.get('temporal_relation_ids', []) or []),
 			'temporal_issue_ids': list(temporal_proof_bundle.get('temporal_issue_ids', []) or []),
+			'time_window': time_window,
 			'execution_mode': execution_mode,
 			'requires_manual_review': execution_mode in {'manual_review', 'review_and_retrieve'},
 			'reasoning_backed': bool(((element.get('reasoning_diagnostics') or {}).get('backend_available_count', 0) or 0) > 0),
@@ -4361,6 +4783,8 @@ class Mediator:
 			'preferred_support_kind': preferred_support_kind,
 			'preferred_evidence_classes': list(element.get('preferred_evidence_classes', []) or []),
 			'fallback_support_kinds': list(element.get('fallback_support_kinds', []) or []),
+			'source_preferences': {},
+			'authority_intent': '',
 			'source_quality_target': str(element.get('source_quality_target') or '').strip(),
 			'missing_fact_bundle': list(element.get('missing_fact_bundle', []) or []),
 			'satisfied_fact_bundle': list(element.get('satisfied_fact_bundle', []) or []),
@@ -4418,6 +4842,24 @@ class Mediator:
 			return []
 		claim_element_id = str(task.get('claim_element_id') or '').strip()
 		claim_element_text = str(task.get('claim_element') or '').strip()
+		source_preferences = task.get('source_preferences') if isinstance(task.get('source_preferences'), dict) else {}
+		time_window = task.get('time_window') if isinstance(task.get('time_window'), dict) else {}
+		graph_gap_query = task.get('graph_gap_query') if isinstance(task.get('graph_gap_query'), dict) else {}
+		graph_gap_missing_support_values = graph_gap_query.get('missing_support_kinds') or []
+		if not isinstance(graph_gap_missing_support_values, list):
+			graph_gap_missing_support_values = [graph_gap_missing_support_values]
+		graph_gap_missing_support_kinds = [
+			str(kind or '').strip()
+			for kind in graph_gap_missing_support_values
+			if str(kind or '').strip()
+		]
+		graph_gap_has_support = bool(graph_gap_query.get('has_graph_support', False))
+		graph_gap_authority_bias = ''
+		if graph_gap_has_support and 'authority' in graph_gap_missing_support_kinds:
+			graph_gap_authority_bias = 'graph_backed_authority_gap'
+		defense_themes = self._authority_defense_themes_for_follow_up_task(task)
+		if graph_gap_authority_bias:
+			defense_themes = list(dict.fromkeys([*defense_themes, graph_gap_authority_bias]))
 		try:
 			programs = legal_authority_search.build_search_programs(
 				query=primary_query,
@@ -4428,6 +4870,11 @@ class Mediator:
 						'claim_element_text': claim_element_text,
 					}
 				],
+				jurisdiction=str(task.get('jurisdiction') or ''),
+				forum=str(task.get('forum') or ''),
+				time_window=time_window,
+				defense_themes=defense_themes,
+				authority_families=list(source_preferences.get('authority_families') or []),
 			)
 		except Exception as exc:
 			self.log(
@@ -4472,11 +4919,25 @@ class Mediator:
 				'element_definition_search': 2,
 				'treatment_check_search': 3,
 			})
+		elif focus == 'ontology_quality_gap_closure':
+			priority_by_type.update({
+				'element_definition_search': 1,
+				'fact_pattern_search': 2,
+				'treatment_check_search': 3,
+			})
 		elif focus == 'parse_quality_improvement':
 			priority_by_type.update({
 				'element_definition_search': 1,
 				'fact_pattern_search': 2,
 				'treatment_check_search': 3,
+			})
+		if graph_gap_authority_bias:
+			priority_by_type.update({
+				'element_definition_search': 1,
+				'fact_pattern_search': 2,
+				'treatment_check_search': 3,
+				'adverse_authority_search': 4,
+				'procedural_search': 5,
 			})
 
 		rule_candidate_context = task.get('rule_candidate_context', {}) if isinstance(task.get('rule_candidate_context'), dict) else {}
@@ -4561,6 +5022,12 @@ class Mediator:
 				'validation_status': str(task.get('validation_status') or ''),
 				'primary_authority_query': primary_query,
 				'query_variants': list(authority_queries),
+				'source_preferences': dict(source_preferences),
+				'time_window': dict(time_window),
+				'defense_themes': list(defense_themes),
+				'graph_gap_query': dict(graph_gap_query),
+				'graph_gap_authority_bias': graph_gap_authority_bias,
+				'graph_gap_missing_support_kinds': list(graph_gap_missing_support_kinds),
 				'rule_signal_bias': rule_signal_bias or existing_rule_signal_bias,
 				'rule_candidate_focus_types': list(top_rule_types[:3]),
 				'rule_candidate_focus_texts': list((rule_candidate_context.get('top_rule_texts') or [])[:2]),
@@ -4572,6 +5039,8 @@ class Mediator:
 				'claim_type': str(program.get('claim_type') or claim_type),
 				'claim_element_id': str(program.get('claim_element_id') or claim_element_id),
 				'claim_element_text': str(program.get('claim_element_text') or claim_element_text),
+				'jurisdiction': str(program.get('jurisdiction') or task.get('jurisdiction') or ''),
+				'forum': str(program.get('forum') or task.get('forum') or ''),
 				'metadata': metadata,
 			})
 
@@ -4584,9 +5053,61 @@ class Mediator:
 		)
 		return normalized_programs
 
+	def _authority_defense_themes_for_follow_up_task(self, task: Dict[str, Any]) -> List[str]:
+		focus = str(task.get('follow_up_focus') or '')
+		themes: List[str] = []
+		focus_theme = {
+			'contradiction_resolution': 'contradiction_or_rebuttal',
+			'adverse_authority_review': 'adverse_authority_or_exception',
+			'fact_gap_closure': 'predicate_fact_gap',
+			'temporal_gap_closure': 'temporal_prerequisite',
+			'reasoning_gap_closure': 'formal_proof_gap',
+			'ontology_quality_gap_closure': 'ontology_quality',
+			'parse_quality_improvement': 'source_quality',
+			'confirm_good_law': 'authority_treatment',
+			'find_better_authority': 'limiting_authority',
+		}.get(focus)
+		if focus_theme:
+			themes.append(focus_theme)
+		rule_candidate_context = task.get('rule_candidate_context') if isinstance(task.get('rule_candidate_context'), dict) else {}
+		for rule_type in (rule_candidate_context.get('top_rule_types') or []):
+			normalized = str(rule_type or '').strip().lower()
+			if normalized == 'exception':
+				themes.append('exception')
+			elif normalized in {'procedural_prerequisite', 'procedure'}:
+				themes.append('procedural_prerequisite')
+			elif normalized in {'element', 'definition'}:
+				themes.append('element_standard')
+		for item in (task.get('missing_fact_bundle') or []):
+			value = str(item or '').strip()
+			if value:
+				themes.append(f'fact::{value[:80]}')
+		return list(dict.fromkeys(themes))
+
 	def _summarize_authority_search_programs(self, programs: List[Dict[str, Any]]) -> Dict[str, Any]:
 		program_type_counts: Dict[str, int] = {}
 		authority_intent_counts: Dict[str, int] = {}
+		jurisdiction_counts: Dict[str, int] = {}
+		forum_counts: Dict[str, int] = {}
+		authority_family_counts: Dict[str, int] = {}
+		defense_theme_counts: Dict[str, int] = {}
+		time_window_counts: Dict[str, int] = {}
+		graph_gap_authority_bias_counts: Dict[str, int] = {}
+
+		def _increment(counts: Dict[str, int], value: Any) -> None:
+			normalized = str(value or '').strip()
+			if normalized:
+				counts[normalized] = counts.get(normalized, 0) + 1
+
+		def _time_window_label(value: Any) -> str:
+			if not isinstance(value, dict):
+				return ''
+			window_type = str(value.get('time_window_type') or '').strip()
+			profile_id = str(value.get('profile_id') or '').strip()
+			status = str(value.get('status') or '').strip()
+			parts = [item for item in [window_type, profile_id, status] if item]
+			return ':'.join(parts)
+
 		for program in programs:
 			if not isinstance(program, dict):
 				continue
@@ -4594,21 +5115,61 @@ class Mediator:
 			program_type_counts[program_type] = program_type_counts.get(program_type, 0) + 1
 			authority_intent = str(program.get('authority_intent') or 'unknown')
 			authority_intent_counts[authority_intent] = authority_intent_counts.get(authority_intent, 0) + 1
+			_increment(jurisdiction_counts, program.get('jurisdiction'))
+			_increment(forum_counts, program.get('forum'))
+			for family in program.get('authority_families') or []:
+				_increment(authority_family_counts, family)
+			metadata = program.get('metadata') if isinstance(program.get('metadata'), dict) else {}
+			for theme in metadata.get('defense_themes') or []:
+				_increment(defense_theme_counts, theme)
+			_increment(time_window_counts, _time_window_label(metadata.get('time_window')))
+			_increment(graph_gap_authority_bias_counts, metadata.get('graph_gap_authority_bias'))
 		primary_program = programs[0] if programs else {}
 		primary_metadata = primary_program.get('metadata') or {}
 		primary_program_bias = ''
 		primary_program_rule_bias = ''
+		primary_graph_gap_authority_bias = ''
+		primary_defense_themes: List[str] = []
+		primary_time_window: Dict[str, Any] = {}
 		if isinstance(primary_metadata, dict):
 			primary_program_bias = str(primary_metadata.get('authority_signal_bias') or '')
 			primary_program_rule_bias = str(primary_metadata.get('rule_signal_bias') or '')
+			primary_graph_gap_authority_bias = str(primary_metadata.get('graph_gap_authority_bias') or '')
+			primary_defense_themes = [
+				str(theme)
+				for theme in (primary_metadata.get('defense_themes') or [])
+				if str(theme).strip()
+			]
+			primary_time_window = (
+				dict(primary_metadata.get('time_window') or {})
+				if isinstance(primary_metadata.get('time_window'), dict)
+				else {}
+			)
 		return {
 			'program_count': len(programs),
 			'program_type_counts': program_type_counts,
 			'authority_intent_counts': authority_intent_counts,
+			'jurisdiction_counts': jurisdiction_counts,
+			'forum_counts': forum_counts,
+			'authority_family_counts': authority_family_counts,
+			'defense_theme_counts': defense_theme_counts,
+			'time_window_counts': time_window_counts,
+			'graph_gap_authority_bias_counts': graph_gap_authority_bias_counts,
 			'primary_program_id': str(primary_program.get('program_id') or ''),
 			'primary_program_type': str(primary_program.get('program_type') or ''),
+			'primary_program_intent': str(primary_program.get('authority_intent') or ''),
+			'primary_jurisdiction': str(primary_program.get('jurisdiction') or ''),
+			'primary_forum': str(primary_program.get('forum') or ''),
+			'primary_authority_families': [
+				str(family)
+				for family in (primary_program.get('authority_families') or [])
+				if str(family).strip()
+			],
+			'primary_defense_themes': primary_defense_themes,
+			'primary_time_window': primary_time_window,
 			'primary_program_bias': primary_program_bias,
 			'primary_program_rule_bias': primary_program_rule_bias,
+			'primary_graph_gap_authority_bias': primary_graph_gap_authority_bias,
 		}
 
 	def _classify_graph_support(self, graph_support: Dict[str, Any]) -> Dict[str, Any]:
@@ -4635,6 +5196,51 @@ class Mediator:
 			'recommended_action': 'retrieve_more_support',
 		}
 
+	def _build_graph_gap_context(
+		self,
+		graph_support: Dict[str, Any],
+		graph_support_assessment: Dict[str, Any],
+	) -> Dict[str, Any]:
+		summary = graph_support.get('summary', {}) if isinstance(graph_support, dict) else {}
+		results = graph_support.get('results', []) if isinstance(graph_support, dict) and isinstance(graph_support.get('results'), list) else []
+		fact_registry_summary = summary.get('fact_registry_summary') if isinstance(summary.get('fact_registry_summary'), dict) else {
+			'registry_version': 'claim_fact_registry_summary.v1',
+			'fact_count': int(summary.get('total_fact_count', 0) or 0),
+			'unique_source_ref_count': int(summary.get('unique_source_ref_count', 0) or 0),
+			'unique_source_record_count': int(summary.get('unique_source_record_count', 0) or 0),
+			'passage_anchored_count': int(summary.get('passage_anchored_count', 0) or 0),
+			'source_family_counts': dict(summary.get('source_family_counts') or {}) if isinstance(summary.get('source_family_counts'), dict) else {},
+			'record_scope_counts': dict(summary.get('record_scope_counts') or {}) if isinstance(summary.get('record_scope_counts'), dict) else {},
+			'artifact_family_counts': dict(summary.get('artifact_family_counts') or {}) if isinstance(summary.get('artifact_family_counts'), dict) else {},
+			'corpus_family_counts': dict(summary.get('corpus_family_counts') or {}) if isinstance(summary.get('corpus_family_counts'), dict) else {},
+			'content_origin_counts': dict(summary.get('content_origin_counts') or {}) if isinstance(summary.get('content_origin_counts'), dict) else {},
+			'parse_source_counts': dict(summary.get('parse_source_counts') or {}) if isinstance(summary.get('parse_source_counts'), dict) else {},
+			'input_format_counts': dict(summary.get('input_format_counts') or {}) if isinstance(summary.get('input_format_counts'), dict) else {},
+			'quality_tier_counts': dict(summary.get('quality_tier_counts') or {}) if isinstance(summary.get('quality_tier_counts'), dict) else {},
+		}
+		return {
+			'strength': str(graph_support_assessment.get('strength') or 'none'),
+			'recommended_action': str(graph_support_assessment.get('recommended_action') or ''),
+			'priority_adjustment': int(graph_support_assessment.get('priority_adjustment', 0) or 0),
+			'has_graph_support': bool(results),
+			'result_count': len(results),
+			'total_fact_count': int(summary.get('total_fact_count', 0) or 0),
+			'unique_fact_count': int(summary.get('unique_fact_count', 0) or 0),
+			'duplicate_fact_count': int(summary.get('duplicate_fact_count', 0) or 0),
+			'semantic_cluster_count': int(
+				summary.get('semantic_cluster_count', summary.get('unique_fact_count', summary.get('total_fact_count', 0))) or 0
+			),
+			'semantic_duplicate_count': int(summary.get('semantic_duplicate_count', summary.get('duplicate_fact_count', 0)) or 0),
+			'max_score': float(summary.get('max_score', 0.0) or 0.0),
+			'support_by_kind': dict(summary.get('support_by_kind') or {}) if isinstance(summary.get('support_by_kind'), dict) else {},
+			'support_by_source': dict(summary.get('support_by_source') or {}) if isinstance(summary.get('support_by_source'), dict) else {},
+			'source_family_counts': dict(summary.get('source_family_counts') or {}) if isinstance(summary.get('source_family_counts'), dict) else {},
+			'artifact_family_counts': dict(summary.get('artifact_family_counts') or {}) if isinstance(summary.get('artifact_family_counts'), dict) else {},
+			'corpus_family_counts': dict(summary.get('corpus_family_counts') or {}) if isinstance(summary.get('corpus_family_counts'), dict) else {},
+			'content_origin_counts': dict(summary.get('content_origin_counts') or {}) if isinstance(summary.get('content_origin_counts'), dict) else {},
+			'fact_registry_summary': dict(fact_registry_summary),
+		}
+
 	def _priority_from_score(self, score: int) -> str:
 		if score >= 3:
 			return 'high'
@@ -4648,7 +5254,12 @@ class Mediator:
 				'suppress': False,
 				'reason': '',
 			}
-		if task.get('follow_up_focus') in {'reasoning_gap_closure', 'temporal_gap_closure', 'parse_quality_improvement'}:
+		if task.get('follow_up_focus') in {
+			'reasoning_gap_closure',
+			'temporal_gap_closure',
+			'parse_quality_improvement',
+			'ontology_quality_gap_closure',
+		}:
 			return {
 				'suppress': False,
 				'reason': '',
@@ -4673,6 +5284,149 @@ class Mediator:
 			'suppress': False,
 			'reason': '',
 		}
+
+	def _build_graph_gap_query(
+		self,
+		claim_type: Any,
+		claim_element_id: Any,
+		claim_element_text: Any,
+		missing_support_kinds: Any,
+		graph_gap_context: Dict[str, Any],
+	) -> Dict[str, Any]:
+		normalized_missing_support_kinds = missing_support_kinds or []
+		if not isinstance(normalized_missing_support_kinds, list):
+			normalized_missing_support_kinds = [normalized_missing_support_kinds]
+		return {
+			'claim_type': claim_type,
+			'claim_element_id': claim_element_id,
+			'claim_element_text': claim_element_text,
+			'missing_support_kinds': list(normalized_missing_support_kinds),
+			'recommended_action': graph_gap_context.get('recommended_action', ''),
+			'priority_adjustment': int(graph_gap_context.get('priority_adjustment', 0) or 0),
+			'strength': graph_gap_context.get('strength', 'none'),
+			'has_graph_support': bool(graph_gap_context.get('has_graph_support', False)),
+			'result_count': int(graph_gap_context.get('result_count', 0) or 0),
+			'total_fact_count': int(graph_gap_context.get('total_fact_count', 0) or 0),
+			'unique_fact_count': int(graph_gap_context.get('unique_fact_count', 0) or 0),
+			'duplicate_fact_count': int(graph_gap_context.get('duplicate_fact_count', 0) or 0),
+			'semantic_cluster_count': int(graph_gap_context.get('semantic_cluster_count', 0) or 0),
+			'semantic_duplicate_count': int(graph_gap_context.get('semantic_duplicate_count', 0) or 0),
+			'support_by_kind': dict(graph_gap_context.get('support_by_kind') or {}),
+			'support_by_source': dict(graph_gap_context.get('support_by_source') or {}),
+			'source_family_counts': dict(graph_gap_context.get('source_family_counts') or {}),
+			'corpus_family_counts': dict(graph_gap_context.get('corpus_family_counts') or {}),
+			'content_origin_counts': dict(graph_gap_context.get('content_origin_counts') or {}),
+			'fact_registry_summary': dict(graph_gap_context.get('fact_registry_summary') or {}),
+		}
+
+	def _summarize_graph_gap_queries(self, elements: List[Dict[str, Any]]) -> Dict[str, Any]:
+		summary = {
+			'graph_gap_query_count': 0,
+			'graph_gap_has_support_count': 0,
+			'graph_gap_empty_count': 0,
+			'graph_gap_total_fact_count': 0,
+			'graph_gap_unique_fact_count': 0,
+			'graph_gap_duplicate_fact_count': 0,
+			'graph_gap_semantic_cluster_count': 0,
+			'graph_gap_semantic_duplicate_count': 0,
+			'graph_gap_strength_counts': {},
+			'graph_gap_recommended_action_counts': {},
+			'graph_gap_priority_adjustment_counts': {},
+			'graph_gap_missing_support_kind_counts': {},
+			'graph_gap_support_by_kind': {},
+			'graph_gap_support_by_source': {},
+			'graph_gap_source_family_counts': {},
+			'graph_gap_corpus_family_counts': {},
+			'graph_gap_content_origin_counts': {},
+			'graph_gap_fact_registry_summary': {
+				'registry_version': 'claim_fact_registry_summary.v1',
+				'fact_count': 0,
+				'unique_source_ref_count': 0,
+				'unique_source_record_count': 0,
+				'passage_anchored_count': 0,
+				'source_family_counts': {},
+				'record_scope_counts': {},
+				'artifact_family_counts': {},
+				'corpus_family_counts': {},
+				'content_origin_counts': {},
+				'parse_source_counts': {},
+				'input_format_counts': {},
+				'quality_tier_counts': {},
+			},
+		}
+
+		def increment_count(target: Dict[str, int], value: Any) -> None:
+			normalized_value = '' if value is None else str(value).strip()
+			if not normalized_value:
+				return
+			target[normalized_value] = target.get(normalized_value, 0) + 1
+
+		def merge_counts(target: Dict[str, int], counts: Any) -> None:
+			if not isinstance(counts, dict):
+				return
+			for key, value in counts.items():
+				normalized_key = str(key or '').strip()
+				if not normalized_key:
+					continue
+				target[normalized_key] = target.get(normalized_key, 0) + int(value or 0)
+
+		def merge_fact_registry(fact_summary: Any) -> None:
+			if not isinstance(fact_summary, dict):
+				return
+			target = summary['graph_gap_fact_registry_summary']
+			for key in (
+				'fact_count',
+				'unique_source_ref_count',
+				'unique_source_record_count',
+				'passage_anchored_count',
+			):
+				target[key] = int(target.get(key, 0) or 0) + int(fact_summary.get(key, 0) or 0)
+			for key in (
+				'source_family_counts',
+				'record_scope_counts',
+				'artifact_family_counts',
+				'corpus_family_counts',
+				'content_origin_counts',
+				'parse_source_counts',
+				'input_format_counts',
+				'quality_tier_counts',
+			):
+				merge_counts(target[key], fact_summary.get(key))
+
+		for element in elements or []:
+			if not isinstance(element, dict):
+				continue
+			context = element.get('graph_gap_context')
+			if not isinstance(context, dict) or not context:
+				continue
+			summary['graph_gap_query_count'] += 1
+			if context.get('has_graph_support'):
+				summary['graph_gap_has_support_count'] += 1
+			missing_support_kinds = element.get('missing_support_kinds') or []
+			if not isinstance(missing_support_kinds, list):
+				missing_support_kinds = [missing_support_kinds]
+			for missing_kind in missing_support_kinds:
+				increment_count(summary['graph_gap_missing_support_kind_counts'], missing_kind)
+			increment_count(summary['graph_gap_strength_counts'], context.get('strength'))
+			increment_count(summary['graph_gap_recommended_action_counts'], context.get('recommended_action'))
+			increment_count(summary['graph_gap_priority_adjustment_counts'], context.get('priority_adjustment'))
+			summary['graph_gap_total_fact_count'] += int(context.get('total_fact_count', 0) or 0)
+			summary['graph_gap_unique_fact_count'] += int(context.get('unique_fact_count', 0) or 0)
+			summary['graph_gap_duplicate_fact_count'] += int(context.get('duplicate_fact_count', 0) or 0)
+			summary['graph_gap_semantic_cluster_count'] += int(context.get('semantic_cluster_count', 0) or 0)
+			summary['graph_gap_semantic_duplicate_count'] += int(context.get('semantic_duplicate_count', 0) or 0)
+			merge_counts(summary['graph_gap_support_by_kind'], context.get('support_by_kind'))
+			merge_counts(summary['graph_gap_support_by_source'], context.get('support_by_source'))
+			merge_counts(summary['graph_gap_source_family_counts'], context.get('source_family_counts'))
+			merge_counts(summary['graph_gap_corpus_family_counts'], context.get('corpus_family_counts'))
+			merge_counts(summary['graph_gap_content_origin_counts'], context.get('content_origin_counts'))
+			merge_fact_registry(context.get('fact_registry_summary'))
+
+		summary['graph_gap_empty_count'] = max(
+			int(summary['graph_gap_query_count']) - int(summary['graph_gap_has_support_count']),
+			0,
+		)
+		return summary
 
 	def get_claim_follow_up_plan(
 		self,
@@ -4719,7 +5473,10 @@ class Mediator:
 			)
 			tasks = []
 			for element in claim_data.get('elements', []):
-				if not isinstance(element, dict) or element.get('validation_status') == 'supported':
+				if not isinstance(element, dict):
+					continue
+				ontology_quality_context = self._ontology_quality_follow_up_context(element)
+				if element.get('validation_status') == 'supported' and not ontology_quality_context.get('gap_count'):
 					continue
 				task = self._build_follow_up_task(
 					current_claim,
@@ -4759,6 +5516,7 @@ class Mediator:
 						cooldown_seconds=cooldown_seconds,
 					)
 				graph_support_assessment = self._classify_graph_support(graph_support)
+				graph_gap_context = self._build_graph_gap_context(graph_support, graph_support_assessment)
 				adjusted_priority_score = max(
 					1,
 					min(3, int(task.get('priority_score', 2)) + int(graph_support_assessment.get('priority_adjustment', 0))),
@@ -4775,6 +5533,11 @@ class Mediator:
 						adjusted_priority_score,
 						3 if task.get('execution_mode') == 'manual_review' else 2,
 					)
+				if task.get('follow_up_focus') == 'ontology_quality_gap_closure':
+					adjusted_priority_score = max(
+						adjusted_priority_score,
+						3 if task.get('ontology_has_blocking_gaps') else 2,
+					)
 				if task.get('follow_up_focus') == 'adverse_authority_review':
 					adjusted_priority_score = max(
 						adjusted_priority_score,
@@ -4790,8 +5553,18 @@ class Mediator:
 				task['graph_support'] = graph_support
 				task['has_graph_support'] = bool(graph_support.get('results'))
 				task['graph_support_strength'] = graph_support_assessment['strength']
+				task['graph_gap_context'] = graph_gap_context
+				task['graph_gap_query'] = self._build_graph_gap_query(
+					current_claim,
+					task.get('claim_element_id'),
+					task.get('claim_element'),
+					task.get('missing_support_kinds'),
+					graph_gap_context,
+				)
 				if task.get('follow_up_focus') == 'parse_quality_improvement':
 					task['recommended_action'] = 'improve_parse_quality'
+				elif task.get('follow_up_focus') == 'ontology_quality_gap_closure':
+					task['recommended_action'] = 'improve_ontology_quality'
 				elif str(task.get('validation_recommended_action') or '') in {'collect_fact_support', 'review_adverse_authority'}:
 					task['recommended_action'] = str(task.get('validation_recommended_action') or '')
 				else:
@@ -4799,15 +5572,19 @@ class Mediator:
 				if task.get('validation_status') == 'contradicted' and not task.get('manual_review_resolved'):
 					task['recommended_action'] = 'resolve_contradiction'
 				if task.get('execution_mode') == 'manual_review' and not task.get('manual_review_resolved'):
-					task['recommended_action'] = (
-						'resolve_contradiction'
-						if task.get('validation_status') == 'contradicted'
-						else (
-							'review_adverse_authority'
-							if task.get('follow_up_focus') == 'adverse_authority_review'
-							else 'review_existing_support'
-						)
-					)
+					if task.get('validation_status') == 'contradicted':
+						task['recommended_action'] = 'resolve_contradiction'
+					elif task.get('follow_up_focus') == 'ontology_quality_gap_closure':
+						task['recommended_action'] = 'improve_ontology_quality'
+					elif task.get('follow_up_focus') == 'adverse_authority_review':
+						task['recommended_action'] = 'review_adverse_authority'
+					else:
+						task['recommended_action'] = 'review_existing_support'
+				task['source_preferences'] = self._build_follow_up_source_preferences(task)
+				task['time_window'] = self._build_follow_up_time_window(
+					task,
+					task.get('temporal_rule_profile') if isinstance(task.get('temporal_rule_profile'), dict) else {},
+				)
 				authority_search_programs = self._build_authority_search_programs_for_task(
 					current_claim,
 					task,
@@ -4816,6 +5593,7 @@ class Mediator:
 				task['authority_search_program_summary'] = self._summarize_authority_search_programs(
 					authority_search_programs
 				)
+				task['authority_intent'] = self._authority_intent_for_follow_up_task(task)
 				task['priority_score'] = adjusted_priority_score
 				task['priority'] = self._priority_from_score(adjusted_priority_score)
 				suppression = self._should_suppress_follow_up_task(task)
@@ -4895,11 +5673,16 @@ class Mediator:
 					'reasoning_backed': task.get('reasoning_backed', False),
 					'follow_up_focus': task.get('follow_up_focus', ''),
 					'query_strategy': task.get('query_strategy', ''),
+					'source_preferences': task.get('source_preferences', {}),
+					'time_window': task.get('time_window', {}),
+					'authority_intent': task.get('authority_intent', ''),
 					'proof_gap_count': int(task.get('proof_gap_count', 0) or 0),
 					'proof_gap_types': list(task.get('proof_gap_types') or []),
 					'authority_search_program_summary': task.get('authority_search_program_summary', {}),
 					'authority_search_programs': list(task.get('authority_search_programs') or []),
 					'graph_support': task.get('graph_support', {}),
+					'graph_gap_context': task.get('graph_gap_context', {}),
+					'graph_gap_query': task.get('graph_gap_query', {}),
 					'should_suppress_retrieval': task.get('should_suppress_retrieval', False),
 					'suppression_reason': task.get('suppression_reason', ''),
 					'resolution_status': task_resolution_status,
@@ -4979,7 +5762,13 @@ class Mediator:
 				lane_execution_records: List[Dict[str, Any]] = []
 				run_evidence_lane = (
 					support_kind in (None, 'evidence')
-					and 'evidence' in task.get('missing_support_kinds', [])
+					and (
+						'evidence' in task.get('missing_support_kinds', [])
+						or (
+							task.get('follow_up_focus') == 'ontology_quality_gap_closure'
+							and bool(task.get('queries', {}).get('evidence'))
+						)
+					)
 					and not (
 						support_kind is None
 						and preferred_support_kind == 'authority'
@@ -5068,6 +5857,22 @@ class Mediator:
 					primary_program_metadata = primary_program.get('metadata') if isinstance(primary_program, dict) else {}
 					if not isinstance(primary_program_metadata, dict):
 						primary_program_metadata = {}
+					selected_authority_context = {
+						'selected_search_program_id': str(primary_program.get('program_id') or ''),
+						'selected_search_program_type': str(primary_program.get('program_type') or ''),
+						'selected_search_program_intent': str(primary_program.get('authority_intent') or ''),
+						'selected_search_program_jurisdiction': program_jurisdiction,
+						'selected_search_program_forum': str(primary_program.get('forum') or ''),
+						'selected_search_program_bias': str(primary_program_metadata.get('authority_signal_bias') or ''),
+						'selected_search_program_rule_bias': str(primary_program_metadata.get('rule_signal_bias') or ''),
+						'selected_search_program_graph_gap_bias': str(primary_program_metadata.get('graph_gap_authority_bias') or ''),
+						'selected_search_program_families': list(program_authority_families),
+						'selected_search_program_defense_themes': list(primary_program_metadata.get('defense_themes') or []),
+						'selected_search_program_time_window': dict(primary_program_metadata.get('time_window') or {})
+						if isinstance(primary_program_metadata.get('time_window'), dict)
+						else {},
+					}
+					execution.update(selected_authority_context)
 					if not force and self.claim_support.was_follow_up_executed(
 						user_id,
 						current_claim,
@@ -5089,11 +5894,7 @@ class Mediator:
 								query_variants=task.get('queries', {}).get('authority', []),
 								task_query=task_query_text,
 								effective_query=query_text,
-								selected_search_program_id=str(primary_program.get('program_id') or ''),
-								selected_search_program_type=str(primary_program.get('program_type') or ''),
-								selected_search_program_bias=str(primary_program_metadata.get('authority_signal_bias') or ''),
-								selected_search_program_rule_bias=str(primary_program_metadata.get('rule_signal_bias') or ''),
-								selected_search_program_families=list(program_authority_families),
+								**selected_authority_context,
 								search_program_ids=[
 									program.get('program_id')
 									for program in (task.get('authority_search_programs') or [])
@@ -5142,11 +5943,7 @@ class Mediator:
 								query_variants=task.get('queries', {}).get('authority', []),
 								task_query=task_query_text,
 								effective_query=query_text,
-								selected_search_program_id=str(primary_program.get('program_id') or ''),
-								selected_search_program_type=str(primary_program.get('program_type') or ''),
-								selected_search_program_bias=str(primary_program_metadata.get('authority_signal_bias') or ''),
-								selected_search_program_rule_bias=str(primary_program_metadata.get('rule_signal_bias') or ''),
-								selected_search_program_families=list(program_authority_families),
+								**selected_authority_context,
 								search_program_ids=[
 									program.get('program_id')
 									for program in (task.get('authority_search_programs') or [])
@@ -5163,11 +5960,7 @@ class Mediator:
 						execution['executed']['authority'] = {
 							'query': query_text,
 							'task_query': task_query_text,
-							'selected_search_program_id': str(primary_program.get('program_id') or ''),
-							'selected_search_program_type': str(primary_program.get('program_type') or ''),
-							'selected_search_program_bias': str(primary_program_metadata.get('authority_signal_bias') or ''),
-							'selected_search_program_rule_bias': str(primary_program_metadata.get('rule_signal_bias') or ''),
-							'selected_search_program_families': list(program_authority_families),
+							**selected_authority_context,
 							'search_program_summary': task.get('authority_search_program_summary', {}),
 							'search_programs': list(task.get('authority_search_programs') or []),
 							'search_results': search_result_counts,
@@ -5613,6 +6406,8 @@ class Mediator:
 			'claim_support_gaps': {},
 			'claim_contradiction_candidates': {},
 			'claim_support_validation': {},
+			'claim_coverage_matrix_snapshots': {},
+			'claim_coverage_matrix_snapshot_summary': {},
 			'claim_support_snapshots': {},
 			'claim_support_snapshot_summary': {},
 			'claim_reasoning_review': {},
@@ -5681,6 +6476,22 @@ class Mediator:
 					'elements': [],
 					'unassigned_links': [],
 				},
+			)
+			persisted_coverage_matrix = self.persist_claim_coverage_matrix_snapshot(
+				claim_type=claim_type,
+				user_id=user_id,
+				required_support_kinds=['evidence', 'authority'],
+				coverage_matrix={'claims': {claim_type: results['claim_coverage_matrix'][claim_type]}},
+				metadata={'source': 'research_case_automatically'},
+			)
+			results['claim_coverage_matrix_snapshots'][claim_type] = persisted_coverage_matrix.get('claims', {}).get(
+				claim_type,
+				{},
+			).get('snapshot', {})
+			results['claim_coverage_matrix_snapshot_summary'][claim_type] = summarize_claim_support_snapshot_lifecycle(
+				{'coverage_matrix': results['claim_coverage_matrix_snapshots'][claim_type]}
+				if results['claim_coverage_matrix_snapshots'][claim_type]
+				else {}
 			)
 			claim_overview = self.get_claim_overview(claim_type=claim_type, user_id=user_id)
 			results['claim_overview'][claim_type] = claim_overview.get('claims', {}).get(
@@ -7957,6 +8768,16 @@ class Mediator:
 			or task.get('source_quality_target')
 			or ''
 		).strip()
+		if isinstance(alignment_task.get('source_preferences'), dict):
+			merged_preferences = dict(task.get('source_preferences') or {})
+			merged_preferences.update(alignment_task.get('source_preferences') or {})
+			task['source_preferences'] = merged_preferences
+		if isinstance(alignment_task.get('time_window'), dict):
+			merged_window = dict(task.get('time_window') or {})
+			merged_window.update(alignment_task.get('time_window') or {})
+			task['time_window'] = merged_window
+		if alignment_task.get('authority_intent'):
+			task['authority_intent'] = str(alignment_task.get('authority_intent') or '')
 		task['intake_proof_leads'] = list(alignment_task.get('intake_proof_leads', []) or task.get('intake_proof_leads', []) or [])
 		task['resolution_status'] = self._normalize_follow_up_resolution_status(
 			alignment_task.get('resolution_status') or task.get('resolution_status')
@@ -8074,6 +8895,23 @@ class Mediator:
 						'recommended_next_step': str(element.get('recommended_action') or ''),
 						'contradiction_count': int(element.get('contradiction_candidate_count', 0) or 0),
 					}
+					packet_element['bundle_manifest'] = self._build_support_packet_bundle_manifest(
+						support_facts,
+						support_traces,
+					)
+					packet_element['archive_history'] = self._build_support_packet_archive_history(support_traces)
+					packet_element['graph_trace_drilldown'] = self._build_support_packet_graph_trace_drilldown(
+						element,
+						support_traces,
+					)
+					packet_element['timeline_drilldown'] = self._build_support_packet_timeline_drilldown(
+						reasoning_diagnostics,
+						support_facts,
+					)
+					packet_element['contradiction_report'] = self._build_support_packet_contradiction_report(element)
+					packet_element['missing_support_report'] = self._build_support_packet_missing_support_report(
+						packet_element,
+					)
 					packet_element['support_quality'] = self._derive_packet_support_quality(packet_element)
 					packet_element['support_lane_label'] = self._derive_support_lane_label(packet_element)
 					elements.append(packet_element)
@@ -8107,6 +8945,22 @@ class Mediator:
 						'recommended_next_step': str(gap_element.get('recommended_action') or ''),
 						'contradiction_count': 0,
 					}
+					packet_element['bundle_manifest'] = self._build_support_packet_bundle_manifest(
+						gap_element.get('support_facts', []) or [],
+						gap_element.get('support_traces', []) or [],
+					)
+					packet_element['archive_history'] = self._build_support_packet_archive_history(
+						gap_element.get('support_traces', []) or [],
+					)
+					packet_element['graph_trace_drilldown'] = self._build_support_packet_graph_trace_drilldown(
+						gap_element,
+						gap_element.get('support_traces', []) or [],
+					)
+					packet_element['timeline_drilldown'] = {}
+					packet_element['contradiction_report'] = self._build_support_packet_contradiction_report(gap_element)
+					packet_element['missing_support_report'] = self._build_support_packet_missing_support_report(
+						packet_element,
+					)
 					packet_element['support_quality'] = self._derive_packet_support_quality(packet_element)
 					packet_element['support_lane_label'] = self._derive_support_lane_label(packet_element)
 					elements.append(packet_element)
@@ -8114,9 +8968,190 @@ class Mediator:
 				'claim_type': claim_type,
 				'overall_status': str(validation_claim.get('validation_status') or 'missing'),
 				'elements': elements,
+				'support_packet_reports': self._build_claim_support_packet_reports(elements),
 			}
 
 		return packets
+
+	def get_drafting_support_bundles(
+		self,
+		user_id: str = None,
+		required_support_kinds: List[str] | None = None,
+	) -> Dict[str, Any]:
+		"""Return section-level support bundles for complaint drafting."""
+		from document_pipeline import build_drafting_support_bundles
+
+		packets = self._build_claim_support_packets(
+			user_id=user_id,
+			required_support_kinds=required_support_kinds,
+		)
+		bundles = build_drafting_support_bundles(packets)
+		bundles['claim_support_packets'] = packets
+		return bundles
+
+	def get_drafting_guardrails(
+		self,
+		user_id: str = None,
+		required_support_kinds: List[str] | None = None,
+	) -> Dict[str, Any]:
+		"""Return drafting-time authority and proof guardrails."""
+		from document_pipeline import build_drafting_guardrails
+
+		bundles = self.get_drafting_support_bundles(
+			user_id=user_id,
+			required_support_kinds=required_support_kinds,
+		)
+		guardrails = build_drafting_guardrails(bundles)
+		guardrails['drafting_support_bundles'] = bundles
+		return guardrails
+
+	def _build_support_packet_bundle_manifest(
+		self,
+		support_facts: List[Dict[str, Any]],
+		support_traces: List[Dict[str, Any]],
+	) -> Dict[str, Any]:
+		entries: List[Dict[str, Any]] = []
+		family_counts: Dict[str, int] = {}
+		for fact in support_facts or []:
+			if not isinstance(fact, dict):
+				continue
+			entries.append({
+				'entry_type': 'fact',
+				'id': str(fact.get('fact_id') or ''),
+				'label': str(fact.get('text') or fact.get('fact_text') or ''),
+				'source_ref': str(fact.get('source_ref') or ''),
+			})
+			family_counts['fact'] = family_counts.get('fact', 0) + 1
+		for trace in support_traces or []:
+			if not isinstance(trace, dict):
+				continue
+			source_family = str(trace.get('source_family') or trace.get('support_kind') or 'unknown').strip() or 'unknown'
+			record_summary = trace.get('record_summary') if isinstance(trace.get('record_summary'), dict) else {}
+			entries.append({
+				'entry_type': source_family,
+				'id': str(trace.get('support_ref') or trace.get('source_ref') or ''),
+				'label': str(trace.get('support_label') or record_summary.get('title') or trace.get('support_ref') or ''),
+				'source_table': str(trace.get('source_table') or ''),
+				'source_ref': str(trace.get('source_ref') or ''),
+				'archive_url': str(trace.get('archive_url') or record_summary.get('archive_url') or ''),
+				'content_hash': str(record_summary.get('content_hash') or ''),
+			})
+			family_counts[source_family] = family_counts.get(source_family, 0) + 1
+		return {
+			'entry_count': len(entries),
+			'family_counts': family_counts,
+			'entries': entries,
+		}
+
+	def _build_support_packet_archive_history(self, support_traces: List[Dict[str, Any]]) -> Dict[str, Any]:
+		captures: List[Dict[str, Any]] = []
+		for trace in support_traces or []:
+			if not isinstance(trace, dict):
+				continue
+			record_summary = trace.get('record_summary') if isinstance(trace.get('record_summary'), dict) else {}
+			lineage_summary = trace.get('lineage_summary') if isinstance(trace.get('lineage_summary'), dict) else {}
+			archive_url = str(
+				trace.get('archive_url')
+				or record_summary.get('archive_url')
+				or lineage_summary.get('archive_url')
+				or ''
+			).strip()
+			if not archive_url:
+				continue
+			captures.append({
+				'archive_url': archive_url,
+				'source_url': str(record_summary.get('source_url') or lineage_summary.get('source_url') or ''),
+				'captured_at': str(record_summary.get('captured_at') or lineage_summary.get('captured_at') or ''),
+				'support_ref': str(trace.get('support_ref') or ''),
+				'historical_capture': bool(lineage_summary.get('historical_capture', False)),
+			})
+		return {
+			'capture_count': len(captures),
+			'captures': captures,
+		}
+
+	def _build_support_packet_graph_trace_drilldown(
+		self,
+		element: Dict[str, Any],
+		support_traces: List[Dict[str, Any]],
+	) -> Dict[str, Any]:
+		graph_summaries: List[Dict[str, Any]] = []
+		rule_candidates: List[Dict[str, Any]] = []
+		for trace in support_traces or []:
+			if not isinstance(trace, dict):
+				continue
+			graph_summary = trace.get('graph_summary') if isinstance(trace.get('graph_summary'), dict) else {}
+			record_summary = trace.get('record_summary') if isinstance(trace.get('record_summary'), dict) else {}
+			if graph_summary:
+				graph_summaries.append(graph_summary)
+			rule_candidates.extend(list(graph_summary.get('rule_candidates') or record_summary.get('rule_candidates') or []))
+		return {
+			'graph_summary_count': len(graph_summaries),
+			'rule_candidate_count': len([item for item in rule_candidates if isinstance(item, dict)]),
+			'rule_candidates': [item for item in rule_candidates if isinstance(item, dict)][:10],
+			'authority_rule_candidate_summary': element.get('authority_rule_candidate_summary', {}),
+			'authority_treatment_summary': element.get('authority_treatment_summary', {}),
+		}
+
+	def _build_support_packet_timeline_drilldown(
+		self,
+		reasoning_diagnostics: Dict[str, Any],
+		support_facts: List[Dict[str, Any]],
+	) -> Dict[str, Any]:
+		if not isinstance(reasoning_diagnostics, dict):
+			reasoning_diagnostics = {}
+		temporal_summary = reasoning_diagnostics.get('temporal_summary') if isinstance(reasoning_diagnostics.get('temporal_summary'), dict) else {}
+		temporal_profile = reasoning_diagnostics.get('temporal_rule_profile') if isinstance(reasoning_diagnostics.get('temporal_rule_profile'), dict) else {}
+		timeline_fact_ids = [
+			str(fact.get('fact_id') or '')
+			for fact in support_facts or []
+			if isinstance(fact, dict) and str(fact.get('fact_type') or fact.get('predicate_family') or '').lower() in {'timeline', 'temporal'}
+		]
+		return {
+			'temporal_summary': temporal_summary,
+			'temporal_rule_profile': temporal_profile,
+			'timeline_fact_ids': [fact_id for fact_id in timeline_fact_ids if fact_id],
+		}
+
+	def _build_support_packet_contradiction_report(self, element: Dict[str, Any]) -> Dict[str, Any]:
+		candidates = [
+			item for item in (element.get('contradiction_candidates') or [])
+			if isinstance(item, dict)
+		]
+		return {
+			'contradiction_count': int(element.get('contradiction_candidate_count', len(candidates)) or 0),
+			'candidates': candidates[:10],
+		}
+
+	def _build_support_packet_missing_support_report(self, element: Dict[str, Any]) -> Dict[str, Any]:
+		return {
+			'missing_support_kinds': list(element.get('missing_support_kinds') or []),
+			'missing_fact_bundle': list(element.get('missing_fact_bundle') or []),
+			'recommended_next_step': str(element.get('recommended_next_step') or ''),
+			'parse_quality_flags': list(element.get('parse_quality_flags') or []),
+		}
+
+	def _build_claim_support_packet_reports(self, elements: List[Dict[str, Any]]) -> Dict[str, Any]:
+		missing_support_counts: Dict[str, int] = {}
+		archive_capture_count = 0
+		graph_rule_candidate_count = 0
+		contradiction_count = 0
+		for element in elements or []:
+			if not isinstance(element, dict):
+				continue
+			for kind in element.get('missing_support_kinds') or []:
+				normalized = str(kind or '').strip()
+				if normalized:
+					missing_support_counts[normalized] = missing_support_counts.get(normalized, 0) + 1
+			archive_capture_count += int((element.get('archive_history') or {}).get('capture_count', 0) or 0)
+			graph_rule_candidate_count += int((element.get('graph_trace_drilldown') or {}).get('rule_candidate_count', 0) or 0)
+			contradiction_count += int((element.get('contradiction_report') or {}).get('contradiction_count', 0) or 0)
+		return {
+			'missing_support_counts': missing_support_counts,
+			'archive_capture_count': archive_capture_count,
+			'graph_rule_candidate_count': graph_rule_candidate_count,
+			'contradiction_count': contradiction_count,
+		}
 
 	def _normalize_support_status(self, validation_status: Any) -> str:
 		status = str(validation_status or '').strip().lower()

@@ -103,6 +103,93 @@ def test_treatment_edge_types_accepted():
     assert "unknown_type" not in relation_types
 
 
+def test_treatment_edges_accept_persisted_treated_by_alias():
+    authority_a = {"authority_id": "A", "name": "Source Authority"}
+    authority_b = {"authority_id": "B", "name": "Target Authority"}
+    authority_a["treatment_records"] = [
+        {"treatment_type": "questioned", "treated_by_authority_id": "B"}
+    ]
+
+    graph = _build_authority_graph([authority_a, authority_b])
+    relations = [r for r in graph.relations.values() if r.relation_type == "questioned"]
+
+    assert len(relations) == 1
+    assert relations[0].source_id != relations[0].target_id
+
+
+def test_authority_treatment_edges_preserve_graph_ready_direction():
+    current_authority = {
+        "authority_id": "authority:current-case",
+        "name": "Current Case",
+        "authority_treatment_edges": [
+            {
+                "edge_id": "treatment:later-current",
+                "source_authority_id": "authority:later-case",
+                "target_authority_id": "authority:current-case",
+                "relation_type": "questioned",
+                "confidence": 0.82,
+                "source_citation": "Later v. Current, 456 F.4th 789",
+                "target_citation": "Current v. Earlier, 123 F.3d 456",
+                "treatment_source": "later_case_search",
+                "treatment_date": "2025-02-14",
+                "explanation": "Later authority questioned the earlier rule.",
+                "metadata": {"program_type": "treatment_check_search"},
+            }
+        ],
+        "treatment_records": [
+            {
+                "treatment_id": "treatment:later-current",
+                "treatment_type": "questioned",
+                "treated_by_authority_id": "authority:later-case",
+                "treatment_confidence": 0.82,
+            }
+        ],
+    }
+    later_authority = {
+        "authority_id": "authority:later-case",
+        "name": "Later Case",
+    }
+
+    graph = _build_authority_graph([current_authority, later_authority])
+    relations = [r for r in graph.relations.values() if r.relation_type == "questioned"]
+    authority_nodes = {
+        node.attributes["source_authority_id"]: node
+        for node in graph.get_elements_by_type("authority_source")
+    }
+
+    assert len(relations) == 1
+    assert relations[0].source_id == authority_nodes["authority:later-case"].id
+    assert relations[0].target_id == authority_nodes["authority:current-case"].id
+    assert relations[0].attributes["source_authority_id"] == "authority:later-case"
+    assert relations[0].attributes["target_authority_id"] == "authority:current-case"
+    assert relations[0].attributes["treatment_id"] == "treatment:later-current"
+    assert relations[0].attributes["metadata"]["program_type"] == "treatment_check_search"
+
+
+def test_authority_treatment_edges_resolve_authority_prefixed_id_aliases():
+    authorities = [
+        {
+            "id": 7,
+            "name": "Stored Current Case",
+            "authority_treatment_edges": [
+                {
+                    "source_authority_id": "authority:8",
+                    "target_authority_id": "authority:7",
+                    "relation_type": "limits",
+                    "confidence": 0.7,
+                }
+            ],
+        },
+        {"id": 8, "name": "Stored Later Case"},
+    ]
+
+    graph = _build_authority_graph(authorities)
+    relations = [r for r in graph.relations.values() if r.relation_type == "limits"]
+
+    assert len(relations) == 1
+    assert float(relations[0].attributes["confidence"]) == 0.7
+
+
 def test_treatment_edges_skip_missing_target():
     """Treatment records referencing unknown authority IDs are silently skipped."""
     authority = {
@@ -125,6 +212,11 @@ def test_rule_candidates_create_rule_candidate_elements():
                 "rule_text": "Employer shall not discriminate on basis of race",
                 "rule_type": "obligation",
                 "extraction_confidence": 0.9,
+                "grounded_rule": {
+                    "deontic_operator": "obligation",
+                    "operator_family": "affirmative_duty",
+                    "grounding_status": "grounded",
+                },
             }
         ],
     }
@@ -132,6 +224,8 @@ def test_rule_candidates_create_rule_candidate_elements():
     rule_nodes = graph.get_elements_by_type("rule_candidate")
     assert len(rule_nodes) == 1
     assert rule_nodes[0].attributes.get("rule_type") == "obligation"
+    assert rule_nodes[0].attributes.get("deontic_operator") == "obligation"
+    assert rule_nodes[0].attributes.get("operator_family") == "affirmative_duty"
 
 
 def test_rule_candidate_extracted_from_edge():

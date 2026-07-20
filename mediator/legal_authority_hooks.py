@@ -19,6 +19,7 @@ from integrations.ipfs_datasets.provenance import (
 from integrations.ipfs_datasets.documents import detect_document_input_format, parse_document_text
 from integrations.ipfs_datasets.graphs import extract_graph_from_text, persist_graph_snapshot
 from integrations.ipfs_datasets.types import (
+    AuthorityTreatmentEdge,
     AuthorityTreatmentRecord,
     CaseAuthority,
     CaseFact,
@@ -62,6 +63,26 @@ _ARTIFACT_FAMILY_CORPUS_FAMILY = {
     'legal_authority_text': 'legal_authority',
     'legal_authority_reference': 'legal_authority',
 }
+
+_LEGAL_AUTHORITY_FACT_DURABLE_COLUMNS = {
+    'source_family': 'VARCHAR',
+    'source_record_id': 'BIGINT',
+    'source_ref': 'VARCHAR',
+    'record_scope': 'VARCHAR',
+    'artifact_family': 'VARCHAR',
+    'corpus_family': 'VARCHAR',
+    'content_origin': 'VARCHAR',
+    'parse_source': 'VARCHAR',
+    'input_format': 'VARCHAR',
+    'quality_tier': 'VARCHAR',
+    'quality_score': 'DOUBLE',
+    'page_count': 'INTEGER',
+    'chunk_id': 'VARCHAR',
+    'chunk_index': 'INTEGER',
+    'source_passage': 'JSON',
+}
+
+_MAX_SOURCE_PASSAGE_TEXT_LENGTH = 500
 
 _LEGAL_SEARCH_USER_AGENT = 'complaint-generator/1.0'
 _HOUSING_QUERY_HINTS = {
@@ -209,16 +230,41 @@ def _resolve_artifact_identity(*, content_origin: str = '', artifact_family: str
     }
 
 
+def _ensure_legal_authority_fact_schema(conn: Any) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS legal_authority_facts (
+            authority_id BIGINT,
+            fact_id VARCHAR,
+            fact_text TEXT,
+            source_authority_id VARCHAR,
+            confidence FLOAT,
+            metadata JSON,
+            provenance JSON
+        )
+    """)
+    for column_name, column_type in _LEGAL_AUTHORITY_FACT_DURABLE_COLUMNS.items():
+        conn.execute(
+            f"ALTER TABLE legal_authority_facts ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+        )
+
+
+def _list_table_columns(conn: Any, table_name: str) -> List[str]:
+    rows = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+    return [str(row[1]) for row in rows]
+
+
 def _normalize_authority_fact_row(row: Any, *, authority_id: int) -> Dict[str, Any]:
     metadata = json.loads(row[4]) if row[4] else {}
     provenance = json.loads(row[5]) if row[5] else {}
+    durable_values = dict(row[6]) if len(row) > 6 and isinstance(row[6], dict) else {}
     parse_lineage = metadata.get('parse_lineage', {}) if isinstance(metadata.get('parse_lineage'), dict) else {}
     transform_lineage = parse_lineage.get('transform_lineage', {}) if isinstance(parse_lineage.get('transform_lineage'), dict) else {}
     parse_quality = parse_lineage.get('parse_quality', {}) if isinstance(parse_lineage.get('parse_quality'), dict) else {}
     source_span = parse_lineage.get('source_span', {}) if isinstance(parse_lineage.get('source_span'), dict) else {}
     provenance_metadata = provenance.get('metadata', {}) if isinstance(provenance.get('metadata'), dict) else {}
     content_origin = str(
-        transform_lineage.get('content_origin')
+        durable_values.get('content_origin')
+        or transform_lineage.get('content_origin')
         or parse_lineage.get('content_origin')
         or provenance_metadata.get('content_origin')
         or ''
@@ -226,19 +272,30 @@ def _normalize_authority_fact_row(row: Any, *, authority_id: int) -> Dict[str, A
     artifact_identity = _resolve_artifact_identity(
         content_origin=content_origin,
         artifact_family=str(
-            transform_lineage.get('artifact_family')
+            durable_values.get('artifact_family')
+            or transform_lineage.get('artifact_family')
             or parse_lineage.get('artifact_family')
             or provenance_metadata.get('artifact_family')
             or ''
         ),
         corpus_family=str(
-            transform_lineage.get('corpus_family')
+            durable_values.get('corpus_family')
+            or transform_lineage.get('corpus_family')
             or parse_lineage.get('corpus_family')
             or provenance_metadata.get('corpus_family')
             or ''
         ),
     )
-    source_ref = str(row[2] or parse_lineage.get('source_ref') or '')
+    durable_source_passage = durable_values.get('source_passage')
+    if isinstance(durable_source_passage, str) and durable_source_passage:
+        try:
+            durable_source_passage = json.loads(durable_source_passage)
+        except json.JSONDecodeError:
+            durable_source_passage = {}
+    source_passage = durable_source_passage if isinstance(durable_source_passage, dict) else {}
+    if not source_passage:
+        source_passage = dict(metadata.get('source_passage') or {})
+    source_ref = str(durable_values.get('source_ref') or row[2] or parse_lineage.get('source_ref') or '')
     return {
         'fact_id': row[0],
         'text': row[1],
@@ -246,18 +303,21 @@ def _normalize_authority_fact_row(row: Any, *, authority_id: int) -> Dict[str, A
         'confidence': row[3] or 0.0,
         'metadata': metadata,
         'provenance': provenance,
-        'source_family': 'legal_authority',
-        'source_record_id': authority_id,
+        'source_family': str(durable_values.get('source_family') or 'legal_authority'),
+        'source_record_id': int(durable_values.get('source_record_id') or authority_id),
         'source_ref': source_ref,
-        'record_scope': str(parse_lineage.get('record_scope') or 'legal_authority'),
+        'record_scope': str(durable_values.get('record_scope') or parse_lineage.get('record_scope') or 'legal_authority'),
         'artifact_family': artifact_identity['artifact_family'],
         'corpus_family': artifact_identity['corpus_family'],
         'content_origin': content_origin,
-        'parse_source': str(parse_lineage.get('source') or ''),
-        'input_format': str(parse_lineage.get('input_format') or ''),
-        'quality_tier': str(parse_lineage.get('quality_tier') or ''),
-        'quality_score': float(parse_lineage.get('quality_score') or parse_quality.get('quality_score') or 0.0),
-        'page_count': int(parse_lineage.get('page_count') or source_span.get('page_count') or 0),
+        'parse_source': str(durable_values.get('parse_source') or parse_lineage.get('source') or ''),
+        'input_format': str(durable_values.get('input_format') or parse_lineage.get('input_format') or ''),
+        'quality_tier': str(durable_values.get('quality_tier') or parse_lineage.get('quality_tier') or ''),
+        'quality_score': float(durable_values.get('quality_score') or parse_lineage.get('quality_score') or parse_quality.get('quality_score') or 0.0),
+        'page_count': int(durable_values.get('page_count') or parse_lineage.get('page_count') or source_span.get('page_count') or 0),
+        'chunk_id': str(durable_values.get('chunk_id') or metadata.get('chunk_id') or ''),
+        'chunk_index': int(durable_values.get('chunk_index') or metadata.get('chunk_index') or 0),
+        'source_passage': source_passage,
     }
 
 
@@ -288,6 +348,17 @@ def _merge_handoff_into_provenance_record(provenance, mediator) -> Any:
             mediator,
         ),
     )
+
+
+def _normalize_lineage_text(value: str) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def _clip_source_passage_text(value: str) -> str:
+    text = str(value or '').strip()
+    if len(text) <= _MAX_SOURCE_PASSAGE_TEXT_LENGTH:
+        return text
+    return text[:_MAX_SOURCE_PASSAGE_TEXT_LENGTH].rstrip()
 
 
 class LegalAuthoritySearchHook:
@@ -1079,6 +1150,9 @@ Return only the search terms, one per line."""
         claim_elements: Optional[List[Dict[str, Any]]] = None,
         jurisdiction: Optional[str] = None,
         forum: Optional[str] = None,
+        time_window: Optional[Dict[str, Any]] = None,
+        defense_themes: Optional[List[str]] = None,
+        authority_families: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Build claim-aware legal search programs for support, procedure, and adverse authority.
 
@@ -1093,6 +1167,34 @@ Return only the search terms, one per line."""
         normalized_jurisdiction = str(jurisdiction or "").strip()
         normalized_forum = str(forum or "").strip()
         generated_terms = self._generate_search_terms(base_query)
+        normalized_time_window = time_window if isinstance(time_window, dict) else {}
+        time_window_start = str(
+            normalized_time_window.get('start')
+            or normalized_time_window.get('time_window_start')
+            or normalized_time_window.get('from')
+            or ''
+        ).strip()
+        time_window_end = str(
+            normalized_time_window.get('end')
+            or normalized_time_window.get('time_window_end')
+            or normalized_time_window.get('to')
+            or ''
+        ).strip()
+        time_window_terms = [
+            str(term).strip()
+            for term in (normalized_time_window.get('query_terms') or [])
+            if str(term).strip()
+        ]
+        normalized_defense_themes = list(dict.fromkeys([
+            str(theme).strip()
+            for theme in (defense_themes or [])
+            if str(theme).strip()
+        ]))
+        requested_authority_families = list(dict.fromkeys([
+            str(family).strip()
+            for family in (authority_families or [])
+            if str(family).strip()
+        ]))
 
         normalized_elements: List[Dict[str, str]] = []
         for element in claim_elements or []:
@@ -1127,30 +1229,35 @@ Return only the search terms, one per line."""
                 'authority_intent': 'support',
                 'authority_families': ['statute', 'regulation', 'administrative_rule'],
                 'query_suffix': 'element definition statute regulation rule',
+                'defense_theme': 'element_standard',
             },
             {
                 'program_type': 'fact_pattern_search',
                 'authority_intent': 'support',
                 'authority_families': ['case_law', 'agency_guidance'],
                 'query_suffix': 'fact pattern application authority',
+                'defense_theme': 'fact_application',
             },
             {
                 'program_type': 'procedural_search',
                 'authority_intent': 'procedural',
                 'authority_families': ['regulation', 'administrative_rule', 'agency_guidance'],
                 'query_suffix': 'timeliness exhaustion venue notice procedure',
+                'defense_theme': 'procedural_prerequisite',
             },
             {
                 'program_type': 'adverse_authority_search',
                 'authority_intent': 'oppose',
                 'authority_families': ['case_law', 'statute', 'regulation'],
                 'query_suffix': 'adverse authority defense exception limitation',
+                'defense_theme': 'defense_or_exception',
             },
             {
                 'program_type': 'treatment_check_search',
                 'authority_intent': 'confirm_good_law',
                 'authority_families': ['case_law', 'administrative_rule', 'agency_guidance'],
                 'query_suffix': 'citation history later treatment good law',
+                'defense_theme': 'authority_treatment',
             },
         ]
 
@@ -1158,29 +1265,55 @@ Return only the search terms, one per line."""
         for element in normalized_elements:
             element_text = element['claim_element_text']
             for template in program_templates:
+                template_families = list(template['authority_families'])
+                if requested_authority_families:
+                    filtered_families = [
+                        family for family in template_families
+                        if family in requested_authority_families
+                    ]
+                    if filtered_families:
+                        template_families = filtered_families
                 search_terms = [
                     term
                     for term in [element_text, normalized_claim_type, *generated_terms]
                     if term
                 ]
+                search_terms.extend(time_window_terms)
                 program = LegalSearchProgram(
                     program_type=template['program_type'],
                     claim_type=normalized_claim_type or base_query,
                     authority_intent=template['authority_intent'],
                     query_text=' '.join(
                         part
-                        for part in [base_query, element_text, normalized_jurisdiction, template['query_suffix']]
+                        for part in [
+                            base_query,
+                            element_text,
+                            normalized_jurisdiction,
+                            template['query_suffix'],
+                            ' '.join(time_window_terms[:3]),
+                        ]
                         if part
                     ),
                     claim_element_id=element['claim_element_id'],
                     claim_element_text=element_text,
                     jurisdiction=normalized_jurisdiction,
                     forum=normalized_forum,
-                    authority_families=list(template['authority_families']),
+                    time_window_start=time_window_start,
+                    time_window_end=time_window_end,
+                    authority_families=template_families,
                     search_terms=search_terms[:6],
                     metadata={
                         'base_query': base_query,
                         'claim_type': normalized_claim_type,
+                        'jurisdiction': normalized_jurisdiction,
+                        'forum': normalized_forum,
+                        'time_window': dict(normalized_time_window),
+                        'time_window_start': time_window_start,
+                        'time_window_end': time_window_end,
+                        'time_window_terms': time_window_terms[:8],
+                        'defense_theme': template['defense_theme'],
+                        'defense_themes': normalized_defense_themes,
+                        'authority_family_focus': template_families,
                     },
                 )
                 programs.append(program.as_dict())
@@ -1361,17 +1494,7 @@ class LegalAuthorityStorageHook:
                 )
             """)
 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS legal_authority_facts (
-                    authority_id BIGINT,
-                    fact_id VARCHAR,
-                    fact_text TEXT,
-                    source_authority_id VARCHAR,
-                    confidence FLOAT,
-                    metadata JSON,
-                    provenance JSON
-                )
-            """)
+            _ensure_legal_authority_fact_schema(conn)
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS legal_authority_chunks (
@@ -1419,6 +1542,25 @@ class LegalAuthorityStorageHook:
                     treatment_confidence FLOAT,
                     treatment_date VARCHAR,
                     treatment_explanation TEXT,
+                    metadata JSON,
+                    provenance JSON
+                )
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS legal_authority_search_programs (
+                    authority_id BIGINT,
+                    program_id VARCHAR,
+                    program_type VARCHAR,
+                    claim_type VARCHAR,
+                    authority_intent VARCHAR,
+                    query_text TEXT,
+                    claim_element_id VARCHAR,
+                    claim_element_text TEXT,
+                    jurisdiction VARCHAR,
+                    forum VARCHAR,
+                    authority_families JSON,
+                    search_terms JSON,
                     metadata JSON,
                     provenance JSON
                 )
@@ -1477,6 +1619,11 @@ class LegalAuthorityStorageHook:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_authority_treatments_authority
                 ON legal_authority_treatments(authority_id)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_authority_search_programs_authority
+                ON legal_authority_search_programs(authority_id)
             """)
 
             conn.execute("""
@@ -1599,6 +1746,25 @@ class LegalAuthorityStorageHook:
 
         parse_contract = build_document_parse_contract(document_parse, default_source='legal_authority')
         for chunk in chunks:
+            chunk_metadata = dict(chunk.get('metadata') or {})
+            chunk_metadata.update({
+                'length': chunk.get('length', 0),
+                'parser_version': chunk_metadata.get('parser_version') or parse_contract.get('summary', {}).get('parser_version', ''),
+                'source': chunk_metadata.get('source') or parse_contract.get('source', 'legal_authority'),
+                'input_format': chunk_metadata.get('input_format') or parse_contract.get('summary', {}).get('input_format', ''),
+            })
+            page_count = int(parse_contract.get('summary', {}).get('page_count') or (1 if parse_contract.get('text') else 0))
+            chunk_metadata.setdefault('page_start', 1 if page_count else 0)
+            chunk_metadata.setdefault('page_end', chunk_metadata.get('page_start', 0))
+            chunk_metadata.setdefault('section_label', '')
+            chunk_metadata.setdefault('source_span', {
+                'char_start': int(chunk.get('start', 0) or 0),
+                'char_end': int(chunk.get('end', 0) or 0),
+                'text_length': len(str(parse_contract.get('text') or '')),
+                'page_start': int(chunk_metadata.get('page_start', 0) or 0),
+                'page_end': int(chunk_metadata.get('page_end', 0) or 0),
+                'page_count': page_count,
+            })
             conn.execute(
                 """
                 INSERT INTO legal_authority_chunks (
@@ -1613,12 +1779,7 @@ class LegalAuthorityStorageHook:
                     chunk.get('start'),
                     chunk.get('end'),
                     chunk.get('text'),
-                    json.dumps(_merge_intake_summary_handoff_metadata({
-                        'length': chunk.get('length', 0),
-                        'parser_version': parse_contract.get('summary', {}).get('parser_version', ''),
-                        'source': parse_contract.get('source', 'legal_authority'),
-                        'input_format': parse_contract.get('summary', {}).get('input_format', ''),
-                    }, self.mediator)),
+                    json.dumps(_merge_intake_summary_handoff_metadata(chunk_metadata, self.mediator)),
                 ],
             )
 
@@ -1631,13 +1792,24 @@ class LegalAuthorityStorageHook:
         document_parse: Dict[str, Any],
     ) -> None:
         parse_contract = build_document_parse_contract(document_parse, default_source='legal_authority')
+        chunks = [
+            chunk
+            for chunk in (document_parse.get('chunks', []) or [])
+            if isinstance(chunk, dict)
+        ]
         for entity in graph_payload.get('entities', []) or []:
             if entity.get('type') != 'fact':
                 continue
             attributes = entity.get('attributes', {}) if isinstance(entity.get('attributes'), dict) else {}
+            fact_text = str(attributes.get('text') or entity.get('name') or '')
+            fact_chunk_lineage = self._build_fact_chunk_lineage(
+                fact_text,
+                int(attributes.get('sentence_index', 0) or 0),
+                chunks,
+            )
             fact = CaseFact(
                 fact_id=str(entity.get('id') or ''),
-                text=str(attributes.get('text') or entity.get('name') or ''),
+                text=fact_text,
                 source_authority_id=f'authority:{authority_id}',
                 source_family='legal_authority',
                 source_record_id=authority_id,
@@ -1646,7 +1818,10 @@ class LegalAuthorityStorageHook:
                 confidence=float(entity.get('confidence', 0.0) or 0.0),
                 metadata=_merge_intake_summary_handoff_metadata(
                     build_fact_lineage_metadata(
-                        attributes,
+                        {
+                            **attributes,
+                            **fact_chunk_lineage,
+                        },
                         parse_contract=parse_contract,
                         record_scope='legal_authority',
                         source_ref=f'authority:{authority_id}',
@@ -1658,9 +1833,12 @@ class LegalAuthorityStorageHook:
             conn.execute(
                 """
                 INSERT INTO legal_authority_facts (
-                    authority_id, fact_id, fact_text, source_authority_id, confidence, metadata, provenance
+                    authority_id, fact_id, fact_text, source_authority_id, confidence, metadata, provenance,
+                    source_family, source_record_id, source_ref, record_scope, artifact_family,
+                    corpus_family, content_origin, parse_source, input_format, quality_tier,
+                    quality_score, page_count, chunk_id, chunk_index, source_passage
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     authority_id,
@@ -1670,8 +1848,83 @@ class LegalAuthorityStorageHook:
                     fact.confidence,
                     json.dumps(fact.metadata),
                     json.dumps(fact.provenance.as_dict()),
+                    fact.source_family,
+                    fact.source_record_id,
+                    fact.source_ref,
+                    fact.record_scope,
+                    fact.artifact_family,
+                    fact.corpus_family,
+                    fact.content_origin,
+                    fact.parse_source,
+                    fact.input_format,
+                    fact.quality_tier,
+                    fact.quality_score,
+                    fact.page_count,
+                    str(fact.metadata.get('chunk_id') or ''),
+                    int(fact.metadata.get('chunk_index') or 0),
+                    json.dumps(fact.metadata.get('source_passage') or {}),
                 ],
             )
+
+    def _build_fact_chunk_lineage(
+        self,
+        fact_text: str,
+        sentence_index: int,
+        chunks: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not chunks:
+            return {
+                'sentence_index': sentence_index,
+                'source_passage': {
+                    'chunk_id': '',
+                    'chunk_index': sentence_index,
+                    'start': 0,
+                    'end': 0,
+                    'text': _clip_source_passage_text(fact_text),
+                },
+            }
+
+        normalized_fact_text = _normalize_lineage_text(fact_text)
+        selected_chunk: Dict[str, Any] = {}
+        for chunk in chunks:
+            chunk_text = str(chunk.get('text') or '')
+            normalized_chunk_text = _normalize_lineage_text(chunk_text)
+            if normalized_fact_text and normalized_fact_text in normalized_chunk_text:
+                selected_chunk = chunk
+                break
+
+        if not selected_chunk:
+            selected_chunk = chunks[min(max(sentence_index, 0), len(chunks) - 1)]
+
+        chunk_start = int(selected_chunk.get('start', 0) or 0)
+        chunk_text = str(selected_chunk.get('text') or '')
+        local_start = chunk_text.find(fact_text) if fact_text else -1
+        if local_start < 0 and normalized_fact_text:
+            local_start = _normalize_lineage_text(chunk_text).find(normalized_fact_text)
+        absolute_start = chunk_start + local_start if local_start >= 0 else chunk_start
+        absolute_end = (
+            absolute_start + len(fact_text)
+            if local_start >= 0 and fact_text
+            else int(selected_chunk.get('end', absolute_start) or absolute_start)
+        )
+        passage_text = (
+            chunk_text[local_start:local_start + len(fact_text)]
+            if local_start >= 0 and fact_text
+            else fact_text or chunk_text
+        )
+        source_passage = {
+            'chunk_id': str(selected_chunk.get('chunk_id') or ''),
+            'chunk_index': int(selected_chunk.get('index', 0) or 0),
+            'start': absolute_start,
+            'end': absolute_end,
+            'text': _clip_source_passage_text(passage_text),
+        }
+        return {
+            'sentence_index': sentence_index,
+            'chunk_id': source_passage['chunk_id'],
+            'chunk_index': source_passage['chunk_index'],
+            'source_passage': source_passage,
+        }
 
     def _extract_authority_graph(
         self,
@@ -1764,6 +2017,7 @@ class LegalAuthorityStorageHook:
                 {
                     'program_id': str(program.get('program_id') or ''),
                     'program_type': str(program.get('program_type') or ''),
+                    'claim_type': str(program.get('claim_type') or ''),
                     'authority_intent': str(program.get('authority_intent') or ''),
                     'query_text': str(program.get('query_text') or ''),
                     'claim_element_id': str(program.get('claim_element_id') or ''),
@@ -1773,9 +2027,94 @@ class LegalAuthorityStorageHook:
                     'authority_families': list(program.get('authority_families', []) or []),
                     'search_terms': list(program.get('search_terms', []) or []),
                     'metadata': dict(program.get('metadata', {}) or {}),
+                    'provenance': dict(program.get('provenance', {}) or {}),
                 }
             )
         return normalized_programs
+
+    def _build_search_program_records(
+        self,
+        authority_id: int,
+        authority_data: Dict[str, Any],
+        provenance,
+        claim_type: Optional[str],
+    ) -> List[LegalSearchProgram]:
+        program_records: List[LegalSearchProgram] = []
+        for program in self._normalize_search_programs(authority_data):
+            program_type = str(program.get('program_type') or '').strip()
+            query_text = str(program.get('query_text') or '').strip()
+            if not program_type or not query_text:
+                continue
+            metadata = _merge_intake_summary_handoff_metadata(
+                {
+                    **(program.get('metadata', {}) if isinstance(program.get('metadata'), dict) else {}),
+                    'authority_id': authority_id,
+                    'authority_citation': str(authority_data.get('citation') or ''),
+                    'authority_title': str(authority_data.get('title') or ''),
+                    'authority_source': str(authority_data.get('source') or ''),
+                    'authority_type': str(authority_data.get('type') or ''),
+                },
+                self.mediator,
+            )
+            program_records.append(
+                LegalSearchProgram(
+                    program_id=str(program.get('program_id') or ''),
+                    program_type=program_type,
+                    claim_type=str(program.get('claim_type') or claim_type or ''),
+                    authority_intent=str(program.get('authority_intent') or ''),
+                    query_text=query_text,
+                    claim_element_id=str(program.get('claim_element_id') or ''),
+                    claim_element_text=str(program.get('claim_element_text') or ''),
+                    jurisdiction=str(program.get('jurisdiction') or getattr(provenance, 'jurisdiction', '') or ''),
+                    forum=str(program.get('forum') or ''),
+                    authority_families=list(program.get('authority_families') or []),
+                    search_terms=list(program.get('search_terms') or []),
+                    metadata=metadata,
+                    provenance=_merge_handoff_into_provenance_record(provenance, self.mediator),
+                )
+            )
+        return program_records
+
+    def _store_authority_search_programs(
+        self,
+        conn,
+        authority_id: int,
+        search_programs: List[LegalSearchProgram],
+    ) -> None:
+        for program in search_programs:
+            conn.execute(
+                """
+                DELETE FROM legal_authority_search_programs
+                WHERE authority_id = ? AND program_id = ?
+                """,
+                [authority_id, program.program_id],
+            )
+            conn.execute(
+                """
+                INSERT INTO legal_authority_search_programs (
+                    authority_id, program_id, program_type, claim_type, authority_intent,
+                    query_text, claim_element_id, claim_element_text, jurisdiction, forum,
+                    authority_families, search_terms, metadata, provenance
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    authority_id,
+                    program.program_id,
+                    program.program_type,
+                    program.claim_type,
+                    program.authority_intent,
+                    program.query_text,
+                    program.claim_element_id,
+                    program.claim_element_text,
+                    program.jurisdiction,
+                    program.forum,
+                    json.dumps(program.authority_families),
+                    json.dumps(program.search_terms),
+                    json.dumps(program.metadata),
+                    json.dumps(program.provenance.as_dict()),
+                ],
+            )
 
     def _build_treatment_records(
         self,
@@ -1888,6 +2227,85 @@ class LegalAuthorityStorageHook:
             confidence += 0.05
         return min(round(confidence, 2), 0.95)
 
+    def _build_grounded_rule_metadata(
+        self,
+        sentence: str,
+        rule_type: str,
+        *,
+        authority_id: int,
+        authority: Dict[str, Any],
+        claim_element: Dict[str, Optional[str]],
+        provenance,
+        treatment_summary: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        normalized = str(sentence or '').lower()
+        if any(marker in normalized for marker in ('may not', 'must not', 'shall not', 'prohibited', 'prohibit')):
+            deontic_operator = 'prohibition'
+            operator_family = 'negative_duty'
+        elif any(marker in normalized for marker in ('must', 'shall', 'required', 'requires', 'within')):
+            deontic_operator = 'obligation'
+            operator_family = 'affirmative_duty'
+        elif any(marker in normalized for marker in ('may ', 'authorized', 'permitted', 'can ')):
+            deontic_operator = 'permission'
+            operator_family = 'discretionary_authority'
+        elif str(rule_type or '') in {'exception', 'defense'}:
+            deontic_operator = 'exception'
+            operator_family = 'limitation_or_defense'
+        else:
+            deontic_operator = 'condition'
+            operator_family = 'element_or_condition'
+
+        adverse_types = {'adverse', 'limits', 'distinguishes', 'questioned', 'superseded', 'overruled', 'reversed'}
+        treatment_counts = (
+            treatment_summary.get('by_type', {})
+            if isinstance(treatment_summary, dict) and isinstance(treatment_summary.get('by_type'), dict)
+            else {}
+        )
+        adverse_count = sum(int(treatment_counts.get(treatment_type, 0) or 0) for treatment_type in adverse_types)
+        treatment_record_count = (
+            int(treatment_summary.get('record_count', 0) or 0)
+            if isinstance(treatment_summary, dict)
+            else 0
+        )
+        max_treatment_confidence = (
+            float(treatment_summary.get('max_confidence', 0.0) or 0.0)
+            if isinstance(treatment_summary, dict)
+            else 0.0
+        )
+
+        if adverse_count:
+            treatment_influence = 'weakened'
+            grounding_status = 'adverse_treatment'
+        elif treatment_record_count:
+            treatment_influence = 'treated'
+            grounding_status = 'grounded_with_treatment'
+        else:
+            treatment_influence = 'untreated'
+            grounding_status = 'grounded'
+
+        return {
+            'rule_id_authority_scope': f'authority:{authority_id}',
+            'authority_id': f'authority:{authority_id}',
+            'authority_citation': str(authority.get('citation') or ''),
+            'authority_title': str(authority.get('title') or ''),
+            'authority_type': str(authority.get('type') or ''),
+            'authority_source': str(authority.get('source') or ''),
+            'deontic_operator': deontic_operator,
+            'operator_family': operator_family,
+            'premise_type': 'legal_rule',
+            'rule_type': str(rule_type or ''),
+            'claim_element_id': str(claim_element.get('claim_element_id') or ''),
+            'claim_element_text': str(claim_element.get('claim_element') or ''),
+            'jurisdiction': str(getattr(provenance, 'jurisdiction', '') or ''),
+            'temporal_scope': str(authority.get('metadata', {}).get('effective_date') or ''),
+            'grounding_status': grounding_status,
+            'premise_failure_category': 'adverse_authority' if adverse_count else '',
+            'treatment_influence': treatment_influence,
+            'adverse_treatment_count': adverse_count,
+            'treatment_record_count': treatment_record_count,
+            'max_treatment_confidence': max_treatment_confidence,
+        }
+
     def _extract_rule_candidates(
         self,
         authority_id: int,
@@ -1899,6 +2317,13 @@ class LegalAuthorityStorageHook:
     ) -> List[RuleCandidate]:
         parsed_text = str((document_parse or {}).get('text') or '')
         chunks = (document_parse or {}).get('chunks', []) or []
+        parse_contract = build_document_parse_contract(document_parse or {}, default_source='legal_authority')
+        base_lineage_metadata = build_fact_lineage_metadata(
+            {},
+            parse_contract=parse_contract,
+            record_scope='legal_authority',
+            source_ref=f'authority:{authority_id}',
+        )
         candidate_rows: List[Dict[str, Any]] = []
 
         if chunks:
@@ -1906,25 +2331,48 @@ class LegalAuthorityStorageHook:
                 if not isinstance(chunk, dict):
                     continue
                 chunk_text = str(chunk.get('text') or '')
+                chunk_start = int(chunk.get('start', 0) or 0)
                 for sentence in self._split_rule_candidate_sentences(chunk_text):
+                    local_start = chunk_text.find(sentence)
+                    absolute_start = chunk_start + local_start if local_start >= 0 else chunk_start
+                    absolute_end = absolute_start + len(sentence)
                     candidate_rows.append(
                         {
                             'text': sentence,
                             'chunk_id': str(chunk.get('chunk_id') or ''),
                             'chunk_index': int(chunk.get('index', 0) or 0),
-                            'start': int(chunk.get('start', 0) or 0),
-                            'end': int(chunk.get('end', 0) or 0),
+                            'start': absolute_start,
+                            'end': absolute_end,
+                            'source_passage': {
+                                'chunk_id': str(chunk.get('chunk_id') or ''),
+                                'chunk_index': int(chunk.get('index', 0) or 0),
+                                'start': absolute_start,
+                                'end': absolute_end,
+                                'text': _clip_source_passage_text(sentence),
+                            },
                         }
                     )
         else:
+            search_start = 0
             for index, sentence in enumerate(self._split_rule_candidate_sentences(parsed_text)):
+                local_start = parsed_text.find(sentence, search_start)
+                absolute_start = local_start if local_start >= 0 else 0
+                absolute_end = absolute_start + len(sentence)
+                search_start = absolute_end
                 candidate_rows.append(
                     {
                         'text': sentence,
                         'chunk_id': '',
                         'chunk_index': index,
-                        'start': 0,
-                        'end': 0,
+                        'start': absolute_start,
+                        'end': absolute_end,
+                        'source_passage': {
+                            'chunk_id': '',
+                            'chunk_index': index,
+                            'start': absolute_start,
+                            'end': absolute_end,
+                            'text': _clip_source_passage_text(sentence),
+                        },
                     }
                 )
 
@@ -1942,6 +2390,14 @@ class LegalAuthorityStorageHook:
             rule_type = self._classify_rule_candidate_type(sentence)
             claim_element_text = str(claim_element.get('claim_element') or '')
             predicate_template = claim_element_text or str(claim_type or '')
+            grounded_rule = self._build_grounded_rule_metadata(
+                sentence,
+                rule_type,
+                authority_id=authority_id,
+                authority=authority,
+                claim_element=claim_element,
+                provenance=provenance,
+            )
             rule_candidates.append(
                 RuleCandidate(
                     authority_id=f'authority:{authority_id}',
@@ -1955,15 +2411,18 @@ class LegalAuthorityStorageHook:
                     extraction_confidence=self._rule_candidate_confidence(sentence, claim_element_text),
                     metadata=_merge_intake_summary_handoff_metadata(
                         {
+                            **base_lineage_metadata,
                             'chunk_id': row.get('chunk_id', ''),
                             'chunk_index': row.get('chunk_index', 0),
                             'source_span': {
                                 'start': row.get('start', 0),
                                 'end': row.get('end', 0),
                             },
+                            'source_passage': row.get('source_passage', {}),
                             'claim_type': claim_type or '',
                             'authority_type': authority.get('type', ''),
                             'authority_source': authority.get('source', ''),
+                            'grounded_rule': grounded_rule,
                         },
                         self.mediator,
                     ),
@@ -1980,6 +2439,10 @@ class LegalAuthorityStorageHook:
         rule_candidates: List[RuleCandidate],
     ) -> None:
         for record in rule_candidates:
+            conn.execute(
+                "DELETE FROM legal_authority_rule_candidates WHERE authority_id = ? AND rule_id = ?",
+                [authority_id, record.rule_id],
+            )
             conn.execute(
                 """
                 INSERT INTO legal_authority_rule_candidates (
@@ -2022,13 +2485,47 @@ class LegalAuthorityStorageHook:
                 'treatment_id': row[0],
                 'treatment_type': row[1],
                 'treated_by_authority_id': row[2],
+                'treated_authority_id': row[2],
+                'target_authority_id': row[2],
                 'treated_by_citation': row[3],
+                'target_citation': row[3],
                 'treatment_source': row[4],
                 'treatment_confidence': row[5] or 0.0,
                 'treatment_date': row[6] or '',
                 'treatment_explanation': row[7] or '',
                 'metadata': json.loads(row[8]) if row[8] else {},
                 'provenance': json.loads(row[9]) if row[9] else {},
+            }
+            for row in rows
+        ]
+
+    def _get_authority_search_programs(self, conn, authority_id: int) -> List[Dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT program_id, program_type, claim_type, authority_intent, query_text,
+                   claim_element_id, claim_element_text, jurisdiction, forum,
+                   authority_families, search_terms, metadata, provenance
+            FROM legal_authority_search_programs
+            WHERE authority_id = ?
+            ORDER BY program_type ASC, program_id ASC
+            """,
+            [authority_id],
+        ).fetchall()
+        return [
+            {
+                'program_id': row[0],
+                'program_type': row[1],
+                'claim_type': row[2],
+                'authority_intent': row[3],
+                'query_text': row[4],
+                'claim_element_id': row[5],
+                'claim_element_text': row[6],
+                'jurisdiction': row[7],
+                'forum': row[8],
+                'authority_families': json.loads(row[9]) if row[9] else [],
+                'search_terms': json.loads(row[10]) if row[10] else [],
+                'metadata': json.loads(row[11]) if row[11] else {},
+                'provenance': json.loads(row[12]) if row[12] else {},
             }
             for row in rows
         ]
@@ -2045,8 +2542,13 @@ class LegalAuthorityStorageHook:
             """,
             [authority_id],
         ).fetchall()
-        return [
-            {
+        candidates: List[Dict[str, Any]] = []
+        for row in rows:
+            metadata = json.loads(row[9]) if row[9] else {}
+            grounded_rule = metadata.get('grounded_rule', {}) if isinstance(metadata, dict) else {}
+            source_passage = metadata.get('source_passage', {}) if isinstance(metadata, dict) else {}
+            parse_lineage = metadata.get('parse_lineage', {}) if isinstance(metadata, dict) else {}
+            record = {
                 'rule_id': row[0],
                 'rule_text': row[1],
                 'rule_type': row[2],
@@ -2056,11 +2558,14 @@ class LegalAuthorityStorageHook:
                 'jurisdiction': row[6],
                 'temporal_scope': row[7],
                 'extraction_confidence': row[8] or 0.0,
-                'metadata': json.loads(row[9]) if row[9] else {},
+                'metadata': metadata,
+                'grounded_rule': grounded_rule if isinstance(grounded_rule, dict) else {},
+                'source_passage': source_passage if isinstance(source_passage, dict) else {},
+                'parse_lineage': parse_lineage if isinstance(parse_lineage, dict) else {},
                 'provenance': json.loads(row[10]) if row[10] else {},
             }
-            for row in rows
-        ]
+            candidates.append(record)
+        return candidates
 
     def _build_treatment_summary(self, treatment_records: List[Dict[str, Any]]) -> Dict[str, Any]:
         counts: Dict[str, int] = {}
@@ -2076,25 +2581,168 @@ class LegalAuthorityStorageHook:
             'max_confidence': max_confidence,
         }
 
+    def _build_citation_history_summary(self, treatment_records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        related_authority_ids = set()
+        related_citations = set()
+        treatment_dates: List[str] = []
+        source_counts: Dict[str, int] = {}
+        for record in treatment_records:
+            related_id = str(
+                record.get('treated_by_authority_id')
+                or record.get('treated_authority_id')
+                or record.get('target_authority_id')
+                or ''
+            ).strip()
+            if related_id:
+                related_authority_ids.add(related_id)
+            related_citation = str(
+                record.get('treated_by_citation')
+                or record.get('target_citation')
+                or ''
+            ).strip()
+            if related_citation:
+                related_citations.add(related_citation)
+            treatment_date = str(record.get('treatment_date') or '').strip()
+            if treatment_date:
+                treatment_dates.append(treatment_date)
+            source = str(record.get('treatment_source') or '').strip()
+            if source:
+                source_counts[source] = source_counts.get(source, 0) + 1
+
+        treatment_dates.sort()
+        return {
+            'record_count': len(treatment_records),
+            'related_authority_count': len(related_authority_ids),
+            'related_citation_count': len(related_citations),
+            'related_authority_ids': sorted(related_authority_ids),
+            'related_citations': sorted(related_citations),
+            'earliest_treatment_date': treatment_dates[0] if treatment_dates else '',
+            'latest_treatment_date': treatment_dates[-1] if treatment_dates else '',
+            'source_counts': source_counts,
+        }
+
+    def _build_authority_treatment_edges(
+        self,
+        authority_record: Dict[str, Any],
+        treatment_records: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        target_authority_id = str(authority_record.get('authority_id') or f"authority:{authority_record.get('id', '')}").strip()
+        target_citation = str(authority_record.get('citation') or '').strip()
+        edges: List[Dict[str, Any]] = []
+        for record in treatment_records:
+            if not isinstance(record, dict):
+                continue
+            relation_type = str(record.get('treatment_type') or '').strip()
+            if not relation_type:
+                continue
+            metadata = dict(record.get('metadata') or {})
+            metadata.update({
+                'source_record_treatment_id': str(record.get('treatment_id') or ''),
+                'source_record_authority_id': str(authority_record.get('id') or ''),
+            })
+            edge = AuthorityTreatmentEdge(
+                edge_id=str(record.get('treatment_id') or ''),
+                source_authority_id=str(record.get('treated_by_authority_id') or ''),
+                source_citation=str(record.get('treated_by_citation') or ''),
+                target_authority_id=target_authority_id,
+                target_citation=target_citation,
+                relation_type=relation_type,
+                confidence=float(record.get('treatment_confidence', 0.0) or 0.0),
+                treatment_source=str(record.get('treatment_source') or ''),
+                treatment_date=str(record.get('treatment_date') or ''),
+                explanation=str(record.get('treatment_explanation') or ''),
+                metadata=metadata,
+                provenance=build_provenance(**(record.get('provenance') or {})),
+            ).as_dict()
+            edges.append(edge)
+        return edges
+
+    def _build_search_program_summary(self, search_programs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        by_type: Dict[str, int] = {}
+        by_intent: Dict[str, int] = {}
+        claim_element_ids = set()
+        for record in search_programs:
+            program_type = str(record.get('program_type') or '')
+            if program_type:
+                by_type[program_type] = by_type.get(program_type, 0) + 1
+            authority_intent = str(record.get('authority_intent') or '')
+            if authority_intent:
+                by_intent[authority_intent] = by_intent.get(authority_intent, 0) + 1
+            claim_element_id = str(record.get('claim_element_id') or '')
+            if claim_element_id:
+                claim_element_ids.add(claim_element_id)
+        return {
+            'record_count': len(search_programs),
+            'by_type': by_type,
+            'by_intent': by_intent,
+            'claim_element_count': len(claim_element_ids),
+        }
+
     def _build_rule_candidate_summary(self, rule_candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
         counts: Dict[str, int] = {}
+        deontic_counts: Dict[str, int] = {}
+        operator_family_counts: Dict[str, int] = {}
+        grounding_status_counts: Dict[str, int] = {}
+        adverse_treatment_count = 0
         max_confidence = 0.0
         for record in rule_candidates:
             rule_type = str(record.get('rule_type') or '')
             if rule_type:
                 counts[rule_type] = counts.get(rule_type, 0) + 1
+            grounded_rule = record.get('grounded_rule', {}) if isinstance(record.get('grounded_rule'), dict) else {}
+            deontic_operator = str(grounded_rule.get('deontic_operator') or '')
+            if deontic_operator:
+                deontic_counts[deontic_operator] = deontic_counts.get(deontic_operator, 0) + 1
+            operator_family = str(grounded_rule.get('operator_family') or '')
+            if operator_family:
+                operator_family_counts[operator_family] = operator_family_counts.get(operator_family, 0) + 1
+            grounding_status = str(grounded_rule.get('grounding_status') or '')
+            if grounding_status:
+                grounding_status_counts[grounding_status] = grounding_status_counts.get(grounding_status, 0) + 1
+            adverse_treatment_count += int(grounded_rule.get('adverse_treatment_count', 0) or 0)
             max_confidence = max(max_confidence, float(record.get('extraction_confidence', 0.0) or 0.0))
         return {
             'record_count': len(rule_candidates),
             'by_type': counts,
+            'by_deontic_operator': deontic_counts,
+            'by_operator_family': operator_family_counts,
+            'by_grounding_status': grounding_status_counts,
+            'adverse_treatment_count': adverse_treatment_count,
             'max_confidence': max_confidence,
         }
 
     def _attach_treatment_payloads(self, conn, record: Dict[str, Any]) -> Dict[str, Any]:
+        search_programs = self._get_authority_search_programs(conn, record['id'])
+        record['search_programs'] = search_programs
+        record['search_program_summary'] = self._build_search_program_summary(search_programs)
         treatment_records = self._get_authority_treatments(conn, record['id'])
         record['treatment_records'] = treatment_records
+        record['authority_treatment_edges'] = self._build_authority_treatment_edges(record, treatment_records)
         record['treatment_summary'] = self._build_treatment_summary(treatment_records)
+        record['citation_history_summary'] = self._build_citation_history_summary(treatment_records)
         rule_candidates = self._get_authority_rule_candidates(conn, record['id'])
+        for candidate in rule_candidates:
+            grounded_rule = candidate.get('grounded_rule', {})
+            if not isinstance(grounded_rule, dict):
+                grounded_rule = {}
+            grounded_rule = {
+                **grounded_rule,
+                **self._build_grounded_rule_metadata(
+                    str(candidate.get('rule_text') or ''),
+                    str(candidate.get('rule_type') or ''),
+                    authority_id=record['id'],
+                    authority=record,
+                    claim_element={
+                        'claim_element_id': str(candidate.get('claim_element_id') or ''),
+                        'claim_element': str(candidate.get('claim_element_text') or ''),
+                    },
+                    provenance=type('ProvenanceView', (), {'jurisdiction': candidate.get('jurisdiction') or ''})(),
+                    treatment_summary=record['treatment_summary'],
+                ),
+            }
+            candidate['grounded_rule'] = grounded_rule
+            if isinstance(candidate.get('metadata'), dict):
+                candidate['metadata']['grounded_rule'] = grounded_rule
         record['rule_candidates'] = rule_candidates
         record['rule_candidate_summary'] = self._build_rule_candidate_summary(rule_candidates)
         return record
@@ -2338,10 +2986,27 @@ class LegalAuthorityStorageHook:
                 normalized_authority,
             )
             if existing_record_id is not None:
+                self._store_authority_search_programs(
+                    conn,
+                    existing_record_id,
+                    self._build_search_program_records(existing_record_id, authority_data, provenance, claim_type),
+                )
                 self._store_authority_treatments(
                     conn,
                     existing_record_id,
                     self._build_treatment_records(existing_record_id, authority_data, provenance),
+                )
+                self._store_authority_rule_candidates(
+                    conn,
+                    existing_record_id,
+                    self._extract_rule_candidates(
+                        existing_record_id,
+                        normalized_authority,
+                        claim_type,
+                        document_parse,
+                        provenance,
+                        claim_element,
+                    ),
                 )
                 conn.close()
                 self.mediator.log(
@@ -2439,6 +3104,11 @@ class LegalAuthorityStorageHook:
                 graph_payload,
                 provenance,
                 document_parse,
+            )
+            self._store_authority_search_programs(
+                conn,
+                record_id,
+                self._build_search_program_records(record_id, authority_data, provenance, claim_type),
             )
             self._store_authority_treatments(
                 conn,
@@ -2627,6 +3297,20 @@ class LegalAuthorityStorageHook:
             self.mediator.log('legal_authority_treatment_query_error', error=str(e), authority_id=authority_id)
             return []
 
+    def get_authority_search_programs(self, authority_id: int) -> List[Dict[str, Any]]:
+        """Get persisted search-program records for a stored legal authority."""
+        if not DUCKDB_AVAILABLE:
+            return []
+
+        try:
+            conn = duckdb.connect(self.db_path)
+            records = self._get_authority_search_programs(conn, authority_id)
+            conn.close()
+            return records
+        except Exception as e:
+            self.mediator.log('legal_authority_search_program_query_error', error=str(e), authority_id=authority_id)
+            return []
+
     def get_authority_rule_candidates(self, authority_id: int) -> List[Dict[str, Any]]:
         """Get persisted rule candidate records for a stored legal authority."""
         if not DUCKDB_AVAILABLE:
@@ -2648,11 +3332,33 @@ class LegalAuthorityStorageHook:
 
         try:
             conn = duckdb.connect(self.db_path)
+            columns = set(_list_table_columns(conn, 'legal_authority_facts'))
+            durable_select = []
+            for column_name in _LEGAL_AUTHORITY_FACT_DURABLE_COLUMNS:
+                if column_name == 'source_passage':
+                    expression = (
+                        "CASE WHEN source_passage IS NULL THEN NULL "
+                        "ELSE CAST(source_passage AS VARCHAR) END AS source_passage"
+                        if column_name in columns
+                        else "NULL AS source_passage"
+                    )
+                else:
+                    expression = column_name if column_name in columns else f"NULL AS {column_name}"
+                durable_select.append(expression)
+            durable_struct = ', '.join(
+                f'{column_name} := {column_name}'
+                for column_name in _LEGAL_AUTHORITY_FACT_DURABLE_COLUMNS
+            )
             rows = conn.execute(
-                """
-                SELECT fact_id, fact_text, source_authority_id, confidence, metadata, provenance
-                FROM legal_authority_facts
-                WHERE authority_id = ?
+                f"""
+                SELECT fact_id, fact_text, source_authority_id, confidence, metadata, provenance,
+                       struct_pack({durable_struct})
+                FROM (
+                    SELECT fact_id, fact_text, source_authority_id, confidence, metadata, provenance,
+                           {', '.join(durable_select)}
+                    FROM legal_authority_facts
+                    WHERE authority_id = ?
+                ) facts
                 ORDER BY fact_id ASC
                 """,
                 [authority_id],

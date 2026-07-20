@@ -195,6 +195,78 @@ class ClaimSupportFollowUpExecuteRequest(BaseModel):
     include_follow_up_plan: bool = True
 
 
+def _build_heavy_processing_queue_state(
+    mediator: Any,
+    resolved_user_id: str,
+    claim_type: Optional[str],
+) -> Dict[str, Any]:
+    get_queue_state = getattr(mediator, "get_enrichment_queue_state", None)
+    queue_state: Dict[str, Any] = {}
+    if callable(get_queue_state):
+        candidate_state = get_queue_state(resolved_user_id, claim_type=claim_type)
+        if isinstance(candidate_state, dict):
+            queue_state = candidate_state
+
+    queue_entries = (
+        list(queue_state.get("queue") or [])
+        if isinstance(queue_state.get("queue"), list)
+        else []
+    )
+    status_counts: Dict[str, int] = {}
+    for entry in queue_entries:
+        if not isinstance(entry, dict):
+            continue
+        status = str(entry.get("status") or "pending")
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    return {
+        "available": bool(queue_state.get("available", False)),
+        "user_id": resolved_user_id,
+        "claim_type": claim_type,
+        "interactive_dashboard_safe": True,
+        "message": (
+            "Heavy graph, legal, document, and proof enrichment can be queued "
+            "without blocking the current review payload."
+        ),
+        "queue": queue_entries,
+        "queue_count": int(queue_state.get("queue_count", len(queue_entries)) or 0),
+        "pending_count": int(
+            queue_state.get("pending_count", status_counts.get("pending", 0)) or 0
+        ),
+        "running_count": int(
+            queue_state.get("running_count", status_counts.get("running", 0)) or 0
+        ),
+        "completed_count": int(
+            queue_state.get("completed_count", status_counts.get("completed", 0)) or 0
+        ),
+        "failed_count": int(
+            queue_state.get("failed_count", status_counts.get("failed", 0)) or 0
+        ),
+        "recommended_enrichment_types": [
+            {
+                "type": "graph_enrichment",
+                "label": "Rebuild graph support",
+                "description": "Refresh graph traces and support-path inputs in the background.",
+            },
+            {
+                "type": "legal_authority_refresh",
+                "label": "Refresh legal authority retrieval",
+                "description": "Queue authority search and treatment validation work.",
+            },
+            {
+                "type": "document_reparse",
+                "label": "Reparse document evidence",
+                "description": "Queue expensive document extraction or OCR remediation.",
+            },
+            {
+                "type": "proof_export",
+                "label": "Export theorem/proof artifacts",
+                "description": "Queue formal proof artifact export without blocking review.",
+            },
+        ],
+    }
+
+
 class ClaimSupportManualReviewResolveRequest(BaseModel):
     user_id: Optional[str] = None
     claim_type: Optional[str] = None
@@ -1597,7 +1669,7 @@ def summarize_claim_support_snapshot_lifecycle(
         for snapshot in snapshot_map.values()
         if isinstance(snapshot, dict)
     )
-    return {
+    lifecycle_summary = {
         "total_snapshot_count": len(snapshot_kinds),
         "fresh_snapshot_count": len(fresh_snapshot_kinds),
         "stale_snapshot_count": len(stale_snapshot_kinds),
@@ -1607,6 +1679,81 @@ def summarize_claim_support_snapshot_lifecycle(
         "retention_limits": retention_limits,
         "total_pruned_snapshot_count": total_pruned_snapshot_count,
     }
+    coverage_summaries: List[Dict[str, Any]] = []
+    for snapshot in snapshot_map.values():
+        if not isinstance(snapshot, dict):
+            continue
+        metadata = snapshot.get("metadata", {}) if isinstance(snapshot.get("metadata"), dict) else {}
+        coverage_summary = metadata.get("coverage_matrix_summary")
+        if isinstance(coverage_summary, dict) and coverage_summary:
+            coverage_summaries.append(coverage_summary)
+
+    if coverage_summaries:
+        coverage_status_counts: Dict[str, int] = {}
+        coverage_support_by_kind: Dict[str, int] = {}
+        coverage_path_kind_counts: Dict[str, int] = {}
+
+        def _merge_counts(target: Dict[str, int], counts: Any) -> None:
+            if not isinstance(counts, dict):
+                return
+            for key, value in counts.items():
+                normalized_key = str(key or "").strip()
+                if not normalized_key:
+                    continue
+                target[normalized_key] = target.get(normalized_key, 0) + int(value or 0)
+
+        for coverage_summary in coverage_summaries:
+            _merge_counts(coverage_status_counts, coverage_summary.get("status_counts"))
+            _merge_counts(coverage_support_by_kind, coverage_summary.get("support_by_kind"))
+            _merge_counts(coverage_path_kind_counts, coverage_summary.get("path_kind_counts"))
+
+        lifecycle_summary["coverage_matrix_summary"] = {
+            "summary_count": len(coverage_summaries),
+            "element_count": sum(
+                int(summary.get("element_count", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "status_counts": coverage_status_counts,
+            "support_by_kind": coverage_support_by_kind,
+            "total_links": sum(
+                int(summary.get("total_links", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "total_facts": sum(
+                int(summary.get("total_facts", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "graph_snapshot_ref_count": sum(
+                int(summary.get("graph_snapshot_ref_count", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "support_path_count": sum(
+                int(summary.get("support_path_count", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "current_trace_path_count": sum(
+                int(summary.get("current_trace_path_count", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "persisted_path_count": sum(
+                int(summary.get("persisted_path_count", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "graph_linked_path_count": sum(
+                int(summary.get("graph_linked_path_count", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "support_ref_count": sum(
+                int(summary.get("support_ref_count", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "unique_support_ref_count": sum(
+                int(summary.get("unique_support_ref_count", 0) or 0)
+                for summary in coverage_summaries
+            ),
+            "path_kind_counts": coverage_path_kind_counts,
+        }
+    return lifecycle_summary
 
 
 def _aggregate_timeline_gap_follow_ups(
@@ -2180,6 +2327,13 @@ def summarize_follow_up_history_claim(
     adaptive_query_strategy_counts: Dict[str, int] = {}
     adaptive_retry_reason_counts: Dict[str, int] = {}
     selected_authority_program_type_counts: Dict[str, int] = {}
+    selected_authority_intent_counts: Dict[str, int] = {}
+    selected_authority_jurisdiction_counts: Dict[str, int] = {}
+    selected_authority_forum_counts: Dict[str, int] = {}
+    selected_authority_family_counts: Dict[str, int] = {}
+    selected_authority_defense_theme_counts: Dict[str, int] = {}
+    selected_authority_time_window_counts: Dict[str, int] = {}
+    selected_authority_graph_gap_bias_counts: Dict[str, int] = {}
     selected_authority_program_bias_counts: Dict[str, int] = {}
     selected_authority_program_rule_bias_counts: Dict[str, int] = {}
     source_family_counts: Dict[str, int] = {}
@@ -2192,6 +2346,23 @@ def summarize_follow_up_history_claim(
     zero_result_entry_count = 0
     last_adaptive_retry: Optional[Dict[str, Any]] = None
     fact_targeting_metrics = _aggregate_fact_targeting_metrics(entries)
+    quality_routing_metrics = _aggregate_quality_routing_metrics(entries)
+    graph_gap_context_metrics = _aggregate_graph_gap_context_metrics(entries)
+
+    def _increment_count(counts: Dict[str, int], value: Any) -> None:
+        normalized = str(value or "").strip()
+        if normalized:
+            counts[normalized] = counts.get(normalized, 0) + 1
+
+    def _time_window_label(value: Any) -> str:
+        if not isinstance(value, dict):
+            return ""
+        parts = [
+            str(value.get("time_window_type") or "").strip(),
+            str(value.get("profile_id") or "").strip(),
+            str(value.get("status") or "").strip(),
+        ]
+        return ":".join([part for part in parts if part])
 
     for entry in entries:
         if not isinstance(entry, dict):
@@ -2210,8 +2381,33 @@ def summarize_follow_up_history_claim(
         adaptive_priority_penalty = int(entry.get("adaptive_priority_penalty", 0) or 0)
         zero_result = bool(entry.get("zero_result", False))
         selected_search_program_type = str(entry.get("selected_search_program_type") or "")
+        selected_search_program_intent = str(
+            entry.get("selected_search_program_intent") or entry.get("authority_intent") or ""
+        )
+        selected_search_program_jurisdiction = str(
+            entry.get("selected_search_program_jurisdiction") or ""
+        )
+        selected_search_program_forum = str(entry.get("selected_search_program_forum") or "")
+        selected_search_program_families = (
+            entry.get("selected_search_program_families")
+            if isinstance(entry.get("selected_search_program_families"), list)
+            else []
+        )
+        selected_search_program_defense_themes = (
+            entry.get("selected_search_program_defense_themes")
+            if isinstance(entry.get("selected_search_program_defense_themes"), list)
+            else []
+        )
+        selected_search_program_time_window = (
+            entry.get("selected_search_program_time_window")
+            if isinstance(entry.get("selected_search_program_time_window"), dict)
+            else {}
+        )
         selected_search_program_bias = str(entry.get("selected_search_program_bias") or "")
         selected_search_program_rule_bias = str(entry.get("selected_search_program_rule_bias") or "")
+        selected_search_program_graph_gap_bias = str(
+            entry.get("selected_search_program_graph_gap_bias") or ""
+        )
         source_family = str(entry.get("source_family") or "")
         record_scope = str(entry.get("record_scope") or "")
         artifact_family = str(entry.get("artifact_family") or "")
@@ -2260,6 +2456,23 @@ def summarize_follow_up_history_claim(
             selected_authority_program_type_counts[selected_search_program_type] = (
                 selected_authority_program_type_counts.get(selected_search_program_type, 0) + 1
             )
+        if selected_search_program_intent:
+            selected_authority_intent_counts[selected_search_program_intent] = (
+                selected_authority_intent_counts.get(selected_search_program_intent, 0) + 1
+            )
+        _increment_count(
+            selected_authority_jurisdiction_counts,
+            selected_search_program_jurisdiction,
+        )
+        _increment_count(selected_authority_forum_counts, selected_search_program_forum)
+        for family in selected_search_program_families:
+            _increment_count(selected_authority_family_counts, family)
+        for theme in selected_search_program_defense_themes:
+            _increment_count(selected_authority_defense_theme_counts, theme)
+        _increment_count(
+            selected_authority_time_window_counts,
+            _time_window_label(selected_search_program_time_window),
+        )
         if selected_search_program_bias:
             selected_authority_program_bias_counts[selected_search_program_bias] = (
                 selected_authority_program_bias_counts.get(selected_search_program_bias, 0) + 1
@@ -2267,6 +2480,10 @@ def summarize_follow_up_history_claim(
         if selected_search_program_rule_bias:
             selected_authority_program_rule_bias_counts[selected_search_program_rule_bias] = (
                 selected_authority_program_rule_bias_counts.get(selected_search_program_rule_bias, 0) + 1
+            )
+        if selected_search_program_graph_gap_bias:
+            selected_authority_graph_gap_bias_counts[selected_search_program_graph_gap_bias] = (
+                selected_authority_graph_gap_bias_counts.get(selected_search_program_graph_gap_bias, 0) + 1
             )
         if source_family:
             source_family_counts[source_family] = source_family_counts.get(source_family, 0) + 1
@@ -2316,21 +2533,79 @@ def summarize_follow_up_history_claim(
                 and entry.get("query_strategy") == "temporal_gap_targeted"
             ]
         ),
+        "ontology_quality_gap_task_count": len(
+            [
+                entry
+                for entry in entries
+                if isinstance(entry, dict)
+                and entry.get("follow_up_focus") == "ontology_quality_gap_closure"
+            ]
+        ),
+        "ontology_quality_gap_targeted_task_count": len(
+            [
+                entry
+                for entry in entries
+                if isinstance(entry, dict)
+                and entry.get("query_strategy") == "ontology_quality_gap_targeted"
+            ]
+        ),
         "temporal_rule_status_counts": temporal_rule_status_counts,
         "temporal_rule_blocking_reason_counts": temporal_rule_blocking_reason_counts,
         "temporal_resolution_status_counts": temporal_resolution_status_counts,
+        "quality_signal_counts": quality_routing_metrics["quality_signal_counts"],
+        "primary_quality_signal_counts": quality_routing_metrics["primary_quality_signal_counts"],
+        "quality_follow_up_action_counts": quality_routing_metrics["quality_follow_up_action_counts"],
         "adaptive_retry_entry_count": adaptive_retry_entry_count,
         "priority_penalized_entry_count": priority_penalized_entry_count,
         "adaptive_query_strategy_counts": adaptive_query_strategy_counts,
         "adaptive_retry_reason_counts": adaptive_retry_reason_counts,
         "selected_authority_program_type_counts": selected_authority_program_type_counts,
+        "selected_authority_intent_counts": selected_authority_intent_counts,
+        "selected_authority_jurisdiction_counts": selected_authority_jurisdiction_counts,
+        "selected_authority_forum_counts": selected_authority_forum_counts,
+        "selected_authority_family_counts": selected_authority_family_counts,
+        "selected_authority_defense_theme_counts": selected_authority_defense_theme_counts,
+        "selected_authority_time_window_counts": selected_authority_time_window_counts,
         "selected_authority_program_bias_counts": selected_authority_program_bias_counts,
         "selected_authority_program_rule_bias_counts": selected_authority_program_rule_bias_counts,
+        "selected_authority_graph_gap_bias_counts": selected_authority_graph_gap_bias_counts,
         "source_family_counts": source_family_counts,
         "record_scope_counts": record_scope_counts,
         "artifact_family_counts": artifact_family_counts,
         "corpus_family_counts": corpus_family_counts,
         "content_origin_counts": content_origin_counts,
+        "graph_gap_context_task_count": graph_gap_context_metrics["graph_gap_context_task_count"],
+        "graph_gap_has_support_task_count": graph_gap_context_metrics["graph_gap_has_support_task_count"],
+        "graph_gap_empty_task_count": graph_gap_context_metrics["graph_gap_empty_task_count"],
+        "graph_gap_total_fact_count": graph_gap_context_metrics["graph_gap_total_fact_count"],
+        "graph_gap_unique_fact_count": graph_gap_context_metrics["graph_gap_unique_fact_count"],
+        "graph_gap_duplicate_fact_count": graph_gap_context_metrics["graph_gap_duplicate_fact_count"],
+        "graph_gap_semantic_cluster_count": graph_gap_context_metrics["graph_gap_semantic_cluster_count"],
+        "graph_gap_semantic_duplicate_count": graph_gap_context_metrics["graph_gap_semantic_duplicate_count"],
+        "graph_gap_strength_counts": graph_gap_context_metrics["graph_gap_strength_counts"],
+        "graph_gap_recommended_action_counts": graph_gap_context_metrics["graph_gap_recommended_action_counts"],
+        "graph_gap_priority_adjustment_counts": graph_gap_context_metrics["graph_gap_priority_adjustment_counts"],
+        "graph_gap_source_family_counts": graph_gap_context_metrics["graph_gap_source_family_counts"],
+        "graph_gap_artifact_family_counts": graph_gap_context_metrics["graph_gap_artifact_family_counts"],
+        "graph_gap_corpus_family_counts": graph_gap_context_metrics["graph_gap_corpus_family_counts"],
+        "graph_gap_content_origin_counts": graph_gap_context_metrics["graph_gap_content_origin_counts"],
+        "graph_gap_fact_registry_summary": graph_gap_context_metrics["graph_gap_fact_registry_summary"],
+        "graph_gap_query_task_count": graph_gap_context_metrics["graph_gap_query_task_count"],
+        "graph_gap_query_has_support_task_count": graph_gap_context_metrics[
+            "graph_gap_query_has_support_task_count"
+        ],
+        "graph_gap_query_empty_task_count": graph_gap_context_metrics["graph_gap_query_empty_task_count"],
+        "graph_gap_query_result_count": graph_gap_context_metrics["graph_gap_query_result_count"],
+        "graph_gap_query_missing_support_kind_counts": graph_gap_context_metrics[
+            "graph_gap_query_missing_support_kind_counts"
+        ],
+        "graph_gap_query_strength_counts": graph_gap_context_metrics["graph_gap_query_strength_counts"],
+        "graph_gap_query_recommended_action_counts": graph_gap_context_metrics[
+            "graph_gap_query_recommended_action_counts"
+        ],
+        "graph_gap_query_priority_adjustment_counts": graph_gap_context_metrics[
+            "graph_gap_query_priority_adjustment_counts"
+        ],
         "primary_missing_fact_counts": fact_targeting_metrics["primary_missing_fact_counts"],
         "missing_fact_bundle_counts": fact_targeting_metrics["missing_fact_bundle_counts"],
         "satisfied_fact_bundle_counts": fact_targeting_metrics["satisfied_fact_bundle_counts"],
@@ -2880,6 +3155,7 @@ def _attach_validation_to_claim_matrix(
         element["proof_gaps"] = list(validation_element.get("proof_gaps", []) or [])
         element["proof_decision_trace"] = dict(validation_element.get("proof_decision_trace", {}) or {})
         element["proof_diagnostics"] = dict(validation_element.get("proof_diagnostics", {}) or {})
+        element["reasoning_diagnostics"] = dict(validation_element.get("reasoning_diagnostics", {}) or {})
         element["contradiction_candidate_count"] = int(
             validation_element.get("contradiction_candidate_count", 0) or 0
         )
@@ -3082,6 +3358,7 @@ def _augment_question_recommendations_with_fact_prompts(
         if isinstance(item, dict) and item.get("suppression_key")
     }
     added: List[Dict[str, Any]] = []
+    ontology_added: List[Dict[str, Any]] = []
 
     for element in claim_matrix.get("elements", []) or []:
         if not isinstance(element, dict):
@@ -3092,6 +3369,84 @@ def _augment_question_recommendations_with_fact_prompts(
         missing_support_kinds = [
             str(kind) for kind in (element.get("missing_support_kinds", []) or []) if kind
         ]
+        reasoning = (
+            element.get("reasoning_diagnostics", {})
+            if isinstance(element.get("reasoning_diagnostics"), dict)
+            else {}
+        )
+        ontology_quality = (
+            reasoning.get("graphrag_quality", {})
+            if isinstance(reasoning.get("graphrag_quality"), dict)
+            else {}
+        )
+        ontology_gaps = (
+            ontology_quality.get("gaps")
+            if isinstance(ontology_quality.get("gaps"), list)
+            else []
+        )
+        if ontology_quality and (ontology_gaps or bool(ontology_quality.get("has_gaps", False))):
+            gap_types = [
+                str(gap.get("gap_type") or gap.get("type") or "ontology_quality_gap")
+                for gap in ontology_gaps
+                if isinstance(gap, dict)
+            ]
+            if not gap_types:
+                gap_types = ["ontology_quality_gap"]
+            follow_up_action = next(
+                (
+                    str(gap.get("follow_up_action") or "").strip()
+                    for gap in ontology_gaps
+                    if isinstance(gap, dict) and str(gap.get("follow_up_action") or "").strip()
+                ),
+                "improve_ontology_quality",
+            )
+            grade = str(ontology_quality.get("grade") or "unknown").strip() or "unknown"
+            score = ontology_quality.get("overall_quality_score")
+            score_label = f"{float(score):.2f}" if isinstance(score, (int, float)) else "unknown"
+            recommendation = denoiser._build_review_question_recommendation(
+                claim_type=claim_name,
+                lane="ontology_quality_gap",
+                target_claim_element_id=element_id,
+                target_claim_element_text=element_text,
+                question_text=(
+                    f"What missing entity, relationship, source detail, or concept would make the support graph for "
+                    f"{element_text} more complete?"
+                ),
+                question_reason=(
+                    f"GraphRAG ontology quality for {element_text} is grade {grade} with "
+                    f"{len(ontology_gaps) or 1} ontology gap(s), so the support graph needs more precise structure."
+                ),
+                expected_proof_gain=(
+                    "high" if bool(ontology_quality.get("has_blocking_gaps", False)) else "medium"
+                ),
+                supporting_evidence_summary=(
+                    f"Ontology quality grade {grade}, score {score_label}; gaps: {', '.join(gap_types[:3])}"
+                ),
+                current_status=validation_status,
+                missing_support_kinds=missing_support_kinds,
+            )
+            recommendation["ontology_quality"] = {
+                "valid": bool(ontology_quality.get("valid", False)),
+                "grade": grade,
+                "overall_quality_score": score,
+                "has_gaps": bool(ontology_quality.get("has_gaps", False)),
+                "has_blocking_gaps": bool(ontology_quality.get("has_blocking_gaps", False)),
+                "gap_count": len(ontology_gaps) or 1,
+                "gap_types": gap_types,
+            }
+            recommendation["ontology_gap_types"] = gap_types
+            recommendation["quality_signal_counts"] = {"ontology_quality_gap": len(ontology_gaps) or 1}
+            recommendation["primary_quality_signal"] = {
+                "signal_type": "ontology_quality_gap",
+                "question_lane": "ontology_quality_gap",
+                "follow_up_action": follow_up_action,
+                "count": len(ontology_gaps) or 1,
+            }
+            recommendation["quality_follow_up_action"] = follow_up_action
+            suppression_key = str(recommendation.get("suppression_key") or "")
+            if suppression_key and suppression_key not in seen_keys:
+                seen_keys.add(suppression_key)
+                ontology_added.append(recommendation)
 
         candidate_packets = []
         for packet in element.get("document_fact_packets", []) or []:
@@ -3163,9 +3518,273 @@ def _augment_question_recommendations_with_fact_prompts(
                 seen_keys.add(suppression_key)
             added.append(recommendation)
             if len(augmented) + len(added) >= max_questions:
-                return (added + augmented)[:max_questions]
+                return (added + augmented + ontology_added)[:max_questions]
 
-    return (added + augmented)[:max_questions]
+    return (added + augmented + ontology_added)[:max_questions]
+
+
+def _summarize_question_recommendations(
+    recommendations: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    lane_counts: Dict[str, int] = {}
+    quality_signal_counts: Dict[str, int] = {}
+    primary_quality_signal_counts: Dict[str, int] = {}
+    quality_follow_up_action_counts: Dict[str, int] = {}
+    expected_proof_gain_counts: Dict[str, int] = {}
+
+    for recommendation in recommendations:
+        if not isinstance(recommendation, dict):
+            continue
+        lane = str(recommendation.get("question_lane") or "unknown")
+        lane_counts[lane] = lane_counts.get(lane, 0) + 1
+        expected_gain = str(recommendation.get("expected_proof_gain") or "unknown")
+        expected_proof_gain_counts[expected_gain] = (
+            expected_proof_gain_counts.get(expected_gain, 0) + 1
+        )
+        signal_counts = (
+            recommendation.get("quality_signal_counts", {})
+            if isinstance(recommendation.get("quality_signal_counts"), dict)
+            else {}
+        )
+        for signal_type, signal_count in signal_counts.items():
+            normalized_signal = str(signal_type or "").strip()
+            if not normalized_signal:
+                continue
+            try:
+                normalized_count = int(signal_count or 0)
+            except (TypeError, ValueError):
+                normalized_count = 0
+            if normalized_count <= 0:
+                continue
+            quality_signal_counts[normalized_signal] = (
+                quality_signal_counts.get(normalized_signal, 0) + normalized_count
+            )
+        primary_signal = (
+            recommendation.get("primary_quality_signal", {})
+            if isinstance(recommendation.get("primary_quality_signal"), dict)
+            else {}
+        )
+        primary_signal_type = str(primary_signal.get("signal_type") or "").strip()
+        if primary_signal_type:
+            primary_quality_signal_counts[primary_signal_type] = (
+                primary_quality_signal_counts.get(primary_signal_type, 0) + 1
+            )
+        follow_up_action = str(recommendation.get("quality_follow_up_action") or "").strip()
+        if follow_up_action:
+            quality_follow_up_action_counts[follow_up_action] = (
+                quality_follow_up_action_counts.get(follow_up_action, 0) + 1
+            )
+
+    return {
+        "recommendation_count": len(
+            [item for item in recommendations if isinstance(item, dict)]
+        ),
+        "question_lane_counts": dict(sorted(lane_counts.items())),
+        "expected_proof_gain_counts": dict(sorted(expected_proof_gain_counts.items())),
+        "quality_signal_counts": dict(sorted(quality_signal_counts.items())),
+        "primary_quality_signal_counts": dict(sorted(primary_quality_signal_counts.items())),
+        "quality_follow_up_action_counts": dict(
+            sorted(quality_follow_up_action_counts.items())
+        ),
+    }
+
+
+def _aggregate_quality_routing_metrics(entries: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    quality_signal_counts: Dict[str, int] = {}
+    primary_quality_signal_counts: Dict[str, int] = {}
+    quality_follow_up_action_counts: Dict[str, int] = {}
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        signal_counts = (
+            entry.get("quality_signal_counts", {})
+            if isinstance(entry.get("quality_signal_counts"), dict)
+            else {}
+        )
+        if not signal_counts:
+            support_quality_summary = (
+                entry.get("support_quality_summary", {})
+                if isinstance(entry.get("support_quality_summary"), dict)
+                else {}
+            )
+            signal_counts = (
+                support_quality_summary.get("quality_signal_counts", {})
+                if isinstance(support_quality_summary.get("quality_signal_counts"), dict)
+                else {}
+            )
+        for signal_type, signal_count in signal_counts.items():
+            normalized_signal = str(signal_type or "").strip()
+            if not normalized_signal:
+                continue
+            try:
+                normalized_count = int(signal_count or 0)
+            except (TypeError, ValueError):
+                normalized_count = 0
+            if normalized_count <= 0:
+                continue
+            quality_signal_counts[normalized_signal] = (
+                quality_signal_counts.get(normalized_signal, 0) + normalized_count
+            )
+        primary_signal = (
+            entry.get("primary_quality_signal", {})
+            if isinstance(entry.get("primary_quality_signal"), dict)
+            else {}
+        )
+        primary_signal_type = str(primary_signal.get("signal_type") or "").strip()
+        if primary_signal_type:
+            primary_quality_signal_counts[primary_signal_type] = (
+                primary_quality_signal_counts.get(primary_signal_type, 0) + 1
+            )
+        follow_up_action = str(entry.get("quality_follow_up_action") or "").strip()
+        if follow_up_action:
+            quality_follow_up_action_counts[follow_up_action] = (
+                quality_follow_up_action_counts.get(follow_up_action, 0) + 1
+            )
+
+    return {
+        "quality_signal_counts": dict(sorted(quality_signal_counts.items())),
+        "primary_quality_signal_counts": dict(sorted(primary_quality_signal_counts.items())),
+        "quality_follow_up_action_counts": dict(
+            sorted(quality_follow_up_action_counts.items())
+        ),
+    }
+
+
+def _aggregate_ontology_quality_metrics(elements: List[Dict[str, Any]]) -> Dict[str, Any]:
+    available_count = 0
+    valid_count = 0
+    invalid_count = 0
+    has_gap_count = 0
+    blocking_gap_count = 0
+    total_gap_count = 0
+    grade_counts: Dict[str, int] = {}
+    gap_type_counts: Dict[str, int] = {}
+    gap_severity_counts: Dict[str, int] = {}
+    gap_follow_up_action_counts: Dict[str, int] = {}
+    workflow_status_counts: Dict[str, int] = {}
+    workflow_degraded_reason_counts: Dict[str, int] = {}
+    workflow_backend_available_count = 0
+    workflow_degraded_count = 0
+    scores: List[float] = []
+
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        reasoning = (
+            element.get("reasoning_diagnostics", {})
+            if isinstance(element.get("reasoning_diagnostics"), dict)
+            else {}
+        )
+        quality = (
+            reasoning.get("graphrag_quality", {})
+            if isinstance(reasoning.get("graphrag_quality"), dict)
+            else {}
+        )
+        if not quality:
+            continue
+        available_count += 1
+        if bool(quality.get("valid", False)):
+            valid_count += 1
+        else:
+            invalid_count += 1
+        grade = str(quality.get("grade") or "unknown").strip() or "unknown"
+        grade_counts[grade] = grade_counts.get(grade, 0) + 1
+        workflow_status = str(quality.get("workflow_status") or "").strip()
+        if workflow_status:
+            workflow_status_counts[workflow_status] = workflow_status_counts.get(workflow_status, 0) + 1
+        if bool(quality.get("workflow_backend_available", False)):
+            workflow_backend_available_count += 1
+        workflow_degraded_reason = str(quality.get("workflow_degraded_reason") or "").strip()
+        if workflow_degraded_reason:
+            workflow_degraded_count += 1
+            workflow_degraded_reason_counts[workflow_degraded_reason] = (
+                workflow_degraded_reason_counts.get(workflow_degraded_reason, 0) + 1
+            )
+        try:
+            scores.append(float(quality.get("overall_quality_score") or 0.0))
+        except (TypeError, ValueError):
+            scores.append(0.0)
+        has_gaps = bool(quality.get("has_gaps", False))
+        has_blocking_gaps = bool(quality.get("has_blocking_gaps", False))
+        if has_gaps:
+            has_gap_count += 1
+        if has_blocking_gaps:
+            blocking_gap_count += 1
+        quality_gap_type_counts = (
+            quality.get("gap_type_counts")
+            if isinstance(quality.get("gap_type_counts"), dict)
+            else {}
+        )
+        quality_gap_severity_counts = (
+            quality.get("gap_severity_counts")
+            if isinstance(quality.get("gap_severity_counts"), dict)
+            else {}
+        )
+        quality_gap_follow_up_action_counts = (
+            quality.get("gap_follow_up_action_counts")
+            if isinstance(quality.get("gap_follow_up_action_counts"), dict)
+            else {}
+        )
+        gaps = quality.get("gaps") if isinstance(quality.get("gaps"), list) else []
+        total_gap_count += len(gaps)
+        if quality_gap_type_counts:
+            for gap_type, count in quality_gap_type_counts.items():
+                normalized_gap_type = str(gap_type or "").strip()
+                if normalized_gap_type:
+                    gap_type_counts[normalized_gap_type] = gap_type_counts.get(normalized_gap_type, 0) + int(count or 0)
+        else:
+            for gap in gaps:
+                if not isinstance(gap, dict):
+                    continue
+                gap_type = str(gap.get("gap_type") or gap.get("type") or "unknown").strip()
+                if gap_type:
+                    gap_type_counts[gap_type] = gap_type_counts.get(gap_type, 0) + 1
+        if quality_gap_severity_counts:
+            for severity, count in quality_gap_severity_counts.items():
+                normalized_severity = str(severity or "").strip()
+                if normalized_severity:
+                    gap_severity_counts[normalized_severity] = gap_severity_counts.get(normalized_severity, 0) + int(count or 0)
+        else:
+            for gap in gaps:
+                if not isinstance(gap, dict):
+                    continue
+                severity = str(gap.get("severity") or "").strip()
+                if severity:
+                    gap_severity_counts[severity] = gap_severity_counts.get(severity, 0) + 1
+        if quality_gap_follow_up_action_counts:
+            for action, count in quality_gap_follow_up_action_counts.items():
+                normalized_action = str(action or "").strip()
+                if normalized_action:
+                    gap_follow_up_action_counts[normalized_action] = gap_follow_up_action_counts.get(normalized_action, 0) + int(count or 0)
+        else:
+            for gap in gaps:
+                if not isinstance(gap, dict):
+                    continue
+                action = str(gap.get("follow_up_action") or "").strip()
+                if action:
+                    gap_follow_up_action_counts[action] = gap_follow_up_action_counts.get(action, 0) + 1
+
+    average_score = sum(scores) / len(scores) if scores else 0.0
+    minimum_score = min(scores) if scores else 0.0
+    return {
+        "available_element_count": available_count,
+        "valid_element_count": valid_count,
+        "invalid_element_count": invalid_count,
+        "gap_element_count": has_gap_count,
+        "blocking_gap_element_count": blocking_gap_count,
+        "total_gap_count": total_gap_count,
+        "grade_counts": dict(sorted(grade_counts.items())),
+        "gap_type_counts": dict(sorted(gap_type_counts.items())),
+        "gap_severity_counts": dict(sorted(gap_severity_counts.items())),
+        "gap_follow_up_action_counts": dict(sorted(gap_follow_up_action_counts.items())),
+        "workflow_status_counts": dict(sorted(workflow_status_counts.items())),
+        "workflow_backend_available_element_count": workflow_backend_available_count,
+        "workflow_degraded_element_count": workflow_degraded_count,
+        "workflow_degraded_reason_counts": dict(sorted(workflow_degraded_reason_counts.items())),
+        "average_quality_score": round(average_score, 4),
+        "minimum_quality_score": round(minimum_score, 4),
+    }
 
 
 def _summarize_claim_coverage_claim(
@@ -3175,8 +3794,10 @@ def _summarize_claim_coverage_claim(
     gap_claim: Dict[str, Any],
     contradiction_claim: Dict[str, Any],
     validation_claim: Optional[Dict[str, Any]] = None,
+    formal_claim: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     validation_claim = validation_claim if isinstance(validation_claim, dict) else {}
+    formal_claim = formal_claim if isinstance(formal_claim, dict) else {}
     support_trace_summary = (
         coverage_claim.get("support_trace_summary", {})
         if isinstance(coverage_claim.get("support_trace_summary"), dict)
@@ -3214,7 +3835,13 @@ def _summarize_claim_coverage_claim(
 
     unresolved_elements = []
     recommended_gap_actions: Dict[str, int] = {}
+    graph_gap_query_summary: Dict[str, Any] = {}
     if isinstance(gap_claim, dict):
+        graph_gap_query_summary = (
+            dict(gap_claim.get("graph_gap_query_summary") or {})
+            if isinstance(gap_claim.get("graph_gap_query_summary"), dict)
+            else {}
+        )
         for element in gap_claim.get("unresolved_elements", []):
             if not isinstance(element, dict):
                 continue
@@ -3300,12 +3927,30 @@ def _summarize_claim_coverage_claim(
         if element_text and element_text not in seen_parse_quality_issue_elements:
             seen_parse_quality_issue_elements.add(element_text)
             parse_quality_issue_elements.append(element_text)
+    ontology_quality_summary = _aggregate_ontology_quality_metrics(validation_elements)
 
     return {
         "claim_type": claim_type,
         "validation_status": validation_claim.get("validation_status", ""),
         "validation_status_counts": validation_claim.get("validation_status_counts", {}),
+        "formal_status": formal_claim.get("formal_status", ""),
+        "formal_status_counts": formal_claim.get("formal_status_counts", {}),
         "proof_gap_count": int(validation_claim.get("proof_gap_count", 0) or 0),
+        "formal_proof_gap_count": int(formal_claim.get("proof_gap_count", 0) or 0),
+        "formal_predicate_count": int(formal_claim.get("predicate_count", 0) or 0),
+        "formalization_ready_element_count": int(
+            formal_claim.get("formalization_ready_element_count", 0) or 0
+        ),
+        "theorem_export_ready": bool(formal_claim.get("theorem_export_ready", False)),
+        "formal_support_quality_signal_counts": dict(
+            formal_claim.get("support_quality_signal_counts", {}) or {}
+        ),
+        "formal_primary_quality_signal_counts": dict(
+            formal_claim.get("primary_quality_signal_counts", {}) or {}
+        ),
+        "formal_quality_follow_up_action_counts": dict(
+            formal_claim.get("quality_follow_up_action_counts", {}) or {}
+        ),
         "elements_requiring_follow_up": validation_claim.get(
             "elements_requiring_follow_up", []
         ),
@@ -3327,6 +3972,20 @@ def _summarize_claim_coverage_claim(
         "reasoning_fallback_ontology_count": int(
             reasoning_summary.get("fallback_ontology_count", 0) or 0
         ),
+        "ontology_quality_summary": ontology_quality_summary,
+        "ontology_quality_available_element_count": ontology_quality_summary[
+            "available_element_count"
+        ],
+        "ontology_quality_valid_element_count": ontology_quality_summary[
+            "valid_element_count"
+        ],
+        "ontology_quality_gap_element_count": ontology_quality_summary[
+            "gap_element_count"
+        ],
+        "ontology_quality_blocking_gap_element_count": ontology_quality_summary[
+            "blocking_gap_element_count"
+        ],
+        "ontology_quality_grade_counts": ontology_quality_summary["grade_counts"],
         "reasoning_hybrid_bridge_available_count": int(
             reasoning_summary.get("hybrid_bridge_available_count", 0) or 0
         ),
@@ -3401,6 +4060,7 @@ def _summarize_claim_coverage_claim(
         else 0,
         "unresolved_elements": unresolved_elements,
         "recommended_gap_actions": recommended_gap_actions,
+        "graph_gap_query_summary": graph_gap_query_summary,
         "contradiction_candidate_count": contradiction_candidate_count,
         "contradicted_elements": contradicted_elements,
         "graph_trace_summary": {
@@ -3435,7 +4095,7 @@ def _aggregate_graph_support_metrics(tasks: List[Dict[str, Any]]) -> Dict[str, A
             target[normalized_key] = target.get(normalized_key, 0) + int(value or 0)
 
     def _increment_count(target: Dict[str, int], value: Any) -> None:
-        normalized_value = str(value or "").strip()
+        normalized_value = "" if value is None else str(value).strip()
         if not normalized_value:
             return
         target[normalized_value] = target.get(normalized_value, 0) + 1
@@ -3472,6 +4132,160 @@ def _aggregate_graph_support_metrics(tasks: List[Dict[str, Any]]) -> Dict[str, A
         "artifact_family_counts": artifact_family_counts,
         "corpus_family_counts": corpus_family_counts,
         "content_origin_counts": content_origin_counts,
+    }
+
+
+def _aggregate_graph_gap_context_metrics(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    graph_gap_context_task_count = 0
+    graph_gap_has_support_task_count = 0
+    graph_gap_total_fact_count = 0
+    graph_gap_unique_fact_count = 0
+    graph_gap_duplicate_fact_count = 0
+    graph_gap_semantic_cluster_count = 0
+    graph_gap_semantic_duplicate_count = 0
+    graph_gap_strength_counts: Dict[str, int] = {}
+    graph_gap_recommended_action_counts: Dict[str, int] = {}
+    graph_gap_priority_adjustment_counts: Dict[str, int] = {}
+    graph_gap_source_family_counts: Dict[str, int] = {}
+    graph_gap_artifact_family_counts: Dict[str, int] = {}
+    graph_gap_corpus_family_counts: Dict[str, int] = {}
+    graph_gap_content_origin_counts: Dict[str, int] = {}
+    graph_gap_query_task_count = 0
+    graph_gap_query_has_support_task_count = 0
+    graph_gap_query_result_count = 0
+    graph_gap_query_missing_support_kind_counts: Dict[str, int] = {}
+    graph_gap_query_strength_counts: Dict[str, int] = {}
+    graph_gap_query_recommended_action_counts: Dict[str, int] = {}
+    graph_gap_query_priority_adjustment_counts: Dict[str, int] = {}
+    fact_registry_summary = {
+        "registry_version": "claim_fact_registry_summary.v1",
+        "fact_count": 0,
+        "unique_source_ref_count": 0,
+        "unique_source_record_count": 0,
+        "passage_anchored_count": 0,
+        "source_family_counts": {},
+        "record_scope_counts": {},
+        "artifact_family_counts": {},
+        "corpus_family_counts": {},
+        "content_origin_counts": {},
+        "parse_source_counts": {},
+        "input_format_counts": {},
+        "quality_tier_counts": {},
+    }
+
+    def _increment_count(target: Dict[str, int], value: Any) -> None:
+        normalized_value = "" if value is None else str(value).strip()
+        if not normalized_value:
+            return
+        target[normalized_value] = target.get(normalized_value, 0) + 1
+
+    def _merge_counts(target: Dict[str, int], counts: Any) -> None:
+        if not isinstance(counts, dict):
+            return
+        for key, value in counts.items():
+            normalized_key = str(key or "").strip()
+            if not normalized_key:
+                continue
+            target[normalized_key] = target.get(normalized_key, 0) + int(value or 0)
+
+    def _merge_fact_registry(summary: Any) -> None:
+        if not isinstance(summary, dict):
+            return
+        for numeric_key in (
+            "fact_count",
+            "unique_source_ref_count",
+            "unique_source_record_count",
+            "passage_anchored_count",
+        ):
+            fact_registry_summary[numeric_key] = int(fact_registry_summary[numeric_key]) + int(
+                summary.get(numeric_key, 0) or 0
+            )
+        for count_key in (
+            "source_family_counts",
+            "record_scope_counts",
+            "artifact_family_counts",
+            "corpus_family_counts",
+            "content_origin_counts",
+            "parse_source_counts",
+            "input_format_counts",
+            "quality_tier_counts",
+        ):
+            _merge_counts(fact_registry_summary[count_key], summary.get(count_key))
+
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        query = task.get("graph_gap_query")
+        if isinstance(query, dict) and query:
+            graph_gap_query_task_count += 1
+            if query.get("has_graph_support"):
+                graph_gap_query_has_support_task_count += 1
+            graph_gap_query_result_count += int(query.get("result_count", 0) or 0)
+            missing_support_kinds = query.get("missing_support_kinds") or []
+            if not isinstance(missing_support_kinds, list):
+                missing_support_kinds = [missing_support_kinds]
+            for missing_kind in missing_support_kinds:
+                _increment_count(graph_gap_query_missing_support_kind_counts, missing_kind)
+            _increment_count(graph_gap_query_strength_counts, query.get("strength"))
+            _increment_count(
+                graph_gap_query_recommended_action_counts,
+                query.get("recommended_action"),
+            )
+            _increment_count(
+                graph_gap_query_priority_adjustment_counts,
+                query.get("priority_adjustment"),
+            )
+        context = task.get("graph_gap_context")
+        if not isinstance(context, dict) or not context:
+            continue
+        graph_gap_context_task_count += 1
+        if context.get("has_graph_support"):
+            graph_gap_has_support_task_count += 1
+        _increment_count(graph_gap_strength_counts, context.get("strength"))
+        _increment_count(graph_gap_recommended_action_counts, context.get("recommended_action"))
+        _increment_count(
+            graph_gap_priority_adjustment_counts,
+            context.get("priority_adjustment"),
+        )
+        graph_gap_total_fact_count += int(context.get("total_fact_count", 0) or 0)
+        graph_gap_unique_fact_count += int(context.get("unique_fact_count", 0) or 0)
+        graph_gap_duplicate_fact_count += int(context.get("duplicate_fact_count", 0) or 0)
+        graph_gap_semantic_cluster_count += int(context.get("semantic_cluster_count", 0) or 0)
+        graph_gap_semantic_duplicate_count += int(context.get("semantic_duplicate_count", 0) or 0)
+        _merge_counts(graph_gap_source_family_counts, context.get("source_family_counts"))
+        _merge_counts(graph_gap_artifact_family_counts, context.get("artifact_family_counts"))
+        _merge_counts(graph_gap_corpus_family_counts, context.get("corpus_family_counts"))
+        _merge_counts(graph_gap_content_origin_counts, context.get("content_origin_counts"))
+        _merge_fact_registry(context.get("fact_registry_summary"))
+
+    return {
+        "graph_gap_context_task_count": graph_gap_context_task_count,
+        "graph_gap_has_support_task_count": graph_gap_has_support_task_count,
+        "graph_gap_empty_task_count": max(graph_gap_context_task_count - graph_gap_has_support_task_count, 0),
+        "graph_gap_total_fact_count": graph_gap_total_fact_count,
+        "graph_gap_unique_fact_count": graph_gap_unique_fact_count,
+        "graph_gap_duplicate_fact_count": graph_gap_duplicate_fact_count,
+        "graph_gap_semantic_cluster_count": graph_gap_semantic_cluster_count,
+        "graph_gap_semantic_duplicate_count": graph_gap_semantic_duplicate_count,
+        "graph_gap_strength_counts": graph_gap_strength_counts,
+        "graph_gap_recommended_action_counts": graph_gap_recommended_action_counts,
+        "graph_gap_priority_adjustment_counts": graph_gap_priority_adjustment_counts,
+        "graph_gap_source_family_counts": graph_gap_source_family_counts,
+        "graph_gap_artifact_family_counts": graph_gap_artifact_family_counts,
+        "graph_gap_corpus_family_counts": graph_gap_corpus_family_counts,
+        "graph_gap_content_origin_counts": graph_gap_content_origin_counts,
+        "graph_gap_fact_registry_summary": fact_registry_summary,
+        "graph_gap_query_task_count": graph_gap_query_task_count,
+        "graph_gap_query_has_support_task_count": graph_gap_query_has_support_task_count,
+        "graph_gap_query_empty_task_count": max(
+            graph_gap_query_task_count - graph_gap_query_has_support_task_count,
+            0,
+        ),
+        "graph_gap_query_result_count": graph_gap_query_result_count,
+        "graph_gap_query_missing_support_kind_counts": graph_gap_query_missing_support_kind_counts,
+        "graph_gap_query_strength_counts": graph_gap_query_strength_counts,
+        "graph_gap_query_recommended_action_counts": graph_gap_query_recommended_action_counts,
+        "graph_gap_query_priority_adjustment_counts": graph_gap_query_priority_adjustment_counts,
     }
 
 
@@ -3563,9 +4377,17 @@ def _aggregate_authority_search_program_metrics(
     authority_search_program_count = 0
     authority_search_program_type_counts: Dict[str, int] = {}
     authority_search_intent_counts: Dict[str, int] = {}
+    authority_jurisdiction_counts: Dict[str, int] = {}
+    authority_forum_counts: Dict[str, int] = {}
+    authority_family_counts: Dict[str, int] = {}
+    authority_defense_theme_counts: Dict[str, int] = {}
+    authority_time_window_counts: Dict[str, int] = {}
+    authority_graph_gap_bias_counts: Dict[str, int] = {}
     primary_authority_program_type_counts: Dict[str, int] = {}
+    primary_authority_intent_counts: Dict[str, int] = {}
     primary_authority_program_bias_counts: Dict[str, int] = {}
     primary_authority_program_rule_bias_counts: Dict[str, int] = {}
+    primary_authority_graph_gap_bias_counts: Dict[str, int] = {}
 
     for task in tasks:
         if not isinstance(task, dict):
@@ -3589,11 +4411,40 @@ def _aggregate_authority_search_program_metrics(
                 authority_search_intent_counts.get(str(intent), 0)
                 + int(count or 0)
             )
+        for jurisdiction, count in (summary.get("jurisdiction_counts") or {}).items():
+            authority_jurisdiction_counts[str(jurisdiction)] = (
+                authority_jurisdiction_counts.get(str(jurisdiction), 0) + int(count or 0)
+            )
+        for forum, count in (summary.get("forum_counts") or {}).items():
+            authority_forum_counts[str(forum)] = (
+                authority_forum_counts.get(str(forum), 0) + int(count or 0)
+            )
+        for family, count in (summary.get("authority_family_counts") or {}).items():
+            authority_family_counts[str(family)] = (
+                authority_family_counts.get(str(family), 0) + int(count or 0)
+            )
+        for theme, count in (summary.get("defense_theme_counts") or {}).items():
+            authority_defense_theme_counts[str(theme)] = (
+                authority_defense_theme_counts.get(str(theme), 0) + int(count or 0)
+            )
+        for window, count in (summary.get("time_window_counts") or {}).items():
+            authority_time_window_counts[str(window)] = (
+                authority_time_window_counts.get(str(window), 0) + int(count or 0)
+            )
+        for bias, count in (summary.get("graph_gap_authority_bias_counts") or {}).items():
+            authority_graph_gap_bias_counts[str(bias)] = (
+                authority_graph_gap_bias_counts.get(str(bias), 0) + int(count or 0)
+            )
 
         primary_program_type = str(summary.get("primary_program_type") or "")
         if primary_program_type:
             primary_authority_program_type_counts[primary_program_type] = (
                 primary_authority_program_type_counts.get(primary_program_type, 0) + 1
+            )
+        primary_program_intent = str(summary.get("primary_program_intent") or "")
+        if primary_program_intent:
+            primary_authority_intent_counts[primary_program_intent] = (
+                primary_authority_intent_counts.get(primary_program_intent, 0) + 1
             )
         primary_program_bias = str(summary.get("primary_program_bias") or "")
         if primary_program_bias:
@@ -3605,15 +4456,28 @@ def _aggregate_authority_search_program_metrics(
             primary_authority_program_rule_bias_counts[primary_program_rule_bias] = (
                 primary_authority_program_rule_bias_counts.get(primary_program_rule_bias, 0) + 1
             )
+        primary_graph_gap_bias = str(summary.get("primary_graph_gap_authority_bias") or "")
+        if primary_graph_gap_bias:
+            primary_authority_graph_gap_bias_counts[primary_graph_gap_bias] = (
+                primary_authority_graph_gap_bias_counts.get(primary_graph_gap_bias, 0) + 1
+            )
 
     return {
         "authority_search_program_task_count": authority_search_program_task_count,
         "authority_search_program_count": authority_search_program_count,
         "authority_search_program_type_counts": authority_search_program_type_counts,
         "authority_search_intent_counts": authority_search_intent_counts,
+        "authority_jurisdiction_counts": authority_jurisdiction_counts,
+        "authority_forum_counts": authority_forum_counts,
+        "authority_family_counts": authority_family_counts,
+        "authority_defense_theme_counts": authority_defense_theme_counts,
+        "authority_time_window_counts": authority_time_window_counts,
+        "authority_graph_gap_bias_counts": authority_graph_gap_bias_counts,
         "primary_authority_program_type_counts": primary_authority_program_type_counts,
+        "primary_authority_intent_counts": primary_authority_intent_counts,
         "primary_authority_program_bias_counts": primary_authority_program_bias_counts,
         "primary_authority_program_rule_bias_counts": primary_authority_program_rule_bias_counts,
+        "primary_authority_graph_gap_bias_counts": primary_authority_graph_gap_bias_counts,
     }
 
 
@@ -3781,10 +4645,12 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
                 temporal_resolution_status_counts.get(resolution_status, 0) + 1
             )
     graph_support_metrics = _aggregate_graph_support_metrics(tasks)
+    graph_gap_context_metrics = _aggregate_graph_gap_context_metrics(tasks)
     adaptive_retry_metrics = _aggregate_adaptive_retry_metrics(tasks)
     authority_search_program_metrics = _aggregate_authority_search_program_metrics(tasks)
     rule_candidate_metrics = _aggregate_rule_candidate_metrics(tasks)
     fact_targeting_metrics = _aggregate_fact_targeting_metrics(tasks)
+    quality_routing_metrics = _aggregate_quality_routing_metrics(tasks)
     warning_metrics = _aggregate_search_warning_metrics(tasks)
     summary = {
         "task_count": len(tasks),
@@ -3850,11 +4716,25 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
                 if task.get("follow_up_focus") == "parse_quality_improvement"
             ]
         ),
+        "ontology_quality_gap_task_count": len(
+            [
+                task
+                for task in tasks
+                if task.get("follow_up_focus") == "ontology_quality_gap_closure"
+            ]
+        ),
         "quality_gap_targeted_task_count": len(
             [
                 task
                 for task in tasks
                 if task.get("query_strategy") == "quality_gap_targeted"
+            ]
+        ),
+        "ontology_quality_gap_targeted_task_count": len(
+            [
+                task
+                for task in tasks
+                if task.get("query_strategy") == "ontology_quality_gap_targeted"
             ]
         ),
         "temporal_gap_targeted_task_count": len(
@@ -3873,9 +4753,44 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
         "artifact_family_counts": graph_support_metrics["artifact_family_counts"],
         "corpus_family_counts": graph_support_metrics["corpus_family_counts"],
         "content_origin_counts": graph_support_metrics["content_origin_counts"],
+        "graph_gap_context_task_count": graph_gap_context_metrics["graph_gap_context_task_count"],
+        "graph_gap_has_support_task_count": graph_gap_context_metrics["graph_gap_has_support_task_count"],
+        "graph_gap_empty_task_count": graph_gap_context_metrics["graph_gap_empty_task_count"],
+        "graph_gap_total_fact_count": graph_gap_context_metrics["graph_gap_total_fact_count"],
+        "graph_gap_unique_fact_count": graph_gap_context_metrics["graph_gap_unique_fact_count"],
+        "graph_gap_duplicate_fact_count": graph_gap_context_metrics["graph_gap_duplicate_fact_count"],
+        "graph_gap_semantic_cluster_count": graph_gap_context_metrics["graph_gap_semantic_cluster_count"],
+        "graph_gap_semantic_duplicate_count": graph_gap_context_metrics["graph_gap_semantic_duplicate_count"],
+        "graph_gap_strength_counts": graph_gap_context_metrics["graph_gap_strength_counts"],
+        "graph_gap_recommended_action_counts": graph_gap_context_metrics["graph_gap_recommended_action_counts"],
+        "graph_gap_priority_adjustment_counts": graph_gap_context_metrics["graph_gap_priority_adjustment_counts"],
+        "graph_gap_source_family_counts": graph_gap_context_metrics["graph_gap_source_family_counts"],
+        "graph_gap_artifact_family_counts": graph_gap_context_metrics["graph_gap_artifact_family_counts"],
+        "graph_gap_corpus_family_counts": graph_gap_context_metrics["graph_gap_corpus_family_counts"],
+        "graph_gap_content_origin_counts": graph_gap_context_metrics["graph_gap_content_origin_counts"],
+        "graph_gap_fact_registry_summary": graph_gap_context_metrics["graph_gap_fact_registry_summary"],
+        "graph_gap_query_task_count": graph_gap_context_metrics["graph_gap_query_task_count"],
+        "graph_gap_query_has_support_task_count": graph_gap_context_metrics[
+            "graph_gap_query_has_support_task_count"
+        ],
+        "graph_gap_query_empty_task_count": graph_gap_context_metrics["graph_gap_query_empty_task_count"],
+        "graph_gap_query_result_count": graph_gap_context_metrics["graph_gap_query_result_count"],
+        "graph_gap_query_missing_support_kind_counts": graph_gap_context_metrics[
+            "graph_gap_query_missing_support_kind_counts"
+        ],
+        "graph_gap_query_strength_counts": graph_gap_context_metrics["graph_gap_query_strength_counts"],
+        "graph_gap_query_recommended_action_counts": graph_gap_context_metrics[
+            "graph_gap_query_recommended_action_counts"
+        ],
+        "graph_gap_query_priority_adjustment_counts": graph_gap_context_metrics[
+            "graph_gap_query_priority_adjustment_counts"
+        ],
         "primary_missing_fact_counts": fact_targeting_metrics["primary_missing_fact_counts"],
         "missing_fact_bundle_counts": fact_targeting_metrics["missing_fact_bundle_counts"],
         "satisfied_fact_bundle_counts": fact_targeting_metrics["satisfied_fact_bundle_counts"],
+        "quality_signal_counts": quality_routing_metrics["quality_signal_counts"],
+        "primary_quality_signal_counts": quality_routing_metrics["primary_quality_signal_counts"],
+        "quality_follow_up_action_counts": quality_routing_metrics["quality_follow_up_action_counts"],
         "follow_up_focus_counts": follow_up_focus_counts,
         "query_strategy_counts": query_strategy_counts,
         "proof_decision_source_counts": proof_decision_source_counts,
@@ -3907,14 +4822,38 @@ def _summarize_follow_up_plan_claim(claim_plan: Dict[str, Any]) -> Dict[str, Any
         "authority_search_intent_counts": authority_search_program_metrics[
             "authority_search_intent_counts"
         ],
+        "authority_jurisdiction_counts": authority_search_program_metrics[
+            "authority_jurisdiction_counts"
+        ],
+        "authority_forum_counts": authority_search_program_metrics[
+            "authority_forum_counts"
+        ],
+        "authority_family_counts": authority_search_program_metrics[
+            "authority_family_counts"
+        ],
+        "authority_defense_theme_counts": authority_search_program_metrics[
+            "authority_defense_theme_counts"
+        ],
+        "authority_time_window_counts": authority_search_program_metrics[
+            "authority_time_window_counts"
+        ],
+        "authority_graph_gap_bias_counts": authority_search_program_metrics[
+            "authority_graph_gap_bias_counts"
+        ],
         "primary_authority_program_type_counts": authority_search_program_metrics[
             "primary_authority_program_type_counts"
+        ],
+        "primary_authority_intent_counts": authority_search_program_metrics[
+            "primary_authority_intent_counts"
         ],
         "primary_authority_program_bias_counts": authority_search_program_metrics[
             "primary_authority_program_bias_counts"
         ],
         "primary_authority_program_rule_bias_counts": authority_search_program_metrics[
             "primary_authority_program_rule_bias_counts"
+        ],
+        "primary_authority_graph_gap_bias_counts": authority_search_program_metrics[
+            "primary_authority_graph_gap_bias_counts"
         ],
         "rule_candidate_backed_task_count": rule_candidate_metrics[
             "rule_candidate_backed_task_count"
@@ -3962,6 +4901,35 @@ def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dic
     temporal_rule_status_counts: Dict[str, int] = {}
     temporal_rule_blocking_reason_counts: Dict[str, int] = {}
     temporal_resolution_status_counts: Dict[str, int] = {}
+    selected_authority_program_type_counts: Dict[str, int] = {}
+    selected_authority_intent_counts: Dict[str, int] = {}
+    selected_authority_jurisdiction_counts: Dict[str, int] = {}
+    selected_authority_forum_counts: Dict[str, int] = {}
+    selected_authority_family_counts: Dict[str, int] = {}
+    selected_authority_defense_theme_counts: Dict[str, int] = {}
+    selected_authority_time_window_counts: Dict[str, int] = {}
+    selected_authority_graph_gap_bias_counts: Dict[str, int] = {}
+
+    def _increment_count(counts: Dict[str, int], value: Any) -> None:
+        normalized = str(value or "").strip()
+        if normalized:
+            counts[normalized] = counts.get(normalized, 0) + 1
+
+    def _time_window_label(value: Any) -> str:
+        if not isinstance(value, dict):
+            return ""
+        return ":".join(
+            [
+                part
+                for part in [
+                    str(value.get("time_window_type") or "").strip(),
+                    str(value.get("profile_id") or "").strip(),
+                    str(value.get("status") or "").strip(),
+                ]
+                if part
+            ]
+        )
+
     for task in all_tasks:
         focus = str(task.get("follow_up_focus") or "unknown")
         follow_up_focus_counts[focus] = follow_up_focus_counts.get(focus, 0) + 1
@@ -3997,11 +4965,56 @@ def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dic
             temporal_resolution_status_counts[resolution_status] = (
                 temporal_resolution_status_counts.get(resolution_status, 0) + 1
             )
+        _increment_count(
+            selected_authority_program_type_counts,
+            task.get("selected_search_program_type"),
+        )
+        _increment_count(
+            selected_authority_intent_counts,
+            task.get("selected_search_program_intent") or task.get("authority_intent"),
+        )
+        _increment_count(
+            selected_authority_jurisdiction_counts,
+            task.get("selected_search_program_jurisdiction"),
+        )
+        _increment_count(
+            selected_authority_forum_counts,
+            task.get("selected_search_program_forum"),
+        )
+        selected_families = (
+            task.get("selected_search_program_families")
+            if isinstance(task.get("selected_search_program_families"), list)
+            else []
+        )
+        for family in selected_families:
+            _increment_count(selected_authority_family_counts, family)
+        selected_themes = (
+            task.get("selected_search_program_defense_themes")
+            if isinstance(task.get("selected_search_program_defense_themes"), list)
+            else []
+        )
+        for theme in selected_themes:
+            _increment_count(selected_authority_defense_theme_counts, theme)
+        selected_time_window = (
+            task.get("selected_search_program_time_window")
+            if isinstance(task.get("selected_search_program_time_window"), dict)
+            else {}
+        )
+        _increment_count(
+            selected_authority_time_window_counts,
+            _time_window_label(selected_time_window),
+        )
+        _increment_count(
+            selected_authority_graph_gap_bias_counts,
+            task.get("selected_search_program_graph_gap_bias"),
+        )
     graph_support_metrics = _aggregate_graph_support_metrics(executed_tasks + skipped_tasks)
+    graph_gap_context_metrics = _aggregate_graph_gap_context_metrics(all_tasks)
     adaptive_retry_metrics = _aggregate_adaptive_retry_metrics(all_tasks)
     authority_search_program_metrics = _aggregate_authority_search_program_metrics(all_tasks)
     rule_candidate_metrics = _aggregate_rule_candidate_metrics(all_tasks)
     fact_targeting_metrics = _aggregate_fact_targeting_metrics(all_tasks)
+    quality_routing_metrics = _aggregate_quality_routing_metrics(all_tasks)
     warning_metrics = _aggregate_search_warning_metrics(all_tasks)
     summary = {
         "executed_task_count": len(executed_tasks),
@@ -4037,8 +5050,22 @@ def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dic
         "parse_quality_task_count": len(
             [task for task in all_tasks if task.get("follow_up_focus") == "parse_quality_improvement"]
         ),
+        "ontology_quality_gap_task_count": len(
+            [
+                task
+                for task in all_tasks
+                if task.get("follow_up_focus") == "ontology_quality_gap_closure"
+            ]
+        ),
         "quality_gap_targeted_task_count": len(
             [task for task in all_tasks if task.get("query_strategy") == "quality_gap_targeted"]
+        ),
+        "ontology_quality_gap_targeted_task_count": len(
+            [
+                task
+                for task in all_tasks
+                if task.get("query_strategy") == "ontology_quality_gap_targeted"
+            ]
         ),
         "temporal_gap_targeted_task_count": len(
             [task for task in all_tasks if task.get("query_strategy") == "temporal_gap_targeted"]
@@ -4052,14 +5079,57 @@ def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dic
         "artifact_family_counts": graph_support_metrics["artifact_family_counts"],
         "corpus_family_counts": graph_support_metrics["corpus_family_counts"],
         "content_origin_counts": graph_support_metrics["content_origin_counts"],
+        "graph_gap_context_task_count": graph_gap_context_metrics["graph_gap_context_task_count"],
+        "graph_gap_has_support_task_count": graph_gap_context_metrics["graph_gap_has_support_task_count"],
+        "graph_gap_empty_task_count": graph_gap_context_metrics["graph_gap_empty_task_count"],
+        "graph_gap_total_fact_count": graph_gap_context_metrics["graph_gap_total_fact_count"],
+        "graph_gap_unique_fact_count": graph_gap_context_metrics["graph_gap_unique_fact_count"],
+        "graph_gap_duplicate_fact_count": graph_gap_context_metrics["graph_gap_duplicate_fact_count"],
+        "graph_gap_semantic_cluster_count": graph_gap_context_metrics["graph_gap_semantic_cluster_count"],
+        "graph_gap_semantic_duplicate_count": graph_gap_context_metrics["graph_gap_semantic_duplicate_count"],
+        "graph_gap_strength_counts": graph_gap_context_metrics["graph_gap_strength_counts"],
+        "graph_gap_recommended_action_counts": graph_gap_context_metrics["graph_gap_recommended_action_counts"],
+        "graph_gap_priority_adjustment_counts": graph_gap_context_metrics["graph_gap_priority_adjustment_counts"],
+        "graph_gap_source_family_counts": graph_gap_context_metrics["graph_gap_source_family_counts"],
+        "graph_gap_artifact_family_counts": graph_gap_context_metrics["graph_gap_artifact_family_counts"],
+        "graph_gap_corpus_family_counts": graph_gap_context_metrics["graph_gap_corpus_family_counts"],
+        "graph_gap_content_origin_counts": graph_gap_context_metrics["graph_gap_content_origin_counts"],
+        "graph_gap_fact_registry_summary": graph_gap_context_metrics["graph_gap_fact_registry_summary"],
+        "graph_gap_query_task_count": graph_gap_context_metrics["graph_gap_query_task_count"],
+        "graph_gap_query_has_support_task_count": graph_gap_context_metrics[
+            "graph_gap_query_has_support_task_count"
+        ],
+        "graph_gap_query_empty_task_count": graph_gap_context_metrics["graph_gap_query_empty_task_count"],
+        "graph_gap_query_result_count": graph_gap_context_metrics["graph_gap_query_result_count"],
+        "graph_gap_query_missing_support_kind_counts": graph_gap_context_metrics[
+            "graph_gap_query_missing_support_kind_counts"
+        ],
+        "graph_gap_query_strength_counts": graph_gap_context_metrics["graph_gap_query_strength_counts"],
+        "graph_gap_query_recommended_action_counts": graph_gap_context_metrics[
+            "graph_gap_query_recommended_action_counts"
+        ],
+        "graph_gap_query_priority_adjustment_counts": graph_gap_context_metrics[
+            "graph_gap_query_priority_adjustment_counts"
+        ],
         "primary_missing_fact_counts": fact_targeting_metrics["primary_missing_fact_counts"],
         "missing_fact_bundle_counts": fact_targeting_metrics["missing_fact_bundle_counts"],
         "satisfied_fact_bundle_counts": fact_targeting_metrics["satisfied_fact_bundle_counts"],
+        "quality_signal_counts": quality_routing_metrics["quality_signal_counts"],
+        "primary_quality_signal_counts": quality_routing_metrics["primary_quality_signal_counts"],
+        "quality_follow_up_action_counts": quality_routing_metrics["quality_follow_up_action_counts"],
         "follow_up_focus_counts": follow_up_focus_counts,
         "query_strategy_counts": query_strategy_counts,
         "proof_decision_source_counts": proof_decision_source_counts,
         "resolution_status_counts": resolution_status_counts,
         "temporal_resolution_status_counts": temporal_resolution_status_counts,
+        "selected_authority_program_type_counts": selected_authority_program_type_counts,
+        "selected_authority_intent_counts": selected_authority_intent_counts,
+        "selected_authority_jurisdiction_counts": selected_authority_jurisdiction_counts,
+        "selected_authority_forum_counts": selected_authority_forum_counts,
+        "selected_authority_family_counts": selected_authority_family_counts,
+        "selected_authority_defense_theme_counts": selected_authority_defense_theme_counts,
+        "selected_authority_time_window_counts": selected_authority_time_window_counts,
+        "selected_authority_graph_gap_bias_counts": selected_authority_graph_gap_bias_counts,
         "resolution_applied_counts": resolution_applied_counts,
         "temporal_rule_status_counts": temporal_rule_status_counts,
         "temporal_rule_blocking_reason_counts": temporal_rule_blocking_reason_counts,
@@ -4086,14 +5156,38 @@ def _summarize_follow_up_execution_claim(claim_execution: Dict[str, Any]) -> Dic
         "authority_search_intent_counts": authority_search_program_metrics[
             "authority_search_intent_counts"
         ],
+        "authority_jurisdiction_counts": authority_search_program_metrics[
+            "authority_jurisdiction_counts"
+        ],
+        "authority_forum_counts": authority_search_program_metrics[
+            "authority_forum_counts"
+        ],
+        "authority_family_counts": authority_search_program_metrics[
+            "authority_family_counts"
+        ],
+        "authority_defense_theme_counts": authority_search_program_metrics[
+            "authority_defense_theme_counts"
+        ],
+        "authority_time_window_counts": authority_search_program_metrics[
+            "authority_time_window_counts"
+        ],
+        "authority_graph_gap_bias_counts": authority_search_program_metrics[
+            "authority_graph_gap_bias_counts"
+        ],
         "primary_authority_program_type_counts": authority_search_program_metrics[
             "primary_authority_program_type_counts"
+        ],
+        "primary_authority_intent_counts": authority_search_program_metrics[
+            "primary_authority_intent_counts"
         ],
         "primary_authority_program_bias_counts": authority_search_program_metrics[
             "primary_authority_program_bias_counts"
         ],
         "primary_authority_program_rule_bias_counts": authority_search_program_metrics[
             "primary_authority_program_rule_bias_counts"
+        ],
+        "primary_authority_graph_gap_bias_counts": authority_search_program_metrics[
+            "primary_authority_graph_gap_bias_counts"
         ],
         "rule_candidate_backed_task_count": rule_candidate_metrics[
             "rule_candidate_backed_task_count"
@@ -4251,9 +5345,28 @@ def build_claim_support_review_payload(
         user_id=resolved_user_id,
         required_support_kinds=required_support_kinds,
     )
+    coverage_matrix_snapshots: Dict[str, Any] = {}
+    get_coverage_matrix_snapshots = getattr(
+        mediator,
+        "get_claim_coverage_matrix_snapshots",
+        None,
+    )
+    if callable(get_coverage_matrix_snapshots):
+        candidate_coverage_snapshots = get_coverage_matrix_snapshots(
+            claim_type=request.claim_type,
+            user_id=resolved_user_id,
+            required_support_kinds=required_support_kinds,
+        )
+        if isinstance(candidate_coverage_snapshots, dict):
+            coverage_matrix_snapshots = candidate_coverage_snapshots
     snapshot_claims = (
         diagnostic_snapshots.get("claims", {})
         if isinstance(diagnostic_snapshots, dict)
+        else {}
+    )
+    coverage_snapshot_claims = (
+        coverage_matrix_snapshots.get("claims", {})
+        if isinstance(coverage_matrix_snapshots.get("claims"), dict)
         else {}
     )
     gap_claims = {
@@ -4311,6 +5424,16 @@ def build_claim_support_review_payload(
         required_support_kinds=required_support_kinds,
     )
     validation_claims = validation.get("claims", {}) if isinstance(validation, dict) else {}
+    formal_validation_report: Dict[str, Any] = {}
+    get_formal_validation_report = getattr(mediator, "get_formal_validation_report", None)
+    if callable(get_formal_validation_report):
+        candidate_formal_report = get_formal_validation_report(
+            claim_type=request.claim_type,
+            user_id=resolved_user_id,
+            required_support_kinds=required_support_kinds,
+        )
+        if isinstance(candidate_formal_report, dict):
+            formal_validation_report = candidate_formal_report
 
     testimony_payload: Dict[str, Any] = {}
     get_claim_testimony_records = getattr(mediator, "get_claim_testimony_records", None)
@@ -4359,6 +5482,9 @@ def build_claim_support_review_payload(
             gap_claims.get(claim_name, {}),
             contradiction_claims.get(claim_name, {}),
             validation_claims.get(claim_name, {}),
+            (formal_validation_report.get("claims", {}) or {}).get(claim_name, {})
+            if isinstance(formal_validation_report.get("claims"), dict)
+            else {},
         )
         for claim_name, claim_matrix in coverage_claims.items()
         if isinstance(claim_matrix, dict)
@@ -4402,6 +5528,36 @@ def build_claim_support_review_payload(
     )
     handoff_metadata = _build_confirmed_intake_summary_handoff_metadata(mediator)
     document_focus_preview = _get_formalization_document_focus_preview(mediator)
+    heavy_processing_queue = _build_heavy_processing_queue_state(
+        mediator,
+        resolved_user_id,
+        request.claim_type,
+    )
+    coverage_snapshot_entries = {
+        claim_name: claim_snapshot
+        for claim_name, claim_snapshot in coverage_snapshot_claims.items()
+        if isinstance(claim_snapshot, dict)
+    }
+    coverage_snapshot_lifecycle = {}
+    for claim_name in coverage_claims.keys():
+        snapshot = (
+            (coverage_snapshot_entries.get(claim_name, {}) or {}).get("snapshot", {})
+        )
+        coverage_snapshot_lifecycle[claim_name] = summarize_claim_support_snapshot_lifecycle(
+            {"coverage_matrix": snapshot}
+            if isinstance(snapshot, dict) and snapshot
+            else {}
+        )
+
+    question_recommendations = {
+        claim_name: _build_claim_question_recommendations(
+            claim_name,
+            gap_claims.get(claim_name, {}),
+            contradiction_claims.get(claim_name, {}),
+            coverage_claims.get(claim_name, {}),
+        )
+        for claim_name in coverage_claims.keys()
+    }
 
     payload: Dict[str, Any] = {
         "user_id": resolved_user_id,
@@ -4439,6 +5595,7 @@ def build_claim_support_review_payload(
             if isinstance(intake_case_summary.get("document_drafting_next_action"), dict)
             else {}
         ),
+        "heavy_processing_queue": heavy_processing_queue,
         "document_focus_preview": document_focus_preview,
         "recommended_next_action": (
             str((intake_status.get("next_action") or {}).get("action") or "")
@@ -4455,10 +5612,13 @@ def build_claim_support_review_payload(
         ),
         "intake_contradiction_summary": intake_contradiction_summary,
         "claim_coverage_matrix": coverage_claims,
+        "claim_coverage_matrix_snapshots": coverage_snapshot_entries,
+        "claim_coverage_matrix_snapshot_summary": coverage_snapshot_lifecycle,
         "claim_coverage_summary": coverage_summary,
         "claim_support_gaps": gap_claims,
         "claim_contradiction_candidates": contradiction_claims,
         "claim_support_validation": validation_claims,
+        "formal_validation_report": formal_validation_report,
         "claim_support_snapshots": {
             claim_name: claim_snapshot.get("snapshots", {})
             for claim_name, claim_snapshot in snapshot_claims.items()
@@ -4480,14 +5640,10 @@ def build_claim_support_review_payload(
             )
             for claim_name in coverage_claims.keys()
         },
-        "question_recommendations": {
-            claim_name: _build_claim_question_recommendations(
-                claim_name,
-                gap_claims.get(claim_name, {}),
-                contradiction_claims.get(claim_name, {}),
-                coverage_claims.get(claim_name, {}),
-            )
-            for claim_name in coverage_claims.keys()
+        "question_recommendations": question_recommendations,
+        "question_recommendation_summary": {
+            claim_name: _summarize_question_recommendations(recommendations)
+            for claim_name, recommendations in question_recommendations.items()
         },
         "testimony_records": testimony_claims,
         "testimony_summary": {

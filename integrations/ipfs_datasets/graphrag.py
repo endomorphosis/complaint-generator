@@ -960,6 +960,391 @@ def identify_ontology_gaps(
     )
 
 
+def _clamp_score(value: Any) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, numeric))
+
+
+def _support_quality_tier(score: float, *, duplicate_ratio: float, structurally_missing: bool) -> str:
+    if structurally_missing:
+        return "structurally_missing"
+    if duplicate_ratio >= 0.5 and score < 0.75:
+        return "duplicate_support"
+    if score >= 0.80:
+        return "strong_support"
+    if score >= 0.55:
+        return "moderate_support"
+    return "weak_support"
+
+
+def score_support_path_quality(
+    support_path: Any,
+    *,
+    ontology: Optional[Dict[str, Any]] = None,
+    required_support_kinds: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Score one support path using source quality, graph connectivity, and ontology shape."""
+    operation = "score_support_path_quality"
+    if not isinstance(support_path, dict) or not support_path:
+        return with_adapter_metadata(
+            {
+                "status": "error",
+                "error": "support_path must be a non-empty dict",
+                "support_quality_score": 0.0,
+                "support_quality_tier": "structurally_missing",
+                "quality_signals": [],
+            },
+            operation=operation,
+            backend_available=GRAPHRAG_AVAILABLE,
+            degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+            implementation_status="implemented",
+        )
+
+    metadata = support_path.get("metadata", {}) if isinstance(support_path.get("metadata"), dict) else {}
+    support_trace_summary = (
+        metadata.get("support_trace_summary", {})
+        if isinstance(metadata.get("support_trace_summary"), dict)
+        else {}
+    )
+    graph_trace_summary = (
+        metadata.get("graph_trace_summary", {})
+        if isinstance(metadata.get("graph_trace_summary"), dict)
+        else {}
+    )
+
+    fact_ids = support_path.get("fact_ids", []) if isinstance(support_path.get("fact_ids"), list) else []
+    support_refs = support_path.get("support_refs", []) if isinstance(support_path.get("support_refs"), list) else []
+    support_kinds = support_path.get("support_kinds", []) if isinstance(support_path.get("support_kinds"), list) else []
+    if not support_kinds:
+        support_kinds = list((support_trace_summary.get("support_by_kind") or {}).keys())
+    source_families = support_path.get("source_families", []) if isinstance(support_path.get("source_families"), list) else []
+
+    fact_count = int(support_path.get("fact_count") or len(fact_ids) or support_trace_summary.get("fact_trace_count") or 0)
+    support_ref_count = int(support_path.get("support_ref_count") or len(support_refs) or 0)
+    trace_count = int(support_path.get("trace_count") or support_trace_summary.get("trace_count") or 0)
+    unique_trace_basis = max(len(set(str(ref) for ref in support_refs if ref)), len(set(str(fid) for fid in fact_ids if fid)))
+    duplicate_ratio = 0.0
+    if trace_count > 1 and unique_trace_basis:
+        duplicate_ratio = _clamp_score(1.0 - (unique_trace_basis / trace_count))
+
+    required = [str(kind) for kind in (required_support_kinds or []) if str(kind or "").strip()]
+    support_kind_set = {str(kind) for kind in support_kinds if str(kind or "").strip()}
+    if required:
+        missing_required = [kind for kind in required if kind not in support_kind_set]
+        support_kind_score = 1.0 - (len(missing_required) / max(len(required), 1))
+    else:
+        missing_required = []
+        support_kind_score = min(len(support_kind_set) / 2.0, 1.0) if support_kind_set else 0.0
+
+    avg_parse_quality = float(support_trace_summary.get("avg_parse_quality_score") or 0.0)
+    if avg_parse_quality > 0:
+        source_quality_score = _clamp_score(avg_parse_quality / 100.0)
+    elif fact_count:
+        source_quality_score = 0.70
+    elif support_ref_count:
+        source_quality_score = 0.45
+    else:
+        source_quality_score = 0.0
+
+    graph_id_count = int(support_path.get("graph_id_count") or len(support_path.get("graph_ids", []) or []) or 0)
+    graph_trace_count = int(support_path.get("graph_trace_count") or graph_trace_summary.get("traced_link_count") or 0)
+    graph_density = graph_trace_count / max(trace_count, 1)
+    graph_connectivity_score = _clamp_score((0.60 if graph_id_count else 0.0) + min(graph_density, 1.0) * 0.40)
+    if graph_connectivity_score == 0.0 and fact_count:
+        graph_connectivity_score = 0.35
+
+    ontology_shape_score = 0.50
+    ontology_alignment_score = 0.50
+    if isinstance(ontology, dict) and ontology:
+        entities = ontology.get("entities") or []
+        relations = ontology.get("relations") or ontology.get("relationships") or []
+        concepts = ontology.get("concepts") or []
+        ontology_shape_score = _clamp_score(
+            min(len(entities), 5) / 5.0 * 0.35
+            + min(len(relations), 5) / 5.0 * 0.35
+            + min(len(concepts), 5) / 5.0 * 0.30
+        )
+        ontology_terms: List[str] = []
+        for item in list(entities) + list(concepts):
+            if isinstance(item, dict):
+                ontology_terms.append(str(item.get("name") or item.get("label") or ""))
+            else:
+                ontology_terms.append(str(item))
+        relation_terms = [
+            str(rel.get("predicate") or rel.get("type") or "")
+            for rel in relations
+            if isinstance(rel, dict)
+        ]
+        ontology_terms.extend(relation_terms)
+        haystack = " ".join(term.lower() for term in ontology_terms if term)
+        path_terms = [*support_kind_set, *[str(family) for family in source_families if family]]
+        matched_terms = [term for term in path_terms if term and term.lower() in haystack]
+        ontology_alignment_score = _clamp_score(len(matched_terms) / max(len(path_terms), 1)) if path_terms else ontology_shape_score
+
+    raw_score = (
+        source_quality_score * 0.35
+        + graph_connectivity_score * 0.25
+        + support_kind_score * 0.20
+        + ontology_shape_score * 0.10
+        + ontology_alignment_score * 0.10
+    )
+    duplicate_penalty = min(duplicate_ratio * 0.25, 0.25)
+    support_quality_score = round(_clamp_score(raw_score - duplicate_penalty), 4)
+    structurally_missing = fact_count == 0 and support_ref_count == 0
+    tier = _support_quality_tier(
+        support_quality_score,
+        duplicate_ratio=duplicate_ratio,
+        structurally_missing=structurally_missing,
+    )
+
+    quality_signals: List[Dict[str, Any]] = []
+    if missing_required:
+        quality_signals.append({
+            "signal_type": "missing_required_support_kind",
+            "severity": "moderate",
+            "missing_support_kinds": missing_required,
+            "follow_up_action": "collect_missing_support_kind",
+        })
+    if graph_connectivity_score < 0.4:
+        quality_signals.append({
+            "signal_type": "weak_graph_connectivity",
+            "severity": "minor",
+            "follow_up_action": "persist_or_query_graph_support",
+        })
+    if source_quality_score < 0.5:
+        quality_signals.append({
+            "signal_type": "weak_source_quality",
+            "severity": "moderate",
+            "follow_up_action": "improve_source_parse_quality",
+        })
+    if duplicate_ratio >= 0.5:
+        quality_signals.append({
+            "signal_type": "duplicate_support",
+            "severity": "minor",
+            "duplicate_ratio": round(duplicate_ratio, 4),
+            "follow_up_action": "collect_independent_support",
+        })
+    if structurally_missing:
+        quality_signals.append({
+            "signal_type": "structurally_missing_support",
+            "severity": "blocking",
+            "follow_up_action": "collect_initial_support",
+        })
+
+    return with_adapter_metadata(
+        {
+            "status": "success",
+            "proof_path_id": str(support_path.get("proof_path_id") or ""),
+            "support_quality_score": support_quality_score,
+            "support_quality_tier": tier,
+            "source_quality_score": round(source_quality_score, 4),
+            "graph_connectivity_score": round(graph_connectivity_score, 4),
+            "support_kind_score": round(support_kind_score, 4),
+            "ontology_shape_score": round(ontology_shape_score, 4),
+            "ontology_alignment_score": round(ontology_alignment_score, 4),
+            "duplicate_ratio": round(duplicate_ratio, 4),
+            "missing_required_support_kinds": missing_required,
+            "quality_signals": quality_signals,
+            "quality_signal_count": len(quality_signals),
+            "fact_count": fact_count,
+            "support_ref_count": support_ref_count,
+            "trace_count": trace_count,
+            "graph_id_count": graph_id_count,
+            "graph_trace_count": graph_trace_count,
+        },
+        operation=operation,
+        backend_available=GRAPHRAG_AVAILABLE,
+        degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+        implementation_status="implemented",
+        extra_metadata={"required_support_kinds": required},
+    )
+
+
+def build_validate_score_ontology(
+    text: str,
+    *,
+    claim_type: Optional[str] = None,
+    config: Any | None = None,
+    refinement_rounds: int = 1,
+) -> Dict[str, Any]:
+    """Build, validate, refine, and score an ontology in one adapter call.
+
+    This is the normalized W5.1 workflow surface for complaint phases: callers
+    do not need to know whether the upstream GraphRAG backend or local fallback
+    produced the ontology, and they always receive validation, quality, and gap
+    payloads with adapter metadata.
+    """
+    operation = "build_validate_score_ontology"
+    build_result = build_ontology(text, config=config)
+    ontology = build_result.get("ontology") if isinstance(build_result, dict) else None
+    if ontology is None:
+        ontology = _build_local_ontology(str(text or ""))
+        build_result = with_adapter_metadata(
+            {
+                "status": "success",
+                "ontology": ontology,
+                "metadata": {
+                    "text_length": len(text or ""),
+                    "source": "local_regex_fallback",
+                    "fallback_reason": "graphrag_backend_unavailable",
+                },
+            },
+            operation="build_ontology",
+            backend_available=GRAPHRAG_AVAILABLE,
+            degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+            implementation_status="implemented",
+        )
+
+    validation_result = validate_ontology(ontology)
+    validation_payload = (
+        validation_result.get("result")
+        if isinstance(validation_result, dict) and isinstance(validation_result.get("result"), dict)
+        else {}
+    )
+    if not validation_payload:
+        validation_payload = _validate_ontology_locally(ontology)
+        validation_result = with_adapter_metadata(
+            {
+                "status": "success",
+                "result": validation_payload,
+                "valid": validation_payload["valid"],
+                "metadata": {"source": "local_validation_fallback"},
+            },
+            operation="validate_ontology",
+            backend_available=GRAPHRAG_AVAILABLE,
+            degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+            implementation_status="implemented",
+        )
+    valid = bool(
+        validation_result.get("valid")
+        if isinstance(validation_result, dict) and validation_result.get("valid") is not None
+        else validation_payload.get("valid")
+    )
+
+    refinement_result = run_refinement_cycle(
+        ontology,
+        rounds=refinement_rounds,
+    ) if valid else with_adapter_metadata(
+        {
+            "status": "skipped",
+            "result": ontology,
+            "reason": "ontology_validation_failed",
+        },
+        operation="run_refinement_cycle",
+        backend_available=GRAPHRAG_AVAILABLE,
+        degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+        implementation_status="skipped",
+        extra_metadata={"rounds": refinement_rounds},
+    )
+    refined_ontology = (
+        refinement_result.get("result")
+        if isinstance(refinement_result, dict) and refinement_result.get("result") is not None
+        else ontology
+    )
+    if valid and refined_ontology is ontology and (
+        not isinstance(refinement_result, dict)
+        or refinement_result.get("status") == "unavailable"
+        or refinement_result.get("result") is None
+    ):
+        refined_ontology = _refine_ontology_locally(ontology, rounds=refinement_rounds)
+        refinement_result = with_adapter_metadata(
+            {
+                "status": "success",
+                "result": refined_ontology,
+                "metadata": {"source": "local_refinement_fallback"},
+            },
+            operation="run_refinement_cycle",
+            backend_available=GRAPHRAG_AVAILABLE,
+            degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+            implementation_status="implemented",
+            extra_metadata={"rounds": refinement_rounds},
+        )
+
+    quality_result = score_ontology_support_paths(
+        refined_ontology,
+        claim_type=claim_type,
+    )
+    gap_result = identify_ontology_gaps(
+        refined_ontology,
+        claim_type=claim_type,
+    )
+    ontology_gaps = (
+        gap_result.get("gaps", [])
+        if isinstance(gap_result, dict) and isinstance(gap_result.get("gaps"), list)
+        else []
+    )
+    gap_type_counts: Dict[str, int] = {}
+    gap_severity_counts: Dict[str, int] = {}
+    gap_follow_up_action_counts: Dict[str, int] = {}
+    for gap in ontology_gaps:
+        if not isinstance(gap, dict):
+            continue
+        gap_type = str(gap.get("gap_type") or gap.get("type") or "unknown").strip()
+        severity = str(gap.get("severity") or "unknown").strip()
+        follow_up_action = str(gap.get("follow_up_action") or "").strip()
+        if gap_type:
+            gap_type_counts[gap_type] = gap_type_counts.get(gap_type, 0) + 1
+        if severity:
+            gap_severity_counts[severity] = gap_severity_counts.get(severity, 0) + 1
+        if follow_up_action:
+            gap_follow_up_action_counts[follow_up_action] = gap_follow_up_action_counts.get(follow_up_action, 0) + 1
+    workflow_degraded_reason = GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else ""
+
+    ontology_quality = {
+        "valid": valid,
+        "validation_status": validation_result.get("status") if isinstance(validation_result, dict) else "",
+        "validation_issues": validation_payload.get("issues", []),
+        "overall_quality_score": float(quality_result.get("overall_quality_score", 0.0) or 0.0),
+        "grade": quality_result.get("grade", "F"),
+        "entity_coverage_score": quality_result.get("entity_coverage_score", 0.0),
+        "concept_completeness_score": quality_result.get("concept_completeness_score", 0.0),
+        "relation_score": quality_result.get("relation_score", 0.0),
+        "relation_density_score": quality_result.get("relation_density_score", 0.0),
+        "gap_count": int(gap_result.get("gap_count", 0) or 0),
+        "has_gaps": bool(gap_result.get("has_gaps", False)),
+        "has_blocking_gaps": bool(gap_result.get("has_blocking_gaps", False)),
+        "gap_type_counts": dict(sorted(gap_type_counts.items())),
+        "gap_severity_counts": dict(sorted(gap_severity_counts.items())),
+        "gap_follow_up_action_counts": dict(sorted(gap_follow_up_action_counts.items())),
+        "entity_count": int(quality_result.get("entity_count", 0) or 0),
+        "relation_count": int(quality_result.get("relation_count", 0) or 0),
+        "concept_count": int(quality_result.get("concept_count", 0) or 0),
+        "workflow_operation": operation,
+        "workflow_status": "success" if ontology is not None and valid else "degraded",
+        "workflow_backend_available": bool(GRAPHRAG_AVAILABLE),
+        "workflow_implementation_status": "implemented",
+        "workflow_degraded_reason": workflow_degraded_reason,
+        "refinement_rounds": refinement_rounds,
+    }
+    status = "success" if ontology is not None and valid else "degraded"
+
+    return with_adapter_metadata(
+        {
+            "status": status,
+            "claim_type": claim_type or "",
+            "ontology": refined_ontology,
+            "build": build_result,
+            "validation": validation_result,
+            "refinement": refinement_result,
+            "quality": quality_result,
+            "gaps": gap_result,
+            "ontology_quality": ontology_quality,
+            "metadata": {
+                "text_length": len(text or ""),
+                "refinement_rounds": refinement_rounds,
+            },
+        },
+        operation=operation,
+        backend_available=GRAPHRAG_AVAILABLE,
+        degraded_reason=GRAPHRAG_ERROR if not GRAPHRAG_AVAILABLE else None,
+        implementation_status="implemented",
+        extra_metadata={"claim_type": claim_type, "refinement_rounds": refinement_rounds},
+    )
+
+
 __all__ = [
     "OntologyGenerator",
     "LogicValidator",
@@ -978,5 +1363,7 @@ __all__ = [
     "query_pdf_knowledge_graph",
     "score_ontology_support_paths",
     "identify_ontology_gaps",
+    "score_support_path_quality",
+    "build_validate_score_ontology",
     "_CLAIM_ONTOLOGY_PROFILES",
 ]

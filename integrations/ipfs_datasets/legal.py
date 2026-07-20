@@ -1222,6 +1222,78 @@ def constrain_assertions_to_corpus(
     }
 
 
+def search_legal_authority_program(
+    program: Dict[str, Any],
+    *,
+    max_results: int = 5,
+    state: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Execute a normalized legal search program against matching authority families."""
+    if not isinstance(program, dict):
+        raise TypeError("program must be a dictionary")
+
+    query = str(program.get("query_text") or "").strip()
+    if not query:
+        raise ValueError("program.query_text is required")
+
+    families = {
+        str(family or "").strip()
+        for family in (program.get("authority_families") or [])
+        if str(family or "").strip()
+    }
+    jurisdiction = str(program.get("jurisdiction") or "").strip()
+    state_code = _resolve_state_code(state or jurisdiction)
+    include_all = not families
+
+    results: Dict[str, List[Dict[str, Any]]] = {
+        "statutes": [],
+        "state_statutes": [],
+        "regulations": [],
+        "administrative_rules": [],
+        "case_law": [],
+        "docket_materials": [],
+    }
+
+    if include_all or "statute" in families:
+        results["statutes"] = search_us_code(query, max_results=max_results)
+        results["state_statutes"] = search_state_laws(query, state=state_code, max_results=max_results)
+    if include_all or "regulation" in families:
+        results["regulations"] = search_federal_register(query, max_results=max_results)
+    if include_all or "administrative_rule" in families:
+        results["administrative_rules"] = search_state_administrative_rules(query, state=state_code, max_results=max_results)
+    if include_all or "case_law" in families:
+        results["case_law"] = search_recap_documents(query, max_results=max_results)
+    if include_all or "docket_material" in families:
+        results["docket_materials"] = search_recap_documents(query, max_results=max_results)
+
+    flat_results = [
+        item
+        for bucket in results.values()
+        for item in bucket
+        if isinstance(item, dict)
+    ]
+    return with_adapter_metadata(
+        {
+            "program": dict(program),
+            "query": query,
+            "authority_families": sorted(families),
+            "results": results,
+            "flat_results": flat_results,
+            "result_count": len(flat_results),
+        },
+        operation="search_legal_authority_program",
+        backend_available=True,
+        implementation_status="normalized",
+        extra_metadata={
+            "program_id": str(program.get("program_id") or ""),
+            "program_type": str(program.get("program_type") or ""),
+            "authority_intent": str(program.get("authority_intent") or ""),
+            "jurisdiction": jurisdiction,
+            "state_code": state_code,
+        },
+    )
+
+
 __all__ = [
     "LEGAL_SCRAPERS_AVAILABLE",
     "LEGAL_SCRAPERS_ERROR",
@@ -1232,5 +1304,6 @@ __all__ = [
     "search_recap_documents",
     "search_state_laws",
     "search_state_administrative_rules",
+    "search_legal_authority_program",
     "constrain_assertions_to_corpus",
 ]

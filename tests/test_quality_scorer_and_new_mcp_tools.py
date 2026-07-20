@@ -160,6 +160,73 @@ def test_contradiction_reduces_score():
     assert with_contradictions["dimensions"]["contradiction_free"] < without["dimensions"]["contradiction_free"]
 
 
+def test_fact_registry_summary_scores_corpus_grounding_without_coverage_percent():
+    report = {
+        "proof_status": "passed",
+        "predicate_count": 2,
+        "contradiction_count": 0,
+        "chronology_blocked": False,
+        "theorem_export": {"tdfol_formula_count": 1, "dcec_formula_count": 1, "lean4": "x", "coq": "x"},
+        "fact_registry_summary": {
+            "fact_count": 2,
+            "unique_source_ref_count": 2,
+            "passage_anchored_count": 2,
+            "source_family_counts": {"evidence": 1, "legal_authority": 1},
+        },
+    }
+
+    result = _score(report)
+
+    assert result["dimensions"]["corpus_grounding"] >= 80
+    assert result["fact_registry_summary"]["source_family_counts"] == {
+        "evidence": 1,
+        "legal_authority": 1,
+    }
+
+
+def test_empty_fact_registry_summary_triggers_source_backing_suggestion():
+    report = {
+        "proof_status": "needs_review",
+        "predicate_count": 2,
+        "contradiction_count": 0,
+        "chronology_blocked": False,
+        "fact_registry_summary": {"fact_count": 0},
+    }
+
+    result = _score(report)
+
+    assert result["dimensions"]["corpus_grounding"] == 35
+    assert any(
+        suggestion["dimension"] == "corpus_grounding"
+        and "fact registry has no source-backed facts" in suggestion["action"]
+        for suggestion in result["suggestions"]
+    )
+
+
+def test_unanchored_fact_registry_summary_suggests_passage_anchors():
+    report = {
+        "proof_status": "needs_review",
+        "predicate_count": 2,
+        "contradiction_count": 0,
+        "chronology_blocked": False,
+        "fact_registry_summary": {
+            "fact_count": 1,
+            "unique_source_ref_count": 1,
+            "passage_anchored_count": 0,
+            "source_family_counts": {"evidence": 1},
+        },
+    }
+
+    result = _score(report)
+
+    assert result["dimensions"]["corpus_grounding"] < 70
+    assert any(
+        suggestion["dimension"] == "corpus_grounding"
+        and "passage anchors" in suggestion["action"]
+        for suggestion in result["suggestions"]
+    )
+
+
 def test_quality_scorer_exported_from_package():
     from integrations.ipfs_datasets import score_draft_quality, QUALITY_SCORER_VERSION
 

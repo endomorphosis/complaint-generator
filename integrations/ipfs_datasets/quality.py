@@ -46,11 +46,56 @@ def _grade(score: int) -> str:
     return "F"
 
 
+def _extract_fact_registry_summary(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the first fact-registry summary exposed by proof/theorem payloads."""
+    candidates = [
+        report.get("fact_registry_summary"),
+        (report.get("theorem_export") or {}).get("fact_registry_summary")
+        if isinstance(report.get("theorem_export"), dict)
+        else {},
+        (report.get("temporal_reasoning_payload") or {}).get("fact_registry_summary")
+        if isinstance(report.get("temporal_reasoning_payload"), dict)
+        else {},
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            return dict(candidate)
+    return {}
+
+
 def _score_corpus_grounding(report: Dict[str, Any]) -> int:
-    """0-100 based on corpus coverage percentage and ungrounded assertion count."""
+    """0-100 based on corpus coverage, support facts, and ungrounded assertions."""
+    fact_registry_summary = _extract_fact_registry_summary(report)
+    fact_count = int(fact_registry_summary.get("fact_count") or 0)
+    unique_source_refs = int(fact_registry_summary.get("unique_source_ref_count") or 0)
+    passage_anchored_count = int(fact_registry_summary.get("passage_anchored_count") or 0)
+    source_family_counts = (
+        fact_registry_summary.get("source_family_counts")
+        if isinstance(fact_registry_summary.get("source_family_counts"), dict)
+        else {}
+    )
     coverage = report.get("corpus_coverage_percent")
     if coverage is not None:
-        return int(max(0, min(100, int(coverage))))
+        score = int(max(0, min(100, int(coverage))))
+        if fact_registry_summary:
+            if fact_count <= 0:
+                score = min(score, 65)
+            else:
+                passage_ratio = passage_anchored_count / max(fact_count, 1)
+                score += min(8, int(round(passage_ratio * 8)))
+                score += min(4, len(source_family_counts) * 2)
+                score = min(score, 100)
+        return score
+    if fact_registry_summary:
+        if fact_count <= 0:
+            return 35
+        passage_ratio = passage_anchored_count / max(fact_count, 1)
+        score = 45
+        score += min(30, fact_count * 4)
+        score += min(10, unique_source_refs * 2)
+        score += min(10, len(source_family_counts) * 5)
+        score += min(15, int(round(passage_ratio * 15)))
+        return int(max(0, min(100, score)))
     # If no coverage data, check ungrounded count vs total
     ungrounded_count = int(report.get("ungrounded_assertion_count") or 0)
     predicate_count = int(report.get("predicate_count") or 0)
@@ -140,17 +185,28 @@ def _build_suggestions(
 
     ungrounded = list(report.get("ungrounded_assertions") or [])
     if corpus_score < 70:
+        fact_registry_summary = _extract_fact_registry_summary(report)
+        fact_count = int(fact_registry_summary.get("fact_count") or 0)
+        passage_anchored_count = int(fact_registry_summary.get("passage_anchored_count") or 0)
+        if fact_registry_summary and fact_count <= 0:
+            action = "Attach persisted support facts before proof review; the fact registry has no source-backed facts."
+        elif fact_registry_summary and passage_anchored_count <= 0:
+            action = "Add chunk or passage anchors to support facts so proof reviewers can trace generated predicates to source text."
+        elif ungrounded:
+            action = (
+                f"Ground {len(ungrounded)} ungrounded assertion(s) in US Code, "
+                "Federal Register, or state law before filing."
+            )
+        else:
+            action = (
+                "Improve legal corpus grounding — run constrain_assertions_to_corpus with "
+                "COMPLAINT_LEGAL_VECTOR_INDEX_DIR set to enable semantic search."
+            )
         suggestions.append(
             {
                 "priority": "high",
                 "dimension": "corpus_grounding",
-                "action": (
-                    f"Ground {len(ungrounded)} ungrounded assertion(s) in US Code, "
-                    "Federal Register, or state law before filing."
-                    if ungrounded
-                    else "Improve legal corpus grounding — run constrain_assertions_to_corpus with "
-                    "COMPLAINT_LEGAL_VECTOR_INDEX_DIR set to enable semantic search."
-                ),
+                "action": action,
             }
         )
 
@@ -260,6 +316,7 @@ def score_draft_quality(
         * ``claim_id``          — echoed back
         * ``scorer_version``    — str
     """
+    fact_registry_summary = _extract_fact_registry_summary(report)
     corpus_score = _score_corpus_grounding(report)
     proof_score = _score_proof_completeness(report)
     policy_score = _score_policy_compliance(report)
@@ -299,6 +356,7 @@ def score_draft_quality(
         "claim_id": claim_id,
         "scorer_version": QUALITY_SCORER_VERSION,
         "pipeline_version": str(report.get("pipeline_version") or ""),
+        "fact_registry_summary": fact_registry_summary,
     }
 
 

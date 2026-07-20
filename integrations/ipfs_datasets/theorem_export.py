@@ -394,6 +394,15 @@ def export_proof_result_to_theorems(
         or result_inner.get("dcec_formulas")
         or []
     )
+    fact_registry_summary = {}
+    for candidate in (
+        proof_result.get("fact_registry_summary"),
+        temporal_payload.get("fact_registry_summary"),
+        result_inner.get("fact_registry_summary") if isinstance(result_inner, dict) else {},
+    ):
+        if isinstance(candidate, dict):
+            fact_registry_summary = dict(candidate)
+            break
 
     lean4_src = export_formulas_to_lean4(
         tdfol_formulas,
@@ -415,6 +424,7 @@ def export_proof_result_to_theorems(
         "dcec_formula_count": len(dcec_formulas),
         "export_version": THEOREM_EXPORT_VERSION,
         "exported_at": timestamp,
+        "fact_registry_summary": fact_registry_summary,
     }
 
 

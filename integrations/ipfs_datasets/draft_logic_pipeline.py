@@ -50,11 +50,62 @@ def _extract_text_assertions(body: str) -> List[Dict[str, Any]]:
     return assertions
 
 
+def _summarize_support_facts(support_facts: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
+    facts = [fact for fact in (support_facts or []) if isinstance(fact, dict)]
+    source_family_counts: Dict[str, int] = {}
+    artifact_family_counts: Dict[str, int] = {}
+    corpus_family_counts: Dict[str, int] = {}
+    content_origin_counts: Dict[str, int] = {}
+    parse_source_counts: Dict[str, int] = {}
+    input_format_counts: Dict[str, int] = {}
+    unique_fact_ids = set()
+    unique_source_refs = set()
+    passage_anchored_count = 0
+
+    def _count(target: Dict[str, int], value: Any) -> None:
+        text = str(value or "").strip()
+        if text:
+            target[text] = target.get(text, 0) + 1
+
+    for fact in facts:
+        fact_id = str(fact.get("fact_id") or "").strip()
+        if fact_id:
+            unique_fact_ids.add(fact_id)
+        source_ref = str(fact.get("source_ref") or "").strip()
+        if source_ref:
+            unique_source_refs.add(source_ref)
+        source_passage = fact.get("source_passage") if isinstance(fact.get("source_passage"), dict) else {}
+        if fact.get("chunk_id") or source_passage.get("chunk_id"):
+            passage_anchored_count += 1
+
+        _count(source_family_counts, fact.get("source_family"))
+        _count(artifact_family_counts, fact.get("artifact_family"))
+        _count(corpus_family_counts, fact.get("corpus_family"))
+        _count(content_origin_counts, fact.get("content_origin"))
+        _count(parse_source_counts, fact.get("parse_source"))
+        _count(input_format_counts, fact.get("input_format"))
+
+    return {
+        "fact_count": len(facts),
+        "unique_fact_count": len(unique_fact_ids),
+        "unique_source_ref_count": len(unique_source_refs),
+        "passage_anchored_count": passage_anchored_count,
+        "source_family_counts": source_family_counts,
+        "artifact_family_counts": artifact_family_counts,
+        "corpus_family_counts": corpus_family_counts,
+        "content_origin_counts": content_origin_counts,
+        "parse_source_counts": parse_source_counts,
+        "input_format_counts": input_format_counts,
+    }
+
+
 def run_pipeline(
     body: str,
     *,
     state: Optional[str] = None,
     allow_live_scrape_fallback: bool = False,
+    support_facts: Optional[List[Dict[str, Any]]] = None,
+    fact_registry_summary: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Run the full draft-logic pipeline on *body*.
 
@@ -86,6 +137,13 @@ def run_pipeline(
         * ``pipeline_version`` — str
     """
     errors: List[str] = []
+    normalized_fact_registry_summary = (
+        dict(fact_registry_summary)
+        if isinstance(fact_registry_summary, dict)
+        else _summarize_support_facts(support_facts)
+    )
+    normalized_fact_registry_summary.setdefault("registry_version", "claim_fact_registry_summary.v1")
+    normalized_fact_registry_summary.setdefault("source", "claim_support_facts")
 
     # ------------------------------------------------------------------
     # Step A — text → FOL predicates
@@ -193,6 +251,7 @@ def run_pipeline(
         "policy_warnings": policy_warnings,
         "has_blockers": has_blockers,
         "predicate_count": len(predicates),
+        "fact_registry_summary": normalized_fact_registry_summary,
         "theorem_export": theorem_export,
         "pipeline_version": DRAFT_LOGIC_PIPELINE_VERSION,
         "errors": errors,
@@ -269,6 +328,9 @@ def render_proof_report(
     lines.append(f"| Chronology blocked | {'Yes' if chronology_blocked else 'No'} |")
     coverage = report.get("corpus_coverage_percent")
     lines.append(f"| Corpus coverage | {f'{coverage}%' if coverage is not None else 'n/a'} |")
+    fact_registry_summary = report.get("fact_registry_summary") if isinstance(report.get("fact_registry_summary"), dict) else {}
+    lines.append(f"| Support facts | {int(fact_registry_summary.get('fact_count') or 0)} |")
+    lines.append(f"| Passage-anchored facts | {int(fact_registry_summary.get('passage_anchored_count') or 0)} |")
     norms = list(report.get("norms") or [])
     lines.append(f"| Deontic norms found | {len(norms)} |")
     violations = list(report.get("policy_violations") or [])

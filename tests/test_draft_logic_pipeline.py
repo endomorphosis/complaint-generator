@@ -29,6 +29,7 @@ def test_pipeline_returns_required_keys_on_empty_body():
         "policy_warnings",
         "has_blockers",
         "predicate_count",
+        "fact_registry_summary",
         "pipeline_version",
         "errors",
     }
@@ -84,6 +85,73 @@ def test_pipeline_sub_results_are_dicts():
     result = _run("Plaintiff reported safety violations to HR on January 15.")
     for key in ("fol_result", "deontic_result", "corpus_result", "proof_result", "policy_result"):
         assert isinstance(result.get(key), dict), f"Sub-result '{key}' should be a dict"
+
+
+def test_pipeline_summarizes_support_fact_registry_inputs():
+    result = _run(
+        "Plaintiff reported discrimination to HR.",
+        support_facts=[
+            {
+                "fact_id": "fact:complaint",
+                "text": "Plaintiff reported discrimination to HR.",
+                "source_family": "evidence",
+                "source_ref": "QmComplaint",
+                "artifact_family": "archived_web_page",
+                "corpus_family": "web_page",
+                "content_origin": "historical_archive_capture",
+                "parse_source": "web_document",
+                "input_format": "html",
+                "chunk_id": "chunk-0",
+                "source_passage": {"chunk_id": "chunk-0", "chunk_index": 0},
+            },
+            {
+                "fact_id": "fact:authority",
+                "text": "Protected activity is recognized by statute.",
+                "source_family": "legal_authority",
+                "source_ref": "authority:42",
+                "artifact_family": "legal_authority_text",
+                "corpus_family": "legal_authority",
+                "content_origin": "authority_full_text",
+                "parse_source": "legal_authority",
+                "input_format": "text",
+            },
+        ],
+    )
+
+    summary = result["fact_registry_summary"]
+    assert summary["registry_version"] == "claim_fact_registry_summary.v1"
+    assert summary["fact_count"] == 2
+    assert summary["unique_fact_count"] == 2
+    assert summary["unique_source_ref_count"] == 2
+    assert summary["passage_anchored_count"] == 1
+    assert summary["source_family_counts"] == {
+        "evidence": 1,
+        "legal_authority": 1,
+    }
+    assert summary["artifact_family_counts"] == {
+        "archived_web_page": 1,
+        "legal_authority_text": 1,
+    }
+    assert summary["corpus_family_counts"] == {
+        "web_page": 1,
+        "legal_authority": 1,
+    }
+
+
+def test_render_proof_report_includes_fact_registry_metrics():
+    from integrations.ipfs_datasets.draft_logic_pipeline import render_proof_report
+
+    rendered = render_proof_report({
+        "proof_status": "needs_review",
+        "predicate_count": 1,
+        "fact_registry_summary": {
+            "fact_count": 3,
+            "passage_anchored_count": 2,
+        },
+    })
+
+    assert "| Support facts | 3 |" in rendered
+    assert "| Passage-anchored facts | 2 |" in rendered
 
 
 def test_pipeline_text_to_fol_extracts_predicates():

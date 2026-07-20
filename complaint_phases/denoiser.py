@@ -3083,6 +3083,43 @@ class ComplaintDenoiser:
             'suppression_key': self._normalize_question_text(normalized_text),
         }
 
+    @staticmethod
+    def _primary_quality_signal_for_summary(quality_summary: Dict[str, Any]) -> Dict[str, Any]:
+        signal_counts = (
+            quality_summary.get('quality_signal_counts', {})
+            if isinstance(quality_summary.get('quality_signal_counts'), dict)
+            else {}
+        )
+        prioritized = [
+            ('structurally_missing_support', 'missing_element', 'collect_initial_support'),
+            ('weak_graph_connectivity', 'graph_quality_gap', 'persist_or_query_graph_support'),
+            ('weak_source_quality', 'source_quality_gap', 'improve_source_parse_quality'),
+            ('duplicate_support', 'duplicate_support', 'collect_independent_support'),
+            ('weak_support_path', 'support_quality_gap', 'strengthen_support_path'),
+        ]
+        for signal, lane, action in prioritized:
+            count = int(signal_counts.get(signal, 0) or 0)
+            if signal == 'structurally_missing_support':
+                count = max(count, int(quality_summary.get('structurally_missing_path_count', 0) or 0))
+            if signal == 'weak_support_path':
+                count = max(count, int(quality_summary.get('weak_support_path_count', 0) or 0))
+            if count > 0:
+                return {
+                    'signal_type': signal,
+                    'question_lane': lane,
+                    'follow_up_action': action,
+                    'count': count,
+                }
+        recommended_action = str(quality_summary.get('recommended_quality_action') or '')
+        if recommended_action:
+            return {
+                'signal_type': 'recommended_quality_action',
+                'question_lane': 'support_quality_gap',
+                'follow_up_action': recommended_action,
+                'count': 1,
+            }
+        return {}
+
     def generate_review_question_recommendations(
         self,
         claim_type: str,
@@ -3146,10 +3183,29 @@ class ComplaintDenoiser:
             total_links = int(element.get('total_links', 0) or 0)
             fact_count = int(element.get('fact_count', 0) or 0)
             recommended_action = str(element.get('recommended_action') or '')
+            support_quality_summary = (
+                element.get('support_quality_summary', {})
+                if isinstance(element.get('support_quality_summary'), dict)
+                else {}
+            )
+            quality_signal_counts = (
+                support_quality_summary.get('quality_signal_counts', {})
+                if isinstance(support_quality_summary.get('quality_signal_counts'), dict)
+                else {}
+            )
 
             lane = 'testimony'
             if recommended_action == 'improve_parse_quality':
                 lane = 'document_request'
+            elif int(quality_signal_counts.get('weak_source_quality', 0) or 0) > 0:
+                lane = 'document_request'
+            elif int(quality_signal_counts.get('duplicate_support', 0) or 0) > 0:
+                lane = 'document_request'
+            elif (
+                recommended_action in {'strengthen_support_path', 'review_support_quality'}
+                or int(quality_signal_counts.get('weak_graph_connectivity', 0) or 0) > 0
+            ):
+                lane = 'testimony'
             elif missing_support_kinds == ['authority']:
                 lane = 'authority_clarification'
             elif 'evidence' in missing_support_kinds or total_links == 0 or fact_count == 0:
@@ -3158,14 +3214,32 @@ class ComplaintDenoiser:
                 lane = 'authority_clarification'
 
             if lane == 'document_request':
-                question_text = f"Do you have a document, message, timeline, or record that supports {element_text}?"
-                question_reason = (
-                    f"{element_text} has some support, but the current records indicate a parse or source-quality gap."
-                )
+                if int(quality_signal_counts.get('duplicate_support', 0) or 0) > 0:
+                    question_text = f"Do you have an independent document, message, witness, or record that separately supports {element_text}?"
+                    question_reason = (
+                        f"{element_text} appears to rely on duplicate or non-independent support, so a distinct source would strengthen the proof path."
+                    )
+                else:
+                    question_text = f"Do you have a clearer document, message, timeline, or record that supports {element_text}?"
+                    question_reason = (
+                        f"{element_text} has some support, but the current records indicate a parse, source-quality, or document-quality gap."
+                    )
             elif lane == 'authority_clarification':
                 question_text = f"Is there a rule, policy, statute, or case that clearly supports {element_text}?"
                 question_reason = (
                     f"{element_text} is still missing authority support needed for legal review."
+                )
+            elif (
+                recommended_action in {'strengthen_support_path', 'review_support_quality'}
+                or int(quality_signal_counts.get('weak_graph_connectivity', 0) or 0) > 0
+            ):
+                question_text = (
+                    f"What additional facts, source details, or relationships connect the current support "
+                    f"more directly to {element_text}?"
+                )
+                question_reason = (
+                    f"{element_text} has support, but GraphRAG support-path scoring found a structural quality gap "
+                    "such as weak graph connectivity or an indirect support path."
                 )
             else:
                 question_text = f"What specific facts can you provide to support {element_text}?"
@@ -3188,6 +3262,11 @@ class ComplaintDenoiser:
                 current_status=status,
                 missing_support_kinds=missing_support_kinds,
             )
+            recommendation['support_quality_summary'] = support_quality_summary
+            recommendation['quality_signal_counts'] = dict(quality_signal_counts)
+            primary_quality_signal = self._primary_quality_signal_for_summary(support_quality_summary)
+            recommendation['primary_quality_signal'] = primary_quality_signal
+            recommendation['quality_follow_up_action'] = primary_quality_signal.get('follow_up_action', '')
             if recommendation['suppression_key'] in seen_keys:
                 continue
             seen_keys.add(recommendation['suppression_key'])

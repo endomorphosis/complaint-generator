@@ -392,11 +392,11 @@ Make `/claim-support-review` the canonical operator workflow for legal readiness
 
 ### Checklist
 
-- [ ] redesign the dashboard into clear sections for Questions, Testimony, Documents, Facts, Graph, Law, and Actions
-- [ ] add per-element proof cards with visible next actions and drilldowns
-- [ ] preserve deep-link context from `/document` into claim and section review state
-- [ ] make drafting warnings and readiness summaries reference concrete proof cards and support ledgers
-- [ ] ensure heavy processing steps can be queued without breaking the interactive dashboard
+- [x] redesign the dashboard into clear sections for Questions, Testimony, Documents, Facts, Graph, Law, and Actions
+- [x] add per-element proof cards with visible next actions and drilldowns
+- [x] preserve deep-link context from `/document` into claim and section review state
+- [x] make drafting warnings and readiness summaries reference concrete proof cards and support ledgers
+- [x] ensure heavy processing steps can be queued without breaking the interactive dashboard
 
 ### Acceptance criteria
 

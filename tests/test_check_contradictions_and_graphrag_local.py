@@ -41,6 +41,75 @@ def test_check_contradictions_required_keys():
         assert key in result, f"Missing key: {key}"
 
 
+def test_query_graph_support_summary_includes_fact_registry_counts():
+    from integrations.ipfs_datasets.graphs import query_graph_support
+
+    facts = [
+        {
+            "fact_id": "fact-1",
+            "text": "Plaintiff reported discrimination to human resources.",
+            "claim_element_id": "protected_activity",
+            "claim_element_text": "Protected activity",
+            "support_kind": "evidence",
+            "source_table": "evidence_facts",
+            "source_family": "evidence",
+            "source_record_id": 7,
+            "source_ref": "bafy-email",
+            "record_scope": "claim",
+            "artifact_family": "archived_web_page",
+            "corpus_family": "web_archive",
+            "content_origin": "historical_archive_capture",
+            "parse_source": "ipfs_datasets_py",
+            "input_format": "html",
+            "quality_tier": "high",
+            "chunk_id": "chunk-1",
+            "source_passage": {"chunk_id": "chunk-1", "text": "Plaintiff reported discrimination."},
+        },
+        {
+            "fact_id": "fact-2",
+            "text": "Title VII prohibits retaliation for protected complaints.",
+            "claim_element_id": "protected_activity",
+            "support_kind": "authority",
+            "source_table": "legal_authority_facts",
+            "source_family": "legal_authority",
+            "source_record_id": 3,
+            "source_ref": "42 U.S.C. § 2000e-3",
+            "record_scope": "authority",
+            "artifact_family": "legal_authority_reference",
+            "corpus_family": "legal_corpus",
+            "content_origin": "authority_reference_fallback",
+            "parse_source": "legal_authority_parser",
+            "input_format": "text",
+            "quality_tier": "medium",
+        },
+    ]
+
+    result = query_graph_support(
+        "protected_activity",
+        support_facts=facts,
+        claim_type="retaliation",
+        claim_element_text="Protected activity",
+    )
+
+    summary = result["summary"]
+    assert summary["source_family_counts"] == {"evidence": 1, "legal_authority": 1}
+    assert summary["artifact_family_counts"] == {
+        "archived_web_page": 1,
+        "legal_authority_reference": 1,
+    }
+    assert summary["corpus_family_counts"] == {"web_archive": 1, "legal_corpus": 1}
+    assert summary["content_origin_counts"] == {
+        "historical_archive_capture": 1,
+        "authority_reference_fallback": 1,
+    }
+    assert summary["parse_source_counts"] == {"ipfs_datasets_py": 1, "legal_authority_parser": 1}
+    assert summary["input_format_counts"] == {"html": 1, "text": 1}
+    assert summary["quality_tier_counts"] == {"high": 1, "medium": 1}
+    assert summary["unique_source_ref_count"] == 2
+    assert summary["unique_source_record_count"] == 2
+    assert summary["passage_anchored_count"] == 1
+
+
 def test_check_contradictions_temporal_issue_signal():
     from integrations.ipfs_datasets.logic import check_contradictions
 

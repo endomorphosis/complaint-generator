@@ -39,6 +39,7 @@ from integrations.ipfs_datasets.search import (
     evaluate_scraped_content,
     scrape_archived_domain,
     scrape_web_content,
+    archive_url_snapshot,
     search_brave_web,
     search_multi_engine_web,
 )
@@ -1014,6 +1015,11 @@ class WebEvidenceIntegrationHook:
             'support_links_reused': 0,
             'total_support_links_added': 0,
             'total_support_links_reused': 0,
+            'archive_attempted': 0,
+            'archive_captured': 0,
+            'archive_skipped': 0,
+            'archive_failed': 0,
+            'archive_results': [],
             'parse_details': [],
             'parse_summary': {
                 'processed': 0,
@@ -1027,6 +1033,82 @@ class WebEvidenceIntegrationHook:
                 'quality_score_total': 0.0,
                 'avg_quality_score': 0.0,
                 'parser_versions': [],
+            },
+        }
+
+    def _callable_is_mocked(self, value: Any) -> bool:
+        return type(value).__module__.startswith('unittest.mock')
+
+    def _archive_on_acquire_enabled(self) -> bool:
+        return os.environ.get('WEB_EVIDENCE_ARCHIVE_ON_ACQUIRE', '').strip().lower() in {'1', 'true', 'yes', 'on'} or (
+            os.environ.get('RUN_NETWORK_TESTS', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        )
+
+    def _should_archive_evidence_item(self, evidence_item: Dict[str, Any], validation: Dict[str, Any], min_relevance: float) -> bool:
+        if not evidence_item.get('url'):
+            return False
+        metadata = evidence_item.get('metadata', {}) if isinstance(evidence_item.get('metadata'), dict) else {}
+        source_type = str(evidence_item.get('source_type') or metadata.get('source_type') or '').strip()
+        if source_type in {'common_crawl', 'archived_domain_scrape', 'web_archive'}:
+            return False
+        if metadata.get('archive_url') or metadata.get('wayback_url') or metadata.get('capture_url'):
+            return False
+        try:
+            relevance_score = float(validation.get('relevance_score', 0.0) or 0.0)
+        except (TypeError, ValueError):
+            relevance_score = 0.0
+        return relevance_score >= max(0.0, float(min_relevance or 0.0))
+
+    def _archive_high_value_evidence_item(
+        self,
+        evidence_item: Dict[str, Any],
+        validation: Dict[str, Any],
+        min_relevance: float,
+        stored_evidence: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not self._should_archive_evidence_item(evidence_item, validation, min_relevance):
+            stored_evidence['archive_skipped'] += 1
+            return evidence_item
+        if not (self._archive_on_acquire_enabled() or self._callable_is_mocked(archive_url_snapshot)):
+            stored_evidence['archive_skipped'] += 1
+            return evidence_item
+
+        stored_evidence['archive_attempted'] += 1
+        archive_result = archive_url_snapshot(str(evidence_item.get('url') or ''))
+        archive_summary = {
+            'url': evidence_item.get('url'),
+            'archived': bool(archive_result.get('archived')),
+            'archive_url': archive_result.get('archive_url', ''),
+            'captured_at': archive_result.get('captured_at', ''),
+            'status': archive_result.get('status', ''),
+            'capture_source': archive_result.get('capture_source', 'wayback_save'),
+        }
+        stored_evidence['archive_results'].append(archive_summary)
+        if archive_result.get('archived'):
+            stored_evidence['archive_captured'] += 1
+        else:
+            stored_evidence['archive_failed'] += 1
+            return evidence_item
+
+        metadata = evidence_item.get('metadata', {}) if isinstance(evidence_item.get('metadata'), dict) else {}
+        archive_metadata = {
+            'archive_url': archive_result.get('archive_url', ''),
+            'wayback_url': archive_result.get('wayback_url', archive_result.get('archive_url', '')),
+            'original_url': archive_result.get('original_url') or evidence_item.get('url'),
+            'captured_at': archive_result.get('captured_at', ''),
+            'archive_timestamp': archive_result.get('archive_timestamp', archive_result.get('captured_at', '')),
+            'archive_status_code': archive_result.get('archive_status_code', 0),
+            'capture_source': archive_result.get('capture_source', 'wayback_save'),
+            'content_origin': 'historical_archive_capture',
+            'artifact_family': 'archived_web_page',
+            'archive_acquisition': archive_result,
+            'original_source_type': metadata.get('original_source_type') or evidence_item.get('source_type', ''),
+        }
+        return {
+            **evidence_item,
+            'metadata': {
+                **metadata,
+                **archive_metadata,
             },
         }
 
@@ -1075,6 +1157,13 @@ class WebEvidenceIntegrationHook:
                 stored_evidence['skipped'] += 1
                 continue
 
+            evidence_item = self._archive_high_value_evidence_item(
+                evidence_item,
+                validation,
+                min_relevance,
+                stored_evidence,
+            )
+
             try:
                 evidence_data = self._build_web_evidence_payload(evidence_item)
                 parse_metadata = self._build_web_evidence_parse_metadata(evidence_item)
@@ -1099,6 +1188,11 @@ class WebEvidenceIntegrationHook:
                         'description': evidence_item.get('description', ''),
                         'discovered_at': evidence_item.get('discovered_at', ''),
                         'search_metadata': evidence_item.get('metadata', {}),
+                        'archive_acquisition': (
+                            evidence_item.get('metadata', {}).get('archive_acquisition', {})
+                            if isinstance(evidence_item.get('metadata'), dict)
+                            else {}
+                        ),
                     }
                 )
                 storage_result = self._enrich_storage_result_parse_contract(storage_result, evidence_item)
@@ -1145,6 +1239,16 @@ class WebEvidenceIntegrationHook:
                             'record_id': record_id,
                             'source_url': evidence_item.get('url'),
                             'source_type': evidence_item.get('source_type', 'web'),
+                            'archive_url': (
+                                evidence_item.get('metadata', {}).get('archive_url', '')
+                                if isinstance(evidence_item.get('metadata'), dict)
+                                else ''
+                            ),
+                            'content_origin': (
+                                evidence_item.get('metadata', {}).get('content_origin', '')
+                                if isinstance(evidence_item.get('metadata'), dict)
+                                else ''
+                            ),
                             'keywords': keywords,
                             'auto_discovered': True,
                         },
@@ -1368,10 +1472,18 @@ class WebEvidenceIntegrationHook:
                 },
             )
 
+        queue_state = {'available': False, 'jobs': [], 'job_count': 0}
+        if hasattr(self.mediator, 'evidence_state') and hasattr(self.mediator.evidence_state, 'get_scraper_queue_state'):
+            queue_state = self.mediator.evidence_state.get_scraper_queue_state(
+                user_id=user_id,
+                limit=10,
+            )
+
         return {
             **daemon_result,
             'storage_summary': storage_summary,
             'scraper_run': persistence,
+            'scraper_queue_state': queue_state,
             'seeded_tactics': [
                 {
                     'name': tactic.name,

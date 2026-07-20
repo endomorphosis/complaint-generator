@@ -319,6 +319,17 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
             status=status,
         )
 
+    @router.get("/api/claim-support/enrichment-job/{job_id}")
+    async def claim_support_enrichment_job(
+        job_id: int,
+        user_id: Optional[str] = Query(default=None),
+    ) -> Dict[str, Any]:
+        resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
+        return mediator.get_background_enrichment_job(
+            job_id=job_id,
+            user_id=resolved_user,
+        )
+
     @router.post("/api/claim-support/enrich-background")
     async def claim_support_enrich_background(
         enrichment_type: str = Query(...),
@@ -327,12 +338,23 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
         priority: int = Query(default=0, ge=0, le=10),
     ) -> Dict[str, Any]:
         resolved_user = user_id or getattr(getattr(mediator, "state", None), "username", None) or "anonymous"
-        return mediator.submit_background_enrichment_job(
+        submission = mediator.submit_background_enrichment_job(
             enrichment_type=enrichment_type,
             user_id=resolved_user,
             claim_type=claim_type,
             priority=priority,
         )
+        if not isinstance(submission, dict):
+            submission = {"submitted": False, "error": "Invalid enrichment queue response"}
+        get_queue_state = getattr(mediator, "get_enrichment_queue_state", None)
+        if callable(get_queue_state):
+            queue_state = get_queue_state(
+                resolved_user,
+                claim_type=claim_type,
+            )
+            if isinstance(queue_state, dict):
+                submission["queue_state"] = queue_state
+        return submission
 
     # M4: Retrieval session routes
     @router.post("/api/claim-support/retrieval-session")

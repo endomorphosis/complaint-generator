@@ -158,6 +158,47 @@ def test_export_proof_result_formula_counts_match():
     assert result["dcec_formula_count"] == 1
 
 
+def test_export_proof_result_preserves_fact_registry_summary():
+    payload = {
+        "temporal_reasoning_payload": {
+            "tdfol_formulas": ["Supports(s1,c1)"],
+            "dcec_formulas": [],
+            "fact_registry_summary": {
+                "fact_count": 2,
+                "source_family_counts": {"evidence": 1, "legal_authority": 1},
+                "corpus_family_counts": {"web_archive": 1, "legal_corpus": 1},
+                "passage_anchored_count": 1,
+            },
+        }
+    }
+
+    result = _export_result(payload)
+
+    assert result["fact_registry_summary"] == {
+        "fact_count": 2,
+        "source_family_counts": {"evidence": 1, "legal_authority": 1},
+        "corpus_family_counts": {"web_archive": 1, "legal_corpus": 1},
+        "passage_anchored_count": 1,
+    }
+
+
+def test_export_proof_result_prefers_top_level_fact_registry_summary():
+    payload = {
+        "fact_registry_summary": {"fact_count": 3, "source_family_counts": {"evidence": 3}},
+        "temporal_reasoning_payload": {
+            "tdfol_formulas": ["Supports(s1,c1)"],
+            "fact_registry_summary": {"fact_count": 1},
+        },
+    }
+
+    result = _export_result(payload)
+
+    assert result["fact_registry_summary"] == {
+        "fact_count": 3,
+        "source_family_counts": {"evidence": 3},
+    }
+
+
 def test_export_proof_result_lean4_is_nonempty_string():
     payload = {
         "temporal_reasoning_payload": {

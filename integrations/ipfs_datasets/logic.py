@@ -153,13 +153,144 @@ def _normalize_claim_reasoning_review(value: Any) -> Dict[str, Any]:
     return normalized
 
 
+def _summarize_fact_registry_for_facts(support_facts: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    facts = [fact for fact in support_facts or [] if isinstance(fact, dict)]
+    source_family_counts: Dict[str, int] = {}
+    record_scope_counts: Dict[str, int] = {}
+    artifact_family_counts: Dict[str, int] = {}
+    corpus_family_counts: Dict[str, int] = {}
+    content_origin_counts: Dict[str, int] = {}
+    parse_source_counts: Dict[str, int] = {}
+    input_format_counts: Dict[str, int] = {}
+    quality_tier_counts: Dict[str, int] = {}
+    support_kind_counts: Dict[str, int] = {}
+    source_table_counts: Dict[str, int] = {}
+    unique_fact_ids = set()
+    unique_source_refs = set()
+    unique_source_records = set()
+    passage_anchored_count = 0
+
+    def _count(target: Dict[str, int], value: Any) -> None:
+        text = str(value or "").strip()
+        if text:
+            target[text] = target.get(text, 0) + 1
+
+    for fact in facts:
+        fact_id = str(fact.get("fact_id") or "").strip()
+        source_ref = str(fact.get("source_ref") or "").strip()
+        source_family = str(fact.get("source_family") or "").strip()
+        source_record_id = fact.get("source_record_id")
+        source_passage = fact.get("source_passage") if isinstance(fact.get("source_passage"), dict) else {}
+        if fact_id:
+            unique_fact_ids.add(fact_id)
+        if source_ref:
+            unique_source_refs.add(source_ref)
+        if source_family and source_record_id not in (None, ""):
+            unique_source_records.add((source_family, str(source_record_id)))
+        if source_passage.get("chunk_id") or fact.get("chunk_id"):
+            passage_anchored_count += 1
+        _count(source_family_counts, source_family)
+        _count(record_scope_counts, fact.get("record_scope"))
+        _count(artifact_family_counts, fact.get("artifact_family"))
+        _count(corpus_family_counts, fact.get("corpus_family"))
+        _count(content_origin_counts, fact.get("content_origin"))
+        _count(parse_source_counts, fact.get("parse_source"))
+        _count(input_format_counts, fact.get("input_format"))
+        _count(quality_tier_counts, fact.get("quality_tier"))
+        _count(support_kind_counts, fact.get("support_kind"))
+        _count(source_table_counts, fact.get("source_table"))
+
+    return {
+        "registry_version": "claim_fact_registry_summary.v1",
+        "source": "logic_predicate_support_facts",
+        "fact_count": len(facts),
+        "unique_fact_count": len(unique_fact_ids),
+        "unique_source_ref_count": len(unique_source_refs),
+        "unique_source_record_count": len(unique_source_records),
+        "passage_anchored_count": passage_anchored_count,
+        "source_family_counts": source_family_counts,
+        "record_scope_counts": record_scope_counts,
+        "artifact_family_counts": artifact_family_counts,
+        "corpus_family_counts": corpus_family_counts,
+        "content_origin_counts": content_origin_counts,
+        "parse_source_counts": parse_source_counts,
+        "input_format_counts": input_format_counts,
+        "quality_tier_counts": quality_tier_counts,
+        "support_kind_counts": support_kind_counts,
+        "source_table_counts": source_table_counts,
+    }
+
+
+def _summarize_fact_registry_for_predicates(
+    predicates: Iterable[Dict[str, Any]],
+    *,
+    support_facts: Iterable[Dict[str, Any]] = (),
+) -> Dict[str, Any]:
+    facts: List[Dict[str, Any]] = [fact for fact in support_facts or [] if isinstance(fact, dict)]
+    predicate_summaries: List[Dict[str, Any]] = []
+    for predicate in predicates or []:
+        if not isinstance(predicate, dict):
+            continue
+        facts.extend(
+            fact
+            for fact in predicate.get("support_facts", []) or []
+            if isinstance(fact, dict)
+        )
+        if isinstance(predicate.get("fact_registry_summary"), dict):
+            predicate_summaries.append(predicate["fact_registry_summary"])
+    summary = _summarize_fact_registry_for_facts(facts)
+    if facts or not predicate_summaries:
+        return summary
+
+    count_map_keys = (
+        "source_family_counts",
+        "record_scope_counts",
+        "artifact_family_counts",
+        "corpus_family_counts",
+        "content_origin_counts",
+        "parse_source_counts",
+        "input_format_counts",
+        "quality_tier_counts",
+        "support_kind_counts",
+        "source_table_counts",
+    )
+    scalar_count_keys = (
+        "fact_count",
+        "unique_fact_count",
+        "unique_source_ref_count",
+        "unique_source_record_count",
+        "passage_anchored_count",
+    )
+    for predicate_summary in predicate_summaries:
+        for key in scalar_count_keys:
+            summary[key] = int(summary.get(key) or 0) + int(predicate_summary.get(key) or 0)
+        for key in count_map_keys:
+            target = summary.setdefault(key, {})
+            source = predicate_summary.get(key) if isinstance(predicate_summary.get(key), dict) else {}
+            for value, count in source.items():
+                text = str(value or "").strip()
+                if text:
+                    target[text] = int(target.get(text) or 0) + int(count or 0)
+    summary["source"] = "logic_predicate_fact_registry_summary"
+    return summary
+
+
 def _normalize_logic_payload(payload_or_predicates: Any) -> Dict[str, Any]:
     if isinstance(payload_or_predicates, dict):
         raw_predicates = payload_or_predicates.get("predicates")
         predicates = raw_predicates if isinstance(raw_predicates, list) else []
+        raw_support_facts = payload_or_predicates.get("support_facts")
+        support_facts = [fact for fact in raw_support_facts if isinstance(fact, dict)] if isinstance(raw_support_facts, list) else []
+        fact_registry_summary = (
+            dict(payload_or_predicates.get("fact_registry_summary"))
+            if isinstance(payload_or_predicates.get("fact_registry_summary"), dict)
+            else _summarize_fact_registry_for_predicates(predicates, support_facts=support_facts)
+        )
         temporal_reasoning_payload = payload_or_predicates.get("temporal_reasoning_payload")
         return {
             "predicates": [predicate for predicate in predicates if isinstance(predicate, dict)],
+            "support_facts": support_facts,
+            "fact_registry_summary": fact_registry_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload if isinstance(temporal_reasoning_payload, dict) else {},
             "claim_support_temporal_handoff": _normalize_claim_support_temporal_handoff(
                 payload_or_predicates.get("claim_support_temporal_handoff")
@@ -170,8 +301,11 @@ def _normalize_logic_payload(payload_or_predicates: Any) -> Dict[str, Any]:
             "payload_keys": sorted(payload_or_predicates.keys()),
         }
 
+    predicate_list = [predicate for predicate in payload_or_predicates if isinstance(predicate, dict)]
     return {
-        "predicates": [predicate for predicate in payload_or_predicates if isinstance(predicate, dict)],
+        "predicates": predicate_list,
+        "support_facts": [],
+        "fact_registry_summary": _summarize_fact_registry_for_predicates(predicate_list),
         "temporal_reasoning_payload": {},
         "claim_support_temporal_handoff": {},
         "claim_reasoning_review": {},
@@ -234,26 +368,48 @@ def _build_temporal_reasoning_payload(
         predicate_type = str(predicate.get("predicate_type") or "").strip()
         if predicate_type == "claim_element":
             claim_symbol = _normalize_logic_symbol(predicate.get("claim_element_id") or predicate.get("predicate_id"), prefix="claim")
-            claim_elements.append(
-                {
-                    "claim_symbol": claim_symbol,
-                    "claim_type": claim_type,
-                    "claim_element_id": predicate.get("claim_element_id"),
-                    "claim_element_text": predicate.get("claim_element_text"),
-                    "coverage_status": predicate.get("coverage_status"),
-                }
-            )
+            claim_element = {
+                "claim_symbol": claim_symbol,
+                "claim_type": claim_type,
+                "claim_element_id": predicate.get("claim_element_id"),
+                "claim_element_text": predicate.get("claim_element_text"),
+                "coverage_status": predicate.get("coverage_status"),
+            }
+            if isinstance(predicate.get("fact_registry_summary"), dict):
+                claim_element["fact_registry_summary"] = dict(predicate["fact_registry_summary"])
+            support_facts = [fact for fact in predicate.get("support_facts", []) or [] if isinstance(fact, dict)]
+            if support_facts:
+                claim_element["support_fact_count"] = len(support_facts)
+            claim_elements.append(claim_element)
         elif predicate_type == "support_trace":
             trace_symbol = _normalize_logic_symbol(predicate.get("predicate_id") or predicate.get("support_ref"), prefix="support")
-            support_traces.append(
-                {
-                    "support_symbol": trace_symbol,
-                    "claim_type": claim_type,
-                    "support_ref": predicate.get("support_ref"),
-                    "support_kind": predicate.get("support_kind"),
-                    "text": predicate.get("text") or "",
-                }
-            )
+            support_trace = {
+                "support_symbol": trace_symbol,
+                "claim_type": claim_type,
+                "support_ref": predicate.get("support_ref"),
+                "support_kind": predicate.get("support_kind"),
+                "text": predicate.get("text") or "",
+            }
+            for field in (
+                "source_family",
+                "source_record_id",
+                "source_ref",
+                "record_scope",
+                "artifact_family",
+                "corpus_family",
+                "content_origin",
+                "parse_source",
+                "input_format",
+                "quality_tier",
+                "quality_score",
+                "chunk_id",
+                "chunk_index",
+                "source_passage",
+            ):
+                value = predicate.get(field)
+                if value not in (None, "", [], {}):
+                    support_trace[field] = value
+            support_traces.append(support_trace)
             claim_symbol = _normalize_logic_symbol(predicate.get("claim_element_id") or claim_type, prefix="claim")
             tdfol_formulas.append(f"Supports({trace_symbol},{claim_symbol})")
             dcec_formulas.append(f"Supports({trace_symbol},{claim_symbol})")
@@ -861,6 +1017,7 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
     normalized_payload = _normalize_logic_payload(predicates)
     predicate_list = normalized_payload["predicates"]
     predicate_summary = _summarize_predicates(predicate_list)
+    fact_registry_summary = normalized_payload["fact_registry_summary"]
 
     # Run the full hybrid reasoning pipeline (handles reasoner bridge + fallback).
     reasoning_result = run_hybrid_reasoning(normalized_payload)
@@ -930,6 +1087,7 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             "contradiction_count": contradiction_count,
             "contradictions": contradiction_list,
             **predicate_summary,
+            "fact_registry_summary": deepcopy(fact_registry_summary),
             "temporal_reasoning_payload": temporal_reasoning_payload,
             "proof_artifact": proof_artifact,
             "theorem_export": theorem_export,
@@ -939,6 +1097,7 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
         implementation_status="implemented",
         extra_metadata={
             **predicate_summary,
+            "fact_registry_summary": deepcopy(fact_registry_summary),
             "temporal_reasoning_payload": temporal_reasoning_payload,
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
@@ -1191,6 +1350,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
     claim_support_temporal_handoff = normalized_payload["claim_support_temporal_handoff"]
     claim_reasoning_review = normalized_payload["claim_reasoning_review"]
     predicate_summary = _summarize_predicates(predicates)
+    fact_registry_summary = normalized_payload["fact_registry_summary"]
 
     if isinstance(bridge_payload, dict) and bridge_payload:
         temporal_reasoning_payload = deepcopy(bridge_payload)
@@ -1218,6 +1378,11 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
         dict,
     ):
         temporal_reasoning_payload["claim_reasoning_review"] = deepcopy(claim_reasoning_review)
+    if fact_registry_summary and not isinstance(
+        temporal_reasoning_payload.get("fact_registry_summary"),
+        dict,
+    ):
+        temporal_reasoning_payload["fact_registry_summary"] = deepcopy(fact_registry_summary)
 
     proof_artifact = _build_reasoner_proof_artifact(
         predicates,
@@ -1241,6 +1406,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
             "compiler_bridge_available": REASONER_BRIDGE_AVAILABLE,
             "proof_artifact": proof_artifact,
             "local_logic_snapshot": local_logic_snapshot,
+            "fact_registry_summary": deepcopy(fact_registry_summary),
             "claim_reasoning_review": deepcopy(temporal_reasoning_payload.get("claim_reasoning_review") or {}),
             "compiler_bridge_path": (
                 REASONER_BRIDGE_PATH if REASONER_BRIDGE_AVAILABLE else ""
@@ -1248,6 +1414,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
         },
         "payload_keys": normalized_payload["payload_keys"],
         "predicate_count": predicate_summary.get("predicate_count", 0),
+        "fact_registry_summary": deepcopy(fact_registry_summary),
         "temporal_reasoning_payload": temporal_reasoning_payload,
     }
     return with_adapter_metadata(
@@ -1615,6 +1782,7 @@ def map_claim_elements_to_predicates(
     predicates: List[Dict[str, Any]] = []
     template_match_count = 0
     unmapped_element_ids: List[str] = []
+    all_support_facts: List[Dict[str, Any]] = []
 
     for element in list(elements):
         if not isinstance(element, dict):
@@ -1623,6 +1791,19 @@ def map_claim_elements_to_predicates(
         element_text = str(element.get("element_text") or element.get("label") or "")
         coverage_status = str(element.get("status") or element.get("coverage_status") or "missing")
         predicate_id = element.get("predicate_id") or f"{claim_type}:{element_id}" if element_id else f"{claim_type}:unknown"
+        support_facts = [
+            dict(fact)
+            for fact in element.get("support_facts", []) or []
+            if isinstance(fact, dict)
+        ]
+        all_support_facts.extend(support_facts)
+        fact_registry_summary = (
+            dict(element.get("fact_registry_summary"))
+            if isinstance(element.get("fact_registry_summary"), dict)
+            else dict(element.get("support_fact_registry_summary"))
+            if isinstance(element.get("support_fact_registry_summary"), dict)
+            else _summarize_fact_registry_for_facts(support_facts)
+        )
 
         tmpl = element_templates.get(element_id)
         if tmpl:
@@ -1648,9 +1829,12 @@ def map_claim_elements_to_predicates(
             "grounded_facts": tmpl.get("grounded_facts", []) if tmpl else [],
             "expected_predicate_types": tmpl.get("predicate_types", ["claim_element"]) if tmpl else ["claim_element"],
             "template_matched": bool(tmpl),
+            "support_facts": support_facts,
+            "fact_registry_summary": fact_registry_summary,
         }
         predicates.append(predicate)
 
+    fact_registry_summary = _summarize_fact_registry_for_facts(all_support_facts)
     return with_adapter_metadata(
         {
             "status": "success",
@@ -1659,11 +1843,16 @@ def map_claim_elements_to_predicates(
             "predicate_count": len(predicates),
             "template_match_count": template_match_count,
             "unmapped_element_ids": unmapped_element_ids,
+            "fact_registry_summary": fact_registry_summary,
         },
         operation="map_claim_elements_to_predicates",
         backend_available=True,
         implementation_status="implemented",
-        extra_metadata={"claim_type": claim_type, "element_count": len(predicates)},
+        extra_metadata={
+            "claim_type": claim_type,
+            "element_count": len(predicates),
+            "fact_registry_summary": fact_registry_summary,
+        },
     )
 
 

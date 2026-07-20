@@ -7,7 +7,7 @@ to enable neurosymbolic matching against complaint graphs.
 
 import json
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 
@@ -610,14 +610,16 @@ class LegalGraphBuilder:
         2. Authority-to-authority treatment edges (``supports``, ``adverse``,
            ``limits``, ``distinguishes``, ``questioned``, ``superseded``,
            ``good_law_unconfirmed``) derived from each authority's
-           ``treatment_records`` or ``treatment_summary``.
+           graph-ready ``authority_treatment_edges``, ``treatment_records``,
+           or ``treatment_summary``.
         3. Rule-to-claim-element edges (``governs``) linking extracted rule
            candidates to the claim elements they cover.
 
         Args:
             authorities: Authority dicts as returned by legal-authority hooks.
                 Each dict should have at minimum ``authority_id`` or ``id``,
-                ``name`` or ``title``, and optionally ``treatment_records``,
+                ``name`` or ``title``, and optionally
+                ``authority_treatment_edges``, ``treatment_records``,
                 ``treatment_summary``, and ``rule_candidates``.
             claim_elements: Optional list of claim-element dicts with
                 ``element_id`` / ``claim_element_id`` and ``element_text`` /
@@ -684,6 +686,10 @@ class LegalGraphBuilder:
             graph.add_element(node)
             if raw_id:
                 authority_node_ids[raw_id] = node.id
+                if raw_id.startswith('authority:'):
+                    authority_node_ids.setdefault(raw_id.removeprefix('authority:'), node.id)
+                else:
+                    authority_node_ids.setdefault(f'authority:{raw_id}', node.id)
 
         # Second pass: add treatment edges and rule candidate edges now that all
         # authority nodes are registered (so cross-authority treatment targets resolve).
@@ -721,14 +727,88 @@ class LegalGraphBuilder:
     ) -> None:
         """Add authority-to-authority treatment relation edges.
 
-        Reads ``treatment_records`` (list of dicts with ``treatment_type``,
-        ``treated_authority_id``) or ``treatment_summary`` from *authority* and
+        Reads graph-ready ``authority_treatment_edges`` first, then falls back
+        to ``treatment_records`` or ``treatment_summary`` from *authority* and
         inserts a :class:`LegalRelation` for each valid treatment pair.
         """
         _VALID_TREATMENT_TYPES = {
             'supports', 'adverse', 'limits', 'distinguishes',
             'questioned', 'superseded', 'good_law_unconfirmed',
         }
+        emitted: Set[Tuple[str, str, str]] = set()
+
+        def add_edge_from_record(
+            record: Dict[str, Any],
+            *,
+            source_ref: str,
+            target_ref: str,
+            relation_type: str,
+        ) -> None:
+            if relation_type not in _VALID_TREATMENT_TYPES:
+                return
+            edge_source_node_id = authority_node_ids.get(source_ref) if source_ref else source_node_id
+            target_node_id = authority_node_ids.get(target_ref)
+            if not edge_source_node_id or not target_node_id:
+                return
+            signature = (edge_source_node_id, target_node_id, relation_type)
+            if signature in emitted:
+                return
+            emitted.add(signature)
+            confidence = float(
+                record.get('confidence')
+                or record.get('treatment_confidence')
+                or 0.0
+            )
+            rel = LegalRelation(
+                id=self._get_relation_id(),
+                source_id=edge_source_node_id,
+                target_id=target_node_id,
+                relation_type=relation_type,
+                attributes={
+                    'confidence': confidence,
+                    'explanation': str(record.get('explanation') or record.get('treatment_explanation') or ''),
+                    'treatment_date': str(record.get('treatment_date') or ''),
+                    'treatment_source': str(record.get('treatment_source') or ''),
+                    'source_authority_id': source_ref,
+                    'target_authority_id': target_ref,
+                    'source_citation': str(record.get('source_citation') or record.get('treated_by_citation') or ''),
+                    'target_citation': str(record.get('target_citation') or ''),
+                    'treatment_id': str(record.get('edge_id') or record.get('treatment_id') or ''),
+                    'metadata': record.get('metadata') if isinstance(record.get('metadata'), dict) else {},
+                },
+            )
+            graph.add_relation(rel)
+
+        authority_edges = authority.get('authority_treatment_edges')
+        has_graph_ready_edges = isinstance(authority_edges, list) and len(authority_edges) > 0
+        if has_graph_ready_edges:
+            for record in authority_edges:
+                if not isinstance(record, dict):
+                    continue
+                add_edge_from_record(
+                    record,
+                    source_ref=str(
+                        record.get('source_authority_id')
+                        or record.get('treated_by_authority_id')
+                        or ''
+                    ).strip(),
+                    target_ref=str(
+                        record.get('target_authority_id')
+                        or record.get('treated_authority_id')
+                        or record.get('treated_by_authority_id')
+                        or record.get('target_id')
+                        or ''
+                    ).strip(),
+                    relation_type=str(
+                        record.get('relation_type')
+                        or record.get('treatment_type')
+                        or ''
+                    ).strip(),
+                )
+
+        if has_graph_ready_edges:
+            return
+
         treatment_records = authority.get('treatment_records')
         if not isinstance(treatment_records, list):
             summary = authority.get('treatment_summary') if isinstance(authority.get('treatment_summary'), dict) else {}
@@ -737,26 +817,19 @@ class LegalGraphBuilder:
             if not isinstance(record, dict):
                 continue
             treatment_type = str(record.get('treatment_type') or record.get('type') or '').strip()
-            if treatment_type not in _VALID_TREATMENT_TYPES:
-                continue
-            treated_id = str(record.get('treated_authority_id') or record.get('target_id') or '').strip()
-            target_node_id = authority_node_ids.get(treated_id)
-            if not target_node_id:
-                continue
-            confidence = float(record.get('treatment_confidence', 0.0) or 0.0)
-            rel = LegalRelation(
-                id=self._get_relation_id(),
-                source_id=source_node_id,
-                target_id=target_node_id,
+            treated_id = str(
+                record.get('treated_authority_id')
+                or record.get('treated_by_authority_id')
+                or record.get('target_authority_id')
+                or record.get('target_id')
+                or ''
+            ).strip()
+            add_edge_from_record(
+                record,
+                source_ref='',
+                target_ref=treated_id,
                 relation_type=treatment_type,
-                attributes={
-                    'confidence': confidence,
-                    'explanation': str(record.get('treatment_explanation') or ''),
-                    'treatment_date': str(record.get('treatment_date') or ''),
-                    'treatment_source': str(record.get('treatment_source') or ''),
-                },
             )
-            graph.add_relation(rel)
 
     def _add_rule_candidate_edges(
         self,
@@ -782,6 +855,10 @@ class LegalGraphBuilder:
                 continue
             rule_type = str(candidate.get('rule_type') or 'rule').strip()
             confidence = float(candidate.get('extraction_confidence', 0.0) or 0.0)
+            grounded_rule = candidate.get('grounded_rule', {})
+            if not isinstance(grounded_rule, dict):
+                metadata = candidate.get('metadata', {}) if isinstance(candidate.get('metadata'), dict) else {}
+                grounded_rule = metadata.get('grounded_rule', {}) if isinstance(metadata.get('grounded_rule'), dict) else {}
             rule_node = LegalElement(
                 id=self._get_element_id(),
                 element_type='rule_candidate',
@@ -791,6 +868,12 @@ class LegalGraphBuilder:
                     'rule_type': rule_type,
                     'extraction_confidence': confidence,
                     'source_authority_node': authority_node_id,
+                    'grounded_rule': grounded_rule,
+                    'deontic_operator': grounded_rule.get('deontic_operator', ''),
+                    'operator_family': grounded_rule.get('operator_family', ''),
+                    'grounding_status': grounded_rule.get('grounding_status', ''),
+                    'treatment_influence': grounded_rule.get('treatment_influence', ''),
+                    'premise_failure_category': grounded_rule.get('premise_failure_category', ''),
                 },
             )
             graph.add_element(rule_node)

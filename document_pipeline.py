@@ -176,6 +176,383 @@ def _build_claim_checklist_chip_labels(claim: Dict[str, Any]) -> List[str]:
     return chip_labels
 
 
+def build_drafting_support_bundles(claim_support_packets: Dict[str, Any]) -> Dict[str, Any]:
+    """Build section-level drafting support bundles from mediator claim packets."""
+    section_bundles: Dict[str, Dict[str, Any]] = {
+        "factual_allegations": {
+            "section_id": "factual_allegations",
+            "support_status": "unsupported",
+            "claim_elements": [],
+            "source_refs": [],
+            "explicit_gaps": [],
+        },
+        "jurisdiction_and_venue": {
+            "section_id": "jurisdiction_and_venue",
+            "support_status": "unsupported",
+            "claim_elements": [],
+            "source_refs": [],
+            "explicit_gaps": [],
+        },
+        "claims_for_relief": {
+            "section_id": "claims_for_relief",
+            "support_status": "unsupported",
+            "claim_elements": [],
+            "source_refs": [],
+            "explicit_gaps": [],
+        },
+        "requested_relief": {
+            "section_id": "requested_relief",
+            "support_status": "unsupported",
+            "claim_elements": [],
+            "source_refs": [],
+            "explicit_gaps": ["Confirm requested relief is supported by facts and authority."],
+        },
+    }
+
+    status_rank = {
+        "unsupported": 0,
+        "contradicted": 0,
+        "partially_supported": 1,
+        "supported": 2,
+    }
+
+    def _merge_status(current: str, candidate: str) -> str:
+        if candidate == "contradicted":
+            return "contradicted"
+        return candidate if status_rank.get(candidate, 0) > status_rank.get(current, 0) else current
+
+    def _add_source_refs(bundle: Dict[str, Any], manifest: Dict[str, Any]) -> None:
+        existing = set(bundle["source_refs"])
+        for entry in manifest.get("entries", []) if isinstance(manifest, dict) else []:
+            if not isinstance(entry, dict):
+                continue
+            ref = str(entry.get("id") or entry.get("source_ref") or "").strip()
+            if ref and ref not in existing:
+                existing.add(ref)
+                bundle["source_refs"].append(ref)
+
+    for claim_type, packet in (claim_support_packets or {}).items():
+        if not isinstance(packet, dict):
+            continue
+        for element in packet.get("elements", []) or []:
+            if not isinstance(element, dict):
+                continue
+            support_status = str(element.get("support_status") or "unsupported").strip() or "unsupported"
+            element_ref = {
+                "claim_type": claim_type,
+                "element_id": element.get("element_id"),
+                "element_text": element.get("element_text"),
+                "support_status": support_status,
+                "support_quality": element.get("support_quality", ""),
+                "support_lane_label": element.get("support_lane_label", ""),
+                "missing_support_report": element.get("missing_support_report", {}),
+                "authority_treatment_summary": element.get("authority_treatment_summary", {}),
+                "authority_rule_candidate_summary": element.get("authority_rule_candidate_summary", {}),
+                "validation_summary": {
+                    "contradiction_count": int((element.get("contradiction_report") or {}).get("contradiction_count", 0) or 0),
+                    "temporal_rule_status": element.get("temporal_rule_status", ""),
+                },
+            }
+            factual_bundle = section_bundles["factual_allegations"]
+            factual_bundle["claim_elements"].append(element_ref)
+            factual_bundle["support_status"] = _merge_status(factual_bundle["support_status"], support_status)
+            _add_source_refs(factual_bundle, element.get("bundle_manifest") or {})
+
+            claims_bundle = section_bundles["claims_for_relief"]
+            claims_bundle["claim_elements"].append(element_ref)
+            claims_bundle["support_status"] = _merge_status(claims_bundle["support_status"], support_status)
+            _add_source_refs(claims_bundle, element.get("bundle_manifest") or {})
+
+            missing_report = element.get("missing_support_report") if isinstance(element.get("missing_support_report"), dict) else {}
+            for gap in list(missing_report.get("missing_support_kinds") or []) + list(missing_report.get("missing_fact_bundle") or []):
+                gap_text = str(gap or "").strip()
+                if gap_text:
+                    for section_id in ("factual_allegations", "claims_for_relief"):
+                        section_bundles[section_id]["explicit_gaps"].append(gap_text)
+
+            temporal_status = str(element.get("temporal_rule_status") or "").strip()
+            if temporal_status:
+                jurisdiction_bundle = section_bundles["jurisdiction_and_venue"]
+                jurisdiction_bundle["claim_elements"].append(element_ref)
+                jurisdiction_bundle["support_status"] = _merge_status(jurisdiction_bundle["support_status"], support_status)
+                if temporal_status not in {"satisfied", "passed"}:
+                    jurisdiction_bundle["explicit_gaps"].append(f"Temporal rule status: {temporal_status}")
+
+    for bundle in section_bundles.values():
+        bundle["explicit_gaps"] = _dedupe_text_values(bundle["explicit_gaps"])
+        bundle["source_refs"] = _dedupe_text_values(bundle["source_refs"])
+        bundle["claim_element_count"] = len(bundle["claim_elements"])
+    return {
+        "available": True,
+        "sections": section_bundles,
+        "section_count": len(section_bundles),
+    }
+
+
+def build_drafting_guardrails(drafting_support_bundles: Dict[str, Any]) -> Dict[str, Any]:
+    """Build stable drafting-time guardrail warnings from section support bundles."""
+    bundles = drafting_support_bundles if isinstance(drafting_support_bundles, dict) else {}
+    sections = bundles.get("sections") if isinstance(bundles.get("sections"), dict) else {}
+    warning_index: Dict[str, Dict[str, Any]] = {}
+
+    def _add_warning(
+        *,
+        section_id: str,
+        warning_type: str,
+        message: str,
+        severity: str = "warning",
+        source: str = "drafting_support_bundle",
+        recommended_action: str = "Review support before export.",
+        claim_type: str = "",
+        element_id: Any = "",
+        source_refs: Iterable[Any] = (),
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        normalized_section = str(section_id or "document").strip() or "document"
+        normalized_type = str(warning_type or "drafting_guardrail").strip() or "drafting_guardrail"
+        normalized_claim = str(claim_type or "").strip()
+        normalized_element = str(element_id or "").strip()
+        normalized_severity = str(severity or "warning").strip().lower()
+        if normalized_severity == "blocked":
+            normalized_severity = "blocker"
+        warning_id = "drafting-guardrail-" + _slugify(
+            "-".join(
+                item
+                for item in [
+                    normalized_section,
+                    normalized_claim,
+                    normalized_element,
+                    normalized_type,
+                ]
+                if item
+            )
+        )
+        if warning_id in warning_index:
+            return
+        warning = {
+            "warning_id": warning_id,
+            "section_id": normalized_section,
+            "claim_type": normalized_claim,
+            "element_id": normalized_element,
+            "severity": "blocker" if normalized_severity in {"blocker", "critical"} else "warning",
+            "warning_type": normalized_type,
+            "message": str(message or "").strip(),
+            "source": str(source or "drafting_support_bundle").strip() or "drafting_support_bundle",
+            "recommended_action": str(recommended_action or "").strip() or "Review support before export.",
+            "source_refs": _dedupe_text_values(source_refs),
+        }
+        if details:
+            warning["details"] = dict(details)
+        warning_index[warning_id] = warning
+
+    for section_id, section in sections.items():
+        if not isinstance(section, dict):
+            continue
+        normalized_section_id = str(section.get("section_id") or section_id or "document").strip() or "document"
+        section_status = str(section.get("support_status") or "").strip().lower()
+        section_source_refs = _dedupe_text_values(section.get("source_refs") or [])
+        explicit_gaps = _dedupe_text_values(section.get("explicit_gaps") or [])
+        if section_status in {"unsupported", "contradicted"} and normalized_section_id != "requested_relief":
+            _add_warning(
+                section_id=normalized_section_id,
+                warning_type="unsupported_section",
+                severity="blocker",
+                message=f"{normalized_section_id.replace('_', ' ').title()} lacks support sufficient for drafting export.",
+                recommended_action="Attach evidence and authority support before relying on this section.",
+                source_refs=section_source_refs,
+                details={"support_status": section_status, "explicit_gaps": explicit_gaps[:8]},
+            )
+        for gap in explicit_gaps:
+            _add_warning(
+                section_id=normalized_section_id,
+                warning_type="explicit_section_gap",
+                message=str(gap),
+                recommended_action="Resolve the explicit drafting gap or document why degraded drafting is acceptable.",
+                source_refs=section_source_refs,
+            )
+
+        for element in section.get("claim_elements", []) or []:
+            if not isinstance(element, dict):
+                continue
+            claim_type = str(element.get("claim_type") or "").strip()
+            element_id = element.get("element_id")
+            element_label = str(element.get("element_text") or element_id or "claim element").strip()
+            support_status = str(element.get("support_status") or "").strip().lower()
+            missing_support_report = (
+                element.get("missing_support_report")
+                if isinstance(element.get("missing_support_report"), dict)
+                else {}
+            )
+            missing_support_kinds = _dedupe_text_values(missing_support_report.get("missing_support_kinds") or [])
+            missing_fact_bundle = _dedupe_text_values(missing_support_report.get("missing_fact_bundle") or [])
+            if support_status in {"unsupported", "contradicted"}:
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="unsupported_element",
+                    severity="blocker",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' is {support_status or 'unsupported'}.",
+                    recommended_action="Add source-backed facts and authority or omit the unsupported allegation before export.",
+                    source_refs=section_source_refs,
+                    details={
+                        "support_status": support_status,
+                        "missing_support_kinds": missing_support_kinds,
+                        "missing_fact_bundle": missing_fact_bundle[:8],
+                    },
+                )
+            elif support_status == "partially_supported":
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="partially_supported_element",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' is only partially supported.",
+                    recommended_action="Strengthen the element with additional support before final drafting.",
+                    source_refs=section_source_refs,
+                    details={"missing_support_kinds": missing_support_kinds, "missing_fact_bundle": missing_fact_bundle[:8]},
+                )
+            if missing_support_kinds or missing_fact_bundle:
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="proof_support_gap",
+                    severity="blocker" if support_status in {"unsupported", "contradicted"} else "warning",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' has unresolved proof-support gaps.",
+                    recommended_action="Close missing evidence, authority, or fact-bundle gaps before export.",
+                    source_refs=section_source_refs,
+                    details={
+                        "missing_support_kinds": missing_support_kinds,
+                        "missing_fact_bundle": missing_fact_bundle[:8],
+                    },
+                )
+
+            validation_summary = (
+                element.get("validation_summary")
+                if isinstance(element.get("validation_summary"), dict)
+                else {}
+            )
+            contradiction_count = int(validation_summary.get("contradiction_count") or 0)
+            if contradiction_count > 0:
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="contradiction",
+                    severity="blocker",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' has contradiction signals.",
+                    recommended_action="Resolve contradictory facts or authority before relying on this element.",
+                    source_refs=section_source_refs,
+                    details={"contradiction_count": contradiction_count},
+                )
+            temporal_rule_status = str(validation_summary.get("temporal_rule_status") or "").strip().lower()
+            if temporal_rule_status and temporal_rule_status not in {"ready", "supported", "satisfied", "pass", "passed"}:
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="temporal_or_procedural_gap",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' has temporal-rule status '{temporal_rule_status}'.",
+                    recommended_action="Resolve timeline predicates and procedural timing before final drafting.",
+                    source_refs=section_source_refs,
+                    details={"temporal_rule_status": temporal_rule_status},
+                )
+
+            treatment_summary = (
+                element.get("authority_treatment_summary")
+                if isinstance(element.get("authority_treatment_summary"), dict)
+                else {}
+            )
+            adverse_authority_count = int(treatment_summary.get("adverse_authority_link_count") or 0)
+            if adverse_authority_count > 0:
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="adverse_authority",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' includes adverse or limiting authority.",
+                    recommended_action="Review treatment and either distinguish the authority or avoid relying on it.",
+                    source_refs=section_source_refs,
+                    details={"adverse_authority_link_count": adverse_authority_count},
+                )
+            uncertain_authority_count = int(treatment_summary.get("uncertain_authority_link_count") or 0)
+            treatment_type_counts = (
+                treatment_summary.get("treatment_type_counts")
+                if isinstance(treatment_summary.get("treatment_type_counts"), dict)
+                else {}
+            )
+            unresolved_treatments = sorted(
+                str(name)
+                for name, count in treatment_type_counts.items()
+                if int(count or 0) > 0 and str(name) in {"questioned", "limits", "superseded", "good_law_unconfirmed"}
+            )
+            if uncertain_authority_count > 0 or unresolved_treatments:
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="weak_treatment_confidence",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' has unresolved authority treatment or good-law confidence.",
+                    recommended_action="Run or review good-law/treatment checks before export.",
+                    source_refs=section_source_refs,
+                    details={
+                        "uncertain_authority_link_count": uncertain_authority_count,
+                        "unresolved_treatment_types": unresolved_treatments,
+                    },
+                )
+
+            rule_summary = (
+                element.get("authority_rule_candidate_summary")
+                if isinstance(element.get("authority_rule_candidate_summary"), dict)
+                else {}
+            )
+            rule_type_counts = (
+                rule_summary.get("rule_type_counts")
+                if isinstance(rule_summary.get("rule_type_counts"), dict)
+                else {}
+            )
+            procedural_rule_count = int(rule_type_counts.get("procedural_prerequisite") or 0)
+            fact_unsatisfied_rule_count = int(rule_summary.get("fact_unsatisfied_rule_count") or 0)
+            if procedural_rule_count > 0:
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="missing_procedural_prerequisite",
+                    severity="blocker" if fact_unsatisfied_rule_count > 0 else "warning",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' has procedural prerequisite rules to satisfy.",
+                    recommended_action="Confirm prerequisite facts, timing, notices, and exhaustion requirements before export.",
+                    source_refs=section_source_refs,
+                    details={
+                        "procedural_rule_count": procedural_rule_count,
+                        "fact_unsatisfied_rule_count": fact_unsatisfied_rule_count,
+                    },
+                )
+            elif fact_unsatisfied_rule_count > 0:
+                _add_warning(
+                    section_id=normalized_section_id,
+                    claim_type=claim_type,
+                    element_id=element_id,
+                    warning_type="failed_premise",
+                    severity="blocker",
+                    message=f"{claim_type or 'Claim'} element '{element_label}' has unsatisfied rule premises.",
+                    recommended_action="Resolve failed or unsupported premises before export.",
+                    source_refs=section_source_refs,
+                    details={"fact_unsatisfied_rule_count": fact_unsatisfied_rule_count},
+                )
+
+    warnings = list(warning_index.values())
+    blocker_count = sum(1 for warning in warnings if warning.get("severity") == "blocker")
+    return {
+        "available": bool(sections),
+        "status": "blocked" if blocker_count else ("warning" if warnings else "ready"),
+        "warning_count": len(warnings),
+        "blocker_count": blocker_count,
+        "warnings": warnings,
+    }
+
+
 def _collect_temporal_registry_identifiers(records: Any, *keys: str) -> List[str]:
     identifiers: List[str] = []
     for record in records if isinstance(records, list) else []:
@@ -7167,6 +7544,14 @@ class FormalComplaintDocumentBuilder:
             claim_fact_entries = self._prune_redundant_claim_fact_entries(claim_fact_entries)
             claim_facts = [str(entry.get("text") or "").strip() for entry in claim_fact_entries if str(entry.get("text") or "").strip()]
             source_context = self._extract_support_source_context_counts(support_claim)
+            fact_registry_summary = _safe_call(
+                self.mediator,
+                "get_claim_fact_registry_summary",
+                claim_type=claim_type,
+                user_id=user_id,
+            ) or {}
+            if not isinstance(fact_registry_summary, dict):
+                fact_registry_summary = {}
             claims.append(
                 {
                     "claim_type": claim_type,
@@ -7195,6 +7580,7 @@ class FormalComplaintDocumentBuilder:
                         "artifact_family_counts": source_context["artifact_family_counts"],
                         "corpus_family_counts": source_context["corpus_family_counts"],
                         "content_origin_counts": source_context["content_origin_counts"],
+                        "fact_registry_summary": fact_registry_summary,
                     },
                     "supporting_exhibits": [
                         {
@@ -7708,6 +8094,19 @@ class FormalComplaintDocumentBuilder:
                             "support_trace_ids": support_trace_ids,
                             "source_kind": "claim_support_fact",
                             "source_ref": str(row.get("source_ref") or row.get("fact_id") or "").strip() or None,
+                            "source_family": str(row.get("source_family") or "").strip(),
+                            "source_record_id": row.get("source_record_id"),
+                            "record_scope": str(row.get("record_scope") or "").strip(),
+                            "artifact_family": str(row.get("artifact_family") or "").strip(),
+                            "corpus_family": str(row.get("corpus_family") or "").strip(),
+                            "content_origin": str(row.get("content_origin") or "").strip(),
+                            "parse_source": str(row.get("parse_source") or "").strip(),
+                            "input_format": str(row.get("input_format") or "").strip(),
+                            "quality_tier": str(row.get("quality_tier") or "").strip(),
+                            "quality_score": row.get("quality_score"),
+                            "chunk_id": str(row.get("chunk_id") or "").strip(),
+                            "chunk_index": row.get("chunk_index"),
+                            "source_passage": dict(row.get("source_passage") or {}) if isinstance(row.get("source_passage"), dict) else {},
                         }
                     )
 
@@ -7863,6 +8262,29 @@ class FormalComplaintDocumentBuilder:
                     for trace_id in _coerce_list(matched.get("support_trace_ids"))
                 ]
             )
+            for field in (
+                "source_ref",
+                "source_family",
+                "source_record_id",
+                "record_scope",
+                "artifact_family",
+                "corpus_family",
+                "content_origin",
+                "parse_source",
+                "input_format",
+                "quality_tier",
+                "quality_score",
+                "chunk_id",
+                "chunk_index",
+                "source_passage",
+            ):
+                if current.get(field):
+                    continue
+                for matched in matched_entries:
+                    value = matched.get(field)
+                    if value not in (None, "", [], {}):
+                        current[field] = value
+                        break
             enriched.append(current)
         return enriched
 
@@ -9423,6 +9845,11 @@ class FormalComplaintDocumentBuilder:
         support_summary = self._safe_mediator_dict("summarize_claim_support", user_id=user_id)
         gap_summary = self._safe_mediator_dict("get_claim_support_gaps", user_id=user_id)
         validation_summary = self._safe_mediator_dict("get_claim_support_validation", user_id=user_id)
+        drafting_guardrails = self._safe_mediator_dict(
+            "get_drafting_guardrails",
+            user_id=user_id,
+            required_support_kinds=["evidence", "authority"],
+        )
 
         support_claims = support_summary.get("claims", {}) if isinstance(support_summary.get("claims"), dict) else {}
         gap_claims = gap_summary.get("claims", {}) if isinstance(gap_summary.get("claims"), dict) else {}
@@ -10049,6 +10476,7 @@ class FormalComplaintDocumentBuilder:
             "document_provenance_summary": document_provenance_summary,
             "document_fact_backed_ratio": round(document_fact_backed_ratio, 4),
             "document_low_grounding_flag": document_low_grounding_flag,
+            "drafting_guardrails": drafting_guardrails if drafting_guardrails else {"available": False, "status": "ready", "warning_count": 0, "blocker_count": 0, "warnings": []},
             "drafting_handoff": {
                 "gate_on_graph_completeness": bool(graph_gate_active),
                 "graph_phase_status": str(graph_signals.get("status") or "ready").strip().lower() or "ready",
@@ -10087,6 +10515,27 @@ class FormalComplaintDocumentBuilder:
                 },
             },
         }
+        guardrail_warnings = [
+            dict(item)
+            for item in list((drafting_guardrails or {}).get("warnings") or [])
+            if isinstance(item, dict)
+        ]
+        if guardrail_warnings:
+            readiness_payload["warnings"] = list(readiness_payload.get("warnings") or []) + guardrail_warnings
+            readiness_payload["warning_count"] = int(readiness_payload.get("warning_count") or 0) + len(guardrail_warnings)
+            guardrail_status = str((drafting_guardrails or {}).get("status") or "ready").strip().lower() or "ready"
+            readiness_payload["status"] = _merge_status(
+                str(readiness_payload.get("status") or "ready"),
+                "blocked" if guardrail_status in {"blocked", "critical"} else guardrail_status,
+            )
+            readiness_payload["phase_status"] = _merge_status(
+                str(readiness_payload.get("phase_status") or "ready"),
+                "blocked" if int((drafting_guardrails or {}).get("blocker_count") or 0) > 0 else "warning",
+            )
+            if int((drafting_guardrails or {}).get("blocker_count") or 0) > 0:
+                readiness_payload["blockers"] = _dedupe_text_values(
+                    list(readiness_payload.get("blockers") or []) + ["drafting_guardrail_blockers"]
+                )
         workflow_phase_plan = self._build_runtime_workflow_phase_plan(
             drafting_readiness=readiness_payload,
             document_optimization=None,
@@ -10104,7 +10553,7 @@ class FormalComplaintDocumentBuilder:
         if workflow_optimization_guidance:
             readiness_payload["workflow_optimization_guidance"] = workflow_optimization_guidance
         if workflow_warnings:
-            readiness_payload["warnings"] = workflow_warnings
+            readiness_payload["warnings"] = list(readiness_payload.get("warnings") or []) + workflow_warnings
             readiness_payload["warning_count"] = int(readiness_payload.get("warning_count") or 0) + len(workflow_warnings)
             for warning in workflow_warnings:
                 readiness_payload["status"] = _merge_status(
