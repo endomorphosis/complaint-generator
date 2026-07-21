@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import HTMLResponse
+from .fastapi_compat import attach_router_routes
 
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -72,5 +73,4 @@ def create_core_site_ui_router() -> APIRouter:
 
 
 def attach_core_site_ui_routes(app: FastAPI) -> FastAPI:
-    app.include_router(create_core_site_ui_router())
-    return app
+    return attach_router_routes(app, create_core_site_ui_router())

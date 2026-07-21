@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from document_pipeline import DEFAULT_OUTPUT_DIR, _build_claim_checklist_chip_labels as _pipeline_claim_chip_labels
+from .fastapi_compat import attach_router_routes
 from integrations.ipfs_datasets.storage import retrieve_bytes
 from intake_status import (
     build_intake_case_review_summary,
@@ -1627,5 +1628,4 @@ def create_document_router(mediator: Any) -> APIRouter:
 
 
 def attach_document_routes(app: FastAPI, mediator: Any) -> FastAPI:
-    app.include_router(create_document_router(mediator))
-    return app
+    return attach_router_routes(app, create_document_router(mediator))

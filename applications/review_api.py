@@ -29,6 +29,7 @@ from claim_support_review import (
     build_claim_support_uploaded_document_payload,
 )
 from .document_api import attach_document_routes
+from .fastapi_compat import attach_router_routes
 
 try:
     import python_multipart  # type: ignore  # noqa: F401
@@ -444,8 +445,7 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
 
 
 def attach_claim_support_review_routes(app: FastAPI, mediator: Any) -> FastAPI:
-    app.include_router(create_claim_support_review_router(mediator))
-    return app
+    return attach_router_routes(app, create_claim_support_review_router(mediator))
 
 
 def create_review_api_app(mediator: Any) -> FastAPI:

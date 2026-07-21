@@ -311,6 +311,8 @@ class PhaseManager:
         event_ledger = intake_case_file.get('event_ledger') if isinstance(intake_case_file.get('event_ledger'), list) else []
         temporal_fact_registry = intake_case_file.get('temporal_fact_registry') if isinstance(intake_case_file.get('temporal_fact_registry'), list) else []
         temporal_issue_registry = intake_case_file.get('temporal_issue_registry') if isinstance(intake_case_file.get('temporal_issue_registry'), list) else []
+        if not temporal_issue_registry and isinstance(intake_case_file.get('timeline_issues'), list):
+            temporal_issue_registry = intake_case_file.get('timeline_issues')
         timeline_consistency_summary = intake_case_file.get('timeline_consistency_summary') if isinstance(intake_case_file.get('timeline_consistency_summary'), dict) else {}
 
         event_records = temporal_fact_registry if temporal_fact_registry else event_ledger

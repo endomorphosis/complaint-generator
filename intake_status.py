@@ -802,6 +802,8 @@ def _build_intake_chronology_readiness(raw_status: Any) -> Dict[str, Any]:
             "timeline_relation_summary",
             "temporal_issue_registry",
             "temporal_issue_registry_summary",
+            "timeline_issues",
+            "timeline_issue_summary",
             "timeline_consistency_summary",
         )
     )
@@ -816,7 +818,13 @@ def _build_intake_chronology_readiness(raw_status: Any) -> Dict[str, Any]:
     timeline_relations = status.get("timeline_relations") if isinstance(status.get("timeline_relations"), list) else []
     timeline_relation_summary = status.get("timeline_relation_summary") if isinstance(status.get("timeline_relation_summary"), dict) else {}
     temporal_issue_registry = status.get("temporal_issue_registry") if isinstance(status.get("temporal_issue_registry"), list) else []
-    temporal_issue_registry_summary = summarize_temporal_issue_registry(status.get("temporal_issue_registry_summary"))
+    timeline_issues = status.get("timeline_issues") if isinstance(status.get("timeline_issues"), list) else []
+    issue_summary_source = status.get("temporal_issue_registry_summary")
+    if not isinstance(issue_summary_source, dict) or not issue_summary_source:
+        issue_summary_source = status.get("timeline_issue_summary")
+    if not temporal_issue_registry and timeline_issues:
+        temporal_issue_registry = timeline_issues
+    temporal_issue_registry_summary = summarize_temporal_issue_registry(issue_summary_source)
     timeline_consistency_summary = status.get("timeline_consistency_summary") if isinstance(status.get("timeline_consistency_summary"), dict) else {}
 
     event_records = temporal_fact_registry if temporal_fact_registry else event_ledger
@@ -1103,11 +1111,13 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
     temporal_relation_registry = raw_status.get("temporal_relation_registry")
     timeline_relations = raw_status.get("timeline_relations")
     temporal_issue_registry = raw_status.get("temporal_issue_registry")
+    timeline_issues = raw_status.get("timeline_issues")
     timeline_anchor_summary = raw_status.get("timeline_anchor_summary")
     temporal_fact_registry_summary = raw_status.get("temporal_fact_registry_summary")
     temporal_relation_registry_summary = raw_status.get("temporal_relation_registry_summary")
     timeline_relation_summary = raw_status.get("timeline_relation_summary")
     temporal_issue_registry_summary = raw_status.get("temporal_issue_registry_summary")
+    timeline_issue_summary = raw_status.get("timeline_issue_summary")
     timeline_consistency_summary = raw_status.get("timeline_consistency_summary")
     harm_profile = raw_status.get("harm_profile")
     remedy_profile = raw_status.get("remedy_profile")
@@ -1274,8 +1284,20 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
         "temporal_issue_registry": (
             temporal_issue_registry if isinstance(temporal_issue_registry, list) else []
         ),
+        "timeline_issues": (
+            timeline_issues
+            if isinstance(timeline_issues, list)
+            else (temporal_issue_registry if isinstance(temporal_issue_registry, list) else [])
+        ),
+        "timeline_issue_summary": summarize_temporal_issue_registry(
+            timeline_issue_summary
+            if isinstance(timeline_issue_summary, dict)
+            else temporal_issue_registry_summary
+        ),
         "temporal_issue_registry_summary": summarize_temporal_issue_registry(
             temporal_issue_registry_summary
+            if isinstance(temporal_issue_registry_summary, dict)
+            else timeline_issue_summary
         ),
         "intake_chronology_readiness": _build_intake_chronology_readiness(raw_status),
         "timeline_consistency_summary": (
