@@ -173,7 +173,9 @@
         "integrations/ipfs_datasets/graphs.py",
         "complaint_phases/knowledge_graph.py",
         "integrations/ipfs_datasets/logic.py",
-        "lib/formal_logic"
+        "lib/formal_logic",
+        "data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md",
+        "objective validation repair"
       ],
       "fib_priority": 999999,
       "goal_id": "G3",
