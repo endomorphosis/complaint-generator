@@ -962,6 +962,8 @@ def build_intake_status_summary(
     document_provenance_summary = raw_status.get("document_provenance_summary")
     evidence_workflow_action_queue = raw_status.get("evidence_workflow_action_queue")
     alignment_evidence_tasks = raw_status.get("alignment_evidence_tasks")
+    open_item_summary = raw_status.get("open_item_summary")
+    proof_lead_collection_summary = raw_status.get("proof_lead_collection_summary")
     raw_document_drafting_next_action = raw_status.get("document_drafting_next_action")
     raw_document_grounding_recovery_action = raw_status.get("document_grounding_recovery_action")
     document_drafting_next_action = (
@@ -1036,6 +1038,10 @@ def build_intake_status_summary(
         "canonical_fact_count": int(readiness.get("canonical_fact_count", 0) or 0),
         "proof_lead_count": int(readiness.get("proof_lead_count", 0) or 0),
     }
+    if isinstance(open_item_summary, dict) and open_item_summary:
+        summary["open_item_summary"] = dict(open_item_summary)
+    if isinstance(proof_lead_collection_summary, dict) and proof_lead_collection_summary:
+        summary["proof_lead_collection_summary"] = dict(proof_lead_collection_summary)
     if document_grounding_recovery_action:
         summary["document_grounding_recovery_action"] = document_grounding_recovery_action
     if document_grounding_improvement_next_action:
@@ -1074,8 +1080,10 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
     canonical_fact_intent_summary = raw_status.get("canonical_fact_intent_summary")
     proof_lead_summary = raw_status.get("proof_lead_summary")
     proof_lead_intent_summary = raw_status.get("proof_lead_intent_summary")
+    proof_lead_collection_summary = raw_status.get("proof_lead_collection_summary")
     blocker_follow_up_summary = raw_status.get("blocker_follow_up_summary")
     open_items = raw_status.get("open_items")
+    open_item_summary = raw_status.get("open_item_summary")
     event_ledger = raw_status.get("event_ledger")
     event_ledger_summary = raw_status.get("event_ledger_summary")
     timeline_anchors = raw_status.get("timeline_anchors")
@@ -1172,11 +1180,19 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
         "proof_lead_summary": (
             proof_lead_summary if isinstance(proof_lead_summary, dict) else {}
         ),
+        "proof_lead_collection_summary": (
+            proof_lead_collection_summary
+            if isinstance(proof_lead_collection_summary, dict)
+            else {}
+        ),
         "blocker_follow_up_summary": (
             blocker_follow_up_summary if isinstance(blocker_follow_up_summary, dict) else {}
         ),
         "open_items": (
             open_items if isinstance(open_items, list) else []
+        ),
+        "open_item_summary": (
+            open_item_summary if isinstance(open_item_summary, dict) else {}
         ),
         "proof_lead_intent_summary": (
             proof_lead_intent_summary

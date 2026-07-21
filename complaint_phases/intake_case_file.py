@@ -867,6 +867,20 @@ def _normalize_canonical_fact_record(record: Any) -> Dict[str, Any]:
     fact = _coerce_dict(record)
     normalized_text = _normalize_text(fact.get("text") or "")
     fact_type = _normalize_text(fact.get("fact_type") or "general").lower() or "general"
+    claim_types = _unique_normalized_strings(
+        list(fact.get("claim_types") or [])
+        + ([fact.get("target_claim_type")] if str(fact.get("target_claim_type") or "").strip() else [])
+    )
+    element_tags = _unique_normalized_strings(
+        list(fact.get("element_tags") or [])
+        + list(fact.get("target_element_ids") or [])
+        + ([fact.get("target_element_id")] if str(fact.get("target_element_id") or "").strip() else [])
+    )
+    element_links = _normalize_intake_target_links(
+        fact.get("element_links") or fact.get("target_links"),
+        claim_types=claim_types,
+        element_ids=element_tags,
+    )
     existing_temporal_context = _coerce_dict(fact.get("temporal_context"))
     reusable_temporal_raw_text = ""
     if (
@@ -918,8 +932,11 @@ def _normalize_canonical_fact_record(record: Any) -> Dict[str, Any]:
         "structured_timeline_group": _normalize_text(fact.get("structured_timeline_group") or "") or None,
         "actor_ids": list(fact.get("actor_ids") or []),
         "target_ids": list(fact.get("target_ids") or []),
-        "claim_types": list(fact.get("claim_types") or []),
-        "element_tags": list(fact.get("element_tags") or []),
+        "claim_types": claim_types,
+        "element_tags": element_tags,
+        "target_claim_types": claim_types,
+        "target_element_ids": element_tags,
+        "element_links": element_links,
         "location": _normalize_text(fact.get("location") or "") or None,
         "fact_participants": _coerce_dict(fact.get("fact_participants")),
         "event_label": _normalize_text(fact.get("event_label") or normalized_text) or None,
@@ -939,8 +956,99 @@ def _normalize_canonical_fact_record(record: Any) -> Dict[str, Any]:
     }
 
 
+def _normalize_intake_target_links(
+    value: Any,
+    *,
+    claim_types: List[str] | None = None,
+    element_ids: List[str] | None = None,
+    fact_ids: List[str] | None = None,
+) -> List[Dict[str, str]]:
+    links: List[Dict[str, str]] = []
+    seen = set()
+
+    def _append_link(
+        *,
+        claim_type: Any = "",
+        element_id: Any = "",
+        fact_id: Any = "",
+    ) -> None:
+        normalized_claim_type = _normalize_text(claim_type)
+        normalized_element_id = _normalize_text(element_id)
+        normalized_fact_id = _normalize_text(fact_id)
+        if not normalized_claim_type and not normalized_element_id and not normalized_fact_id:
+            return
+        marker = (normalized_claim_type, normalized_element_id, normalized_fact_id)
+        if marker in seen:
+            return
+        seen.add(marker)
+        link: Dict[str, str] = {}
+        if normalized_claim_type:
+            link["claim_type"] = normalized_claim_type
+        if normalized_element_id:
+            link["element_id"] = normalized_element_id
+        if normalized_fact_id:
+            link["fact_id"] = normalized_fact_id
+        links.append(link)
+
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, dict):
+            _append_link(
+                claim_type=item.get("claim_type") or item.get("target_claim_type"),
+                element_id=item.get("element_id") or item.get("target_element_id") or item.get("claim_element_id"),
+                fact_id=item.get("fact_id") or item.get("target_fact_id"),
+            )
+            continue
+        normalized_item = _normalize_text(item)
+        if normalized_item:
+            _append_link(element_id=normalized_item)
+
+    normalized_claim_types = _unique_normalized_strings(claim_types or [])
+    normalized_element_ids = _unique_normalized_strings(element_ids or [])
+    normalized_fact_ids = _unique_normalized_strings(fact_ids or [])
+    if normalized_claim_types and normalized_element_ids and normalized_fact_ids:
+        for claim_type in normalized_claim_types:
+            for element_id in normalized_element_ids:
+                for fact_id in normalized_fact_ids:
+                    _append_link(claim_type=claim_type, element_id=element_id, fact_id=fact_id)
+    elif normalized_claim_types and normalized_element_ids:
+        for claim_type in normalized_claim_types:
+            for element_id in normalized_element_ids:
+                _append_link(claim_type=claim_type, element_id=element_id)
+    else:
+        for claim_type in normalized_claim_types:
+            _append_link(claim_type=claim_type)
+        for element_id in normalized_element_ids:
+            _append_link(element_id=element_id)
+    for fact_id in normalized_fact_ids:
+        _append_link(fact_id=fact_id)
+    return links
+
+
 def _normalize_proof_lead_record(record: Any) -> Dict[str, Any]:
     lead = _coerce_dict(record)
+    lead_type = _normalize_text(lead.get("lead_type") or "evidence").lower() or "evidence"
+    related_fact_ids = _unique_normalized_strings(lead.get("related_fact_ids") or [])
+    fact_targets = _unique_normalized_strings(
+        list(lead.get("fact_targets") or [])
+        + list(lead.get("target_fact_ids") or [])
+        + related_fact_ids
+    )
+    element_targets = _unique_normalized_strings(
+        list(lead.get("element_targets") or [])
+        + list(lead.get("target_element_ids") or [])
+        + ([lead.get("target_element_id")] if str(lead.get("target_element_id") or "").strip() else [])
+    )
+    target_claim_types = _unique_normalized_strings(
+        list(lead.get("target_claim_types") or [])
+        + list(lead.get("claim_types") or [])
+        + ([lead.get("target_claim_type")] if str(lead.get("target_claim_type") or "").strip() else [])
+    )
+    target_links = _normalize_intake_target_links(
+        lead.get("target_links") or lead.get("element_links"),
+        claim_types=target_claim_types,
+        element_ids=element_targets,
+        fact_ids=fact_targets,
+    )
     raw_temporal_scope = _normalize_text(
         lead.get("temporal_scope")
         or _coerce_dict(lead.get("temporal_context")).get("raw_text")
@@ -948,12 +1056,22 @@ def _normalize_proof_lead_record(record: Any) -> Dict[str, Any]:
     ) or None
     return {
         **lead,
-        "lead_type": _normalize_text(lead.get("lead_type") or "evidence").lower() or "evidence",
+        "lead_type": lead_type,
         "description": _normalize_text(lead.get("description") or ""),
-        "related_fact_ids": list(lead.get("related_fact_ids") or []),
-        "fact_targets": list(lead.get("fact_targets") or []),
-        "element_targets": list(lead.get("element_targets") or []),
-        "timeline_anchor_ids": list(lead.get("timeline_anchor_ids") or []),
+        "related_fact_ids": related_fact_ids,
+        "fact_targets": fact_targets,
+        "element_targets": element_targets,
+        "target_claim_types": target_claim_types,
+        "target_element_ids": element_targets,
+        "target_fact_ids": fact_targets,
+        "target_links": target_links,
+        "timeline_anchor_ids": _unique_normalized_strings(lead.get("timeline_anchor_ids") or []),
+        "availability": _normalize_text(lead.get("availability") or "availability_unknown").lower() or "availability_unknown",
+        "availability_details": _normalize_text(lead.get("availability_details") or ""),
+        "owner": _normalize_text(lead.get("owner") or "unknown") or "unknown",
+        "custodian": _normalize_text(lead.get("custodian") or lead.get("owner") or "unknown") or "unknown",
+        "expected_format": _normalize_text(lead.get("expected_format") or _derive_expected_format(lead_type)),
+        "retrieval_path": _normalize_text(lead.get("retrieval_path") or _derive_retrieval_path(lead_type)),
         "source_artifact_ids": _unique_normalized_strings(
             list(lead.get("source_artifact_ids") or [])
             + ([lead.get("source_artifact_id")] if str(lead.get("source_artifact_id") or "").strip() else [])
@@ -966,6 +1084,34 @@ def _normalize_proof_lead_record(record: Any) -> Dict[str, Any]:
         "temporal_scope": raw_temporal_scope,
         "temporal_context": _build_temporal_context(raw_temporal_scope),
     }
+
+
+def _ensure_stable_intake_record_ids(
+    records: Any,
+    *,
+    id_key: str,
+    prefix: str,
+) -> List[Dict[str, Any]]:
+    normalized_records = [
+        dict(record)
+        for record in (records if isinstance(records, list) else [])
+        if isinstance(record, dict)
+    ]
+    seen_ids = {
+        _normalize_text(record.get(id_key) or "")
+        for record in normalized_records
+        if _normalize_text(record.get(id_key) or "")
+    }
+    next_index = 1
+    for record in normalized_records:
+        if _normalize_text(record.get(id_key) or ""):
+            continue
+        while f"{prefix}_{next_index:03d}" in seen_ids:
+            next_index += 1
+        record[id_key] = f"{prefix}_{next_index:03d}"
+        seen_ids.add(record[id_key])
+        next_index += 1
+    return normalized_records
 
 
 def _merge_normalized_string_lists(*values: Any) -> List[str]:
@@ -1007,13 +1153,22 @@ def _canonical_fact_match_keys(record: Any) -> List[tuple[Any, ...]]:
 def _merge_canonical_fact_records(base: Any, overlay: Any) -> Dict[str, Any]:
     base_fact = _normalize_canonical_fact_record(base)
     overlay_fact = _normalize_canonical_fact_record(overlay)
+    merged_claim_types = _merge_normalized_string_lists(base_fact.get("claim_types"), overlay_fact.get("claim_types"))
+    merged_element_tags = _merge_normalized_string_lists(base_fact.get("element_tags"), overlay_fact.get("element_tags"))
     return {
         **base_fact,
         **overlay_fact,
         "actor_ids": _merge_normalized_string_lists(base_fact.get("actor_ids"), overlay_fact.get("actor_ids")),
         "target_ids": _merge_normalized_string_lists(base_fact.get("target_ids"), overlay_fact.get("target_ids")),
-        "claim_types": _merge_normalized_string_lists(base_fact.get("claim_types"), overlay_fact.get("claim_types")),
-        "element_tags": _merge_normalized_string_lists(base_fact.get("element_tags"), overlay_fact.get("element_tags")),
+        "claim_types": merged_claim_types,
+        "element_tags": merged_element_tags,
+        "target_claim_types": merged_claim_types,
+        "target_element_ids": merged_element_tags,
+        "element_links": _normalize_intake_target_links(
+            list(base_fact.get("element_links") or []) + list(overlay_fact.get("element_links") or []),
+            claim_types=merged_claim_types,
+            element_ids=merged_element_tags,
+        ),
         "timeline_anchor_ids": _merge_normalized_string_lists(
             base_fact.get("timeline_anchor_ids"),
             overlay_fact.get("timeline_anchor_ids"),
@@ -1091,17 +1246,37 @@ def _proof_lead_match_keys(record: Any) -> List[tuple[Any, ...]]:
 def _merge_proof_lead_records(base: Any, overlay: Any) -> Dict[str, Any]:
     base_lead = _normalize_proof_lead_record(base)
     overlay_lead = _normalize_proof_lead_record(overlay)
+    merged_related_fact_ids = _merge_normalized_string_lists(
+        base_lead.get("related_fact_ids"),
+        overlay_lead.get("related_fact_ids"),
+    )
+    merged_fact_targets = _merge_normalized_string_lists(
+        base_lead.get("fact_targets"),
+        overlay_lead.get("fact_targets"),
+        merged_related_fact_ids,
+    )
+    merged_element_targets = _merge_normalized_string_lists(
+        base_lead.get("element_targets"),
+        overlay_lead.get("element_targets"),
+    )
+    merged_claim_types = _merge_normalized_string_lists(
+        base_lead.get("target_claim_types"),
+        overlay_lead.get("target_claim_types"),
+    )
     return {
         **base_lead,
         **overlay_lead,
-        "related_fact_ids": _merge_normalized_string_lists(
-            base_lead.get("related_fact_ids"),
-            overlay_lead.get("related_fact_ids"),
-        ),
-        "fact_targets": _merge_normalized_string_lists(base_lead.get("fact_targets"), overlay_lead.get("fact_targets")),
-        "element_targets": _merge_normalized_string_lists(
-            base_lead.get("element_targets"),
-            overlay_lead.get("element_targets"),
+        "related_fact_ids": merged_related_fact_ids,
+        "fact_targets": merged_fact_targets,
+        "element_targets": merged_element_targets,
+        "target_claim_types": merged_claim_types,
+        "target_element_ids": merged_element_targets,
+        "target_fact_ids": merged_fact_targets,
+        "target_links": _normalize_intake_target_links(
+            list(base_lead.get("target_links") or []) + list(overlay_lead.get("target_links") or []),
+            claim_types=merged_claim_types,
+            element_ids=merged_element_targets,
+            fact_ids=merged_fact_targets,
         ),
         "timeline_anchor_ids": _merge_normalized_string_lists(
             base_lead.get("timeline_anchor_ids"),
@@ -1829,6 +2004,7 @@ def _derive_retrieval_path(lead_type: str) -> str:
         return "witness_follow_up"
     if "photo" in normalized or "image" in normalized:
         return "complainant_device_gallery"
+    return "complainant_possession"
 
 
 def merge_preserved_temporal_issue_registry(
@@ -2048,6 +2224,9 @@ def build_open_items(intake_case_file: Dict[str, Any]) -> List[Dict[str, Any]]:
         normalized_id = _normalize_text(item.get("open_item_id") or "")
         if not normalized_id:
             return
+        target_claim_type = _normalize_text(item.get("target_claim_type") or "")
+        target_element_id = _normalize_text(item.get("target_element_id") or "")
+        evidence_classes = _unique_normalized_strings(item.get("evidence_classes") or [])
         normalized_item = {
             **item,
             "open_item_id": normalized_id,
@@ -2056,8 +2235,20 @@ def build_open_items(intake_case_file: Dict[str, Any]) -> List[Dict[str, Any]]:
             "blocking_level": _normalize_text(item.get("blocking_level") or "important").lower() or "important",
             "section": _normalize_text(item.get("section") or "general").lower() or "general",
             "reason": _normalize_text(item.get("reason") or "Follow-up required."),
-            "target_claim_type": _normalize_text(item.get("target_claim_type") or ""),
-            "target_element_id": _normalize_text(item.get("target_element_id") or ""),
+            "target_claim_type": target_claim_type,
+            "target_element_id": target_element_id,
+            "target_claim_types": [target_claim_type] if target_claim_type else [],
+            "target_element_ids": [target_element_id] if target_element_id else [],
+            "target_element_metadata": {
+                "claim_type": target_claim_type,
+                "element_id": target_element_id,
+                "evidence_classes": evidence_classes,
+            },
+            "element_links": _normalize_intake_target_links(
+                item.get("element_links"),
+                claim_types=[target_claim_type] if target_claim_type else [],
+                element_ids=[target_element_id] if target_element_id else [],
+            ),
             "next_question_strategy": _normalize_text(item.get("next_question_strategy") or "targeted_blocker_follow_up").lower() or "targeted_blocker_follow_up",
             "recommended_support_kind": _normalize_text(item.get("recommended_support_kind") or "intake_clarification").lower() or "intake_clarification",
             "proof_path_status": _normalize_text(item.get("proof_path_status") or "missing").lower() or "missing",
@@ -2978,11 +3169,21 @@ def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[st
             if isinstance(fact, dict)
         ]
     ))
+    canonical_facts = _ensure_stable_intake_record_ids(
+        canonical_facts,
+        id_key="fact_id",
+        prefix="fact",
+    )
     proof_leads = [
         _normalize_proof_lead_record(lead)
         for lead in build_proof_leads(knowledge_graph)
         if isinstance(lead, dict)
     ]
+    proof_leads = _ensure_stable_intake_record_ids(
+        proof_leads,
+        id_key="lead_id",
+        prefix="lead",
+    )
 
     timeline_anchors = build_timeline_anchors(canonical_facts)
     timeline_relations = build_timeline_relations(canonical_facts)
@@ -3068,9 +3269,19 @@ def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, 
                 previous_canonical_facts,
             )
         ))
+        case_file["canonical_facts"] = _ensure_stable_intake_record_ids(
+            _coerce_list(case_file.get("canonical_facts")),
+            id_key="fact_id",
+            prefix="fact",
+        )
         case_file["proof_leads"] = _merge_preserved_proof_leads(
             build_proof_leads(knowledge_graph),
             previous_proof_leads,
+        )
+        case_file["proof_leads"] = _ensure_stable_intake_record_ids(
+            _coerce_list(case_file.get("proof_leads")),
+            id_key="lead_id",
+            prefix="lead",
         )
     else:
         case_file["canonical_facts"] = _dedupe_structured_timeline_groups(_enrich_canonical_facts_with_relative_anchor_dates([
@@ -3078,11 +3289,21 @@ def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, 
             for record in _coerce_list(case_file.get("canonical_facts"))
             if isinstance(record, dict)
         ]))
+        case_file["canonical_facts"] = _ensure_stable_intake_record_ids(
+            _coerce_list(case_file.get("canonical_facts")),
+            id_key="fact_id",
+            prefix="fact",
+        )
         case_file["proof_leads"] = [
             _normalize_proof_lead_record(record)
             for record in _coerce_list(case_file.get("proof_leads"))
             if isinstance(record, dict)
         ]
+        case_file["proof_leads"] = _ensure_stable_intake_record_ids(
+            _coerce_list(case_file.get("proof_leads")),
+            id_key="lead_id",
+            prefix="lead",
+        )
     case_file["intake_sections"] = refresh_intake_sections(case_file, knowledge_graph)
     case_file["timeline_anchors"] = build_timeline_anchors(_coerce_list(case_file.get("canonical_facts")))
     case_file["timeline_relations"] = build_timeline_relations(_coerce_list(case_file.get("canonical_facts")))

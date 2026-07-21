@@ -6034,6 +6034,105 @@ class Mediator:
 				summary['target_element_id_counts'][target_element_id] = summary['target_element_id_counts'].get(target_element_id, 0) + 1
 		return summary
 
+	def _summarize_proof_lead_collection(self, proof_leads: Any) -> Dict[str, Any]:
+		normalized_leads = [lead for lead in proof_leads if isinstance(lead, dict)] if isinstance(proof_leads, list) else []
+		summary: Dict[str, Any] = {
+			'count': len(normalized_leads),
+			'owner_counts': {},
+			'availability_counts': {},
+			'expected_format_counts': {},
+			'retrieval_path_counts': {},
+			'target_claim_type_counts': {},
+			'target_element_id_counts': {},
+			'target_fact_count': 0,
+			'missing_target_link_count': 0,
+			'queueable_lead_count': 0,
+		}
+		for lead in normalized_leads:
+			for field_name, summary_key in (
+				('owner', 'owner_counts'),
+				('availability', 'availability_counts'),
+				('expected_format', 'expected_format_counts'),
+				('retrieval_path', 'retrieval_path_counts'),
+			):
+				value = self._normalize_intake_text(lead.get(field_name)).lower()
+				if value:
+					summary[summary_key][value] = summary[summary_key].get(value, 0) + 1
+			target_claim_types = [
+				self._normalize_intake_text(item)
+				for item in (lead.get('target_claim_types') or lead.get('claim_types') or [])
+				if self._normalize_intake_text(item)
+			]
+			target_element_ids = [
+				self._normalize_intake_text(item)
+				for item in (lead.get('target_element_ids') or lead.get('element_targets') or [])
+				if self._normalize_intake_text(item)
+			]
+			target_fact_ids = [
+				self._normalize_intake_text(item)
+				for item in (lead.get('target_fact_ids') or lead.get('fact_targets') or lead.get('related_fact_ids') or [])
+				if self._normalize_intake_text(item)
+			]
+			for claim_type in target_claim_types:
+				summary['target_claim_type_counts'][claim_type] = summary['target_claim_type_counts'].get(claim_type, 0) + 1
+			for element_id in target_element_ids:
+				summary['target_element_id_counts'][element_id] = summary['target_element_id_counts'].get(element_id, 0) + 1
+			summary['target_fact_count'] += len(target_fact_ids)
+			if not (target_claim_types or target_element_ids or target_fact_ids or lead.get('target_links')):
+				summary['missing_target_link_count'] += 1
+			if self._normalize_intake_text(lead.get('retrieval_path')) and self._normalize_intake_text(lead.get('availability')):
+				summary['queueable_lead_count'] += 1
+		return summary
+
+	def _summarize_open_intake_work(self, open_items: Any) -> Dict[str, Any]:
+		normalized_items = [item for item in open_items if isinstance(item, dict)] if isinstance(open_items, list) else []
+		summary: Dict[str, Any] = {
+			'count': len(normalized_items),
+			'queueable_count': 0,
+			'blocking_count': 0,
+			'blocking_level_counts': {},
+			'kind_counts': {},
+			'section_counts': {},
+			'next_question_strategy_counts': {},
+			'target_claim_type_counts': {},
+			'target_element_id_counts': {},
+			'recommended_support_kind_counts': {},
+			'proof_path_status_counts': {},
+			'queueable_items': [],
+		}
+		for item in normalized_items:
+			status = self._normalize_intake_text(item.get('status') or 'open').lower() or 'open'
+			blocking_level = self._normalize_intake_text(item.get('blocking_level')).lower()
+			if blocking_level == 'blocking':
+				summary['blocking_count'] += 1
+			for field_name, summary_key in (
+				('blocking_level', 'blocking_level_counts'),
+				('kind', 'kind_counts'),
+				('section', 'section_counts'),
+				('next_question_strategy', 'next_question_strategy_counts'),
+				('target_claim_type', 'target_claim_type_counts'),
+				('target_element_id', 'target_element_id_counts'),
+				('recommended_support_kind', 'recommended_support_kind_counts'),
+				('proof_path_status', 'proof_path_status_counts'),
+			):
+				value = self._normalize_intake_text(item.get(field_name)).lower()
+				if value:
+					summary[summary_key][value] = summary[summary_key].get(value, 0) + 1
+			if status == 'open' and self._normalize_intake_text(item.get('next_question_strategy')):
+				summary['queueable_count'] += 1
+				summary['queueable_items'].append({
+					'open_item_id': self._normalize_intake_text(item.get('open_item_id')),
+					'kind': self._normalize_intake_text(item.get('kind')),
+					'blocking_level': blocking_level,
+					'section': self._normalize_intake_text(item.get('section')),
+					'next_question_strategy': self._normalize_intake_text(item.get('next_question_strategy')),
+					'target_claim_type': self._normalize_intake_text(item.get('target_claim_type')),
+					'target_element_id': self._normalize_intake_text(item.get('target_element_id')),
+					'recommended_support_kind': self._normalize_intake_text(item.get('recommended_support_kind')),
+					'proof_path_status': self._normalize_intake_text(item.get('proof_path_status')),
+				})
+		return summary
+
 	def _append_canonical_fact(
 		self,
 		intake_case_file: Dict[str, Any],
@@ -6068,6 +6167,12 @@ class Mediator:
 				existing['location'] = location
 			existing['claim_types'] = list(dict.fromkeys(list(existing.get('claim_types', []) or []) + list(claim_types or [])))
 			existing['element_tags'] = list(dict.fromkeys(list(existing.get('element_tags', []) or []) + list(element_tags or [])))
+			existing['target_claim_types'] = list(existing.get('claim_types', []) or [])
+			existing['target_element_ids'] = list(existing.get('element_tags', []) or [])
+			existing['element_links'] = self._build_intake_target_links(
+				claim_types=existing['target_claim_types'],
+				element_ids=existing['target_element_ids'],
+			)
 			existing['actor_ids'] = list(dict.fromkeys(list(existing.get('actor_ids', []) or []) + list(actor_ids or [])))
 			existing['target_ids'] = list(dict.fromkeys(list(existing.get('target_ids', []) or []) + list(target_ids or [])))
 			existing['fact_participants'] = {
@@ -6093,6 +6198,12 @@ class Mediator:
 			'fact_type': fact_type,
 			'claim_types': list(claim_types or []),
 			'element_tags': list(element_tags or []),
+			'target_claim_types': list(claim_types or []),
+			'target_element_ids': list(element_tags or []),
+			'element_links': self._build_intake_target_links(
+				claim_types=list(claim_types or []),
+				element_ids=list(element_tags or []),
+			),
 			'event_date_or_range': event_date_or_range,
 			'actor_ids': list(actor_ids or []),
 			'target_ids': list(target_ids or []),
@@ -6111,6 +6222,68 @@ class Mediator:
 		}
 		canonical_facts.append(fact_record)
 		return fact_record
+
+	def _build_intake_target_links(
+		self,
+		*,
+		claim_types: List[str] | None = None,
+		element_ids: List[str] | None = None,
+		fact_ids: List[str] | None = None,
+	) -> List[Dict[str, str]]:
+		links: List[Dict[str, str]] = []
+		seen = set()
+
+		def _append_link(claim_type: str = '', element_id: str = '', fact_id: str = '') -> None:
+			normalized_claim_type = self._normalize_intake_text(claim_type)
+			normalized_element_id = self._normalize_intake_text(element_id)
+			normalized_fact_id = self._normalize_intake_text(fact_id)
+			if not normalized_claim_type and not normalized_element_id and not normalized_fact_id:
+				return
+			marker = (normalized_claim_type, normalized_element_id, normalized_fact_id)
+			if marker in seen:
+				return
+			seen.add(marker)
+			link: Dict[str, str] = {}
+			if normalized_claim_type:
+				link['claim_type'] = normalized_claim_type
+			if normalized_element_id:
+				link['element_id'] = normalized_element_id
+			if normalized_fact_id:
+				link['fact_id'] = normalized_fact_id
+			links.append(link)
+
+		normalized_claim_types = [
+			self._normalize_intake_text(item)
+			for item in (claim_types or [])
+			if self._normalize_intake_text(item)
+		]
+		normalized_element_ids = [
+			self._normalize_intake_text(item)
+			for item in (element_ids or [])
+			if self._normalize_intake_text(item)
+		]
+		normalized_fact_ids = [
+			self._normalize_intake_text(item)
+			for item in (fact_ids or [])
+			if self._normalize_intake_text(item)
+		]
+		if normalized_claim_types and normalized_element_ids and normalized_fact_ids:
+			for claim_type in normalized_claim_types:
+				for element_id in normalized_element_ids:
+					for fact_id in normalized_fact_ids:
+						_append_link(claim_type=claim_type, element_id=element_id, fact_id=fact_id)
+		elif normalized_claim_types and normalized_element_ids:
+			for claim_type in normalized_claim_types:
+				for element_id in normalized_element_ids:
+					_append_link(claim_type=claim_type, element_id=element_id)
+		else:
+			for claim_type in normalized_claim_types:
+				_append_link(claim_type=claim_type)
+			for element_id in normalized_element_ids:
+				_append_link(element_id=element_id)
+		for fact_id in normalized_fact_ids:
+			_append_link(fact_id=fact_id)
+		return links
 
 	def _build_authored_event_support_refs(
 		self,
@@ -6147,6 +6320,7 @@ class Mediator:
 		related_fact_ids: List[str] | None = None,
 		fact_targets: List[str] | None = None,
 		element_targets: List[str] | None = None,
+		target_claim_types: List[str] | None = None,
 		owner: str | None = None,
 		expected_format: str | None = None,
 		retrieval_path: str | None = None,
@@ -6172,6 +6346,14 @@ class Mediator:
 				lead['related_fact_ids'] = list(dict.fromkeys(list(lead.get('related_fact_ids', []) or []) + list(related_fact_ids or [])))
 				lead['fact_targets'] = list(dict.fromkeys(list(lead.get('fact_targets', []) or []) + list(fact_targets or [])))
 				lead['element_targets'] = list(dict.fromkeys(list(lead.get('element_targets', []) or []) + list(element_targets or [])))
+				lead['target_fact_ids'] = list(lead.get('fact_targets', []) or [])
+				lead['target_element_ids'] = list(lead.get('element_targets', []) or [])
+				lead['target_claim_types'] = list(dict.fromkeys(list(lead.get('target_claim_types', []) or []) + list(target_claim_types or [])))
+				lead['target_links'] = self._build_intake_target_links(
+					claim_types=lead['target_claim_types'],
+					element_ids=lead['target_element_ids'],
+					fact_ids=lead['target_fact_ids'],
+				)
 				lead['evidence_classes'] = list(dict.fromkeys(list(lead.get('evidence_classes', []) or []) + list(evidence_classes or [])))
 				if availability_details and not lead.get('availability_details'):
 					lead['availability_details'] = availability_details
@@ -6193,6 +6375,14 @@ class Mediator:
 			'related_fact_ids': list(related_fact_ids or []),
 			'fact_targets': list(fact_targets or []),
 			'element_targets': list(element_targets or []),
+			'target_claim_types': list(target_claim_types or []),
+			'target_element_ids': list(element_targets or []),
+			'target_fact_ids': list(fact_targets or related_fact_ids or []),
+			'target_links': self._build_intake_target_links(
+				claim_types=list(target_claim_types or []),
+				element_ids=list(element_targets or []),
+				fact_ids=list(fact_targets or related_fact_ids or []),
+			),
 			'availability': 'claimed_available',
 			'availability_details': availability_details or 'Provided by complainant during intake',
 			'owner': owner or 'complainant',
@@ -6468,6 +6658,7 @@ class Mediator:
 				related_fact_ids=[created_fact['fact_id']],
 				fact_targets=[created_fact['fact_id']],
 				element_targets=resolved_element_targets,
+				target_claim_types=resolved_claim_types,
 				priority='high' if question.get('priority') == 'high' else 'medium',
 				evidence_classes=evidence_classes,
 				custodian=self._infer_proof_lead_custodian(answer, lead_type),
@@ -10476,8 +10667,10 @@ class Mediator:
 				'count': len(proof_leads),
 				'proof_leads': proof_leads,
 			},
+			'proof_lead_collection_summary': self._summarize_proof_lead_collection(proof_leads),
 			'blocker_follow_up_summary': blocker_follow_up_summary if isinstance(blocker_follow_up_summary, dict) else {},
 			'open_items': open_items if isinstance(open_items, list) else [],
+			'open_item_summary': self._summarize_open_intake_work(open_items),
 			'event_ledger': event_ledger if isinstance(event_ledger, list) else [],
 			'event_ledger_summary': {
 				'count': len(event_ledger) if isinstance(event_ledger, list) else 0,
