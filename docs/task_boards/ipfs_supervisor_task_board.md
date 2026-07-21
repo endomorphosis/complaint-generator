@@ -103,7 +103,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-IE-B0 Timeline ledger foundation
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
@@ -113,11 +113,11 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Event and relation IDs created during intake are visible downstream. Chronology blockers identify missing anchors, relations, or contradictions.
 - Source doc: docs/INTAKE_EVIDENCE_EXECUTION_BACKLOG.md
 - Canonical task id: IE-B0
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-IE-B1 Intake structure foundation
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
@@ -127,7 +127,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Intake answers produce structured facts and proof leads with stable references. Open intake work is explicit queueable work.
 - Source doc: docs/INTAKE_EVIDENCE_EXECUTION_BACKLOG.md
 - Canonical task id: IE-B1
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-IE-B2 Proof-directed question planner
 
@@ -411,7 +411,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-CONTRACT-PAYLOADS Payload contract validation and fixture hygiene
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
@@ -421,4 +421,4 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Every json fence in PAYLOAD_CONTRACTS.md parses as JSON. Task-board validation catches malformed payload examples before supervisor execution. Contract changes remain compatible with markdown and machine-readable consumers.
 - Source doc: docs/PAYLOAD_CONTRACTS.md
 - Canonical task id: CONTRACT-PAYLOADS
-- Canonical status: validation_required
+- Canonical status: complete
