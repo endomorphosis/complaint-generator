@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-import tempfile
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -474,63 +472,16 @@ def create_complaint_workspace_router(service: Optional[ComplaintWorkspaceServic
         ) -> Dict[str, Any]:
             if not files:
                 raise HTTPException(status_code=400, detail="At least one file is required.")
-
-            with tempfile.TemporaryDirectory(prefix="complaint-workspace-upload-") as temp_dir:
-                temp_root = Path(temp_dir)
-                temp_paths: List[str] = []
-                uploaded_files: List[Dict[str, Any]] = []
-                for index, file in enumerate(files, start=1):
-                    original_name = Path(str(file.filename or f"upload-{index}")).name or f"upload-{index}"
-                    destination = temp_root / f"{index:04d}_{original_name}"
-                    file_bytes = await file.read()
-                    destination.write_bytes(file_bytes)
-                    temp_paths.append(str(destination))
-                    uploaded_files.append(
-                        {
-                            "filename": original_name,
-                            "content_type": str(file.content_type or "application/octet-stream"),
-                            "size": len(file_bytes),
-                            "temporary_path": str(destination),
-                        }
-                    )
-
-                payload = workspace.import_local_evidence(
-                    user_id,
-                    paths=temp_paths,
-                    claim_element_id=claim_element_id,
-                    kind=kind,
-                    evidence_root=evidence_root,
-                )
-
-                note_record = None
-                normalized_note = str(note or "").strip()
-                if normalized_note:
-                    uploaded_names = [item["filename"] for item in uploaded_files if item.get("filename")]
-                    effective_claim_element_id = claim_element_id
-                    if claim_element_id in {"auto", "suggested"}:
-                        first_import = next(iter(payload.get("imported") or []), {})
-                        effective_claim_element_id = str(
-                            first_import.get("effective_claim_element_id")
-                            or first_import.get("suggested_claim_element_id")
-                            or "causation"
-                        ).strip() or "causation"
-                    note_record = workspace.save_evidence(
-                        user_id,
-                        kind="testimony",
-                        claim_element_id=effective_claim_element_id,
-                        title=str(note_title or "Chat upload note").strip() or "Chat upload note",
-                        content=normalized_note,
-                        source=str(source or "dashboard-chat-upload").strip() or "dashboard-chat-upload",
-                        attachment_names=uploaded_names,
-                    )
-                    payload["note_record"] = note_record.get("saved")
-                    payload["session"] = note_record.get("session")
-                    payload["review"] = note_record.get("review")
-                    payload["case_synopsis"] = note_record.get("case_synopsis")
-
-                payload["uploaded_files"] = uploaded_files
-                payload["upload_source"] = str(source or "dashboard-chat-upload").strip() or "dashboard-chat-upload"
-                return payload
+            return await workspace.upload_local_evidence_files(
+                user_id,
+                files=files,
+                claim_element_id=claim_element_id,
+                kind=kind,
+                evidence_root=evidence_root,
+                note=note,
+                note_title=note_title,
+                source=source,
+            )
     else:
 
         @router.post("/api/complaint-workspace/upload-local-evidence")

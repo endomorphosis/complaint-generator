@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import threading
+import tempfile
 import uuid
 import zipfile
 import hashlib
@@ -1737,6 +1738,87 @@ class ComplaintWorkspaceRequestHandlers:
             "session": deepcopy(state),
             "case_synopsis": workspace._build_case_synopsis(state),
         }
+
+    async def upload_local_evidence_files(
+        self,
+        user_id: Optional[str],
+        *,
+        files: List[Any],
+        claim_element_id: str = "causation",
+        kind: str = "document",
+        evidence_root: Optional[str] = None,
+        note: Optional[str] = None,
+        note_title: Optional[str] = None,
+        source: Optional[str] = "dashboard-chat-upload",
+    ) -> Dict[str, Any]:
+        if not files:
+            raise ValueError("At least one file is required.")
+
+        workspace = self.workspace
+        upload_source = str(source or "dashboard-chat-upload").strip() or "dashboard-chat-upload"
+        with tempfile.TemporaryDirectory(prefix="complaint-workspace-upload-") as temp_dir:
+            temp_root = Path(temp_dir)
+            temp_paths: List[str] = []
+            uploaded_files: List[Dict[str, Any]] = []
+            for index, file in enumerate(files, start=1):
+                original_name = Path(str(getattr(file, "filename", None) or f"upload-{index}")).name or f"upload-{index}"
+                destination = temp_root / f"{index:04d}_{original_name}"
+                file_bytes = file.read()
+                if inspect.isawaitable(file_bytes):
+                    file_bytes = await file_bytes
+                if isinstance(file_bytes, str):
+                    file_bytes = file_bytes.encode("utf-8")
+                elif file_bytes is None:
+                    file_bytes = b""
+                else:
+                    file_bytes = bytes(file_bytes)
+                destination.write_bytes(file_bytes)
+                temp_paths.append(str(destination))
+                uploaded_files.append(
+                    {
+                        "filename": original_name,
+                        "content_type": str(getattr(file, "content_type", None) or "application/octet-stream"),
+                        "size": len(file_bytes),
+                        "temporary_path": str(destination),
+                    }
+                )
+
+            payload = workspace.import_local_evidence(
+                user_id,
+                paths=temp_paths,
+                claim_element_id=claim_element_id,
+                kind=kind,
+                evidence_root=evidence_root,
+            )
+
+            normalized_note = str(note or "").strip()
+            if normalized_note:
+                uploaded_names = [item["filename"] for item in uploaded_files if item.get("filename")]
+                effective_claim_element_id = claim_element_id
+                if claim_element_id in {"auto", "suggested"}:
+                    first_import = next(iter(payload.get("imported") or []), {})
+                    effective_claim_element_id = str(
+                        first_import.get("effective_claim_element_id")
+                        or first_import.get("suggested_claim_element_id")
+                        or "causation"
+                    ).strip() or "causation"
+                note_record = self.save_evidence(
+                    user_id,
+                    kind="testimony",
+                    claim_element_id=effective_claim_element_id,
+                    title=str(note_title or "Chat upload note").strip() or "Chat upload note",
+                    content=normalized_note,
+                    source=upload_source,
+                    attachment_names=uploaded_names,
+                )
+                payload["note_record"] = note_record.get("saved")
+                payload["session"] = note_record.get("session")
+                payload["review"] = note_record.get("review")
+                payload["case_synopsis"] = note_record.get("case_synopsis")
+
+            payload["uploaded_files"] = uploaded_files
+            payload["upload_source"] = upload_source
+            return payload
 
     def generate_complaint(
         self,
@@ -4699,6 +4781,29 @@ class ComplaintWorkspaceService:
             content=content,
             source=source,
             attachment_names=attachment_names,
+        )
+
+    async def upload_local_evidence_files(
+        self,
+        user_id: Optional[str],
+        *,
+        files: List[Any],
+        claim_element_id: str = "causation",
+        kind: str = "document",
+        evidence_root: Optional[str] = None,
+        note: Optional[str] = None,
+        note_title: Optional[str] = None,
+        source: Optional[str] = "dashboard-chat-upload",
+    ) -> Dict[str, Any]:
+        return await self.request_handlers.upload_local_evidence_files(
+            user_id,
+            files=files,
+            claim_element_id=claim_element_id,
+            kind=kind,
+            evidence_root=evidence_root,
+            note=note,
+            note_title=note_title,
+            source=source,
         )
 
     @classmethod
