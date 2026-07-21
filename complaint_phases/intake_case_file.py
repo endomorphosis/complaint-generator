@@ -3020,6 +3020,7 @@ def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[st
         "temporal_fact_registry": temporal_fact_registry,
         "temporal_relation_registry": temporal_relation_registry,
         "temporal_issue_registry": temporal_issue_registry,
+        "timeline_issues": temporal_issue_registry,
         "event_ledger": event_ledger,
         "timeline_consistency_summary": timeline_consistency_summary,
         "harm_profile": build_harm_profile(canonical_facts),
@@ -3057,7 +3058,10 @@ def refresh_intake_sections(intake_case_file: Dict[str, Any], knowledge_graph) -
 def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, *, append_snapshot: bool = False) -> Dict[str, Any]:
     """Refresh derived intake sections, open items, and summary snapshots."""
     case_file = _coerce_dict(intake_case_file)
-    previous_temporal_issue_registry = _coerce_list(case_file.get("temporal_issue_registry"))
+    previous_temporal_issue_registry = (
+        _coerce_list(case_file.get("temporal_issue_registry"))
+        or _coerce_list(case_file.get("timeline_issues"))
+    )
     previous_canonical_facts = _coerce_list(case_file.get("canonical_facts"))
     previous_proof_leads = _coerce_list(case_file.get("proof_leads"))
     if knowledge_graph is not None:
@@ -3104,6 +3108,7 @@ def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, 
         ),
         previous_temporal_issue_registry,
     )
+    case_file["timeline_issues"] = _coerce_list(case_file.get("temporal_issue_registry"))
     case_file["proof_leads"] = _link_proof_leads_to_timeline_anchors(
         _coerce_list(case_file.get("proof_leads")),
         _coerce_list(case_file.get("timeline_anchors")),

@@ -6352,6 +6352,7 @@ class Mediator:
 			timeline_relations,
 		)
 		intake_case_file['temporal_issue_registry'] = temporal_issue_registry
+		intake_case_file['timeline_issues'] = temporal_issue_registry
 
 	def _apply_intake_answer_to_case_file(
 		self,
@@ -7630,6 +7631,8 @@ class Mediator:
 		temporal_relation_registry = case_file.get('temporal_relation_registry') if isinstance(case_file.get('temporal_relation_registry'), list) else []
 		timeline_relations = case_file.get('timeline_relations') if isinstance(case_file.get('timeline_relations'), list) else []
 		temporal_issue_registry = case_file.get('temporal_issue_registry') if isinstance(case_file.get('temporal_issue_registry'), list) else []
+		if not temporal_issue_registry and isinstance(case_file.get('timeline_issues'), list):
+			temporal_issue_registry = case_file.get('timeline_issues')
 		timeline_consistency_summary = case_file.get('timeline_consistency_summary') if isinstance(case_file.get('timeline_consistency_summary'), dict) else {}
 
 		event_records = temporal_fact_registry if temporal_fact_registry else event_ledger
@@ -7887,6 +7890,8 @@ class Mediator:
 		open_items = intake_case.get('open_items', []) if isinstance(intake_case.get('open_items'), list) else []
 		event_ledger = intake_case.get('event_ledger', []) if isinstance(intake_case.get('event_ledger'), list) else []
 		temporal_issue_registry = intake_case.get('temporal_issue_registry', []) if isinstance(intake_case.get('temporal_issue_registry'), list) else []
+		if not temporal_issue_registry and isinstance(intake_case.get('timeline_issues'), list):
+			temporal_issue_registry = intake_case.get('timeline_issues')
 		timeline_anchor_ids_by_fact_id = self._build_timeline_anchor_ids_by_fact_id(intake_case)
 		temporal_relation_formulas_by_id = self._build_temporal_relation_formulas_by_id(intake_case)
 		proof_lead_map = {
@@ -10377,6 +10382,9 @@ class Mediator:
 		temporal_fact_registry = intake_case_file.get('temporal_fact_registry', []) if isinstance(intake_case_file, dict) else []
 		temporal_relation_registry = intake_case_file.get('temporal_relation_registry', []) if isinstance(intake_case_file, dict) else []
 		temporal_issue_registry = intake_case_file.get('temporal_issue_registry', []) if isinstance(intake_case_file, dict) else []
+		if not temporal_issue_registry and isinstance(intake_case_file, dict) and isinstance(intake_case_file.get('timeline_issues'), list):
+			temporal_issue_registry = intake_case_file.get('timeline_issues')
+		timeline_issues = temporal_issue_registry if isinstance(temporal_issue_registry, list) else []
 		question_candidates = self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'question_candidates') or []
 		adversarial_intake_priority_summary = (
 			self.phase_manager.get_phase_data(ComplaintPhase.INTAKE, 'adversarial_intake_priority_summary') or {}
@@ -10403,9 +10411,15 @@ class Mediator:
 		temporal_issue_type_counts: Dict[str, int] = {}
 		temporal_issue_claim_type_counts: Dict[str, int] = {}
 		temporal_issue_element_tag_counts: Dict[str, int] = {}
+		temporal_issue_ids: List[str] = []
+		temporal_issue_missing_predicates: List[str] = []
+		temporal_issue_required_provenance_kinds: List[str] = []
 		for issue in temporal_issue_registry if isinstance(temporal_issue_registry, list) else []:
 			if not isinstance(issue, dict):
 				continue
+			issue_id = str(issue.get('issue_id') or '').strip()
+			if issue_id and issue_id not in temporal_issue_ids:
+				temporal_issue_ids.append(issue_id)
 			status_value = str(issue.get('current_resolution_status') or issue.get('status') or '').strip().lower()
 			if status_value:
 				temporal_issue_status_counts[status_value] = temporal_issue_status_counts.get(status_value, 0) + 1
@@ -10432,6 +10446,14 @@ class Mediator:
 				temporal_issue_element_tag_counts[normalized_element_tag] = (
 					temporal_issue_element_tag_counts.get(normalized_element_tag, 0) + 1
 				)
+			for predicate in issue.get('missing_temporal_predicates') or []:
+				normalized_predicate = str(predicate or '').strip()
+				if normalized_predicate and normalized_predicate not in temporal_issue_missing_predicates:
+					temporal_issue_missing_predicates.append(normalized_predicate)
+			for provenance_kind in issue.get('required_provenance_kinds') or []:
+				normalized_provenance_kind = str(provenance_kind or '').strip()
+				if normalized_provenance_kind and normalized_provenance_kind not in temporal_issue_required_provenance_kinds:
+					temporal_issue_required_provenance_kinds.append(normalized_provenance_kind)
 		resolved_temporal_issue_count = int(temporal_issue_status_counts.get('resolved', 0) or 0)
 		unresolved_temporal_issue_count = max(
 			0,
@@ -10507,15 +10529,34 @@ class Mediator:
 				'relations': timeline_relations if isinstance(timeline_relations, list) else [],
 			},
 			'temporal_issue_registry': temporal_issue_registry if isinstance(temporal_issue_registry, list) else [],
-			'temporal_issue_registry_summary': {
-				'count': len(temporal_issue_registry) if isinstance(temporal_issue_registry, list) else 0,
-				'issues': temporal_issue_registry if isinstance(temporal_issue_registry, list) else [],
+			'timeline_issues': timeline_issues,
+			'timeline_issue_summary': {
+				'count': len(timeline_issues),
+				'issues': timeline_issues,
+				'issue_ids': temporal_issue_ids,
 				'status_counts': temporal_issue_status_counts,
 				'severity_counts': temporal_issue_severity_counts,
 				'lane_counts': temporal_issue_lane_counts,
 				'issue_type_counts': temporal_issue_type_counts,
 				'claim_type_counts': temporal_issue_claim_type_counts,
 				'element_tag_counts': temporal_issue_element_tag_counts,
+				'missing_temporal_predicates': temporal_issue_missing_predicates,
+				'required_provenance_kinds': temporal_issue_required_provenance_kinds,
+				'resolved_count': resolved_temporal_issue_count,
+				'unresolved_count': unresolved_temporal_issue_count,
+			},
+			'temporal_issue_registry_summary': {
+				'count': len(temporal_issue_registry) if isinstance(temporal_issue_registry, list) else 0,
+				'issues': temporal_issue_registry if isinstance(temporal_issue_registry, list) else [],
+				'issue_ids': temporal_issue_ids,
+				'status_counts': temporal_issue_status_counts,
+				'severity_counts': temporal_issue_severity_counts,
+				'lane_counts': temporal_issue_lane_counts,
+				'issue_type_counts': temporal_issue_type_counts,
+				'claim_type_counts': temporal_issue_claim_type_counts,
+				'element_tag_counts': temporal_issue_element_tag_counts,
+				'missing_temporal_predicates': temporal_issue_missing_predicates,
+				'required_provenance_kinds': temporal_issue_required_provenance_kinds,
 				'resolved_count': resolved_temporal_issue_count,
 				'unresolved_count': unresolved_temporal_issue_count,
 			},

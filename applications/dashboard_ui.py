@@ -8,6 +8,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import ChainableUndefined, Environment, FileSystemLoader, select_autoescape
+from .fastapi_compat import attach_router_routes
 
 
 @dataclass(frozen=True)
@@ -5550,13 +5551,12 @@ def create_dashboard_ui_router() -> APIRouter:
 
 
 def attach_dashboard_ui_routes(app: FastAPI) -> FastAPI:
-    if _IPFS_DATASETS_STATIC_DIR.is_dir() and not any(
+    if not any(
         getattr(route, "path", None) == "/ipfs-datasets-static" for route in app.routes
     ):
         app.mount(
             "/ipfs-datasets-static",
-            StaticFiles(directory=str(_IPFS_DATASETS_STATIC_DIR)),
+            StaticFiles(directory=str(_IPFS_DATASETS_STATIC_DIR), check_dir=False),
             name="ipfs-datasets-static",
         )
-    app.include_router(create_dashboard_ui_router())
-    return app
+    return attach_router_routes(app, create_dashboard_ui_router())
