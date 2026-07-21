@@ -672,7 +672,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-034 Resolve 3 preflight-conflicting backlogged worktree merges
 
-- Status: todo
+- Status: blocked
 - Completion: manual
 - Priority: P1
 - Track: ops
@@ -683,6 +683,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-034-reconciliation-9c835d7af624.md
 - Acceptance: Reconciliation guardrail filed this because 3 branch or worktree cleanup candidates are blocked by preflight_merge_conflict. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-034-reconciliation-9c835d7af624.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
 
+- Blocked reason: Deferred by objective-task janitor during launch steering because off_mission_worktree_cleanup_task; this keeps lanes focused on Swissknife, Hallucinate App, MCP++, Meta glasses, and Playwright launch readiness.
 ## REF-035 Resolve validation retry-budget failure for REF-031
 
 - Status: todo
