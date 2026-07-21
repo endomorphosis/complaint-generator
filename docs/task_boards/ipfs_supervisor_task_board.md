@@ -285,7 +285,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-IPFS-M4 Operator productization
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Track: sup
