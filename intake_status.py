@@ -444,9 +444,13 @@ def _build_alignment_evidence_task_summary(alignment_evidence_tasks: Any) -> Dic
         "resolution_status_counts": {},
         "temporal_gap_task_count": 0,
         "temporal_gap_targeted_task_count": 0,
+        "temporal_next_action_count": 0,
         "temporal_rule_status_counts": {},
         "temporal_rule_blocking_reason_counts": {},
         "temporal_resolution_status_counts": {},
+        "temporal_follow_up_target_counts": {},
+        "temporal_question_objective_counts": {},
+        "temporal_proof_criticality_counts": {},
     }
 
     for task in normalized_tasks:
@@ -464,6 +468,28 @@ def _build_alignment_evidence_task_summary(alignment_evidence_tasks: Any) -> Dic
             continue
 
         summary["temporal_gap_task_count"] += 1
+        temporal_next_actions = [
+            action
+            for action in (task.get("temporal_next_actions") if isinstance(task.get("temporal_next_actions"), list) else [])
+            if isinstance(action, dict)
+        ]
+        summary["temporal_next_action_count"] += len(temporal_next_actions)
+        for temporal_action in temporal_next_actions:
+            follow_up_target = str(temporal_action.get("follow_up_target") or "").strip().lower()
+            if follow_up_target:
+                summary["temporal_follow_up_target_counts"][follow_up_target] = (
+                    summary["temporal_follow_up_target_counts"].get(follow_up_target, 0) + 1
+                )
+            question_objective = str(temporal_action.get("question_objective") or "").strip().lower()
+            if question_objective:
+                summary["temporal_question_objective_counts"][question_objective] = (
+                    summary["temporal_question_objective_counts"].get(question_objective, 0) + 1
+                )
+            proof_criticality = str(temporal_action.get("proof_criticality") or "").strip().lower()
+            if proof_criticality:
+                summary["temporal_proof_criticality_counts"][proof_criticality] = (
+                    summary["temporal_proof_criticality_counts"].get(proof_criticality, 0) + 1
+                )
         temporal_rule_status = str(task.get("temporal_rule_status") or "").strip().lower()
         if temporal_rule_status in {"partial", "failed"}:
             summary["temporal_gap_targeted_task_count"] += 1
@@ -505,6 +531,13 @@ def _merge_alignment_task_summary(raw_summary: Any, alignment_evidence_tasks: An
             )
             or 0
         ),
+        "temporal_next_action_count": int(
+            provided_summary.get(
+                "temporal_next_action_count",
+                derived_summary.get("temporal_next_action_count", 0),
+            )
+            or 0
+        ),
         "temporal_rule_status_counts": dict(
             provided_summary.get(
                 "temporal_rule_status_counts",
@@ -523,6 +556,27 @@ def _merge_alignment_task_summary(raw_summary: Any, alignment_evidence_tasks: An
             provided_summary.get(
                 "temporal_resolution_status_counts",
                 derived_summary.get("temporal_resolution_status_counts", {}),
+            )
+            or {}
+        ),
+        "temporal_follow_up_target_counts": dict(
+            provided_summary.get(
+                "temporal_follow_up_target_counts",
+                derived_summary.get("temporal_follow_up_target_counts", {}),
+            )
+            or {}
+        ),
+        "temporal_question_objective_counts": dict(
+            provided_summary.get(
+                "temporal_question_objective_counts",
+                derived_summary.get("temporal_question_objective_counts", {}),
+            )
+            or {}
+        ),
+        "temporal_proof_criticality_counts": dict(
+            provided_summary.get(
+                "temporal_proof_criticality_counts",
+                derived_summary.get("temporal_proof_criticality_counts", {}),
             )
             or {}
         ),
@@ -1004,6 +1058,32 @@ def build_intake_status_summary(
                 compact_next_action["validation_target_count"] = int(next_action.get("validation_target_count") or 0)
             except (TypeError, ValueError):
                 compact_next_action["validation_target_count"] = 0
+        if isinstance(next_action.get("temporal_next_actions"), list):
+            compact_next_action["temporal_next_actions"] = [
+                dict(item)
+                for item in next_action.get("temporal_next_actions", [])
+                if isinstance(item, dict)
+            ]
+            compact_next_action["temporal_next_action_count"] = len(compact_next_action["temporal_next_actions"])
+        for field_name in (
+            "temporal_rule_profile_id",
+            "temporal_rule_status",
+            "temporal_missingness_kind",
+        ):
+            if field_name in next_action:
+                compact_next_action[field_name] = str(next_action.get(field_name) or "").strip()
+        for field_name in (
+            "temporal_issue_ids",
+            "missing_temporal_predicates",
+            "required_temporal_predicates",
+            "required_provenance_kinds",
+        ):
+            if isinstance(next_action.get(field_name), list):
+                compact_next_action[field_name] = [
+                    str(item).strip()
+                    for item in next_action.get(field_name, [])
+                    if str(item).strip()
+                ]
         primary_validation_target_value = next_action.get("primary_validation_target")
         if isinstance(primary_validation_target_value, dict) and primary_validation_target_value:
             primary_validation_target = {
@@ -1066,6 +1146,20 @@ def build_intake_status_summary(
         support_lane_label_counts = claim_support_packet_summary.get("support_lane_label_counts")
         if isinstance(support_lane_label_counts, dict) and support_lane_label_counts:
             summary["support_lane_label_counts"] = dict(support_lane_label_counts)
+        summary["temporal_gap_task_count"] = int(claim_support_packet_summary.get("temporal_gap_task_count", 0) or 0)
+        summary["temporal_gap_targeted_task_count"] = int(claim_support_packet_summary.get("temporal_gap_targeted_task_count", 0) or 0)
+        summary["temporal_next_action_count"] = int(claim_support_packet_summary.get("temporal_next_action_count", 0) or 0)
+        for field_name in (
+            "temporal_rule_status_counts",
+            "temporal_rule_blocking_reason_counts",
+            "temporal_resolution_status_counts",
+            "temporal_follow_up_target_counts",
+            "temporal_question_objective_counts",
+            "temporal_proof_criticality_counts",
+        ):
+            field_value = claim_support_packet_summary.get(field_name)
+            if isinstance(field_value, dict):
+                summary[field_name] = dict(field_value)
     if isinstance(open_item_summary, dict) and open_item_summary:
         summary["open_item_summary"] = dict(open_item_summary)
     if isinstance(proof_lead_collection_summary, dict) and proof_lead_collection_summary:
@@ -1212,9 +1306,13 @@ def build_intake_case_review_summary(mediator: Any) -> Dict[str, Any]:
         **claim_support_packet_summary_value,
         "temporal_gap_task_count": int(alignment_task_summary.get("temporal_gap_task_count", 0) or 0),
         "temporal_gap_targeted_task_count": int(alignment_task_summary.get("temporal_gap_targeted_task_count", 0) or 0),
+        "temporal_next_action_count": int(alignment_task_summary.get("temporal_next_action_count", 0) or 0),
         "temporal_rule_status_counts": dict(alignment_task_summary.get("temporal_rule_status_counts", {}) or {}),
         "temporal_rule_blocking_reason_counts": dict(alignment_task_summary.get("temporal_rule_blocking_reason_counts", {}) or {}),
         "temporal_resolution_status_counts": dict(alignment_task_summary.get("temporal_resolution_status_counts", {}) or {}),
+        "temporal_follow_up_target_counts": dict(alignment_task_summary.get("temporal_follow_up_target_counts", {}) or {}),
+        "temporal_question_objective_counts": dict(alignment_task_summary.get("temporal_question_objective_counts", {}) or {}),
+        "temporal_proof_criticality_counts": dict(alignment_task_summary.get("temporal_proof_criticality_counts", {}) or {}),
     }
     if _agg_lane_counts and "support_lane_label_counts" not in claim_support_packet_summary_value:
         claim_support_packet_summary_value["support_lane_label_counts"] = _agg_lane_counts
@@ -1448,9 +1546,13 @@ def _build_alignment_task_update_summary(
         "promoted_document_count": 0,
         "temporal_gap_task_count": 0,
         "temporal_gap_targeted_task_count": 0,
+        "temporal_next_action_count": 0,
         "temporal_rule_status_counts": {},
         "temporal_rule_blocking_reason_counts": {},
         "temporal_resolution_status_counts": {},
+        "temporal_follow_up_target_counts": {},
+        "temporal_question_objective_counts": {},
+        "temporal_proof_criticality_counts": {},
     }
     task_lookup = _build_alignment_task_lookup(alignment_evidence_tasks)
     for item in visible_updates:
@@ -1475,6 +1577,28 @@ def _build_alignment_task_update_summary(
             continue
 
         summary["temporal_gap_task_count"] += 1
+        temporal_next_actions = [
+            action
+            for action in (task.get("temporal_next_actions") if isinstance(task.get("temporal_next_actions"), list) else [])
+            if isinstance(action, dict)
+        ]
+        summary["temporal_next_action_count"] += len(temporal_next_actions)
+        for temporal_action in temporal_next_actions:
+            follow_up_target = str(temporal_action.get("follow_up_target") or "").strip().lower()
+            if follow_up_target:
+                summary["temporal_follow_up_target_counts"][follow_up_target] = (
+                    summary["temporal_follow_up_target_counts"].get(follow_up_target, 0) + 1
+                )
+            question_objective = str(temporal_action.get("question_objective") or "").strip().lower()
+            if question_objective:
+                summary["temporal_question_objective_counts"][question_objective] = (
+                    summary["temporal_question_objective_counts"].get(question_objective, 0) + 1
+                )
+            proof_criticality = str(temporal_action.get("proof_criticality") or "").strip().lower()
+            if proof_criticality:
+                summary["temporal_proof_criticality_counts"][proof_criticality] = (
+                    summary["temporal_proof_criticality_counts"].get(proof_criticality, 0) + 1
+                )
         temporal_rule_status = str(task.get("temporal_rule_status") or "").strip().lower()
         if temporal_rule_status in {"partial", "failed"}:
             summary["temporal_gap_targeted_task_count"] += 1

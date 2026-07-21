@@ -1830,6 +1830,9 @@ class TestMediatorThreePhaseIntegration:
             'document_artifact',
             'legal_authority',
         ]
+        assert result['alignment_evidence_tasks'][0]['temporal_next_actions'][0]['next_action']
+        assert result['alignment_evidence_tasks'][0]['temporal_next_actions'][0]['affected_rule']['profile_id'] == 'retaliation_temporal_profile_v1'
+        assert result['alignment_evidence_tasks'][0]['temporal_next_actions'][0]['temporal_missingness_kind'] == 'temporal_gap'
         assert 'temporal_proof_bundle_id' in result['alignment_evidence_tasks'][0]
         assert any(
             'Establish chronology:' in item
@@ -1851,9 +1854,15 @@ class TestMediatorThreePhaseIntegration:
                 'Retaliation causation lacks a clear temporal ordering from protected activity to adverse action.': 1,
             },
             'temporal_resolution_status_counts': {'awaiting_testimony': 1},
+            'temporal_next_action_count': 1,
+            'temporal_follow_up_target_counts': {'clarification': 1},
+            'temporal_question_objective_counts': {'anchor_capture': 1},
+            'temporal_proof_criticality_counts': {'medium': 1},
         }
         assert status['claim_support_packet_summary']['temporal_gap_task_count'] == 1
         assert status['claim_support_packet_summary']['temporal_gap_targeted_task_count'] == 1
+        assert status['claim_support_packet_summary']['temporal_next_action_count'] == 1
+        assert status['claim_support_packet_summary']['temporal_question_objective_counts'] == {'anchor_capture': 1}
         assert status['claim_support_packet_summary']['temporal_rule_status_counts'] == {'partial': 1}
         assert status['claim_support_packet_summary']['temporal_rule_blocking_reason_counts'] == {
             'Retaliation causation lacks a clear temporal ordering from protected activity to adverse action.': 1,

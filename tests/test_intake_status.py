@@ -972,6 +972,10 @@ def test_build_intake_case_review_summary_returns_additive_structured_fields():
         "temporal_rule_status_counts": {"partial": 1},
         "temporal_rule_blocking_reason_counts": {"Retaliation chronology remains unresolved.": 1},
         "temporal_resolution_status_counts": {"awaiting_testimony": 1},
+        "temporal_next_action_count": 0,
+        "temporal_follow_up_target_counts": {},
+        "temporal_question_objective_counts": {},
+        "temporal_proof_criticality_counts": {},
     }
     assert summary["alignment_task_updates"][0]["resolution_status"] == "partially_addressed"
     assert summary["alignment_task_update_history"][1]["evidence_sequence"] == 2

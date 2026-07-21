@@ -245,6 +245,8 @@ Route temporal proof failures into specific testimony, document, or external-rec
 - [x] rank follow-ups by proof criticality and legal timing impact — `rank_follow_ups()` in `temporal_rule_profiles.py` sorts high-criticality items first; `evaluate_temporal_rule_profile()` returns pre-ranked follow-ups
 - [x] expose timeline gap follow-ups in review and optimization payloads — `timeline_gap_follow_ups` field in `summarize_claim_reasoning_review()` output, aggregated via `_aggregate_timeline_gap_follow_ups(proof_bundles)`
 - [x] preserve whether follow-up targets testimony, document request, or external corroboration — `follow_up_target` field on every enriched follow-up item (`testimony`, `document_request`, `external_corroboration`, `clarification`)
+- [x] emit explicit temporal next-action records for blocking chronology issues — proof bundles, claim-support handoffs, alignment evidence tasks, follow-up task metadata, and intake summaries now preserve `temporal_next_actions` with `next_action`, `affected_rule`, `affected_fact_ids`, `affected_issue_ids`, `temporal_missingness_kind`, `follow_up_target`, and `question_objective`
+- [x] route temporal next actions into operator prompts — the denoiser converts `fill_temporal_chronology_gap` tasks into rule-aware timeline questions and keeps temporal gaps separate from ordinary missing support
 
 ### Acceptance criteria
 
