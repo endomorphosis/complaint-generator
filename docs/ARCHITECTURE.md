@@ -81,22 +81,50 @@ first extraction direction are:
 | `applications/dashboard_ui.py` | 5,562 lines | Extract dashboard entry catalogs, fixture builders, and render helpers from route setup. |
 | `mediator/claim_support_hooks.py` | 5,309 lines | Split persistence/query helpers from review payload assembly and follow-up planning. |
 
+### Allowed Import Direction
+
+The dependency rule for production packages is top-down: user-facing surfaces
+call orchestration, orchestration calls domain workflow and adapter packages,
+and stable cross-consumer helpers sit at the bottom in `lib/`. Lower layers must
+not import higher layers. The same contract is recorded in `pyproject.toml`
+under `[tool.complaint_generator.import_boundaries]` and is enforced by
+`tests/test_package_imports.py`.
+
+| Package | May import these project packages | Must not import |
+|---|---|---|
+| `applications/` | `applications/`, `mediator/`, `complaint_phases/`, `integrations/`, `lib/` | Keep reusable legal, evidence, graph, and document workflow logic out of route handlers, CLI commands, Typer setup, FastAPI setup, and browser fixtures. |
+| `mediator/` | `mediator/`, `complaint_phases/`, `integrations/`, `lib/` | Do not import `applications/`, UI frameworks, CLI frameworks, browser fixtures, templates, static assets, or script-only modules. |
+| `complaint_phases/` | `complaint_phases/`, `lib/` | Do not import `applications/`, `mediator/`, `integrations/`, provider backends, or concrete `ipfs_datasets_py` modules; phase code should stay deterministic and domain-focused. |
+| `integrations/` | `integrations/`, `lib/` | Do not import `applications/`, `mediator/`, or `complaint_phases/` from adapter code; integration modules translate optional dependencies into local contracts. |
+| `lib/` | `lib/` | Do not import application, mediator, phase, integration, backend, script, template, or static-asset modules. |
+
+`complaint_generator/` remains the public compatibility package for console
+scripts and import aliases. Its wrappers may delegate to `applications/`, but
+new workflow behavior should still be implemented in the layer that owns it and
+then exposed through a thin compatibility wrapper only when a public import path
+requires it.
+
+### Shared Code Rule
+
+Keep code in its owning layer until two or more production consumers need the
+same side-effect-light helper or data contract. At that point, move the stable
+shared piece to `lib/` and keep transport concerns, persistence setup, provider
+calls, and optional dependency loading in their original owner packages. Shared
+code in `lib/` should accept plain values or small local data objects, avoid
+network or database side effects, and be useful without importing application or
+mediator state.
+
 ### Refactor Dependency Rules
 
-1. `applications/` may depend on `complaint_generator/`, `mediator/`,
-   `complaint_phases/`, `integrations/`, and `lib/`, but should not contain
-   reusable domain logic.
-2. `mediator/` may depend on `complaint_phases/`, `integrations/`, `backends/`,
-   and `lib/`, but should not import FastAPI, Typer, browser fixtures, or
-   script-only modules.
-3. `complaint_phases/` should stay domain-focused and avoid dependencies on
-   `applications/`, `mediator/`, and concrete `ipfs_datasets_py` modules.
-4. Production optional dependency access should flow through
+1. New production imports between `applications/`, `mediator/`,
+   `complaint_phases/`, `integrations/`, and `lib/` must match the allowed
+   import table above.
+2. Production optional dependency access should flow through
    `integrations/ipfs_datasets/`; direct `ipfs_datasets_py` imports are allowed
    only in adapters, tests, benchmarks, or explicitly documented shims.
-5. Long-running automation should expose `status`, `pid`, `updated_at`,
+3. Long-running automation should expose `status`, `pid`, `updated_at`,
    artifact paths, queue counts where applicable, and a stop path.
-6. Each refactor slice should name a validation lane before code movement.
+4. Each refactor slice should name a validation lane before code movement.
 
 ### Layer 1: User Interface
 - **CLI Application** - Command-line interface for interactive complaints

@@ -92,3 +92,41 @@ include = [
   "mediator",
   "mediator.*",
 ]
+
+[tool.complaint_generator.import_boundaries]
+description = "Production package import boundaries documented in docs/ARCHITECTURE.md."
+enforced_packages = [
+  "applications",
+  "mediator",
+  "complaint_phases",
+  "integrations",
+  "lib",
+]
+shared_code_package = "lib"
+shared_code_rule = "Keep code in its owning layer until two or more production consumers need the same side-effect-light helper; then move the stable helper or data contract to lib."
+
+[tool.complaint_generator.import_boundaries.allowed_imports]
+applications = [
+  "applications",
+  "mediator",
+  "complaint_phases",
+  "integrations",
+  "lib",
+]
+mediator = [
+  "mediator",
+  "complaint_phases",
+  "integrations",
+  "lib",
+]
+complaint_phases = [
+  "complaint_phases",
+  "lib",
+]
+integrations = [
+  "integrations",
+  "lib",
+]
+lib = [
+  "lib",
+]

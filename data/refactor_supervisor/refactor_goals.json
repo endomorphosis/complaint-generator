@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-21T21:12:30Z",
+  "generated_at": "2026-07-21T21:27:30Z",
   "goals": [
     {
       "id": "G1",
@@ -834,9 +834,9 @@
       "pyproject": true,
       "pytest_ini": true
     },
-    "python_file_count": 436,
-    "python_total_lines": 244126,
-    "scanned_at": "2026-07-21T21:12:30Z",
+    "python_file_count": 437,
+    "python_total_lines": 244202,
+    "scanned_at": "2026-07-21T21:27:30Z",
     "signals": {
       "broad_exception_count": 375,
       "direct_ipfs_import_count": 231,
@@ -1110,7 +1110,7 @@
         "mediator/__init__.py:1"
       ]
     },
-    "test_file_count": 260
+    "test_file_count": 261
   },
   "source_supervisor_module": "ipfs_accelerate_py.agent_supervisor",
   "todo_path": "data/refactor_supervisor/refactor_todo.md"
