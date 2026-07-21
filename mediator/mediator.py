@@ -28,6 +28,7 @@ from .web_evidence_hooks import (
 )
 from .claim_support_hooks import ClaimSupportHook
 from .formal_document import ComplaintDocumentBuilder
+from .workflow_service import WorkflowActionService
 from integrations.ipfs_datasets.capabilities import (
 	summarize_ipfs_datasets_startup_payload,
 )
@@ -125,6 +126,17 @@ class Mediator:
 		self.denoiser = ComplaintDenoiser(mediator=self)
 		self.legal_graph_builder = LegalGraphBuilder(mediator=self)
 		self.neurosymbolic_matcher = NeurosymbolicMatcher(mediator=self)
+		self.workflow_actions = WorkflowActionService(
+			self,
+			recovery_action_builder=lambda *args, **kwargs: _build_document_grounding_recovery_action(
+				*args,
+				**kwargs,
+			),
+			improvement_next_action_builder=lambda *args, **kwargs: _build_document_grounding_improvement_next_action(
+				*args,
+				**kwargs,
+			),
+		)
 		
 		# State is already initialized above; keep reset() for callers that
 		# explicitly want a fresh state.
