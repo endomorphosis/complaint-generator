@@ -5,9 +5,21 @@ from .capabilities import (
 	summarize_ipfs_datasets_capabilities,
 	summarize_ipfs_datasets_startup_payload,
 )
+from .graphs import (
+	KNOWLEDGE_GRAPHS_AVAILABLE,
+	GRAPHS_ERROR,
+	extract_graph_from_text,
+	query_graph_support,
+	persist_graph_snapshot,
+	query_graph_snapshot,
+	resolve_duplicate_entities,
+	attach_provenance_edges,
+	get_authority_graph_api_version,
+)
 from .types import (
 	CaseArtifact,
 	CaseAuthority,
+	AuthorityTreatmentEdge,
 	CaseClaimElement,
 	CaseFact,
 	CaseSupportEdge,
@@ -29,6 +41,7 @@ from .types import (
 	with_adapter_metadata,
 )
 from .search import (
+	archive_url_snapshot,
 	discover_seeded_commoncrawl,
 	download_url,
 	download_with_recovery,
@@ -42,10 +55,16 @@ from .search import (
 from .documents import (
 	DOCUMENTS_AVAILABLE,
 	DOCUMENTS_ERROR,
+	detect_document_input_format,
 	extract_text_content,
 	ingest_download_manifest,
 	ingest_local_document,
+	parse_document_bytes,
+	parse_document_file,
+	parse_document_text,
 	parse_pdf_to_record,
+	should_parse_document_input,
+	summarize_document_parse,
 )
 from .llm import generate_text_with_metadata, llm_router_status
 from .router_status import get_router_status_report
@@ -59,6 +78,10 @@ from .graphrag import (
 	cross_analyze_pdf_documents,
 	batch_process_pdfs,
 	query_pdf_knowledge_graph,
+	score_ontology_support_paths,
+	identify_ontology_gaps,
+	score_support_path_quality,
+	build_validate_score_ontology,
 )
 from .policy_rules import (
 	build_policy_rule_corpus,
@@ -86,6 +109,53 @@ from .vector_store import (
 	get_embeddings_router,
 	search_vector_index,
 )
+from .theorem_export import (
+	export_formulas_to_lean4,
+	export_formulas_to_coq,
+	export_proof_result_to_theorems,
+	THEOREM_EXPORT_VERSION,
+)
+from .logic import (
+	LOGIC_AVAILABLE,
+	LOGIC_ERROR,
+	Z3_AVAILABLE,
+	REASONER_BRIDGE_AVAILABLE,
+	REASONER_BRIDGE_ERROR,
+	LOCAL_FORMAL_LOGIC_AVAILABLE,
+	LOCAL_FORMAL_LOGIC_PATH,
+	text_to_fol,
+	legal_text_to_deontic,
+	prove_claim_elements,
+	check_contradictions,
+	run_hybrid_reasoning,
+	get_predicate_templates,
+	map_claim_elements_to_predicates,
+)
+from .legal import (
+	LEGAL_SCRAPERS_AVAILABLE,
+	LEGAL_SCRAPERS_ERROR,
+	LEGAL_SOURCE_AVAILABILITY,
+	search_us_code,
+	search_federal_register,
+	search_recap_documents,
+	search_state_laws,
+	search_state_administrative_rules,
+	search_legal_authority_program,
+	constrain_assertions_to_corpus,
+)
+from .draft_logic_pipeline import (
+	DRAFT_LOGIC_PIPELINE_VERSION,
+	run_pipeline as run_draft_logic_pipeline,
+	render_proof_report,
+	pin_proof_report_to_ipfs,
+)
+from .policy_rules import (
+	check_policy_rules_with_deontic_norms,
+)
+from .quality import (
+	QUALITY_SCORER_VERSION,
+	score_draft_quality,
+)
 
 __all__ = [
 	"CapabilityStatus",
@@ -93,8 +163,19 @@ __all__ = [
 	"summarize_ipfs_datasets_capability_report",
 	"summarize_ipfs_datasets_capabilities",
 	"summarize_ipfs_datasets_startup_payload",
+	# Graph adapter
+	"KNOWLEDGE_GRAPHS_AVAILABLE",
+	"GRAPHS_ERROR",
+	"extract_graph_from_text",
+	"query_graph_support",
+	"persist_graph_snapshot",
+	"query_graph_snapshot",
+	"resolve_duplicate_entities",
+	"attach_provenance_edges",
+	"get_authority_graph_api_version",
 	"CaseArtifact",
 	"CaseAuthority",
+	"AuthorityTreatmentEdge",
 	"CaseClaimElement",
 	"CaseFact",
 	"CaseSupportEdge",
@@ -130,6 +211,10 @@ __all__ = [
 	"cross_analyze_pdf_documents",
 	"batch_process_pdfs",
 	"query_pdf_knowledge_graph",
+	"score_ontology_support_paths",
+	"identify_ontology_gaps",
+	"score_support_path_quality",
+	"build_validate_score_ontology",
 	"extract_policy_rules_from_pdf",
 	"build_policy_rule_corpus",
 	"store_bytes",
@@ -143,14 +228,21 @@ __all__ = [
 	"scrape_archived_domain",
 	"scrape_web_content",
 	"recover_manifest_downloads",
+	"archive_url_snapshot",
 	"search_brave_web",
 	"search_multi_engine_web",
 	"extract_text_content",
 	"DOCUMENTS_AVAILABLE",
 	"DOCUMENTS_ERROR",
+	"detect_document_input_format",
 	"ingest_download_manifest",
 	"ingest_local_document",
+	"parse_document_bytes",
+	"parse_document_file",
+	"parse_document_text",
 	"parse_pdf_to_record",
+	"should_parse_document_input",
+	"summarize_document_parse",
 	"EMBEDDINGS_AVAILABLE",
 	"EMBEDDINGS_ERROR",
 	"VECTOR_STORE_AVAILABLE",
@@ -161,4 +253,44 @@ __all__ = [
 	"create_vector_index",
 	"search_vector_index",
 	"get_embeddings_router",
+	"export_formulas_to_lean4",
+	"export_formulas_to_coq",
+	"export_proof_result_to_theorems",
+	"THEOREM_EXPORT_VERSION",
+	# Logic pipeline
+	"LOGIC_AVAILABLE",
+	"LOGIC_ERROR",
+	"Z3_AVAILABLE",
+	"REASONER_BRIDGE_AVAILABLE",
+	"REASONER_BRIDGE_ERROR",
+	"LOCAL_FORMAL_LOGIC_AVAILABLE",
+	"LOCAL_FORMAL_LOGIC_PATH",
+	"text_to_fol",
+	"legal_text_to_deontic",
+	"prove_claim_elements",
+	"check_contradictions",
+	"run_hybrid_reasoning",
+	"get_predicate_templates",
+	"map_claim_elements_to_predicates",
+	# Legal corpus
+	"LEGAL_SCRAPERS_AVAILABLE",
+	"LEGAL_SCRAPERS_ERROR",
+	"LEGAL_SOURCE_AVAILABILITY",
+	"search_us_code",
+	"search_federal_register",
+	"search_recap_documents",
+	"search_state_laws",
+	"search_state_administrative_rules",
+	"search_legal_authority_program",
+	"constrain_assertions_to_corpus",
+	# Draft logic pipeline
+	"DRAFT_LOGIC_PIPELINE_VERSION",
+	"run_draft_logic_pipeline",
+	"render_proof_report",
+	"pin_proof_report_to_ipfs",
+	# Policy rules
+	"check_policy_rules_with_deontic_norms",
+	# Draft quality scorer
+	"QUALITY_SCORER_VERSION",
+	"score_draft_quality",
 ]

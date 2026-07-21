@@ -626,11 +626,13 @@ class CLI:
 			selected_program_type_counts = summary.get('selected_authority_program_type_counts', {}) if isinstance(summary.get('selected_authority_program_type_counts'), dict) else {}
 			selected_program_bias_counts = summary.get('selected_authority_program_bias_counts', {}) if isinstance(summary.get('selected_authority_program_bias_counts'), dict) else {}
 			selected_program_rule_bias_counts = summary.get('selected_authority_program_rule_bias_counts', {}) if isinstance(summary.get('selected_authority_program_rule_bias_counts'), dict) else {}
+			selected_graph_gap_bias_counts = summary.get('selected_authority_graph_gap_bias_counts', {}) if isinstance(summary.get('selected_authority_graph_gap_bias_counts'), dict) else {}
 			history_program_entry_count = sum(int(count or 0) for count in selected_program_type_counts.values())
 			if not (
 				history_program_entry_count > 0
 				or selected_program_bias_counts
 				or selected_program_rule_bias_counts
+				or selected_graph_gap_bias_counts
 			):
 				continue
 			lines.append(
@@ -645,6 +647,9 @@ class CLI:
 			if selected_program_rule_bias_counts:
 				rule_bias_labels = self._format_cli_count_labels(selected_program_rule_bias_counts)
 				lines.append(f'  selected_rule_biases: {rule_bias_labels}')
+			if selected_graph_gap_bias_counts:
+				graph_gap_bias_labels = self._format_cli_count_labels(selected_graph_gap_bias_counts)
+				lines.append(f'  selected_graph_gap_biases: {graph_gap_bias_labels}')
 			source_context_summary = self._format_follow_up_source_context_summary(summary)
 			if source_context_summary:
 				lines.append(f'  source_context: {source_context_summary}')

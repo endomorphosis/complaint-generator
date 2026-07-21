@@ -162,6 +162,12 @@ _state_code_map, _state_code_map_error = import_attr_optional(
     "ipfs_datasets_py.processors.legal_scrapers.state_laws_scraper",
     "US_STATES",
 )
+# Live IPFS streaming backend — optional; available when ipfs_datasets_py
+# exposes the state_laws IPFS-streaming dataset adapter.
+_stream_ipfs_state_laws_async, _ipfs_stream_state_laws_error = import_attr_optional(
+    "ipfs_datasets_py.datasets.state_laws_ipfs_stream",
+    "stream_state_laws_from_ipfs",
+)
 
 
 def _resolve_state_code(value: Optional[str], *, default: str = "OR") -> str:
@@ -181,8 +187,13 @@ LEGAL_SOURCE_AVAILABILITY = {
     "federal_statutes": _search_us_code_async is not None,
     "federal_regulations": _search_federal_register_async is not None,
     "case_law": _search_recap_documents_async is not None,
-    "state_statutes": _search_state_law_corpus_async is not None or _scrape_state_laws_async is not None,
+    "state_statutes": (
+        _search_state_law_corpus_async is not None
+        or _scrape_state_laws_async is not None
+        or _stream_ipfs_state_laws_async is not None
+    ),
     "administrative_rules": _search_state_law_corpus_async is not None or _scrape_state_admin_rules_async is not None,
+    "state_laws_ipfs_stream": _stream_ipfs_state_laws_async is not None,
 }
 
 LEGAL_SCRAPERS_AVAILABLE = any(LEGAL_SOURCE_AVAILABILITY.values())
@@ -196,6 +207,54 @@ LEGAL_SCRAPERS_ERROR = (
     or _state_admin_rules_scrape_error
     or _state_code_map_error
 )
+
+# Environment variable that enables the IPFS streaming live-lookup pass.
+# Set to "1", "true", "yes", or "on" to allow search_state_laws to attempt
+# IPFS streaming when the HuggingFace corpus / parquet backends return no
+# results and the ipfs_datasets_py state_laws_ipfs_stream adapter is importable.
+_IPFS_STREAM_STATE_LAWS_ENV = "COMPLAINT_ENABLE_IPFS_STATE_LAWS_STREAM"
+
+
+def _search_ipfs_state_laws_stream(
+    query: str,
+    *,
+    state_code: str,
+    max_results: int,
+) -> List[Dict[str, Any]]:
+    """Attempt a live IPFS-streaming search of the state-laws dataset.
+
+    Uses the ``ipfs_datasets_py.datasets.state_laws_ipfs_stream`` adapter when
+    available.  Returns an empty list if the adapter is absent, the IPFS
+    backend is unavailable, or any error occurs.  Guarded by
+    ``COMPLAINT_ENABLE_IPFS_STATE_LAWS_STREAM=1``.
+    """
+    import os
+
+    if os.environ.get(_IPFS_STREAM_STATE_LAWS_ENV, "").strip() not in {"1", "true", "yes", "on"}:
+        return []
+    if _stream_ipfs_state_laws_async is None:
+        return []
+    try:
+        payload = run_async_compat(
+            _stream_ipfs_state_laws_async(
+                {
+                    "query": query,
+                    "state": state_code,
+                    "top_k": max_results,
+                    "output_format": "json",
+                }
+            )
+        )
+        return _normalize_payload_results(
+            payload,
+            "statute",
+            "state_law_ipfs_stream",
+            query=query,
+            operation="search_state_laws_ipfs_stream",
+            max_results=max_results,
+        )
+    except Exception:
+        return []
 
 
 def _extract_payload_items(payload: Dict[str, Any], *keys: str) -> List[Dict[str, Any]]:
@@ -798,6 +857,23 @@ def search_state_laws(
         _set_last_legal_search_diagnostic("search_state_laws", diagnostics)
         return parquet_results
 
+    # Try live IPFS streaming before falling back to full live scrape.
+    # Gated by COMPLAINT_ENABLE_IPFS_STATE_LAWS_STREAM=1.
+    diagnostics["attempted_backends"].append("ipfs_stream")
+    ipfs_stream_results = _search_ipfs_state_laws_stream(
+        query,
+        state_code=state_code,
+        max_results=max_results,
+    )
+    if ipfs_stream_results:
+        diagnostics["selected_backend"] = "ipfs_stream"
+        _set_last_legal_search_diagnostic("search_state_laws", diagnostics)
+        return _attach_hf_corpus_metadata(
+            ipfs_stream_results,
+            hf_dataset_id=DEFAULT_STATE_LAWS_DATASET_ID,
+            retrieval_backend="ipfs_stream",
+        )
+
     if not allow_live_scrape_fallback:
         diagnostics["selected_backend"] = ""
         diagnostics["final_status"] = "empty_without_live_fallback"
@@ -963,6 +1039,261 @@ def search_state_administrative_rules(
     return payload
 
 
+# ---------------------------------------------------------------------------
+# Legal corpus containment — constrain FOL assertions to grounded citations
+# ---------------------------------------------------------------------------
+
+# Environment variable that points to a local vector index directory built from
+# the legal corpus.  When set, constrain_assertions_to_corpus will try a
+# semantic (embedding-based) similarity search as a fourth grounding pass.
+_LEGAL_VECTOR_INDEX_DIR_ENV = "COMPLAINT_LEGAL_VECTOR_INDEX_DIR"
+
+
+def _search_legal_vector_index(
+    query: str,
+    *,
+    index_dir: str,
+    max_results: int,
+) -> List[Dict[str, Any]]:
+    """Try a semantic vector search against a pre-built legal corpus index.
+
+    Returns a list of normalised authority dicts (same shape as other
+    ``search_*`` helpers) or an empty list when the index is absent / not
+    set up.
+    """
+    from .vector_store import search_vector_index
+
+    result = search_vector_index(
+        query,
+        index_name="legal_corpus",
+        index_dir=index_dir,
+        top_k=max_results,
+    )
+    if not isinstance(result, dict) or result.get("status") not in {"success", "available"}:
+        return []
+    raw_hits: List[Dict[str, Any]] = list(result.get("results") or [])
+    normalised: List[Dict[str, Any]] = []
+    for item in raw_hits[:max_results]:
+        if not isinstance(item, dict):
+            continue
+        normalised.append(
+            _normalize_authority(
+                item,
+                str(item.get("type") or "legal_corpus"),
+                str(item.get("source") or "vector_index"),
+                query=query,
+                operation="search_legal_vector_index",
+                upstream_collection="results",
+            )
+        )
+    return normalised
+
+
+def constrain_assertions_to_corpus(
+    assertions: List[Dict[str, Any]],
+    *,
+    state: Optional[str] = None,
+    max_results_per_assertion: int = 3,
+    allow_live_scrape_fallback: bool = False,
+    legal_vector_index_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Ground *assertions* against the legal corpus and classify each one.
+
+    For every assertion dict (expected to have at least a ``text`` key) the
+    function issues a search against the combined federal and state-law corpus
+    (US Code + Federal Register + state laws) and marks each assertion as one
+    of:
+
+    * ``grounded``  — at least one authoritative corpus document was found.
+    * ``ungrounded`` — no corpus document could be located.
+
+    The summary dict exposes ``grounded_count``, ``ungrounded_count``, and
+    ``corpus_coverage_percent`` for downstream use by the proof pipeline and
+    the editor guardrails.
+
+    Parameters
+    ----------
+    assertions:
+        List of assertion dicts.  Each should carry at minimum a ``text`` key
+        with the assertion text to search.  A ``assertion_id`` key is used for
+        tracking; one is synthesised if absent.
+    state:
+        Optional two-letter state code to narrow state-law searches.
+    max_results_per_assertion:
+        How many corpus hits to return per assertion.
+    allow_live_scrape_fallback:
+        Whether to permit live-scrape calls when IPFS backends are absent.
+        Defaults to *False* to keep the function fast in offline / test
+        environments.
+    legal_vector_index_dir:
+        Path to a directory that contains a pre-built legal corpus vector index
+        (``legal_corpus.vectors.npy`` + ``legal_corpus.records.jsonl``).
+        When ``None`` the function falls back to the
+        ``COMPLAINT_LEGAL_VECTOR_INDEX_DIR`` environment variable.  If neither
+        is set the semantic search pass is skipped.
+    """
+    import os
+
+    _vector_index_dir: Optional[str] = (
+        legal_vector_index_dir
+        or os.environ.get(_LEGAL_VECTOR_INDEX_DIR_ENV, "").strip()
+        or None
+    )
+
+    grounded: List[Dict[str, Any]] = []
+    ungrounded: List[Dict[str, Any]] = []
+    details: List[Dict[str, Any]] = []
+
+    for index, assertion in enumerate(assertions or []):
+        assertion_id = str(assertion.get("assertion_id") or assertion.get("id") or f"a-{index + 1}")
+        text = str(assertion.get("text") or "").strip()
+        if not text:
+            ungrounded.append(assertion)
+            details.append({"assertion_id": assertion_id, "grounded": False, "corpus_hits": []})
+            continue
+
+        corpus_hits: List[Dict[str, Any]] = []
+
+        # 1. Try US Code
+        try:
+            hits = search_us_code(text, max_results=max_results_per_assertion)
+            corpus_hits.extend(hits or [])
+        except Exception:
+            pass
+
+        # 2. Try Federal Register if still empty
+        if not corpus_hits:
+            try:
+                hits = search_federal_register(text, max_results=max_results_per_assertion)
+                corpus_hits.extend(hits or [])
+            except Exception:
+                pass
+
+        # 3. Try state laws if a state is provided and still empty
+        if not corpus_hits and state:
+            try:
+                hits = search_state_laws(
+                    text,
+                    state=state,
+                    max_results=max_results_per_assertion,
+                    allow_live_scrape_fallback=allow_live_scrape_fallback,
+                )
+                corpus_hits.extend(hits or [])
+            except Exception:
+                pass
+
+        # 4. Semantic vector similarity search (optional, requires pre-built index)
+        if not corpus_hits and _vector_index_dir:
+            try:
+                hits = _search_legal_vector_index(
+                    text,
+                    index_dir=_vector_index_dir,
+                    max_results=max_results_per_assertion,
+                )
+                corpus_hits.extend(hits or [])
+            except Exception:
+                pass
+
+        is_grounded = bool(corpus_hits)
+        detail: Dict[str, Any] = {
+            "assertion_id": assertion_id,
+            "text": text,
+            "grounded": is_grounded,
+            "corpus_hits": corpus_hits[:max_results_per_assertion],
+        }
+        details.append(detail)
+        if is_grounded:
+            grounded.append({**assertion, "grounded": True, "corpus_hits": corpus_hits[:max_results_per_assertion]})
+        else:
+            ungrounded.append({**assertion, "grounded": False, "corpus_hits": []})
+
+    total = len(assertions or [])
+    grounded_count = len(grounded)
+    corpus_coverage_percent = int(round((grounded_count / total) * 100)) if total else None
+
+    return {
+        "grounded": grounded,
+        "ungrounded": ungrounded,
+        "details": details,
+        "grounded_count": grounded_count,
+        "ungrounded_count": len(ungrounded),
+        "total_assertion_count": total,
+        "corpus_coverage_percent": corpus_coverage_percent,
+    }
+
+
+def search_legal_authority_program(
+    program: Dict[str, Any],
+    *,
+    max_results: int = 5,
+    state: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Execute a normalized legal search program against matching authority families."""
+    if not isinstance(program, dict):
+        raise TypeError("program must be a dictionary")
+
+    query = str(program.get("query_text") or "").strip()
+    if not query:
+        raise ValueError("program.query_text is required")
+
+    families = {
+        str(family or "").strip()
+        for family in (program.get("authority_families") or [])
+        if str(family or "").strip()
+    }
+    jurisdiction = str(program.get("jurisdiction") or "").strip()
+    state_code = _resolve_state_code(state or jurisdiction)
+    include_all = not families
+
+    results: Dict[str, List[Dict[str, Any]]] = {
+        "statutes": [],
+        "state_statutes": [],
+        "regulations": [],
+        "administrative_rules": [],
+        "case_law": [],
+        "docket_materials": [],
+    }
+
+    if include_all or "statute" in families:
+        results["statutes"] = search_us_code(query, max_results=max_results)
+        results["state_statutes"] = search_state_laws(query, state=state_code, max_results=max_results)
+    if include_all or "regulation" in families:
+        results["regulations"] = search_federal_register(query, max_results=max_results)
+    if include_all or "administrative_rule" in families:
+        results["administrative_rules"] = search_state_administrative_rules(query, state=state_code, max_results=max_results)
+    if include_all or "case_law" in families:
+        results["case_law"] = search_recap_documents(query, max_results=max_results)
+    if include_all or "docket_material" in families:
+        results["docket_materials"] = search_recap_documents(query, max_results=max_results)
+
+    flat_results = [
+        item
+        for bucket in results.values()
+        for item in bucket
+        if isinstance(item, dict)
+    ]
+    return with_adapter_metadata(
+        {
+            "program": dict(program),
+            "query": query,
+            "authority_families": sorted(families),
+            "results": results,
+            "flat_results": flat_results,
+            "result_count": len(flat_results),
+        },
+        operation="search_legal_authority_program",
+        backend_available=True,
+        implementation_status="normalized",
+        extra_metadata={
+            "program_id": str(program.get("program_id") or ""),
+            "program_type": str(program.get("program_type") or ""),
+            "authority_intent": str(program.get("authority_intent") or ""),
+            "jurisdiction": jurisdiction,
+            "state_code": state_code,
+        },
+    )
+
+
 __all__ = [
     "LEGAL_SCRAPERS_AVAILABLE",
     "LEGAL_SCRAPERS_ERROR",
@@ -973,4 +1304,6 @@ __all__ = [
     "search_recap_documents",
     "search_state_laws",
     "search_state_administrative_rules",
+    "search_legal_authority_program",
+    "constrain_assertions_to_corpus",
 ]

@@ -206,6 +206,99 @@ def fetch_archive_text(session: requests.Session, url: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def archive_url_snapshot(
+    url: str,
+    *,
+    session: Optional[requests.Session] = None,
+    timeout: int = 30,
+    archive_endpoint: str = "https://web.archive.org/save/",
+) -> Dict[str, Any]:
+    target_url = str(url or "").strip()
+    if not target_url:
+        return with_adapter_metadata(
+            {
+                "status": "skipped",
+                "archived": False,
+                "error": "missing url",
+                "url": "",
+                "archive_url": "",
+            },
+            operation="archive_url_snapshot",
+            backend_available=False,
+            implementation_status="skipped",
+        )
+
+    client = session or requests.Session()
+    endpoint = archive_endpoint.rstrip("/") + "/" + target_url
+    try:
+        response = client.get(
+            endpoint,
+            timeout=timeout,
+            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
+            allow_redirects=False,
+        )
+    except Exception as exc:
+        return with_adapter_metadata(
+            {
+                "status": "error",
+                "archived": False,
+                "error": str(exc),
+                "url": target_url,
+                "archive_url": "",
+                "archive_endpoint": archive_endpoint,
+            },
+            operation="archive_url_snapshot",
+            backend_available=True,
+            implementation_status="error",
+        )
+
+    location = str(response.headers.get("Content-Location") or response.headers.get("Location") or "").strip()
+    archive_url = ""
+    if location:
+        if location.startswith("http://") or location.startswith("https://"):
+            archive_url = location
+        elif location.startswith("/"):
+            archive_url = "https://web.archive.org" + location
+        else:
+            archive_url = "https://web.archive.org/" + location.lstrip("/")
+    if not archive_url and response.url and "web.archive.org" in str(response.url):
+        archive_url = str(response.url)
+
+    captured_at = ""
+    timestamp_match = re.search(r"/web/(\d{8,14})/", archive_url)
+    if timestamp_match:
+        captured_at = timestamp_match.group(1)
+
+    status_code = int(getattr(response, "status_code", 0) or 0)
+    archived = bool(archive_url and status_code < 500)
+    payload = {
+        "status": "success" if archived else "unavailable",
+        "archived": archived,
+        "url": target_url,
+        "original_url": target_url,
+        "archive_url": archive_url,
+        "wayback_url": archive_url,
+        "captured_at": captured_at,
+        "archive_timestamp": captured_at,
+        "archive_status_code": status_code,
+        "archive_endpoint": archive_endpoint,
+        "capture_source": "wayback_save",
+        "content_origin": "historical_archive_capture" if archived else "",
+    }
+    return with_adapter_metadata(
+        payload,
+        operation="archive_url_snapshot",
+        backend_available=True,
+        implementation_status="implemented" if archived else "unavailable",
+        extra_metadata={
+            "url": target_url,
+            "archive_url": archive_url,
+            "status_code": status_code,
+            "archived": archived,
+        },
+    )
+
+
 def discover_seeded_commoncrawl(
     queries_file: str | Path,
     *,
@@ -687,6 +780,143 @@ def _normalize_scrape_result(result: Any, source_type: str) -> Dict[str, Any]:
     )
 
 
+def rank_search_results(
+    results: Iterable[Dict[str, Any]],
+    *,
+    query: str = "",
+    claim_element_text: str = "",
+    preferred_jurisdiction: str = "",
+    temporal_context: str = "",
+    max_results: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    query_terms = set(re.findall(r"[a-z0-9]+", str(query or "").lower()))
+    element_terms = set(re.findall(r"[a-z0-9]+", str(claim_element_text or "").lower()))
+    temporal_terms = set(re.findall(r"[a-z0-9]+", str(temporal_context or "").lower()))
+    preferred_jurisdiction = str(preferred_jurisdiction or "").strip().lower()
+    ranked: List[Dict[str, Any]] = []
+
+    for item in results or []:
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
+        text = " ".join(
+            str(value or "")
+            for value in (
+                item.get("title"),
+                item.get("description"),
+                item.get("content"),
+                item.get("citation"),
+                metadata.get("domain"),
+                metadata.get("jurisdiction"),
+            )
+        ).lower()
+        item_terms = set(re.findall(r"[a-z0-9]+", text))
+        base_score = float(metadata.get("score") or item.get("score") or 0.0)
+        query_weight = min(0.28, len(query_terms & item_terms) * 0.035)
+        element_weight = min(0.18, len(element_terms & item_terms) * 0.04)
+
+        source_type = str(item.get("source_type") or metadata.get("source_type") or "").strip().lower()
+        authority_class = str(
+            metadata.get("authority_class")
+            or metadata.get("authority_family")
+            or metadata.get("authority_type")
+            or source_type
+        ).strip().lower()
+        authority_class_weight = 0.0
+        if authority_class in {"statute", "regulation", "primary", "mandatory_authority"}:
+            authority_class_weight = 0.12
+        elif authority_class in {"case_law", "binding_case", "precedent"}:
+            authority_class_weight = 0.09
+        elif authority_class in {"guidance", "secondary", "persuasive_authority"}:
+            authority_class_weight = 0.04
+
+        jurisdiction = str(metadata.get("jurisdiction") or "").strip().lower()
+        jurisdiction_weight = 0.0
+        if preferred_jurisdiction and jurisdiction:
+            if preferred_jurisdiction == jurisdiction:
+                jurisdiction_weight = 0.12
+            elif preferred_jurisdiction in jurisdiction or jurisdiction in preferred_jurisdiction:
+                jurisdiction_weight = 0.06
+
+        try:
+            source_quality = max(0.0, min(1.0, float(metadata.get("quality_score") or metadata.get("data_quality_score") or 0.0)))
+        except (TypeError, ValueError):
+            source_quality = 0.0
+        source_quality_weight = source_quality * 0.10
+
+        temporal_text = " ".join(
+            str(value or "")
+            for value in (
+                text,
+                metadata.get("published_date"),
+                metadata.get("effective_date"),
+                metadata.get("temporal_scope"),
+            )
+        ).lower()
+        temporal_weight = min(0.08, len(temporal_terms & set(re.findall(r"[a-z0-9]+", temporal_text))) * 0.025)
+        if re.search(r"\b(19|20)\d{2}\b", str(temporal_context or query)) and re.search(r"\b(19|20)\d{2}\b", temporal_text):
+            temporal_weight = max(temporal_weight, 0.04)
+
+        graph_summary = metadata.get("graph_trace_summary", {}) if isinstance(metadata.get("graph_trace_summary"), dict) else {}
+        support_quality = metadata.get("support_quality_summary", {}) if isinstance(metadata.get("support_quality_summary"), dict) else {}
+        graph_weight = 0.0
+        if graph_summary:
+            graph_weight += min(0.05, int(graph_summary.get("traced_link_count", 0) or graph_summary.get("graph_count", 0) or 1) * 0.02)
+        quality_tier = str(metadata.get("path_quality_tier") or support_quality.get("dominant_quality_tier") or "").strip().lower()
+        if quality_tier in {"strong_support", "strong", "high"}:
+            graph_weight += 0.06
+        elif quality_tier in {"weak_support", "structurally_missing"}:
+            graph_weight -= 0.025
+
+        content_origin = str(metadata.get("content_origin") or "").strip().lower()
+        artifact_family = str(metadata.get("artifact_family") or "").strip().lower()
+        archive_weight = 0.0
+        if source_type == "web_archive" or content_origin == "historical_archive_capture" or artifact_family == "archived_web_page":
+            archive_weight = 0.06
+
+        factors = {
+            "base_score": round(base_score, 6),
+            "query_weight": round(query_weight, 6),
+            "claim_element_fit_weight": round(element_weight, 6),
+            "authority_class_weight": round(authority_class_weight, 6),
+            "jurisdiction_weight": round(jurisdiction_weight, 6),
+            "source_quality_weight": round(source_quality_weight, 6),
+            "temporal_relevance_weight": round(temporal_weight, 6),
+            "graph_signal_weight": round(graph_weight, 6),
+            "archive_signal_weight": round(archive_weight, 6),
+        }
+        ranking_score = round(base_score + sum(value for key, value in factors.items() if key != "base_score"), 6)
+        explanation = [
+            label
+            for label, value in (
+                ("query terms", query_weight),
+                ("claim-element fit", element_weight),
+                ("authority class", authority_class_weight),
+                ("jurisdiction", jurisdiction_weight),
+                ("source quality", source_quality_weight),
+                ("temporal relevance", temporal_weight),
+                ("graph/support signal", graph_weight),
+                ("archive signal", archive_weight),
+            )
+            if value
+        ]
+        enriched = dict(item)
+        enriched_metadata = dict(metadata)
+        enriched_metadata.update({
+            "ranking_score": ranking_score,
+            "search_ranking_factors": factors,
+            "search_ranking_explanation": explanation,
+        })
+        enriched["metadata"] = enriched_metadata
+        enriched["ranking_score"] = ranking_score
+        ranked.append(enriched)
+
+    ranked.sort(key=lambda item: float(item.get("ranking_score", 0.0) or 0.0), reverse=True)
+    if max_results is not None:
+        return ranked[:max(0, int(max_results))]
+    return ranked
+
+
 def _coerce_scraper_methods(methods: Optional[Sequence[str]]) -> Optional[List[Any]]:
     if not methods or ScraperMethod is None:
         return None
@@ -724,6 +954,9 @@ def search_brave_web(
     max_results: int = 10,
     freshness: Optional[str] = None,
     api_key: Optional[str] = None,
+    claim_element_text: str = "",
+    preferred_jurisdiction: str = "",
+    temporal_context: str = "",
 ) -> List[Dict[str, Any]]:
     if _search_brave is None:
         return []
@@ -760,26 +993,55 @@ def search_brave_web(
                 query=query,
             )
         )
-    return normalized
+    return rank_search_results(
+        normalized,
+        query=query,
+        claim_element_text=claim_element_text,
+        preferred_jurisdiction=preferred_jurisdiction,
+        temporal_context=temporal_context,
+        max_results=max_results,
+    )
 
 
 def search_multi_engine_web(
     query: str,
     max_results: int = 10,
     engines: Optional[List[str]] = None,
+    claim_element_text: str = "",
+    preferred_jurisdiction: str = "",
+    temporal_context: str = "",
 ) -> List[Dict[str, Any]]:
     if not MULTI_ENGINE_SEARCH_AVAILABLE:
-        return search_brave_web(query=query, max_results=max_results)
+        return search_brave_web(
+            query=query,
+            max_results=max_results,
+            claim_element_text=claim_element_text,
+            preferred_jurisdiction=preferred_jurisdiction,
+            temporal_context=temporal_context,
+        )
 
     target_engines = engines or ["brave", "duckduckgo", "google_cse"]
     try:
         orchestrator = MultiEngineOrchestrator(OrchestratorConfig(engines=target_engines))
         response = orchestrator.search(query, max_results=max_results)
     except Exception:
-        return search_brave_web(query=query, max_results=max_results)
+        return search_brave_web(
+            query=query,
+            max_results=max_results,
+            claim_element_text=claim_element_text,
+            preferred_jurisdiction=preferred_jurisdiction,
+            temporal_context=temporal_context,
+        )
 
     results = [_normalize_search_item(item, "multi_engine_search", query=query) for item in getattr(response, "results", [])]
-    return _deduplicate_results(results[:max_results])
+    return rank_search_results(
+        _deduplicate_results(results),
+        query=query,
+        claim_element_text=claim_element_text,
+        preferred_jurisdiction=preferred_jurisdiction,
+        temporal_context=temporal_context,
+        max_results=max_results,
+    )
 
 
 def scrape_web_content(
@@ -897,6 +1159,7 @@ __all__ = [
     "SEARCH_ERROR",
     "search_brave_web",
     "discover_seeded_commoncrawl",
+    "archive_url_snapshot",
     "fetch_archive_text",
     "fetch_commoncrawl_latest_index",
     "load_seeded_queries",
@@ -904,6 +1167,7 @@ __all__ = [
     "parse_seeded_query",
     "QuerySpec",
     "score_archive_url",
+    "rank_search_results",
     "search_multi_engine_web",
     "scrape_web_content",
     "scrape_archived_domain",

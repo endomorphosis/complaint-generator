@@ -50,6 +50,8 @@ GRAPHS_ERROR = (
     or _graph_lineage_error
 )
 
+_GRAPH_SNAPSHOT_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
 
 def _stable_identifier(prefix: str, *parts: str) -> str:
     normalized = "|".join(part.strip() for part in parts if part and part.strip())
@@ -112,6 +114,124 @@ def _semantic_token_set(value: str) -> set[str]:
         for normalized in (_normalize_semantic_token(token) for token in _tokenize(value))
         if normalized and normalized not in stopwords
     }
+
+
+def _count_values(rows: List[Dict[str, Any]], key: str) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for row in rows or []:
+        value = str(row.get(key) or "").strip()
+        if not value:
+            continue
+        counts[value] = counts.get(value, 0) + 1
+    return counts
+
+
+def _summarize_fact_registry_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    unique_source_refs = {
+        str(row.get("source_ref") or "").strip()
+        for row in rows or []
+        if str(row.get("source_ref") or "").strip()
+    }
+    unique_source_records = {
+        str(row.get("source_record_id") or "").strip()
+        for row in rows or []
+        if str(row.get("source_record_id") or "").strip()
+    }
+    passage_anchored_count = 0
+    for row in rows or []:
+        source_passage = row.get("source_passage") if isinstance(row.get("source_passage"), dict) else {}
+        if source_passage.get("chunk_id") or row.get("chunk_id"):
+            passage_anchored_count += 1
+    return {
+        "registry_version": "claim_fact_registry_summary.v1",
+        "fact_count": len(rows or []),
+        "unique_source_ref_count": len(unique_source_refs),
+        "unique_source_record_count": len(unique_source_records),
+        "passage_anchored_count": passage_anchored_count,
+        "source_family_counts": _count_values(rows, "source_family"),
+        "source_ref_counts": _count_values(rows, "source_ref"),
+        "source_record_id_counts": _count_values(rows, "source_record_id"),
+        "record_scope_counts": _count_values(rows, "record_scope"),
+        "artifact_family_counts": _count_values(rows, "artifact_family"),
+        "corpus_family_counts": _count_values(rows, "corpus_family"),
+        "content_origin_counts": _count_values(rows, "content_origin"),
+        "parse_source_counts": _count_values(rows, "parse_source"),
+        "input_format_counts": _count_values(rows, "input_format"),
+        "quality_tier_counts": _count_values(rows, "quality_tier"),
+    }
+
+
+def _extract_fact_registry_summary(
+    graph_payload: Dict[str, Any],
+    metadata: Dict[str, Any],
+    persistence_metadata: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if isinstance(persistence_metadata, dict) and isinstance(persistence_metadata.get("fact_registry_summary"), dict):
+        return dict(persistence_metadata["fact_registry_summary"])
+    if isinstance(graph_payload, dict) and isinstance(graph_payload.get("fact_registry_summary"), dict):
+        return dict(graph_payload["fact_registry_summary"])
+    if isinstance(metadata, dict) and isinstance(metadata.get("fact_registry_summary"), dict):
+        return dict(metadata["fact_registry_summary"])
+    support_facts = graph_payload.get("support_facts") if isinstance(graph_payload, dict) else []
+    if isinstance(support_facts, list):
+        return _summarize_fact_registry_rows([row for row in support_facts if isinstance(row, dict)])
+    return _summarize_fact_registry_rows([])
+
+
+_FACT_REGISTRY_NUMERIC_FIELDS = (
+    "fact_count",
+    "unique_source_ref_count",
+    "unique_source_record_count",
+    "passage_anchored_count",
+)
+
+_FACT_REGISTRY_COUNT_FIELDS = (
+    "source_family_counts",
+    "source_ref_counts",
+    "source_record_id_counts",
+    "record_scope_counts",
+    "artifact_family_counts",
+    "corpus_family_counts",
+    "content_origin_counts",
+    "parse_source_counts",
+    "input_format_counts",
+    "quality_tier_counts",
+)
+
+
+def _merge_count_maps(existing: Dict[str, int], incoming: Dict[str, Any]) -> Dict[str, int]:
+    for key, value in incoming.items():
+        try:
+            increment = int(value)
+        except (TypeError, ValueError):
+            continue
+        existing[str(key)] = existing.get(str(key), 0) + increment
+    return existing
+
+
+def _merge_fact_registry_summaries(summaries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {
+        "registry_version": "claim_fact_registry_summary.v1",
+        "aggregation_scope": "graph_snapshot_query",
+        "snapshot_count": len(summaries),
+    }
+    for field in _FACT_REGISTRY_NUMERIC_FIELDS:
+        merged[field] = sum(
+            int(summary.get(field) or 0)
+            for summary in summaries
+            if isinstance(summary, dict)
+        )
+    for field in _FACT_REGISTRY_COUNT_FIELDS:
+        counts: Dict[str, int] = {}
+        for summary in summaries:
+            if isinstance(summary, dict) and isinstance(summary.get(field), dict):
+                _merge_count_maps(counts, summary[field])
+        merged[field] = counts
+    if merged["source_ref_counts"]:
+        merged["unique_source_ref_count"] = len(merged["source_ref_counts"])
+    if merged["source_record_id_counts"]:
+        merged["unique_source_record_count"] = len(merged["source_record_id_counts"])
+    return merged
 
 
 def _score_fact_match(fact: Dict[str, Any], claim_element_id: str, claim_element_text: str) -> float:
@@ -319,7 +439,23 @@ def query_graph_support(
     ranked_results = []
     support_by_kind: Dict[str, int] = {}
     support_by_source: Dict[str, int] = {}
+    source_family_counts: Dict[str, int] = {}
+    record_scope_counts: Dict[str, int] = {}
+    artifact_family_counts: Dict[str, int] = {}
+    corpus_family_counts: Dict[str, int] = {}
+    content_origin_counts: Dict[str, int] = {}
+    parse_source_counts: Dict[str, int] = {}
+    input_format_counts: Dict[str, int] = {}
+    quality_tier_counts: Dict[str, int] = {}
+    unique_source_refs = set()
+    unique_source_records = set()
+    passage_anchored_count = 0
     deduped_results: Dict[str, Dict[str, Any]] = {}
+
+    def _count(target: Dict[str, int], value: Any) -> None:
+        text = str(value or "").strip()
+        if text:
+            target[text] = target.get(text, 0) + 1
 
     for fact in facts:
         score = _score_fact_match(fact, claim_element_id, claim_element_text or "")
@@ -336,6 +472,24 @@ def query_graph_support(
         source_table = str(fact.get("source_table") or "unknown")
         support_by_kind[support_kind] = support_by_kind.get(support_kind, 0) + 1
         support_by_source[source_table] = support_by_source.get(source_table, 0) + 1
+        source_family = str(fact.get("source_family") or "").strip()
+        source_record_id = fact.get("source_record_id")
+        source_ref = str(fact.get("source_ref") or "").strip()
+        source_passage = fact.get("source_passage") if isinstance(fact.get("source_passage"), dict) else {}
+        if source_ref:
+            unique_source_refs.add(source_ref)
+        if source_family and source_record_id not in (None, ""):
+            unique_source_records.add((source_family, str(source_record_id)))
+        if source_passage.get("chunk_id") or fact.get("chunk_id"):
+            passage_anchored_count += 1
+        _count(source_family_counts, source_family)
+        _count(record_scope_counts, fact.get("record_scope"))
+        _count(artifact_family_counts, fact.get("artifact_family"))
+        _count(corpus_family_counts, fact.get("corpus_family"))
+        _count(content_origin_counts, fact.get("content_origin"))
+        _count(parse_source_counts, fact.get("parse_source"))
+        _count(input_format_counts, fact.get("input_format"))
+        _count(quality_tier_counts, fact.get("quality_tier"))
 
         dedup_key = _fact_dedup_key(result)
         existing = deduped_results.get(dedup_key)
@@ -458,8 +612,19 @@ def query_graph_support(
                 duplicate_fact_count=duplicate_fact_count,
                 semantic_cluster_count=semantic_cluster_count,
                 semantic_duplicate_count=semantic_duplicate_count,
+                unique_source_ref_count=len(unique_source_refs),
+                unique_source_record_count=len(unique_source_records),
+                passage_anchored_count=passage_anchored_count,
                 support_by_kind=support_by_kind,
                 support_by_source=support_by_source,
+                source_family_counts=source_family_counts,
+                record_scope_counts=record_scope_counts,
+                artifact_family_counts=artifact_family_counts,
+                corpus_family_counts=corpus_family_counts,
+                content_origin_counts=content_origin_counts,
+                parse_source_counts=parse_source_counts,
+                input_format_counts=input_format_counts,
+                quality_tier_counts=quality_tier_counts,
                 max_score=ranked_results[0]["score"] if ranked_results else 0.0,
             ),
             metadata={},
@@ -493,30 +658,285 @@ def persist_graph_snapshot(
         str(relationship_count),
         str(metadata.get("text_length") or ""),
     )
+    fact_registry_summary = _extract_fact_registry_summary(
+        graph_payload if isinstance(graph_payload, dict) else {},
+        metadata,
+        persistence_metadata,
+    )
+    existing_snapshot = _GRAPH_SNAPSHOT_REGISTRY.get(stable_graph_id)
+    local_created = existing_snapshot is None and not existing_graph
+    local_reused = existing_snapshot is not None or existing_graph
+    snapshot_metadata = {
+        "source_id": source_id,
+        **(persistence_metadata or {}),
+        "fact_registry_summary": fact_registry_summary,
+        "lineage": {
+            "status": str(graph_payload.get("status") or "") if isinstance(graph_payload, dict) else "",
+            "text_length": metadata.get("text_length", 0),
+            "sentence_count": metadata.get("sentence_count", 0),
+        },
+        "persistence_scope": "adapter_memory",
+        "backend_storage_available": _graph_storage_module is not None,
+    }
+    snapshot_record = {
+        "graph_id": stable_graph_id,
+        "source_id": source_id,
+        "status": "stored-fallback",
+        "node_count": entity_count,
+        "edge_count": relationship_count,
+        "entities": list(graph_payload.get("entities", []) or []) if isinstance(graph_payload, dict) else [],
+        "relationships": list(graph_payload.get("relationships", []) or []) if isinstance(graph_payload, dict) else [],
+        "fact_registry_summary": fact_registry_summary,
+        "metadata": snapshot_metadata,
+    }
+    _GRAPH_SNAPSHOT_REGISTRY[stable_graph_id] = snapshot_record
     return with_adapter_metadata(
         GraphSnapshotResult(
-            status="pending" if _graph_storage_module is not None else "noop",
+            status="stored-fallback",
             graph_id=stable_graph_id,
-            persisted=False,
-            created=created,
-            reused=reused,
+            persisted=True,
+            created=local_created if graph_changed is None else bool(created and not existing_snapshot),
+            reused=local_reused if graph_changed is None else bool(reused or existing_snapshot),
             node_count=entity_count,
             edge_count=relationship_count,
-            metadata={
-                "source_id": source_id,
-                **(persistence_metadata or {}),
-                "lineage": {
-                    "status": str(graph_payload.get("status") or "") if isinstance(graph_payload, dict) else "",
-                    "text_length": metadata.get("text_length", 0),
-                    "sentence_count": metadata.get("sentence_count", 0),
-                },
-            },
+            metadata=snapshot_metadata,
         ).as_dict(),
         operation="persist_graph_snapshot",
         backend_available=_graph_storage_module is not None,
         degraded_reason=_graph_storage_error,
-        implementation_status="pending" if _graph_storage_module is not None else "noop",
+        implementation_status="fallback",
     )
+
+
+def query_graph_snapshot(
+    graph_id: Optional[str] = None,
+    *,
+    source_id: Optional[str] = None,
+    limit: int = 25,
+) -> Dict[str, Any]:
+    """Return adapter-level graph snapshots by graph id or source id.
+
+    The current adapter keeps a deterministic in-process fallback registry so
+    graph projections remain queryable even when an upstream graph store is not
+    installed.
+    """
+    normalized_limit = max(0, int(limit or 0))
+    snapshots = list(_GRAPH_SNAPSHOT_REGISTRY.values())
+    if graph_id:
+        snapshots = [snapshot for snapshot in snapshots if snapshot.get("graph_id") == graph_id]
+    if source_id:
+        snapshots = [snapshot for snapshot in snapshots if snapshot.get("source_id") == source_id]
+    snapshots = snapshots[:normalized_limit] if normalized_limit else []
+    fact_registry_summary = _merge_fact_registry_summaries([
+        snapshot.get("fact_registry_summary", {})
+        for snapshot in snapshots
+        if isinstance(snapshot.get("fact_registry_summary"), dict)
+    ])
+    return with_adapter_metadata(
+        {
+            "status": "found" if snapshots else "missing",
+            "found": bool(snapshots),
+            "graph_id": graph_id or "",
+            "source_id": source_id or "",
+            "snapshot_count": len(snapshots),
+            "snapshots": [dict(snapshot) for snapshot in snapshots],
+            "fact_registry_summary": fact_registry_summary,
+        },
+        operation="query_graph_snapshot",
+        backend_available=_graph_storage_module is not None,
+        degraded_reason=_graph_storage_error,
+        implementation_status="fallback",
+    )
+
+
+def resolve_duplicate_entities(
+    entities: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Resolve near-duplicate actors and entities across testimony and document graphs.
+
+    Groups entities by normalised name using :func:`_texts_semantically_similar`.
+    Returns a mapping of canonical entity IDs to the merged entity record plus
+    a list of absorbed duplicates, and a summary of how many were merged.
+
+    ``entities`` should be dicts with at least ``entity_id`` (or ``id``) and
+    ``name`` (or ``text``) keys.  The ``source_kind`` field is used to label
+    whether the entity came from ``testimony``, ``evidence``, or ``law``.
+    """
+    clusters: List[Dict[str, Any]] = []
+
+    for entity in entities or []:
+        name = str(entity.get("name") or entity.get("text") or "")
+        eid = str(entity.get("entity_id") or entity.get("id") or "")
+        source_kind = str(entity.get("source_kind") or "unknown")
+
+        matched: Optional[Dict[str, Any]] = None
+        for cluster in clusters:
+            if _texts_semantically_similar(cluster["canonical_name"], name):
+                matched = cluster
+                break
+
+        if matched is None:
+            clusters.append(
+                {
+                    "canonical_entity_id": eid or _stable_identifier("entity", name),
+                    "canonical_name": name,
+                    "source_kinds": [source_kind] if source_kind else [],
+                    "entity_ids": [eid] if eid else [],
+                    "names": [name] if name else [],
+                    "duplicate_count": 1,
+                    "absorbed": [],
+                }
+            )
+            continue
+
+        matched["duplicate_count"] += 1
+        if eid and eid not in matched["entity_ids"]:
+            matched["entity_ids"].append(eid)
+        if name and name not in matched["names"]:
+            matched["names"].append(name)
+        if source_kind and source_kind not in matched["source_kinds"]:
+            matched["source_kinds"].append(source_kind)
+        matched["absorbed"].append(
+            {
+                "entity_id": eid,
+                "name": name,
+                "source_kind": source_kind,
+            }
+        )
+
+    entity_map: Dict[str, Dict[str, Any]] = {c["canonical_entity_id"]: c for c in clusters}
+    merged_count = sum(len(c["absorbed"]) for c in clusters)
+
+    return {
+        "resolved": True,
+        "entity_count": len(clusters),
+        "input_count": len(entities or []),
+        "merged_count": merged_count,
+        "entity_map": entity_map,
+        "clusters": clusters,
+    }
+
+
+def attach_provenance_edges(
+    facts: List[Dict[str, Any]],
+    chunks: List[Dict[str, Any]],
+    artifacts: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build provenance edges linking facts → chunks → artifacts.
+
+    Each edge has a stable ``edge_id``, ``from_id``, ``to_id``, and
+    ``edge_kind`` (``fact_to_chunk`` or ``chunk_to_artifact``).  Only edges
+    where both ends are present are emitted.
+
+    Returns ``{edges, fact_to_chunk_count, chunk_to_artifact_count,
+    unresolved_fact_count, unresolved_chunk_count}``.
+    """
+    chunk_by_ref: Dict[str, Dict[str, Any]] = {}
+    for chunk in chunks or []:
+        cref = str(chunk.get("chunk_ref") or chunk.get("chunk_id") or chunk.get("id") or "")
+        if cref:
+            chunk_by_ref[cref] = chunk
+
+    artifact_by_id: Dict[str, Dict[str, Any]] = {}
+    for artifact in artifacts or []:
+        aid = str(artifact.get("artifact_id") or artifact.get("id") or "")
+        if aid:
+            artifact_by_id[aid] = artifact
+
+    edges: List[Dict[str, Any]] = []
+    fact_to_chunk_count = 0
+    chunk_to_artifact_count = 0
+    unresolved_fact_count = 0
+    unresolved_chunk_count = 0
+    seen_chunk_artifact_edges: set = set()
+
+    for fact in facts or []:
+        fid = str(fact.get("fact_id") or fact.get("id") or "")
+        cref = str(fact.get("chunk_ref") or "")
+
+        if not cref or cref not in chunk_by_ref:
+            unresolved_fact_count += 1
+            continue
+
+        edge_id = _stable_identifier("edge_fc", fid, cref)
+        edges.append(
+            {
+                "edge_id": edge_id,
+                "edge_kind": "fact_to_chunk",
+                "from_id": fid,
+                "from_kind": "fact",
+                "to_id": cref,
+                "to_kind": "chunk",
+            }
+        )
+        fact_to_chunk_count += 1
+
+        chunk = chunk_by_ref[cref]
+        aid = str(chunk.get("artifact_id") or chunk.get("source_artifact_id") or "")
+        if not aid or aid not in artifact_by_id:
+            unresolved_chunk_count += 1
+            continue
+
+        ca_key = f"{cref}|{aid}"
+        if ca_key in seen_chunk_artifact_edges:
+            continue
+        seen_chunk_artifact_edges.add(ca_key)
+        ca_edge_id = _stable_identifier("edge_ca", cref, aid)
+        edges.append(
+            {
+                "edge_id": ca_edge_id,
+                "edge_kind": "chunk_to_artifact",
+                "from_id": cref,
+                "from_kind": "chunk",
+                "to_id": aid,
+                "to_kind": "artifact",
+            }
+        )
+        chunk_to_artifact_count += 1
+
+    return {
+        "attached": True,
+        "edge_count": len(edges),
+        "fact_to_chunk_count": fact_to_chunk_count,
+        "chunk_to_artifact_count": chunk_to_artifact_count,
+        "unresolved_fact_count": unresolved_fact_count,
+        "unresolved_chunk_count": unresolved_chunk_count,
+        "edges": edges,
+    }
+
+
+def get_authority_graph_api_version() -> Dict[str, Any]:
+    """Return a snapshot of the authority graph API version information.
+
+    Reflects the refreshed ``ipfs_datasets_py`` submodule layout so that the
+    workspace can verify compatibility at runtime.
+    """
+    modules_available = {
+        "knowledge_graphs": _knowledge_graphs_module is not None,
+        "graph_extraction": _graph_extraction_module is not None,
+        "graph_query": _graph_query_module is not None,
+        "graph_storage": _graph_storage_module is not None,
+        "graph_lineage": _graph_lineage_module is not None,
+    }
+    module_paths = {
+        name: getattr(mod, "__file__", "") or ""
+        for name, mod in {
+            "knowledge_graphs": _knowledge_graphs_module,
+            "graph_extraction": _graph_extraction_module,
+            "graph_query": _graph_query_module,
+            "graph_storage": _graph_storage_module,
+            "graph_lineage": _graph_lineage_module,
+        }.items()
+        if mod is not None
+    }
+    return {
+        "api_version": "authority-graph-v1",
+        "backend_available": KNOWLEDGE_GRAPHS_AVAILABLE,
+        "modules_available": modules_available,
+        "module_paths": module_paths,
+        "error": str(GRAPHS_ERROR or "") or None,
+        "submodule": "ipfs_datasets_py",
+    }
 
 
 __all__ = [
@@ -525,4 +945,8 @@ __all__ = [
     "extract_graph_from_text",
     "query_graph_support",
     "persist_graph_snapshot",
+    "query_graph_snapshot",
+    "resolve_duplicate_entities",
+    "attach_provenance_edges",
+    "get_authority_graph_api_version",
 ]

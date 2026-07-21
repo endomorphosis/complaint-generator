@@ -15,7 +15,7 @@ def test_mike_status_contract_state_transitions_and_invariants(tmp_path):
     user_id = "mike-contract-user"
 
     initial = service.get_mike_integration_status(user_id)
-    assert initial["status_contract_version"] == "complaint-mike-status-v3"
+    assert initial["status_contract_version"] == "complaint-mike-status-v4"
     assert initial["workflow_state"]["key"] == "not_handed_off"
     assert initial["pending_sync"] is False
     assert isinstance(initial["citation_link_conflict_count"], int)
@@ -176,7 +176,7 @@ def test_mike_handoff_exposes_router_grounding_logic_and_submodule_contracts(tmp
     payload = service.build_mike_handoff("handoff-contract-user", grounding_mode="legal_corpus_only")
     handoff_payload = payload["handoff_payload"]
 
-    assert payload["contract_versions"]["handoff"] == "complaint-mike-handoff-v3"
+    assert payload["contract_versions"]["handoff"] == "complaint-mike-handoff-v4"
     assert handoff_payload["router_policy"]["provider_policy_source"] == "complaint_generator"
     assert handoff_payload["grounding_mode"] == "legal_corpus_only"
     assert handoff_payload["corpus_boundaries"]["strict_legal_containment"] is True
@@ -189,7 +189,7 @@ def test_mike_handoff_exposes_router_grounding_logic_and_submodule_contracts(tmp
         "integrations/ipfs_datasets/graphs.py",
     }
     assert "logic_handoff" in handoff_payload
-    assert handoff_payload["skill_asset_manifest"]["version"] == "complaint-mike-skill-assets-v1"
+    assert handoff_payload["skill_asset_manifest"]["version"] == "complaint-mike-skill-assets-v2"
     assert "complaint-grounding" in handoff_payload["skill_asset_manifest"]["asset_ids"]
     assert "complaint-corpus-search" in handoff_payload["skill_asset_manifest"]["asset_ids"]
     assert "complaint-policy-rules" in handoff_payload["skill_asset_manifest"]["asset_ids"]
@@ -401,6 +401,62 @@ def test_formal_diagnostics_include_mike_grounding_and_logic_snapshot(tmp_path, 
     assert "mike_grounding" in payload
     assert "mike_logic" in payload
     assert "mike_sync_diagnostics" in payload
+
+
+def test_mike_sync_logic_review_contains_proof_pipeline_fields(tmp_path):
+    """After sync_mike_final_draft, logic_review must expose proof-pipeline fields."""
+    service = ComplaintWorkspaceService(root_dir=tmp_path)
+    user_id = "mike-proof-pipeline-user"
+    handoff = service.build_mike_handoff(user_id)
+
+    sync_payload = service.sync_mike_final_draft(
+        user_id,
+        body=(
+            "Plaintiff reported safety violations to HR on January 15. "
+            "Defendant terminated Plaintiff on January 17. "
+            "Plaintiff seeks back pay, compensatory damages, and attorneys fees."
+        ),
+        handoff_id=handoff["handoff_id"],
+    )
+
+    logic_review = sync_payload["logic_review"]
+    # Core proof fields must always be present.
+    assert "proof_status" in logic_review
+    assert "contradiction_count" in logic_review
+    assert "chronology_blocked" in logic_review
+    assert "has_blockers" in logic_review
+    assert isinstance(logic_review["proof_status"], str)
+    assert isinstance(logic_review["contradiction_count"], int)
+    assert isinstance(logic_review["chronology_blocked"], bool)
+    assert isinstance(logic_review["has_blockers"], bool)
+
+    # Pipeline-injected fields must be present (even when pipeline is disabled).
+    assert "ungrounded_assertions" in logic_review
+    assert "corpus_coverage_percent" in logic_review
+    assert "pipeline_norms" in logic_review
+    assert "pipeline_policy_violations" in logic_review
+    assert "pipeline_policy_warnings" in logic_review
+    assert "draft_proof_pipeline_version" in logic_review
+    assert isinstance(logic_review["ungrounded_assertions"], list)
+    assert isinstance(logic_review["pipeline_norms"], list)
+    assert isinstance(logic_review["pipeline_policy_violations"], list)
+
+    # Editor guardrails must expose corpus_coverage_percent and ungrounded_assertions.
+    # guardrails are computed from logic_review in _build_mike_editor_guardrails.
+    # We can verify the guardrails contract via a direct call.
+    from applications.complaint_workspace import ComplaintWorkspaceService as _WS
+    review = service._build_review(service._load_state(user_id))
+    guardrails = _WS._build_mike_editor_guardrails(
+        review,
+        legal_corpus_review={},
+        logic_review=logic_review,
+    )
+    assert "proof_readiness_flags" in guardrails
+    prf = guardrails["proof_readiness_flags"]
+    assert "ungrounded_assertion_count" in prf
+    assert isinstance(prf["ungrounded_assertion_count"], int)
+    assert "ungrounded_assertions" in guardrails
+    assert isinstance(guardrails["ungrounded_assertions"], list)
 
 
 def test_mike_assertion_classifier_covers_relief_temporal_legal_and_factual_cases():

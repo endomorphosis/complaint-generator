@@ -8,6 +8,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import ChainableUndefined, Environment, FileSystemLoader, select_autoescape
+from .fastapi_compat import attach_router_routes
 
 
 @dataclass(frozen=True)
@@ -729,8 +730,8 @@ def _build_ipfs_dashboard_context(entry: DashboardEntry) -> dict[str, Any]:
 
 
 def _render_ipfs_dashboard(entry: DashboardEntry) -> str:
-    template = _IPFS_DASHBOARD_ENV.get_template(entry.template_name)
     try:
+        template = _IPFS_DASHBOARD_ENV.get_template(entry.template_name)
         return template.render(**_build_ipfs_dashboard_context(entry))
     except Exception as exc:
         return f"""
@@ -739,11 +740,10 @@ def _render_ipfs_dashboard(entry: DashboardEntry) -> str:
 <head>
     <meta charset=\"UTF-8\">
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-    <title>{escape(entry.title)} | Compatibility Preview</title>
+    <title>{escape(entry.title)} | Dashboard Preview</title>
     <style>
-        body {{ font-family: 'Public Sans', Arial, sans-serif; margin: 0; background: #f6f4ef; color: #122033; }}
+        body {{ font-family: 'Public Sans', Arial, sans-serif; margin: 0; background: #f7f7f4; color: #122033; }}
         main {{ max-width: 960px; margin: 0 auto; padding: 32px 24px 48px; }}
-        .card {{ background: white; border-radius: 18px; padding: 24px; box-shadow: 0 12px 32px rgba(17, 34, 51, 0.08); }}
         h1 {{ margin-top: 0; }}
         pre {{ white-space: pre-wrap; overflow-wrap: anywhere; background: #f3f5f7; padding: 16px; border-radius: 12px; }}
         a {{ color: #0a4f66; font-weight: 600; }}
@@ -751,9 +751,10 @@ def _render_ipfs_dashboard(entry: DashboardEntry) -> str:
 </head>
 <body>
     <main>
-        <section class=\"card\">
+        <section>
             <h1>{escape(entry.title)}</h1>
-            <p>{escape(entry.summary)} This legacy template is mounted through the complaint-generator dashboard hub in compatibility-preview mode.</p>
+            <p>{escape(entry.summary)}</p>
+            <p>The optional ipfs_datasets dashboard template <code>{escape(entry.template_name)}</code> is not installed in this checkout, so the complaint-generator dashboard hub is serving a stable fallback page.</p>
             <p><a href=\"/dashboards\">Back to dashboard hub</a></p>
             <pre>{escape(str(exc))}</pre>
         </section>
@@ -5550,13 +5551,12 @@ def create_dashboard_ui_router() -> APIRouter:
 
 
 def attach_dashboard_ui_routes(app: FastAPI) -> FastAPI:
-    if _IPFS_DATASETS_STATIC_DIR.is_dir() and not any(
+    if not any(
         getattr(route, "path", None) == "/ipfs-datasets-static" for route in app.routes
     ):
         app.mount(
             "/ipfs-datasets-static",
-            StaticFiles(directory=str(_IPFS_DATASETS_STATIC_DIR)),
+            StaticFiles(directory=str(_IPFS_DATASETS_STATIC_DIR), check_dir=False),
             name="ipfs-datasets-static",
         )
-    app.include_router(create_dashboard_ui_router())
-    return app
+    return attach_router_routes(app, create_dashboard_ui_router())

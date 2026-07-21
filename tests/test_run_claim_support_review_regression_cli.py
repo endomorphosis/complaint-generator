@@ -73,6 +73,10 @@ def test_resolve_test_targets_on_includes_all_browser_suites():
     assert targets[:len(cli.BASE_TESTS)] == cli.BASE_TESTS
     assert targets[len(cli.BASE_TESTS):] == cli.BROWSER_TESTS
     assert 'tests/test_complaint_generator_package.py' in targets
+    assert 'tests/test_t1_t3_temporal_next_steps.py' in targets
+    assert 'tests/test_temporal_rule_profiles.py' in targets
+    assert 'tests/test_mediator_three_phase.py' in targets
+    assert 'tests/test_intake_status.py' in targets
     assert 'tests/test_complaint_generator_site_playwright.py' in targets
 
 

@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from .complaint_mcp_protocol import handle_jsonrpc_message, tool_list_payload
 from .complaint_workspace import ComplaintWorkspaceService, generate_decentralized_id
+from .fastapi_compat import attach_router_routes
 
 try:
     import python_multipart  # type: ignore  # noqa: F401
@@ -873,5 +874,4 @@ def attach_complaint_workspace_routes(
     app: FastAPI,
     service: Optional[ComplaintWorkspaceService] = None,
 ) -> FastAPI:
-    app.include_router(create_complaint_workspace_router(service))
-    return app
+    return attach_router_routes(app, create_complaint_workspace_router(service))
