@@ -18,7 +18,11 @@ from integrations.ipfs_datasets.graphrag import (
 )
 from integrations.ipfs_datasets.graphs import persist_graph_snapshot, query_graph_snapshot
 from integrations.ipfs_datasets.logic import check_contradictions, prove_claim_elements, run_hybrid_reasoning
-from complaint_analysis.temporal_rule_profiles import evaluate_temporal_rule_profile
+from complaint_analysis.temporal_rule_profiles import (
+    enrich_follow_up,
+    evaluate_temporal_rule_profile,
+    rank_follow_ups,
+)
 from claim_support_review import _merge_intake_summary_handoff_metadata
 
 try:
@@ -1952,6 +1956,173 @@ class ClaimSupportHook:
         temporal_rule_profile = reasoning.get('temporal_rule_profile', {})
         return temporal_rule_profile if isinstance(temporal_rule_profile, dict) else {}
 
+    def _build_temporal_next_actions(
+        self,
+        *,
+        claim_type: str,
+        element: Dict[str, Any],
+        temporal_context: Dict[str, Any],
+        temporal_rule_profile: Dict[str, Any],
+        fact_ids: List[str],
+        relation_ids: List[str],
+        issue_ids: List[str],
+        missing_temporal_predicates: List[str],
+        required_provenance_kinds: List[str],
+        missing_fact_roles: List[str],
+        missing_relations: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        profile = temporal_rule_profile if isinstance(temporal_rule_profile, dict) else {}
+        context = temporal_context if isinstance(temporal_context, dict) else {}
+        issues = [issue for issue in (context.get('temporal_issues', []) or []) if isinstance(issue, dict)]
+        issue_by_id = {
+            str(issue.get('issue_id') or issue.get('contradiction_id') or issue.get('dependency_id') or '').strip(): issue
+            for issue in issues
+            if str(issue.get('issue_id') or issue.get('contradiction_id') or issue.get('dependency_id') or '').strip()
+        }
+        profile_id = str(profile.get('profile_id') or '').strip()
+        rule_frame_id = str(profile.get('rule_frame_id') or '').strip()
+        temporal_rule_status = str(profile.get('status') or '').strip()
+        claim_element_id = str(element.get('element_id') or '').strip()
+        claim_element_text = str(element.get('element_text') or '').strip()
+        actions: List[Dict[str, Any]] = []
+        seen = set()
+
+        def _issue_category(issue: Dict[str, Any]) -> str:
+            return str(issue.get('issue_type') or issue.get('category') or '').strip()
+
+        def _issue_fact_ids(issue: Dict[str, Any]) -> List[str]:
+            values = [
+                str(item).strip()
+                for item in (issue.get('fact_ids') if isinstance(issue.get('fact_ids'), list) else [])
+                if str(item).strip()
+            ]
+            return values or list(fact_ids)
+
+        def _append_action(
+            follow_up: Dict[str, Any],
+            *,
+            reason: str = '',
+            issue: Optional[Dict[str, Any]] = None,
+            blocking_reason: str = '',
+        ) -> None:
+            issue_record = issue if isinstance(issue, dict) else {}
+            issue_category = _issue_category(issue_record)
+            enriched = enrich_follow_up(follow_up if isinstance(follow_up, dict) else {}, issue_category=issue_category)
+            lane = str(enriched.get('follow_up_lane') or enriched.get('lane') or '').strip()
+            action_reason = str(
+                reason
+                or enriched.get('reason')
+                or blocking_reason
+                or issue_record.get('summary')
+                or 'Resolve the temporal proof blocker.'
+            ).strip()
+            affected_issue_ids = [
+                str(issue_record.get('issue_id') or issue_record.get('contradiction_id') or issue_record.get('dependency_id') or '').strip()
+            ] if issue_record else []
+            affected_issue_ids = [item for item in affected_issue_ids if item]
+            if not affected_issue_ids:
+                affected_issue_ids = list(issue_ids)
+            affected_fact_ids = _issue_fact_ids(issue_record) if issue_record else list(fact_ids)
+            key = (
+                lane,
+                action_reason,
+                tuple(affected_issue_ids),
+                tuple(affected_fact_ids),
+                profile_id,
+                rule_frame_id,
+            )
+            if key in seen:
+                return
+            seen.add(key)
+            actions.append({
+                'action': 'resolve_temporal_blocker',
+                'next_action': 'resolve_temporal_blocker',
+                'follow_up_lane': lane,
+                'lane': str(enriched.get('lane') or lane),
+                'follow_up_target': str(enriched.get('follow_up_target') or 'clarification'),
+                'proof_criticality': str(enriched.get('proof_criticality') or 'medium'),
+                'question_objective': str(enriched.get('question_objective') or 'anchor_capture'),
+                'reason': action_reason,
+                'prompt': str(enriched.get('prompt') or enriched.get('reason') or action_reason),
+                'claim_type': str(claim_type or ''),
+                'claim_element_id': claim_element_id,
+                'claim_element_text': claim_element_text,
+                'temporal_missingness_kind': 'temporal_gap',
+                'follow_up_focus': 'temporal_gap_closure',
+                'query_strategy': 'temporal_gap_targeted',
+                'affected_rule': {
+                    'profile_id': profile_id,
+                    'rule_frame_id': rule_frame_id,
+                    'status': temporal_rule_status,
+                    'blocking_reason': blocking_reason or action_reason,
+                },
+                'affected_rule_profile_id': profile_id,
+                'affected_rule_frame_id': rule_frame_id,
+                'affected_fact_ids': affected_fact_ids,
+                'affected_relation_ids': list(relation_ids),
+                'affected_issue_ids': affected_issue_ids,
+                'temporal_issue_ids': affected_issue_ids,
+                'missing_fact_roles': list(missing_fact_roles),
+                'missing_relations': list(missing_relations),
+                'missing_temporal_predicates': list(missing_temporal_predicates),
+                'required_provenance_kinds': list(required_provenance_kinds),
+                'issue_category': issue_category,
+            })
+
+        for issue_id in issue_ids:
+            issue = issue_by_id.get(issue_id, {})
+            if not issue:
+                continue
+            _append_action(
+                {
+                    'lane': str(issue.get('recommended_resolution_lane') or ''),
+                    'reason': str(issue.get('summary') or issue.get('label') or '').strip(),
+                },
+                issue=issue,
+            )
+
+        follow_ups = [
+            follow_up
+            for follow_up in (profile.get('recommended_follow_ups', []) or [])
+            if isinstance(follow_up, dict)
+        ]
+        blocking_reasons = [
+            str(reason).strip()
+            for reason in (profile.get('blocking_reasons', []) or [])
+            if str(reason).strip()
+        ]
+        for index, follow_up in enumerate(follow_ups):
+            _append_action(
+                follow_up,
+                reason=str(follow_up.get('reason') or '').strip(),
+                blocking_reason=blocking_reasons[index] if index < len(blocking_reasons) else '',
+            )
+        if not actions:
+            for reason in blocking_reasons:
+                _append_action({'lane': 'clarify_with_complainant', 'reason': reason}, blocking_reason=reason)
+        if not actions and (missing_temporal_predicates or missing_fact_roles or missing_relations):
+            _append_action(
+                {
+                    'lane': 'clarify_with_complainant',
+                    'reason': 'Resolve missing temporal predicates or fact roles before proof execution.',
+                }
+            )
+
+        ranked = rank_follow_ups(actions)
+        for index, action in enumerate(ranked, start=1):
+            action['rank'] = index
+            action['action_id'] = ':'.join(
+                part
+                for part in [
+                    'temporal_next_action',
+                    self._normalize_reasoning_key(claim_type) or 'claim',
+                    self._normalize_reasoning_key(claim_element_id or claim_element_text) or 'element',
+                    str(index),
+                ]
+                if part
+            )
+        return ranked
+
     def _build_temporal_proof_bundle(
         self,
         claim_type: str,
@@ -2201,6 +2372,20 @@ class ClaimSupportHook:
                 'required_provenance_kinds': list(required_provenance_kinds),
             })
 
+        temporal_next_actions = self._build_temporal_next_actions(
+            claim_type=claim_type,
+            element=element,
+            temporal_context=context,
+            temporal_rule_profile=profile,
+            fact_ids=fact_ids,
+            relation_ids=relation_ids,
+            issue_ids=issue_ids,
+            missing_temporal_predicates=missing_temporal_predicates,
+            required_provenance_kinds=required_provenance_kinds,
+            missing_fact_roles=missing_fact_roles,
+            missing_relations=missing_relations,
+        )
+
         proof_input_digest_payload = {
             'contract_version': 'claim_support_temporal_proof_bundle_v1',
             'proof_bundle_id': proof_bundle_id,
@@ -2261,6 +2446,8 @@ class ClaimSupportHook:
                 for follow_up in (profile.get('recommended_follow_ups', []) or [])
                 if isinstance(follow_up, dict)
             ],
+            'temporal_next_actions': temporal_next_actions,
+            'temporal_next_action_count': len(temporal_next_actions),
             'theorem_exports': {
                 'tdfol_formulas': tdfol_formulas,
                 'dcec_formulas': dcec_formulas,
@@ -2355,14 +2542,21 @@ class ClaimSupportHook:
             for follow_up in (proof_bundle.get('recommended_follow_ups', []) or [])
             if isinstance(follow_up, dict)
         ])
+        temporal_next_actions = [
+            dict(action)
+            for action in (proof_bundle.get('temporal_next_actions', []) or [])
+            if isinstance(action, dict)
+        ]
 
-        chronology_task_count = len(recommended_follow_ups) or len(blocking_reasons) or len(issue_ids)
+        chronology_task_count = len(temporal_next_actions) or len(recommended_follow_ups) or len(blocking_reasons) or len(issue_ids)
         temporal_handoff = {
             'claim_type': str(claim_type or '').strip(),
             'claim_element_id': str(element.get('element_id') or '').strip(),
             'unresolved_temporal_issue_count': len(issue_ids),
             'unresolved_temporal_issue_ids': issue_ids,
             'chronology_task_count': chronology_task_count,
+            'temporal_next_actions': temporal_next_actions,
+            'temporal_next_action_count': len(temporal_next_actions),
             'event_ids': list(fact_ids),
             'temporal_fact_ids': list(fact_ids),
             'temporal_relation_ids': relation_ids,
@@ -3826,6 +4020,25 @@ class ClaimSupportHook:
                 if isinstance(element.get('support_quality_summary'), dict)
                 else {}
             )
+            temporal_proof_bundle = (
+                reasoning_diagnostics.get('temporal_proof_bundle')
+                if isinstance(reasoning_diagnostics.get('temporal_proof_bundle'), dict)
+                else {}
+            )
+            claim_support_temporal_handoff = (
+                reasoning_diagnostics.get('claim_support_temporal_handoff')
+                if isinstance(reasoning_diagnostics.get('claim_support_temporal_handoff'), dict)
+                else {}
+            )
+            temporal_next_actions = [
+                dict(action)
+                for action in (
+                    temporal_proof_bundle.get('temporal_next_actions')
+                    or claim_support_temporal_handoff.get('temporal_next_actions')
+                    or []
+                )
+                if isinstance(action, dict)
+            ]
             element_validation = {
                 'element_id': element.get('element_id'),
                 'element_text': element.get('element_text'),
@@ -3849,6 +4062,9 @@ class ClaimSupportHook:
                 'proof_diagnostics': proof_diagnostics,
                 'proof_decision_trace': decision_trace,
                 'reasoning_diagnostics': reasoning_diagnostics,
+                'temporal_next_actions': temporal_next_actions,
+                'temporal_next_action_count': len(temporal_next_actions),
+                'temporal_missingness_kind': 'temporal_gap' if temporal_next_actions else '',
                 'gap_context': gap_element,
             }
             elements.append(element_validation)

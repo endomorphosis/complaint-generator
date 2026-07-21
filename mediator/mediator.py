@@ -45,6 +45,7 @@ from claim_support_review import (
 	summarize_claim_reasoning_review,
 	summarize_claim_support_snapshot_lifecycle,
 )
+from complaint_analysis.temporal_rule_profiles import enrich_follow_up, rank_follow_ups
 from document_pipeline import FormalComplaintDocumentBuilder
 from intake_status import (
 	_build_document_grounding_improvement_next_action,
@@ -4217,6 +4218,13 @@ class Mediator:
 			'temporal_rule_status': str(task.get('temporal_rule_status') or ''),
 			'temporal_rule_blocking_reasons': list(task.get('temporal_rule_blocking_reasons') or []),
 			'temporal_rule_follow_ups': list(task.get('temporal_rule_follow_ups') or []),
+			'temporal_next_actions': [dict(action) for action in (task.get('temporal_next_actions') or []) if isinstance(action, dict)],
+			'temporal_next_action_count': int(task.get('temporal_next_action_count', 0) or len(task.get('temporal_next_actions') or [])),
+			'temporal_missingness_kind': str(task.get('temporal_missingness_kind') or ''),
+			'temporal_issue_ids': list(task.get('temporal_issue_ids') or []),
+			'missing_temporal_predicates': list(task.get('missing_temporal_predicates') or []),
+			'required_temporal_predicates': list(task.get('required_temporal_predicates') or []),
+			'required_provenance_kinds': list(task.get('required_provenance_kinds') or []),
 			'missing_support_kinds': list(task.get('missing_support_kinds') or []),
 			'missing_fact_bundle': list(task.get('missing_fact_bundle') or []),
 			'satisfied_fact_bundle': list(task.get('satisfied_fact_bundle') or []),
@@ -4746,6 +4754,23 @@ class Mediator:
 			},
 			temporal_rule_profile,
 		)
+		temporal_next_actions = self._build_temporal_next_actions_for_task(
+			claim_type=claim_type,
+			claim_element_id=element.get('element_id'),
+			claim_element_label=element_text,
+			temporal_rule_profile_id=temporal_rule_profile.get('profile_id'),
+			temporal_rule_status=temporal_rule_profile.get('status'),
+			temporal_rule_follow_ups=temporal_rule_profile.get('recommended_follow_ups', []),
+			temporal_rule_blocking_reasons=temporal_rule_profile.get('blocking_reasons', []),
+			temporal_issue_records=[],
+			temporal_fact_ids=temporal_proof_bundle.get('temporal_fact_ids', []),
+			temporal_relation_ids=temporal_proof_bundle.get('temporal_relation_ids', []),
+			temporal_issue_ids=temporal_proof_bundle.get('temporal_issue_ids', []),
+			missing_temporal_predicates=temporal_proof_bundle.get('missing_temporal_predicates', []),
+			required_provenance_kinds=temporal_proof_bundle.get('required_provenance_kinds', []),
+			temporal_proof_bundle=temporal_proof_bundle,
+			packet_temporal_next_actions=element.get('temporal_next_actions'),
+		)
 		return {
 			'claim_type': claim_type,
 			'claim_element_id': element.get('element_id'),
@@ -4777,6 +4802,9 @@ class Mediator:
 			'temporal_rule_status': str(temporal_rule_profile.get('status') or ''),
 			'temporal_rule_blocking_reasons': list(temporal_rule_profile.get('blocking_reasons', []) or []),
 			'temporal_rule_follow_ups': list(temporal_rule_profile.get('recommended_follow_ups', []) or []),
+			'temporal_next_actions': temporal_next_actions,
+			'temporal_next_action_count': len(temporal_next_actions),
+			'temporal_missingness_kind': 'temporal_gap' if temporal_gap_targeted or temporal_next_actions else '',
 			'temporal_proof_bundle_id': str(temporal_proof_bundle.get('proof_bundle_id') or ''),
 			'temporal_fact_ids': list(temporal_proof_bundle.get('temporal_fact_ids', []) or []),
 			'temporal_relation_ids': list(temporal_proof_bundle.get('temporal_relation_ids', []) or []),
@@ -9565,9 +9593,13 @@ class Mediator:
 			'temporal_rule_profile_failed_element_count': 0,
 			'temporal_gap_task_count': 0,
 			'temporal_gap_targeted_task_count': 0,
+			'temporal_next_action_count': 0,
 			'temporal_rule_status_counts': {},
 			'temporal_rule_blocking_reason_counts': {},
 			'temporal_resolution_status_counts': {},
+			'temporal_follow_up_target_counts': {},
+			'temporal_question_objective_counts': {},
+			'temporal_proof_criticality_counts': {},
 		}
 		if not isinstance(packets, dict):
 			return summary
@@ -9648,9 +9680,13 @@ class Mediator:
 			'resolution_status_counts': {},
 			'temporal_gap_task_count': 0,
 			'temporal_gap_targeted_task_count': 0,
+			'temporal_next_action_count': 0,
 			'temporal_rule_status_counts': {},
 			'temporal_rule_blocking_reason_counts': {},
 			'temporal_resolution_status_counts': {},
+			'temporal_follow_up_target_counts': {},
+			'temporal_question_objective_counts': {},
+			'temporal_proof_criticality_counts': {},
 		}
 		for task in tasks:
 			if not isinstance(task, dict):
@@ -9674,6 +9710,28 @@ class Mediator:
 			if not is_temporal_task:
 				continue
 			summary['temporal_gap_task_count'] += 1
+			temporal_next_actions = [
+				action
+				for action in (task.get('temporal_next_actions') if isinstance(task.get('temporal_next_actions'), list) else [])
+				if isinstance(action, dict)
+			]
+			summary['temporal_next_action_count'] += len(temporal_next_actions)
+			for temporal_action in temporal_next_actions:
+				follow_up_target = str(temporal_action.get('follow_up_target') or '').strip().lower()
+				if follow_up_target:
+					summary['temporal_follow_up_target_counts'][follow_up_target] = (
+						summary['temporal_follow_up_target_counts'].get(follow_up_target, 0) + 1
+					)
+				question_objective = str(temporal_action.get('question_objective') or '').strip().lower()
+				if question_objective:
+					summary['temporal_question_objective_counts'][question_objective] = (
+						summary['temporal_question_objective_counts'].get(question_objective, 0) + 1
+					)
+				proof_criticality = str(temporal_action.get('proof_criticality') or '').strip().lower()
+				if proof_criticality:
+					summary['temporal_proof_criticality_counts'][proof_criticality] = (
+						summary['temporal_proof_criticality_counts'].get(proof_criticality, 0) + 1
+					)
 			temporal_rule_status = str(task.get('temporal_rule_status') or '').strip().lower()
 			if temporal_rule_status in {'partial', 'failed'}:
 				summary['temporal_gap_targeted_task_count'] += 1
@@ -10307,6 +10365,45 @@ class Mediator:
 				temporal_rule_follow_ups = list(packet_element.get('temporal_rule_follow_ups', []) or [])
 				if not temporal_rule_follow_ups:
 					temporal_rule_follow_ups = fallback_temporal_rule_follow_ups
+				shared_missing_temporal_predicates = [
+					str(item).strip()
+					for item in (theorem_export_metadata.get('missing_temporal_predicates') or [])
+					if str(item).strip()
+				]
+				if not shared_missing_temporal_predicates:
+					for issue in matching_issue_records:
+						for predicate in (issue.get('missing_temporal_predicates') if isinstance(issue.get('missing_temporal_predicates'), list) else []):
+							normalized_predicate = str(predicate).strip()
+							if normalized_predicate and normalized_predicate not in shared_missing_temporal_predicates:
+								shared_missing_temporal_predicates.append(normalized_predicate)
+				shared_required_provenance_kinds = [
+					str(item).strip()
+					for item in (theorem_export_metadata.get('required_provenance_kinds') or [])
+					if str(item).strip()
+				]
+				if not shared_required_provenance_kinds:
+					for issue in matching_issue_records:
+						for provenance_kind in (issue.get('required_provenance_kinds') if isinstance(issue.get('required_provenance_kinds'), list) else []):
+							normalized_provenance_kind = str(provenance_kind).strip()
+							if normalized_provenance_kind and normalized_provenance_kind not in shared_required_provenance_kinds:
+								shared_required_provenance_kinds.append(normalized_provenance_kind)
+				temporal_next_actions = self._build_temporal_next_actions_for_task(
+					claim_type=claim_type,
+					claim_element_id=element_id,
+					claim_element_label=intake_element['label'],
+					temporal_rule_profile_id=packet_element.get('temporal_rule_profile_id'),
+					temporal_rule_status=temporal_rule_status,
+					temporal_rule_follow_ups=temporal_rule_follow_ups,
+					temporal_rule_blocking_reasons=temporal_rule_blocking_reasons,
+					temporal_issue_records=matching_issue_records,
+					temporal_fact_ids=temporal_fact_ids,
+					temporal_relation_ids=temporal_relation_ids,
+					temporal_issue_ids=temporal_issue_ids,
+					missing_temporal_predicates=shared_missing_temporal_predicates,
+					required_provenance_kinds=shared_required_provenance_kinds,
+					temporal_proof_bundle=temporal_proof_bundle,
+					packet_temporal_next_actions=packet_element.get('temporal_next_actions'),
+				)
 				has_authored_chronology = bool(
 					authored_temporal_issue_ids
 					or (not proof_temporal_fact_ids and temporal_fact_ids)
@@ -10401,6 +10498,9 @@ class Mediator:
 						'temporal_rule_status': temporal_rule_status,
 						'temporal_rule_blocking_reasons': temporal_rule_blocking_reasons,
 						'temporal_rule_follow_ups': temporal_rule_follow_ups,
+						'temporal_next_actions': temporal_next_actions,
+						'temporal_next_action_count': len(temporal_next_actions),
+						'temporal_missingness_kind': 'temporal_gap' if temporal_next_actions else '',
 						'recommended_next_step': str(packet_element.get('recommended_next_step') or '').strip(),
 						'intake_open_item_ids': [item_id for item_id in matching_open_item_ids if item_id],
 						'intake_proof_lead_ids': [lead_id for lead_id in matching_proof_lead_ids if lead_id],
@@ -10635,6 +10735,147 @@ class Mediator:
 				required_kinds.append('testimony_record')
 		return required_kinds
 
+	def _build_temporal_next_actions_for_task(
+		self,
+		*,
+		claim_type: Any,
+		claim_element_id: Any,
+		claim_element_label: Any,
+		temporal_rule_profile_id: Any,
+		temporal_rule_status: Any,
+		temporal_rule_follow_ups: Any,
+		temporal_rule_blocking_reasons: Any,
+		temporal_issue_records: Any,
+		temporal_fact_ids: Any,
+		temporal_relation_ids: Any,
+		temporal_issue_ids: Any,
+		missing_temporal_predicates: Any,
+		required_provenance_kinds: Any,
+		temporal_proof_bundle: Any = None,
+		packet_temporal_next_actions: Any = None,
+	) -> List[Dict[str, Any]]:
+		source_actions = []
+		if isinstance(packet_temporal_next_actions, list) and packet_temporal_next_actions:
+			source_actions = packet_temporal_next_actions
+		elif isinstance(temporal_proof_bundle, dict) and isinstance(temporal_proof_bundle.get('temporal_next_actions'), list):
+			source_actions = temporal_proof_bundle.get('temporal_next_actions') or []
+		normalized_actions: List[Dict[str, Any]] = []
+		seen = set()
+		claim_type_text = str(claim_type or '').strip()
+		element_id = str(claim_element_id or '').strip()
+		element_label = str(claim_element_label or '').strip()
+		profile_id = str(temporal_rule_profile_id or '').strip()
+		rule_status = str(temporal_rule_status or '').strip().lower()
+		fact_ids = [str(item).strip() for item in (temporal_fact_ids if isinstance(temporal_fact_ids, list) else []) if str(item).strip()]
+		relation_ids = [str(item).strip() for item in (temporal_relation_ids if isinstance(temporal_relation_ids, list) else []) if str(item).strip()]
+		issue_ids = [str(item).strip() for item in (temporal_issue_ids if isinstance(temporal_issue_ids, list) else []) if str(item).strip()]
+		missing_predicates = [str(item).strip() for item in (missing_temporal_predicates if isinstance(missing_temporal_predicates, list) else []) if str(item).strip()]
+		required_kinds = [str(item).strip() for item in (required_provenance_kinds if isinstance(required_provenance_kinds, list) else []) if str(item).strip()]
+
+		def _append(raw_action: Dict[str, Any], issue: Dict[str, Any] = None, reason_override: str = '') -> None:
+			issue_record = issue if isinstance(issue, dict) else {}
+			issue_category = str(issue_record.get('issue_type') or issue_record.get('category') or raw_action.get('issue_category') or '').strip()
+			enriched = enrich_follow_up(raw_action, issue_category=issue_category)
+			reason = str(
+				reason_override
+				or enriched.get('reason')
+				or issue_record.get('summary')
+				or 'Resolve the chronology blocker for this element.'
+			).strip()
+			affected_issue_ids = [
+				str(issue_record.get('issue_id') or issue_record.get('contradiction_id') or issue_record.get('dependency_id') or '').strip()
+			] if issue_record else [
+				str(item).strip()
+				for item in (enriched.get('affected_issue_ids') if isinstance(enriched.get('affected_issue_ids'), list) else [])
+				if str(item).strip()
+			]
+			affected_issue_ids = [item for item in affected_issue_ids if item] or list(issue_ids)
+			affected_fact_ids = [
+				str(item).strip()
+				for item in (issue_record.get('fact_ids') if isinstance(issue_record.get('fact_ids'), list) else enriched.get('affected_fact_ids') if isinstance(enriched.get('affected_fact_ids'), list) else [])
+				if str(item).strip()
+			] or list(fact_ids)
+			lane = str(enriched.get('follow_up_lane') or enriched.get('lane') or '').strip()
+			key = (lane, reason, tuple(affected_issue_ids), tuple(affected_fact_ids), profile_id)
+			if key in seen:
+				return
+			seen.add(key)
+			normalized_actions.append({
+				**dict(enriched),
+				'action': str(enriched.get('action') or 'resolve_temporal_blocker'),
+				'next_action': str(enriched.get('next_action') or enriched.get('action') or 'resolve_temporal_blocker'),
+				'follow_up_lane': lane,
+				'lane': str(enriched.get('lane') or lane),
+				'reason': reason,
+				'prompt': str(enriched.get('prompt') or reason),
+				'claim_type': claim_type_text,
+				'claim_element_id': element_id,
+				'claim_element_label': element_label,
+				'temporal_missingness_kind': 'temporal_gap',
+				'follow_up_focus': 'temporal_gap_closure',
+				'query_strategy': 'temporal_gap_targeted',
+				'affected_rule': (
+					dict(enriched.get('affected_rule'))
+					if isinstance(enriched.get('affected_rule'), dict)
+					else {
+						'profile_id': profile_id,
+						'rule_frame_id': str(enriched.get('affected_rule_frame_id') or ''),
+						'status': rule_status,
+						'blocking_reason': reason,
+					}
+				),
+				'affected_rule_profile_id': str(enriched.get('affected_rule_profile_id') or profile_id),
+				'affected_fact_ids': affected_fact_ids,
+				'affected_relation_ids': [
+					str(item).strip()
+					for item in (enriched.get('affected_relation_ids') if isinstance(enriched.get('affected_relation_ids'), list) else [])
+					if str(item).strip()
+				] or list(relation_ids),
+				'affected_issue_ids': affected_issue_ids,
+				'temporal_issue_ids': affected_issue_ids,
+				'missing_temporal_predicates': [
+					str(item).strip()
+					for item in (enriched.get('missing_temporal_predicates') if isinstance(enriched.get('missing_temporal_predicates'), list) else [])
+					if str(item).strip()
+				] or list(missing_predicates),
+				'required_provenance_kinds': [
+					str(item).strip()
+					for item in (enriched.get('required_provenance_kinds') if isinstance(enriched.get('required_provenance_kinds'), list) else [])
+					if str(item).strip()
+				] or list(required_kinds),
+				'issue_category': issue_category,
+			})
+
+		for source_action in source_actions:
+			if isinstance(source_action, dict):
+				_append(source_action)
+		if not normalized_actions:
+			for issue in (temporal_issue_records if isinstance(temporal_issue_records, list) else []):
+				if not isinstance(issue, dict):
+					continue
+				_append(
+					{
+						'lane': str(issue.get('recommended_resolution_lane') or ''),
+						'reason': str(issue.get('summary') or issue.get('label') or '').strip(),
+					},
+					issue=issue,
+				)
+		if not normalized_actions:
+			for follow_up in (temporal_rule_follow_ups if isinstance(temporal_rule_follow_ups, list) else []):
+				if isinstance(follow_up, dict):
+					_append(follow_up)
+		if not normalized_actions:
+			for reason in (temporal_rule_blocking_reasons if isinstance(temporal_rule_blocking_reasons, list) else []):
+				normalized_reason = str(reason or '').strip()
+				if normalized_reason:
+					_append({'lane': 'clarify_with_complainant', 'reason': normalized_reason}, reason_override=normalized_reason)
+
+		ranked_actions = rank_follow_ups(normalized_actions)
+		for index, action in enumerate(ranked_actions, start=1):
+			action['rank'] = int(action.get('rank') or index)
+			action.setdefault('action_id', f'temporal_next_action:{claim_type_text}:{element_id or element_label}:{index}')
+		return ranked_actions
+
 	def _build_alignment_evidence_tasks(
 		self,
 		alignment_summary: Any,
@@ -10698,6 +10939,22 @@ class Mediator:
 					fallback_support_kinds=fallback_support_kinds,
 					temporal_follow_ups=temporal_follow_ups,
 					temporal_issue_records=element.get('temporal_issue_records', []),
+				)
+				temporal_next_actions = self._build_temporal_next_actions_for_task(
+					claim_type=claim_type,
+					claim_element_id=claim_element_id,
+					claim_element_label=claim_element_label,
+					temporal_rule_profile_id=element.get('temporal_rule_profile_id'),
+					temporal_rule_status=temporal_rule_status,
+					temporal_rule_follow_ups=temporal_follow_ups,
+					temporal_rule_blocking_reasons=element.get('temporal_rule_blocking_reasons', []),
+					temporal_issue_records=element.get('temporal_issue_records', []),
+					temporal_fact_ids=element.get('temporal_fact_ids', []),
+					temporal_relation_ids=element.get('temporal_relation_ids', []),
+					temporal_issue_ids=element.get('temporal_issue_ids', []),
+					missing_temporal_predicates=missing_temporal_predicates,
+					required_provenance_kinds=required_provenance_kinds,
+					packet_temporal_next_actions=element.get('temporal_next_actions'),
 				)
 				authored_temporal_issue_ids = [
 					str(issue_id).strip()
@@ -10807,6 +11064,9 @@ class Mediator:
 						'temporal_rule_status': temporal_rule_status,
 						'temporal_rule_blocking_reasons': list(element.get('temporal_rule_blocking_reasons', []) or []),
 						'temporal_rule_follow_ups': temporal_follow_ups,
+						'temporal_next_actions': temporal_next_actions,
+						'temporal_next_action_count': len(temporal_next_actions),
+						'temporal_missingness_kind': 'temporal_gap' if temporal_gap_targeted or temporal_next_actions else '',
 						'intake_origin_refs': [
 							f'open_item:{item_id}'
 							for item_id in (element.get('intake_open_item_ids', []) or [])
@@ -11105,6 +11365,28 @@ class Mediator:
 			if not is_temporal_task:
 				continue
 			summary['temporal_gap_task_count'] += 1
+			temporal_next_actions = [
+				action
+				for action in (task.get('temporal_next_actions') if isinstance(task.get('temporal_next_actions'), list) else [])
+				if isinstance(action, dict)
+			]
+			summary['temporal_next_action_count'] += len(temporal_next_actions)
+			for temporal_action in temporal_next_actions:
+				follow_up_target = str(temporal_action.get('follow_up_target') or '').strip().lower()
+				if follow_up_target:
+					summary['temporal_follow_up_target_counts'][follow_up_target] = (
+						summary['temporal_follow_up_target_counts'].get(follow_up_target, 0) + 1
+					)
+				question_objective = str(temporal_action.get('question_objective') or '').strip().lower()
+				if question_objective:
+					summary['temporal_question_objective_counts'][question_objective] = (
+						summary['temporal_question_objective_counts'].get(question_objective, 0) + 1
+					)
+				proof_criticality = str(temporal_action.get('proof_criticality') or '').strip().lower()
+				if proof_criticality:
+					summary['temporal_proof_criticality_counts'][proof_criticality] = (
+						summary['temporal_proof_criticality_counts'].get(proof_criticality, 0) + 1
+					)
 			temporal_rule_status = str(task.get('temporal_rule_status') or '').strip().lower()
 			if temporal_rule_status in {'partial', 'failed'}:
 				summary['temporal_gap_targeted_task_count'] += 1
@@ -12713,9 +12995,13 @@ class Mediator:
 			**claim_support_packet_summary,
 			'temporal_gap_task_count': int(alignment_task_summary.get('temporal_gap_task_count', 0) or 0),
 			'temporal_gap_targeted_task_count': int(alignment_task_summary.get('temporal_gap_targeted_task_count', 0) or 0),
+			'temporal_next_action_count': int(alignment_task_summary.get('temporal_next_action_count', 0) or 0),
 			'temporal_rule_status_counts': dict(alignment_task_summary.get('temporal_rule_status_counts', {}) or {}),
 			'temporal_rule_blocking_reason_counts': dict(alignment_task_summary.get('temporal_rule_blocking_reason_counts', {}) or {}),
 			'temporal_resolution_status_counts': dict(alignment_task_summary.get('temporal_resolution_status_counts', {}) or {}),
+			'temporal_follow_up_target_counts': dict(alignment_task_summary.get('temporal_follow_up_target_counts', {}) or {}),
+			'temporal_question_objective_counts': dict(alignment_task_summary.get('temporal_question_objective_counts', {}) or {}),
+			'temporal_proof_criticality_counts': dict(alignment_task_summary.get('temporal_proof_criticality_counts', {}) or {}),
 		}
 		alignment_task_update_summary = self._summarize_alignment_task_update_status(
 			alignment_task_updates,

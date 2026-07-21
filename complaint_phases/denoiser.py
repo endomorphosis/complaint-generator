@@ -5721,7 +5721,75 @@ class ComplaintDenoiser:
             if preferred_evidence_classes:
                 evidence_hint = f" such as {', '.join(preferred_evidence_classes[:3])}"
             bundle_hint = f" I still need facts about {missing_fact_bundle[0]}." if missing_fact_bundle else ''
-            if support_status == 'contradicted' or action == 'resolve_support_conflicts':
+            temporal_next_actions = [
+                item
+                for item in (task.get('temporal_next_actions') if isinstance(task.get('temporal_next_actions'), list) else [])
+                if isinstance(item, dict)
+            ]
+            primary_temporal_action = temporal_next_actions[0] if temporal_next_actions else {}
+            temporal_question_objective = str(primary_temporal_action.get('question_objective') or '').strip()
+            temporal_follow_up_target = str(primary_temporal_action.get('follow_up_target') or '').strip()
+            if action == 'fill_temporal_chronology_gap':
+                temporal_blocking_reasons = task.get('temporal_rule_blocking_reasons')
+                if isinstance(temporal_blocking_reasons, list):
+                    temporal_blocking_reason = next((str(item).strip() for item in temporal_blocking_reasons if str(item).strip()), '')
+                else:
+                    temporal_blocking_reason = str(temporal_blocking_reasons or '').strip()
+                temporal_reason = str(
+                    primary_temporal_action.get('reason')
+                    or temporal_blocking_reason
+                    or ''
+                ).strip()
+                question_objective = str(
+                    temporal_question_objective
+                    or 'anchor_capture'
+                ).strip()
+                follow_up_target = str(primary_temporal_action.get('follow_up_target') or '').strip().lower()
+                temporal_question_objective = question_objective
+                temporal_follow_up_target = follow_up_target
+                affected_rule = (
+                    primary_temporal_action.get('affected_rule')
+                    if isinstance(primary_temporal_action.get('affected_rule'), dict)
+                    else {}
+                )
+                rule_hint = str(
+                    affected_rule.get('rule_frame_id')
+                    or primary_temporal_action.get('affected_rule_frame_id')
+                    or task.get('temporal_rule_profile_id')
+                    or ''
+                ).strip()
+                if question_objective == 'contradiction_resolution':
+                    question_text = (
+                        f"What dated record or firsthand detail resolves the conflicting chronology for "
+                        f"{claim_element_label} in {claim_type}?"
+                    )
+                elif question_objective == 'deadline_verification':
+                    question_text = (
+                        f"What filing, notice, or agency record verifies the deadline timing for "
+                        f"{claim_element_label} in {claim_type}?"
+                    )
+                elif follow_up_target == 'document_request':
+                    question_text = (
+                        f"What dated document anchors the chronology for {claim_element_label} "
+                        f"in {claim_type}?"
+                    )
+                elif follow_up_target == 'external_corroboration':
+                    question_text = (
+                        f"What external record can corroborate the timing for {claim_element_label} "
+                        f"in {claim_type}?"
+                    )
+                else:
+                    question_text = (
+                        f"What exact date, sequence, or first-hand chronology detail resolves "
+                        f"{claim_element_label} for {claim_type}?"
+                    )
+                if temporal_reason:
+                    question_text = f"{question_text} This is needed because {temporal_reason}"
+                if rule_hint:
+                    question_text = f"{question_text} Affected rule: {rule_hint}."
+                question_type = 'timeline'
+                priority = 'high'
+            elif support_status == 'contradicted' or action == 'resolve_support_conflicts':
                 question_text = (
                     f"What evidence best resolves the conflict around {claim_element_label} "
                     f"for {claim_type}?{bundle_hint}"
@@ -5760,8 +5828,22 @@ class ComplaintDenoiser:
                     'missing_fact_bundle': list(task.get('missing_fact_bundle') or []),
                     'success_criteria': list(task.get('success_criteria') or []),
                     'recommended_queries': recommended_queries,
+                    'temporal_next_actions': temporal_next_actions,
+                    'temporal_missingness_kind': str(task.get('temporal_missingness_kind') or ''),
+                    'question_objective': temporal_question_objective,
+                    'follow_up_target': temporal_follow_up_target,
+                    'affected_rule': (
+                        dict(primary_temporal_action.get('affected_rule'))
+                        if isinstance(primary_temporal_action.get('affected_rule'), dict)
+                        else {}
+                    ),
+                    'affected_fact_ids': list(primary_temporal_action.get('affected_fact_ids') or []),
+                    'affected_issue_ids': list(primary_temporal_action.get('affected_issue_ids') or []),
                 },
                 'priority': priority,
+                'question_objective': temporal_question_objective,
+                'follow_up_target': temporal_follow_up_target,
+                'proof_priority': 0 if action == 'fill_temporal_chronology_gap' else self._phase1_proof_priority(question_type),
             })
 
         for action in remaining_workflow_actions:

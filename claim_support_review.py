@@ -1777,7 +1777,12 @@ def _aggregate_timeline_gap_follow_ups(
         if not isinstance(bundle, dict):
             continue
         rule_frame_id = str(bundle.get("rule_frame_id") or "").strip()
-        for follow_up in bundle.get("recommended_follow_ups") or []:
+        source_follow_ups = (
+            bundle.get("temporal_next_actions")
+            if isinstance(bundle.get("temporal_next_actions"), list) and bundle.get("temporal_next_actions")
+            else bundle.get("recommended_follow_ups")
+        )
+        for follow_up in source_follow_ups or []:
             if not isinstance(follow_up, dict):
                 continue
             enriched = enrich_follow_up(follow_up)
@@ -1790,6 +1795,19 @@ def _aggregate_timeline_gap_follow_ups(
             if rule_frame_id and "rule_frame_id" not in enriched:
                 enriched = dict(enriched)
                 enriched["rule_frame_id"] = rule_frame_id
+            if rule_frame_id and "affected_rule" not in enriched:
+                enriched = dict(enriched)
+                enriched["affected_rule"] = {
+                    "profile_id": str(bundle.get("profile_id") or ""),
+                    "rule_frame_id": rule_frame_id,
+                    "status": str(bundle.get("status") or ""),
+                }
+            if "affected_fact_ids" not in enriched:
+                enriched = dict(enriched)
+                enriched["affected_fact_ids"] = list(bundle.get("temporal_fact_ids") or [])
+            if "affected_issue_ids" not in enriched:
+                enriched = dict(enriched)
+                enriched["affected_issue_ids"] = list(bundle.get("temporal_issue_ids") or [])
             combined.append(enriched)
             if len(combined) >= max_items:
                 break
