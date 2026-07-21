@@ -100,6 +100,13 @@ Make Phase 1 emit structured state that can drive evidence tasks directly.
 - a single intake answer can produce structured facts and proof leads with stable references
 - unresolved intake work is visible as explicit queue items instead of implicit narrative gaps
 
+### Emitted structure
+
+- `canonical_facts[]` carry durable `fact_id` values plus claim/element linkage through `claim_types`, `element_tags`, `target_claim_types`, `target_element_ids`, and `element_links`.
+- `proof_leads[]` carry collection-routing fields (`owner`, `custodian`, `availability`, `expected_format`, `retrieval_path`) and target linkage (`target_claim_types`, `target_element_ids`, `target_fact_ids`, `target_links`).
+- `open_items[]` are the queueable Phase 1 work list and include `blocking_level`, `next_question_strategy`, target claim/element metadata, support kind, and proof-path status.
+- `get_three_phase_status()` and intake review summaries preserve raw records and expose aggregate `proof_lead_collection_summary` and `open_item_summary` payloads for operators and API consumers.
+
 ### Suggested validation
 
 - `./.venv/bin/python -m pytest tests/test_mediator_three_phase.py -q`
