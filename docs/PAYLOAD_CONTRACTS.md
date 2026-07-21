@@ -2321,6 +2321,9 @@ Interpretation notes:
 - `claim_coverage_matrix[claim_type]` exposes the same grouped claim-element support view used by automatic legal research.
 - `claim_coverage_matrix[claim_type]` also includes per-element `support_packets` and `support_packet_summary` lineage rollups.
 - `claim_support_packets[claim_type].elements[*]` is the higher-level review workspace packet and includes `bundle_manifest`, `archive_history`, `graph_trace_drilldown`, `timeline_drilldown`, `contradiction_report`, and `missing_support_report` for operator drilldown.
+- `GET /api/claim-support/support-timeline` returns the same support lineage as a latest-first timeline using `captured_at`, `observed_at`, then stored `timestamp` as the ordering fields. Entries include `support_kind`, `support_ref`, `fact`, and `provenance` with archive URL, capture source, source domain, content hash, and historical-capture marker when available.
+- `GET /api/claim-support/archive-history` returns visible captures after filtering and limit application, and `domain_count` reflects the domains present in the returned `captures_by_domain` object.
+- `GET /api/claim-support/graph-trace` returns graph-support drilldowns scoped by claim element or support reference, with compact graph summary counts for operator inspection.
 - `persist_claim_coverage_matrix_snapshot(...)` persists those grouped rows under `snapshot_kind: "coverage_matrix"` with retention pruning. Retrieval via `get_claim_coverage_matrix_snapshots(...)` returns `coverage_matrix`, `snapshot.snapshot_id`, `snapshot.required_support_kinds`, `snapshot.metadata`, and stale-token fields for each claim. `snapshot.metadata.coverage_matrix_summary` is the compact coverage companion for status/support counts, graph snapshot refs, support paths, current-trace versus persisted paths, graph-linked paths, support-ref counts, path-kind mixes, and support quality.
 - Review payloads include `claim_coverage_matrix_snapshots[claim_type]` and `claim_coverage_matrix_snapshot_summary[claim_type]` so dashboards can inspect the latest persisted coverage matrix and its freshness independently from the live `claim_coverage_matrix` recomputation.
 - `claim_coverage_summary[claim_type]` includes the compact per-claim `support_packet_summary` totals used by operator dashboards.
@@ -2331,7 +2334,7 @@ Interpretation notes:
 
 `POST /api/claim-support/enrich-background` queues long-running enrichment work such as archive, parse, graph, and validation passes. `GET /api/claim-support/enrichment-queue` lists queued/running/completed jobs, and `GET /api/claim-support/enrichment-job/{job_id}` returns one job detail.
 
-Queue entries include `job_id`, `status`, `priority`, `metadata`, `progress`, `partial_results`, `error`, `created_at`, and `updated_at`. Workers can persist progress and partial results through `Mediator.update_background_enrichment_job_status(...)`, so operator surfaces can show partial completion and failure details without blocking interactive case work.
+Queue entries include `job_id`, `status`, `priority`, `metadata`, `progress`, `partial_results`, `error`, `created_at`, and `updated_at`. Malformed or non-object stored metadata degrades to an empty object so the queue remains inspectable. Workers can persist progress and partial results through `Mediator.update_background_enrichment_job_status(...)`, so operator surfaces can show partial completion and failure details without blocking interactive case work.
 
 ## Drafting Support Bundles
 
