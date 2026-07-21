@@ -1,0 +1,76 @@
+from __future__ import annotations
+
+import ast
+import tomllib
+import warnings
+from pathlib import Path
+from typing import Iterable
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+ARCHITECTURE_PATH = REPO_ROOT / "docs" / "ARCHITECTURE.md"
+
+
+def _load_boundary_config() -> tuple[list[str], dict[str, list[str]]]:
+    pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    boundary_config = pyproject["tool"]["complaint_generator"]["import_boundaries"]
+    enforced_packages = list(boundary_config["enforced_packages"])
+    allowed_imports = dict(boundary_config["allowed_imports"])
+    return enforced_packages, allowed_imports
+
+
+def _python_files(package_name: str) -> Iterable[Path]:
+    package_dir = REPO_ROOT / package_name
+    return sorted(path for path in package_dir.rglob("*.py") if path.is_file())
+
+
+def _absolute_import_roots(file_path: Path) -> set[str]:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+    import_roots: set[str] = set()
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            import_roots.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            import_roots.add(node.module.split(".", 1)[0])
+
+    return import_roots
+
+
+def test_configured_package_import_boundaries_are_enforced():
+    enforced_packages, allowed_imports = _load_boundary_config()
+    enforced_package_set = set(enforced_packages)
+    violations: list[str] = []
+
+    for package_name in enforced_packages:
+        allowed_for_package = set(allowed_imports[package_name])
+        for file_path in _python_files(package_name):
+            imported_roots = _absolute_import_roots(file_path)
+            disallowed_roots = sorted(
+                imported_root
+                for imported_root in imported_roots & enforced_package_set
+                if imported_root not in allowed_for_package
+            )
+            if disallowed_roots:
+                relative_path = file_path.relative_to(REPO_ROOT).as_posix()
+                violations.append(f"{relative_path}: {', '.join(disallowed_roots)}")
+
+    assert not violations, (
+        "Package import boundary violations found. Update the code or the documented "
+        f"architecture contract before proceeding: {violations}"
+    )
+
+
+def test_import_boundary_config_is_documented():
+    enforced_packages, allowed_imports = _load_boundary_config()
+    architecture = ARCHITECTURE_PATH.read_text(encoding="utf-8")
+
+    assert "### Allowed Import Direction" in architecture
+    assert "### Shared Code Rule" in architecture
+
+    for package_name in enforced_packages:
+        expected_imports = ", ".join(f"`{import_name}/`" for import_name in allowed_imports[package_name])
+        assert f"| `{package_name}/` | {expected_imports} |" in architecture
