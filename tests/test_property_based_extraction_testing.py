@@ -6,6 +6,7 @@ ontology extraction to ensure robustness across diverse inputs.
 """
 
 import pytest
+pytest.importorskip("hypothesis")
 from hypothesis import given, strategies as st, assume, settings
 from ipfs_datasets_py.optimizers.graphrag.ontology_generator import (
     OntologyGenerator,

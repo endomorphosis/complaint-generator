@@ -1,0 +1,4446 @@
+{
+  "active_goal_count": 21,
+  "completed_goal_count": 0,
+  "generated_at": "2026-07-21T19:39:54.889381+00:00",
+  "goal_count": 21,
+  "goals": [
+    {
+      "bundle": "refactor/g1",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "mediator/mediator.py",
+        "applications/complaint_workspace.py",
+        "tests/test_claim_support_review_playwright_smoke.py",
+        "docs/ARCHITECTURE.md",
+        "pyproject.toml",
+        "applications/document_api.py",
+        "integrations/ipfs_datasets/loader.py",
+        "applications/complaint_cli.py"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G1",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "active",
+      "title": "Stabilize repository boundaries",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g1/g1-s1",
+      "evidence": [
+        "mediator/mediator.py",
+        "applications/complaint_workspace.py",
+        "tests/test_claim_support_review_playwright_smoke.py",
+        "scripts/synthesize_hacc_complaint.py",
+        "tests/test_review_api.py",
+        "complaint_phases/denoiser.py",
+        "A short module ownership map exists.",
+        "Entrypoints are grouped by CLI",
+        "web",
+        "mediator",
+        "and workflow role.",
+        "python -m pytest tests/test_package_imports.py -q",
+        "docs/ARCHITECTURE.md",
+        "pyproject.toml",
+        "Architecture docs identify allowed imports.",
+        "New work has a simple rule for where shared code belongs.",
+        "python -m pytest tests/test_package_imports.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G1.S1",
+      "parents": [
+        "G1"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Map package ownership and runtime entrypoints",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g1/g1-s2",
+      "evidence": [
+        "applications/complaint_workspace.py",
+        "applications/document_api.py",
+        "integrations/ipfs_datasets/loader.py",
+        "scripts/agentic_complaint_evidence_scraper.py",
+        "scripts/agentic_scraper_cli.py",
+        "scripts/backfill_claim_testimony_links.py",
+        "scripts/check_hacc_routers.py",
+        "scripts/enrich_email_timeline_authorities.py",
+        "scripts/generate_decision_trees.py",
+        "scripts/generate_email_search_plan.py",
+        "scripts/generate_hacc_email_seed_plan.py",
+        "scripts/gmail_duckdb_daemon.py",
+        "No production entrypoint mutates sys.path for normal imports.",
+        "Explicit exceptions are isolated to scripts/tests.",
+        "python -m pytest tests/test_package_imports.py -q",
+        "applications/complaint_cli.py",
+        "applications/complaint_workspace.py",
+        "Production direct imports are replaced or documented.",
+        "Degraded mode still imports cleanly.",
+        "python -m pytest tests/test_ipfs_adapter_layer.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G1.S2",
+      "parents": [
+        "G1"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Remove ad hoc import path behavior from production surfaces",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g2",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "mediator/mediator.py",
+        "mediator/__init__.py",
+        "mediator/claim_support_hooks.py",
+        "applications/complaint_workspace.py",
+        "applications/dashboard_ui.py",
+        "playwright/server.js",
+        "data/refactor_supervisor/discovery/2026-07-21-ref-029-objective-validation-repair.md",
+        "objective validation repair"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G2",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "active",
+      "title": "Decompose oversized orchestration modules",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g2/g2-s1",
+      "evidence": [
+        "mediator/mediator.py",
+        "mediator/__init__.py",
+        "One cohesive service is extracted.",
+        "Existing imports continue to resolve.",
+        "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q",
+        "mediator/claim_support_hooks.py",
+        "At least one cohesive helper group moves behind a stable import.",
+        "No payload contract changes without tests.",
+        "python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G2.S1",
+      "parents": [
+        "G2"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Extract mediator service seams",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g2/g2-s2",
+      "evidence": [
+        "applications/complaint_workspace.py",
+        "One handler group is isolated.",
+        "Routes keep the same response shape.",
+        "python -m pytest tests/test_review_api.py -q",
+        "applications/dashboard_ui.py",
+        "playwright/server.js",
+        "Fixture builders are named and reusable.",
+        "Playwright smoke tests remain stable.",
+        "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G2.S2",
+      "parents": [
+        "G2"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Reduce application surface coupling",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g3",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "integrations/ipfs_datasets/capabilities.py",
+        "integrations/ipfs_datasets/loader.py",
+        "integrations/ipfs_datasets/documents.py",
+        "mediator/evidence_hooks.py",
+        "integrations/ipfs_datasets/graphs.py",
+        "complaint_phases/knowledge_graph.py",
+        "integrations/ipfs_datasets/logic.py",
+        "lib/formal_logic"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G3",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "active",
+      "title": "Harden adapter contracts and degraded mode",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g3/g3-s1",
+      "evidence": [
+        "integrations/ipfs_datasets/capabilities.py",
+        "integrations/ipfs_datasets/loader.py",
+        "All adapter groups report stable keys.",
+        "Missing optional extras produce actionable reasons.",
+        "python -m pytest tests/test_ipfs_adapter_layer.py -q",
+        "integrations/ipfs_datasets/documents.py",
+        "mediator/evidence_hooks.py",
+        "Evidence",
+        "authority",
+        "and web ingestion can call one parse contract.",
+        "Fallback mode preserves current behavior.",
+        "python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G3.S1",
+      "parents": [
+        "G3"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Normalize IPFS datasets adapter payloads",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g3/g3-s2",
+      "evidence": [
+        "integrations/ipfs_datasets/graphs.py",
+        "complaint_phases/knowledge_graph.py",
+        "Interfaces specify persistence",
+        "query",
+        "and provenance fields.",
+        "Fallback graph behavior remains covered.",
+        "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q",
+        "integrations/ipfs_datasets/logic.py",
+        "lib/formal_logic",
+        "Logic status distinguishes unavailable",
+        "degraded",
+        "and implemented.",
+        "Callers do not branch on fragile strings.",
+        "python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G3.S2",
+      "parents": [
+        "G3"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Clarify graph, GraphRAG, and logic adapter boundaries",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g4",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "pytest.ini",
+        "Makefile",
+        "docs/VERIFICATION_SUMMARY.md",
+        "tests",
+        "pyproject.toml"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G4",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "active",
+      "title": "Improve validation speed and confidence",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g4/g4-s1",
+      "evidence": [
+        "pytest.ini",
+        "Makefile",
+        "docs/VERIFICATION_SUMMARY.md",
+        "A documented test lane map exists.",
+        "Each P0 workstream has a named validation command.",
+        "python -m pytest --collect-only -q",
+        "tests",
+        "pyproject.toml",
+        "Tests catch direct production imports where adapters are required.",
+        "Tests avoid blocking intentional test-only imports.",
+        "python -m pytest tests/test_package_imports.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G4.S1",
+      "parents": [
+        "G4"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Create focused test lanes for refactor work",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g5",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "scripts/refactor_agent_supervisor.py",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "data/refactor_supervisor"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G5",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "active",
+      "title": "Make automation observable and refillable",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g5/g5-s1",
+      "evidence": [
+        "scripts/refactor_agent_supervisor.py",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "Queued task count is maintained above the configured floor.",
+        "Docs and JSON state are regenerated each cycle.",
+        "python scripts/refactor_agent_supervisor.py seed --once",
+        "data/refactor_supervisor",
+        "Status JSON includes pid",
+        "heartbeat",
+        "scan summary",
+        "and counts.",
+        "Stop command terminates the daemon cleanly.",
+        "python scripts/refactor_agent_supervisor.py status"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G5.S1",
+      "parents": [
+        "G5"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Operate a durable refactor taskboard",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g6",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "mediator/mediator.py",
+        "mediator/evidence_hooks.py",
+        "integrations/ipfs_datasets/search.py",
+        "applications/ui_review.py",
+        "complaint_generator/ui_optimizer_daemon.py",
+        "mediator/state.py",
+        "integrations/ipfs_datasets/scraper_daemon.py",
+        "scripts/gmail_duckdb_daemon.py",
+        "docs/OBSERVABILITY_INDEX.md",
+        "docs/observability/TROUBLESHOOTING.md"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G6",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "active",
+      "title": "Pay down error-handling and observability debt",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g6/g6-s1",
+      "evidence": [
+        "mediator/mediator.py",
+        "mediator/evidence_hooks.py",
+        "integrations/ipfs_datasets/search.py",
+        "Top production broad-exception clusters are documented.",
+        "At least one cluster returns a typed degraded result.",
+        "python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q",
+        "applications/ui_review.py",
+        "complaint_generator/ui_optimizer_daemon.py",
+        "mediator/state.py",
+        "Intentional ignores are named.",
+        "Unexpected failures leave diagnostic breadcrumbs.",
+        "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G6.S1",
+      "parents": [
+        "G6"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Replace silent failures with typed outcomes",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g6/g6-s2",
+      "evidence": [
+        "complaint_generator/ui_optimizer_daemon.py",
+        "integrations/ipfs_datasets/scraper_daemon.py",
+        "scripts/gmail_duckdb_daemon.py",
+        "Status payloads include status",
+        "pid",
+        "updated_at",
+        "artifacts",
+        "and last_error where applicable.",
+        "Existing CLI tests remain compatible.",
+        "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q",
+        "docs/OBSERVABILITY_INDEX.md",
+        "docs/observability/TROUBLESHOOTING.md",
+        "Docs explain where to find pid",
+        "log",
+        "status",
+        "and queue files.",
+        "Troubleshooting includes stale running task recovery.",
+        "python scripts/refactor_agent_supervisor.py status"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G6.S2",
+      "parents": [
+        "G6"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Unify runtime status payloads",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g7",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "applications/review_api.py",
+        "applications/ui_review.py",
+        "mediator/claim_support_hooks.py",
+        "tests/test_claim_support_review_playwright_smoke.py",
+        "tests/test_review_surface_site_playwright.py"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G7",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "active",
+      "title": "Rationalize frontend and review surfaces",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g7/g7-s1",
+      "evidence": [
+        "applications/review_api.py",
+        "applications/ui_review.py",
+        "mediator/claim_support_hooks.py",
+        "DTO helpers cover coverage",
+        "follow-up",
+        "and support-path summaries.",
+        "Route response snapshots stay stable.",
+        "python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q",
+        "tests/test_claim_support_review_playwright_smoke.py",
+        "tests/test_review_surface_site_playwright.py",
+        "Shared builders remove repeated setup.",
+        "Screenshots still render with representative support states.",
+        "python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G7.S1",
+      "parents": [
+        "G7"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Separate review API contracts from display assembly",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g8",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "data/refactor_supervisor/refactor_goals.json",
+        "scripts/refactor_agent_supervisor.py",
+        "tests/test_refactor_agent_supervisor.py"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G8",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "active",
+      "title": "Prepare incremental implementation slices",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g8/g8-s1",
+      "evidence": [
+        "docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "Each P0 backlog workstream maps to at least one refactor goal.",
+        "Duplicated tasks are merged or explicitly scoped.",
+        "python scripts/refactor_agent_supervisor.py seed --once",
+        "data/refactor_supervisor/refactor_goals.json",
+        "The first three claims are small",
+        "testable",
+        "and dependency-ordered.",
+        "Each claim names exact validation commands.",
+        "python scripts/refactor_agent_supervisor.py status"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G8.S1",
+      "parents": [
+        "G8"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Convert existing roadmaps into executable slices",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g8/g8-s2",
+      "evidence": [
+        "scripts/refactor_agent_supervisor.py",
+        "Status output or a new command lists next tasks by priority.",
+        "Output is stable enough for automation.",
+        "python scripts/refactor_agent_supervisor.py status",
+        "tests/test_refactor_agent_supervisor.py",
+        "scripts/refactor_agent_supervisor.py",
+        "Running seed twice does not duplicate active tasks.",
+        "Payloads include goal",
+        "subgoal",
+        "priority",
+        "acceptance",
+        "and validation.",
+        "python -m pytest tests/test_refactor_agent_supervisor.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G8.S2",
+      "parents": [
+        "G8"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Keep generated artifacts reviewable",
+      "track": "ops"
+    }
+  ],
+  "graph": {
+    "children": {
+      "G1": [
+        "G1.S1",
+        "G1.S2"
+      ],
+      "G2": [
+        "G2.S1",
+        "G2.S2"
+      ],
+      "G3": [
+        "G3.S1",
+        "G3.S2"
+      ],
+      "G4": [
+        "G4.S1"
+      ],
+      "G5": [
+        "G5.S1"
+      ],
+      "G6": [
+        "G6.S1",
+        "G6.S2"
+      ],
+      "G7": [
+        "G7.S1"
+      ],
+      "G8": [
+        "G8.S1",
+        "G8.S2"
+      ]
+    },
+    "depths": {
+      "G1": 0,
+      "G1.S1": 1,
+      "G1.S2": 1,
+      "G2": 0,
+      "G2.S1": 1,
+      "G2.S2": 1,
+      "G3": 0,
+      "G3.S1": 1,
+      "G3.S2": 1,
+      "G4": 0,
+      "G4.S1": 1,
+      "G5": 0,
+      "G5.S1": 1,
+      "G6": 0,
+      "G6.S1": 1,
+      "G6.S2": 1,
+      "G7": 0,
+      "G7.S1": 1,
+      "G8": 0,
+      "G8.S1": 1,
+      "G8.S2": 1
+    },
+    "edges": [
+      {
+        "from": "G1",
+        "kind": "refines",
+        "to": "G1.S1"
+      },
+      {
+        "from": "G1",
+        "kind": "refines",
+        "to": "G1.S2"
+      },
+      {
+        "from": "G2",
+        "kind": "refines",
+        "to": "G2.S1"
+      },
+      {
+        "from": "G2",
+        "kind": "refines",
+        "to": "G2.S2"
+      },
+      {
+        "from": "G3",
+        "kind": "refines",
+        "to": "G3.S1"
+      },
+      {
+        "from": "G3",
+        "kind": "refines",
+        "to": "G3.S2"
+      },
+      {
+        "from": "G4",
+        "kind": "refines",
+        "to": "G4.S1"
+      },
+      {
+        "from": "G5",
+        "kind": "refines",
+        "to": "G5.S1"
+      },
+      {
+        "from": "G6",
+        "kind": "refines",
+        "to": "G6.S1"
+      },
+      {
+        "from": "G6",
+        "kind": "refines",
+        "to": "G6.S2"
+      },
+      {
+        "from": "G7",
+        "kind": "refines",
+        "to": "G7.S1"
+      },
+      {
+        "from": "G8",
+        "kind": "refines",
+        "to": "G8.S1"
+      },
+      {
+        "from": "G8",
+        "kind": "refines",
+        "to": "G8.S2"
+      }
+    ],
+    "nodes": [
+      "G1",
+      "G1.S1",
+      "G1.S2",
+      "G2",
+      "G2.S1",
+      "G2.S2",
+      "G3",
+      "G3.S1",
+      "G3.S2",
+      "G4",
+      "G4.S1",
+      "G5",
+      "G5.S1",
+      "G6",
+      "G6.S1",
+      "G6.S2",
+      "G7",
+      "G7.S1",
+      "G8",
+      "G8.S1",
+      "G8.S2"
+    ],
+    "roots": [
+      "G1",
+      "G2",
+      "G3",
+      "G4",
+      "G5",
+      "G6",
+      "G7",
+      "G8"
+    ]
+  },
+  "heap_schedule": [
+    {
+      "fib_priority": 999999,
+      "goal_id": "G1.S2",
+      "graph_depth": 1,
+      "heap_index": 0,
+      "output_count": 0,
+      "parents": [
+        "G1"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 20,
+      "sort_key": [
+        999999,
+        0,
+        -80,
+        1,
+        "G1.S2"
+      ],
+      "status": "active",
+      "title": "Remove ad hoc import path behavior from production surfaces",
+      "track": "ops",
+      "work_surface_score": 80
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G1.S1",
+      "graph_depth": 1,
+      "heap_index": 1,
+      "output_count": 0,
+      "parents": [
+        "G1"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 17,
+      "sort_key": [
+        999999,
+        0,
+        -68,
+        1,
+        "G1.S1"
+      ],
+      "status": "active",
+      "title": "Map package ownership and runtime entrypoints",
+      "track": "ops",
+      "work_surface_score": 68
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G3.S2",
+      "graph_depth": 1,
+      "heap_index": 2,
+      "output_count": 0,
+      "parents": [
+        "G3"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 14,
+      "sort_key": [
+        999999,
+        0,
+        -56,
+        1,
+        "G3.S2"
+      ],
+      "status": "active",
+      "title": "Clarify graph, GraphRAG, and logic adapter boundaries",
+      "track": "ops",
+      "work_surface_score": 56
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G8.S2",
+      "graph_depth": 1,
+      "heap_index": 3,
+      "output_count": 0,
+      "parents": [
+        "G8"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 13,
+      "sort_key": [
+        999999,
+        0,
+        -52,
+        1,
+        "G8.S2"
+      ],
+      "status": "active",
+      "title": "Keep generated artifacts reviewable",
+      "track": "ops",
+      "work_surface_score": 52
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G3.S1",
+      "graph_depth": 1,
+      "heap_index": 4,
+      "output_count": 0,
+      "parents": [
+        "G3"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 12,
+      "sort_key": [
+        999999,
+        0,
+        -48,
+        1,
+        "G3.S1"
+      ],
+      "status": "active",
+      "title": "Normalize IPFS datasets adapter payloads",
+      "track": "ops",
+      "work_surface_score": 48
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G5.S1",
+      "graph_depth": 1,
+      "heap_index": 5,
+      "output_count": 0,
+      "parents": [
+        "G5"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 12,
+      "sort_key": [
+        999999,
+        0,
+        -48,
+        1,
+        "G5.S1"
+      ],
+      "status": "active",
+      "title": "Operate a durable refactor taskboard",
+      "track": "ops",
+      "work_surface_score": 48
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G8.S1",
+      "graph_depth": 1,
+      "heap_index": 6,
+      "output_count": 0,
+      "parents": [
+        "G8"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 11,
+      "sort_key": [
+        999999,
+        0,
+        -44,
+        1,
+        "G8.S1"
+      ],
+      "status": "active",
+      "title": "Convert existing roadmaps into executable slices",
+      "track": "ops",
+      "work_surface_score": 44
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G1",
+      "graph_depth": 0,
+      "heap_index": 7,
+      "output_count": 0,
+      "parents": [],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 10,
+      "sort_key": [
+        999999,
+        0,
+        -40,
+        0,
+        "G1"
+      ],
+      "status": "active",
+      "title": "Stabilize repository boundaries",
+      "track": "ops",
+      "work_surface_score": 40
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G3",
+      "graph_depth": 0,
+      "heap_index": 8,
+      "output_count": 0,
+      "parents": [],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 10,
+      "sort_key": [
+        999999,
+        0,
+        -40,
+        0,
+        "G3"
+      ],
+      "status": "active",
+      "title": "Harden adapter contracts and degraded mode",
+      "track": "ops",
+      "work_surface_score": 40
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G2.S1",
+      "graph_depth": 1,
+      "heap_index": 9,
+      "output_count": 0,
+      "parents": [
+        "G2"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 9,
+      "sort_key": [
+        999999,
+        0,
+        -36,
+        1,
+        "G2.S1"
+      ],
+      "status": "active",
+      "title": "Extract mediator service seams",
+      "track": "ops",
+      "work_surface_score": 36
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G2.S2",
+      "graph_depth": 1,
+      "heap_index": 10,
+      "output_count": 0,
+      "parents": [
+        "G2"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 9,
+      "sort_key": [
+        999999,
+        0,
+        -36,
+        1,
+        "G2.S2"
+      ],
+      "status": "active",
+      "title": "Reduce application surface coupling",
+      "track": "ops",
+      "work_surface_score": 36
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G2",
+      "graph_depth": 0,
+      "heap_index": 11,
+      "output_count": 0,
+      "parents": [],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 8,
+      "sort_key": [
+        999999,
+        0,
+        -32,
+        0,
+        "G2"
+      ],
+      "status": "active",
+      "title": "Decompose oversized orchestration modules",
+      "track": "ops",
+      "work_surface_score": 32
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G8",
+      "graph_depth": 0,
+      "heap_index": 12,
+      "output_count": 0,
+      "parents": [],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 7,
+      "sort_key": [
+        999999,
+        0,
+        -28,
+        0,
+        "G8"
+      ],
+      "status": "active",
+      "title": "Prepare incremental implementation slices",
+      "track": "ops",
+      "work_surface_score": 28
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G5",
+      "graph_depth": 0,
+      "heap_index": 13,
+      "output_count": 0,
+      "parents": [],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 5,
+      "sort_key": [
+        999999,
+        0,
+        -20,
+        0,
+        "G5"
+      ],
+      "status": "active",
+      "title": "Make automation observable and refillable",
+      "track": "ops",
+      "work_surface_score": 20
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G6.S2",
+      "graph_depth": 1,
+      "heap_index": 14,
+      "output_count": 0,
+      "parents": [
+        "G6"
+      ],
+      "priority": "P1",
+      "priority_rank": 1,
+      "required_evidence_count": 18,
+      "sort_key": [
+        999999,
+        1,
+        -72,
+        1,
+        "G6.S2"
+      ],
+      "status": "active",
+      "title": "Unify runtime status payloads",
+      "track": "ops",
+      "work_surface_score": 72
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G7.S1",
+      "graph_depth": 1,
+      "heap_index": 15,
+      "output_count": 0,
+      "parents": [
+        "G7"
+      ],
+      "priority": "P1",
+      "priority_rank": 1,
+      "required_evidence_count": 13,
+      "sort_key": [
+        999999,
+        1,
+        -52,
+        1,
+        "G7.S1"
+      ],
+      "status": "active",
+      "title": "Separate review API contracts from display assembly",
+      "track": "ops",
+      "work_surface_score": 52
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G6",
+      "graph_depth": 0,
+      "heap_index": 16,
+      "output_count": 0,
+      "parents": [],
+      "priority": "P1",
+      "priority_rank": 1,
+      "required_evidence_count": 12,
+      "sort_key": [
+        999999,
+        1,
+        -48,
+        0,
+        "G6"
+      ],
+      "status": "active",
+      "title": "Pay down error-handling and observability debt",
+      "track": "ops",
+      "work_surface_score": 48
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G6.S1",
+      "graph_depth": 1,
+      "heap_index": 17,
+      "output_count": 0,
+      "parents": [
+        "G6"
+      ],
+      "priority": "P1",
+      "priority_rank": 1,
+      "required_evidence_count": 12,
+      "sort_key": [
+        999999,
+        1,
+        -48,
+        1,
+        "G6.S1"
+      ],
+      "status": "active",
+      "title": "Replace silent failures with typed outcomes",
+      "track": "ops",
+      "work_surface_score": 48
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G4.S1",
+      "graph_depth": 1,
+      "heap_index": 18,
+      "output_count": 0,
+      "parents": [
+        "G4"
+      ],
+      "priority": "P1",
+      "priority_rank": 1,
+      "required_evidence_count": 11,
+      "sort_key": [
+        999999,
+        1,
+        -44,
+        1,
+        "G4.S1"
+      ],
+      "status": "active",
+      "title": "Create focused test lanes for refactor work",
+      "track": "ops",
+      "work_surface_score": 44
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G4",
+      "graph_depth": 0,
+      "heap_index": 19,
+      "output_count": 0,
+      "parents": [],
+      "priority": "P1",
+      "priority_rank": 1,
+      "required_evidence_count": 7,
+      "sort_key": [
+        999999,
+        1,
+        -28,
+        0,
+        "G4"
+      ],
+      "status": "active",
+      "title": "Improve validation speed and confidence",
+      "track": "ops",
+      "work_surface_score": 28
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G7",
+      "graph_depth": 0,
+      "heap_index": 20,
+      "output_count": 0,
+      "parents": [],
+      "priority": "P1",
+      "priority_rank": 1,
+      "required_evidence_count": 7,
+      "sort_key": [
+        999999,
+        1,
+        -28,
+        0,
+        "G7"
+      ],
+      "status": "active",
+      "title": "Rationalize frontend and review surfaces",
+      "track": "ops",
+      "work_surface_score": 28
+    }
+  ],
+  "objective_path": "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_objective_heap.md",
+  "schema": "ipfs_accelerate_py.agent_supervisor.objective_graph",
+  "thought_graph": {
+    "edge_count": 258,
+    "edges": [
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:6d2b8ef709c5"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:3fa03927433c"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:f0c1eddc0cf0"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:3b229b80264e"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:09ef200e41e2"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:6d2b8ef709c5"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:c05347d676bc"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:dffc51113899"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:43a7105d32ce"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:6a6ad7dced1b"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "validated_by",
+        "to": "validation:eca7a557983d"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:b4d7d8c8b13e"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4b761d6b3fa9"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:66296aa2a627"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:d6ad4f8935b7"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:5ae2e8046b66"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:d63a7f01e052"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:6cbc2e7a4dbb"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:867de19f4218"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4068950d6048"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:dcafa2ac60a3"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:aac0f482276e"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:04e8b38e73f0"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:03e28f7b0e46"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:9aac1307e178"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:80efb3a18049"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:0a6983fc5661"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:04e8b38e73f0"
+      },
+      {
+        "from": "goal:G1.S1",
+        "kind": "validated_by",
+        "to": "validation:04e8b38e73f0"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:44487fa9cd23"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:fd937b37b2d6"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:bb85e6d6f242"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:00da853e238c"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:b16aa98bc5a1"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:90ad9322e670"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:2dd0cfc09d8b"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e58b507b3ebe"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:dc6156b37f89"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:46134510e994"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:92c9e2129c1c"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:c72881ae0ff5"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:5b281508f996"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:3a929734c50f"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:3f1abfd758f7"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e4c396fb1ffa"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:44487fa9cd23"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:ff9cc437b297"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:fa07cb938291"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:fb1bf90bf366"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "validated_by",
+        "to": "validation:21a6037b0f10"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "requires_evidence",
+        "to": "evidence:7466ff431ff3"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "requires_evidence",
+        "to": "evidence:248ec277c0c0"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "requires_evidence",
+        "to": "evidence:ce12d18c5cab"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "requires_evidence",
+        "to": "evidence:6f512fa4c448"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "requires_evidence",
+        "to": "evidence:7cd93ee3ab27"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "requires_evidence",
+        "to": "evidence:2d64b17cd307"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "requires_evidence",
+        "to": "evidence:90aad5a29c12"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "requires_evidence",
+        "to": "evidence:eb46857904bc"
+      },
+      {
+        "from": "goal:G2",
+        "kind": "validated_by",
+        "to": "validation:94c287e91bbb"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4a9fee2a9a92"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:7fc6d57a50f5"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:05eb54bb3f14"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:65030b41380f"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:7dda6ee05254"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:03aafeb6fd84"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:bda3e5f4be70"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:cff511c253f4"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:e33adf4a8b3b"
+      },
+      {
+        "from": "goal:G2.S1",
+        "kind": "validated_by",
+        "to": "validation:4ec77956d751"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:1c0cc1029dd6"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:758793de854b"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:73c1d51dd14b"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:0bfc00a09935"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:b4b0d7305b40"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:37bafca45189"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e26b7efa6497"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:9b1643a62a81"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:8d04f2411aea"
+      },
+      {
+        "from": "goal:G2.S2",
+        "kind": "validated_by",
+        "to": "validation:a662b17ac165"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:f07e11bf7db6"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:058a09e12a68"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:918246e81f78"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:2f0e0645bba7"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:a414db782074"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:b2557f2fb6ca"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:2bf5a4819f82"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:266080ca076d"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:1ab18953883b"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:b04fe9f20996"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "validated_by",
+        "to": "validation:54883e007096"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:0aa1430d8504"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:547bd0ad7ef6"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:dc1a9b971692"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:5fec8b90b6bd"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:cce8a4234a2a"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:20ccb713acf9"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:ad76eb0efceb"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:8636f7c429a6"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:bccc6d7f44a2"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:9a12f4aa5c38"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:5e7e05a81551"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:37e77f303a72"
+      },
+      {
+        "from": "goal:G3.S1",
+        "kind": "validated_by",
+        "to": "validation:d2044424470e"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:62a95285bdb2"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:4709c0c3b87d"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e7f377872b3c"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:8b64c75283cc"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:d01f8d118793"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:aaa27914d65d"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e18aa7f12aa9"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:26a69cd38b8a"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:46773c2084c5"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:ef31188d6fc1"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:b75f163d96cd"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:926a4e71019c"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:8413bf0418b8"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:3066a3488de0"
+      },
+      {
+        "from": "goal:G3.S2",
+        "kind": "validated_by",
+        "to": "validation:1406d98f373c"
+      },
+      {
+        "from": "goal:G4",
+        "kind": "requires_evidence",
+        "to": "evidence:c9cf4e7fbbc5"
+      },
+      {
+        "from": "goal:G4",
+        "kind": "requires_evidence",
+        "to": "evidence:0a9bde28e4a2"
+      },
+      {
+        "from": "goal:G4",
+        "kind": "requires_evidence",
+        "to": "evidence:25e27c6fc672"
+      },
+      {
+        "from": "goal:G4",
+        "kind": "requires_evidence",
+        "to": "evidence:7b7a7528ee9b"
+      },
+      {
+        "from": "goal:G4",
+        "kind": "requires_evidence",
+        "to": "evidence:12984ab52272"
+      },
+      {
+        "from": "goal:G4",
+        "kind": "requires_evidence",
+        "to": "evidence:ac52268b216e"
+      },
+      {
+        "from": "goal:G4",
+        "kind": "requires_evidence",
+        "to": "evidence:aec270d94d62"
+      },
+      {
+        "from": "goal:G4",
+        "kind": "validated_by",
+        "to": "validation:033e169ea47e"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2b4cc1b5f2b6"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:7c659b984581"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:395841e4d5b8"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:74e12a60c885"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:3e5a049ce73d"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:9cf6dd5afbaa"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:d1c94733c405"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:658d3066f746"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:496db8fdb7b5"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:35fbc9e78352"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4cc11403347a"
+      },
+      {
+        "from": "goal:G4.S1",
+        "kind": "validated_by",
+        "to": "validation:501faf0fb81c"
+      },
+      {
+        "from": "goal:G5",
+        "kind": "requires_evidence",
+        "to": "evidence:17932ec285d8"
+      },
+      {
+        "from": "goal:G5",
+        "kind": "requires_evidence",
+        "to": "evidence:fa24b95af710"
+      },
+      {
+        "from": "goal:G5",
+        "kind": "requires_evidence",
+        "to": "evidence:03a59d1fa82f"
+      },
+      {
+        "from": "goal:G5",
+        "kind": "requires_evidence",
+        "to": "evidence:fa24b95af710"
+      },
+      {
+        "from": "goal:G5",
+        "kind": "requires_evidence",
+        "to": "evidence:15465996f438"
+      },
+      {
+        "from": "goal:G5",
+        "kind": "validated_by",
+        "to": "validation:76cd95c32e3c"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4f655087fe48"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:f72cccd8fe3c"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:06601b227bc8"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:5be934a636ca"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:3825454a5b18"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4f4bab2ddf9b"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:9fb7eba4dd1c"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:1500774a16bd"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:eff1f644d0bb"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4635e55f79d7"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:fa5f0a514335"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:a0a31c08a074"
+      },
+      {
+        "from": "goal:G5.S1",
+        "kind": "validated_by",
+        "to": "validation:2997f3e35a24"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:633252ac6b34"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:9b496c9f5458"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:eb02978724b0"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:8a3c2077314c"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:7acb137e5fab"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:0c8f79f9204f"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:85a54a5e618b"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:fa2c8f517790"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:57743ddde152"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:8acaf11fee64"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:ad721f8eae07"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "requires_evidence",
+        "to": "evidence:f0ebe5884b9c"
+      },
+      {
+        "from": "goal:G6",
+        "kind": "validated_by",
+        "to": "validation:914b2aa5b355"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2982c4ca7deb"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:179684dd6d9b"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:472d4e853dff"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:ab93a8d6ade2"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:0c91a0769b77"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:5fa2d5706797"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:1eb1d8b56991"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4977a37917dc"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:f887fd5a6043"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:d8180805eb17"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:1398b92350a2"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:353d54b8affb"
+      },
+      {
+        "from": "goal:G6.S1",
+        "kind": "validated_by",
+        "to": "validation:d393a783b53a"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:973baf896c0c"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:37bdcec9c39a"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:6b9794addbca"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:8fd0dd066b7b"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:1ae386644e38"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:074b10a2abe3"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:828cb0b1deb9"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:68269cd50078"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:b31f684b6fea"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:708ee90f6834"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:66acd5d30249"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:2d756bf1168f"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:b6368928630c"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:526271bedff3"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:84d0c09fedbd"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:bfda60094bf9"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:2e90f2df1315"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:f83e85e1bac6"
+      },
+      {
+        "from": "goal:G6.S2",
+        "kind": "validated_by",
+        "to": "validation:e41cb08333ec"
+      },
+      {
+        "from": "goal:G7",
+        "kind": "requires_evidence",
+        "to": "evidence:b5570a6d7c8a"
+      },
+      {
+        "from": "goal:G7",
+        "kind": "requires_evidence",
+        "to": "evidence:3b56a9e9bcfd"
+      },
+      {
+        "from": "goal:G7",
+        "kind": "requires_evidence",
+        "to": "evidence:8f6ec6ee8230"
+      },
+      {
+        "from": "goal:G7",
+        "kind": "requires_evidence",
+        "to": "evidence:ae6814a2a0bf"
+      },
+      {
+        "from": "goal:G7",
+        "kind": "requires_evidence",
+        "to": "evidence:69b4419b334d"
+      },
+      {
+        "from": "goal:G7",
+        "kind": "requires_evidence",
+        "to": "evidence:555b16f364f9"
+      },
+      {
+        "from": "goal:G7",
+        "kind": "requires_evidence",
+        "to": "evidence:36dc5713d344"
+      },
+      {
+        "from": "goal:G7",
+        "kind": "validated_by",
+        "to": "validation:ea9c24b1d4a9"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2dddba8d82f8"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2079fbecce16"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:00c7423e015c"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:985a420b225e"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:a06e2c16b794"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2305c3ff692b"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:c04c18792b2a"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2dbe3302f1a8"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:f7371290a952"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:c2bbea09ee6c"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:dc769b37222f"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:a41b8859b030"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:b14bb61fab3f"
+      },
+      {
+        "from": "goal:G7.S1",
+        "kind": "validated_by",
+        "to": "validation:7ef4d7f95b29"
+      },
+      {
+        "from": "goal:G8",
+        "kind": "requires_evidence",
+        "to": "evidence:a40af2a71839"
+      },
+      {
+        "from": "goal:G8",
+        "kind": "requires_evidence",
+        "to": "evidence:e29ab10cfd3e"
+      },
+      {
+        "from": "goal:G8",
+        "kind": "requires_evidence",
+        "to": "evidence:fee7d83cf296"
+      },
+      {
+        "from": "goal:G8",
+        "kind": "requires_evidence",
+        "to": "evidence:e29ab10cfd3e"
+      },
+      {
+        "from": "goal:G8",
+        "kind": "requires_evidence",
+        "to": "evidence:f3c9c110124e"
+      },
+      {
+        "from": "goal:G8",
+        "kind": "requires_evidence",
+        "to": "evidence:a15c8b005efe"
+      },
+      {
+        "from": "goal:G8",
+        "kind": "requires_evidence",
+        "to": "evidence:639c1b05b1cd"
+      },
+      {
+        "from": "goal:G8",
+        "kind": "validated_by",
+        "to": "validation:7f7c4a06ac1b"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:fc5866207ab9"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:7df9382aeb79"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:09a3c1f8fca1"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:d9395a835f13"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:8a104bed7f70"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:bb9db9813fd5"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:cc2fc5d2f0f3"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:bad6773577f7"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:620868b531b0"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:924b1715f493"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:16c492a057ee"
+      },
+      {
+        "from": "goal:G8.S1",
+        "kind": "validated_by",
+        "to": "validation:ce0af9b2a7f1"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e2b5d4aedcf2"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:de7d9a07ab7b"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:17a9834eeeb1"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:a90433b751f9"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:aa2f515e1036"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e2b5d4aedcf2"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:bdbb05aa925d"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:a598166d8478"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:32c39c700901"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:0150ed505809"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:c030ee5c778e"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:812b303eb12c"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:7b3c38567c12"
+      },
+      {
+        "from": "goal:G8.S2",
+        "kind": "validated_by",
+        "to": "validation:d61882f7ad34"
+      }
+    ],
+    "node_count": 273,
+    "nodes": [
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:00c7423e015c",
+        "kind": "evidence_requirement",
+        "term": "mediator/claim_support_hooks.py",
+        "thought": "Find or create repository evidence proving `mediator/claim_support_hooks.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:00da853e238c",
+        "kind": "evidence_requirement",
+        "term": "scripts/agentic_complaint_evidence_scraper.py",
+        "thought": "Find or create repository evidence proving `scripts/agentic_complaint_evidence_scraper.py`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:0150ed505809",
+        "kind": "evidence_requirement",
+        "term": "priority",
+        "thought": "Find or create repository evidence proving `priority`."
+      },
+      {
+        "goal_id": "G5",
+        "id": "evidence:03a59d1fa82f",
+        "kind": "evidence_requirement",
+        "term": "scripts/refactor_agent_supervisor.py",
+        "thought": "Find or create repository evidence proving `scripts/refactor_agent_supervisor.py`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:03aafeb6fd84",
+        "kind": "evidence_requirement",
+        "term": "mediator/claim_support_hooks.py",
+        "thought": "Find or create repository evidence proving `mediator/claim_support_hooks.py`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:03e28f7b0e46",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:04e8b38e73f0",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_package_imports.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_package_imports.py -q`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:058a09e12a68",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:05eb54bb3f14",
+        "kind": "evidence_requirement",
+        "term": "One cohesive service is extracted.",
+        "thought": "Find or create repository evidence proving `One cohesive service is extracted.`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:06601b227bc8",
+        "kind": "evidence_requirement",
+        "term": "Queued task count is maintained above the configured floor.",
+        "thought": "Find or create repository evidence proving `Queued task count is maintained above the configured floor.`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:074b10a2abe3",
+        "kind": "evidence_requirement",
+        "term": "updated_at",
+        "thought": "Find or create repository evidence proving `updated_at`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:09a3c1f8fca1",
+        "kind": "evidence_requirement",
+        "term": "Each P0 backlog workstream maps to at least one refactor goal.",
+        "thought": "Find or create repository evidence proving `Each P0 backlog workstream maps to at least one refactor goal.`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:09ef200e41e2",
+        "kind": "evidence_requirement",
+        "term": "tests/test_claim_support_review_playwright_smoke.py",
+        "thought": "Find or create repository evidence proving `tests/test_claim_support_review_playwright_smoke.py`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:0a6983fc5661",
+        "kind": "evidence_requirement",
+        "term": "New work has a simple rule for where shared code belongs.",
+        "thought": "Find or create repository evidence proving `New work has a simple rule for where shared code belongs.`."
+      },
+      {
+        "goal_id": "G4",
+        "id": "evidence:0a9bde28e4a2",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:0aa1430d8504",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/capabilities.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/capabilities.py`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:0bfc00a09935",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_review_api.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_review_api.py -q`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:0c8f79f9204f",
+        "kind": "evidence_requirement",
+        "term": "applications/ui_review.py",
+        "thought": "Find or create repository evidence proving `applications/ui_review.py`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:0c91a0769b77",
+        "kind": "evidence_requirement",
+        "term": "At least one cluster returns a typed degraded result.",
+        "thought": "Find or create repository evidence proving `At least one cluster returns a typed degraded result.`."
+      },
+      {
+        "goal_id": "G4",
+        "id": "evidence:12984ab52272",
+        "kind": "evidence_requirement",
+        "term": "docs/VERIFICATION_SUMMARY.md",
+        "thought": "Find or create repository evidence proving `docs/VERIFICATION_SUMMARY.md`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:1398b92350a2",
+        "kind": "evidence_requirement",
+        "term": "Unexpected failures leave diagnostic breadcrumbs.",
+        "thought": "Find or create repository evidence proving `Unexpected failures leave diagnostic breadcrumbs.`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:1500774a16bd",
+        "kind": "evidence_requirement",
+        "term": "heartbeat",
+        "thought": "Find or create repository evidence proving `heartbeat`."
+      },
+      {
+        "goal_id": "G5",
+        "id": "evidence:15465996f438",
+        "kind": "evidence_requirement",
+        "term": "data/refactor_supervisor",
+        "thought": "Find or create repository evidence proving `data/refactor_supervisor`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:16c492a057ee",
+        "kind": "evidence_requirement",
+        "term": "python scripts/refactor_agent_supervisor.py status",
+        "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py status`."
+      },
+      {
+        "goal_id": "G5",
+        "id": "evidence:17932ec285d8",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:179684dd6d9b",
+        "kind": "evidence_requirement",
+        "term": "mediator/evidence_hooks.py",
+        "thought": "Find or create repository evidence proving `mediator/evidence_hooks.py`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:17a9834eeeb1",
+        "kind": "evidence_requirement",
+        "term": "Output is stable enough for automation.",
+        "thought": "Find or create repository evidence proving `Output is stable enough for automation.`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:1ab18953883b",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/logic.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/logic.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:1ae386644e38",
+        "kind": "evidence_requirement",
+        "term": "pid",
+        "thought": "Find or create repository evidence proving `pid`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:1c0cc1029dd6",
+        "kind": "evidence_requirement",
+        "term": "applications/complaint_workspace.py",
+        "thought": "Find or create repository evidence proving `applications/complaint_workspace.py`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:1eb1d8b56991",
+        "kind": "evidence_requirement",
+        "term": "applications/ui_review.py",
+        "thought": "Find or create repository evidence proving `applications/ui_review.py`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:2079fbecce16",
+        "kind": "evidence_requirement",
+        "term": "applications/ui_review.py",
+        "thought": "Find or create repository evidence proving `applications/ui_review.py`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:20ccb713acf9",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/documents.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/documents.py`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:2305c3ff692b",
+        "kind": "evidence_requirement",
+        "term": "and support-path summaries.",
+        "thought": "Find or create repository evidence proving `and support-path summaries.`."
+      },
+      {
+        "goal_id": "G2",
+        "id": "evidence:248ec277c0c0",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G4",
+        "id": "evidence:25e27c6fc672",
+        "kind": "evidence_requirement",
+        "term": "pytest.ini",
+        "thought": "Find or create repository evidence proving `pytest.ini`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:266080ca076d",
+        "kind": "evidence_requirement",
+        "term": "complaint_phases/knowledge_graph.py",
+        "thought": "Find or create repository evidence proving `complaint_phases/knowledge_graph.py`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:26a69cd38b8a",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/logic.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/logic.py`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:2982c4ca7deb",
+        "kind": "evidence_requirement",
+        "term": "mediator/mediator.py",
+        "thought": "Find or create repository evidence proving `mediator/mediator.py`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:2b4cc1b5f2b6",
+        "kind": "evidence_requirement",
+        "term": "pytest.ini",
+        "thought": "Find or create repository evidence proving `pytest.ini`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:2bf5a4819f82",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/graphs.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/graphs.py`."
+      },
+      {
+        "goal_id": "G2",
+        "id": "evidence:2d64b17cd307",
+        "kind": "evidence_requirement",
+        "term": "applications/complaint_workspace.py",
+        "thought": "Find or create repository evidence proving `applications/complaint_workspace.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:2d756bf1168f",
+        "kind": "evidence_requirement",
+        "term": "docs/observability/TROUBLESHOOTING.md",
+        "thought": "Find or create repository evidence proving `docs/observability/TROUBLESHOOTING.md`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:2dbe3302f1a8",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:2dd0cfc09d8b",
+        "kind": "evidence_requirement",
+        "term": "scripts/check_hacc_routers.py",
+        "thought": "Find or create repository evidence proving `scripts/check_hacc_routers.py`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:2dddba8d82f8",
+        "kind": "evidence_requirement",
+        "term": "applications/review_api.py",
+        "thought": "Find or create repository evidence proving `applications/review_api.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:2e90f2df1315",
+        "kind": "evidence_requirement",
+        "term": "Troubleshooting includes stale running task recovery.",
+        "thought": "Find or create repository evidence proving `Troubleshooting includes stale running task recovery.`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:2f0e0645bba7",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/loader.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/loader.py`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:3066a3488de0",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:32c39c700901",
+        "kind": "evidence_requirement",
+        "term": "subgoal",
+        "thought": "Find or create repository evidence proving `subgoal`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:353d54b8affb",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:35fbc9e78352",
+        "kind": "evidence_requirement",
+        "term": "Tests avoid blocking intentional test-only imports.",
+        "thought": "Find or create repository evidence proving `Tests avoid blocking intentional test-only imports.`."
+      },
+      {
+        "goal_id": "G7",
+        "id": "evidence:36dc5713d344",
+        "kind": "evidence_requirement",
+        "term": "tests/test_review_surface_site_playwright.py",
+        "thought": "Find or create repository evidence proving `tests/test_review_surface_site_playwright.py`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:37bafca45189",
+        "kind": "evidence_requirement",
+        "term": "playwright/server.js",
+        "thought": "Find or create repository evidence proving `playwright/server.js`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:37bdcec9c39a",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/scraper_daemon.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/scraper_daemon.py`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:37e77f303a72",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:3825454a5b18",
+        "kind": "evidence_requirement",
+        "term": "python scripts/refactor_agent_supervisor.py seed --once",
+        "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py seed --once`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:395841e4d5b8",
+        "kind": "evidence_requirement",
+        "term": "docs/VERIFICATION_SUMMARY.md",
+        "thought": "Find or create repository evidence proving `docs/VERIFICATION_SUMMARY.md`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:3a929734c50f",
+        "kind": "evidence_requirement",
+        "term": "Explicit exceptions are isolated to scripts/tests.",
+        "thought": "Find or create repository evidence proving `Explicit exceptions are isolated to scripts/tests.`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:3b229b80264e",
+        "kind": "evidence_requirement",
+        "term": "applications/complaint_workspace.py",
+        "thought": "Find or create repository evidence proving `applications/complaint_workspace.py`."
+      },
+      {
+        "goal_id": "G7",
+        "id": "evidence:3b56a9e9bcfd",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:3e5a049ce73d",
+        "kind": "evidence_requirement",
+        "term": "Each P0 workstream has a named validation command.",
+        "thought": "Find or create repository evidence proving `Each P0 workstream has a named validation command.`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:3f1abfd758f7",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_package_imports.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_package_imports.py -q`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:3fa03927433c",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:4068950d6048",
+        "kind": "evidence_requirement",
+        "term": "web",
+        "thought": "Find or create repository evidence proving `web`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:43a7105d32ce",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/loader.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/loader.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:44487fa9cd23",
+        "kind": "evidence_requirement",
+        "term": "applications/complaint_workspace.py",
+        "thought": "Find or create repository evidence proving `applications/complaint_workspace.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:46134510e994",
+        "kind": "evidence_requirement",
+        "term": "scripts/generate_email_search_plan.py",
+        "thought": "Find or create repository evidence proving `scripts/generate_email_search_plan.py`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:4635e55f79d7",
+        "kind": "evidence_requirement",
+        "term": "and counts.",
+        "thought": "Find or create repository evidence proving `and counts.`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:46773c2084c5",
+        "kind": "evidence_requirement",
+        "term": "lib/formal_logic",
+        "thought": "Find or create repository evidence proving `lib/formal_logic`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:4709c0c3b87d",
+        "kind": "evidence_requirement",
+        "term": "complaint_phases/knowledge_graph.py",
+        "thought": "Find or create repository evidence proving `complaint_phases/knowledge_graph.py`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:472d4e853dff",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/search.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/search.py`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:496db8fdb7b5",
+        "kind": "evidence_requirement",
+        "term": "Tests catch direct production imports where adapters are required.",
+        "thought": "Find or create repository evidence proving `Tests catch direct production imports where adapters are required.`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:4977a37917dc",
+        "kind": "evidence_requirement",
+        "term": "complaint_generator/ui_optimizer_daemon.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/ui_optimizer_daemon.py`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:4a9fee2a9a92",
+        "kind": "evidence_requirement",
+        "term": "mediator/mediator.py",
+        "thought": "Find or create repository evidence proving `mediator/mediator.py`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:4b761d6b3fa9",
+        "kind": "evidence_requirement",
+        "term": "applications/complaint_workspace.py",
+        "thought": "Find or create repository evidence proving `applications/complaint_workspace.py`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:4cc11403347a",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_package_imports.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_package_imports.py -q`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:4f4bab2ddf9b",
+        "kind": "evidence_requirement",
+        "term": "data/refactor_supervisor",
+        "thought": "Find or create repository evidence proving `data/refactor_supervisor`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:4f655087fe48",
+        "kind": "evidence_requirement",
+        "term": "scripts/refactor_agent_supervisor.py",
+        "thought": "Find or create repository evidence proving `scripts/refactor_agent_supervisor.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:526271bedff3",
+        "kind": "evidence_requirement",
+        "term": "log",
+        "thought": "Find or create repository evidence proving `log`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:547bd0ad7ef6",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/loader.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/loader.py`."
+      },
+      {
+        "goal_id": "G7",
+        "id": "evidence:555b16f364f9",
+        "kind": "evidence_requirement",
+        "term": "tests/test_claim_support_review_playwright_smoke.py",
+        "thought": "Find or create repository evidence proving `tests/test_claim_support_review_playwright_smoke.py`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:57743ddde152",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/scraper_daemon.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/scraper_daemon.py`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:5ae2e8046b66",
+        "kind": "evidence_requirement",
+        "term": "tests/test_review_api.py",
+        "thought": "Find or create repository evidence proving `tests/test_review_api.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:5b281508f996",
+        "kind": "evidence_requirement",
+        "term": "No production entrypoint mutates sys.path for normal imports.",
+        "thought": "Find or create repository evidence proving `No production entrypoint mutates sys.path for normal imports.`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:5be934a636ca",
+        "kind": "evidence_requirement",
+        "term": "Docs and JSON state are regenerated each cycle.",
+        "thought": "Find or create repository evidence proving `Docs and JSON state are regenerated each cycle.`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:5e7e05a81551",
+        "kind": "evidence_requirement",
+        "term": "Fallback mode preserves current behavior.",
+        "thought": "Find or create repository evidence proving `Fallback mode preserves current behavior.`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:5fa2d5706797",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:5fec8b90b6bd",
+        "kind": "evidence_requirement",
+        "term": "Missing optional extras produce actionable reasons.",
+        "thought": "Find or create repository evidence proving `Missing optional extras produce actionable reasons.`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:620868b531b0",
+        "kind": "evidence_requirement",
+        "term": "and dependency-ordered.",
+        "thought": "Find or create repository evidence proving `and dependency-ordered.`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:62a95285bdb2",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/graphs.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/graphs.py`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:633252ac6b34",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G8",
+        "id": "evidence:639c1b05b1cd",
+        "kind": "evidence_requirement",
+        "term": "tests/test_refactor_agent_supervisor.py",
+        "thought": "Find or create repository evidence proving `tests/test_refactor_agent_supervisor.py`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:65030b41380f",
+        "kind": "evidence_requirement",
+        "term": "Existing imports continue to resolve.",
+        "thought": "Find or create repository evidence proving `Existing imports continue to resolve.`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:658d3066f746",
+        "kind": "evidence_requirement",
+        "term": "pyproject.toml",
+        "thought": "Find or create repository evidence proving `pyproject.toml`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:66296aa2a627",
+        "kind": "evidence_requirement",
+        "term": "tests/test_claim_support_review_playwright_smoke.py",
+        "thought": "Find or create repository evidence proving `tests/test_claim_support_review_playwright_smoke.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:66acd5d30249",
+        "kind": "evidence_requirement",
+        "term": "docs/OBSERVABILITY_INDEX.md",
+        "thought": "Find or create repository evidence proving `docs/OBSERVABILITY_INDEX.md`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:68269cd50078",
+        "kind": "evidence_requirement",
+        "term": "and last_error where applicable.",
+        "thought": "Find or create repository evidence proving `and last_error where applicable.`."
+      },
+      {
+        "goal_id": "G7",
+        "id": "evidence:69b4419b334d",
+        "kind": "evidence_requirement",
+        "term": "mediator/claim_support_hooks.py",
+        "thought": "Find or create repository evidence proving `mediator/claim_support_hooks.py`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:6a6ad7dced1b",
+        "kind": "evidence_requirement",
+        "term": "applications/complaint_cli.py",
+        "thought": "Find or create repository evidence proving `applications/complaint_cli.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:6b9794addbca",
+        "kind": "evidence_requirement",
+        "term": "scripts/gmail_duckdb_daemon.py",
+        "thought": "Find or create repository evidence proving `scripts/gmail_duckdb_daemon.py`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:6cbc2e7a4dbb",
+        "kind": "evidence_requirement",
+        "term": "A short module ownership map exists.",
+        "thought": "Find or create repository evidence proving `A short module ownership map exists.`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:6d2b8ef709c5",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G2",
+        "id": "evidence:6f512fa4c448",
+        "kind": "evidence_requirement",
+        "term": "mediator/__init__.py",
+        "thought": "Find or create repository evidence proving `mediator/__init__.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:708ee90f6834",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:73c1d51dd14b",
+        "kind": "evidence_requirement",
+        "term": "Routes keep the same response shape.",
+        "thought": "Find or create repository evidence proving `Routes keep the same response shape.`."
+      },
+      {
+        "goal_id": "G2",
+        "id": "evidence:7466ff431ff3",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:74e12a60c885",
+        "kind": "evidence_requirement",
+        "term": "A documented test lane map exists.",
+        "thought": "Find or create repository evidence proving `A documented test lane map exists.`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:758793de854b",
+        "kind": "evidence_requirement",
+        "term": "One handler group is isolated.",
+        "thought": "Find or create repository evidence proving `One handler group is isolated.`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:7acb137e5fab",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/search.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/search.py`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:7b3c38567c12",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_refactor_agent_supervisor.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_refactor_agent_supervisor.py -q`."
+      },
+      {
+        "goal_id": "G4",
+        "id": "evidence:7b7a7528ee9b",
+        "kind": "evidence_requirement",
+        "term": "Makefile",
+        "thought": "Find or create repository evidence proving `Makefile`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:7c659b984581",
+        "kind": "evidence_requirement",
+        "term": "Makefile",
+        "thought": "Find or create repository evidence proving `Makefile`."
+      },
+      {
+        "goal_id": "G2",
+        "id": "evidence:7cd93ee3ab27",
+        "kind": "evidence_requirement",
+        "term": "mediator/claim_support_hooks.py",
+        "thought": "Find or create repository evidence proving `mediator/claim_support_hooks.py`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:7dda6ee05254",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:7df9382aeb79",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:7fc6d57a50f5",
+        "kind": "evidence_requirement",
+        "term": "mediator/__init__.py",
+        "thought": "Find or create repository evidence proving `mediator/__init__.py`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:80efb3a18049",
+        "kind": "evidence_requirement",
+        "term": "Architecture docs identify allowed imports.",
+        "thought": "Find or create repository evidence proving `Architecture docs identify allowed imports.`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:812b303eb12c",
+        "kind": "evidence_requirement",
+        "term": "and validation.",
+        "thought": "Find or create repository evidence proving `and validation.`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:828cb0b1deb9",
+        "kind": "evidence_requirement",
+        "term": "artifacts",
+        "thought": "Find or create repository evidence proving `artifacts`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:8413bf0418b8",
+        "kind": "evidence_requirement",
+        "term": "Callers do not branch on fragile strings.",
+        "thought": "Find or create repository evidence proving `Callers do not branch on fragile strings.`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:84d0c09fedbd",
+        "kind": "evidence_requirement",
+        "term": "status",
+        "thought": "Find or create repository evidence proving `status`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:85a54a5e618b",
+        "kind": "evidence_requirement",
+        "term": "complaint_generator/ui_optimizer_daemon.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/ui_optimizer_daemon.py`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:8636f7c429a6",
+        "kind": "evidence_requirement",
+        "term": "Evidence",
+        "thought": "Find or create repository evidence proving `Evidence`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:867de19f4218",
+        "kind": "evidence_requirement",
+        "term": "Entrypoints are grouped by CLI",
+        "thought": "Find or create repository evidence proving `Entrypoints are grouped by CLI`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:8a104bed7f70",
+        "kind": "evidence_requirement",
+        "term": "python scripts/refactor_agent_supervisor.py seed --once",
+        "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py seed --once`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:8a3c2077314c",
+        "kind": "evidence_requirement",
+        "term": "mediator/evidence_hooks.py",
+        "thought": "Find or create repository evidence proving `mediator/evidence_hooks.py`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:8acaf11fee64",
+        "kind": "evidence_requirement",
+        "term": "scripts/gmail_duckdb_daemon.py",
+        "thought": "Find or create repository evidence proving `scripts/gmail_duckdb_daemon.py`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:8b64c75283cc",
+        "kind": "evidence_requirement",
+        "term": "query",
+        "thought": "Find or create repository evidence proving `query`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:8d04f2411aea",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_claim_support_review_playwright_smoke.py -q`."
+      },
+      {
+        "goal_id": "G7",
+        "id": "evidence:8f6ec6ee8230",
+        "kind": "evidence_requirement",
+        "term": "applications/review_api.py",
+        "thought": "Find or create repository evidence proving `applications/review_api.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:8fd0dd066b7b",
+        "kind": "evidence_requirement",
+        "term": "Status payloads include status",
+        "thought": "Find or create repository evidence proving `Status payloads include status`."
+      },
+      {
+        "goal_id": "G2",
+        "id": "evidence:90aad5a29c12",
+        "kind": "evidence_requirement",
+        "term": "applications/dashboard_ui.py",
+        "thought": "Find or create repository evidence proving `applications/dashboard_ui.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:90ad9322e670",
+        "kind": "evidence_requirement",
+        "term": "scripts/backfill_claim_testimony_links.py",
+        "thought": "Find or create repository evidence proving `scripts/backfill_claim_testimony_links.py`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:918246e81f78",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/capabilities.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/capabilities.py`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:924b1715f493",
+        "kind": "evidence_requirement",
+        "term": "Each claim names exact validation commands.",
+        "thought": "Find or create repository evidence proving `Each claim names exact validation commands.`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:926a4e71019c",
+        "kind": "evidence_requirement",
+        "term": "and implemented.",
+        "thought": "Find or create repository evidence proving `and implemented.`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:92c9e2129c1c",
+        "kind": "evidence_requirement",
+        "term": "scripts/generate_hacc_email_seed_plan.py",
+        "thought": "Find or create repository evidence proving `scripts/generate_hacc_email_seed_plan.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:973baf896c0c",
+        "kind": "evidence_requirement",
+        "term": "complaint_generator/ui_optimizer_daemon.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/ui_optimizer_daemon.py`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:985a420b225e",
+        "kind": "evidence_requirement",
+        "term": "DTO helpers cover coverage",
+        "thought": "Find or create repository evidence proving `DTO helpers cover coverage`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:9a12f4aa5c38",
+        "kind": "evidence_requirement",
+        "term": "and web ingestion can call one parse contract.",
+        "thought": "Find or create repository evidence proving `and web ingestion can call one parse contract.`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:9aac1307e178",
+        "kind": "evidence_requirement",
+        "term": "pyproject.toml",
+        "thought": "Find or create repository evidence proving `pyproject.toml`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:9b1643a62a81",
+        "kind": "evidence_requirement",
+        "term": "Playwright smoke tests remain stable.",
+        "thought": "Find or create repository evidence proving `Playwright smoke tests remain stable.`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:9b496c9f5458",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:9cf6dd5afbaa",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest --collect-only -q",
+        "thought": "Find or create repository evidence proving `python -m pytest --collect-only -q`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:9fb7eba4dd1c",
+        "kind": "evidence_requirement",
+        "term": "Status JSON includes pid",
+        "thought": "Find or create repository evidence proving `Status JSON includes pid`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:a06e2c16b794",
+        "kind": "evidence_requirement",
+        "term": "follow-up",
+        "thought": "Find or create repository evidence proving `follow-up`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:a0a31c08a074",
+        "kind": "evidence_requirement",
+        "term": "python scripts/refactor_agent_supervisor.py status",
+        "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py status`."
+      },
+      {
+        "goal_id": "G8",
+        "id": "evidence:a15c8b005efe",
+        "kind": "evidence_requirement",
+        "term": "scripts/refactor_agent_supervisor.py",
+        "thought": "Find or create repository evidence proving `scripts/refactor_agent_supervisor.py`."
+      },
+      {
+        "goal_id": "G8",
+        "id": "evidence:a40af2a71839",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:a414db782074",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/documents.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/documents.py`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:a41b8859b030",
+        "kind": "evidence_requirement",
+        "term": "Screenshots still render with representative support states.",
+        "thought": "Find or create repository evidence proving `Screenshots still render with representative support states.`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:a598166d8478",
+        "kind": "evidence_requirement",
+        "term": "Payloads include goal",
+        "thought": "Find or create repository evidence proving `Payloads include goal`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:a90433b751f9",
+        "kind": "evidence_requirement",
+        "term": "python scripts/refactor_agent_supervisor.py status",
+        "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py status`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:aa2f515e1036",
+        "kind": "evidence_requirement",
+        "term": "tests/test_refactor_agent_supervisor.py",
+        "thought": "Find or create repository evidence proving `tests/test_refactor_agent_supervisor.py`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:aaa27914d65d",
+        "kind": "evidence_requirement",
+        "term": "Fallback graph behavior remains covered.",
+        "thought": "Find or create repository evidence proving `Fallback graph behavior remains covered.`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:aac0f482276e",
+        "kind": "evidence_requirement",
+        "term": "and workflow role.",
+        "thought": "Find or create repository evidence proving `and workflow role.`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:ab93a8d6ade2",
+        "kind": "evidence_requirement",
+        "term": "Top production broad-exception clusters are documented.",
+        "thought": "Find or create repository evidence proving `Top production broad-exception clusters are documented.`."
+      },
+      {
+        "goal_id": "G4",
+        "id": "evidence:ac52268b216e",
+        "kind": "evidence_requirement",
+        "term": "tests",
+        "thought": "Find or create repository evidence proving `tests`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:ad721f8eae07",
+        "kind": "evidence_requirement",
+        "term": "docs/OBSERVABILITY_INDEX.md",
+        "thought": "Find or create repository evidence proving `docs/OBSERVABILITY_INDEX.md`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:ad76eb0efceb",
+        "kind": "evidence_requirement",
+        "term": "mediator/evidence_hooks.py",
+        "thought": "Find or create repository evidence proving `mediator/evidence_hooks.py`."
+      },
+      {
+        "goal_id": "G7",
+        "id": "evidence:ae6814a2a0bf",
+        "kind": "evidence_requirement",
+        "term": "applications/ui_review.py",
+        "thought": "Find or create repository evidence proving `applications/ui_review.py`."
+      },
+      {
+        "goal_id": "G4",
+        "id": "evidence:aec270d94d62",
+        "kind": "evidence_requirement",
+        "term": "pyproject.toml",
+        "thought": "Find or create repository evidence proving `pyproject.toml`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:b04fe9f20996",
+        "kind": "evidence_requirement",
+        "term": "lib/formal_logic",
+        "thought": "Find or create repository evidence proving `lib/formal_logic`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:b14bb61fab3f",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:b16aa98bc5a1",
+        "kind": "evidence_requirement",
+        "term": "scripts/agentic_scraper_cli.py",
+        "thought": "Find or create repository evidence proving `scripts/agentic_scraper_cli.py`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:b2557f2fb6ca",
+        "kind": "evidence_requirement",
+        "term": "mediator/evidence_hooks.py",
+        "thought": "Find or create repository evidence proving `mediator/evidence_hooks.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:b31f684b6fea",
+        "kind": "evidence_requirement",
+        "term": "Existing CLI tests remain compatible.",
+        "thought": "Find or create repository evidence proving `Existing CLI tests remain compatible.`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:b4b0d7305b40",
+        "kind": "evidence_requirement",
+        "term": "applications/dashboard_ui.py",
+        "thought": "Find or create repository evidence proving `applications/dashboard_ui.py`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:b4d7d8c8b13e",
+        "kind": "evidence_requirement",
+        "term": "mediator/mediator.py",
+        "thought": "Find or create repository evidence proving `mediator/mediator.py`."
+      },
+      {
+        "goal_id": "G7",
+        "id": "evidence:b5570a6d7c8a",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:b6368928630c",
+        "kind": "evidence_requirement",
+        "term": "Docs explain where to find pid",
+        "thought": "Find or create repository evidence proving `Docs explain where to find pid`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:b75f163d96cd",
+        "kind": "evidence_requirement",
+        "term": "degraded",
+        "thought": "Find or create repository evidence proving `degraded`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:bad6773577f7",
+        "kind": "evidence_requirement",
+        "term": "testable",
+        "thought": "Find or create repository evidence proving `testable`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:bb85e6d6f242",
+        "kind": "evidence_requirement",
+        "term": "integrations/ipfs_datasets/loader.py",
+        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/loader.py`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:bb9db9813fd5",
+        "kind": "evidence_requirement",
+        "term": "data/refactor_supervisor/refactor_goals.json",
+        "thought": "Find or create repository evidence proving `data/refactor_supervisor/refactor_goals.json`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:bccc6d7f44a2",
+        "kind": "evidence_requirement",
+        "term": "authority",
+        "thought": "Find or create repository evidence proving `authority`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:bda3e5f4be70",
+        "kind": "evidence_requirement",
+        "term": "At least one cohesive helper group moves behind a stable import.",
+        "thought": "Find or create repository evidence proving `At least one cohesive helper group moves behind a stable import.`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:bdbb05aa925d",
+        "kind": "evidence_requirement",
+        "term": "Running seed twice does not duplicate active tasks.",
+        "thought": "Find or create repository evidence proving `Running seed twice does not duplicate active tasks.`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:bfda60094bf9",
+        "kind": "evidence_requirement",
+        "term": "and queue files.",
+        "thought": "Find or create repository evidence proving `and queue files.`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:c030ee5c778e",
+        "kind": "evidence_requirement",
+        "term": "acceptance",
+        "thought": "Find or create repository evidence proving `acceptance`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:c04c18792b2a",
+        "kind": "evidence_requirement",
+        "term": "Route response snapshots stay stable.",
+        "thought": "Find or create repository evidence proving `Route response snapshots stay stable.`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:c05347d676bc",
+        "kind": "evidence_requirement",
+        "term": "pyproject.toml",
+        "thought": "Find or create repository evidence proving `pyproject.toml`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:c2bbea09ee6c",
+        "kind": "evidence_requirement",
+        "term": "tests/test_review_surface_site_playwright.py",
+        "thought": "Find or create repository evidence proving `tests/test_review_surface_site_playwright.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:c72881ae0ff5",
+        "kind": "evidence_requirement",
+        "term": "scripts/gmail_duckdb_daemon.py",
+        "thought": "Find or create repository evidence proving `scripts/gmail_duckdb_daemon.py`."
+      },
+      {
+        "goal_id": "G4",
+        "id": "evidence:c9cf4e7fbbc5",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:cc2fc5d2f0f3",
+        "kind": "evidence_requirement",
+        "term": "The first three claims are small",
+        "thought": "Find or create repository evidence proving `The first three claims are small`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:cce8a4234a2a",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_ipfs_adapter_layer.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_ipfs_adapter_layer.py -q`."
+      },
+      {
+        "goal_id": "G2",
+        "id": "evidence:ce12d18c5cab",
+        "kind": "evidence_requirement",
+        "term": "mediator/mediator.py",
+        "thought": "Find or create repository evidence proving `mediator/mediator.py`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:cff511c253f4",
+        "kind": "evidence_requirement",
+        "term": "No payload contract changes without tests.",
+        "thought": "Find or create repository evidence proving `No payload contract changes without tests.`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:d01f8d118793",
+        "kind": "evidence_requirement",
+        "term": "and provenance fields.",
+        "thought": "Find or create repository evidence proving `and provenance fields.`."
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "evidence:d1c94733c405",
+        "kind": "evidence_requirement",
+        "term": "tests",
+        "thought": "Find or create repository evidence proving `tests`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:d63a7f01e052",
+        "kind": "evidence_requirement",
+        "term": "complaint_phases/denoiser.py",
+        "thought": "Find or create repository evidence proving `complaint_phases/denoiser.py`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:d6ad4f8935b7",
+        "kind": "evidence_requirement",
+        "term": "scripts/synthesize_hacc_complaint.py",
+        "thought": "Find or create repository evidence proving `scripts/synthesize_hacc_complaint.py`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:d8180805eb17",
+        "kind": "evidence_requirement",
+        "term": "Intentional ignores are named.",
+        "thought": "Find or create repository evidence proving `Intentional ignores are named.`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:d9395a835f13",
+        "kind": "evidence_requirement",
+        "term": "Duplicated tasks are merged or explicitly scoped.",
+        "thought": "Find or create repository evidence proving `Duplicated tasks are merged or explicitly scoped.`."
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "evidence:dc1a9b971692",
+        "kind": "evidence_requirement",
+        "term": "All adapter groups report stable keys.",
+        "thought": "Find or create repository evidence proving `All adapter groups report stable keys.`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:dc6156b37f89",
+        "kind": "evidence_requirement",
+        "term": "scripts/generate_decision_trees.py",
+        "thought": "Find or create repository evidence proving `scripts/generate_decision_trees.py`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:dc769b37222f",
+        "kind": "evidence_requirement",
+        "term": "Shared builders remove repeated setup.",
+        "thought": "Find or create repository evidence proving `Shared builders remove repeated setup.`."
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "evidence:dcafa2ac60a3",
+        "kind": "evidence_requirement",
+        "term": "mediator",
+        "thought": "Find or create repository evidence proving `mediator`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:de7d9a07ab7b",
+        "kind": "evidence_requirement",
+        "term": "Status output or a new command lists next tasks by priority.",
+        "thought": "Find or create repository evidence proving `Status output or a new command lists next tasks by priority.`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:dffc51113899",
+        "kind": "evidence_requirement",
+        "term": "applications/document_api.py",
+        "thought": "Find or create repository evidence proving `applications/document_api.py`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:e18aa7f12aa9",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q`."
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "evidence:e26b7efa6497",
+        "kind": "evidence_requirement",
+        "term": "Fixture builders are named and reusable.",
+        "thought": "Find or create repository evidence proving `Fixture builders are named and reusable.`."
+      },
+      {
+        "goal_id": "G8",
+        "id": "evidence:e29ab10cfd3e",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "evidence:e2b5d4aedcf2",
+        "kind": "evidence_requirement",
+        "term": "scripts/refactor_agent_supervisor.py",
+        "thought": "Find or create repository evidence proving `scripts/refactor_agent_supervisor.py`."
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "evidence:e33adf4a8b3b",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:e4c396fb1ffa",
+        "kind": "evidence_requirement",
+        "term": "applications/complaint_cli.py",
+        "thought": "Find or create repository evidence proving `applications/complaint_cli.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:e58b507b3ebe",
+        "kind": "evidence_requirement",
+        "term": "scripts/enrich_email_timeline_authorities.py",
+        "thought": "Find or create repository evidence proving `scripts/enrich_email_timeline_authorities.py`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:e7f377872b3c",
+        "kind": "evidence_requirement",
+        "term": "Interfaces specify persistence",
+        "thought": "Find or create repository evidence proving `Interfaces specify persistence`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:eb02978724b0",
+        "kind": "evidence_requirement",
+        "term": "mediator/mediator.py",
+        "thought": "Find or create repository evidence proving `mediator/mediator.py`."
+      },
+      {
+        "goal_id": "G2",
+        "id": "evidence:eb46857904bc",
+        "kind": "evidence_requirement",
+        "term": "playwright/server.js",
+        "thought": "Find or create repository evidence proving `playwright/server.js`."
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "evidence:ef31188d6fc1",
+        "kind": "evidence_requirement",
+        "term": "Logic status distinguishes unavailable",
+        "thought": "Find or create repository evidence proving `Logic status distinguishes unavailable`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:eff1f644d0bb",
+        "kind": "evidence_requirement",
+        "term": "scan summary",
+        "thought": "Find or create repository evidence proving `scan summary`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:f07e11bf7db6",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:f0c1eddc0cf0",
+        "kind": "evidence_requirement",
+        "term": "mediator/mediator.py",
+        "thought": "Find or create repository evidence proving `mediator/mediator.py`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:f0ebe5884b9c",
+        "kind": "evidence_requirement",
+        "term": "docs/observability/TROUBLESHOOTING.md",
+        "thought": "Find or create repository evidence proving `docs/observability/TROUBLESHOOTING.md`."
+      },
+      {
+        "goal_id": "G8",
+        "id": "evidence:f3c9c110124e",
+        "kind": "evidence_requirement",
+        "term": "data/refactor_supervisor/refactor_goals.json",
+        "thought": "Find or create repository evidence proving `data/refactor_supervisor/refactor_goals.json`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:f72cccd8fe3c",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "evidence:f7371290a952",
+        "kind": "evidence_requirement",
+        "term": "tests/test_claim_support_review_playwright_smoke.py",
+        "thought": "Find or create repository evidence proving `tests/test_claim_support_review_playwright_smoke.py`."
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "evidence:f83e85e1bac6",
+        "kind": "evidence_requirement",
+        "term": "python scripts/refactor_agent_supervisor.py status",
+        "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py status`."
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "evidence:f887fd5a6043",
+        "kind": "evidence_requirement",
+        "term": "mediator/state.py",
+        "thought": "Find or create repository evidence proving `mediator/state.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:fa07cb938291",
+        "kind": "evidence_requirement",
+        "term": "Degraded mode still imports cleanly.",
+        "thought": "Find or create repository evidence proving `Degraded mode still imports cleanly.`."
+      },
+      {
+        "goal_id": "G5",
+        "id": "evidence:fa24b95af710",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G6",
+        "id": "evidence:fa2c8f517790",
+        "kind": "evidence_requirement",
+        "term": "mediator/state.py",
+        "thought": "Find or create repository evidence proving `mediator/state.py`."
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "evidence:fa5f0a514335",
+        "kind": "evidence_requirement",
+        "term": "Stop command terminates the daemon cleanly.",
+        "thought": "Find or create repository evidence proving `Stop command terminates the daemon cleanly.`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:fb1bf90bf366",
+        "kind": "evidence_requirement",
+        "term": "python -m pytest tests/test_ipfs_adapter_layer.py -q",
+        "thought": "Find or create repository evidence proving `python -m pytest tests/test_ipfs_adapter_layer.py -q`."
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "evidence:fc5866207ab9",
+        "kind": "evidence_requirement",
+        "term": "docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md",
+        "thought": "Find or create repository evidence proving `docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:fd937b37b2d6",
+        "kind": "evidence_requirement",
+        "term": "applications/document_api.py",
+        "thought": "Find or create repository evidence proving `applications/document_api.py`."
+      },
+      {
+        "goal_id": "G8",
+        "id": "evidence:fee7d83cf296",
+        "kind": "evidence_requirement",
+        "term": "docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md",
+        "thought": "Find or create repository evidence proving `docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:ff9cc437b297",
+        "kind": "evidence_requirement",
+        "term": "Production direct imports are replaced or documented.",
+        "thought": "Find or create repository evidence proving `Production direct imports are replaced or documented.`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "goal:G1",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Stabilize repository boundaries",
+        "title": "Stabilize repository boundaries",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G1.S1",
+        "id": "goal:G1.S1",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Map package ownership and runtime entrypoints",
+        "title": "Map package ownership and runtime entrypoints",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "goal:G1.S2",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Remove ad hoc import path behavior from production surfaces",
+        "title": "Remove ad hoc import path behavior from production surfaces",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G2",
+        "id": "goal:G2",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Decompose oversized orchestration modules",
+        "title": "Decompose oversized orchestration modules",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G2.S1",
+        "id": "goal:G2.S1",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Extract mediator service seams",
+        "title": "Extract mediator service seams",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G2.S2",
+        "id": "goal:G2.S2",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Reduce application surface coupling",
+        "title": "Reduce application surface coupling",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G3",
+        "id": "goal:G3",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Harden adapter contracts and degraded mode",
+        "title": "Harden adapter contracts and degraded mode",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G3.S1",
+        "id": "goal:G3.S1",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Normalize IPFS datasets adapter payloads",
+        "title": "Normalize IPFS datasets adapter payloads",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G3.S2",
+        "id": "goal:G3.S2",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Clarify graph, GraphRAG, and logic adapter boundaries",
+        "title": "Clarify graph, GraphRAG, and logic adapter boundaries",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G4",
+        "id": "goal:G4",
+        "kind": "goal",
+        "priority": "P1",
+        "status": "active",
+        "thought": "Improve validation speed and confidence",
+        "title": "Improve validation speed and confidence",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G4.S1",
+        "id": "goal:G4.S1",
+        "kind": "goal",
+        "priority": "P1",
+        "status": "active",
+        "thought": "Create focused test lanes for refactor work",
+        "title": "Create focused test lanes for refactor work",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G5",
+        "id": "goal:G5",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Make automation observable and refillable",
+        "title": "Make automation observable and refillable",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G5.S1",
+        "id": "goal:G5.S1",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Operate a durable refactor taskboard",
+        "title": "Operate a durable refactor taskboard",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G6",
+        "id": "goal:G6",
+        "kind": "goal",
+        "priority": "P1",
+        "status": "active",
+        "thought": "Pay down error-handling and observability debt",
+        "title": "Pay down error-handling and observability debt",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G6.S1",
+        "id": "goal:G6.S1",
+        "kind": "goal",
+        "priority": "P1",
+        "status": "active",
+        "thought": "Replace silent failures with typed outcomes",
+        "title": "Replace silent failures with typed outcomes",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G6.S2",
+        "id": "goal:G6.S2",
+        "kind": "goal",
+        "priority": "P1",
+        "status": "active",
+        "thought": "Unify runtime status payloads",
+        "title": "Unify runtime status payloads",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G7",
+        "id": "goal:G7",
+        "kind": "goal",
+        "priority": "P1",
+        "status": "active",
+        "thought": "Rationalize frontend and review surfaces",
+        "title": "Rationalize frontend and review surfaces",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G7.S1",
+        "id": "goal:G7.S1",
+        "kind": "goal",
+        "priority": "P1",
+        "status": "active",
+        "thought": "Separate review API contracts from display assembly",
+        "title": "Separate review API contracts from display assembly",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G8",
+        "id": "goal:G8",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Prepare incremental implementation slices",
+        "title": "Prepare incremental implementation slices",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G8.S1",
+        "id": "goal:G8.S1",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Convert existing roadmaps into executable slices",
+        "title": "Convert existing roadmaps into executable slices",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G8.S2",
+        "id": "goal:G8.S2",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Keep generated artifacts reviewable",
+        "title": "Keep generated artifacts reviewable",
+        "track": "ops"
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G4",
+        "id": "validation:033e169ea47e",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_package_imports.py -q",
+        "goal_id": "G1.S1",
+        "id": "validation:04e8b38e73f0",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q, python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q",
+        "goal_id": "G3.S2",
+        "id": "validation:1406d98f373c",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_package_imports.py -q, python -m pytest tests/test_ipfs_adapter_layer.py -q",
+        "goal_id": "G1.S2",
+        "id": "validation:21a6037b0f10",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python scripts/refactor_agent_supervisor.py seed --once, python scripts/refactor_agent_supervisor.py status",
+        "goal_id": "G5.S1",
+        "id": "validation:2997f3e35a24",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q, python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q",
+        "goal_id": "G2.S1",
+        "id": "validation:4ec77956d751",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q, python -m pytest tests/test_package_imports.py -q",
+        "goal_id": "G4.S1",
+        "id": "validation:501faf0fb81c",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G3",
+        "id": "validation:54883e007096",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G5",
+        "id": "validation:76cd95c32e3c",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q, python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q",
+        "goal_id": "G7.S1",
+        "id": "validation:7ef4d7f95b29",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G8",
+        "id": "validation:7f7c4a06ac1b",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G6",
+        "id": "validation:914b2aa5b355",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G2",
+        "id": "validation:94c287e91bbb",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_review_api.py -q, python -m pytest tests/test_claim_support_review_playwright_smoke.py -q",
+        "goal_id": "G2.S2",
+        "id": "validation:a662b17ac165",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python scripts/refactor_agent_supervisor.py seed --once, python scripts/refactor_agent_supervisor.py status",
+        "goal_id": "G8.S1",
+        "id": "validation:ce0af9b2a7f1",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_ipfs_adapter_layer.py -q, python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q",
+        "goal_id": "G3.S1",
+        "id": "validation:d2044424470e",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q, python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q",
+        "goal_id": "G6.S1",
+        "id": "validation:d393a783b53a",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python scripts/refactor_agent_supervisor.py status, python -m pytest tests/test_refactor_agent_supervisor.py -q",
+        "goal_id": "G8.S2",
+        "id": "validation:d61882f7ad34",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q, python scripts/refactor_agent_supervisor.py status",
+        "goal_id": "G6.S2",
+        "id": "validation:e41cb08333ec",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G7",
+        "id": "validation:ea9c24b1d4a9",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G1",
+        "id": "validation:eca7a557983d",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      }
+    ],
+    "schema": "ipfs_accelerate_py.agent_supervisor.objective_thought_graph"
+  }
+}
