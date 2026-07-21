@@ -87,7 +87,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-008 Resolve merge retry-budget failure for REF-004
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
