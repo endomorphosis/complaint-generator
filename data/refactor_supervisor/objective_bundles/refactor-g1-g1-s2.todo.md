@@ -45,3 +45,16 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Candidate kind: seed
 - Todo vector key: ref-004-routedirectipfs-datasets-pyimportsthroughintegra
 - Acceptance: Production direct imports are replaced or documented.; Degraded mode still imports cleanly.
+
+## REF-005 Resolve 1 preflight-conflicting backlogged worktree merges
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Fingerprint: db50ee4f0701bf764df9051f8a2d4ccd371d4768
+- Dedupe key: reconciliation_guardrail:preflight_merge_conflict
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-005-reconciliation-db50ee4f0701.md
+- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by preflight_merge_conflict. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-005-reconciliation-db50ee4f0701.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
