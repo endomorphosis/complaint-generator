@@ -1,10 +1,10 @@
 # REF-034 Reconciliation Guardrail
 
 Date: 2026-07-21
-Fingerprint: 9c835d7af6245b4daef691c8cbcc07adb1c227c5
+Fingerprint: 58176a0bb299301c09175102b78e2b0657e6131a
 Kind: preflight_merge_conflict
 Reason: preflight_merge_conflict
-Candidate count: 3
+Candidate count: 2
 Priority: P1
 Track: ops
 
@@ -20,20 +20,18 @@ Track: ops
 
 - `implementation/ref-001-attempt-1-1784661950` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-001-attempt-1-1784661950`
   - Conflict paths:
+    - `applications/complaint_workspace.py`
+    - `docs/ARCHITECTURE.md`
     - `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
     - `mediator/mediator.py`
     - `scripts/refactor_agent_supervisor.py`
-- `implementation/ref-002-attempt-1-1784662460` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-002-attempt-1-1784662460`
+    - `tests/test_package_imports.py`
+- `implementation/ref-028-attempt-1-1784669974` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-028-attempt-1-1784669974`
   - Conflict paths:
-    - `docs/ARCHITECTURE.md`
-    - `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
-    - `scripts/refactor_agent_supervisor.py`
-- `implementation/ref-029-attempt-1-1784662824` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-029-attempt-1-1784662824`
-  - Conflict paths:
-    - `data/refactor_supervisor/objective_graph.json`
-    - `data/refactor_supervisor/refactor_todo.md`
-    - `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
-    - `scripts/refactor_agent_supervisor.py`
+    - `applications/complaint_workspace.py`
+    - `data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md`
+    - `data/refactor_supervisor/refactor_objective_heap.md`
+    - `tests/test_package_imports.py`
 
 ## Why This Blocks Progress
 
@@ -52,7 +50,7 @@ worktree cleanup skip count decreases.
 
 ## Reconciliation Plan
 
-Work surface: `3` candidates, `3` sampled records.
+Work surface: `2` candidates, `2` sampled records.
 
 ### Suggested Actions
 
@@ -100,17 +98,19 @@ Work surface: `3` candidates, `3` sampled records.
       "scope": "backlogged_worktrees"
     }
   ],
-  "candidate_count": 3,
+  "candidate_count": 2,
   "conflict_path_counts": {
-    "data/refactor_supervisor/objective_graph.json": 1,
-    "data/refactor_supervisor/refactor_todo.md": 1,
+    "applications/complaint_workspace.py": 2,
+    "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md": 1,
+    "data/refactor_supervisor/refactor_objective_heap.md": 1,
     "docs/ARCHITECTURE.md": 1,
-    "docs/REFACTOR_SUPERVISOR_TASKBOARD.md": 3,
+    "docs/REFACTOR_SUPERVISOR_TASKBOARD.md": 1,
     "mediator/mediator.py": 1,
-    "scripts/refactor_agent_supervisor.py": 3
+    "scripts/refactor_agent_supervisor.py": 1,
+    "tests/test_package_imports.py": 2
   },
   "dedupe_key": "reconciliation_guardrail:preflight_merge_conflict",
-  "fingerprint": "9c835d7af6245b4daef691c8cbcc07adb1c227c5",
+  "fingerprint": "58176a0bb299301c09175102b78e2b0657e6131a",
   "kind": "preflight_merge_conflict",
   "main_dirty_evidence": {},
   "reason": "preflight_merge_conflict",
@@ -121,22 +121,22 @@ Work surface: `3` candidates, `3` sampled records.
   ],
   "sample_branches": [
     "implementation/ref-001-attempt-1-1784661950",
-    "implementation/ref-002-attempt-1-1784662460",
-    "implementation/ref-029-attempt-1-1784662824"
+    "implementation/ref-028-attempt-1-1784669974"
   ],
-  "sample_count": 3,
+  "sample_count": 2,
   "sample_status_paths": [
+    "applications/complaint_workspace.py",
+    "docs/ARCHITECTURE.md",
     "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
     "mediator/mediator.py",
     "scripts/refactor_agent_supervisor.py",
-    "docs/ARCHITECTURE.md",
-    "data/refactor_supervisor/objective_graph.json",
-    "data/refactor_supervisor/refactor_todo.md"
+    "tests/test_package_imports.py",
+    "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
+    "data/refactor_supervisor/refactor_objective_heap.md"
   ],
   "sample_worktrees": [
     "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-001-attempt-1-1784661950",
-    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-002-attempt-1-1784662460",
-    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-029-attempt-1-1784662824"
+    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-028-attempt-1-1784669974"
   ],
   "success_signals": [
     "preflight_blocked_count_decreases",
@@ -145,12 +145,14 @@ Work surface: `3` candidates, `3` sampled records.
     "main_checkout_dirty_becomes_false"
   ],
   "top_conflict_paths": [
-    "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-    "scripts/refactor_agent_supervisor.py",
-    "data/refactor_supervisor/objective_graph.json",
-    "data/refactor_supervisor/refactor_todo.md",
+    "applications/complaint_workspace.py",
+    "tests/test_package_imports.py",
+    "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
+    "data/refactor_supervisor/refactor_objective_heap.md",
     "docs/ARCHITECTURE.md",
-    "mediator/mediator.py"
+    "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+    "mediator/mediator.py",
+    "scripts/refactor_agent_supervisor.py"
   ]
 }
 ```
