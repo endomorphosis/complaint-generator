@@ -49,7 +49,9 @@
         "pyproject.toml",
         "Architecture docs identify allowed imports.",
         "New work has a simple rule for where shared code belongs.",
-        "python -m pytest tests/test_package_imports.py -q"
+        "python -m pytest tests/test_package_imports.py -q",
+        "data/refactor_supervisor/discovery/2026-07-21-ref-048-objective-validation-repair.md",
+        "objective validation repair"
       ],
       "fib_priority": 999999,
       "goal_id": "G1.S1",
