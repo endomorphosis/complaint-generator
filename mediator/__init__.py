@@ -1,4 +1,5 @@
 from .mediator import *
+from .workflow_service import WorkflowActionService
 from .legal_hooks import (
     LegalClassificationHook,
     StatuteRetrievalHook,
