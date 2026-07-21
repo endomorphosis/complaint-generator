@@ -331,7 +331,6 @@ Representative optimization router metadata fragment:
         }
       }
     ]
-    }
   }
 }
 ```
@@ -1366,7 +1365,8 @@ Representative shape:
         "collect_initial_support": 1,
         "collect_missing_support_kind": 1
       }
-    },
+    }
+  },
   "follow_up_execution_summary": {
     "civil rights": {
       "executed_task_count": 0,
@@ -1569,10 +1569,6 @@ Representative shape:
       "graph_id_count": 1
     },
     "recommended_action": "collect_missing_support_kind",
-
-    Interpretation notes:
-
-    - `graph_support` is a top-level alias for the same fallback ranking also carried inside `gap_summary.graph_support`, so callers inspecting one element do not need to dig through the gap summary to reach the ranked graph-support view.
     "graph_support": {
       "status": "ready",
       "results": [
@@ -2260,7 +2256,6 @@ Case-level auto-discovery payloads from `Mediator.discover_evidence_automaticall
       }
     }
   }
-}
 ```
 
 Interpretation notes:

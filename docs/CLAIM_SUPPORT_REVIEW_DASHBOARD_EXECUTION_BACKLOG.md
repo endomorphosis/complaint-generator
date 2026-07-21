@@ -61,19 +61,20 @@ The goal now is not to redesign the system abstractly. The goal is to deliver a 
 - `Complete`: implemented enough to be treated as baseline
 - `In Progress`: partially implemented and actively extendable
 - `Planned`: designed but not yet implemented
+- `Validation Required`: implemented checklist items exist, but the supervisor should still run the listed validation commands before treating the slice as closed
 - `Deferred`: useful but lower priority than the current roadmap
 
 ## Workstream Overview
 
 | ID | Workstream | Status | Priority | Outcome |
 |---|---|---|---|---|
-| W1 | Question planning and testimony intake | Planned | P0 | The dashboard becomes a guided clarification surface tied to legal proof gaps |
-| W2 | Document intake and decomposition | Planned | P0 | Uploaded or linked materials become reusable parsed evidence artifacts |
-| W3 | Fact registry and support ledger | Planned | P0 | Every element status can be traced to durable fact and chunk records |
-| W4 | Graph persistence and support paths | Planned | P1 | Support and contradiction paths become reusable and queryable |
-| W5 | Retrieval sessions and evidence ranking | Planned | P1 | Operators can inspect the best chunks and why they were selected |
-| W6 | Legal proof and contradiction engine | Planned | P0 | Facts can be evaluated against legal predicates, exceptions, and contradictions |
-| W7 | Operator experience and drafting integration | Planned | P1 | The dashboard becomes the canonical evidence-readiness workflow feeding `/document` |
+| W1 | Question planning and testimony intake | Complete | P0 | The dashboard becomes a guided clarification surface tied to legal proof gaps |
+| W2 | Document intake and decomposition | Complete | P0 | Uploaded or linked materials become reusable parsed evidence artifacts |
+| W3 | Fact registry and support ledger | Complete | P0 | Every element status can be traced to durable fact and chunk records |
+| W4 | Graph persistence and support paths | Complete | P1 | Support and contradiction paths become reusable and queryable |
+| W5 | Retrieval sessions and evidence ranking | Complete | P1 | Operators can inspect the best chunks and why they were selected |
+| W6 | Legal proof and contradiction engine | Complete | P0 | Facts can be evaluated against legal predicates, exceptions, and contradictions |
+| W7 | Operator experience and drafting integration | Validation Required | P1 | The dashboard becomes the canonical evidence-readiness workflow feeding `/document` |
 
 ## M0: Question And Testimony Foundation
 
@@ -374,7 +375,7 @@ Turn coverage review into facts-applied-to-law validation with proof gaps, excep
 
 ## M6: Operator Productization And `/document` Handoff
 
-Status: Planned
+Status: Validation Required
 Priority: P1
 
 ### Goal

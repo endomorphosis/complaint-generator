@@ -5,10 +5,10 @@ Status: Active execution backlog
 
 Companion docs:
 
-- [docs/INTAKE_EVIDENCE_IMPROVEMENT_PLAN.md](/home/barberb/complaint-generator/docs/INTAKE_EVIDENCE_IMPROVEMENT_PLAN.md)
-- [docs/ARCHITECTURE.md](/home/barberb/complaint-generator/docs/ARCHITECTURE.md)
-- [docs/EVIDENCE_MANAGEMENT.md](/home/barberb/complaint-generator/docs/EVIDENCE_MANAGEMENT.md)
-- [docs/PAYLOAD_CONTRACTS.md](/home/barberb/complaint-generator/docs/PAYLOAD_CONTRACTS.md)
+- [docs/INTAKE_EVIDENCE_IMPROVEMENT_PLAN.md](../docs/INTAKE_EVIDENCE_IMPROVEMENT_PLAN.md)
+- [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)
+- [docs/EVIDENCE_MANAGEMENT.md](../docs/EVIDENCE_MANAGEMENT.md)
+- [docs/PAYLOAD_CONTRACTS.md](../docs/PAYLOAD_CONTRACTS.md)
 
 ## Purpose
 
@@ -18,7 +18,7 @@ The emphasis is execution, not redesign. The repo already has the core primitive
 
 ## Execution Principles
 
-1. Keep [complaint_phases/phase_manager.py](/home/barberb/complaint-generator/complaint_phases/phase_manager.py) as the canonical workflow controller.
+1. Keep [complaint_phases/phase_manager.py](../complaint_phases/phase_manager.py) as the canonical workflow controller.
 2. Keep normalized state and summaries in mediator and phase modules, not in application-layer request builders.
 3. Treat claim-element proof readiness as the organizing principle for both phases.
 4. Prefer thin vertical slices that improve behavior immediately and preserve degraded-mode operation.
@@ -40,7 +40,7 @@ The emphasis is execution, not redesign. The repo already has the core primitive
 
 ## Batch 0: Timeline Ledger Foundation
 
-Status: Planned
+Status: Validation Required
 Priority: P0
 
 ### Goal
@@ -75,7 +75,7 @@ Make chronology a durable cross-phase object instead of a collection of summarie
 
 ## Batch 1: Intake Structure Foundation
 
-Status: Planned
+Status: Validation Required
 Priority: P0
 
 ### Goal
@@ -84,9 +84,9 @@ Make Phase 1 emit structured state that can drive evidence tasks directly.
 
 ### Primary files
 
-- [complaint_phases/intake_case_file.py](/home/barberb/complaint-generator/complaint_phases/intake_case_file.py)
-- [mediator/mediator.py](/home/barberb/complaint-generator/mediator/mediator.py)
-- [intake_status.py](/home/barberb/complaint-generator/intake_status.py)
+- [complaint_phases/intake_case_file.py](../complaint_phases/intake_case_file.py)
+- [mediator/mediator.py](../mediator/mediator.py)
+- [intake_status.py](../intake_status.py)
 
 ### Tasks
 
@@ -107,7 +107,7 @@ Make Phase 1 emit structured state that can drive evidence tasks directly.
 
 ## Batch 2: Proof-Directed Question Planner
 
-Status: Planned
+Status: Validation Required
 Priority: P0
 
 ### Goal
@@ -116,8 +116,8 @@ Make question selection optimize for proof gain, not only generic gap reduction.
 
 ### Primary files
 
-- [complaint_phases/denoiser.py](/home/barberb/complaint-generator/complaint_phases/denoiser.py)
-- [mediator/mediator.py](/home/barberb/complaint-generator/mediator/mediator.py)
+- [complaint_phases/denoiser.py](../complaint_phases/denoiser.py)
+- [mediator/mediator.py](../mediator/mediator.py)
 
 ### Tasks
 
@@ -152,9 +152,9 @@ Separate missingness from ambiguity and contradiction, and route each one differ
 
 ### Primary files
 
-- [complaint_phases/phase_manager.py](/home/barberb/complaint-generator/complaint_phases/phase_manager.py)
-- [mediator/mediator.py](/home/barberb/complaint-generator/mediator/mediator.py)
-- [intake_status.py](/home/barberb/complaint-generator/intake_status.py)
+- [complaint_phases/phase_manager.py](../complaint_phases/phase_manager.py)
+- [mediator/mediator.py](../mediator/mediator.py)
+- [intake_status.py](../intake_status.py)
 
 ### Tasks
 
@@ -184,10 +184,10 @@ Turn support gaps into concrete, element-level evidence tasks.
 
 ### Primary files
 
-- [mediator/claim_support_hooks.py](/home/barberb/complaint-generator/mediator/claim_support_hooks.py)
-- [mediator/mediator.py](/home/barberb/complaint-generator/mediator/mediator.py)
-- [complaint_phases/phase_manager.py](/home/barberb/complaint-generator/complaint_phases/phase_manager.py)
-- [complaint_phases/denoiser.py](/home/barberb/complaint-generator/complaint_phases/denoiser.py)
+- [mediator/claim_support_hooks.py](../mediator/claim_support_hooks.py)
+- [mediator/mediator.py](../mediator/mediator.py)
+- [complaint_phases/phase_manager.py](../complaint_phases/phase_manager.py)
+- [complaint_phases/denoiser.py](../complaint_phases/denoiser.py)
 
 ### Tasks
 
@@ -217,9 +217,9 @@ Make documentary evidence, testimony, authority, and web captures comparable sup
 
 ### Primary files
 
-- [mediator/evidence_hooks.py](/home/barberb/complaint-generator/mediator/evidence_hooks.py)
-- [mediator/claim_support_hooks.py](/home/barberb/complaint-generator/mediator/claim_support_hooks.py)
-- [docs/EVIDENCE_MANAGEMENT.md](/home/barberb/complaint-generator/docs/EVIDENCE_MANAGEMENT.md)
+- [mediator/evidence_hooks.py](../mediator/evidence_hooks.py)
+- [mediator/claim_support_hooks.py](../mediator/claim_support_hooks.py)
+- [docs/EVIDENCE_MANAGEMENT.md](../docs/EVIDENCE_MANAGEMENT.md)
 
 ### Tasks
 
@@ -254,8 +254,8 @@ Make Phase 1 and Phase 2 transitions depend on semantic readiness, not just coar
 
 ### Primary files
 
-- [complaint_phases/phase_manager.py](/home/barberb/complaint-generator/complaint_phases/phase_manager.py)
-- [mediator/mediator.py](/home/barberb/complaint-generator/mediator/mediator.py)
+- [complaint_phases/phase_manager.py](../complaint_phases/phase_manager.py)
+- [mediator/mediator.py](../mediator/mediator.py)
 
 ### Tasks
 
@@ -285,12 +285,12 @@ Expose the new intake and evidence state cleanly to operators and optimizer trac
 
 ### Primary files
 
-- [intake_status.py](/home/barberb/complaint-generator/intake_status.py)
-- [applications/review_api.py](/home/barberb/complaint-generator/applications/review_api.py)
-- [applications/document_api.py](/home/barberb/complaint-generator/applications/document_api.py)
-- [templates/claim_support_review.html](/home/barberb/complaint-generator/templates/claim_support_review.html)
-- [templates/document.html](/home/barberb/complaint-generator/templates/document.html)
-- [templates/optimization_trace.html](/home/barberb/complaint-generator/templates/optimization_trace.html)
+- [intake_status.py](../intake_status.py)
+- [applications/review_api.py](../applications/review_api.py)
+- [applications/document_api.py](../applications/document_api.py)
+- [templates/claim_support_review.html](../templates/claim_support_review.html)
+- [templates/document.html](../templates/document.html)
+- [templates/optimization_trace.html](../templates/optimization_trace.html)
 
 ### Tasks
 
@@ -321,8 +321,8 @@ Make the improvements measurable in automated runs.
 
 ### Primary files
 
-- [adversarial_harness/harness.py](/home/barberb/complaint-generator/adversarial_harness/harness.py)
-- [adversarial_harness/critic.py](/home/barberb/complaint-generator/adversarial_harness/critic.py)
+- [adversarial_harness/harness.py](../adversarial_harness/harness.py)
+- [adversarial_harness/critic.py](../adversarial_harness/critic.py)
 - targeted complaint-phase tests
 
 ### Tasks

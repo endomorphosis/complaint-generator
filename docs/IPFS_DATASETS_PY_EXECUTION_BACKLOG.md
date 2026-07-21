@@ -9,6 +9,7 @@ Companion docs:
 - `docs/IPFS_DATASETS_PY_NEXT_BATCH_PLAN.md`
 - `docs/IPFS_DATASETS_PY_CAPABILITY_MATRIX.md`
 - `docs/PAYLOAD_CONTRACTS.md`
+- `docs/AGENT_SUPERVISOR_TASK_BOARD.md`
 
 ## Purpose
 
@@ -59,15 +60,12 @@ These areas are already present and should be treated as foundation, not future 
 
 ## Still shallow or incomplete
 
-These are the main execution targets:
+These are the main execution and validation targets:
 
-- `integrations/ipfs_datasets/documents.py` exists but is still a fallback-oriented adapter rather than the shared parse contract for all ingestion paths
-- `integrations/ipfs_datasets/graphs.py` is still primarily fallback extraction and stub persistence
-- `integrations/ipfs_datasets/graphrag.py` is not yet used in support scoring or denoiser planning
-- `integrations/ipfs_datasets/logic.py` still returns `not_implemented` for proof workflows
-- the shared fact registry now also covers archived web evidence through the shared persisted evidence fact path, but it does not yet provide one fully explicit durable corpus service across graph artifacts and future predicates
-- no graph-store persistence or query plane exists for multi-artifact support tracing
-- review payloads and a dedicated dashboard now exist, but there is still no full contradiction, provenance, timeline, and support-path review workspace
+- shared parse, graph, GraphRAG, and logic contracts are implemented enough to validate as baseline, but supervisor runs should still execute the focused validation commands before closing dependent work
+- the shared fact registry covers evidence, authorities, and archived web evidence; remaining work is to keep the same first-class storage shape across future graph artifacts, predicates, and higher-level consumers
+- graph snapshot and support-query payloads exist, but external supervisors should treat graph-store-backed execution as capability-dependent and preserve adapter fallback behavior
+- review payloads and the dedicated dashboard expose coverage, provenance, timeline, and support-path data; remaining work is validation, product hardening, and keeping contract examples synchronized
 
 ## Status Legend
 
@@ -766,10 +764,6 @@ Acceptance criteria:
 
 - operator-facing worker processes only execute claimed queue items
 - queued and completed retrieval work can be inspected without starting new scraper runs
-- distinguish live-web evidence from historical snapshots in support summaries
-
-Acceptance criteria:
-
 - support payloads can tell whether an evidentiary page came from a live fetch, historical snapshot, or both
 
 Implementation notes:

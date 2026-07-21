@@ -48,19 +48,20 @@ Still shallow or incomplete:
 - `Complete`: implemented enough to treat as baseline
 - `In Progress`: partially implemented and actively extendable
 - `Planned`: designed but not yet implemented
+- `Validation Required`: implemented checklist items exist, but the supervisor should still run the listed validation commands before treating the slice as closed
 - `Deferred`: useful but lower priority than current roadmap
 
 ## Workstream Overview
 
 | ID | Workstream | Status | Priority | Outcome |
 |---|---|---|---|---|
-| T0 | Canonical temporal registry | Planned | P0 | One durable fact and relation substrate for chronology |
-| T1 | Claim-scoped temporal graph assembly | Planned | P0 | Stable partial-order graphs and issue categories per claim |
-| T2 | Legal temporal rule profiles | Planned | P0 | Claim-type specific timing rules and blocking windows |
-| T3 | Theorem export and proof bundles | Planned | P0 | Durable TDFOL and DCEC proof payloads with provenance |
-| T4 | Temporal contradiction and follow-up planner | Planned | P1 | Missing chronology becomes actionable next steps |
-| T5 | Review, drafting, and optimization integration | Planned | P1 | Temporal proof state becomes an operational readiness gate |
-| T6 | Regression and gold-case enforcement | Planned | P0 | Chronology behavior is measurable and test-protected |
+| T0 | Canonical temporal registry | Complete | P0 | One durable fact and relation substrate for chronology |
+| T1 | Claim-scoped temporal graph assembly | Validation Required | P0 | Stable partial-order graphs and issue categories per claim |
+| T2 | Legal temporal rule profiles | Validation Required | P0 | Claim-type specific timing rules and blocking windows |
+| T3 | Theorem export and proof bundles | Validation Required | P0 | Durable TDFOL and DCEC proof payloads with provenance |
+| T4 | Temporal contradiction and follow-up planner | Validation Required | P1 | Missing chronology becomes actionable next steps |
+| T5 | Review, drafting, and optimization integration | Validation Required | P1 | Temporal proof state becomes an operational readiness gate |
+| T6 | Regression and gold-case enforcement | Validation Required | P0 | Chronology behavior is measurable and test-protected |
 
 ## T0: Canonical Temporal Registry
 
@@ -105,7 +106,7 @@ Create one durable schema for temporal facts, relations, anchors, and issues acr
 
 ## T1: Claim-Scoped Temporal Graph Assembly
 
-Status: In Progress
+Status: Validation Required
 Priority: P0
 
 ### Goal
@@ -145,7 +146,7 @@ Build deterministic claim-level and element-level partial-order graphs from the 
 
 ## T2: Legal Temporal Rule Profiles
 
-Status: In Progress
+Status: Validation Required
 Priority: P0
 
 ### Goal
@@ -183,7 +184,7 @@ Define explicit legal timing rules per claim type so chronology can be evaluated
 
 ## T3: Theorem Export And Proof Bundles
 
-Status: In Progress
+Status: Validation Required
 Priority: P0
 
 ### Goal
@@ -221,7 +222,7 @@ Compile chronology into durable theorem-ready proof bundles with provenance-awar
 
 ## T4: Temporal Contradiction And Follow-Up Planner
 
-Status: Planned
+Status: Validation Required
 Priority: P1
 
 ### Goal
@@ -260,7 +261,7 @@ Route temporal proof failures into specific testimony, document, or external-rec
 
 ## T5: Review, Drafting, And Optimization Integration
 
-Status: In Progress
+Status: Validation Required
 Priority: P1
 
 ### Goal
@@ -300,7 +301,7 @@ Make temporal proof state a first-class readiness input across the review dashbo
 
 ## T6: Regression And Gold-Case Enforcement
 
-Status: In Progress
+Status: Validation Required
 Priority: P0
 
 ### Goal
