@@ -34,7 +34,10 @@ def create_claim_support_review_ui_router() -> APIRouter:
 
 
 def attach_claim_support_review_ui_routes(app: FastAPI) -> FastAPI:
-    app.include_router(create_claim_support_review_ui_router())
+    router = create_claim_support_review_ui_router()
+    app.router.routes.extend(router.routes)
+    if hasattr(app.router, "_mark_routes_changed"):
+        app.router._mark_routes_changed()
     return app
 
 
