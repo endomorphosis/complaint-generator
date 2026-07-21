@@ -9,7 +9,13 @@ import pytest
 
 duckdb = pytest.importorskip("duckdb")
 
-from complaint_analysis.temporal_rule_profiles import evaluate_temporal_rule_profile
+from complaint_analysis.decision_trees import get_temporal_rule_question_hints
+from complaint_analysis.legal_patterns import get_temporal_legal_patterns
+from complaint_analysis.temporal_rule_profiles import (
+    evaluate_temporal_rule_profile,
+    get_temporal_rule_profile_for_claim_type,
+    list_temporal_rule_profiles,
+)
 
 
 pytestmark = pytest.mark.no_auto_network
@@ -3037,6 +3043,28 @@ class TestClaimSupportHook:
             'has_contradictory_dates': False,
             'has_limitations_risk': False,
         }
+
+    def test_retaliation_temporal_rule_profile_contract_is_data_layer_discoverable(self):
+        profiles = list_temporal_rule_profiles()
+        profile = get_temporal_rule_profile_for_claim_type('employment retaliation')
+        question_hints = get_temporal_rule_question_hints('retaliation')
+        causation_patterns = get_temporal_legal_patterns('employment retaliation', 'causal_connection')
+
+        assert any(item['profile_id'] == 'retaliation_temporal_profile_v1' for item in profiles)
+        assert profile['rule_frame_id'] == 'retaliation_temporal_frame'
+        assert {event['role'] for event in profile['required_events']} == {
+            'protected_activity',
+            'adverse_action',
+        }
+        assert {window['window_id'] for window in profile['legal_windows']} >= {
+            'retaliation_protected_activity_before_adverse_action',
+            'retaliation_eeoc_180_day_charge_window',
+            'retaliation_eeoc_300_day_deferral_charge_window',
+        }
+        assert 'lack_of_employer_knowledge' in profile['defenses']
+        assert any(hint['proof_objective'] == 'anchor_required_event' for hint in question_hints)
+        assert any(hint.get('window_id') == 'retaliation_protected_activity_before_adverse_action' for hint in question_hints)
+        assert any('temporal proximity' in pattern for pattern in causation_patterns)
 
     def test_get_temporal_reasoning_context_prefers_temporal_registries(self):
         try:
