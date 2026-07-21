@@ -183,3 +183,31 @@ Work surface: `1` candidates, `1` sampled records.
   "top_conflict_paths": []
 }
 ```
+
+## Reconciliation Result
+
+Resolved: 2026-07-21T20:06Z
+
+- Classified the original dirty main checkout evidence and found the work had
+  already been narrowed from five paths to one local supervisor wrapper change.
+- Preserved that remaining main checkout change with commit
+  `f20703f1bb2a732fa78daf8c031fb315232baa1e`
+  (`chore(refactor): preserve merge watchdog pacing`) instead of discarding it.
+- Reran the `refactor/g2/g2-s1` supervisor reconciliation path. The lane event
+  log records `main_checkout_dirty: false`, empty `main_status_short`, and empty
+  `main_dirty_evidence` for the post-repair pass at
+  `2026-07-21T20:06:01Z`.
+- The dirty-main blocked candidate count for this guardrail decreased from
+  `1` to `0`. The remaining candidates moved to the separate
+  `preflight_merge_conflict` guardrail surface, so REF-007 no longer owns those
+  merge blockers.
+- A failed background merge attempt was aborted after the preserved branch
+  commits remained available on their implementation refs; the main checkout was
+  returned to a non-merge state before handing this task back to the supervisor.
+
+Post-repair evidence source:
+`data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/state/agent_refactor_g2_g2_s1_supervisor_events.jsonl`
+contains the rerun pass with `target_signature`
+`f20703f1bb2a732fa78daf8c031fb315232baa1e`,
+`main_checkout_dirty: false`, `candidate_count: 2`,
+`processed_count: 2`, and `preflight_blocked_count: 2`.
