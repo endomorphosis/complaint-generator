@@ -72,7 +72,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g3
 - Goal: Harden adapter contracts and degraded mode
-- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, integrations/ipfs_datasets/logic.py, lib/formal_logic
+- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, integrations/ipfs_datasets/logic.py, lib/formal_logic, data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest --collect-only -q
 
 ## G3.S1 Normalize IPFS datasets adapter payloads
