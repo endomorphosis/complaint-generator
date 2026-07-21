@@ -397,7 +397,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-TEMP-T6 Regression and gold-case enforcement
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
