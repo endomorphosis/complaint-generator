@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import signal
 import socket
 import subprocess
@@ -42,6 +43,9 @@ WORKTREE_ROOT = STATE_ROOT / "worktrees"
 BUNDLE_LANE_ROOT = STATE_ROOT / "bundle_lanes"
 BUNDLE_LANE_MANIFEST = BUNDLE_LANE_ROOT / "bundle_lanes.json"
 BUNDLE_COORDINATION_PATH = BUNDLE_LANE_ROOT / "coordination.sqlite3"
+MERGE_RESOLVER_PID_PATH = STATE_ROOT / "merge_resolver_watchdog.pid"
+MERGE_RESOLVER_STATUS_PATH = STATE_ROOT / "merge_resolver_watchdog_status.json"
+MERGE_RESOLVER_LOG_PATH = STATE_ROOT / "merge_resolver_watchdog.log"
 STATUS_PATH = STATE_ROOT / "refactor_supervisor_status.json"
 PID_PATH = STATE_ROOT / "refactor_supervisor.pid"
 LOG_PATH = STATE_ROOT / "refactor_supervisor.log"
@@ -99,6 +103,18 @@ def _upstream_bundle_runner():
     from ipfs_accelerate_py.agent_supervisor.bundle_supervisor import build_arg_parser, run_bundle_supervisor
 
     return build_arg_parser, run_bundle_supervisor
+
+
+def merge_resolver_command() -> str:
+    return shlex.join(
+        (
+            "env",
+            f"PYTHONPATH={ACCELERATE_REPO}",
+            sys.executable,
+            "-m",
+            "ipfs_accelerate_py.agent_supervisor.llm_merge_resolver_fallback",
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -1227,6 +1243,12 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
         "--implement",
         "--implementation-timeout",
         str(float(args.implementation_timeout)),
+        "--llm-merge-resolver-command",
+        merge_resolver_command(),
+        "--llm-merge-resolver-timeout-seconds",
+        str(float(args.merge_resolver_timeout)),
+        "--merge-reconciliation-max-merges",
+        str(int(args.merge_reconciliation_max_merges)),
         "--check-interval",
         str(float(args.interval_s)),
         "--daemon-interval",
@@ -1324,6 +1346,12 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
         str(int(args.max_restarts)),
         "--implementation-timeout",
         str(float(args.implementation_timeout)),
+        "--llm-merge-resolver-command",
+        merge_resolver_command(),
+        "--llm-merge-resolver-timeout-seconds",
+        str(float(args.merge_resolver_timeout)),
+        "--merge-reconciliation-max-merges",
+        str(int(args.merge_reconciliation_max_merges)),
         "--coordination-path",
         str(BUNDLE_COORDINATION_PATH),
         "--claimant-did",
@@ -1415,6 +1443,8 @@ def status_payload() -> dict[str, Any]:
         "log_path": str(LOG_PATH),
         "bundle_lane_manifest": str(BUNDLE_LANE_MANIFEST),
         "bundle_coordination_path": str(BUNDLE_COORDINATION_PATH),
+        "merge_resolver_command": merge_resolver_command(),
+        "merge_resolver_enabled_for_new_launches": True,
     }
     if STATUS_PATH.exists():
         try:
@@ -1489,6 +1519,8 @@ def add_parallel_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--daemon-interval-s", type=float, default=120.0)
     parser.add_argument("--implementation-timeout", type=float, default=1800.0)
     parser.add_argument("--max-restarts", type=int, default=3)
+    parser.add_argument("--merge-resolver-timeout", type=float, default=900.0)
+    parser.add_argument("--merge-reconciliation-max-merges", type=int, default=2)
     parser.add_argument("--lease-ms", type=int, default=300000)
     parser.add_argument("--full-scan", action="store_true", help="Run the expensive upstream objective AST scan before planning lanes.")
     parser.add_argument("--skip-active-bundle", action="store_true", default=True)
@@ -1518,6 +1550,8 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--refill-floor", type=int, default=20)
     start.add_argument("--implementation-timeout", type=float, default=1800.0)
     start.add_argument("--max-restarts", type=int, default=10)
+    start.add_argument("--merge-resolver-timeout", type=float, default=900.0)
+    start.add_argument("--merge-reconciliation-max-merges", type=int, default=2)
 
     plan_parallel = sub.add_parser("plan-parallel", help="Plan goal/subgoal/AST bundle lanes without launching them.")
     add_parallel_args(plan_parallel)

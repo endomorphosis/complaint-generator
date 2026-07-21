@@ -58,3 +58,16 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Outputs: data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-005-reconciliation-db50ee4f0701.md
 - Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by preflight_merge_conflict. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-005-reconciliation-db50ee4f0701.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
+
+## REF-006 Resolve dirty main checkout blocking 1 worktree merges
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Fingerprint: fde3722148ab64b3223caf20029a0bf7d0467dad
+- Dedupe key: reconciliation_guardrail:main_checkout_dirty
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-006-reconciliation-fde3722148ab.md
+- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-006-reconciliation-fde3722148ab.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
