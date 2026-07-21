@@ -89,7 +89,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-CSR-M6 Operator productization and document handoff
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Track: sup
