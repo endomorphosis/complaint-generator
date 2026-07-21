@@ -5,7 +5,6 @@ import json
 import os
 import re
 import shutil
-import sys
 import threading
 import uuid
 import zipfile
@@ -21,6 +20,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
 from complaint_phases.legal_document import parse_legal_document
+from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
 
 try:
     import anyio
@@ -36,15 +36,12 @@ except ModuleNotFoundError:
     anyio = _AnyioFallback()
 
 
-def _ensure_local_ipfs_datasets_path() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    candidate = repo_root / "ipfs_datasets_py"
-    candidate_text = str(candidate)
-    if candidate.is_dir() and candidate_text not in sys.path:
-        sys.path.insert(0, candidate_text)
-
-
-_ensure_local_ipfs_datasets_path()
+def _require_ipfs_attr(module_name: str, attr_name: str) -> Any:
+    value, error = import_attr_optional(module_name, attr_name)
+    if value is not None and error is None:
+        return value
+    message = import_failure_message(error) or f"missing attribute {attr_name}"
+    raise ImportError(f"Unable to import {module_name}.{attr_name}: {message}")
 
 
 DEFAULT_USER_ID = "did:key:anonymous"
@@ -4937,7 +4934,10 @@ class ComplaintWorkspaceService:
         uid_window_size: Optional[int] = None,
     ) -> Dict[str, Any]:
         async def _run_import() -> Dict[str, Any]:
-            from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
+            import_gmail_evidence = _require_ipfs_attr(
+                "ipfs_datasets_py.processors.legal_data.email_import",
+                "import_gmail_evidence",
+            )
 
             return await import_gmail_evidence(
                 addresses=addresses,
@@ -5001,7 +5001,10 @@ class ComplaintWorkspaceService:
         bm25_search_limit: int = 20,
     ) -> Dict[str, Any]:
         async def _run_pipeline() -> Dict[str, Any]:
-            from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
+            run_gmail_duckdb_pipeline = _require_ipfs_attr(
+                "ipfs_datasets_py.processors.legal_data.email_pipeline",
+                "run_gmail_duckdb_pipeline",
+            )
 
             return await run_gmail_duckdb_pipeline(
                 user_id=str(user_id or DEFAULT_USER_ID),
@@ -5046,7 +5049,10 @@ class ComplaintWorkspaceService:
         bm25_k1: float = 1.2,
         bm25_b: float = 0.75,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
+        search_email_duckdb_corpus = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data.email_pipeline",
+            "search_email_duckdb_corpus",
+        )
 
         return search_email_duckdb_corpus(
             index_path=index_path,
@@ -5932,9 +5938,13 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             return self._load_workspace_single_parquet_payload(resolved_path)
 
-        from ipfs_datasets_py.processors.legal_data import (
-            WorkspaceDatasetBuilder,
-            load_packaged_workspace_dataset,
+        WorkspaceDatasetBuilder = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "WorkspaceDatasetBuilder",
+        )
+        load_packaged_workspace_dataset = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "load_packaged_workspace_dataset",
         )
 
         if normalized_type == "packaged":
@@ -6205,7 +6215,14 @@ class ComplaintWorkspaceService:
         *,
         input_type: str = "packaged",
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import DocketDatasetBuilder, load_packaged_docket_dataset
+        DocketDatasetBuilder = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "DocketDatasetBuilder",
+        )
+        load_packaged_docket_dataset = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "load_packaged_docket_dataset",
+        )
 
         resolved_path = self._resolve_docket_path(input_path)
         normalized_type = str(input_type or "packaged").strip().lower()
@@ -6402,7 +6419,10 @@ class ComplaintWorkspaceService:
         include_document_text: bool = False,
         document_limit: Optional[int] = 25,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import summarize_docket_dataset
+        summarize_docket_dataset = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "summarize_docket_dataset",
+        )
 
         resolved_path = self._resolve_docket_path(input_path)
         dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
@@ -6480,7 +6500,10 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             summary = self._summarize_workspace_dataset_payload(filtered_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+            summarize_workspace_dataset = _require_ipfs_attr(
+                "ipfs_datasets_py.processors.legal_data",
+                "summarize_workspace_dataset",
+            )
 
             summary = dict(summarize_workspace_dataset(filtered_payload))
         return {
@@ -6984,7 +7007,10 @@ class ComplaintWorkspaceService:
         if normalized_type in {"single", "single_parquet", "parquet"}:
             summary = self._summarize_workspace_dataset_payload(dataset_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import summarize_workspace_dataset
+            summarize_workspace_dataset = _require_ipfs_attr(
+                "ipfs_datasets_py.processors.legal_data",
+                "summarize_workspace_dataset",
+            )
 
             summary = dict(summarize_workspace_dataset(dataset_payload))
         knowledge_graph = dict(dataset_payload.get("knowledge_graph") or {})
@@ -7121,10 +7147,17 @@ class ComplaintWorkspaceService:
             )
             summary = self._summarize_workspace_dataset_payload(filtered_payload)
         else:
-            from ipfs_datasets_py.processors.legal_data import (
-                search_workspace_dataset_bm25,
-                search_workspace_dataset_vector,
-                summarize_workspace_dataset,
+            search_workspace_dataset_bm25 = _require_ipfs_attr(
+                "ipfs_datasets_py.processors.legal_data",
+                "search_workspace_dataset_bm25",
+            )
+            search_workspace_dataset_vector = _require_ipfs_attr(
+                "ipfs_datasets_py.processors.legal_data",
+                "search_workspace_dataset_vector",
+            )
+            summarize_workspace_dataset = _require_ipfs_attr(
+                "ipfs_datasets_py.processors.legal_data",
+                "summarize_workspace_dataset",
             )
 
             if normalized_backend == "bm25":
@@ -7158,10 +7191,17 @@ class ComplaintWorkspaceService:
         top_k: int = 10,
         vector_dimension: int = 32,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import (
-            search_docket_dataset_bm25,
-            search_docket_dataset_vector,
-            summarize_docket_dataset,
+        search_docket_dataset_bm25 = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "search_docket_dataset_bm25",
+        )
+        search_docket_dataset_vector = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "search_docket_dataset_vector",
+        )
+        summarize_docket_dataset = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "summarize_docket_dataset",
         )
 
         resolved_path = self._resolve_docket_path(input_path)
@@ -7194,7 +7234,10 @@ class ComplaintWorkspaceService:
         *,
         input_type: str = "packaged",
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import summarize_docket_dataset
+        summarize_docket_dataset = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "summarize_docket_dataset",
+        )
 
         resolved_path = self._resolve_docket_path(input_path)
         dataset_payload = self._load_docket_dataset_payload(resolved_path, input_type=input_type)
@@ -7236,7 +7279,10 @@ class ComplaintWorkspaceService:
         }
 
     def get_packaged_docket_operator_dashboard(self, manifest_path: str | Path) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import get_packaged_docket_operator_dashboard
+        get_packaged_docket_operator_dashboard = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "get_packaged_docket_operator_dashboard",
+        )
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         dashboard = get_packaged_docket_operator_dashboard(resolved_manifest)
@@ -7252,7 +7298,10 @@ class ComplaintWorkspaceService:
         *,
         report_format: str = "parsed",
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import load_packaged_docket_operator_dashboard_report
+        load_packaged_docket_operator_dashboard_report = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "load_packaged_docket_operator_dashboard_report",
+        )
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         normalized_format = str(report_format or "parsed").strip().lower()
@@ -7278,7 +7327,10 @@ class ComplaintWorkspaceService:
         chain_until_satisfied: bool = True,
         attach_refreshed_packets: bool = False,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import execute_packaged_docket_proof_revalidation_queue
+        execute_packaged_docket_proof_revalidation_queue = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "execute_packaged_docket_proof_revalidation_queue",
+        )
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         execution = execute_packaged_docket_proof_revalidation_queue(
@@ -7309,7 +7361,10 @@ class ComplaintWorkspaceService:
         execution_top_k: int = 10,
         chain_until_satisfied: bool = True,
     ) -> Dict[str, Any]:
-        from ipfs_datasets_py.processors.legal_data import persist_packaged_docket_proof_revalidation_queue
+        persist_packaged_docket_proof_revalidation_queue = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.legal_data",
+            "persist_packaged_docket_proof_revalidation_queue",
+        )
 
         resolved_manifest = str(Path(str(manifest_path)).expanduser().resolve())
         resolved_output_dir = str(Path(str(output_dir)).expanduser().resolve())

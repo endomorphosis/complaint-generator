@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
 
-from ipfs_datasets_py.processors.legal_data.email_authority_enrichment import enrich_email_timeline_authorities
+
+def _require_enrich_email_timeline_authorities():
+    enrich_email_timeline_authorities, error = import_attr_optional(
+        "ipfs_datasets_py.processors.legal_data.email_authority_enrichment",
+        "enrich_email_timeline_authorities",
+    )
+    if enrich_email_timeline_authorities is not None:
+        return enrich_email_timeline_authorities
+    raise ImportError(
+        "Unable to import ipfs_datasets_py email authority enrichment: "
+        f"{import_failure_message(error) or 'missing enrich_email_timeline_authorities'}"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    enrich_email_timeline_authorities = _require_enrich_email_timeline_authorities()
     payload = enrich_email_timeline_authorities(
         args.email_timeline_handoff,
         output_dir=args.output_dir,

@@ -3,14 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from complaint_generator.agentic_evidence_download import run_agentic_evidence_download
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    from complaint_generator.agentic_evidence_download import run_agentic_evidence_download
+
     args = build_parser().parse_args()
     payload = run_agentic_evidence_download(
         complaint_query=args.complaint_query,

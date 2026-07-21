@@ -16,11 +16,18 @@ from typing import Any
 import anyio
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
-from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
-from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
+from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
+
+
+def _require_ipfs_attr(module_name: str, attr_name: str, label: str):
+    value, error = import_attr_optional(module_name, attr_name)
+    if value is not None:
+        return value
+    raise ImportError(
+        f"Unable to import ipfs_datasets_py {label}: "
+        f"{import_failure_message(error) or f'missing {attr_name}'}"
+    )
 
 
 _STOP_REQUESTED = False
@@ -324,6 +331,11 @@ def _resolve_credentials(args: argparse.Namespace, parser: argparse.ArgumentPars
         if not getattr(args, "gmail_oauth_client_secrets", None):
             parser.error("--gmail-oauth-client-secrets is required when --use-gmail-oauth is enabled.")
         return gmail_user, ""
+    resolve_gmail_credentials = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_auth",
+        "resolve_gmail_credentials",
+        "Gmail credential resolver",
+    )
     return resolve_gmail_credentials(
         gmail_user=str(args.gmail_user or ""),
         gmail_app_password=str(args.gmail_app_password or ""),
@@ -337,6 +349,11 @@ def _resolve_credentials(args: argparse.Namespace, parser: argparse.ArgumentPars
 
 
 async def _run_cycle(args: argparse.Namespace) -> dict[str, Any]:
+    run_gmail_duckdb_pipeline = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_pipeline",
+        "run_gmail_duckdb_pipeline",
+        "Gmail DuckDB pipeline",
+    )
     return await run_gmail_duckdb_pipeline(
         user_id=args.user_id,
         addresses=args.addresses,
