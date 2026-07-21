@@ -183,3 +183,43 @@ Work surface: `1` candidates, `1` sampled records.
   "top_conflict_paths": []
 }
 ```
+
+## Resolution Evidence
+
+Resolved on 2026-07-21 by preserving the dirty main checkout in explicit
+supervisor commits and rerunning the lane reconciliation pass against
+`data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s2`.
+
+Preserved main checkout changes:
+
+- `512f56e chore(refactor): preserve supervisor baseline artifacts`
+- `d5f9358 chore(refactor): record g1 reconciliation guardrail`
+
+The scoped rerun command was:
+
+```sh
+PYTHONPATH=/home/barberb/complaint-generator/ipfs_datasets_py/ipfs_accelerate_py \
+python -m ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor \
+  --once --reconciliation-only \
+  --todo-path /home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md \
+  --state-dir /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/state \
+  --state-prefix agent_refactor_g2_g2_s2 \
+  --task-prefix REF- \
+  --worktree-root /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s2 \
+  --worktree-submodule-path ipfs_datasets_py/ipfs_accelerate_py \
+  --worktree-reconciliation-max-merges 1 \
+  --no-worktree-scan-cache \
+  --log-level INFO
+```
+
+Result:
+
+- `main_checkout_dirty`: `true` before reconciliation, `false` after the scoped rerun.
+- `raw_main_checkout_dirty`: `false` after the scoped rerun.
+- Main dirty status paths after the scoped rerun: none.
+- `candidate_count`: `1`; `processed_count`: `1`.
+- `main_checkout_dirty`-blocked candidate count: decreased from `1` to `0`.
+- The remaining candidate is no longer blocked by a dirty checkout. It is now
+  blocked by a separate `preflight_merge_conflict` on
+  `scripts/refactor_agent_supervisor.py`, recorded as REF-010 in
+  `2026-07-21-ref-010-reconciliation-ec3af14efd7f.md`.
