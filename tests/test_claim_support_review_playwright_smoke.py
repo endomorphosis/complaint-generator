@@ -19,6 +19,7 @@ from applications.review_api import attach_claim_support_review_routes
 from applications.document_ui import attach_document_ui_routes
 from applications.review_ui import attach_claim_support_review_ui_routes, attach_review_health_routes
 from complaint_phases import ComplaintPhase
+from lib.runtime_ownership import RUNTIME_ROLE_WEB, require_module_ownership
 
 
 pytestmark = [pytest.mark.no_auto_network, pytest.mark.browser]
@@ -38,6 +39,16 @@ def _build_browser_smoke_app(mediator: Mock) -> FastAPI:
     attach_claim_support_review_ui_routes(app)
     attach_review_health_routes(app, "claim-support-review-smoke")
     return app
+
+
+def test_review_ui_runtime_ownership_is_web_entrypoint() -> None:
+    ownership = require_module_ownership("applications.review_ui")
+
+    assert ownership.role == RUNTIME_ROLE_WEB
+    assert {entrypoint.name for entrypoint in ownership.entrypoints} == {
+        "create_review_dashboard_app",
+        "create_review_surface_app",
+    }
 
 
 def _build_document_browser_smoke_app() -> FastAPI:

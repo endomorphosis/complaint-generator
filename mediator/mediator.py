@@ -1,6 +1,7 @@
 from time import time
 import re
 from typing import List, Optional, Dict, Any
+from lib.runtime_ownership import require_module_ownership
 from .strings import user_prompts
 from .state import State
 from .inquiries import Inquiries
@@ -52,6 +53,8 @@ from intake_status import (
 )
 
 
+MODULE_OWNERSHIP = require_module_ownership("mediator.mediator")
+RUNTIME_ENTRYPOINT_ROLE = MODULE_OWNERSHIP.role
 ALIGNMENT_TASK_UPDATE_HISTORY_LIMIT = 25
 FOLLOW_UP_REVIEWABLE_ESCALATION_STATUSES = {
 	'awaiting_complainant_record',

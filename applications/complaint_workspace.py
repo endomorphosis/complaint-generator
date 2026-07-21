@@ -21,6 +21,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
 from complaint_phases.legal_document import parse_legal_document
+from lib.runtime_ownership import require_module_ownership
 
 try:
     import anyio
@@ -47,6 +48,8 @@ def _ensure_local_ipfs_datasets_path() -> None:
 _ensure_local_ipfs_datasets_path()
 
 
+MODULE_OWNERSHIP = require_module_ownership("applications.complaint_workspace")
+RUNTIME_ENTRYPOINT_ROLE = MODULE_OWNERSHIP.role
 DEFAULT_USER_ID = "did:key:anonymous"
 DEFAULT_UI_UX_OPTIMIZER_METHOD = "actor_critic"
 DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
