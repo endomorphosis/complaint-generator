@@ -8,7 +8,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-005 Split mediator/mediator.py by workflow service while preserving public API compatibility
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G2
