@@ -194,6 +194,8 @@ Preserved main checkout changes:
 
 - `512f56e chore(refactor): preserve supervisor baseline artifacts`
 - `d5f9358 chore(refactor): record g1 reconciliation guardrail`
+- `771821d chore(refactor): resolve ref-009 checkout guardrail`
+- `2968ebb chore(refactor): preserve merge resolver guardrail output`
 
 The scoped rerun command was:
 
