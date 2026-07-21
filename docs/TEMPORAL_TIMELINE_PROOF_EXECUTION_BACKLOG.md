@@ -162,11 +162,12 @@ Define explicit legal timing rules per claim type so chronology can be evaluated
 
 ### Checklist
 
-- [x] define a temporal rule profile contract with required events, optional events, deadlines, and defenses
+- [x] define a temporal rule profile contract with required events, optional events, deadlines, and defenses — `TemporalRuleProfileContract`, `TemporalEventRequirement`, and `LegalTemporalWindow` in `complaint_analysis/temporal_rule_profiles.py` expose data-only contracts through `list_temporal_rule_profiles()`, `get_temporal_rule_profile_contract()`, and `get_temporal_rule_profile_for_claim_type()`
 - [x] implement the first rule profile for retaliation
 - [x] add legal windows for causal proximity, filing, notice, or exhaustion where relevant — EEOC 180/300-day window via `has_limitations_risk` and `limitations_risk_days`
 - [x] expose rule-frame IDs in proof payloads so failures can be explained against concrete legal rules — `rule_frame_id` in proof bundles and `temporal_rule_frame_id` in element review items
-- [x] document how claim-type timing rules differ from generic timeline consistency warnings — see `_TEMPORAL_ISSUE_FOLLOW_UP_PROFILES` in `complaint_analysis/temporal_rule_profiles.py`; claim-type rules (e.g. `retaliation_temporal_profile_v1`) evaluate ordered role-tagged facts against a legal frame (`retaliation_temporal_frame`) whereas generic timeline warnings come from issue-registry normalization of `missing_anchor`, `contradictory_dates`, and `relative_only_ordering` issue types without a claim-type gate
+- [x] document how claim-type timing rules differ from generic timeline consistency warnings — see `_TEMPORAL_ISSUE_FOLLOW_UP_PROFILES` and the profile registry in `complaint_analysis/temporal_rule_profiles.py`; claim-type rules (e.g. `retaliation_temporal_profile_v1`) evaluate ordered role-tagged facts against a legal frame (`retaliation_temporal_frame`) whereas generic timeline warnings come from issue-registry normalization of `missing_anchor`, `contradictory_dates`, and `relative_only_ordering` issue types without a claim-type gate
+- [x] expose non-rendering discovery hooks — `get_temporal_rule_question_hints()` in `complaint_analysis/decision_trees.py` and `get_temporal_legal_patterns()` in `complaint_analysis/legal_patterns.py` let intake/review code discover the same profile events and legal timing terms without depending on HTML templates
 
 ### Acceptance criteria
 

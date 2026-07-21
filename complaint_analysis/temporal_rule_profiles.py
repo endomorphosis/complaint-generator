@@ -1,7 +1,223 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any, Dict, List, Optional, Set
+
+
+@dataclass(frozen=True)
+class TemporalEventRequirement:
+    """A role-tagged event a legal timing profile expects to find."""
+
+    event_id: str
+    role: str
+    label: str
+    required: bool = True
+    accepted_element_tags: List[str] = field(default_factory=list)
+    required_anchor: bool = True
+    missing_issue_category: str = "missing_anchor"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class LegalTemporalWindow:
+    """A claim-specific timing window or ordering rule."""
+
+    window_id: str
+    label: str
+    window_type: str
+    source_event_role: str
+    target_event_role: str
+    relation: str = "before"
+    min_days: Optional[int] = None
+    max_days: Optional[int] = None
+    violation_issue_category: str = "legal_window_violation"
+    description: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class TemporalRuleProfileContract:
+    """Stable, data-only contract for claim-type temporal rule evaluation."""
+
+    profile_id: str
+    rule_frame_id: str
+    claim_type: str
+    description: str
+    required_events: List[TemporalEventRequirement] = field(default_factory=list)
+    optional_events: List[TemporalEventRequirement] = field(default_factory=list)
+    legal_windows: List[LegalTemporalWindow] = field(default_factory=list)
+    defenses: List[str] = field(default_factory=list)
+    issue_categories: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+RETALIATION_TEMPORAL_PROFILE_ID = "retaliation_temporal_profile_v1"
+RETALIATION_TEMPORAL_RULE_FRAME_ID = "retaliation_temporal_frame"
+
+
+_RETALIATION_TEMPORAL_PROFILE = TemporalRuleProfileContract(
+    profile_id=RETALIATION_TEMPORAL_PROFILE_ID,
+    rule_frame_id=RETALIATION_TEMPORAL_RULE_FRAME_ID,
+    claim_type="retaliation",
+    description=(
+        "Evaluates whether protected activity, adverse action, and causal "
+        "connection chronology are present and legally ordered."
+    ),
+    required_events=[
+        TemporalEventRequirement(
+            event_id="retaliation_protected_activity_event",
+            role="protected_activity",
+            label="Protected activity",
+            accepted_element_tags=["protected_activity", "protectedactivity"],
+            missing_issue_category="retaliation_missing_causation",
+        ),
+        TemporalEventRequirement(
+            event_id="retaliation_adverse_action_event",
+            role="adverse_action",
+            label="Adverse action",
+            accepted_element_tags=["adverse_action", "adverseaction"],
+            missing_issue_category="missing_anchor",
+        ),
+    ],
+    optional_events=[
+        TemporalEventRequirement(
+            event_id="retaliation_employer_knowledge_event",
+            role="employer_knowledge",
+            label="Employer knowledge of protected activity",
+            required=False,
+            accepted_element_tags=["employer_knowledge", "knowledge"],
+            required_anchor=False,
+            missing_issue_category="retaliation_missing_knowledge_timing",
+        ),
+        TemporalEventRequirement(
+            event_id="retaliation_exhaustion_or_charge_event",
+            role="administrative_charge",
+            label="Administrative charge or agency filing",
+            required=False,
+            accepted_element_tags=["administrative_charge", "eeoc_charge", "filing"],
+            required_anchor=True,
+            missing_issue_category="limitations_risk",
+        ),
+    ],
+    legal_windows=[
+        LegalTemporalWindow(
+            window_id="retaliation_protected_activity_before_adverse_action",
+            label="Protected activity precedes adverse action",
+            window_type="ordering",
+            source_event_role="protected_activity",
+            target_event_role="adverse_action",
+            relation="before",
+            violation_issue_category="retaliation_missing_sequence",
+            description=(
+                "Causation requires the protected activity to precede the adverse action "
+                "or another legally sufficient causal sequence."
+            ),
+        ),
+        LegalTemporalWindow(
+            window_id="retaliation_eeoc_180_day_charge_window",
+            label="EEOC 180-day non-deferral filing risk window",
+            window_type="filing_deadline",
+            source_event_role="adverse_action",
+            target_event_role="administrative_charge",
+            relation="within_days",
+            max_days=180,
+            violation_issue_category="limitations_risk",
+            description=(
+                "Flags non-deferral jurisdiction charge-timeliness risk when the adverse "
+                "action is more than 180 days old."
+            ),
+        ),
+        LegalTemporalWindow(
+            window_id="retaliation_eeoc_300_day_deferral_charge_window",
+            label="EEOC 300-day deferral filing risk window",
+            window_type="filing_deadline",
+            source_event_role="adverse_action",
+            target_event_role="administrative_charge",
+            relation="within_days",
+            max_days=300,
+            violation_issue_category="limitations_risk",
+            description=(
+                "Documents the longer deferral-state charge-timeliness window for "
+                "review and proof explanations."
+            ),
+        ),
+    ],
+    defenses=[
+        "same_decision_without_protected_activity",
+        "legitimate_nonretaliatory_reason",
+        "lack_of_employer_knowledge",
+        "untimely_administrative_charge",
+    ],
+    issue_categories=[
+        "retaliation_missing_causation",
+        "retaliation_missing_causation_link",
+        "retaliation_missing_sequence",
+        "retaliation_missing_sequencing_dates",
+        "temporal_reverse_before",
+        "limitations_risk",
+        "contradictory_dates",
+    ],
+)
+
+
+_TEMPORAL_RULE_PROFILE_REGISTRY: Dict[str, TemporalRuleProfileContract] = {
+    _RETALIATION_TEMPORAL_PROFILE.profile_id: _RETALIATION_TEMPORAL_PROFILE,
+}
+
+_CLAIM_TYPE_PROFILE_ALIASES: Dict[str, str] = {
+    "retaliation": RETALIATION_TEMPORAL_PROFILE_ID,
+    "employment_retaliation": RETALIATION_TEMPORAL_PROFILE_ID,
+    "employment_discrimination_retaliation": RETALIATION_TEMPORAL_PROFILE_ID,
+}
+
+
+def list_temporal_rule_profiles() -> List[Dict[str, Any]]:
+    """Return all registered legal temporal rule profile contracts."""
+    return [
+        profile.to_dict()
+        for profile in sorted(
+            _TEMPORAL_RULE_PROFILE_REGISTRY.values(),
+            key=lambda item: item.profile_id,
+        )
+    ]
+
+
+def get_temporal_rule_profile_contract(profile_id: Any) -> Optional[Dict[str, Any]]:
+    """Return a registered profile contract by profile id."""
+    profile = _TEMPORAL_RULE_PROFILE_REGISTRY.get(str(profile_id or "").strip())
+    return profile.to_dict() if profile else None
+
+
+def get_temporal_rule_profile_for_claim_type(claim_type: Any) -> Optional[Dict[str, Any]]:
+    """Return the explicit temporal rule profile contract for a claim type."""
+    normalized = _normalize_key(claim_type)
+    profile_id = _CLAIM_TYPE_PROFILE_ALIASES.get(normalized)
+    if not profile_id and _is_retaliation_claim_type(claim_type):
+        profile_id = RETALIATION_TEMPORAL_PROFILE_ID
+    return get_temporal_rule_profile_contract(profile_id) if profile_id else None
+
+
+def has_temporal_rule_profile(claim_type: Any) -> bool:
+    """Return whether the claim type has an explicit legal timing profile."""
+    return get_temporal_rule_profile_for_claim_type(claim_type) is not None
+
+
+def get_temporal_event_roles(claim_type: Any) -> List[str]:
+    """Return required and optional event roles for a claim type's profile."""
+    profile = get_temporal_rule_profile_for_claim_type(claim_type) or {}
+    roles: List[str] = []
+    for event in list(profile.get("required_events", []) or []) + list(profile.get("optional_events", []) or []):
+        role = str(event.get("role") or "").strip()
+        if role and role not in roles:
+            roles.append(role)
+    return roles
 
 
 # ---------------------------------------------------------------------------
@@ -281,8 +497,8 @@ def evaluate_temporal_rule_profile(
         return {
             "available": True,
             "evaluated": False,
-            "profile_id": "retaliation_temporal_profile_v1",
-            "rule_frame_id": "retaliation_temporal_frame",
+            "profile_id": RETALIATION_TEMPORAL_PROFILE_ID,
+            "rule_frame_id": RETALIATION_TEMPORAL_RULE_FRAME_ID,
             "status": "not_targeted",
             "reason": "Element is not covered by the retaliation temporal profile.",
         }
@@ -470,8 +686,8 @@ def evaluate_temporal_rule_profile(
     return {
         "available": True,
         "evaluated": True,
-        "profile_id": "retaliation_temporal_profile_v1",
-        "rule_frame_id": "retaliation_temporal_frame",
+        "profile_id": RETALIATION_TEMPORAL_PROFILE_ID,
+        "rule_frame_id": RETALIATION_TEMPORAL_RULE_FRAME_ID,
         "claim_type": str(claim_type or ""),
         "element_role": role,
         "status": status,
