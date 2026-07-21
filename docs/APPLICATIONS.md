@@ -325,6 +325,8 @@ POST to this endpoint to build a filing-style complaint package from the current
 
 The browser UI for this workflow is available at `/document`, which submits to this endpoint and renders artifact download links, section-level drafting readiness, claim-level filing warnings, compact claim-level source context, guardrail summaries, managed artifact provenance, and the generated pleading text from the response payload.
 
+DOCX generation uses `python-docx` when that optional package is installed. In slim deployments where the package is unavailable, the document pipeline still emits valid DOCX containers with the pleading and affidavit text, section headings, grouped factual allegation headings, readiness-driven open gaps, and claim-support handoff content preserved for operator review. PDF, TXT, checklist, and packet artifacts continue through their native renderers.
+
 Example request:
 
 ```json
