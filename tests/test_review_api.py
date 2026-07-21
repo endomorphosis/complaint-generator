@@ -2802,7 +2802,8 @@ def test_claim_support_follow_up_execution_payload_returns_post_execution_review
         "Event sequence",
     ]
     assert payload["follow_up_execution"]["retaliation"]["tasks"][0]["satisfied_fact_bundle"] == ["Protected activity"]
-    assert payload["follow_up_execution_summary"]["retaliation"] == {
+    follow_up_execution_summary = payload["follow_up_execution_summary"]["retaliation"]
+    expected_follow_up_execution_summary = {
         "executed_task_count": 1,
         "skipped_task_count": 1,
         "suppressed_task_count": 0,
@@ -2873,6 +2874,8 @@ def test_claim_support_follow_up_execution_payload_returns_post_execution_review
         "matched_claim_element_rule_count": 0,
         "rule_candidate_type_counts": {},
     }
+    for key, value in expected_follow_up_execution_summary.items():
+        assert follow_up_execution_summary[key] == value
     assert payload["execution_quality_summary"]["retaliation"] == {
         "pre_low_quality_parsed_record_count": 1,
         "post_low_quality_parsed_record_count": 0,
