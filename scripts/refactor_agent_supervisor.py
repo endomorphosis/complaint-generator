@@ -1399,18 +1399,18 @@ def active_bundle_keys() -> set[str]:
     active_task_id = str(state.get("active_task_id") or "").strip()
     if not active_task_id:
         return set()
-    lines = TODO_PATH.read_text(encoding="utf-8", errors="replace").splitlines()
-    in_block = False
-    for line in lines:
-        if line.startswith("## "):
-            if in_block:
-                return set()
-            in_block = line.startswith(f"## {active_task_id} ")
-            continue
-        if in_block and line.startswith("- Bundle:"):
-            bundle_key = line.split(":", 1)[1].strip()
-            return {bundle_key} if bundle_key else set()
-    return set()
+    text = TODO_PATH.read_text(encoding="utf-8", errors="replace")
+    block_pattern = re.compile(
+        rf"^##\s+{re.escape(active_task_id)}\s+.*?(?=^\s*-\s+\[\s?\]\s+Task checkbox-|^##\s+{re.escape(TASK_PREFIX)}|\Z)",
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    match = block_pattern.search(text)
+    if not match:
+        return set()
+    bundle_match = re.search(r"^-\s+Bundle:\s*(.+?)\s*$", match.group(0), flags=re.MULTILINE)
+    if not bundle_match:
+        return set()
+    return {bundle_match.group(1).strip()}
 
 
 def merge_event_paths() -> list[Path]:
