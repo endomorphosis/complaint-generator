@@ -110,6 +110,9 @@ def merge_resolver_command() -> str:
         (
             "env",
             f"PYTHONPATH={ACCELERATE_REPO}",
+            "CODEX_MERGE_RESOLVER_TIMEOUT_SECONDS=300",
+            "COPILOT_MERGE_RESOLVER_TIMEOUT_SECONDS=300",
+            "AGENT_RESOLVER_LOCK_TIMEOUT_SECONDS=60",
             sys.executable,
             "-m",
             "ipfs_accelerate_py.agent_supervisor.llm_merge_resolver_fallback",
@@ -1421,11 +1424,12 @@ def merge_event_paths() -> list[Path]:
     return sorted(dict.fromkeys(paths))
 
 
-def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0) -> dict[str, Any]:
+def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0, max_events: int = 1) -> dict[str, Any]:
     _ensure_accelerate_import_path()
     from ipfs_accelerate_py.agent_supervisor.merge_resolver import invoke_llm_resolver, resolver_payload
 
     results: list[dict[str, Any]] = []
+    attempted = 0
     for events_path in merge_event_paths():
         try:
             payload = resolver_payload(
@@ -1442,6 +1446,18 @@ def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0) -> dict[str,
             if not payload.get("found"):
                 results.append({"events_path": str(events_path), "found": False})
                 continue
+            if attempted >= max(1, int(max_events)):
+                results.append(
+                    {
+                        "events_path": str(events_path),
+                        "found": True,
+                        "task_id": payload.get("task_id"),
+                        "skipped": True,
+                        "skip_reason": "max_events reached for this watchdog cycle",
+                    }
+                )
+                continue
+            attempted += 1
             applied = invoke_llm_resolver(
                 payload,
                 command_template=merge_resolver_command(),
@@ -1465,6 +1481,7 @@ def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0) -> dict[str,
         "event_log_count": len(results),
         "found_count": sum(1 for item in results if item.get("found")),
         "applied_count": sum(1 for item in results if item.get("applied")),
+        "attempted_count": attempted,
         "results": results,
     }
     MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1485,7 +1502,7 @@ def run_merge_resolver_watchdog(*, interval_s: float, timeout_seconds: float, on
     try:
         while True:
             cycle += 1
-            last = resolve_merge_conflicts_once(timeout_seconds=timeout_seconds)
+            last = resolve_merge_conflicts_once(timeout_seconds=timeout_seconds, max_events=1)
             last["cycle"] = cycle
             last["status"] = "running" if not once else "checked"
             MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(last, indent=2, sort_keys=True) + "\n", encoding="utf-8")
