@@ -124,8 +124,9 @@ Build deterministic claim-level and element-level partial-order graphs from the 
 - [x] normalize relation inference for explicit and inferred `before`, `after`, `during`, `overlaps`, and `same_time` — `build_temporal_relation_registry` now marks explicit relations as `inference_mode="explicit"` and generates inferred `before`/`same_time` relations from date anchors with `inference_mode="derived_from_date_anchors"` for pairs not already covered by an explicit relation
 - [x] formalize issue categories such as `missing_anchor`, `contradictory_dates`, `relative_only_ordering`, and `limitations_risk` — `build_temporal_issue_registry` now normalises `temporal_contradictory_dates` → `contradictory_dates`, `temporal_limitations_risk` → `limitations_risk`, etc. from the contradiction queue so rule profiles and downstream consumers see canonical category names
 - [x] add issue severity and blocking metadata — `severity` and `blocking` fields on every issue registry entry
-- [x] emit deterministic claim-level temporal graph summaries for packets and review payloads — `temporal_summary` with `relation_type_counts` and `relation_preview` from graph data in `_get_claim_reasoning_diagnostics`
-- [x] preserve relation previews and type counts from the graph, not from UI formatting logic — `relation_type_counts` carried through `consistency_summary` → `temporal_summary` → review payload
+- [x] emit deterministic claim-level temporal graph summaries for packets and review payloads — `build_claim_temporal_graphs()` now assembles `claim_temporal_graphs` from canonical fact, relation, and issue registries, and `_get_temporal_reasoning_context()` consumes that graph when mediator status provides it
+- [x] preserve relation previews and type counts from the graph, not from UI formatting logic — `relation_type_counts`, `relation_preview`, `warnings`, and readiness trace IDs are carried through graph `consistency_summary` → `temporal_summary` → review payload
+- [x] trace temporal readiness to graph IDs — `intake_chronology_readiness` now includes `trace_fact_ids`, `trace_relation_ids`, `trace_issue_ids`, and `claim_temporal_graph_ids` derived from `claim_temporal_graphs`
 
 ### Acceptance criteria
 

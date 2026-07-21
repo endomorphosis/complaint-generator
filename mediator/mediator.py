@@ -9800,6 +9800,8 @@ class Mediator:
 		if not temporal_issue_registry and isinstance(case_file.get('timeline_issues'), list):
 			temporal_issue_registry = case_file.get('timeline_issues')
 		timeline_consistency_summary = case_file.get('timeline_consistency_summary') if isinstance(case_file.get('timeline_consistency_summary'), dict) else {}
+		claim_temporal_graphs = case_file.get('claim_temporal_graphs') if isinstance(case_file.get('claim_temporal_graphs'), dict) else {}
+		graph_claims = claim_temporal_graphs.get('claims', {}) if isinstance(claim_temporal_graphs.get('claims'), dict) else {}
 
 		event_records = temporal_fact_registry if temporal_fact_registry else event_ledger
 		event_count = len(event_records)
@@ -9820,6 +9822,35 @@ class Mediator:
 
 		relation_records = temporal_relation_registry if temporal_relation_registry else timeline_relations
 		relation_count = len(relation_records)
+		graph_ids: List[str] = []
+		graph_trace_fact_ids: List[str] = []
+		graph_trace_relation_ids: List[str] = []
+		graph_trace_issue_ids: List[str] = []
+		graph_warnings: List[str] = []
+		for graph in graph_claims.values():
+			if not isinstance(graph, dict):
+				continue
+			graph_id = str(graph.get('graph_id') or '').strip()
+			if graph_id and graph_id not in graph_ids:
+				graph_ids.append(graph_id)
+			for fact_id in graph.get('fact_ids') or []:
+				normalized_fact_id = str(fact_id or '').strip()
+				if normalized_fact_id and normalized_fact_id not in graph_trace_fact_ids:
+					graph_trace_fact_ids.append(normalized_fact_id)
+			for relation_id in graph.get('relation_ids') or []:
+				normalized_relation_id = str(relation_id or '').strip()
+				if normalized_relation_id and normalized_relation_id not in graph_trace_relation_ids:
+					graph_trace_relation_ids.append(normalized_relation_id)
+			for issue_id in graph.get('issue_ids') or []:
+				normalized_issue_id = str(issue_id or '').strip()
+				if normalized_issue_id and normalized_issue_id not in graph_trace_issue_ids:
+					graph_trace_issue_ids.append(normalized_issue_id)
+			for warning in graph.get('warnings') or []:
+				normalized_warning = str(warning or '').strip()
+				if normalized_warning and normalized_warning not in graph_warnings:
+					graph_warnings.append(normalized_warning)
+		if graph_trace_relation_ids:
+			relation_count = len(graph_trace_relation_ids)
 		issue_count = len(temporal_issue_registry)
 		resolved_issue_count = 0
 		open_issue_count = 0
@@ -9887,10 +9918,24 @@ class Mediator:
 			'resolved_issue_count': resolved_issue_count,
 			'issue_ids': issue_ids,
 			'blocking_issue_ids': blocking_issue_ids,
+			'trace_fact_ids': graph_trace_fact_ids or [
+				str((event or {}).get('fact_id') or (event or {}).get('temporal_fact_id') or '').strip()
+				for event in event_records
+				if isinstance(event, dict) and str(event.get('fact_id') or event.get('temporal_fact_id') or '').strip()
+			],
+			'trace_relation_ids': graph_trace_relation_ids or [
+				str((relation or {}).get('relation_id') or '').strip()
+				for relation in relation_records
+				if isinstance(relation, dict) and str(relation.get('relation_id') or '').strip()
+			],
+			'trace_issue_ids': graph_trace_issue_ids or issue_ids,
+			'claim_temporal_graph_ids': graph_ids,
 			'missing_temporal_predicates': missing_temporal_predicates,
 			'missing_temporal_predicate_count': len(missing_temporal_predicates),
 			'required_provenance_kinds': required_provenance_kinds,
 			'required_provenance_kind_count': len(required_provenance_kinds),
+			'warnings': graph_warnings,
+			'warning_count': len(graph_warnings),
 			'resolution_lane_counts': resolution_lane_counts,
 			'issue_type_counts': issue_type_counts,
 			'issue_status_counts': issue_status_counts,
@@ -12576,6 +12621,7 @@ class Mediator:
 		temporal_fact_registry = intake_case_file.get('temporal_fact_registry', []) if isinstance(intake_case_file, dict) else []
 		temporal_relation_registry = intake_case_file.get('temporal_relation_registry', []) if isinstance(intake_case_file, dict) else []
 		temporal_issue_registry = intake_case_file.get('temporal_issue_registry', []) if isinstance(intake_case_file, dict) else []
+		claim_temporal_graphs = intake_case_file.get('claim_temporal_graphs', {}) if isinstance(intake_case_file, dict) else {}
 		# `timeline_issues` is a stable canonical alias for `temporal_issue_registry`
 		timeline_issues = (
 			intake_case_file.get('timeline_issues', temporal_issue_registry)
@@ -12780,6 +12826,39 @@ class Mediator:
 				'required_provenance_kinds': temporal_issue_required_provenance_kinds,
 				'resolved_count': resolved_temporal_issue_count,
 				'unresolved_count': unresolved_temporal_issue_count,
+			},
+			'claim_temporal_graphs': claim_temporal_graphs if isinstance(claim_temporal_graphs, dict) else {},
+			'claim_temporal_graph_summary': {
+				'contract_version': (
+					str(claim_temporal_graphs.get('contract_version') or '')
+					if isinstance(claim_temporal_graphs, dict)
+					else ''
+				),
+				'claim_count': (
+					int(claim_temporal_graphs.get('claim_count', 0) or 0)
+					if isinstance(claim_temporal_graphs, dict)
+					else 0
+				),
+				'claim_keys': (
+					list(claim_temporal_graphs.get('claim_keys', []) or [])
+					if isinstance(claim_temporal_graphs, dict)
+					else []
+				),
+				'fact_ids': (
+					list(claim_temporal_graphs.get('fact_ids', []) or [])
+					if isinstance(claim_temporal_graphs, dict)
+					else []
+				),
+				'relation_ids': (
+					list(claim_temporal_graphs.get('relation_ids', []) or [])
+					if isinstance(claim_temporal_graphs, dict)
+					else []
+				),
+				'issue_ids': (
+					list(claim_temporal_graphs.get('issue_ids', []) or [])
+					if isinstance(claim_temporal_graphs, dict)
+					else []
+				),
 			},
 			'intake_chronology_readiness': intake_chronology_readiness,
 			'timeline_consistency_summary': (
