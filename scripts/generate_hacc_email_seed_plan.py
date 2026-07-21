@@ -3,14 +3,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
 
-from ipfs_datasets_py.processors.legal_data.email_seed_planner import build_email_seed_plan
+
+def _require_build_email_seed_plan():
+    build_email_seed_plan, error = import_attr_optional(
+        "ipfs_datasets_py.processors.legal_data.email_seed_planner",
+        "build_email_seed_plan",
+    )
+    if build_email_seed_plan is not None:
+        return build_email_seed_plan
+    raise ImportError(
+        "Unable to import ipfs_datasets_py email seed planner: "
+        f"{import_failure_message(error) or 'missing build_email_seed_plan'}"
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    build_email_seed_plan = _require_build_email_seed_plan()
     grounded_run = Path(args.grounded_run).resolve()
     synthesis_dir = grounded_run / "complaint_synthesis"
     payload = build_email_seed_plan(

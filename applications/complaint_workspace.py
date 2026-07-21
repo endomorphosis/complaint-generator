@@ -5,7 +5,6 @@ import json
 import os
 import re
 import shutil
-import sys
 import threading
 import tempfile
 import uuid
@@ -35,18 +34,6 @@ except ModuleNotFoundError:
             return result
 
     anyio = _AnyioFallback()
-
-
-def _ensure_local_ipfs_datasets_path() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    candidate = repo_root / "ipfs_datasets_py"
-    candidate_text = str(candidate)
-    if candidate.is_dir() and candidate_text not in sys.path:
-        sys.path.insert(0, candidate_text)
-
-
-_ensure_local_ipfs_datasets_path()
-
 
 DEFAULT_USER_ID = "did:key:anonymous"
 DEFAULT_UI_UX_OPTIMIZER_METHOD = "actor_critic"

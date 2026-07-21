@@ -16,7 +16,9 @@
         "pyproject.toml",
         "applications/document_api.py",
         "integrations/ipfs_datasets/loader.py",
-        "applications/complaint_cli.py"
+        "applications/complaint_cli.py",
+        "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
+        "objective validation repair"
       ],
       "fib_priority": 999999,
       "goal_id": "G1",

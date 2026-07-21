@@ -45,13 +45,34 @@ def _matches_package_root(module_name: str, package_root: str) -> bool:
     return module_name == package_root or module_name.startswith(f"{package_root}.")
 
 
-def _package_dir_for_root(package_root: str) -> Path | None:
+def _candidate_ipfs_source_roots() -> list[Path]:
+    """Find vendored dependency roots from worktrees and the primary checkout."""
+
     paths = get_repo_paths()
+    roots: list[Path] = []
+    for candidate in [
+        paths.ipfs_datasets_repo,
+        *[parent / "ipfs_datasets_py" for parent in (paths.repo_root, *paths.repo_root.parents)],
+    ]:
+        if candidate not in roots:
+            roots.append(candidate)
+    return roots
+
+
+def _package_dir_for_root(package_root: str) -> Path | None:
+    candidates: list[Path] = []
     if package_root == "ipfs_datasets_py":
-        return paths.ipfs_datasets_repo / "ipfs_datasets_py"
-    if package_root == "ipfs_accelerate_py":
-        return paths.ipfs_accelerate_repo / "ipfs_accelerate_py"
-    return None
+        candidates = [source_root / "ipfs_datasets_py" for source_root in _candidate_ipfs_source_roots()]
+    elif package_root == "ipfs_accelerate_py":
+        candidates = [
+            source_root / "ipfs_accelerate_py" / "ipfs_accelerate_py"
+            for source_root in _candidate_ipfs_source_roots()
+        ]
+
+    for candidate in candidates:
+        if (candidate / "__init__.py").exists():
+            return candidate
+    return candidates[0] if candidates else None
 
 
 def _loaded_package_matches(package_root: str, package_dir: Path) -> bool:
@@ -89,29 +110,15 @@ def _prime_repo_package(package_root: str) -> None:
         return
     module = importlib.util.module_from_spec(spec)
     sys.modules[package_root] = module
-    spec.loader.exec_module(module)
+    original_sys_path = list(sys.path)
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path[:] = original_sys_path
 
 
 def ensure_import_paths(module_name: str = "", missing_module_name: str = "") -> RepoPaths:
     paths = get_repo_paths()
-    candidate_paths: list[Path] = []
-
-    if _matches_package_root(module_name, "ipfs_datasets_py") or _matches_package_root(
-        missing_module_name, "ipfs_datasets_py"
-    ):
-        candidate_paths.append(paths.ipfs_datasets_repo)
-
-    if _matches_package_root(module_name, "ipfs_accelerate_py") or _matches_package_root(
-        missing_module_name, "ipfs_accelerate_py"
-    ):
-        candidate_paths.append(paths.ipfs_accelerate_repo)
-
-    for path in candidate_paths:
-        if path.exists():
-            path_str = str(path)
-            if path_str not in sys.path:
-                sys.path.insert(0, path_str)
-
     for package_root in ("ipfs_datasets_py", "ipfs_accelerate_py"):
         if _matches_package_root(module_name, package_root) or _matches_package_root(missing_module_name, package_root):
             _prime_repo_package(package_root)
@@ -154,14 +161,24 @@ def import_failure_type(error: Any) -> str:
     return type(error).__name__
 
 
+def _import_module_preserving_sys_path(module_name: str) -> Any:
+    """Import an optional provider without leaking provider path side effects."""
+
+    original_sys_path = list(sys.path)
+    try:
+        return importlib.import_module(module_name)
+    finally:
+        sys.path[:] = original_sys_path
+
+
 def import_module_optional(module_name: str) -> tuple[Any | None, ImportFailure | None]:
     try:
-        return importlib.import_module(module_name), None
+        return _import_module_preserving_sys_path(module_name), None
     except ModuleNotFoundError as exc:
         if _should_retry_with_repo_paths(module_name, exc):
             ensure_import_paths(module_name=module_name, missing_module_name=str(getattr(exc, "name", "") or ""))
             try:
-                return importlib.import_module(module_name), None
+                return _import_module_preserving_sys_path(module_name), None
             except Exception as retry_exc:
                 return None, _build_import_failure(retry_exc, module_name=module_name)
         return None, _build_import_failure(exc, module_name=module_name)

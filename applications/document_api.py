@@ -1,6 +1,5 @@
 from pathlib import Path
 import json
-import sys
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -15,22 +14,11 @@ from intake_status import (
     build_intake_status_summary,
     build_intake_warning_entries,
 )
-try:
-    from workflow_phase_guidance import (
-        humanize_workflow_priority_label,
-        normalize_workflow_phase_recommended_actions,
-        resolve_prioritized_workflow_phase,
-    )
-except ModuleNotFoundError:
-    _REPO_ROOT = Path(__file__).resolve().parent.parent
-    _REPO_ROOT_TEXT = str(_REPO_ROOT)
-    if _REPO_ROOT_TEXT not in sys.path:
-        sys.path.insert(0, _REPO_ROOT_TEXT)
-    from workflow_phase_guidance import (
-        humanize_workflow_priority_label,
-        normalize_workflow_phase_recommended_actions,
-        resolve_prioritized_workflow_phase,
-    )
+from workflow_phase_guidance import (
+    humanize_workflow_priority_label,
+    normalize_workflow_phase_recommended_actions,
+    resolve_prioritized_workflow_phase,
+)
 
 
 FORMAL_COMPLAINT_DOCUMENT_REQUEST_EXAMPLE = {
