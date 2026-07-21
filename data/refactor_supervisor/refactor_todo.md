@@ -445,18 +445,18 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The supervisor itself should not duplicate tasks or emit malformed payloads.
 - Acceptance: Running seed twice does not duplicate active tasks.; Payloads include goal, subgoal, priority, acceptance, and validation.
 
-## REF-027 Resolve dirty main checkout blocking 1 worktree merges
+## REF-027 Resolve dirty main checkout blocking 2 worktree merges
 
 - Status: todo
 - Completion: manual
 - Priority: P1
 - Track: ops
-- Fingerprint: ca0bd08b397560380a898bf871916dcca76b5423
+- Fingerprint: ebc903c15c398edeb9eabd86f6eaa1fc3e15fab8
 - Dedupe key: reconciliation_guardrail:main_checkout_dirty
 - Depends on:
 - Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_todo.md
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md
-- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
+- Acceptance: Reconciliation guardrail filed this because 2 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
 
 ## REF-028 Close objective gap: Stabilize repository boundaries
 
@@ -905,3 +905,14 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: seed
 - Todo vector key: ref-045-makeastscansandimplementationworkspacesincrement
 - Acceptance: AST and evidence records are reused by blob hash and only changed files are reparsed.; Deleted and renamed files invalidate stale evidence deterministically.; Clean worktrees and dependency setups can be pooled without sharing task-local mutations.; Cold and warm paths produce equivalent plans and validation results with measured warm-path savings.
+
+## REF-046 Resolve merge retry-budget failure for REF-001
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on: 
+- Outputs: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, data/refactor_supervisor/discovery
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-046-ref-001-merge-retry-budget.md
+- Acceptance: Merge retry-budget guardrail filed this from repeated merge failures in REF-001. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-046-ref-001-merge-retry-budget.md to fix the merge blocker, verify the intended implementation changes are committed in their owning repository or submodule, run `ipfs-accelerate-agent-merge-resolver --events-path ... --apply` when the conflict is semantic, then mark this repair task completed so the supervisor can release REF-001 from strategy blocked_tasks.
