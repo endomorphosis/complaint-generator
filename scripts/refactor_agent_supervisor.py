@@ -1410,6 +1410,141 @@ def active_bundle_keys() -> set[str]:
     return set()
 
 
+def merge_event_paths() -> list[Path]:
+    paths: list[Path] = []
+    for root in (SUPERVISOR_STATE_DIR, BUNDLE_LANE_ROOT):
+        if not root.exists():
+            continue
+        for path in root.rglob("*events.jsonl"):
+            if path.is_file():
+                paths.append(path)
+    return sorted(dict.fromkeys(paths))
+
+
+def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0) -> dict[str, Any]:
+    _ensure_accelerate_import_path()
+    from ipfs_accelerate_py.agent_supervisor.merge_resolver import invoke_llm_resolver, resolver_payload
+
+    results: list[dict[str, Any]] = []
+    for events_path in merge_event_paths():
+        try:
+            payload = resolver_payload(
+                events_path=events_path,
+                repo_root=PROJECT_ROOT,
+                prompt_heading="Resolve this complaint-generator autonomous refactor merge conflict.",
+                completion_rule="Leave the repository merge-clean and preserve the implemented task intent.",
+                extra_rules=[
+                    "Prefer the smallest conflict resolution that keeps tests and task acceptance criteria meaningful.",
+                    "Do not discard unrelated user changes in the main checkout.",
+                    "If a generated worktree is involved, resolve inside that worktree and commit the merge there when appropriate.",
+                ],
+            )
+            if not payload.get("found"):
+                results.append({"events_path": str(events_path), "found": False})
+                continue
+            applied = invoke_llm_resolver(
+                payload,
+                command_template=merge_resolver_command(),
+                timeout_seconds=timeout_seconds,
+            )
+            results.append(
+                {
+                    "events_path": str(events_path),
+                    "found": True,
+                    "task_id": applied.get("task_id"),
+                    "applied": applied.get("applied", False),
+                    "llm_returncode": applied.get("llm_returncode"),
+                    "apply_error": applied.get("apply_error", ""),
+                }
+            )
+        except Exception as exc:
+            results.append({"events_path": str(events_path), "error": str(exc)})
+    payload = {
+        "status": "checked",
+        "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "event_log_count": len(results),
+        "found_count": sum(1 for item in results if item.get("found")),
+        "applied_count": sum(1 for item in results if item.get("applied")),
+        "results": results,
+    }
+    MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
+def run_merge_resolver_watchdog(*, interval_s: float, timeout_seconds: float, once: bool = False) -> dict[str, Any]:
+    STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    MERGE_RESOLVER_PID_PATH.write_text(str(os.getpid()) + "\n", encoding="utf-8")
+    cycle = 0
+    last: dict[str, Any] = {}
+
+    def _stop(_signum: int, _frame: object) -> None:
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+    try:
+        while True:
+            cycle += 1
+            last = resolve_merge_conflicts_once(timeout_seconds=timeout_seconds)
+            last["cycle"] = cycle
+            last["status"] = "running" if not once else "checked"
+            MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(last, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            if once:
+                break
+            time.sleep(max(10.0, float(interval_s)))
+    except KeyboardInterrupt:
+        last = {"status": "stopped", "cycle": cycle, "last": last}
+        MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(last, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    finally:
+        try:
+            if MERGE_RESOLVER_PID_PATH.exists() and MERGE_RESOLVER_PID_PATH.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                MERGE_RESOLVER_PID_PATH.unlink()
+        except Exception:
+            pass
+    return last
+
+
+def start_merge_resolver_watchdog(args: argparse.Namespace) -> dict[str, Any]:
+    STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    if MERGE_RESOLVER_PID_PATH.exists():
+        try:
+            pid = int(MERGE_RESOLVER_PID_PATH.read_text(encoding="utf-8").strip())
+        except Exception:
+            pid = 0
+        if _pid_alive(pid):
+            return {"status": "already_running", "pid": pid, "status_path": str(MERGE_RESOLVER_STATUS_PATH)}
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ACCELERATE_REPO) + os.pathsep + env.get("PYTHONPATH", "")
+    cmd = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "merge-watchdog-run",
+        "--interval-s",
+        str(float(args.interval_s)),
+        "--timeout-seconds",
+        str(float(args.timeout_seconds)),
+    ]
+    log_handle = MERGE_RESOLVER_LOG_PATH.open("a", encoding="utf-8")
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    time.sleep(1.0)
+    payload = {
+        "status": "started",
+        "pid": proc.pid,
+        "status_path": str(MERGE_RESOLVER_STATUS_PATH),
+        "log_path": str(MERGE_RESOLVER_LOG_PATH),
+        "merge_resolver_command": merge_resolver_command(),
+    }
+    MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
 def stop_daemon() -> dict[str, Any]:
     if not PID_PATH.exists():
         return {"status": "not_running"}
@@ -1509,6 +1644,19 @@ def status_payload() -> dict[str, Any]:
             }
         except Exception as exc:
             payload["parallel_lanes_error"] = str(exc)
+    if MERGE_RESOLVER_STATUS_PATH.exists():
+        try:
+            merge_payload = json.loads(MERGE_RESOLVER_STATUS_PATH.read_text(encoding="utf-8"))
+        except Exception as exc:
+            merge_payload = {"status_read_error": str(exc)}
+        if MERGE_RESOLVER_PID_PATH.exists():
+            try:
+                merge_pid = int(MERGE_RESOLVER_PID_PATH.read_text(encoding="utf-8").strip())
+            except Exception:
+                merge_pid = 0
+            merge_payload["pid"] = merge_pid
+            merge_payload["pid_alive"] = _pid_alive(merge_pid)
+        payload["merge_resolver_watchdog"] = merge_payload
     return payload
 
 
@@ -1559,6 +1707,18 @@ def build_parser() -> argparse.ArgumentParser:
     start_parallel = sub.add_parser("start-parallel", help="Launch upstream leased bundle supervisors for parallel task lanes.")
     add_parallel_args(start_parallel)
 
+    resolve_merges = sub.add_parser("resolve-merges", help="Run one merge-conflict resolver scan over supervisor event logs.")
+    resolve_merges.add_argument("--timeout-seconds", type=float, default=900.0)
+
+    merge_watch = sub.add_parser("start-merge-watchdog", help="Start a background watchdog that resolves failed merge events.")
+    merge_watch.add_argument("--interval-s", type=float, default=120.0)
+    merge_watch.add_argument("--timeout-seconds", type=float, default=900.0)
+
+    merge_run = sub.add_parser("merge-watchdog-run", help=argparse.SUPPRESS)
+    merge_run.add_argument("--interval-s", type=float, default=120.0)
+    merge_run.add_argument("--timeout-seconds", type=float, default=900.0)
+    merge_run.add_argument("--once", action="store_true")
+
     sub.add_parser("status", help="Show supervisor status.")
     sub.add_parser("stop", help="Stop the background supervisor.")
     return parser
@@ -1576,6 +1736,16 @@ def main(argv: list[str] | None = None) -> int:
         payload = run_parallel_bundle_supervisor(args, start=False)
     elif args.command == "start-parallel":
         payload = run_parallel_bundle_supervisor(args, start=True)
+    elif args.command == "resolve-merges":
+        payload = resolve_merge_conflicts_once(timeout_seconds=args.timeout_seconds)
+    elif args.command == "start-merge-watchdog":
+        payload = start_merge_resolver_watchdog(args)
+    elif args.command == "merge-watchdog-run":
+        payload = run_merge_resolver_watchdog(
+            interval_s=args.interval_s,
+            timeout_seconds=args.timeout_seconds,
+            once=args.once,
+        )
     elif args.command == "status":
         payload = status_payload()
     elif args.command == "stop":
