@@ -68,12 +68,15 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G3 Harden adapter contracts and degraded mode
 
-- Status: active
+- Status: completed
 - Priority: P0
 - Bundle: refactor/g3
 - Goal: Harden adapter contracts and degraded mode
 - Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, integrations/ipfs_datasets/logic.py, lib/formal_logic, data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest --collect-only -q
+- Completed at: 2026-07-21T22:56:12.673433+00:00
+- Completion evidence: docs/ARCHITECTURE.md => docs/ARCHITECTURE.md (path), DOCUMENTATION_INDEX.md (exact), README.md (exact); docs/REFACTOR_SUPERVISOR_TASKBOARD.md => docs/REFACTOR_SUPERVISOR_TASKBOARD.md (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); integrations/ipfs_datasets/capabilities.py => integrations/ipfs_datasets/capabilities.py (path), SESSION_84_FINAL_SUMMARY.md (ast), TODO.md (embedding:0.31); integrations/ipfs_datasets/loader.py => integrations/ipfs_datasets/loader.py (path), P3_INFRASTRUCTURE_COMPLETION_SESSION.md (embedding:0.54), P3_SESSION_4_INFRASTRUCTURE_SUMMARY.md (embedding:0.33); integrations/ipfs_datasets/documents.py => integrations/ipfs_datasets/documents.py (path), .complaint_workspace/sessions/alias-script-user.json (ast), .complaint_workspace/sessions/demo-user.json (ast); mediator/evidence_hooks.py => mediator/evidence_hooks.py (path), .complaint_workspace/sessions/alias-script-user.json (ast), .complaint_workspace/sessions/demo-user.json (ast); integrations/ipfs_datasets/graphs.py => integrations/ipfs_datasets/graphs.py (path), BATCH_328_API_RETURN_TYPES_SUMMARY.md (embedding:0.33), DOCUMENTATION_INDEX.md (embedding:0.56); complaint_phases/knowledge_graph.py => complaint_phases/knowledge_graph.py (path), AUTONOMOUS_SESSION_REPORT.md (embedding:0.30), BATCH_328_API_RETURN_TYPES_SUMMARY.md (embedding:0.32); integrations/ipfs_datasets/logic.py => integrations/ipfs_datasets/logic.py (path), BATCH_328_API_RETURN_TYPES_SUMMARY.md (embedding:0.33), DOCUMENTATION_INDEX.md (embedding:0.57); lib/formal_logic => lib/formal_logic (path), adversarial_harness/search_hooks.py (ast), complaint_phases/deontic_logic.py (embedding:0.65); data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md => data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md (path), .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast); objective validation repair => .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast), .complaint_workspace/sessions/site-sdk-user2.json (ast)
+- Completion validation: 0
 
 ## G3.S1 Normalize IPFS datasets adapter payloads
 
