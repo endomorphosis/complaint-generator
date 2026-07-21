@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-008 Separate dashboard fixture data from live route logic
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G2
