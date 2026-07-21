@@ -72,3 +72,26 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-006-reconciliation-fde3722148ab.md
 - Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-006-reconciliation-fde3722148ab.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
 - Reconciliation result: Main checkout dirt was preserved in commit `f20703f1bb2a732fa78daf8c031fb315232baa1e`, current generated guardrail dirt was preserved in commit `81ab5a8ff25abe126f321a2894f328c7f0272597`, the lane reconciliation pass reran at `2026-07-21T20:24:41Z`, and the `main_checkout_dirty` blocker count for this guardrail decreased from `1` to `0`; the remaining processed candidate is a separate `preflight_merge_conflict` on `scripts/refactor_agent_supervisor.py`.
+
+## REF-007 Resolve merge retry-budget failure for REF-003
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on: 
+- Outputs: applications/complaint_workspace.py, applications/document_api.py, integrations/ipfs_datasets/loader.py, scripts/agentic_complaint_evidence_scraper.py, scripts/agentic_scraper_cli.py, scripts/backfill_claim_testimony_links.py, scripts/check_hacc_routers.py, scripts/enrich_email_timeline_authorities.py, scripts/generate_decision_trees.py, scripts/generate_email_search_plan.py, scripts/generate_hacc_email_seed_plan.py, scripts/gmail_duckdb_daemon.py, data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-007-ref-003-merge-retry-budget.md
+- Acceptance: Merge retry-budget guardrail filed this from repeated merge failures in REF-003. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-007-ref-003-merge-retry-budget.md to fix the merge blocker, verify the intended implementation changes are committed in their owning repository or submodule, run `ipfs-accelerate-agent-merge-resolver --events-path ... --apply` when the conflict is semantic, then mark this repair task completed so the supervisor can release REF-003 from strategy blocked_tasks.
+- Repair result: REF-003 was merged into `implementation/ref-007-attempt-1-1784665947` in commit `b733f65`; the semantic conflict in `scripts/refactor_agent_supervisor.py` kept the newer merge-resolver environment wrapper, `ipfs-accelerate-agent-merge-resolver --events-path /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/state/agent_refactor_g1_g1_s2_events.jsonl --apply` reported `applied: true`, and REF-003 was removed from `blocked_tasks`.
+
+## REF-008 Resolve merge retry-budget failure for REF-004
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on: 
+- Outputs: applications/complaint_cli.py, applications/complaint_workspace.py, data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-008-ref-004-merge-retry-budget.md
+- Acceptance: Merge retry-budget guardrail filed this from repeated merge failures in REF-004. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-008-ref-004-merge-retry-budget.md to fix the merge blocker, verify the intended implementation changes are committed in their owning repository or submodule, run `ipfs-accelerate-agent-merge-resolver --events-path ... --apply` when the conflict is semantic, then mark this repair task completed so the supervisor can release REF-004 from strategy blocked_tasks.
