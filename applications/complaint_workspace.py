@@ -1632,12 +1632,217 @@ def _default_state(user_id: str) -> Dict[str, Any]:
     }
 
 
+class ComplaintWorkspaceRequestHandlers:
+    """Request-facing workspace handlers that preserve route/MCP payload shapes."""
+
+    def __init__(self, workspace: "ComplaintWorkspaceService") -> None:
+        self.workspace = workspace
+
+    def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        workspace = self.workspace
+        normalized_user_id = str(user_id or DEFAULT_USER_ID)
+        state = workspace._save_state(workspace._load_state(normalized_user_id))
+        answers = state.get("intake_answers") or {}
+        return {
+            "session": deepcopy(state),
+            "questions": workspace._build_question_status(answers),
+            "next_question": workspace._next_question(answers),
+            "review": workspace._build_review(state),
+            "case_synopsis": workspace._build_case_synopsis(state),
+        }
+
+    def submit_intake_answers(self, user_id: Optional[str], answers: Dict[str, Any]) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        answer_map = state.setdefault("intake_answers", {})
+        history = state.setdefault("intake_history", [])
+        for question in _INTAKE_QUESTIONS:
+            value = str(answers.get(question["id"]) or "").strip()
+            if not value:
+                continue
+            answer_map[question["id"]] = value
+            history.append({"question_id": question["id"], "answer": value, "captured_at": _utc_now()})
+        workspace._save_state(state)
+        return self.get_session(str(state.get("user_id")))
+
+    def run_intake_chat_turn(
+        self,
+        user_id: Optional[str],
+        *,
+        message: Optional[str] = None,
+        question_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        target_question = (
+            workspace._question_by_id(question_id)
+            if question_id
+            else workspace._next_question(state.get("intake_answers") or {})
+        )
+        if question_id and target_question is None:
+            raise ValueError(f"Unknown intake question_id: {question_id}")
+
+        accepted_answer: Optional[Dict[str, Any]] = None
+        normalized_message = str(message or "").strip()
+        if normalized_message:
+            if target_question is None:
+                raise ValueError("The intake flow is already complete for this session.")
+            answer_map = state.setdefault("intake_answers", {})
+            history = state.setdefault("intake_history", [])
+            answer_map[target_question["id"]] = normalized_message
+            accepted_answer = {
+                "question_id": target_question["id"],
+                "answer": normalized_message,
+                "captured_at": _utc_now(),
+            }
+            history.append(deepcopy(accepted_answer))
+
+        workspace._save_state(state)
+        return workspace._build_intake_chat_payload(
+            state,
+            accepted_answer=accepted_answer,
+            requested_question_id=question_id if accepted_answer is None else None,
+        )
+
+    def save_evidence(
+        self,
+        user_id: Optional[str],
+        *,
+        kind: str,
+        claim_element_id: str,
+        title: str,
+        content: str,
+        source: Optional[str] = None,
+        attachment_names: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        evidence_store = state.setdefault("evidence", {"testimony": [], "documents": []})
+        collection_key = "documents" if kind == "document" else "testimony"
+        record = {
+            "id": f"{collection_key}-{len(evidence_store.get(collection_key, [])) + 1}",
+            "kind": kind,
+            "claim_element_id": claim_element_id,
+            "title": title,
+            "content": content,
+            "source": source or "",
+            "attachment_names": [str(item).strip() for item in list(attachment_names or []) if str(item).strip()],
+            "saved_at": _utc_now(),
+        }
+        evidence_store.setdefault(collection_key, []).append(record)
+        workspace._save_state(state)
+        return {
+            "saved": record,
+            "review": workspace._build_review(state),
+            "session": deepcopy(state),
+            "case_synopsis": workspace._build_case_synopsis(state),
+        }
+
+    def generate_complaint(
+        self,
+        user_id: Optional[str],
+        *,
+        requested_relief: Optional[List[str]] = None,
+        title_override: Optional[str] = None,
+        use_llm: bool = False,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        config_path: Optional[str] = None,
+        backend_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        draft = workspace._build_draft(
+            state,
+            requested_relief=requested_relief,
+            use_llm=use_llm,
+            provider=provider,
+            model=model,
+            config_path=config_path,
+            backend_id=backend_id,
+        )
+        if title_override:
+            draft["title"] = title_override
+        state["draft"] = draft
+        workspace._save_state(state)
+        return {
+            "draft": deepcopy(draft),
+            "review": workspace._build_review(state),
+            "session": deepcopy(state),
+            "case_synopsis": workspace._build_case_synopsis(state),
+        }
+
+    def update_draft(
+        self,
+        user_id: Optional[str],
+        *,
+        title: Optional[str] = None,
+        body: Optional[str] = None,
+        requested_relief: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        draft = deepcopy(state.get("draft") or workspace._build_draft(state))
+        if title is not None:
+            draft["title"] = title
+        if body is not None:
+            draft["body"] = body
+        if requested_relief is not None:
+            draft["requested_relief"] = requested_relief
+        draft["updated_at"] = _utc_now()
+        state["draft"] = draft
+        workspace._save_state(state)
+        return {
+            "draft": deepcopy(draft),
+            "review": workspace._build_review(state),
+            "session": deepcopy(state),
+            "case_synopsis": workspace._build_case_synopsis(state),
+        }
+
+    def update_case_synopsis(self, user_id: Optional[str], synopsis: Optional[str]) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state["case_synopsis"] = str(synopsis or "").strip()
+        workspace._save_state(state)
+        session = self.get_session(str(state.get("user_id")))
+        return {
+            "session": session["session"],
+            "review": session["review"],
+            "questions": session["questions"],
+            "next_question": session["next_question"],
+            "case_synopsis": session["case_synopsis"],
+        }
+
+    def update_claim_type(self, user_id: Optional[str], claim_type: Optional[str]) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state["claim_type"] = _normalize_claim_type(claim_type)
+        workspace._save_state(state)
+        session = self.get_session(str(state.get("user_id")))
+        return {
+            "session": session["session"],
+            "review": session["review"],
+            "questions": session["questions"],
+            "next_question": session["next_question"],
+            "case_synopsis": session["case_synopsis"],
+            "claim_type": session["session"]["claim_type"],
+            "claim_type_label": _claim_type_display_name(session["session"]["claim_type"]),
+        }
+
+    def reset_session(self, user_id: Optional[str]) -> Dict[str, Any]:
+        workspace = self.workspace
+        state = _default_state(str(user_id or DEFAULT_USER_ID))
+        workspace._save_state(state)
+        return self.get_session(str(state["user_id"]))
+
+
 class ComplaintWorkspaceService:
     def __init__(self, root_dir: Optional[Path] = None) -> None:
         base_dir = Path(root_dir) if root_dir is not None else _SESSION_DIR
         self._session_dir = base_dir
         self._session_dir.mkdir(parents=True, exist_ok=True)
         self._last_draft_refinement_error: Optional[str] = None
+        self.request_handlers = ComplaintWorkspaceRequestHandlers(self)
 
     def _session_path(self, user_id: str) -> Path:
         return self._session_dir / f"{_slugify_user_id(user_id)}.json"
@@ -2779,16 +2984,7 @@ class ComplaintWorkspaceService:
         }
 
     def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        normalized_user_id = str(user_id or DEFAULT_USER_ID)
-        state = self._save_state(self._load_state(normalized_user_id))
-        answers = state.get("intake_answers") or {}
-        return {
-            "session": deepcopy(state),
-            "questions": self._build_question_status(answers),
-            "next_question": self._next_question(answers),
-            "review": self._build_review(state),
-            "case_synopsis": self._build_case_synopsis(state),
-        }
+        return self.request_handlers.get_session(user_id)
 
     def build_mediator_prompt(self, user_id: Optional[str]) -> Dict[str, Any]:
         session = self.get_session(user_id)
@@ -4246,19 +4442,7 @@ class ComplaintWorkspaceService:
         }
 
     def update_claim_type(self, user_id: Optional[str], claim_type: Optional[str]) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        state["claim_type"] = _normalize_claim_type(claim_type)
-        self._save_state(state)
-        session = self.get_session(str(state.get("user_id")))
-        return {
-            "session": session["session"],
-            "review": session["review"],
-            "questions": session["questions"],
-            "next_question": session["next_question"],
-            "case_synopsis": session["case_synopsis"],
-            "claim_type": session["session"]["claim_type"],
-            "claim_type_label": _claim_type_display_name(session["session"]["claim_type"]),
-        }
+        return self.request_handlers.update_claim_type(user_id, claim_type)
 
     def _build_complaint_output_review_artifacts(self, user_id: Optional[str]) -> List[Dict[str, Any]]:
         if not user_id:
@@ -4481,17 +4665,7 @@ class ComplaintWorkspaceService:
         raise ValueError(f"Unsupported complaint export format: {output_format}")
 
     def submit_intake_answers(self, user_id: Optional[str], answers: Dict[str, Any]) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        answer_map = state.setdefault("intake_answers", {})
-        history = state.setdefault("intake_history", [])
-        for question in _INTAKE_QUESTIONS:
-            value = str(answers.get(question["id"]) or "").strip()
-            if not value:
-                continue
-            answer_map[question["id"]] = value
-            history.append({"question_id": question["id"], "answer": value, "captured_at": _utc_now()})
-        self._save_state(state)
-        return self.get_session(str(state.get("user_id")))
+        return self.request_handlers.submit_intake_answers(user_id, answers)
 
     def run_intake_chat_turn(
         self,
@@ -4500,31 +4674,10 @@ class ComplaintWorkspaceService:
         message: Optional[str] = None,
         question_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        target_question = self._question_by_id(question_id) if question_id else self._next_question(state.get("intake_answers") or {})
-        if question_id and target_question is None:
-            raise ValueError(f"Unknown intake question_id: {question_id}")
-
-        accepted_answer: Optional[Dict[str, Any]] = None
-        normalized_message = str(message or "").strip()
-        if normalized_message:
-            if target_question is None:
-                raise ValueError("The intake flow is already complete for this session.")
-            answer_map = state.setdefault("intake_answers", {})
-            history = state.setdefault("intake_history", [])
-            answer_map[target_question["id"]] = normalized_message
-            accepted_answer = {
-                "question_id": target_question["id"],
-                "answer": normalized_message,
-                "captured_at": _utc_now(),
-            }
-            history.append(deepcopy(accepted_answer))
-
-        self._save_state(state)
-        return self._build_intake_chat_payload(
-            state,
-            accepted_answer=accepted_answer,
-            requested_question_id=question_id if accepted_answer is None else None,
+        return self.request_handlers.run_intake_chat_turn(
+            user_id,
+            message=message,
+            question_id=question_id,
         )
 
     def save_evidence(
@@ -4538,27 +4691,15 @@ class ComplaintWorkspaceService:
         source: Optional[str] = None,
         attachment_names: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        evidence_store = state.setdefault("evidence", {"testimony": [], "documents": []})
-        collection_key = "documents" if kind == "document" else "testimony"
-        record = {
-            "id": f"{collection_key}-{len(evidence_store.get(collection_key, [])) + 1}",
-            "kind": kind,
-            "claim_element_id": claim_element_id,
-            "title": title,
-            "content": content,
-            "source": source or "",
-            "attachment_names": [str(item).strip() for item in list(attachment_names or []) if str(item).strip()],
-            "saved_at": _utc_now(),
-        }
-        evidence_store.setdefault(collection_key, []).append(record)
-        self._save_state(state)
-        return {
-            "saved": record,
-            "review": self._build_review(state),
-            "session": deepcopy(state),
-            "case_synopsis": self._build_case_synopsis(state),
-        }
+        return self.request_handlers.save_evidence(
+            user_id,
+            kind=kind,
+            claim_element_id=claim_element_id,
+            title=title,
+            content=content,
+            source=source,
+            attachment_names=attachment_names,
+        )
 
     @classmethod
     def _build_document_annotation_knowledge_graph(cls, annotations: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -5090,26 +5231,16 @@ class ComplaintWorkspaceService:
         config_path: Optional[str] = None,
         backend_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        draft = self._build_draft(
-            state,
+        return self.request_handlers.generate_complaint(
+            user_id,
             requested_relief=requested_relief,
+            title_override=title_override,
             use_llm=use_llm,
             provider=provider,
             model=model,
             config_path=config_path,
             backend_id=backend_id,
         )
-        if title_override:
-            draft["title"] = title_override
-        state["draft"] = draft
-        self._save_state(state)
-        return {
-            "draft": deepcopy(draft),
-            "review": self._build_review(state),
-            "session": deepcopy(state),
-            "case_synopsis": self._build_case_synopsis(state),
-        }
 
     def update_draft(
         self,
@@ -5119,36 +5250,15 @@ class ComplaintWorkspaceService:
         body: Optional[str] = None,
         requested_relief: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        draft = deepcopy(state.get("draft") or self._build_draft(state))
-        if title is not None:
-            draft["title"] = title
-        if body is not None:
-            draft["body"] = body
-        if requested_relief is not None:
-            draft["requested_relief"] = requested_relief
-        draft["updated_at"] = _utc_now()
-        state["draft"] = draft
-        self._save_state(state)
-        return {
-            "draft": deepcopy(draft),
-            "review": self._build_review(state),
-            "session": deepcopy(state),
-            "case_synopsis": self._build_case_synopsis(state),
-        }
+        return self.request_handlers.update_draft(
+            user_id,
+            title=title,
+            body=body,
+            requested_relief=requested_relief,
+        )
 
     def update_case_synopsis(self, user_id: Optional[str], synopsis: Optional[str]) -> Dict[str, Any]:
-        state = self._load_state(str(user_id or DEFAULT_USER_ID))
-        state["case_synopsis"] = str(synopsis or "").strip()
-        self._save_state(state)
-        session = self.get_session(str(state.get("user_id")))
-        return {
-            "session": session["session"],
-            "review": session["review"],
-            "questions": session["questions"],
-            "next_question": session["next_question"],
-            "case_synopsis": session["case_synopsis"],
-        }
+        return self.request_handlers.update_case_synopsis(user_id, synopsis)
 
     @staticmethod
     def _resolve_mike_base_url(override: Optional[str] = None) -> str:
@@ -5909,9 +6019,7 @@ class ComplaintWorkspaceService:
         }
 
     def reset_session(self, user_id: Optional[str]) -> Dict[str, Any]:
-        state = _default_state(str(user_id or DEFAULT_USER_ID))
-        self._save_state(state)
-        return self.get_session(str(state["user_id"]))
+        return self.request_handlers.reset_session(user_id)
 
     @staticmethod
     def _resolve_docket_path(path_value: str | Path) -> str:

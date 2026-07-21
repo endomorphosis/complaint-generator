@@ -16,7 +16,7 @@ from claim_support_review import (
     build_claim_support_testimony_payload,
     build_claim_support_uploaded_document_payload,
 )
-from .document_api import attach_document_routes
+from .document_api import create_document_router
 
 try:
     import python_multipart  # type: ignore  # noqa: F401
@@ -62,6 +62,21 @@ def _normalize_required_support_kinds_form(
     if not raw_value:
         return []
     return [item.strip() for item in str(raw_value).split(",") if item.strip()]
+
+
+def _include_router_routes(app: FastAPI, router: APIRouter) -> None:
+    existing = {
+        (getattr(route, "path", None), tuple(sorted(getattr(route, "methods", []) or [])))
+        for route in app.routes
+    }
+    for route in router.routes:
+        route_key = (getattr(route, "path", None), tuple(sorted(getattr(route, "methods", []) or [])))
+        if route_key in existing:
+            continue
+        if hasattr(route, "dependency_overrides_provider"):
+            route.dependency_overrides_provider = app
+        app.router.routes.append(route)
+        existing.add(route_key)
 
 
 def create_claim_support_review_router(mediator: Any) -> APIRouter:
@@ -162,12 +177,12 @@ def create_claim_support_review_router(mediator: Any) -> APIRouter:
 
 
 def attach_claim_support_review_routes(app: FastAPI, mediator: Any) -> FastAPI:
-    app.include_router(create_claim_support_review_router(mediator))
+    _include_router_routes(app, create_claim_support_review_router(mediator))
     return app
 
 
 def create_review_api_app(mediator: Any) -> FastAPI:
     app = FastAPI(title="Complaint Generator Review API")
     attach_claim_support_review_routes(app, mediator)
-    attach_document_routes(app, mediator)
+    _include_router_routes(app, create_document_router(mediator))
     return app
