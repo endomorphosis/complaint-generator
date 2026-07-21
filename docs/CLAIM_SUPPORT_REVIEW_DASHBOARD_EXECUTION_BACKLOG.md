@@ -409,6 +409,7 @@ Make `/claim-support-review` the canonical operator workflow for legal readiness
 
 - the dashboard remains usable even when some advanced tabs have reduced capabilities
 - deep-link handoff to `/document` still preserves claim and section context without requiring proof tooling
+- document handoff still emits reviewable DOCX artifacts with pleading, affidavit, section-heading, factual-group, open-gap, and support-handoff text when the optional styled DOCX renderer dependency is unavailable
 
 ### Validation
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlencode
+import zipfile
 
 from complaint_phases import ComplaintPhase
 from complaint_phases.intake_claim_registry import (
@@ -7055,7 +7056,12 @@ class FormalComplaintDocumentBuilder:
         return "\n".join(line for line in lines if line is not None)
 
     def _render_affidavit_docx(self, draft: Dict[str, Any], path: Path) -> None:
-        from docx import Document
+        try:
+            from docx import Document
+        except ModuleNotFoundError:
+            affidavit = draft.get("affidavit", {}) if isinstance(draft.get("affidavit"), dict) else self._build_affidavit(draft)
+            self._write_minimal_docx(path, self._render_affidavit_text(draft, affidavit).split("\n"))
+            return
 
         document = Document()
         for line in self._render_affidavit_text(
@@ -11283,12 +11289,16 @@ class FormalComplaintDocumentBuilder:
         }
 
     def _render_docx(self, draft: Dict[str, Any], path: Path) -> None:
-        from docx import Document
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.opc.constants import RELATIONSHIP_TYPE
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        from docx.shared import Inches, Pt, RGBColor
+        try:
+            from docx import Document
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            from docx.opc.constants import RELATIONSHIP_TYPE
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn
+            from docx.shared import Inches, Pt, RGBColor
+        except ModuleNotFoundError:
+            self._write_minimal_docx(path, self._build_minimal_docx_paragraphs(draft))
+            return
 
         document = Document()
         section = document.sections[0]
@@ -11488,6 +11498,146 @@ class FormalComplaintDocumentBuilder:
         )
 
         document.save(path)
+
+    def _build_minimal_docx_paragraphs(self, draft: Dict[str, Any]) -> List[str]:
+        case_caption = draft.get("case_caption", {}) if isinstance(draft.get("case_caption"), dict) else {}
+        caption_party_lines = (
+            case_caption.get("caption_party_lines")
+            if isinstance(case_caption.get("caption_party_lines"), list)
+            else self._build_caption_party_lines(case_caption)
+        )
+        lines: List[str] = [
+            str(draft.get("court_header") or ""),
+            *[str(line) for line in caption_party_lines if str(line or "").strip()],
+            f"{case_caption.get('case_number_label', 'Civil Action No.')} {case_caption.get('case_number', '________________')}",
+        ]
+        for label_key, value_key, default_label in (
+            ("lead_case_number_label", "lead_case_number", "Lead Case No."),
+            ("related_case_number_label", "related_case_number", "Related Case No."),
+            ("assigned_judge_label", "assigned_judge", "Assigned Judge"),
+            ("courtroom_label", "courtroom", "Courtroom"),
+        ):
+            if case_caption.get(value_key):
+                separator = ": " if value_key in {"assigned_judge", "courtroom"} else " "
+                lines.append(f"{case_caption.get(label_key, default_label)}{separator}{case_caption[value_key]}")
+        lines.extend(
+            [
+                str(case_caption.get("document_title") or "COMPLAINT"),
+                str(case_caption.get("jury_demand_notice") or ""),
+                "Nature of the Action",
+                *[str(item) for item in _coerce_list(draft.get("nature_of_action"))],
+                "Parties",
+                f"Plaintiff: {', '.join(draft.get('parties', {}).get('plaintiffs', []))}.",
+                f"Defendant: {', '.join(draft.get('parties', {}).get('defendants', []))}.",
+                "Jurisdiction and Venue",
+                str(draft.get("jurisdiction_statement") or ""),
+                str(draft.get("venue_statement") or ""),
+                "Summary of Facts",
+            ]
+        )
+        lines.extend(f"{index}. {fact}" for index, fact in enumerate(_coerce_list(draft.get("summary_of_facts")), start=1))
+        lines.append("Factual Allegations")
+        groups = draft.get("factual_allegation_groups") if isinstance(draft.get("factual_allegation_groups"), list) else []
+        if groups:
+            for group in groups:
+                if not isinstance(group, dict):
+                    continue
+                title = str(group.get("title") or "").strip()
+                if title:
+                    lines.append(title)
+                for paragraph in group.get("paragraphs") if isinstance(group.get("paragraphs"), list) else []:
+                    if not isinstance(paragraph, dict):
+                        continue
+                    text = str(paragraph.get("text") or "").strip()
+                    if text:
+                        number = paragraph.get("number")
+                        lines.append(f"{number}. {text}" if number else text)
+        else:
+            lines.extend(f"{index}. {fact}" for index, fact in enumerate(_coerce_list(draft.get("factual_allegations")), start=1))
+        chronology_lines = _coerce_list(draft.get("anchored_chronology_summary"))
+        if chronology_lines:
+            lines.extend(["Anchored Chronology", *[str(item) for item in chronology_lines]])
+        legal_standards = _coerce_list(draft.get("legal_standards"))
+        if legal_standards:
+            lines.extend(["Applicable Legal Standards", *[str(item) for item in legal_standards]])
+        lines.append("Claims for Relief")
+        for index, claim in enumerate(_coerce_list(draft.get("claims_for_relief")), start=1):
+            if not isinstance(claim, dict):
+                continue
+            lines.append(f"Count {_roman(index)} - {claim.get('count_title', 'Claim')}")
+            for label, key in (
+                ("Legal Standard", "legal_standards"),
+                ("Incorporated Support", "allegation_references"),
+                ("Claim-Specific Support", "supporting_facts"),
+                ("Open Support Gaps", "missing_elements"),
+            ):
+                values = _coerce_list(claim.get(key))
+                if values:
+                    lines.append(label)
+                    lines.extend(str(item) for item in values)
+        requested_relief = _coerce_list(draft.get("requested_relief"))
+        if requested_relief:
+            lines.extend(["Requested Relief", *[f"{index}. {item}" for index, item in enumerate(requested_relief, start=1)]])
+        jury_demand = draft.get("jury_demand", {}) if isinstance(draft.get("jury_demand"), dict) else {}
+        if jury_demand:
+            lines.extend([str(jury_demand.get("title") or "Jury Demand"), str(jury_demand.get("text") or "")])
+        exhibits = draft.get("exhibits") if isinstance(draft.get("exhibits"), list) else []
+        if exhibits:
+            lines.append("Supporting Exhibits")
+            for exhibit in exhibits:
+                if isinstance(exhibit, dict):
+                    lines.append(" - ".join(str(exhibit.get(key) or "").strip() for key in ("label", "title", "summary") if str(exhibit.get(key) or "").strip()))
+        for block_key, default_title in (
+            ("verification", "Verification"),
+            ("certificate_of_service", "Certificate of Service"),
+        ):
+            block = draft.get(block_key) if isinstance(draft.get(block_key), dict) else {}
+            if block:
+                lines.extend([str(block.get("title") or default_title), str(block.get("text") or ""), str(block.get("dated") or ""), str(block.get("signature_line") or "")])
+                lines.extend(str(item) for item in _coerce_list(block.get("detail_lines")))
+        signature_block = draft.get("signature_block", {}) if isinstance(draft.get("signature_block"), dict) else {}
+        if signature_block:
+            lines.extend(["Signature Block", *self._build_signature_section_lines(signature_block, self._resolve_draft_forum_type(draft))])
+        return [line for line in lines if str(line or "").strip()]
+
+    def _write_minimal_docx(self, path: Path, paragraphs: List[str]) -> None:
+        paragraph_xml = "\n".join(
+            "<w:p><w:r><w:t xml:space=\"preserve\">"
+            + escape(str(paragraph or ""), quote=False)
+            + "</w:t></w:r></w:p>"
+            for paragraph in paragraphs
+        )
+        document_xml = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            f"<w:body>{paragraph_xml}<w:sectPr/></w:body></w:document>"
+        )
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                (
+                    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                    '<Default Extension="xml" ContentType="application/xml"/>'
+                    '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+                    "</Types>"
+                ),
+            )
+            archive.writestr(
+                "_rels/.rels",
+                (
+                    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+                    "</Relationships>"
+                ),
+            )
+            archive.writestr(
+                "word/_rels/document.xml.rels",
+                '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>',
+            )
+            archive.writestr("word/document.xml", document_xml)
 
     def _add_docx_section(self, document: Any, title: str, paragraphs: List[str]) -> None:
         document.add_heading(title, level=1)

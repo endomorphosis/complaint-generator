@@ -1576,13 +1576,15 @@ def create_document_router(mediator: Any) -> APIRouter:
             optimization_provider=request.optimization_provider,
             optimization_model_name=request.optimization_model_name,
             optimization_persist_artifacts=request.optimization_persist_artifacts,
-            email_timeline_handoff_path=request.email_timeline_handoff_path,
-            email_authority_enrichment_path=request.email_authority_enrichment_path,
             output_dir=request.output_dir,
             output_formats=request.output_formats,
         )
         if request.optimization_llm_config:
             build_kwargs["optimization_llm_config"] = request.optimization_llm_config
+        if request.email_timeline_handoff_path:
+            build_kwargs["email_timeline_handoff_path"] = request.email_timeline_handoff_path
+        if request.email_authority_enrichment_path:
+            build_kwargs["email_authority_enrichment_path"] = request.email_authority_enrichment_path
         payload = mediator.build_formal_complaint_document_package(**build_kwargs)
         payload = _annotate_artifacts_with_download_urls(payload)
         return _annotate_review_links(payload, mediator=mediator, user_id=request.user_id)
