@@ -132,6 +132,8 @@ class RefactorTask:
     rationale: str
     acceptance: tuple[str, ...]
     validation: tuple[str, ...]
+    task_id: str = ""
+    depends_on: tuple[str, ...] = ()
 
     @property
     def stable_key(self) -> str:
@@ -149,6 +151,8 @@ class RefactorTask:
             "rationale": self.rationale,
             "acceptance": list(self.acceptance),
             "validation": list(self.validation),
+            "task_id": self.task_id,
+            "depends_on": list(self.depends_on),
             "stable_key": self.stable_key,
             "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
         }
@@ -641,6 +645,285 @@ def build_goals(scan: dict[str, Any]) -> list[dict[str, Any]]:
                 },
             ],
         },
+        {
+            "id": "G9",
+            "title": "Increase agent-supervisor planning quality and throughput",
+            "priority": "P0",
+            "subgoals": [
+                {
+                    "id": "G9.S1",
+                    "title": "Establish canonical coordination and merge flow",
+                    "tasks": [
+                        _task(
+                            "G9",
+                            "G9.S1",
+                            "Introduce canonical task identity and a durable supervisor task ledger",
+                            "P0",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py",
+                            ),
+                            "Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous.",
+                            (
+                                "Every task has a stable canonical key or CID independent of board path and display id.",
+                                "Legacy markdown tasks migrate idempotently with board namespace provenance.",
+                                "Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.",
+                                "Refill cannot create a second active task for the same canonical work item.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+                            ),
+                            task_id="REF-036",
+                        ),
+                        _task(
+                            "G9",
+                            "G9.S1",
+                            "Replace static bundle launch with a dynamic leased worker pool",
+                            "P0",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py",
+                            ),
+                            "The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.",
+                            (
+                                "A persistent scheduler discovers new and refilled tasks without restart.",
+                                "Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work.",
+                                "Lane count remains within configured capacity and no task executes under two accepted leases.",
+                                "The manifest is an authoritative live projection rather than a launch-time snapshot.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q",
+                            ),
+                            task_id="REF-037",
+                            depends_on=("REF-036",),
+                        ),
+                        _task(
+                            "G9",
+                            "G9.S1",
+                            "Integrate a deduplicating single-consumer merge train",
+                            "P0",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py",
+                            ),
+                            "Independent lanes currently race to merge and repeatedly retry the same failed branches.",
+                            (
+                                "All implementation lanes enqueue merge candidates instead of racing the target checkout.",
+                                "The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness.",
+                                "One conflict fingerprint invokes at most one active resolver attempt.",
+                                "Bounded failures enter quarantine with a durable receipt instead of a polling retry loop.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q",
+                            ),
+                            task_id="REF-038",
+                            depends_on=("REF-037",),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G9.S2",
+                    "title": "Plan from dependencies, conflicts, and objective value",
+                    "tasks": [
+                        _task(
+                            "G9",
+                            "G9.S2",
+                            "Materialize a task dependency DAG and schedule its critical path",
+                            "P0",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py",
+                            ),
+                            "Goal parents are currently sorting hints while generated Profile G tasks carry no dependency task CIDs.",
+                            (
+                                "Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance.",
+                                "Only tasks whose prerequisite merge receipts succeeded are claimable.",
+                                "Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority.",
+                                "Cycles and missing dependencies produce bounded repair evidence rather than deadlock.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+                            ),
+                            task_id="REF-039",
+                            depends_on=("REF-037",),
+                        ),
+                        _task(
+                            "G9",
+                            "G9.S2",
+                            "Build an AST and changed-path conflict graph for lane coloring",
+                            "P0",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py",
+                            ),
+                            "The current conflict domain uses one path root and lightweight semantic similarity, which misses multi-file and symbol overlap.",
+                            (
+                                "Conflict surfaces include all predicted files, AST symbols, interfaces, submodules, and generated artifacts.",
+                                "Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.",
+                                "Actual branch diffs and conflict receipts update future conflict weights.",
+                                "Planner output explains every co-location or separation decision.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+                            ),
+                            task_id="REF-040",
+                            depends_on=("REF-039",),
+                        ),
+                        _task(
+                            "G9",
+                            "G9.S2",
+                            "Use llm_router to generate and evaluate structured plan branches",
+                            "P1",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py",
+                            ),
+                            "Profile G currently records a single constant-scored plan branch and the LLM proposal router is not part of scheduler decisions.",
+                            (
+                                "Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.",
+                                "Candidates declare predicted files and symbols, dependencies, validation proof, cost, risk, and expected objective delta.",
+                                "A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.",
+                                "Router failure falls back to deterministic planning without blocking ready work.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q",
+                            ),
+                            task_id="REF-041",
+                            depends_on=("REF-039",),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G9.S3",
+                    "title": "Adapt execution capacity and validation cost",
+                    "tasks": [
+                        _task(
+                            "G9",
+                            "G9.S3",
+                            "Schedule lanes from live resources and llm_router provider capacity",
+                            "P1",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py",
+                            ),
+                            "Resource class, capability fit, and lane capacity are currently static even when workers are idle or providers are rate-limited.",
+                            (
+                                "Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity.",
+                                "Scheduler honors llm_router health, quota, latency, context, and token-budget constraints.",
+                                "Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.",
+                                "Idle lanes advertise zero occupied capacity and can be reassigned.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q",
+                            ),
+                            task_id="REF-042",
+                            depends_on=("REF-037", "REF-041"),
+                        ),
+                        _task(
+                            "G9",
+                            "G9.S3",
+                            "Add impact-selected cached and parallel validation stages",
+                            "P1",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py",
+                            ),
+                            "Validation commands currently run serially without changed-file impact selection or reusable baseline results.",
+                            (
+                                "Cheap deterministic checks run before expensive tests and fail fast.",
+                                "Independent validations run in parallel under a bounded resource budget.",
+                                "Cache keys include target commit, command, relevant environment, and dependency state.",
+                                "Impact selection is conservative, explainable, and escalates to broader validation before merge completion.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q",
+                            ),
+                            task_id="REF-043",
+                            depends_on=("REF-038",),
+                        ),
+                    ],
+                },
+                {
+                    "id": "G9.S4",
+                    "title": "Close the scheduler feedback and lifecycle loop",
+                    "tasks": [
+                        _task(
+                            "G9",
+                            "G9.S4",
+                            "Publish authoritative throughput metrics and scheduler state",
+                            "P1",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py",
+                            ),
+                            "Status is split across launch manifests, wrapper files, lane state, and event logs, so planners cannot measure useful capacity.",
+                            (
+                                "One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases.",
+                                "Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost.",
+                                "Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity.",
+                                "Scheduler decisions consume the same snapshot exposed to operators.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q",
+                            ),
+                            task_id="REF-044",
+                            depends_on=("REF-037", "REF-038", "REF-039"),
+                        ),
+                        _task(
+                            "G9",
+                            "G9.S4",
+                            "Make AST scans and implementation workspaces incremental and reusable",
+                            "P2",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py",
+                            ),
+                            "Refill scans reread the tracked codebase and each implementation creates fresh worktree and submodule setup even when inputs are unchanged.",
+                            (
+                                "AST and evidence records are reused by blob hash and only changed files are reparsed.",
+                                "Deleted and renamed files invalidate stale evidence deterministically.",
+                                "Clean worktrees and dependency setups can be pooled without sharing task-local mutations.",
+                                "Cold and warm paths produce equivalent plans and validation results with measured warm-path savings.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q",
+                            ),
+                            task_id="REF-045",
+                            depends_on=("REF-040", "REF-042", "REF-043", "REF-044"),
+                        ),
+                    ],
+                },
+            ],
+        },
     ]
 
 
@@ -653,9 +936,24 @@ def _task(
     rationale: str,
     acceptance: tuple[str, ...],
     validation: tuple[str, ...],
+    *,
+    task_id: str = "",
+    depends_on: tuple[str, ...] = (),
 ) -> RefactorTask:
     clean_files = tuple(dict.fromkeys(f for f in files if f))
-    return RefactorTask(goal_id, subgoal_id, title, priority, clean_files, rationale, acceptance, validation)
+    clean_dependencies = tuple(dict.fromkeys(item for item in depends_on if item))
+    return RefactorTask(
+        goal_id,
+        subgoal_id,
+        title,
+        priority,
+        clean_files,
+        rationale,
+        acceptance,
+        validation,
+        task_id,
+        clean_dependencies,
+    )
 
 
 def _paths_from_locations(locations: list[str]) -> list[str]:
@@ -759,7 +1057,8 @@ def _render_seed_todo(goals: list[dict[str, Any]]) -> str:
     ]
     index = 1
     for task in flatten_tasks(goals):
-        lines.append(_task_block(task, f"{TASK_PREFIX}{index:03d}", index))
+        task_id = task.task_id or f"{TASK_PREFIX}{index:03d}"
+        lines.append(_task_block(task, task_id, index))
         lines.append("")
         index += 1
     return "\n".join(lines).rstrip() + "\n"
@@ -819,7 +1118,7 @@ def _task_block(task: RefactorTask, task_id: str, index: int) -> str:
             "- Completion: manual",
             f"- Priority: {task.priority}",
             f"- Track: {task.goal_id}",
-            "- Depends on: ",
+            "- Depends on: " + ", ".join(task.depends_on),
             f"- Outputs: {outputs}",
             f"- Validation: {validation}",
             f"- Bundle: {bundle_key}",
@@ -845,7 +1144,7 @@ def write_seed_bundle_index(
     excluded = exclude_bundle_keys or set()
     task_index = 1
     for task in flatten_tasks(goals):
-        task_id = f"{TASK_PREFIX}{task_index:03d}"
+        task_id = task.task_id or f"{TASK_PREFIX}{task_index:03d}"
         bundle_key = f"refactor/{task.goal_id.lower()}/{task.subgoal_id.replace('.', '-').lower()}"
         if bundle_key in excluded:
             task_index += 1
@@ -902,6 +1201,7 @@ def write_seed_bundle_index(
                 "ast_symbols": _task_ast_symbols(task.files),
                 "paths": list(task.files),
                 "validation": list(task.validation),
+                "depends_on": list(task.depends_on),
             }
         )
         task_index += 1
