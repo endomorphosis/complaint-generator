@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import dataclass
 from html import escape
 from pathlib import Path
@@ -17,6 +18,20 @@ class DashboardEntry:
     template_name: str
     summary: str
     category: str
+
+
+@dataclass(frozen=True)
+class DashboardFixtures:
+    complaint_links: tuple[tuple[str, str], ...]
+    ipfs_entries: tuple[DashboardEntry, ...]
+    ipfs_entry_map: dict[str, DashboardEntry]
+    layperson_hub_advanced_dashboard_slugs: frozenset[str]
+    capability_cards: tuple[dict[str, Any], ...]
+    journey_detail_panels: tuple[dict[str, Any], ...]
+    package_capability_matrix: tuple[dict[str, Any], ...]
+    improvement_plan_items: tuple[tuple[str, str], ...]
+    entry_path_cards: tuple[dict[str, Any], ...]
+    dashboard_subsection_index: tuple[dict[str, Any], ...]
 
 
 _IPFS_DATASETS_TEMPLATES_DIR = (
@@ -418,6 +433,71 @@ _DASHBOARD_SUBSECTION_INDEX = [
 ]
 
 
+def build_complaint_dashboard_links_fixture() -> tuple[tuple[str, str], ...]:
+    return tuple(_COMPLAINT_DASHBOARD_LINKS)
+
+
+def build_ipfs_dashboard_entries_fixture() -> tuple[DashboardEntry, ...]:
+    return tuple(_IPFS_DASHBOARD_ENTRIES)
+
+
+def build_layperson_dashboard_hub_fixture() -> dict[str, Any]:
+    return {
+        "advanced_dashboard_slugs": frozenset(
+            _LAYPERSON_HUB_ADVANCED_DASHBOARD_SLUGS
+        ),
+        "capability_cards": tuple(deepcopy(_CAPABILITY_CARDS)),
+        "journey_detail_panels": tuple(deepcopy(_JOURNEY_DETAIL_PANELS)),
+        "package_capability_matrix": tuple(deepcopy(_PACKAGE_CAPABILITY_MATRIX)),
+        "improvement_plan_items": tuple(_IMPROVEMENT_PLAN_ITEMS),
+        "entry_path_cards": tuple(deepcopy(_ENTRY_PATH_CARDS)),
+        "dashboard_subsection_index": tuple(deepcopy(_DASHBOARD_SUBSECTION_INDEX)),
+    }
+
+
+def build_dashboard_fixture_data() -> DashboardFixtures:
+    """Return the reusable fixture catalog used by dashboard routes and tests."""
+    ipfs_entries = build_ipfs_dashboard_entries_fixture()
+    hub_fixture = build_layperson_dashboard_hub_fixture()
+    return DashboardFixtures(
+        complaint_links=build_complaint_dashboard_links_fixture(),
+        ipfs_entries=ipfs_entries,
+        ipfs_entry_map={entry.slug: entry for entry in ipfs_entries},
+        layperson_hub_advanced_dashboard_slugs=hub_fixture[
+            "advanced_dashboard_slugs"
+        ],
+        capability_cards=hub_fixture["capability_cards"],
+        journey_detail_panels=hub_fixture["journey_detail_panels"],
+        package_capability_matrix=hub_fixture["package_capability_matrix"],
+        improvement_plan_items=hub_fixture["improvement_plan_items"],
+        entry_path_cards=hub_fixture["entry_path_cards"],
+        dashboard_subsection_index=hub_fixture["dashboard_subsection_index"],
+    )
+
+
+_DASHBOARD_FIXTURES = build_dashboard_fixture_data()
+
+
+def get_dashboard_fixtures() -> DashboardFixtures:
+    return _DASHBOARD_FIXTURES
+
+
+def get_ipfs_dashboard_entry(
+    slug: str,
+    *,
+    fixtures: DashboardFixtures | None = None,
+) -> DashboardEntry | None:
+    return (fixtures or _DASHBOARD_FIXTURES).ipfs_entry_map.get(str(slug or ""))
+
+
+def get_default_ipfs_dashboard_entry(
+    *,
+    fixtures: DashboardFixtures | None = None,
+) -> DashboardEntry:
+    resolved_fixtures = fixtures or _DASHBOARD_FIXTURES
+    return resolved_fixtures.ipfs_entry_map["mcp"]
+
+
 def _render_feature_chips(features: list[str]) -> str:
     return "".join(f'<span class="chip">{escape(feature)}</span>' for feature in features)
 
@@ -438,9 +518,9 @@ def _render_subsection_nav(label: str, links: list[tuple[str, str]]) -> str:
     """
 
 
-def _render_entry_path_cards() -> str:
+def _render_entry_path_cards(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
     cards = []
-    for item in _ENTRY_PATH_CARDS:
+    for item in fixtures.entry_path_cards:
         primary_label, primary_href = item["primary"]
         cards.append(
             f"""
@@ -456,9 +536,9 @@ def _render_entry_path_cards() -> str:
     return "\n".join(cards)
 
 
-def _render_dashboard_subsection_index() -> str:
+def _render_dashboard_subsection_index(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
     cards = []
-    for item in _DASHBOARD_SUBSECTION_INDEX:
+    for item in fixtures.dashboard_subsection_index:
         cards.append(
             f"""
             <article class="subsection-index-card">
@@ -471,9 +551,9 @@ def _render_dashboard_subsection_index() -> str:
     return "\n".join(cards)
 
 
-def _render_capability_cards() -> str:
+def _render_capability_cards(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
     cards = []
-    for item in _CAPABILITY_CARDS:
+    for item in fixtures.capability_cards:
         primary_label, primary_href = item["primary"]
         secondary_label, secondary_href = item["secondary"]
         cards.append(
@@ -495,7 +575,7 @@ def _render_capability_cards() -> str:
     return "\n".join(cards)
 
 
-def _render_improvement_plan() -> str:
+def _render_improvement_plan(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
     return "".join(
         f"""
         <li>
@@ -503,13 +583,13 @@ def _render_improvement_plan() -> str:
             <span>{escape(description)}</span>
         </li>
         """
-        for title, description in _IMPROVEMENT_PLAN_ITEMS
+        for title, description in fixtures.improvement_plan_items
     )
 
 
-def _render_journey_detail_panels() -> str:
+def _render_journey_detail_panels(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
     panels = []
-    for panel in _JOURNEY_DETAIL_PANELS:
+    for panel in fixtures.journey_detail_panels:
         steps = "".join(
             f"""
             <li>
@@ -535,9 +615,9 @@ def _render_journey_detail_panels() -> str:
     return "\n".join(panels)
 
 
-def _render_package_capability_matrix() -> str:
+def _render_package_capability_matrix(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
     cards = []
-    for item in _PACKAGE_CAPABILITY_MATRIX:
+    for item in fixtures.package_capability_matrix:
         cards.append(
             f"""
             <article class="package-map-card">
@@ -763,14 +843,17 @@ def _render_ipfs_dashboard(entry: DashboardEntry) -> str:
 """
 
 
-def _render_shell_page(entry: DashboardEntry) -> str:
+def _render_shell_page(
+    entry: DashboardEntry,
+    fixtures: DashboardFixtures = _DASHBOARD_FIXTURES,
+) -> str:
     shell_links = "".join(
         f'<a class="shell-link{' is-active' if item.slug == entry.slug else ''}" href="/dashboards/ipfs-datasets/{escape(item.slug)}">{escape(item.title)}</a>'
-        for item in _IPFS_DASHBOARD_ENTRIES
+        for item in fixtures.ipfs_entries
     )
     top_links = "".join(
         f'<a class="surface-link" href="{escape(path)}">{escape(label)}</a>'
-        for label, path in _COMPLAINT_DASHBOARD_LINKS
+        for label, path in fixtures.complaint_links
     )
     iframe_src = f"/dashboards/raw/ipfs-datasets/{quote(entry.slug)}"
     raw_src = iframe_src
@@ -825,14 +908,15 @@ def _render_dashboard_hub(
     default_manifest_path: str = "",
     default_docket_dataset_path: str = "",
     default_workspace_dataset_path: str = "",
+    fixtures: DashboardFixtures = _DASHBOARD_FIXTURES,
 ) -> str:
     complaint_links = "".join(
         f'<li><a href="{escape(path)}">{escape(label)}</a></li>'
-        for label, path in _COMPLAINT_DASHBOARD_LINKS
+        for label, path in fixtures.complaint_links
     )
     ipfs_sections: dict[str, list[DashboardEntry]] = {}
-    for entry in _IPFS_DASHBOARD_ENTRIES:
-        if entry.slug not in _LAYPERSON_HUB_ADVANCED_DASHBOARD_SLUGS:
+    for entry in fixtures.ipfs_entries:
+        if entry.slug not in fixtures.layperson_hub_advanced_dashboard_slugs:
             continue
         ipfs_sections.setdefault(entry.category, []).append(entry)
     ipfs_markup = "".join(
@@ -842,13 +926,13 @@ def _render_dashboard_hub(
         ) + "</ul></section>"
         for category, entries in ipfs_sections.items()
     )
-    capability_cards = _render_capability_cards()
-    journey_detail_panels = _render_journey_detail_panels()
-    package_capability_matrix = _render_package_capability_matrix()
+    capability_cards = _render_capability_cards(fixtures)
+    journey_detail_panels = _render_journey_detail_panels(fixtures)
+    package_capability_matrix = _render_package_capability_matrix(fixtures)
     dashboard_section_nav = _render_dashboard_section_nav()
-    improvement_plan = _render_improvement_plan()
-    entry_path_cards = _render_entry_path_cards()
-    dashboard_subsection_index = _render_dashboard_subsection_index()
+    improvement_plan = _render_improvement_plan(fixtures)
+    entry_path_cards = _render_entry_path_cards(fixtures)
+    dashboard_subsection_index = _render_dashboard_subsection_index(fixtures)
     docket_input_type = "single"
     normalized_docket_path = str(default_docket_dataset_path or "").strip().lower()
     if normalized_docket_path.endswith(".json") or "manifest" in normalized_docket_path:
@@ -2046,7 +2130,7 @@ def _render_dashboard_hub(
 	            <h1>Unified Dashboard Hub</h1>
 	            <p>Start, continue, organize, review, and draft a legal complaint or response from one guided workspace.</p>
 	        </div>
-        <div class="surface-pills">{''.join(f'<a href="{escape(path)}">{escape(label)}</a>' for label, path in _COMPLAINT_DASHBOARD_LINKS)}</div>
+        <div class="surface-pills">{''.join(f'<a href="{escape(path)}">{escape(label)}</a>' for label, path in fixtures.complaint_links)}</div>
     </header>
     <main>
         <details class="dashboard-section-menu" id="dashboard-section-menu" open>
@@ -5494,7 +5578,7 @@ def create_dashboard_ui_router() -> APIRouter:
 
     @router.get("/mcp", response_class=HTMLResponse)
     async def legacy_mcp_dashboard_root() -> str:
-        return _render_shell_page(_IPFS_DASHBOARD_MAP["mcp"])
+        return _render_shell_page(get_default_ipfs_dashboard_entry())
 
     @router.get("/api/mcp/analytics/history")
     async def mcp_analytics_history() -> dict[str, Any]:
@@ -5534,14 +5618,14 @@ def create_dashboard_ui_router() -> APIRouter:
 
     @router.get("/dashboards/ipfs-datasets/{slug}", response_class=HTMLResponse)
     async def ipfs_datasets_dashboard_shell(slug: str) -> str:
-        entry = _IPFS_DASHBOARD_MAP.get(slug)
+        entry = get_ipfs_dashboard_entry(slug)
         if entry is None:
             raise HTTPException(status_code=404, detail="Dashboard not found")
         return _render_shell_page(entry)
 
     @router.get("/dashboards/raw/ipfs-datasets/{slug}", response_class=HTMLResponse)
     async def ipfs_datasets_dashboard_raw(slug: str) -> str:
-        entry = _IPFS_DASHBOARD_MAP.get(slug)
+        entry = get_ipfs_dashboard_entry(slug)
         if entry is None:
             raise HTTPException(status_code=404, detail="Dashboard not found")
         return _render_ipfs_dashboard(entry)

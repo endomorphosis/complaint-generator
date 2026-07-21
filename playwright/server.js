@@ -213,7 +213,8 @@ function formalEvidenceSummaryItem(item, kind) {
   return `documentary exhibit presently identified as '${title}' on the ${elementLabel} element`;
 }
 
-const dashboardEntries = [
+function buildDashboardEntriesFixture() {
+  return [
   {
     slug: 'mcp',
     title: 'IPFS Datasets MCP Dashboard',
@@ -352,7 +353,8 @@ const dashboardEntries = [
     templateName: 'admin/mcp_dashboard.html',
     summary: 'Administrative MCP dashboard.',
   },
-];
+  ];
+}
 
 const profileData = {
   hashed_username: 'demo-user',
@@ -2081,7 +2083,8 @@ function ipfsTemplate(name) {
   return path.join(ipfsDatasetsTemplatesDir, name);
 }
 
-const laypersonDashboardCards = [
+function buildLaypersonDashboardCardsFixture() {
+  return [
   {
     stepNumber: 1,
     stage: 'Step 1',
@@ -2160,9 +2163,11 @@ const laypersonDashboardCards = [
       ['Open docket tools', '#dashboard-advanced-tools'],
     ],
   },
-];
+  ];
+}
 
-const dashboardUtilityCards = [
+function buildDashboardUtilityCardsFixture() {
+  return [
   {
     stage: 'Utility',
     workflowStage: 'Profile',
@@ -2183,9 +2188,11 @@ const dashboardUtilityCards = [
       ['Technical tools', '#dashboard-advanced-tools'],
     ],
   },
-];
+  ];
+}
 
-const dashboardSubsectionCards = [
+function buildDashboardSubsectionCardsFixture() {
+  return [
   {
     title: 'Start and Review',
     description: 'Guided questions, proof checks, next recommended action, and draft handoff.',
@@ -2206,7 +2213,34 @@ const dashboardSubsectionCards = [
     description: 'Profile, cookies, session tools, and optional package consoles for administrators.',
     links: [['Profile', '/profile'], ['Session tools', '/mcp'], ['Advanced consoles', '#dashboard-advanced-tools']],
   },
-];
+  ];
+}
+
+function buildDashboardFixtures() {
+  const entries = buildDashboardEntriesFixture();
+  return {
+    dashboardEntries: entries,
+    dashboardEntryMap: new Map(entries.map((entry) => [entry.slug, entry])),
+    laypersonDashboardCards: buildLaypersonDashboardCardsFixture(),
+    dashboardUtilityCards: buildDashboardUtilityCardsFixture(),
+    dashboardSubsectionCards: buildDashboardSubsectionCardsFixture(),
+    advancedDashboardSlugs: ['mcp', 'admin-caselaw', 'admin-caselaw-mcp', 'admin-graphrag', 'admin-mcp'],
+  };
+}
+
+const dashboardFixtures = buildDashboardFixtures();
+
+function getDashboardFixtures() {
+  return dashboardFixtures;
+}
+
+function getDashboardEntry(slug, fixtures = dashboardFixtures) {
+  return fixtures.dashboardEntryMap.get(String(slug || '')) || null;
+}
+
+function getDefaultDashboardEntry(fixtures = dashboardFixtures) {
+  return getDashboardEntry('mcp', fixtures) || fixtures.dashboardEntries[0];
+}
 
 function withDashboardContext(href, searchParams) {
   const userId = searchParams && searchParams.get('user_id');
@@ -2223,8 +2257,8 @@ function renderLinkRow(links, searchParams) {
   )).join('');
 }
 
-function renderDashboardHub(searchParams = new URLSearchParams()) {
-  const stageControls = laypersonDashboardCards.map((card) => {
+function renderDashboardHub(searchParams = new URLSearchParams(), fixtures = getDashboardFixtures()) {
+  const stageControls = fixtures.laypersonDashboardCards.map((card) => {
     if (card.locked) {
       return `<article class="stage-control is-locked" data-path-state="${escapeXml(card.stateKind || 'locked')}" aria-label="${escapeXml(card.stepLabel)} locked">
         <div class="stage-label">${escapeXml(card.stepLabel)}</div>
@@ -2245,7 +2279,7 @@ function renderDashboardHub(searchParams = new URLSearchParams()) {
       </div>
     </article>`;
   }).join('');
-  const utilityCards = dashboardUtilityCards.map((card) => {
+  const utilityCards = fixtures.dashboardUtilityCards.map((card) => {
     const prerequisiteMarkup = (card.prerequisites || []).map(([label, text]) => (
       `<div class="prerequisite-next-line"><strong>${escapeXml(label)}</strong>${escapeXml(text)}</div>`
     )).join('');
@@ -2265,20 +2299,16 @@ function renderDashboardHub(searchParams = new URLSearchParams()) {
       ${extraMarkup}
     </article>`;
   }).join('');
-  const subsectionCards = dashboardSubsectionCards.map((card) => (
+  const subsectionCards = fixtures.dashboardSubsectionCards.map((card) => (
     `<article class="subsection-card">
       <h3>${escapeXml(card.title)}</h3>
       <p>${escapeXml(card.description)}</p>
       <div class="link-row">${renderLinkRow(card.links, searchParams)}</div>
     </article>`
   )).join('');
-  const advancedEntries = [
-    dashboardEntries.find((entry) => entry.slug === 'mcp'),
-    dashboardEntries.find((entry) => entry.slug === 'admin-caselaw'),
-    dashboardEntries.find((entry) => entry.slug === 'admin-caselaw-mcp'),
-    dashboardEntries.find((entry) => entry.slug === 'admin-graphrag'),
-    dashboardEntries.find((entry) => entry.slug === 'admin-mcp'),
-  ].filter(Boolean);
+  const advancedEntries = fixtures.advancedDashboardSlugs
+    .map((slug) => getDashboardEntry(slug, fixtures))
+    .filter(Boolean);
   const advancedLinks = advancedEntries.map((entry) => (
     `<li><a href="/dashboards/ipfs-datasets/${escapeXml(entry.slug)}">${escapeXml(entry.title)}</a><span>${escapeXml(entry.summary)}</span></li>`
   )).join('');
@@ -3357,7 +3387,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && url.pathname === '/mcp') {
-    return sendText(response, renderDashboardShell(dashboardEntries[0]), 'text/html; charset=utf-8');
+    return sendText(response, renderDashboardShell(getDefaultDashboardEntry()), 'text/html; charset=utf-8');
   }
 
   if (request.method === 'GET' && url.pathname === '/api/mcp/analytics/history') {
@@ -3376,7 +3406,7 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === 'GET' && url.pathname.startsWith('/dashboards/ipfs-datasets/')) {
     const slug = url.pathname.replace('/dashboards/ipfs-datasets/', '');
-    const entry = dashboardEntries.find((item) => item.slug === slug);
+    const entry = getDashboardEntry(slug);
     if (!entry) {
       response.writeHead(404);
       response.end('Not found');
@@ -3387,7 +3417,7 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === 'GET' && url.pathname.startsWith('/dashboards/raw/ipfs-datasets/')) {
     const slug = url.pathname.replace('/dashboards/raw/ipfs-datasets/', '');
-    const entry = dashboardEntries.find((item) => item.slug === slug);
+    const entry = getDashboardEntry(slug);
     if (!entry) {
       response.writeHead(404);
       response.end('Not found');
