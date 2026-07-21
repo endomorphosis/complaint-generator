@@ -695,11 +695,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Validation: python -m pytest --collect-only -q
 - Acceptance: Retry-budget guardrail filed this from repeated validation failures in REF-031. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-035-ref-031-retry-budget.md to fix the validation blocker, then mark this repair task completed so the supervisor can release REF-031 from strategy blocked_tasks.
 
-- [ ] Task checkbox-36: REF-036 Introduce canonical task identity and a durable supervisor task ledger
+- [x] Task checkbox-36: REF-036 Introduce canonical task identity and a durable supervisor task ledger
 
 ## REF-036 Introduce canonical task identity and a durable supervisor task ledger
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9
@@ -715,6 +715,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: seed
 - Todo vector key: ref-036-introducecanonicaltaskidentityandadurablesupervi
 - Acceptance: Every task has a stable canonical key or CID independent of board path and display id.; Legacy markdown tasks migrate idempotently with board namespace provenance.; Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.; Refill cannot create a second active task for the same canonical work item.
+- Completion evidence: ipfs_accelerate_py commit a148f05a; 235 daemon regressions and 37 identity, lease, and objective graph regressions passed.
 
 - [ ] Task checkbox-37: REF-037 Replace static bundle launch with a dynamic leased worker pool
 
