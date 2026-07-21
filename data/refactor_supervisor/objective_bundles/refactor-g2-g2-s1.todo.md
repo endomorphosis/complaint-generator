@@ -85,3 +85,15 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery/2026-07-21-ref-009-ref-005-merge-retry-budget.md
 - Acceptance: Merge retry-budget guardrail filed this from repeated merge failures in REF-005. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery/2026-07-21-ref-009-ref-005-merge-retry-budget.md to fix the merge blocker, verify the intended implementation changes are committed in their owning repository or submodule, run `ipfs-accelerate-agent-merge-resolver --events-path ... --apply` when the conflict is semantic, then mark this repair task completed so the supervisor can release REF-005 from strategy blocked_tasks.
 - Repair result: REF-005 branch `implementation/ref-005-attempt-1-1784663197` now has sanitizer commits `a1e01a3` and `6531aad`; its final diff from baseline is mediator-only, the script add/add conflict no longer appears in `git merge-tree`, and `REF-005` was removed from the lane strategy `blocked_tasks`.
+
+## REF-010 Resolve merge retry-budget failure for REF-006
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on:
+- Outputs: mediator/claim_support_hooks.py, data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery/2026-07-21-ref-010-ref-006-merge-retry-budget.md
+- Acceptance: Merge retry-budget guardrail filed this from repeated merge failures in REF-006. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery/2026-07-21-ref-010-ref-006-merge-retry-budget.md to fix the merge blocker, verify the intended implementation changes are committed in their owning repository or submodule, run `ipfs-accelerate-agent-merge-resolver --events-path ... --apply` when the conflict is semantic, then mark this repair task completed so the supervisor can release REF-006 from strategy blocked_tasks.
+- Repair result: REF-006 branch `implementation/ref-006-attempt-1-1784663578` contains implementation commit `7009a4a` and sanitizer commit `0305608`; this repair branch carries the sanitized claim-support extraction, `git merge-tree` succeeds for both REF-006 and this branch, the merge resolver was run and reported no configured apply command, validation passed (`45 passed`), and `REF-006` was removed from the live lane strategy `blocked_tasks`.
