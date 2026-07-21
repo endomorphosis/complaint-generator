@@ -226,6 +226,7 @@ Checklist:
 - [x] contradiction and missing-support summaries are operator-visible
 - [x] timeline, archive-history, and graph-trace drilldowns are operator-visible
 - [x] queued acquisition and enrichment state can be inspected from review surfaces
+- [x] operator drilldowns preserve latest-first timeline ordering, visible archive-domain counts, provenance hashes/domains, and degraded queue metadata handling
 - [x] long-running archive, graph, and validation work can move into explicit background workflows where necessary
 - [x] documentation for review and execution routes is aligned with actual payloads and compatibility behavior
 

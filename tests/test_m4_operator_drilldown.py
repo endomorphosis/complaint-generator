@@ -194,6 +194,47 @@ def test_get_support_timeline_respects_limit():
     assert len(result["timeline"]) <= 5
 
 
+def test_get_support_timeline_sorts_latest_capture_first():
+    hooks = _make_claim_support_hook()
+    hooks._get_enriched_claim_support_links = MagicMock(return_value=[
+        {"claim_element_id": "adverse_action", "claim_element_text": "Adverse action"},
+        {"claim_element_id": "protected_activity", "claim_element_text": "Protected activity"},
+        {"claim_element_id": "causation", "claim_element_text": "Causation"},
+    ])
+    hooks._collect_support_traces_from_links = MagicMock(side_effect=[
+        [
+            {
+                "support_ref": "old",
+                "support_kind": "web_evidence",
+                "record_summary": {
+                    "parse_summary": {
+                        "captured_at": "2025-01-01T00:00:00Z",
+                        "archive_url": "https://web.archive.org/old",
+                    }
+                },
+            }
+        ],
+        [
+            {
+                "support_ref": "new",
+                "support_kind": "web_evidence",
+                "record_summary": {
+                    "parse_summary": {
+                        "captured_at": "2025-03-01T00:00:00Z",
+                        "archive_url": "https://web.archive.org/new",
+                    }
+                },
+            }
+        ],
+        [{"support_ref": "undated", "support_kind": "evidence", "record_summary": {}}],
+    ])
+
+    result = hooks.get_support_timeline("test_user")
+
+    assert [entry["support_ref"] for entry in result["timeline"]] == ["new", "old", "undated"]
+    assert result["timeline"][0]["captured_at"] == "2025-03-01T00:00:00Z"
+
+
 # ---------------------------------------------------------------------------
 # get_archive_history
 # ---------------------------------------------------------------------------
@@ -222,6 +263,73 @@ def test_get_archive_history_domain_filter():
     hooks._get_enriched_claim_support_links = MagicMock(return_value=[])
     result = hooks.get_archive_history("test_user", domain="example.com")
     assert result["domain_filter"] == "example.com"
+
+
+def test_get_archive_history_domain_count_matches_limited_visible_groups():
+    hooks = _make_claim_support_hook()
+    hooks._get_enriched_claim_support_links = MagicMock(return_value=[
+        {"claim_element_id": "one"},
+        {"claim_element_id": "two"},
+    ])
+    hooks._collect_support_traces_from_links = MagicMock(side_effect=[
+        [
+            {
+                "support_ref": "older",
+                "support_kind": "web_evidence",
+                "record_summary": {
+                    "parse_summary": {
+                        "archive_url": "https://web.archive.org/20250101/https://old.example/a",
+                        "captured_at": "2025-01-01T00:00:00Z",
+                        "source_domain": "old.example",
+                    }
+                },
+            }
+        ],
+        [
+            {
+                "support_ref": "newer",
+                "support_kind": "web_evidence",
+                "record_summary": {
+                    "parse_summary": {
+                        "archive_url": "https://web.archive.org/20250301/https://new.example/a",
+                        "captured_at": "2025-03-01T00:00:00Z",
+                        "source_domain": "new.example",
+                    }
+                },
+            }
+        ],
+    ])
+
+    result = hooks.get_archive_history("test_user", limit=1)
+
+    assert result["capture_count"] == 1
+    assert result["domain_count"] == 1
+    assert list(result["captures_by_domain"]) == ["new.example"]
+    assert result["captures"][0]["support_ref"] == "newer"
+
+
+def test_build_support_packet_lineage_includes_provenance_fields_from_parse_summary():
+    hooks = _make_claim_support_hook()
+    packet = hooks._build_support_packet(
+        {
+            "record_summary": {
+                "parse_summary": {
+                    "source_url": "https://example.com/source",
+                    "source_domain": "example.com",
+                    "content_hash": "sha256:abc",
+                    "archive_url": "https://web.archive.org/source",
+                    "captured_at": "2025-01-01T00:00:00Z",
+                }
+            }
+        }
+    )
+
+    assert packet["lineage_summary"]["source_url"] == "https://example.com/source"
+    assert packet["lineage_summary"]["source_domain"] == "example.com"
+    assert packet["lineage_summary"]["content_hash"] == "sha256:abc"
+    assert packet["evidence"]["source_url"] == "https://example.com/source"
+    assert packet["provenance"]["source_domain"] == "example.com"
+    assert packet["provenance"]["content_hash"] == "sha256:abc"
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +403,28 @@ def test_get_enrichment_queue_state_returns_counts():
     assert "pending_count" in result
     assert "running_count" in result
     assert "completed_count" in result
+
+
+def test_serialize_enrichment_queue_row_tolerates_malformed_metadata():
+    hooks = _make_claim_support_hook()
+    row = (
+        1,
+        "test_user",
+        "retaliation",
+        "graph_enrichment",
+        "pending",
+        3,
+        "{not-json",
+        "2025-01-01T00:00:00",
+        "2025-01-01T00:00:00",
+    )
+
+    serialized = hooks._serialize_enrichment_queue_row(row)
+
+    assert serialized["metadata"] == {}
+    assert serialized["progress"] == {}
+    assert serialized["partial_results"] == {}
+    assert serialized["error"] == ""
 
 
 # ---------------------------------------------------------------------------

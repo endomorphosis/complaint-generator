@@ -1317,6 +1317,7 @@ class ClaimSupportHook:
             'corpus_family': str(parse_lineage.get('corpus_family') or record_parse_summary.get('corpus_family') or ''),
             'artifact_family': str(parse_lineage.get('artifact_family') or record_parse_summary.get('artifact_family') or ''),
             'source': str(parse_lineage.get('source') or record_parse_summary.get('source') or ''),
+            'source_url': str(parse_lineage.get('source_url') or record_parse_summary.get('source_url') or record_summary.get('source_url') or ''),
             'input_format': str(parse_lineage.get('input_format') or record_parse_summary.get('input_format') or ''),
             'parser_version': str(parse_lineage.get('parser_version') or ''),
             'content_origin': str(parse_lineage.get('content_origin') or record_parse_summary.get('content_origin') or ''),
@@ -1327,6 +1328,8 @@ class ClaimSupportHook:
             'version_of': str(parse_lineage.get('version_of') or record_parse_summary.get('version_of') or ''),
             'captured_at': str(parse_lineage.get('captured_at') or record_parse_summary.get('captured_at') or ''),
             'observed_at': str(parse_lineage.get('observed_at') or record_parse_summary.get('observed_at') or ''),
+            'source_domain': str(parse_lineage.get('source_domain') or record_parse_summary.get('source_domain') or record_summary.get('source_domain') or ''),
+            'content_hash': str(parse_lineage.get('content_hash') or record_parse_summary.get('content_hash') or record_summary.get('content_hash') or ''),
             'content_source_field': str(parse_lineage.get('content_source_field') or record_parse_summary.get('content_source_field') or ''),
             'fallback_mode': str(parse_lineage.get('fallback_mode') or record_parse_summary.get('fallback_mode') or ''),
             'quality_tier': str(record_parse_summary.get('quality_tier') or parse_lineage.get('quality_tier') or ''),
@@ -2443,7 +2446,7 @@ class ClaimSupportHook:
         temporal_rule_status = str(temporal_rule_profile.get('status') or '')
         graphrag_quality_signal = self._extract_graphrag_quality_signal(reasoning)
         graphrag_has_blocking_gaps = bool(
-            reasoning.get('graphrag_quality_enforces_proof_gaps', False)
+            reasoning.get('graphrag_quality_enforces_proof_gaps', True)
             and graphrag_quality_signal.get('has_blocking_gaps', False)
         )
         missing_support_kind_count = len(element.get('missing_support_kinds', []) or [])
@@ -2613,7 +2616,7 @@ class ClaimSupportHook:
         graphrag_quality_signal = self._extract_graphrag_quality_signal(reasoning_diagnostics)
         reasoning = reasoning_diagnostics if isinstance(reasoning_diagnostics, dict) else {}
         if (
-            reasoning.get('graphrag_quality_enforces_proof_gaps', False)
+            reasoning.get('graphrag_quality_enforces_proof_gaps', True)
             and graphrag_quality_signal.get('available')
             and graphrag_quality_signal.get('has_blocking_gaps')
         ):
@@ -3779,6 +3782,11 @@ class ClaimSupportHook:
                 element,
                 contradiction_candidates,
             )
+            if isinstance(reasoning_diagnostics, dict) and 'graphrag_quality_enforces_proof_gaps' not in reasoning_diagnostics:
+                reasoning_diagnostics = {
+                    **reasoning_diagnostics,
+                    'graphrag_quality_enforces_proof_gaps': False,
+                }
             decision_trace = self._build_validation_decision_trace(
                 element,
                 contradiction_candidates,
@@ -8127,6 +8135,8 @@ class ClaimSupportHook:
                 )
                 timeline_entries.append({
                     'captured_at': captured_at,
+                    'observed_at': str(lineage_summary.get('observed_at') or record_summary.get('observed_at') or ''),
+                    'timestamp': str(trace.get('timestamp') or link.get('timestamp') or ''),
                     'support_kind': trace.get('support_kind'),
                     'support_label': trace.get('support_label'),
                     'support_ref': trace.get('support_ref'),
@@ -8147,12 +8157,13 @@ class ClaimSupportHook:
                     },
                 })
 
-        # Sort by captured_at descending (non-empty timestamps first)
-        def _timeline_sort_key(entry: Dict[str, Any]) -> tuple:
-            ts = str(entry.get('captured_at') or '')
-            return (0 if ts else 1, ts)
-
-        timeline_entries.sort(key=_timeline_sort_key)
+        dated_entries = [entry for entry in timeline_entries if str(entry.get('captured_at') or entry.get('observed_at') or entry.get('timestamp') or '')]
+        undated_entries = [entry for entry in timeline_entries if not str(entry.get('captured_at') or entry.get('observed_at') or entry.get('timestamp') or '')]
+        dated_entries.sort(
+            key=lambda entry: str(entry.get('captured_at') or entry.get('observed_at') or entry.get('timestamp') or ''),
+            reverse=True,
+        )
+        timeline_entries = dated_entries + undated_entries
         if limit:
             timeline_entries = timeline_entries[:limit]
 
@@ -8204,6 +8215,8 @@ class ClaimSupportHook:
 
                 if domain and source_domain and domain.lower() not in source_domain.lower():
                     continue
+                if domain and not source_domain:
+                    continue
 
                 capture_entry = {
                     'archive_url': archive_url,
@@ -8224,6 +8237,9 @@ class ClaimSupportHook:
         all_captures.sort(key=lambda e: str(e.get('captured_at') or ''), reverse=True)
         if limit:
             all_captures = all_captures[:limit]
+        limited_by_domain: Dict[str, List[Dict[str, Any]]] = {}
+        for entry in all_captures:
+            limited_by_domain.setdefault(str(entry.get('source_domain') or 'unknown'), []).append(entry)
 
         return {
             'available': True,
@@ -8231,12 +8247,9 @@ class ClaimSupportHook:
             'claim_type': claim_type,
             'domain_filter': domain,
             'capture_count': len(all_captures),
-            'domain_count': len(captures_by_domain),
+            'domain_count': len(limited_by_domain),
             'captures': all_captures,
-            'captures_by_domain': {
-                d: entries[:limit]
-                for d, entries in captures_by_domain.items()
-            },
+            'captures_by_domain': limited_by_domain,
         }
 
     def get_graph_trace_drilldown(
@@ -8305,7 +8318,12 @@ class ClaimSupportHook:
         return duckdb.connect(self.db_path)
 
     def _serialize_enrichment_queue_row(self, row: Any) -> Dict[str, Any]:
-        metadata = json.loads(row[6]) if row[6] else {}
+        try:
+            metadata = json.loads(row[6]) if row[6] else {}
+        except Exception:
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
         entry_status = str(row[4] or 'pending')
         return {
             'id': row[0],
