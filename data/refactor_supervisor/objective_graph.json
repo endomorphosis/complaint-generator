@@ -1,7 +1,7 @@
 {
-  "active_goal_count": 21,
-  "completed_goal_count": 5,
-  "generated_at": "2026-07-21T22:50:01.764744+00:00",
+  "active_goal_count": 20,
+  "completed_goal_count": 6,
+  "generated_at": "2026-07-21T22:58:51.889947+00:00",
   "goal_count": 26,
   "goals": [
     {
@@ -185,7 +185,7 @@
       "goal_id": "G3",
       "parents": [],
       "refinement_depth": "0",
-      "status": "active",
+      "status": "completed",
       "title": "Harden adapter contracts and degraded mode",
       "track": "ops"
     },
@@ -1236,31 +1236,9 @@
     },
     {
       "fib_priority": 999999,
-      "goal_id": "G3",
-      "graph_depth": 0,
-      "heap_index": 11,
-      "output_count": 0,
-      "parents": [],
-      "priority": "P0",
-      "priority_rank": 0,
-      "required_evidence_count": 10,
-      "sort_key": [
-        999999,
-        0,
-        -40,
-        0,
-        "G3"
-      ],
-      "status": "active",
-      "title": "Harden adapter contracts and degraded mode",
-      "track": "ops",
-      "work_surface_score": 40
-    },
-    {
-      "fib_priority": 999999,
       "goal_id": "G2.S1",
       "graph_depth": 1,
-      "heap_index": 12,
+      "heap_index": 11,
       "output_count": 0,
       "parents": [
         "G2"
@@ -1284,7 +1262,7 @@
       "fib_priority": 999999,
       "goal_id": "G2.S2",
       "graph_depth": 1,
-      "heap_index": 13,
+      "heap_index": 12,
       "output_count": 0,
       "parents": [
         "G2"
@@ -1308,7 +1286,7 @@
       "fib_priority": 999999,
       "goal_id": "G8",
       "graph_depth": 0,
-      "heap_index": 14,
+      "heap_index": 13,
       "output_count": 0,
       "parents": [],
       "priority": "P0",
@@ -1330,7 +1308,7 @@
       "fib_priority": 999999,
       "goal_id": "G6.S2",
       "graph_depth": 1,
-      "heap_index": 15,
+      "heap_index": 14,
       "output_count": 0,
       "parents": [
         "G6"
@@ -1354,7 +1332,7 @@
       "fib_priority": 999999,
       "goal_id": "G7.S1",
       "graph_depth": 1,
-      "heap_index": 16,
+      "heap_index": 15,
       "output_count": 0,
       "parents": [
         "G7"
@@ -1378,7 +1356,7 @@
       "fib_priority": 999999,
       "goal_id": "G6",
       "graph_depth": 0,
-      "heap_index": 17,
+      "heap_index": 16,
       "output_count": 0,
       "parents": [],
       "priority": "P1",
@@ -1400,7 +1378,7 @@
       "fib_priority": 999999,
       "goal_id": "G6.S1",
       "graph_depth": 1,
-      "heap_index": 18,
+      "heap_index": 17,
       "output_count": 0,
       "parents": [
         "G6"
@@ -1424,7 +1402,7 @@
       "fib_priority": 999999,
       "goal_id": "G4.S1",
       "graph_depth": 1,
-      "heap_index": 19,
+      "heap_index": 18,
       "output_count": 0,
       "parents": [
         "G4"
@@ -1448,7 +1426,7 @@
       "fib_priority": 999999,
       "goal_id": "G7",
       "graph_depth": 0,
-      "heap_index": 20,
+      "heap_index": 19,
       "output_count": 0,
       "parents": [],
       "priority": "P1",
@@ -1470,7 +1448,7 @@
   "objective_path": "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_objective_heap.md",
   "schema": "ipfs_accelerate_py.agent_supervisor.objective_graph",
   "thought_graph": {
-    "edge_count": 449,
+    "edge_count": 451,
     "edges": [
       {
         "from": "goal:G1",
@@ -1956,6 +1934,16 @@
         "from": "goal:G3",
         "kind": "requires_evidence",
         "to": "evidence:b04fe9f20996"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:3d8b3df478e0"
+      },
+      {
+        "from": "goal:G3",
+        "kind": "requires_evidence",
+        "to": "evidence:e55df40b4552"
       },
       {
         "from": "goal:G3",
@@ -3718,7 +3706,7 @@
         "to": "validation:1121ae702863"
       }
     ],
-    "node_count": 466,
+    "node_count": 468,
     "nodes": [
       {
         "goal_id": "G7.S1",
@@ -4454,6 +4442,13 @@
         "kind": "evidence_requirement",
         "term": "release drained or blocked leases",
         "thought": "Find or create repository evidence proving `release drained or blocked leases`."
+      },
+      {
+        "goal_id": "G3",
+        "id": "evidence:3d8b3df478e0",
+        "kind": "evidence_requirement",
+        "term": "data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md",
+        "thought": "Find or create repository evidence proving `data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md`."
       },
       {
         "goal_id": "G4.S1",
@@ -6255,6 +6250,13 @@
         "thought": "Find or create repository evidence proving `applications/complaint_cli.py`."
       },
       {
+        "goal_id": "G3",
+        "id": "evidence:e55df40b4552",
+        "kind": "evidence_requirement",
+        "term": "objective validation repair",
+        "thought": "Find or create repository evidence proving `objective validation repair`."
+      },
+      {
         "goal_id": "G9.S1",
         "id": "evidence:e60b8a5484c4",
         "kind": "evidence_requirement",
@@ -6683,7 +6685,7 @@
         "id": "goal:G3",
         "kind": "goal",
         "priority": "P0",
-        "status": "active",
+        "status": "completed",
         "thought": "Harden adapter contracts and degraded mode",
         "title": "Harden adapter contracts and degraded mode",
         "track": "ops"
