@@ -61,6 +61,11 @@ def _unique_normalized_strings(values: Any) -> List[str]:
     return normalized_values
 
 
+def _normalize_scope_key(value: Any) -> str:
+    text = _normalize_text(value).lower()
+    return "".join(ch if ch.isalnum() else "_" for ch in text).strip("_")
+
+
 def _looks_like_staff_person_name(value: Any) -> bool:
     text = _normalize_text(value)
     if not text:
@@ -1636,7 +1641,8 @@ def build_temporal_relation_registry(
     for index, relation in enumerate(timeline_relations if isinstance(timeline_relations, list) else [], start=1):
         if not isinstance(relation, dict):
             continue
-        relation_id = _normalize_text(relation.get("relation_id") or "") or f"timeline_relation_{index:03d}"
+        raw_relation_id = _normalize_text(relation.get("relation_id") or "")
+        relation_id = raw_relation_id or f"timeline_relation_{index:03d}"
         source_fact_id = _normalize_text(relation.get("source_fact_id") or "")
         target_fact_id = _normalize_text(relation.get("target_fact_id") or "")
         source_fact = _coerce_dict(fact_index.get(source_fact_id))
@@ -1655,13 +1661,21 @@ def build_temporal_relation_registry(
             list(source_fact.get("testimony_record_ids") or [])
             + list(target_fact.get("testimony_record_ids") or [])
         )
-        inference_basis = _normalize_text(relation.get("inference_basis") or "normalized_temporal_context")
+        raw_inference_basis = _normalize_text(relation.get("inference_basis") or "")
+        relation_id_looks_generated = bool(raw_relation_id and raw_relation_id.startswith("timeline_relation_"))
+        inference_basis = raw_inference_basis or (
+            "normalized_temporal_context" if relation_id_looks_generated else "explicit_relation"
+        )
         inference_mode = _normalize_text(relation.get("inference_mode") or "")
         if not inference_mode:
             inference_mode = (
                 "derived_from_structured_sequence"
                 if inference_basis == "structured_timeline_sequence"
-                else "derived_from_temporal_context"
+                else (
+                    "derived_from_temporal_context"
+                    if inference_basis == "normalized_temporal_context"
+                    else "explicit"
+                )
             )
         registry.append(
             {
@@ -2080,6 +2094,389 @@ def build_timeline_consistency_summary(
         "non_day_precision_fact_ids": non_day_precision_fact_ids,
         "temporal_conflict_relation_count": temporal_conflict_relation_count,
         "orphan_anchor_count": orphan_anchor_count,
+    }
+
+
+def _temporal_record_claim_keys(record: Dict[str, Any]) -> set[str]:
+    values: List[Any] = []
+    for field_name in ("claim_types", "affected_claim_types"):
+        field_value = record.get(field_name)
+        if isinstance(field_value, list):
+            values.extend(field_value)
+    for field_name in ("claim_type", "target_claim_type"):
+        field_value = record.get(field_name)
+        if _normalize_text(field_value):
+            values.append(field_value)
+    intent = record.get("intake_question_intent") if isinstance(record.get("intake_question_intent"), dict) else {}
+    if _normalize_text(intent.get("target_claim_type")):
+        values.append(intent.get("target_claim_type"))
+    return {_normalize_scope_key(value) for value in values if _normalize_scope_key(value)}
+
+
+def _temporal_record_element_keys(record: Dict[str, Any]) -> set[str]:
+    values: List[Any] = []
+    for field_name in ("element_tags", "affected_element_ids", "target_element_ids", "element_targets"):
+        field_value = record.get(field_name)
+        if isinstance(field_value, list):
+            values.extend(field_value)
+    for field_name in ("claim_element_id", "target_element_id"):
+        field_value = record.get(field_name)
+        if _normalize_text(field_value):
+            values.append(field_value)
+    intent = record.get("intake_question_intent") if isinstance(record.get("intake_question_intent"), dict) else {}
+    if _normalize_text(intent.get("target_element_id")):
+        values.append(intent.get("target_element_id"))
+    return {_normalize_scope_key(value) for value in values if _normalize_scope_key(value)}
+
+
+def _temporal_issue_id(issue: Dict[str, Any]) -> str:
+    return _normalize_text(issue.get("issue_id") or issue.get("contradiction_id") or issue.get("dependency_id") or "")
+
+
+def _temporal_relation_preview(relation: Dict[str, Any]) -> str:
+    source_fact_id = _normalize_text(relation.get("source_fact_id") or relation.get("source_temporal_fact_id") or "")
+    target_fact_id = _normalize_text(relation.get("target_fact_id") or relation.get("target_temporal_fact_id") or "")
+    relation_type = _normalize_text(relation.get("relation_type") or "").replace("_", " ")
+    return " ".join(part for part in [source_fact_id, relation_type, target_fact_id] if part).strip()
+
+
+def _build_temporal_graph_record(
+    *,
+    graph_id: str,
+    claim_type: str,
+    facts: List[Dict[str, Any]],
+    relations: List[Dict[str, Any]],
+    issues: List[Dict[str, Any]],
+    element_id: str = "",
+    element_label: str = "",
+) -> Dict[str, Any]:
+    fact_ids = [
+        _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or "")
+        for fact in facts
+        if _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or "")
+    ]
+    relation_ids = [
+        _normalize_text(relation.get("relation_id") or "")
+        for relation in relations
+        if _normalize_text(relation.get("relation_id") or "")
+    ]
+    issue_ids: List[str] = []
+    open_issue_ids: List[str] = []
+    blocking_issue_ids: List[str] = []
+    issue_type_counts: Dict[str, int] = {}
+    issue_status_counts: Dict[str, int] = {}
+    severity_counts: Dict[str, int] = {}
+    missing_temporal_predicates: List[str] = []
+    required_provenance_kinds: List[str] = []
+    warnings: List[str] = []
+
+    for issue in issues:
+        issue_id = _temporal_issue_id(issue)
+        if issue_id and issue_id not in issue_ids:
+            issue_ids.append(issue_id)
+        issue_type = _normalize_text(issue.get("issue_type") or issue.get("category") or "").lower()
+        if issue_type:
+            issue_type_counts[issue_type] = issue_type_counts.get(issue_type, 0) + 1
+        status_value = _normalize_text(issue.get("current_resolution_status") or issue.get("status") or "open").lower() or "open"
+        issue_status_counts[status_value] = issue_status_counts.get(status_value, 0) + 1
+        severity = _normalize_text(issue.get("severity") or "").lower()
+        if severity:
+            severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        if status_value != "resolved" and issue_id:
+            open_issue_ids.append(issue_id)
+        if status_value != "resolved" and (bool(issue.get("blocking")) or severity == "blocking") and issue_id:
+            blocking_issue_ids.append(issue_id)
+        for predicate in issue.get("missing_temporal_predicates") if isinstance(issue.get("missing_temporal_predicates"), list) else []:
+            normalized_predicate = _normalize_text(predicate)
+            if normalized_predicate and normalized_predicate not in missing_temporal_predicates:
+                missing_temporal_predicates.append(normalized_predicate)
+        for provenance_kind in issue.get("required_provenance_kinds") if isinstance(issue.get("required_provenance_kinds"), list) else []:
+            normalized_kind = _normalize_text(provenance_kind)
+            if normalized_kind and normalized_kind not in required_provenance_kinds:
+                required_provenance_kinds.append(normalized_kind)
+        if status_value != "resolved":
+            summary = _normalize_text(issue.get("summary") or issue_type or issue_id)
+            if summary and summary not in warnings:
+                warnings.append(summary)
+
+    relation_type_counts: Dict[str, int] = {}
+    relation_preview: List[str] = []
+    for relation in relations:
+        relation_type = _normalize_text(relation.get("relation_type") or "").lower()
+        if relation_type:
+            relation_type_counts[relation_type] = relation_type_counts.get(relation_type, 0) + 1
+        preview = _temporal_relation_preview(relation)
+        if preview and preview not in relation_preview:
+            relation_preview.append(preview)
+
+    anchored_fact_ids: List[str] = []
+    unanchored_fact_ids: List[str] = []
+    timeline_anchor_ids: List[str] = []
+    for fact in facts:
+        fact_id = _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or "")
+        temporal_context = _coerce_dict(fact.get("temporal_context"))
+        has_anchor = bool(
+            temporal_context.get("start_date")
+            or fact.get("start_time")
+            or _coerce_list(fact.get("timeline_anchor_ids"))
+        )
+        if fact_id and has_anchor:
+            anchored_fact_ids.append(fact_id)
+        elif fact_id:
+            unanchored_fact_ids.append(fact_id)
+        for anchor_id in fact.get("timeline_anchor_ids") if isinstance(fact.get("timeline_anchor_ids"), list) else []:
+            normalized_anchor_id = _normalize_text(anchor_id)
+            if normalized_anchor_id and normalized_anchor_id not in timeline_anchor_ids:
+                timeline_anchor_ids.append(normalized_anchor_id)
+
+    partial_order_ready = bool(facts) and not open_issue_ids and not blocking_issue_ids and not unanchored_fact_ids
+    graph_record = {
+        "contract_version": "claim_temporal_graph.v1",
+        "graph_id": graph_id,
+        "claim_type": claim_type,
+        "claim_key": _normalize_scope_key(claim_type),
+        "element_id": element_id,
+        "element_key": _normalize_scope_key(element_id or element_label),
+        "element_label": element_label,
+        "fact_count": len(facts),
+        "relation_count": len(relations),
+        "issue_count": len(issues),
+        "fact_ids": fact_ids,
+        "temporal_fact_ids": fact_ids,
+        "anchored_fact_ids": anchored_fact_ids,
+        "unanchored_fact_ids": unanchored_fact_ids,
+        "relation_ids": relation_ids,
+        "temporal_relation_ids": relation_ids,
+        "issue_ids": issue_ids,
+        "temporal_issue_ids": issue_ids,
+        "open_issue_ids": open_issue_ids,
+        "blocking_issue_ids": blocking_issue_ids,
+        "timeline_anchor_ids": timeline_anchor_ids,
+        "relation_type_counts": relation_type_counts,
+        "relation_preview": relation_preview[:10],
+        "issue_type_counts": issue_type_counts,
+        "issue_status_counts": issue_status_counts,
+        "severity_counts": severity_counts,
+        "missing_temporal_predicates": missing_temporal_predicates,
+        "required_provenance_kinds": required_provenance_kinds,
+        "warning_count": len(warnings),
+        "warnings": warnings,
+        "partial_order_ready": partial_order_ready,
+        "readiness": {
+            "ready_for_temporal_formalization": partial_order_ready,
+            "trace_fact_ids": fact_ids,
+            "trace_relation_ids": relation_ids,
+            "trace_issue_ids": issue_ids,
+            "blocking_issue_ids": blocking_issue_ids,
+            "missing_temporal_predicates": missing_temporal_predicates,
+            "required_provenance_kinds": required_provenance_kinds,
+        },
+        "facts": facts,
+        "relations": relations,
+        "issues": issues,
+    }
+    return graph_record
+
+
+def build_claim_temporal_graphs(
+    temporal_fact_registry: List[Dict[str, Any]],
+    temporal_relation_registry: List[Dict[str, Any]],
+    temporal_issue_registry: List[Dict[str, Any]],
+    candidate_claims: List[Dict[str, Any]] | None = None,
+) -> Dict[str, Any]:
+    """Assemble deterministic claim and element temporal partial-order graphs.
+
+    The graph is intentionally derived from the canonical temporal registries so
+    packet readiness, proof bundles, and review payloads can all trace back to the
+    same fact/relation/issue IDs.
+    """
+    facts = [
+        _coerce_dict(fact)
+        for fact in (temporal_fact_registry if isinstance(temporal_fact_registry, list) else [])
+        if isinstance(fact, dict)
+    ]
+    relations = [
+        _coerce_dict(relation)
+        for relation in (temporal_relation_registry if isinstance(temporal_relation_registry, list) else [])
+        if isinstance(relation, dict)
+    ]
+    issues = [
+        _coerce_dict(issue)
+        for issue in (temporal_issue_registry if isinstance(temporal_issue_registry, list) else [])
+        if isinstance(issue, dict)
+    ]
+    facts_by_id = {
+        _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or ""): fact
+        for fact in facts
+        if _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or "")
+    }
+
+    claim_labels_by_key: Dict[str, str] = {}
+    for claim in candidate_claims if isinstance(candidate_claims, list) else []:
+        if not isinstance(claim, dict):
+            continue
+        label = _normalize_text(claim.get("claim_type") or claim.get("label") or claim.get("claim_id") or "")
+        key = _normalize_scope_key(label)
+        if key:
+            claim_labels_by_key.setdefault(key, label)
+    for record in [*facts, *relations, *issues]:
+        for claim_key in _temporal_record_claim_keys(record):
+            claim_labels_by_key.setdefault(claim_key, claim_key)
+    if not claim_labels_by_key and facts:
+        claim_labels_by_key["unscoped_claim"] = "unscoped_claim"
+
+    single_claim_key = next(iter(claim_labels_by_key)) if len(claim_labels_by_key) == 1 else ""
+    claim_graphs: Dict[str, Dict[str, Any]] = {}
+    aggregate_fact_ids: List[str] = []
+    aggregate_relation_ids: List[str] = []
+    aggregate_issue_ids: List[str] = []
+
+    for claim_key in sorted(claim_labels_by_key):
+        claim_type = claim_labels_by_key[claim_key]
+        selected_fact_ids = {
+            _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or "")
+            for fact in facts
+            if (
+                claim_key in _temporal_record_claim_keys(fact)
+                or (single_claim_key == claim_key and not _temporal_record_claim_keys(fact))
+            )
+            and _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or "")
+        }
+        selected_relations: List[Dict[str, Any]] = []
+        for relation in relations:
+            relation_claim_keys = _temporal_record_claim_keys(relation)
+            source_fact_id = _normalize_text(relation.get("source_fact_id") or relation.get("source_temporal_fact_id") or "")
+            target_fact_id = _normalize_text(relation.get("target_fact_id") or relation.get("target_temporal_fact_id") or "")
+            relation_matches_claim = claim_key in relation_claim_keys or (single_claim_key == claim_key and not relation_claim_keys)
+            relation_touches_claim_fact = bool(selected_fact_ids & {source_fact_id, target_fact_id})
+            if relation_matches_claim or relation_touches_claim_fact:
+                selected_relations.append(relation)
+                if source_fact_id:
+                    selected_fact_ids.add(source_fact_id)
+                if target_fact_id:
+                    selected_fact_ids.add(target_fact_id)
+
+        selected_facts = [
+            facts_by_id[fact_id]
+            for fact_id in sorted(selected_fact_ids)
+            if fact_id in facts_by_id
+        ]
+        selected_fact_labels = {
+            _normalize_text(fact.get("text") or fact.get("event_label") or "").lower()
+            for fact in selected_facts
+            if _normalize_text(fact.get("text") or fact.get("event_label") or "")
+        }
+        selected_issues: List[Dict[str, Any]] = []
+        for issue in issues:
+            issue_claim_keys = _temporal_record_claim_keys(issue)
+            issue_fact_ids = {
+                _normalize_text(fact_id)
+                for fact_id in _coerce_list(issue.get("fact_ids"))
+                if _normalize_text(fact_id)
+            }
+            issue_node_labels = {
+                _normalize_text(issue.get("left_node_name") or "").lower(),
+                _normalize_text(issue.get("right_node_name") or "").lower(),
+            }
+            issue_node_labels.discard("")
+            issue_matches_claim = claim_key in issue_claim_keys or (single_claim_key == claim_key and not issue_claim_keys)
+            if (
+                issue_matches_claim
+                or (issue_fact_ids and bool(issue_fact_ids & selected_fact_ids))
+                or (issue_node_labels and bool(issue_node_labels & selected_fact_labels))
+            ):
+                selected_issues.append(issue)
+
+        element_keys: Dict[str, str] = {}
+        for record in [*selected_facts, *selected_relations, *selected_issues]:
+            for element_key in _temporal_record_element_keys(record):
+                element_keys.setdefault(element_key, element_key)
+
+        element_graphs: Dict[str, Dict[str, Any]] = {}
+        for element_key in sorted(element_keys):
+            element_seed_fact_ids = {
+                _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or "")
+                for fact in selected_facts
+                if element_key in _temporal_record_element_keys(fact)
+                and _normalize_text(fact.get("fact_id") or fact.get("temporal_fact_id") or "")
+            }
+            element_relations: List[Dict[str, Any]] = []
+            for relation in selected_relations:
+                source_fact_id = _normalize_text(relation.get("source_fact_id") or relation.get("source_temporal_fact_id") or "")
+                target_fact_id = _normalize_text(relation.get("target_fact_id") or relation.get("target_temporal_fact_id") or "")
+                if element_key in _temporal_record_element_keys(relation) or element_seed_fact_ids & {source_fact_id, target_fact_id}:
+                    element_relations.append(relation)
+                    if source_fact_id:
+                        element_seed_fact_ids.add(source_fact_id)
+                    if target_fact_id:
+                        element_seed_fact_ids.add(target_fact_id)
+            element_facts = [
+                facts_by_id[fact_id]
+                for fact_id in sorted(element_seed_fact_ids)
+                if fact_id in facts_by_id
+            ]
+            element_fact_labels = {
+                _normalize_text(fact.get("text") or fact.get("event_label") or "").lower()
+                for fact in element_facts
+                if _normalize_text(fact.get("text") or fact.get("event_label") or "")
+            }
+            element_issues = []
+            for issue in selected_issues:
+                issue_fact_ids = {
+                    _normalize_text(fact_id)
+                    for fact_id in _coerce_list(issue.get("fact_ids"))
+                    if _normalize_text(fact_id)
+                }
+                issue_node_labels = {
+                    _normalize_text(issue.get("left_node_name") or "").lower(),
+                    _normalize_text(issue.get("right_node_name") or "").lower(),
+                }
+                issue_node_labels.discard("")
+                if (
+                    element_key in _temporal_record_element_keys(issue)
+                    or (issue_fact_ids and bool(issue_fact_ids & element_seed_fact_ids))
+                    or (issue_node_labels and bool(issue_node_labels & element_fact_labels))
+                ):
+                    element_issues.append(issue)
+            if not element_facts and not element_relations and not element_issues:
+                continue
+            element_graphs[element_key] = _build_temporal_graph_record(
+                graph_id=f"claim_temporal_graph:{claim_key}:{element_key}",
+                claim_type=claim_type,
+                element_id=element_key,
+                element_label=element_keys[element_key],
+                facts=element_facts,
+                relations=element_relations,
+                issues=element_issues,
+            )
+
+        claim_graph = _build_temporal_graph_record(
+            graph_id=f"claim_temporal_graph:{claim_key}",
+            claim_type=claim_type,
+            facts=selected_facts,
+            relations=selected_relations,
+            issues=selected_issues,
+        )
+        claim_graph["elements"] = element_graphs
+        claim_graphs[claim_key] = claim_graph
+        for fact_id in claim_graph.get("fact_ids", []):
+            if fact_id not in aggregate_fact_ids:
+                aggregate_fact_ids.append(fact_id)
+        for relation_id in claim_graph.get("relation_ids", []):
+            if relation_id not in aggregate_relation_ids:
+                aggregate_relation_ids.append(relation_id)
+        for issue_id in claim_graph.get("issue_ids", []):
+            if issue_id not in aggregate_issue_ids:
+                aggregate_issue_ids.append(issue_id)
+
+    return {
+        "contract_version": "claim_temporal_graph_assembly.v1",
+        "claim_count": len(claim_graphs),
+        "claims": claim_graphs,
+        "claim_keys": list(claim_graphs.keys()),
+        "fact_ids": aggregate_fact_ids,
+        "relation_ids": aggregate_relation_ids,
+        "issue_ids": aggregate_issue_ids,
     }
 
 
@@ -3333,12 +3730,18 @@ def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[st
     temporal_fact_registry = build_temporal_fact_registry(canonical_facts, timeline_anchors)
     temporal_relation_registry = build_temporal_relation_registry(canonical_facts, timeline_relations)
     temporal_issue_registry = build_temporal_issue_registry(canonical_facts, [])
+    claim_temporal_graphs = build_claim_temporal_graphs(
+        temporal_fact_registry,
+        temporal_relation_registry,
+        temporal_issue_registry,
+        candidate_claims,
+    )
     event_ledger = build_event_ledger(temporal_fact_registry)
     proof_leads = _link_proof_leads_to_timeline_anchors(proof_leads, timeline_anchors)
     timeline_consistency_summary = build_timeline_consistency_summary(
         canonical_facts,
         timeline_anchors,
-        timeline_relations,
+        temporal_relation_registry,
     )
     intake_sections = build_intake_sections(
         knowledge_graph,
@@ -3365,6 +3768,7 @@ def build_intake_case_file(knowledge_graph, complaint_text: str = "") -> Dict[st
         "temporal_relation_registry": temporal_relation_registry,
         "temporal_issue_registry": temporal_issue_registry,
         "timeline_issues": temporal_issue_registry,
+        "claim_temporal_graphs": claim_temporal_graphs,
         "event_ledger": event_ledger,
         "timeline_consistency_summary": timeline_consistency_summary,
         "harm_profile": build_harm_profile(canonical_facts),
@@ -3473,6 +3877,12 @@ def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, 
         previous_temporal_issue_registry,
     )
     case_file["timeline_issues"] = _coerce_list(case_file.get("temporal_issue_registry"))
+    case_file["claim_temporal_graphs"] = build_claim_temporal_graphs(
+        _coerce_list(case_file.get("temporal_fact_registry")),
+        _coerce_list(case_file.get("temporal_relation_registry")),
+        _coerce_list(case_file.get("temporal_issue_registry")),
+        _coerce_list(case_file.get("candidate_claims")),
+    )
     case_file["proof_leads"] = _link_proof_leads_to_timeline_anchors(
         _coerce_list(case_file.get("proof_leads")),
         _coerce_list(case_file.get("timeline_anchors")),
@@ -3480,7 +3890,7 @@ def refresh_intake_case_file(intake_case_file: Dict[str, Any], knowledge_graph, 
     case_file["timeline_consistency_summary"] = build_timeline_consistency_summary(
         _coerce_list(case_file.get("canonical_facts")),
         _coerce_list(case_file.get("timeline_anchors")),
-        _coerce_list(case_file.get("timeline_relations")),
+        _coerce_list(case_file.get("temporal_relation_registry")),
     )
     case_file["harm_profile"] = build_harm_profile(_coerce_list(case_file.get("canonical_facts")))
     case_file["remedy_profile"] = build_remedy_profile(_coerce_list(case_file.get("canonical_facts")))

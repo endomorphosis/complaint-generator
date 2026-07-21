@@ -2648,6 +2648,79 @@ class ClaimSupportHook:
         }
         element_keys.discard('')
 
+        claim_temporal_graphs = status.get('claim_temporal_graphs', {})
+
+        def _graph_to_temporal_context(graph: Dict[str, Any]) -> Dict[str, Any]:
+            graph_record = graph if isinstance(graph, dict) else {}
+            if not graph_record:
+                return {}
+            facts = [fact for fact in (graph_record.get('facts', []) or []) if isinstance(fact, dict)]
+            relations = [relation for relation in (graph_record.get('relations', []) or []) if isinstance(relation, dict)]
+            issues = [issue for issue in (graph_record.get('issues', []) or []) if isinstance(issue, dict)]
+            if not facts and not relations and not issues:
+                return {}
+            consistency_summary = {
+                'event_count': int(graph_record.get('fact_count', len(facts)) or 0),
+                'proof_lead_count': 0,
+                'relation_count': int(graph_record.get('relation_count', len(relations)) or 0),
+                'issue_count': int(graph_record.get('issue_count', len(issues)) or 0),
+                'partial_order_ready': bool(graph_record.get('partial_order_ready', False)),
+                'warnings': list(graph_record.get('warnings', []) or []),
+                'warning_count': int(graph_record.get('warning_count', len(graph_record.get('warnings', []) or [])) or 0),
+                'relation_type_counts': dict(graph_record.get('relation_type_counts', {}) or {}),
+                'timeline_anchor_ids': list(graph_record.get('timeline_anchor_ids', []) or []),
+                'missing_temporal_predicates': list(graph_record.get('missing_temporal_predicates', []) or []),
+                'required_provenance_kinds': list(graph_record.get('required_provenance_kinds', []) or []),
+                'graph_id': str(graph_record.get('graph_id') or ''),
+                'trace_fact_ids': list(graph_record.get('fact_ids', []) or []),
+                'trace_relation_ids': list(graph_record.get('relation_ids', []) or []),
+                'trace_issue_ids': list(graph_record.get('issue_ids', []) or []),
+            }
+            return {
+                'temporal_graph': graph_record,
+                'temporal_facts': facts,
+                'temporal_proof_leads': [],
+                'temporal_relations': relations,
+                'temporal_issues': issues,
+                'consistency_summary': consistency_summary,
+            }
+
+        graph_claims = claim_temporal_graphs.get('claims', {}) if isinstance(claim_temporal_graphs.get('claims'), dict) else {}
+        selected_graph: Dict[str, Any] = {}
+        if graph_claims:
+            selected_graph = graph_claims.get(claim_key, {}) if claim_key else {}
+            if not selected_graph:
+                for graph in graph_claims.values():
+                    if not isinstance(graph, dict):
+                        continue
+                    if self._normalize_reasoning_key(graph.get('claim_type')) == claim_key:
+                        selected_graph = graph
+                        break
+            if selected_graph and element_keys:
+                element_graphs = selected_graph.get('elements', {}) if isinstance(selected_graph.get('elements'), dict) else {}
+                selected_element_graph = {}
+                for element_key in element_keys:
+                    if element_key in element_graphs:
+                        selected_element_graph = element_graphs[element_key]
+                        break
+                if not selected_element_graph:
+                    for graph in element_graphs.values():
+                        if not isinstance(graph, dict):
+                            continue
+                        graph_element_keys = {
+                            self._normalize_reasoning_key(graph.get('element_id')),
+                            self._normalize_reasoning_key(graph.get('element_label')),
+                        }
+                        graph_element_keys.discard('')
+                        if graph_element_keys & element_keys:
+                            selected_element_graph = graph
+                            break
+                if selected_element_graph:
+                    selected_graph = selected_element_graph
+        graph_context = _graph_to_temporal_context(selected_graph)
+        if graph_context:
+            return graph_context
+
         def _extract_temporal_context(record: Dict[str, Any]) -> Dict[str, Any]:
             return record.get('temporal_context', {}) if isinstance(record.get('temporal_context'), dict) else {}
 
