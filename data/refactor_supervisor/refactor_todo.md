@@ -958,7 +958,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-048 Close objective gap: Map package ownership and runtime entrypoints
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
