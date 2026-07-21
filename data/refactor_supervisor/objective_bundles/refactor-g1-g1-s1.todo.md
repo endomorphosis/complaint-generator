@@ -45,3 +45,40 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Candidate kind: seed
 - Todo vector key: ref-002-documentalloweddependencydirectionbetweenapplica
 - Acceptance: Architecture docs identify allowed imports.; New work has a simple rule for where shared code belongs.
+
+## REF-048 Close objective gap: Map package ownership and runtime entrypoints
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest tests/test_package_imports.py -q
+- Bundle: refactor/g1/g1-s1
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g1-g1-s1.todo.md
+- Bundle strategy: explicit
+- Graph parents: G1
+- Graph depth: 1
+- Parallel lane: refactor/g1/g1-s1
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Goal id: G1.S1
+- Canonical task key: task/v1/cba035a6013e2ca56c7624d03ca454d9965b4c9fbc75e3c2186b835478bdb080
+- Canonical task CID: baguqeerazoqdljqbhywkk3dwetidzjcu3glfwte7xr26hqqynobvi6f5wcaa
+- Missing evidence: objective validation repair
+- Embedding query: Map package ownership and runtime entrypoints
+- AST query: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs., python -m pytest tests/test_package_imports.py -q
+- Surplus group: objective/G1.S1
+- Merge key: 4003ea72cdc5444e
+- Merge family: objective/G1.S1
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 9ca9d1d1566fc3e7
+- Acceptance: Objective scan filed this gap for G1.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-048-objective-gap-f307b3b05fa3.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
