@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-21T21:47:48Z",
+  "generated_at": "2026-07-21T22:32:58Z",
   "goals": [
     {
       "id": "G1",
@@ -1235,8 +1235,8 @@
       "pytest_ini": true
     },
     "python_file_count": 437,
-    "python_total_lines": 244380,
-    "scanned_at": "2026-07-21T21:47:48Z",
+    "python_total_lines": 244386,
+    "scanned_at": "2026-07-21T22:32:58Z",
     "signals": {
       "broad_exception_count": 375,
       "direct_ipfs_import_count": 215,

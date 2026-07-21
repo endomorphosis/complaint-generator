@@ -138,7 +138,9 @@ def test_production_package_imports_do_not_change_sys_path():
     before = list(sys.path)
 
     for module_name in PRODUCTION_IMPORT_MODULES:
+        module_path_before = list(sys.path)
         importlib.import_module(module_name)
+        assert sys.path == module_path_before, f"{module_name} changed sys.path during import"
 
     assert sys.path == before
 

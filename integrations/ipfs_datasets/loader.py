@@ -46,6 +46,8 @@ def _matches_package_root(module_name: str, package_root: str) -> bool:
 
 
 def _candidate_ipfs_source_roots() -> list[Path]:
+    """Find vendored dependency roots from worktrees and the primary checkout."""
+
     paths = get_repo_paths()
     roots: list[Path] = []
     for candidate in [
@@ -160,6 +162,8 @@ def import_failure_type(error: Any) -> str:
 
 
 def _import_module_preserving_sys_path(module_name: str) -> Any:
+    """Import an optional provider without leaking provider path side effects."""
+
     original_sys_path = list(sys.path)
     try:
         return importlib.import_module(module_name)
