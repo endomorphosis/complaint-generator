@@ -52,7 +52,6 @@ from intake_status import (
 	_build_document_grounding_recovery_action,
 )
 
-
 ALIGNMENT_TASK_UPDATE_HISTORY_LIMIT = 25
 FOLLOW_UP_REVIEWABLE_ESCALATION_STATUSES = {
 	'awaiting_complainant_record',
