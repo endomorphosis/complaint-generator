@@ -48,7 +48,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-007 Resolve dirty main checkout blocking 1 worktree merges
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
