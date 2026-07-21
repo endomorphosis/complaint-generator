@@ -3908,6 +3908,7 @@
             const blocked = Boolean(chronologyBlockerSummary.chronology_blocked);
             const summary = String(chronologyBlockerSummary.summary || '').trim();
             const failedCount = Number(chronologyBlockerSummary.temporal_rule_profile_failed_element_count || 0);
+            const partialCount = Number(chronologyBlockerSummary.temporal_rule_profile_partial_element_count || 0);
             const unresolvedCount = Number(chronologyBlockerSummary.unresolved_temporal_issue_count || 0);
             const gapTaskCount = Number(chronologyBlockerSummary.temporal_gap_task_count || 0);
             const proofScore = Number(chronologyBlockerSummary.proof_readiness_score || 0);
@@ -3915,7 +3916,7 @@
                 ? chronologyBlockerSummary.failed_rule_frame_ids.filter((id) => String(id || '').trim())
                 : [];
 
-            if (!blocked && !unresolvedCount && !gapTaskCount && !failedCount) {
+            if (!blocked && !unresolvedCount && !gapTaskCount && !failedCount && !partialCount) {
                 return '';
             }
 
@@ -3924,6 +3925,9 @@
             const chips = [];
             if (failedCount > 0) {
                 chips.push(`<span class="triage-chip" data-tone="critical">failed rule elements: ${escapeHtml(String(failedCount))}</span>`);
+            }
+            if (partialCount > 0) {
+                chips.push(`<span class="triage-chip" data-tone="${escapeHtml(tone)}">partial rule elements: ${escapeHtml(String(partialCount))}</span>`);
             }
             if (unresolvedCount > 0) {
                 chips.push(`<span class="triage-chip" data-tone="${escapeHtml(tone)}">unresolved issues: ${escapeHtml(String(unresolvedCount))}</span>`);

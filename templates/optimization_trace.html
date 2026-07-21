@@ -1211,6 +1211,7 @@
             const blocked = Boolean(chronologyBlockerSummary.chronology_blocked);
             const summary = String(chronologyBlockerSummary.summary || '').trim();
             const failedCount = Number(chronologyBlockerSummary.temporal_rule_profile_failed_element_count || 0);
+            const partialCount = Number(chronologyBlockerSummary.temporal_rule_profile_partial_element_count || 0);
             const unresolvedCount = Number(chronologyBlockerSummary.unresolved_temporal_issue_count || 0);
             const gapTaskCount = Number(chronologyBlockerSummary.temporal_gap_task_count || 0);
             const proofScore = Number(chronologyBlockerSummary.proof_readiness_score || 0);
@@ -1218,7 +1219,7 @@
                 ? chronologyBlockerSummary.failed_rule_frame_ids.filter((id) => String(id || '').trim())
                 : [];
 
-            if (!blocked && !unresolvedCount && !gapTaskCount && !failedCount) {
+            if (!blocked && !unresolvedCount && !gapTaskCount && !failedCount && !partialCount) {
                 return '';
             }
 
@@ -1226,6 +1227,8 @@
             const chips = [
                 failedCount > 0
                     ? `<span class="chip">Failed rule elements: ${escapeHtml(String(failedCount))}</span>` : '',
+                partialCount > 0
+                    ? `<span class="chip">Partial rule elements: ${escapeHtml(String(partialCount))}</span>` : '',
                 unresolvedCount > 0
                     ? `<span class="chip">Unresolved issues: ${escapeHtml(String(unresolvedCount))}</span>` : '',
                 gapTaskCount > 0
@@ -2385,14 +2388,16 @@
                     const unresolvedCount = Number(claimSupportPacketSummary.claim_support_unresolved_temporal_issue_count || 0);
                     const gapTaskCount = Number(claimSupportPacketSummary.temporal_gap_task_count || 0);
                     const proofScore = Number(claimSupportPacketSummary.proof_readiness_score || 0);
-                    // Tally failed rule profile elements across all claims in claimReasoningReview.
+                    // Tally incomplete rule profile elements across all claims in claimReasoningReview.
                     let failedElementCount = 0;
+                    let partialElementCount = 0;
                     const failedFrameIds = [];
                     if (claimReasoningReview && typeof claimReasoningReview === 'object') {
                         for (const claimKey of Object.keys(claimReasoningReview)) {
                             const cr = claimReasoningReview[claimKey];
                             if (!cr || typeof cr !== 'object') { continue; }
                             failedElementCount += Number(cr.temporal_rule_profile_failed_element_count || 0);
+                            partialElementCount += Number(cr.temporal_rule_profile_partial_element_count || 0);
                             if (cr.proof_bundles && typeof cr.proof_bundles === 'object') {
                                 for (const bundle of Object.values(cr.proof_bundles)) {
                                     if (!bundle || typeof bundle !== 'object') { continue; }
@@ -2405,18 +2410,20 @@
                             }
                         }
                     }
-                    const blocked = Boolean(unresolvedCount > 0 || gapTaskCount > 0 || failedElementCount > 0);
+                    const blocked = Boolean(unresolvedCount > 0 || gapTaskCount > 0 || failedElementCount > 0 || partialElementCount > 0);
                     if (!blocked) { return null; }
                     const parts = [];
                     if (gapTaskCount > 0) { parts.push(`${gapTaskCount} pending chronology gap ${gapTaskCount === 1 ? 'task' : 'tasks'}`); }
                     if (unresolvedCount > 0) { parts.push(`${unresolvedCount} unresolved temporal ${unresolvedCount === 1 ? 'issue' : 'issues'}`); }
                     if (failedElementCount > 0) { parts.push(`${failedElementCount} ${failedElementCount === 1 ? 'element' : 'elements'} with failed temporal rule profile`); }
+                    if (partialElementCount > 0 && failedElementCount <= 0) { parts.push(`${partialElementCount} ${partialElementCount === 1 ? 'element' : 'elements'} with partial temporal rule profile`); }
                     return {
                         chronology_blocked: blocked,
                         proof_readiness_score: proofScore,
                         temporal_gap_task_count: gapTaskCount,
                         unresolved_temporal_issue_count: unresolvedCount,
                         temporal_rule_profile_failed_element_count: failedElementCount,
+                        temporal_rule_profile_partial_element_count: partialElementCount,
                         failed_rule_frame_ids: failedFrameIds,
                         summary: parts.length ? `Chronology blockers remain: ${parts.join('; ')}.` : '',
                     };

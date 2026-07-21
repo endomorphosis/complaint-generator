@@ -50,10 +50,12 @@ def _make_claim_support_hook_stub():
 
     # Grab the unbound method implementation so we can bind it to a namespace.
     real_normalize = _hooks_mod.ClaimSupportHook._normalize_reasoning_key
+    real_build_next_actions = _hooks_mod.ClaimSupportHook._build_temporal_next_actions
     real_build_bundle = _hooks_mod.ClaimSupportHook._build_temporal_proof_bundle
 
     stub = types.SimpleNamespace()
     stub._normalize_reasoning_key = lambda value: real_normalize(stub, value)
+    stub._build_temporal_next_actions = lambda **kw: real_build_next_actions(stub, **kw)
     stub._build_temporal_proof_bundle = lambda *a, **kw: real_build_bundle(stub, *a, **kw)
     return stub
 
@@ -570,6 +572,43 @@ def test_t5_chronology_blocked_when_rule_profile_fails():
     assert result["chronology_blocked"] is True
     assert result["temporal_rule_profile_failed_element_count"] == 1
     assert "failed temporal rule profile" in result["summary"]
+    assert "retaliation_temporal_frame" in result.get("failed_rule_frame_ids", [])
+
+
+def test_t5_chronology_blocked_when_rule_profile_partial():
+    """chronology_blocked is True when temporal_rule_profile_partial_element_count > 0."""
+    pipeline = _make_document_builder_stub()
+
+    intake_case_summary = {
+        "claim_support_packet_summary": {
+            "proof_readiness_score": 0.82,
+            "claim_support_unresolved_temporal_issue_count": 0,
+            "claim_support_unresolved_temporal_issue_ids": [],
+            "temporal_gap_task_count": 0,
+        },
+        "alignment_task_summary": {},
+        "claim_reasoning_review": {
+            "retaliation": {
+                "temporal_rule_profile_failed_element_count": 0,
+                "temporal_rule_profile_partial_element_count": 1,
+                "proof_bundles": {
+                    "retaliation:causal_connection": {
+                        "proof_bundle_id": "retaliation:causal_connection:retaliation_temporal_profile_v1",
+                        "status": "partial",
+                        "rule_frame_id": "retaliation_temporal_frame",
+                    }
+                },
+            }
+        },
+    }
+    result = pipeline._build_chronology_blocker_summary(
+        intake_case_summary=intake_case_summary,
+        claim_support_temporal_handoff={},
+    )
+
+    assert result["chronology_blocked"] is True
+    assert result["temporal_rule_profile_partial_element_count"] == 1
+    assert "partial temporal rule profile" in result["summary"]
     assert "retaliation_temporal_frame" in result.get("failed_rule_frame_ids", [])
 
 
