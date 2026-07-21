@@ -201,17 +201,17 @@ Compile chronology into durable theorem-ready proof bundles with provenance-awar
 
 ### Checklist
 
-- [x] define `proof_bundles` keyed by claim type and element ID — `summarize_claim_reasoning_review` now returns `proof_bundles: {"claim_type:element_id": {...}}` with status, rule_frame_id, fact_ids, relation_ids, issue_ids, tdfol_preview, dcec_preview, theorem_export_metadata, and follow-ups
-- [x] emit theorem exports that reference fact IDs, relation IDs, and rule-frame IDs — `theorem_export_metadata` in `_build_temporal_proof_bundle` carries all of these
+- [x] define `proof_bundles` keyed by claim type and element ID — `summarize_claim_reasoning_review` now returns durable bundles under `proof_bundles: {"claim_type:element_id": {...}}`, preserving full formula lists, digest metadata, status, rule_frame_id, fact_ids, relation_ids, issue_ids, previews, theorem export metadata, and follow-ups
+- [x] emit theorem exports that reference fact IDs, relation IDs, and rule-frame IDs — `theorem_export_metadata` in `_build_temporal_proof_bundle` carries all of these, and `export_theorem_from_proof_bundle()` can reproduce Lean/Coq exports from the persisted bundle alone
 - [x] distinguish certain facts from inferred relations in theorem export metadata — `tdfol_formula_certainties` and `dcec_formula_certainties` maps in `theorem_exports`; `inference_mode="derived_from_date_anchors"` relations are marked `inferred`, all others `certain`
-- [x] attach blocking explanation payloads to failed proof bundles — `blocking_reasons` and `recommended_follow_ups` are in every proof bundle entry
-- [x] expose the same proof bundle previews through review payloads and operator UI — `temporal_proof_bundle_tdfol_preview` and `temporal_proof_bundle_dcec_preview` in flagged element items; `proof_bundles` dict for direct drilldown
+- [x] attach blocking explanation payloads to failed proof bundles — `blocking_reasons`, `blocking_explanations`, `missing_fact_roles`, `missing_relations`, and `recommended_follow_ups` are in every proof bundle entry
+- [x] expose the same proof bundle previews through review payloads and operator UI — `temporal_proof_bundle_tdfol_preview` and `temporal_proof_bundle_dcec_preview` are derived from bundle previews/formulas, while `proof_bundles` retains the full persisted artifact for drilldown and proof execution
 
 ### Acceptance criteria
 
-- theorem exports are reproducible from persisted proof bundles
-- formula previews shown to operators come from the same bundle used for proof execution
-- proof failures identify concrete missing facts or relations instead of generic insufficiency
+- theorem exports are reproducible from persisted proof bundles via stable bundle digests and deterministic export timestamps
+- formula previews shown to operators come from the same bundle used for proof execution; `run_hybrid_reasoning`, `prove_claim_elements`, and `check_contradictions` prefer bundled formulas when `proof_bundles` are supplied
+- proof failures identify concrete missing fact roles, missing relation predicates, affected fact IDs, issue IDs, and required provenance kinds instead of generic insufficiency
 
 ### Degraded mode expectations
 

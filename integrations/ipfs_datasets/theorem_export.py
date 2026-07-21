@@ -382,15 +382,33 @@ def export_proof_result_to_theorems(
     elif isinstance((proof_result.get("result") or {}).get("temporal_reasoning_payload"), dict):
         temporal_payload = proof_result["result"]["temporal_reasoning_payload"]
 
+    proof_bundle_payload: Dict[str, Any] = {}
+    proof_bundles = proof_result.get("proof_bundles")
+    if isinstance(proof_bundles, dict):
+        for bundle in proof_bundles.values():
+            if isinstance(bundle, dict) and isinstance(bundle.get("theorem_exports"), dict):
+                proof_bundle_payload = bundle["theorem_exports"]
+                if not claim_id:
+                    claim_id = str(bundle.get("proof_bundle_id") or "")
+                break
+    if not proof_bundle_payload and isinstance(proof_result.get("temporal_proof_bundle"), dict):
+        bundle = proof_result["temporal_proof_bundle"]
+        if isinstance(bundle.get("theorem_exports"), dict):
+            proof_bundle_payload = bundle["theorem_exports"]
+            if not claim_id:
+                claim_id = str(bundle.get("proof_bundle_id") or "")
+
     # Also check the result sub-dict (run_hybrid_reasoning layout).
     result_inner = proof_result.get("result") or {}
     tdfol_formulas: List[str] = list(
-        temporal_payload.get("tdfol_formulas")
+        proof_bundle_payload.get("tdfol_formulas")
+        or temporal_payload.get("tdfol_formulas")
         or result_inner.get("tdfol_formulas")
         or []
     )
     dcec_formulas: List[str] = list(
-        temporal_payload.get("dcec_formulas")
+        proof_bundle_payload.get("dcec_formulas")
+        or temporal_payload.get("dcec_formulas")
         or result_inner.get("dcec_formulas")
         or []
     )

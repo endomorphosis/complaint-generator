@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections import Counter
 from copy import deepcopy
+import hashlib
 import inspect
+import json
 import re
 from typing import Any, Dict, Iterable, List, Tuple
 
@@ -153,6 +155,152 @@ def _normalize_claim_reasoning_review(value: Any) -> Dict[str, Any]:
     return normalized
 
 
+def _stable_json_dumps(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _stable_payload_digest(value: Any) -> str:
+    return hashlib.sha256(_stable_json_dumps(value).encode("utf-8")).hexdigest()
+
+
+def _normalize_temporal_proof_bundle(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    bundle = deepcopy(value)
+    proof_bundle_id = str(bundle.get("proof_bundle_id") or "").strip()
+    theorem_exports = bundle.get("theorem_exports")
+    if not isinstance(theorem_exports, dict):
+        theorem_exports = {}
+        bundle["theorem_exports"] = theorem_exports
+    tdfol_formulas = [
+        str(formula).strip()
+        for formula in (
+            theorem_exports.get("tdfol_formulas")
+            or bundle.get("tdfol_formulas")
+            or bundle.get("tdfol_preview")
+            or []
+        )
+        if str(formula).strip()
+    ]
+    dcec_formulas = [
+        str(formula).strip()
+        for formula in (
+            theorem_exports.get("dcec_formulas")
+            or bundle.get("dcec_formulas")
+            or bundle.get("dcec_preview")
+            or []
+        )
+        if str(formula).strip()
+    ]
+    theorem_exports["tdfol_formulas"] = tdfol_formulas
+    theorem_exports["dcec_formulas"] = dcec_formulas
+    theorem_exports.setdefault("tdfol_preview", tdfol_formulas[:3])
+    theorem_exports.setdefault("dcec_preview", dcec_formulas[:3])
+    theorem_exports["tdfol_formula_count"] = len(tdfol_formulas)
+    theorem_exports["dcec_formula_count"] = len(dcec_formulas)
+    theorem_export_metadata = theorem_exports.get("theorem_export_metadata")
+    if not isinstance(theorem_export_metadata, dict):
+        theorem_export_metadata = {}
+        theorem_exports["theorem_export_metadata"] = theorem_export_metadata
+    if proof_bundle_id and not theorem_export_metadata.get("proof_bundle_id"):
+        theorem_export_metadata["proof_bundle_id"] = proof_bundle_id
+    bundle.setdefault("contract_version", "claim_support_temporal_proof_bundle_v1")
+    if proof_bundle_id:
+        bundle.setdefault("persistence_key", proof_bundle_id)
+    digest_payload = {
+        "contract_version": bundle.get("contract_version"),
+        "proof_bundle_id": proof_bundle_id,
+        "claim_type": bundle.get("claim_type"),
+        "claim_element_id": bundle.get("claim_element_id"),
+        "rule_frame_id": bundle.get("rule_frame_id"),
+        "temporal_fact_ids": bundle.get("temporal_fact_ids") or bundle.get("fact_ids") or [],
+        "temporal_relation_ids": bundle.get("temporal_relation_ids") or bundle.get("relation_ids") or [],
+        "temporal_issue_ids": bundle.get("temporal_issue_ids") or bundle.get("issue_ids") or [],
+        "tdfol_formulas": tdfol_formulas,
+        "dcec_formulas": dcec_formulas,
+        "theorem_export_metadata": theorem_export_metadata,
+    }
+    bundle.setdefault("bundle_digest", _stable_payload_digest(digest_payload))
+    return bundle
+
+
+def _normalize_proof_bundles(value: Any) -> Dict[str, Dict[str, Any]]:
+    bundles: Dict[str, Dict[str, Any]] = {}
+    if isinstance(value, dict):
+        for raw_key, raw_bundle in value.items():
+            bundle = _normalize_temporal_proof_bundle(raw_bundle)
+            if not bundle:
+                continue
+            key = str(raw_key or "").strip()
+            if not key:
+                key = str(bundle.get("persistence_key") or bundle.get("proof_bundle_id") or "").strip()
+            if key:
+                bundles[key] = bundle
+    single_bundle = _normalize_temporal_proof_bundle(value)
+    if single_bundle:
+        key = str(
+            single_bundle.get("persistence_key")
+            or single_bundle.get("proof_bundle_id")
+            or ""
+        ).strip()
+        if key:
+            bundles[key] = single_bundle
+    return bundles
+
+
+def _extract_formula_payload_from_proof_bundles(
+    proof_bundles: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    tdfol_formulas: List[str] = []
+    dcec_formulas: List[str] = []
+    tdfol_formula_certainties: Dict[str, str] = {}
+    dcec_formula_certainties: Dict[str, str] = {}
+    theorem_export_metadata: Dict[str, Any] = {}
+    bundle_digests: List[str] = []
+
+    for bundle_key in sorted(proof_bundles):
+        bundle = proof_bundles[bundle_key]
+        theorem_exports = bundle.get("theorem_exports") if isinstance(bundle.get("theorem_exports"), dict) else {}
+        for formula in theorem_exports.get("tdfol_formulas", []) or []:
+            normalized_formula = str(formula).strip()
+            if normalized_formula and normalized_formula not in tdfol_formulas:
+                tdfol_formulas.append(normalized_formula)
+        for formula in theorem_exports.get("dcec_formulas", []) or []:
+            normalized_formula = str(formula).strip()
+            if normalized_formula and normalized_formula not in dcec_formulas:
+                dcec_formulas.append(normalized_formula)
+        if isinstance(theorem_exports.get("tdfol_formula_certainties"), dict):
+            for formula, certainty in theorem_exports["tdfol_formula_certainties"].items():
+                normalized_formula = str(formula).strip()
+                if normalized_formula:
+                    tdfol_formula_certainties[normalized_formula] = str(certainty or "certain")
+        if isinstance(theorem_exports.get("dcec_formula_certainties"), dict):
+            for formula, certainty in theorem_exports["dcec_formula_certainties"].items():
+                normalized_formula = str(formula).strip()
+                if normalized_formula:
+                    dcec_formula_certainties[normalized_formula] = str(certainty or "certain")
+        metadata = theorem_exports.get("theorem_export_metadata")
+        if isinstance(metadata, dict) and not theorem_export_metadata:
+            theorem_export_metadata = deepcopy(metadata)
+        bundle_digest = str(bundle.get("bundle_digest") or "").strip()
+        if bundle_digest and bundle_digest not in bundle_digests:
+            bundle_digests.append(bundle_digest)
+
+    if theorem_export_metadata:
+        theorem_export_metadata = deepcopy(theorem_export_metadata)
+        theorem_export_metadata["proof_bundle_digests"] = bundle_digests
+        theorem_export_metadata["proof_execution_source"] = "temporal_proof_bundle"
+
+    return {
+        "tdfol_formulas": tdfol_formulas,
+        "dcec_formulas": dcec_formulas,
+        "tdfol_formula_certainties": tdfol_formula_certainties,
+        "dcec_formula_certainties": dcec_formula_certainties,
+        "theorem_export_metadata": theorem_export_metadata,
+        "proof_bundle_digests": bundle_digests,
+    }
+
+
 def _summarize_fact_registry_for_facts(support_facts: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
     facts = [fact for fact in support_facts or [] if isinstance(fact, dict)]
     source_family_counts: Dict[str, int] = {}
@@ -287,11 +435,24 @@ def _normalize_logic_payload(payload_or_predicates: Any) -> Dict[str, Any]:
             else _summarize_fact_registry_for_predicates(predicates, support_facts=support_facts)
         )
         temporal_reasoning_payload = payload_or_predicates.get("temporal_reasoning_payload")
+        proof_bundles = _normalize_proof_bundles(payload_or_predicates.get("proof_bundles"))
+        if isinstance(temporal_reasoning_payload, dict) and isinstance(temporal_reasoning_payload.get("proof_bundles"), dict):
+            proof_bundles.update(_normalize_proof_bundles(temporal_reasoning_payload.get("proof_bundles")))
+        temporal_proof_bundle = _normalize_temporal_proof_bundle(payload_or_predicates.get("temporal_proof_bundle"))
+        if temporal_proof_bundle:
+            key = str(
+                temporal_proof_bundle.get("persistence_key")
+                or temporal_proof_bundle.get("proof_bundle_id")
+                or ""
+            ).strip()
+            if key:
+                proof_bundles[key] = temporal_proof_bundle
         return {
             "predicates": [predicate for predicate in predicates if isinstance(predicate, dict)],
             "support_facts": support_facts,
             "fact_registry_summary": fact_registry_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload if isinstance(temporal_reasoning_payload, dict) else {},
+            "proof_bundles": proof_bundles,
             "claim_support_temporal_handoff": _normalize_claim_support_temporal_handoff(
                 payload_or_predicates.get("claim_support_temporal_handoff")
             ),
@@ -307,6 +468,7 @@ def _normalize_logic_payload(payload_or_predicates: Any) -> Dict[str, Any]:
         "support_facts": [],
         "fact_registry_summary": _summarize_fact_registry_for_predicates(predicate_list),
         "temporal_reasoning_payload": {},
+        "proof_bundles": {},
         "claim_support_temporal_handoff": {},
         "claim_reasoning_review": {},
         "payload_keys": [],
@@ -345,6 +507,7 @@ def _build_temporal_reasoning_payload(
     *,
     claim_support_temporal_handoff: Any = None,
     claim_reasoning_review: Any = None,
+    proof_bundles: Any = None,
 ) -> Dict[str, Any]:
     predicate_list: List[Dict[str, Any]] = [
         predicate for predicate in predicates
@@ -510,10 +673,35 @@ def _build_temporal_reasoning_payload(
         "tdfol_formula_count": len(tdfol_formulas),
         "dcec_formula_count": len(dcec_formulas),
     }
+    normalized_proof_bundles = _normalize_proof_bundles(proof_bundles)
+    if normalized_proof_bundles:
+        bundle_formula_payload = _extract_formula_payload_from_proof_bundles(normalized_proof_bundles)
+        if bundle_formula_payload["tdfol_formulas"] or bundle_formula_payload["dcec_formulas"]:
+            temporal_reasoning_payload["tdfol_formulas"] = bundle_formula_payload["tdfol_formulas"]
+            temporal_reasoning_payload["dcec_formulas"] = bundle_formula_payload["dcec_formulas"]
+            temporal_reasoning_payload["tdfol_formula_count"] = len(bundle_formula_payload["tdfol_formulas"])
+            temporal_reasoning_payload["dcec_formula_count"] = len(bundle_formula_payload["dcec_formulas"])
+            temporal_reasoning_payload["tdfol_formula_certainties"] = bundle_formula_payload["tdfol_formula_certainties"]
+            temporal_reasoning_payload["dcec_formula_certainties"] = bundle_formula_payload["dcec_formula_certainties"]
+        temporal_reasoning_payload["proof_bundles"] = deepcopy(normalized_proof_bundles)
+        temporal_reasoning_payload["proof_execution_source"] = "temporal_proof_bundle"
+        if bundle_formula_payload["theorem_export_metadata"]:
+            temporal_reasoning_payload["theorem_export_metadata"] = bundle_formula_payload["theorem_export_metadata"]
     normalized_handoff = _normalize_claim_support_temporal_handoff(claim_support_temporal_handoff)
     if normalized_handoff:
         temporal_reasoning_payload["claim_support_temporal_handoff"] = normalized_handoff
-        temporal_reasoning_payload["theorem_export_metadata"] = _build_theorem_export_metadata(normalized_handoff)
+        handoff_export_metadata = _build_theorem_export_metadata(normalized_handoff)
+        existing_export_metadata = (
+            temporal_reasoning_payload.get("theorem_export_metadata")
+            if isinstance(temporal_reasoning_payload.get("theorem_export_metadata"), dict)
+            else {}
+        )
+        if existing_export_metadata:
+            merged_export_metadata = dict(handoff_export_metadata)
+            merged_export_metadata.update(existing_export_metadata)
+            temporal_reasoning_payload["theorem_export_metadata"] = merged_export_metadata
+        else:
+            temporal_reasoning_payload["theorem_export_metadata"] = handoff_export_metadata
     normalized_claim_reasoning_review = _normalize_claim_reasoning_review(claim_reasoning_review)
     if normalized_claim_reasoning_review:
         temporal_reasoning_payload["claim_reasoning_review"] = normalized_claim_reasoning_review
@@ -557,6 +745,7 @@ def _build_reasoner_proof_artifact(
     predicates: Iterable[Dict[str, Any]],
     temporal_reasoning_payload: Dict[str, Any],
     claim_support_temporal_handoff: Dict[str, Any],
+    proof_bundles: Dict[str, Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     if not REASONER_BRIDGE_AVAILABLE or _reasoner_module is None:
         return {
@@ -584,10 +773,12 @@ def _build_reasoner_proof_artifact(
         }
 
     theorem_export_metadata = dict(temporal_reasoning_payload.get("theorem_export_metadata") or {})
+    normalized_proof_bundles = _normalize_proof_bundles(proof_bundles)
     try:
         pipeline_kwargs = {
             "theorem_export_metadata": theorem_export_metadata,
             "claim_support_temporal_handoff": claim_support_temporal_handoff,
+            "proof_bundles": normalized_proof_bundles,
         }
         try:
             supported_parameters = set(inspect.signature(run_pipeline).parameters)
@@ -607,6 +798,7 @@ def _build_reasoner_proof_artifact(
                 "events": [],
                 "theorem_export_metadata": theorem_export_metadata,
                 "claim_support_temporal_handoff": claim_support_temporal_handoff,
+                "proof_bundles": normalized_proof_bundles,
             },
             {},
         )
@@ -625,6 +817,7 @@ def _build_reasoner_proof_artifact(
             ),
             "explanation": explanation if isinstance(explanation, dict) else {},
             "prover_report": dict(pipeline.get("prover_report") or {}),
+            "proof_bundles": deepcopy(normalized_proof_bundles),
         }
     except Exception as exc:
         return {
@@ -634,6 +827,7 @@ def _build_reasoner_proof_artifact(
             "sentence": sentence,
             "theorem_export_metadata": theorem_export_metadata,
             "claim_support_temporal_handoff": dict(claim_support_temporal_handoff or {}),
+            "proof_bundles": deepcopy(normalized_proof_bundles),
         }
 
 
@@ -1018,6 +1212,7 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
     predicate_list = normalized_payload["predicates"]
     predicate_summary = _summarize_predicates(predicate_list)
     fact_registry_summary = normalized_payload["fact_registry_summary"]
+    proof_bundles = normalized_payload["proof_bundles"]
 
     # Run the full hybrid reasoning pipeline (handles reasoner bridge + fallback).
     reasoning_result = run_hybrid_reasoning(normalized_payload)
@@ -1072,7 +1267,11 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
         from .theorem_export import export_proof_result_to_theorems
 
         theorem_export = export_proof_result_to_theorems(
-            {"temporal_reasoning_payload": temporal_reasoning_payload, "proof_artifact": proof_artifact},
+            {
+                "temporal_reasoning_payload": temporal_reasoning_payload,
+                "proof_artifact": proof_artifact,
+                "proof_bundles": proof_bundles,
+            },
         )
     except Exception:
         pass
@@ -1089,6 +1288,7 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             **predicate_summary,
             "fact_registry_summary": deepcopy(fact_registry_summary),
             "temporal_reasoning_payload": temporal_reasoning_payload,
+            "proof_bundles": deepcopy(proof_bundles),
             "proof_artifact": proof_artifact,
             "theorem_export": theorem_export,
         },
@@ -1099,6 +1299,7 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             **predicate_summary,
             "fact_registry_summary": deepcopy(fact_registry_summary),
             "temporal_reasoning_payload": temporal_reasoning_payload,
+            "proof_bundles": deepcopy(proof_bundles),
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
             "reasoner_bridge_available": REASONER_BRIDGE_AVAILABLE,
@@ -1264,10 +1465,12 @@ def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
     normalized_payload = _normalize_logic_payload(predicates)
     predicate_list = normalized_payload["predicates"]
     predicate_summary = _summarize_predicates(predicate_list)
+    proof_bundles = normalized_payload["proof_bundles"]
     temporal_reasoning_payload = _build_temporal_reasoning_payload(
         predicate_list,
         claim_support_temporal_handoff=normalized_payload["claim_support_temporal_handoff"],
         claim_reasoning_review=normalized_payload["claim_reasoning_review"],
+        proof_bundles=proof_bundles,
     )
 
     contradictions: List[Dict[str, Any]] = []
@@ -1330,6 +1533,7 @@ def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
             "proof_status": proof_status,
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
+            "proof_bundles": deepcopy(proof_bundles),
         },
         operation="check_contradictions",
         backend_available=True,
@@ -1337,6 +1541,7 @@ def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
         extra_metadata={
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
+            "proof_bundles": deepcopy(proof_bundles),
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
         },
@@ -1349,6 +1554,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
     bridge_payload = normalized_payload["temporal_reasoning_payload"]
     claim_support_temporal_handoff = normalized_payload["claim_support_temporal_handoff"]
     claim_reasoning_review = normalized_payload["claim_reasoning_review"]
+    proof_bundles = normalized_payload["proof_bundles"]
     predicate_summary = _summarize_predicates(predicates)
     fact_registry_summary = normalized_payload["fact_registry_summary"]
 
@@ -1359,7 +1565,22 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
             predicates,
             claim_support_temporal_handoff=claim_support_temporal_handoff,
             claim_reasoning_review=claim_reasoning_review,
+            proof_bundles=proof_bundles,
         )
+
+    if proof_bundles:
+        bundle_formula_payload = _extract_formula_payload_from_proof_bundles(proof_bundles)
+        if bundle_formula_payload["tdfol_formulas"] or bundle_formula_payload["dcec_formulas"]:
+            temporal_reasoning_payload["tdfol_formulas"] = bundle_formula_payload["tdfol_formulas"]
+            temporal_reasoning_payload["dcec_formulas"] = bundle_formula_payload["dcec_formulas"]
+            temporal_reasoning_payload["tdfol_formula_count"] = len(bundle_formula_payload["tdfol_formulas"])
+            temporal_reasoning_payload["dcec_formula_count"] = len(bundle_formula_payload["dcec_formulas"])
+            temporal_reasoning_payload["tdfol_formula_certainties"] = bundle_formula_payload["tdfol_formula_certainties"]
+            temporal_reasoning_payload["dcec_formula_certainties"] = bundle_formula_payload["dcec_formula_certainties"]
+        temporal_reasoning_payload["proof_bundles"] = deepcopy(proof_bundles)
+        temporal_reasoning_payload["proof_execution_source"] = "temporal_proof_bundle"
+        if bundle_formula_payload["theorem_export_metadata"]:
+            temporal_reasoning_payload["theorem_export_metadata"] = bundle_formula_payload["theorem_export_metadata"]
 
     if claim_support_temporal_handoff and not isinstance(
         temporal_reasoning_payload.get("claim_support_temporal_handoff"),
@@ -1388,6 +1609,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
         predicates,
         temporal_reasoning_payload,
         claim_support_temporal_handoff,
+        proof_bundles,
     )
     local_logic_snapshot = _build_local_logic_snapshot(temporal_reasoning_payload)
 
@@ -1399,6 +1621,8 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
             "tdfol_formulas": list(temporal_reasoning_payload.get("tdfol_formulas", []) or []),
             "dcec_formulas": list(temporal_reasoning_payload.get("dcec_formulas", []) or []),
             "theorem_export_metadata": dict(temporal_reasoning_payload.get("theorem_export_metadata") or {}),
+            "proof_execution_source": str(temporal_reasoning_payload.get("proof_execution_source") or "predicates"),
+            "proof_bundles": deepcopy(proof_bundles),
             "timeline_event_count": len(temporal_reasoning_payload.get("timeline_events", []) or []),
             "temporal_relation_count": len(temporal_reasoning_payload.get("temporal_relations", []) or []),
             "contradiction_signal_count": len(temporal_reasoning_payload.get("contradiction_signals", []) or []),
@@ -1415,6 +1639,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
         "payload_keys": normalized_payload["payload_keys"],
         "predicate_count": predicate_summary.get("predicate_count", 0),
         "fact_registry_summary": deepcopy(fact_registry_summary),
+        "proof_bundles": deepcopy(proof_bundles),
         "temporal_reasoning_payload": temporal_reasoning_payload,
     }
     return with_adapter_metadata(
@@ -1433,8 +1658,71 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
             "local_logic_snapshot_frame_count": local_logic_snapshot["frame_count"],
+            "proof_bundle_count": len(proof_bundles),
         },
     )
+
+
+def export_theorem_from_proof_bundle(
+    proof_bundle: Dict[str, Any],
+    *,
+    exported_at: str = "1970-01-01T00:00:00+00:00",
+) -> Dict[str, Any]:
+    """Recreate Lean/Coq theorem exports from a persisted temporal proof bundle.
+
+    The function is deterministic by default: if callers do not supply
+    ``exported_at`` the same persisted bundle produces byte-identical theorem
+    sources across runs.  The bundle's formulas, metadata, certainties, and
+    digest are preserved in the returned export payload.
+    """
+    bundle = _normalize_temporal_proof_bundle(proof_bundle)
+    theorem_exports = bundle.get("theorem_exports") if isinstance(bundle.get("theorem_exports"), dict) else {}
+    tdfol_formulas = [
+        str(formula).strip()
+        for formula in theorem_exports.get("tdfol_formulas", []) or []
+        if str(formula).strip()
+    ]
+    dcec_formulas = [
+        str(formula).strip()
+        for formula in theorem_exports.get("dcec_formulas", []) or []
+        if str(formula).strip()
+    ]
+    theorem_export_metadata = (
+        deepcopy(theorem_exports.get("theorem_export_metadata"))
+        if isinstance(theorem_exports.get("theorem_export_metadata"), dict)
+        else {}
+    )
+    theorem_export_metadata["proof_execution_source"] = "temporal_proof_bundle"
+    theorem_export_metadata["proof_bundle_digest"] = bundle.get("bundle_digest", "")
+
+    from .theorem_export import export_proof_result_to_theorems
+
+    theorem_export = export_proof_result_to_theorems(
+        {
+            "temporal_reasoning_payload": {
+                "formalism": "tdfol_dcec_bridge_v1",
+                "tdfol_formulas": tdfol_formulas,
+                "dcec_formulas": dcec_formulas,
+                "tdfol_formula_certainties": deepcopy(theorem_exports.get("tdfol_formula_certainties") or {}),
+                "dcec_formula_certainties": deepcopy(theorem_exports.get("dcec_formula_certainties") or {}),
+                "theorem_export_metadata": theorem_export_metadata,
+                "proof_bundles": {
+                    str(bundle.get("persistence_key") or bundle.get("proof_bundle_id") or "bundle"): bundle
+                },
+            },
+            "proof_bundles": {
+                str(bundle.get("persistence_key") or bundle.get("proof_bundle_id") or "bundle"): bundle
+            },
+        },
+        claim_id=str(bundle.get("proof_bundle_id") or ""),
+        exported_at=exported_at,
+    )
+    theorem_export["theorem_export_metadata"] = theorem_export_metadata
+    theorem_export["proof_bundle_id"] = str(bundle.get("proof_bundle_id") or "")
+    theorem_export["proof_bundle_digest"] = str(bundle.get("bundle_digest") or "")
+    theorem_export["tdfol_formula_certainties"] = deepcopy(theorem_exports.get("tdfol_formula_certainties") or {})
+    theorem_export["dcec_formula_certainties"] = deepcopy(theorem_exports.get("dcec_formula_certainties") or {})
+    return theorem_export
 
 
 
@@ -1869,6 +2157,7 @@ __all__ = [
     "prove_claim_elements",
     "check_contradictions",
     "run_hybrid_reasoning",
+    "export_theorem_from_proof_bundle",
     "get_predicate_templates",
     "map_claim_elements_to_predicates",
     "_COMPLAINT_PREDICATE_TEMPLATES",
