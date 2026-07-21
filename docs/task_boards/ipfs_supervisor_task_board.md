@@ -341,7 +341,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-TEMP-T2 Legal temporal rule profiles
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
