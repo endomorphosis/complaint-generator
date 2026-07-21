@@ -416,7 +416,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Priority: P0
 - Track: sup
 - Depends on: 
-- Outputs: docs/PAYLOAD_CONTRACTS.md, scripts/validate_task_boards.py, tests/test_task_board_contracts.py, docs/PAYLOAD_CONTRACTS.md
+- Outputs: docs/PAYLOAD_CONTRACTS.md, scripts/validate_task_boards.py, tests/test_task_board_contracts.py
 - Validation: python scripts/validate_task_boards.py; python -m pytest tests/test_task_board_contracts.py -q
 - Acceptance: Every json fence in PAYLOAD_CONTRACTS.md parses as JSON. Task-board validation catches malformed payload examples before supervisor execution. Contract changes remain compatible with markdown and machine-readable consumers.
 - Source doc: docs/PAYLOAD_CONTRACTS.md

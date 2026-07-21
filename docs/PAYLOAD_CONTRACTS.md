@@ -4,6 +4,52 @@ This document centralizes the response payloads returned by the complaint genera
 
 Use this page when you need the current response contract without stitching it together from multiple feature guides.
 
+## Payload Fixture Hygiene
+
+Every `json` fenced block in this document is a machine-readable fixture. The supervisor task-board validator parses those blocks with Python's standard `json.loads(...)` before tasks are claimed, so examples must remain strict JSON rather than JavaScript object literals.
+
+Machine-readable validator contract:
+
+```json
+{
+  "schema_version": "complaint-generator.payload_fixture_hygiene.v1",
+  "validated_by": "scripts/validate_task_boards.py",
+  "payload_contract_doc": "docs/PAYLOAD_CONTRACTS.md",
+  "supervisor_task_board_json": "docs/task_boards/ipfs_supervisor_task_board.json",
+  "supervisor_task_board_markdown": "docs/task_boards/ipfs_supervisor_task_board.md",
+  "json_fence_contract": {
+    "language": "json",
+    "parser": "json.loads",
+    "allow_comments": false,
+    "allow_trailing_commas": false,
+    "require_complete_json_value": true
+  },
+  "task_payload_required_fields": [
+    "task_id",
+    "title",
+    "source_doc",
+    "status",
+    "priority",
+    "target_files",
+    "acceptance_criteria",
+    "validation_commands"
+  ],
+  "task_output_path_contract": {
+    "repo_relative": true,
+    "may_be_future_expected_output": true,
+    "absolute_paths_allowed": false,
+    "parent_directory_escape_allowed": false
+  }
+}
+```
+
+Contract hygiene rules:
+
+- Keep `json` fences as complete JSON values with quoted keys and no trailing commas.
+- Keep task-board JSON as the canonical machine-readable source; the markdown task board is a projection for human and daemon queue review.
+- Treat `target_files` as expected output paths. They must be repo-relative and non-empty, but they do not have to exist before the assigned task runs.
+- Add new externally visible payload examples here before relying on them from task-board acceptance criteria or supervisor execution packets.
+
 ## Adapter Operation Metadata
 
 Adapter-facing payloads under `integrations/ipfs_datasets/` now share one metadata family even when the top-level `status` differs by operation.

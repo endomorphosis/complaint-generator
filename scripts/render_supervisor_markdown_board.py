@@ -27,6 +27,18 @@ def _csv(values: list[str]) -> str:
     return ", ".join(str(value) for value in values if str(value).strip())
 
 
+def _unique(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique_values: list[str] = []
+    for value in values:
+        normalized = str(value).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_values.append(normalized)
+    return unique_values
+
+
 def _task_status(task: dict[str, Any]) -> str:
     return STATUS_MAP.get(str(task.get("status") or "planned"), "todo")
 
@@ -50,6 +62,7 @@ def render_board(board: dict[str, Any]) -> str:
         outputs = target_files[:]
         if task.get("source_doc"):
             outputs.append(str(task["source_doc"]))
+        outputs = _unique(outputs)
 
         lines.extend(
             [
