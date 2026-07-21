@@ -8,7 +8,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g1
 - Goal: Stabilize repository boundaries
-- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, docs/ARCHITECTURE.md, pyproject.toml, scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, applications/complaint_cli.py, applications/dashboard_ui.py
+- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, docs/ARCHITECTURE.md, pyproject.toml, scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, applications/complaint_cli.py, applications/dashboard_ui.py, data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest --collect-only -q
 
 ## G1.S1 Map package ownership and runtime entrypoints
