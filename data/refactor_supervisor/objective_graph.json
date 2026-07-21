@@ -1,8 +1,8 @@
 {
   "active_goal_count": 21,
-  "completed_goal_count": 0,
-  "generated_at": "2026-07-21T19:39:54.889381+00:00",
-  "goal_count": 21,
+  "completed_goal_count": 5,
+  "generated_at": "2026-07-21T22:50:01.764744+00:00",
+  "goal_count": 26,
   "goals": [
     {
       "bundle": "refactor/g1",
@@ -14,9 +14,11 @@
         "tests/test_claim_support_review_playwright_smoke.py",
         "docs/ARCHITECTURE.md",
         "pyproject.toml",
-        "applications/document_api.py",
-        "integrations/ipfs_datasets/loader.py",
+        "scripts/graphrag_email_manifest.py",
+        "scripts/import_gmail_evidence.py",
+        "scripts/import_local_eml_directory.py",
         "applications/complaint_cli.py",
+        "applications/dashboard_ui.py",
         "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
         "objective validation repair"
       ],
@@ -24,7 +26,7 @@
       "goal_id": "G1",
       "parents": [],
       "refinement_depth": "0",
-      "status": "active",
+      "status": "completed",
       "title": "Stabilize repository boundaries",
       "track": "ops"
     },
@@ -62,23 +64,27 @@
     {
       "bundle": "refactor/g1/g1-s2",
       "evidence": [
-        "applications/complaint_workspace.py",
-        "applications/document_api.py",
-        "integrations/ipfs_datasets/loader.py",
-        "scripts/agentic_complaint_evidence_scraper.py",
-        "scripts/agentic_scraper_cli.py",
-        "scripts/backfill_claim_testimony_links.py",
-        "scripts/check_hacc_routers.py",
-        "scripts/enrich_email_timeline_authorities.py",
-        "scripts/generate_decision_trees.py",
-        "scripts/generate_email_search_plan.py",
-        "scripts/generate_hacc_email_seed_plan.py",
-        "scripts/gmail_duckdb_daemon.py",
+        "scripts/graphrag_email_manifest.py",
+        "scripts/import_gmail_evidence.py",
+        "scripts/import_local_eml_directory.py",
+        "scripts/master_case_email.py",
+        "scripts/process_hacc_pdfs_to_kg.py",
+        "scripts/run_gmail_duckdb_pipeline.py",
+        "scripts/run_hacc_adversarial_report.py",
+        "scripts/run_hacc_grounded_pipeline.py",
+        "scripts/run_hacc_preset_matrix.py",
         "No production entrypoint mutates sys.path for normal imports.",
         "Explicit exceptions are isolated to scripts/tests.",
         "python -m pytest tests/test_package_imports.py -q",
         "applications/complaint_cli.py",
         "applications/complaint_workspace.py",
+        "applications/dashboard_ui.py",
+        "complaint_generator/agentic_evidence_download.py",
+        "complaint_generator/data_migration.py",
+        "complaint_generator/email_agentic_search.py",
+        "complaint_generator/email_authority_enrichment.py",
+        "complaint_generator/email_credentials.py",
+        "complaint_generator/email_graphrag.py",
         "Production direct imports are replaced or documented.",
         "Degraded mode still imports cleanly.",
         "python -m pytest tests/test_ipfs_adapter_layer.py -q"
@@ -103,15 +109,13 @@
         "mediator/claim_support_hooks.py",
         "applications/complaint_workspace.py",
         "applications/dashboard_ui.py",
-        "playwright/server.js",
-        "data/refactor_supervisor/discovery/2026-07-21-ref-029-objective-validation-repair.md",
-        "objective validation repair"
+        "playwright/server.js"
       ],
       "fib_priority": 999999,
       "goal_id": "G2",
       "parents": [],
       "refinement_depth": "0",
-      "status": "active",
+      "status": "completed",
       "title": "Decompose oversized orchestration modules",
       "track": "ops"
     },
@@ -252,7 +256,7 @@
       "goal_id": "G4",
       "parents": [],
       "refinement_depth": "0",
-      "status": "active",
+      "status": "completed",
       "title": "Improve validation speed and confidence",
       "track": "ops"
     },
@@ -294,7 +298,7 @@
       "goal_id": "G5",
       "parents": [],
       "refinement_depth": "0",
-      "status": "active",
+      "status": "completed",
       "title": "Make automation observable and refillable",
       "track": "ops"
     },
@@ -461,9 +465,7 @@
         "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
         "data/refactor_supervisor/refactor_goals.json",
         "scripts/refactor_agent_supervisor.py",
-        "tests/test_refactor_agent_supervisor.py",
-        "data/refactor_supervisor/discovery/2026-07-21-ref-031-objective-validation-repair.md",
-        "objective validation repair"
+        "tests/test_refactor_agent_supervisor.py"
       ],
       "fib_priority": 999999,
       "goal_id": "G8",
@@ -524,6 +526,252 @@
       "status": "active",
       "title": "Keep generated artifacts reviewable",
       "track": "ops"
+    },
+    {
+      "bundle": "refactor/g9",
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G9",
+      "parents": [],
+      "refinement_depth": "0",
+      "status": "completed",
+      "title": "Increase agent-supervisor planning quality and throughput",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g9/g9-s1",
+      "evidence": [
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py",
+        "Every task has a stable canonical key or CID independent of board path and display id.",
+        "Legacy markdown tasks migrate idempotently with board namespace provenance.",
+        "Branches",
+        "events",
+        "retries",
+        "cooldowns",
+        "leases",
+        "and receipts carry canonical identity.",
+        "Refill cannot create a second active task for the same canonical work item.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py",
+        "A persistent scheduler discovers new and refilled tasks without restart.",
+        "Workers claim ready tasks",
+        "release drained or blocked leases",
+        "and steal conflict-safe work.",
+        "Lane count remains within configured capacity and no task executes under two accepted leases.",
+        "The manifest is an authoritative live projection rather than a launch-time snapshot.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py",
+        "All implementation lanes enqueue merge candidates instead of racing the target checkout.",
+        "The train deduplicates by canonical task and commit",
+        "rebases on the latest target",
+        "and preserves priority plus age fairness.",
+        "One conflict fingerprint invokes at most one active resolver attempt.",
+        "Bounded failures enter quarantine with a durable receipt instead of a polling retry loop.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G9.S1",
+      "parents": [
+        "G9"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Establish canonical coordination and merge flow",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g9/g9-s2",
+      "evidence": [
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py",
+        "Goal",
+        "import",
+        "interface",
+        "output-input",
+        "migration",
+        "and validation prerequisites become explicit DAG edges with provenance.",
+        "Only tasks whose prerequisite merge receipts succeeded are claimable.",
+        "Priority includes critical-path length",
+        "slack",
+        "downstream unlock value",
+        "age",
+        "and configured objective priority.",
+        "Cycles and missing dependencies produce bounded repair evidence rather than deadlock.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py",
+        "Conflict surfaces include all predicted files",
+        "AST symbols",
+        "interfaces",
+        "submodules",
+        "and generated artifacts.",
+        "Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.",
+        "Actual branch diffs and conflict receipts update future conflict weights.",
+        "Planner output explains every co-location or separation decision.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py",
+        "Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.",
+        "Candidates declare predicted files and symbols",
+        "dependencies",
+        "validation proof",
+        "cost",
+        "risk",
+        "and expected objective delta.",
+        "A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.",
+        "Router failure falls back to deterministic planning without blocking ready work.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G9.S2",
+      "parents": [
+        "G9"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Plan from dependencies, conflicts, and objective value",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g9/g9-s3",
+      "evidence": [
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py",
+        "Heartbeats report measured CPU",
+        "memory",
+        "disk",
+        "active phase",
+        "and available worker capacity.",
+        "Scheduler honors llm_router health",
+        "quota",
+        "latency",
+        "context",
+        "and token-budget constraints.",
+        "Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.",
+        "Idle lanes advertise zero occupied capacity and can be reassigned.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py",
+        "Cheap deterministic checks run before expensive tests and fail fast.",
+        "Independent validations run in parallel under a bounded resource budget.",
+        "Cache keys include target commit",
+        "command",
+        "relevant environment",
+        "and dependency state.",
+        "Impact selection is conservative",
+        "explainable",
+        "and escalates to broader validation before merge completion.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G9.S3",
+      "parents": [
+        "G9"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Adapt execution capacity and validation cost",
+      "track": "ops"
+    },
+    {
+      "bundle": "refactor/g9/g9-s4",
+      "evidence": [
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py",
+        "One event-derived snapshot reports ready",
+        "active",
+        "idle",
+        "blocked",
+        "validation",
+        "merge",
+        "and resolver phases.",
+        "Metrics include queue wait",
+        "implementation and validation duration",
+        "merge wait",
+        "conflict and retry rate",
+        "completions",
+        "tokens",
+        "and cost.",
+        "Every metric is keyed by canonical goal",
+        "subgoal",
+        "task",
+        "lane",
+        "and provider identity.",
+        "Scheduler decisions consume the same snapshot exposed to operators.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py",
+        "AST and evidence records are reused by blob hash and only changed files are reparsed.",
+        "Deleted and renamed files invalidate stale evidence deterministically.",
+        "Clean worktrees and dependency setups can be pooled without sharing task-local mutations.",
+        "Cold and warm paths produce equivalent plans and validation results with measured warm-path savings.",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q"
+      ],
+      "fib_priority": 999999,
+      "goal_id": "G9.S4",
+      "parents": [
+        "G9"
+      ],
+      "refinement_depth": "1",
+      "status": "active",
+      "title": "Close the scheduler feedback and lifecycle loop",
+      "track": "ops"
     }
   ],
   "graph": {
@@ -556,6 +804,12 @@
       "G8": [
         "G8.S1",
         "G8.S2"
+      ],
+      "G9": [
+        "G9.S1",
+        "G9.S2",
+        "G9.S3",
+        "G9.S4"
       ]
     },
     "depths": {
@@ -579,7 +833,12 @@
       "G7.S1": 1,
       "G8": 0,
       "G8.S1": 1,
-      "G8.S2": 1
+      "G8.S2": 1,
+      "G9": 0,
+      "G9.S1": 1,
+      "G9.S2": 1,
+      "G9.S3": 1,
+      "G9.S4": 1
     },
     "edges": [
       {
@@ -646,6 +905,26 @@
         "from": "G8",
         "kind": "refines",
         "to": "G8.S2"
+      },
+      {
+        "from": "G9",
+        "kind": "refines",
+        "to": "G9.S1"
+      },
+      {
+        "from": "G9",
+        "kind": "refines",
+        "to": "G9.S2"
+      },
+      {
+        "from": "G9",
+        "kind": "refines",
+        "to": "G9.S3"
+      },
+      {
+        "from": "G9",
+        "kind": "refines",
+        "to": "G9.S4"
       }
     ],
     "nodes": [
@@ -669,7 +948,12 @@
       "G7.S1",
       "G8",
       "G8.S1",
-      "G8.S2"
+      "G8.S2",
+      "G9",
+      "G9.S1",
+      "G9.S2",
+      "G9.S3",
+      "G9.S4"
     ],
     "roots": [
       "G1",
@@ -679,39 +963,136 @@
       "G5",
       "G6",
       "G7",
-      "G8"
+      "G8",
+      "G9"
     ]
   },
   "heap_schedule": [
     {
       "fib_priority": 999999,
-      "goal_id": "G1.S2",
+      "goal_id": "G9.S2",
       "graph_depth": 1,
       "heap_index": 0,
+      "output_count": 0,
+      "parents": [
+        "G9"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 46,
+      "sort_key": [
+        999999,
+        0,
+        -184,
+        1,
+        "G9.S2"
+      ],
+      "status": "active",
+      "title": "Plan from dependencies, conflicts, and objective value",
+      "track": "ops",
+      "work_surface_score": 184
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G9.S1",
+      "graph_depth": 1,
+      "heap_index": 1,
+      "output_count": 0,
+      "parents": [
+        "G9"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 41,
+      "sort_key": [
+        999999,
+        0,
+        -164,
+        1,
+        "G9.S1"
+      ],
+      "status": "active",
+      "title": "Establish canonical coordination and merge flow",
+      "track": "ops",
+      "work_surface_score": 164
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G9.S4",
+      "graph_depth": 1,
+      "heap_index": 2,
+      "output_count": 0,
+      "parents": [
+        "G9"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 36,
+      "sort_key": [
+        999999,
+        0,
+        -144,
+        1,
+        "G9.S4"
+      ],
+      "status": "active",
+      "title": "Close the scheduler feedback and lifecycle loop",
+      "track": "ops",
+      "work_surface_score": 144
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G9.S3",
+      "graph_depth": 1,
+      "heap_index": 3,
+      "output_count": 0,
+      "parents": [
+        "G9"
+      ],
+      "priority": "P0",
+      "priority_rank": 0,
+      "required_evidence_count": 32,
+      "sort_key": [
+        999999,
+        0,
+        -128,
+        1,
+        "G9.S3"
+      ],
+      "status": "active",
+      "title": "Adapt execution capacity and validation cost",
+      "track": "ops",
+      "work_surface_score": 128
+    },
+    {
+      "fib_priority": 999999,
+      "goal_id": "G1.S2",
+      "graph_depth": 1,
+      "heap_index": 4,
       "output_count": 0,
       "parents": [
         "G1"
       ],
       "priority": "P0",
       "priority_rank": 0,
-      "required_evidence_count": 20,
+      "required_evidence_count": 24,
       "sort_key": [
         999999,
         0,
-        -80,
+        -96,
         1,
         "G1.S2"
       ],
       "status": "active",
       "title": "Remove ad hoc import path behavior from production surfaces",
       "track": "ops",
-      "work_surface_score": 80
+      "work_surface_score": 96
     },
     {
       "fib_priority": 999999,
       "goal_id": "G1.S1",
       "graph_depth": 1,
-      "heap_index": 1,
+      "heap_index": 5,
       "output_count": 0,
       "parents": [
         "G1"
@@ -735,7 +1116,7 @@
       "fib_priority": 999999,
       "goal_id": "G3.S2",
       "graph_depth": 1,
-      "heap_index": 2,
+      "heap_index": 6,
       "output_count": 0,
       "parents": [
         "G3"
@@ -759,7 +1140,7 @@
       "fib_priority": 999999,
       "goal_id": "G8.S2",
       "graph_depth": 1,
-      "heap_index": 3,
+      "heap_index": 7,
       "output_count": 0,
       "parents": [
         "G8"
@@ -783,7 +1164,7 @@
       "fib_priority": 999999,
       "goal_id": "G3.S1",
       "graph_depth": 1,
-      "heap_index": 4,
+      "heap_index": 8,
       "output_count": 0,
       "parents": [
         "G3"
@@ -807,7 +1188,7 @@
       "fib_priority": 999999,
       "goal_id": "G5.S1",
       "graph_depth": 1,
-      "heap_index": 5,
+      "heap_index": 9,
       "output_count": 0,
       "parents": [
         "G5"
@@ -831,7 +1212,7 @@
       "fib_priority": 999999,
       "goal_id": "G8.S1",
       "graph_depth": 1,
-      "heap_index": 6,
+      "heap_index": 10,
       "output_count": 0,
       "parents": [
         "G8"
@@ -853,31 +1234,9 @@
     },
     {
       "fib_priority": 999999,
-      "goal_id": "G1",
-      "graph_depth": 0,
-      "heap_index": 7,
-      "output_count": 0,
-      "parents": [],
-      "priority": "P0",
-      "priority_rank": 0,
-      "required_evidence_count": 10,
-      "sort_key": [
-        999999,
-        0,
-        -40,
-        0,
-        "G1"
-      ],
-      "status": "active",
-      "title": "Stabilize repository boundaries",
-      "track": "ops",
-      "work_surface_score": 40
-    },
-    {
-      "fib_priority": 999999,
       "goal_id": "G3",
       "graph_depth": 0,
-      "heap_index": 8,
+      "heap_index": 11,
       "output_count": 0,
       "parents": [],
       "priority": "P0",
@@ -899,7 +1258,7 @@
       "fib_priority": 999999,
       "goal_id": "G2.S1",
       "graph_depth": 1,
-      "heap_index": 9,
+      "heap_index": 12,
       "output_count": 0,
       "parents": [
         "G2"
@@ -923,7 +1282,7 @@
       "fib_priority": 999999,
       "goal_id": "G2.S2",
       "graph_depth": 1,
-      "heap_index": 10,
+      "heap_index": 13,
       "output_count": 0,
       "parents": [
         "G2"
@@ -945,31 +1304,9 @@
     },
     {
       "fib_priority": 999999,
-      "goal_id": "G2",
-      "graph_depth": 0,
-      "heap_index": 11,
-      "output_count": 0,
-      "parents": [],
-      "priority": "P0",
-      "priority_rank": 0,
-      "required_evidence_count": 8,
-      "sort_key": [
-        999999,
-        0,
-        -32,
-        0,
-        "G2"
-      ],
-      "status": "active",
-      "title": "Decompose oversized orchestration modules",
-      "track": "ops",
-      "work_surface_score": 32
-    },
-    {
-      "fib_priority": 999999,
       "goal_id": "G8",
       "graph_depth": 0,
-      "heap_index": 12,
+      "heap_index": 14,
       "output_count": 0,
       "parents": [],
       "priority": "P0",
@@ -989,31 +1326,9 @@
     },
     {
       "fib_priority": 999999,
-      "goal_id": "G5",
-      "graph_depth": 0,
-      "heap_index": 13,
-      "output_count": 0,
-      "parents": [],
-      "priority": "P0",
-      "priority_rank": 0,
-      "required_evidence_count": 5,
-      "sort_key": [
-        999999,
-        0,
-        -20,
-        0,
-        "G5"
-      ],
-      "status": "active",
-      "title": "Make automation observable and refillable",
-      "track": "ops",
-      "work_surface_score": 20
-    },
-    {
-      "fib_priority": 999999,
       "goal_id": "G6.S2",
       "graph_depth": 1,
-      "heap_index": 14,
+      "heap_index": 15,
       "output_count": 0,
       "parents": [
         "G6"
@@ -1037,7 +1352,7 @@
       "fib_priority": 999999,
       "goal_id": "G7.S1",
       "graph_depth": 1,
-      "heap_index": 15,
+      "heap_index": 16,
       "output_count": 0,
       "parents": [
         "G7"
@@ -1061,7 +1376,7 @@
       "fib_priority": 999999,
       "goal_id": "G6",
       "graph_depth": 0,
-      "heap_index": 16,
+      "heap_index": 17,
       "output_count": 0,
       "parents": [],
       "priority": "P1",
@@ -1083,7 +1398,7 @@
       "fib_priority": 999999,
       "goal_id": "G6.S1",
       "graph_depth": 1,
-      "heap_index": 17,
+      "heap_index": 18,
       "output_count": 0,
       "parents": [
         "G6"
@@ -1107,7 +1422,7 @@
       "fib_priority": 999999,
       "goal_id": "G4.S1",
       "graph_depth": 1,
-      "heap_index": 18,
+      "heap_index": 19,
       "output_count": 0,
       "parents": [
         "G4"
@@ -1126,28 +1441,6 @@
       "title": "Create focused test lanes for refactor work",
       "track": "ops",
       "work_surface_score": 44
-    },
-    {
-      "fib_priority": 999999,
-      "goal_id": "G4",
-      "graph_depth": 0,
-      "heap_index": 19,
-      "output_count": 0,
-      "parents": [],
-      "priority": "P1",
-      "priority_rank": 1,
-      "required_evidence_count": 7,
-      "sort_key": [
-        999999,
-        1,
-        -28,
-        0,
-        "G4"
-      ],
-      "status": "active",
-      "title": "Improve validation speed and confidence",
-      "track": "ops",
-      "work_surface_score": 28
     },
     {
       "fib_priority": 999999,
@@ -1175,7 +1468,7 @@
   "objective_path": "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_objective_heap.md",
   "schema": "ipfs_accelerate_py.agent_supervisor.objective_graph",
   "thought_graph": {
-    "edge_count": 258,
+    "edge_count": 449,
     "edges": [
       {
         "from": "goal:G1",
@@ -1215,17 +1508,37 @@
       {
         "from": "goal:G1",
         "kind": "requires_evidence",
-        "to": "evidence:dffc51113899"
+        "to": "evidence:49a5376ab1ad"
       },
       {
         "from": "goal:G1",
         "kind": "requires_evidence",
-        "to": "evidence:43a7105d32ce"
+        "to": "evidence:734e4683d26d"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:fe1be3fc60f0"
       },
       {
         "from": "goal:G1",
         "kind": "requires_evidence",
         "to": "evidence:6a6ad7dced1b"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:01b06d0183a3"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:f56dc3cd8d39"
+      },
+      {
+        "from": "goal:G1",
+        "kind": "requires_evidence",
+        "to": "evidence:b2c7f787b17c"
       },
       {
         "from": "goal:G1",
@@ -1325,62 +1638,47 @@
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:44487fa9cd23"
+        "to": "evidence:88d45b78eab0"
       },
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:fd937b37b2d6"
+        "to": "evidence:f6dd90ff37fe"
       },
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:bb85e6d6f242"
+        "to": "evidence:c22cfb2de881"
       },
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:00da853e238c"
+        "to": "evidence:8da6b26379ae"
       },
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:b16aa98bc5a1"
+        "to": "evidence:eaf1a15f8ff6"
       },
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:90ad9322e670"
+        "to": "evidence:956ed40bdd4d"
       },
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:2dd0cfc09d8b"
+        "to": "evidence:8316425fdc5c"
       },
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:e58b507b3ebe"
+        "to": "evidence:53c21dc0b76e"
       },
       {
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
-        "to": "evidence:dc6156b37f89"
-      },
-      {
-        "from": "goal:G1.S2",
-        "kind": "requires_evidence",
-        "to": "evidence:46134510e994"
-      },
-      {
-        "from": "goal:G1.S2",
-        "kind": "requires_evidence",
-        "to": "evidence:92c9e2129c1c"
-      },
-      {
-        "from": "goal:G1.S2",
-        "kind": "requires_evidence",
-        "to": "evidence:c72881ae0ff5"
+        "to": "evidence:ffd947f5320d"
       },
       {
         "from": "goal:G1.S2",
@@ -1406,6 +1704,41 @@
         "from": "goal:G1.S2",
         "kind": "requires_evidence",
         "to": "evidence:44487fa9cd23"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:0864be78ca54"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e611883a2074"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:2a940fca3e7c"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:34b47a2b4937"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:f2598c52d46c"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:6a0b36b67b0f"
+      },
+      {
+        "from": "goal:G1.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:bb142c11f46f"
       },
       {
         "from": "goal:G1.S2",
@@ -2466,9 +2799,924 @@
         "from": "goal:G8.S2",
         "kind": "validated_by",
         "to": "validation:d61882f7ad34"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:2277746cfd70"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:5375b0df5b0d"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:de335a914565"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:da587f177f06"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:6e63cef2aa27"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:e29594ce8e5e"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:3ace7810e7a0"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:098be666ad6e"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:56e43939df7b"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:784a21b3fee7"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:f617360e921f"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:a2ca3aaa0827"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:e67d8789d960"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:8e7660bedb49"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:2361993edef8"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:3244b8e1ead7"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:2d259415543c"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:7deedab5bd01"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:19f89602ded3"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:a27b3895c31c"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:84f2ca04f104"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:6ac9668b3b19"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "requires_evidence",
+        "to": "evidence:f4888c327f9e"
+      },
+      {
+        "from": "goal:G9",
+        "kind": "validated_by",
+        "to": "validation:e8684e936096"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4046867c879c"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:79cb6b8af252"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2f43951e8ace"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:72e3e70f329d"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:71c7a83bea63"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:ed541024c30e"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4fc2b7c0f858"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4f9c453f5336"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2c4a95501423"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:57092292476d"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:df5bd31de44a"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:e60b8a5484c4"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:35f81a3c59bd"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:48a89ae918ce"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:a7c63f0a0ead"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:d3a129bf7414"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:df17bdef6568"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:bba6fed65d3a"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:2f43951e8ace"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:bbe2b7ca9d35"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:f9297029af09"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:e0a1f18dd526"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:27dfda6199f9"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:1e21182f34d4"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:3d73595e0859"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4ade93ace1c3"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:4c1e68cbfdec"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:1c70b2d9f142"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:b5b8b9e8060b"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:8d54530561df"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:7e1a32580c3c"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:a7104a18ca3a"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:71c7a83bea63"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:3897020a9ebb"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:6afc20c3c91d"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:9413d02fb823"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:bdcb540beb86"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:f1ae52ce4778"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:33434141901c"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:476688243000"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "requires_evidence",
+        "to": "evidence:fc4dbfc7ad7e"
+      },
+      {
+        "from": "goal:G9.S1",
+        "kind": "validated_by",
+        "to": "validation:0f1c31ceff26"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:25cd1c982912"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:96ff840be27d"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:2f523796544f"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:c42b65d57a6b"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:7d73471148aa"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:3b5e022fed04"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:3f39664214ee"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:0ed96f24b54b"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:b0906225d409"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:dea74c6e709c"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:c2ceb4055b89"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:969d50121f8d"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:87e84ab102bb"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:0bd2b80f5dad"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e6db94d5d757"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:bdde20fc9ba1"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:8ba53e6bd83a"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:721cb4ec98ff"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:3d4cbff62563"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:25cd1c982912"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:2f523796544f"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:f4f649fa8ab9"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:a8984f209f48"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:3b8c00b2c051"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:55977d49d67a"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:efdcabf51e4b"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:e904e20cc791"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:52d7445e78e7"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:b73bf4424e07"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:b13a5662e9f5"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:285497b521ea"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:a8699af15372"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:302da1b1da8d"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:cab0d8d767eb"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:7b9c6a1dbffa"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:ae7d0b0d51ed"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:fdc295838f4b"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:fa749a213c0f"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:2bf6be26f524"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:c25110f8c209"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:4e4af863f172"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:ad242ca6eaf8"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:2c402b52c56b"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:79cf6b03c139"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:82ee5819b283"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "requires_evidence",
+        "to": "evidence:fec8cde945a6"
+      },
+      {
+        "from": "goal:G9.S2",
+        "kind": "validated_by",
+        "to": "validation:99ef1b6d42e6"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:27f4926dff1b"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:53bf21d96049"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:149263c3d9b2"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:a0cca41d0f08"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:c11725387ac3"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:66acc7212e26"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:a8f2806dbc4c"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:82140567dd44"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:7f24c0995db9"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:40eba8a99788"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:8711fa740d78"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:74b3f6492b53"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:fefe8fdacc31"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:b7ef5ed34420"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:31774e462e3f"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:31e2085140cb"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:b2164f70b9f1"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:841f72b6fe9b"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:904b589c7c46"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:c5ab4cc20812"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:7508b2b6458b"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:fa3b8f3d9fce"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:0e26bc8e5691"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:0f0c3cac2285"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:344284fa2c8f"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:158b89b3c5ba"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:737cc3f5d678"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:71722b79d460"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:d7ba591b1be5"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:e1b38044b34a"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:9cff44eb56a2"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "requires_evidence",
+        "to": "evidence:5a2e18905882"
+      },
+      {
+        "from": "goal:G9.S3",
+        "kind": "validated_by",
+        "to": "validation:1b2a7a8e07a2"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:6a9bd2bf61d3"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:927f11e8a0b4"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:59e44c0286c5"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:177f1310ca0b"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:e35dca22d6b6"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:a545bea4caae"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:44a4615cec76"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:9b06b30a8336"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:c871a9029f07"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:14fae6b63c32"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:8835a8a04536"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:455e2c3ecd3e"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:c5abbd9a555d"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:ed1e769b882f"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:8ba0fc497e00"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:c75fb1bda58f"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:5c4a700f5141"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:02d21f9508a6"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:ccf0be45f4d7"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:e7c74ea61e99"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:f0d370c0d204"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:f6d45ae4a3d0"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:3984a0fbfb8b"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:21433f823556"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:fa1d3d193d04"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:cba7aa34790e"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:332e95cc0ba5"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:fac3b20b59c5"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:788871f87e19"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:570a1f7187dc"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:db7581a81aed"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:fa5d549fb7eb"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:40d8fd734b15"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:3d1d2e6b424e"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:779cf2814d5e"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "requires_evidence",
+        "to": "evidence:6a0c4a2ab7d7"
+      },
+      {
+        "from": "goal:G9.S4",
+        "kind": "validated_by",
+        "to": "validation:1121ae702863"
       }
     ],
-    "node_count": 273,
+    "node_count": 466,
     "nodes": [
       {
         "goal_id": "G7.S1",
@@ -2478,18 +3726,25 @@
         "thought": "Find or create repository evidence proving `mediator/claim_support_hooks.py`."
       },
       {
-        "goal_id": "G1.S2",
-        "id": "evidence:00da853e238c",
-        "kind": "evidence_requirement",
-        "term": "scripts/agentic_complaint_evidence_scraper.py",
-        "thought": "Find or create repository evidence proving `scripts/agentic_complaint_evidence_scraper.py`."
-      },
-      {
         "goal_id": "G8.S2",
         "id": "evidence:0150ed505809",
         "kind": "evidence_requirement",
         "term": "priority",
         "thought": "Find or create repository evidence proving `priority`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:01b06d0183a3",
+        "kind": "evidence_requirement",
+        "term": "applications/dashboard_ui.py",
+        "thought": "Find or create repository evidence proving `applications/dashboard_ui.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:02d21f9508a6",
+        "kind": "evidence_requirement",
+        "term": "tokens",
+        "thought": "Find or create repository evidence proving `tokens`."
       },
       {
         "goal_id": "G5",
@@ -2548,6 +3803,20 @@
         "thought": "Find or create repository evidence proving `updated_at`."
       },
       {
+        "goal_id": "G1.S2",
+        "id": "evidence:0864be78ca54",
+        "kind": "evidence_requirement",
+        "term": "applications/dashboard_ui.py",
+        "thought": "Find or create repository evidence proving `applications/dashboard_ui.py`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:098be666ad6e",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py`."
+      },
+      {
         "goal_id": "G8.S1",
         "id": "evidence:09a3c1f8fca1",
         "kind": "evidence_requirement",
@@ -2583,6 +3852,13 @@
         "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/capabilities.py`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:0bd2b80f5dad",
+        "kind": "evidence_requirement",
+        "term": "downstream unlock value",
+        "thought": "Find or create repository evidence proving `downstream unlock value`."
+      },
+      {
         "goal_id": "G2.S2",
         "id": "evidence:0bfc00a09935",
         "kind": "evidence_requirement",
@@ -2604,6 +3880,27 @@
         "thought": "Find or create repository evidence proving `At least one cluster returns a typed degraded result.`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:0e26bc8e5691",
+        "kind": "evidence_requirement",
+        "term": "Cheap deterministic checks run before expensive tests and fail fast.",
+        "thought": "Find or create repository evidence proving `Cheap deterministic checks run before expensive tests and fail fast.`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:0ed96f24b54b",
+        "kind": "evidence_requirement",
+        "term": "output-input",
+        "thought": "Find or create repository evidence proving `output-input`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:0f0c3cac2285",
+        "kind": "evidence_requirement",
+        "term": "Independent validations run in parallel under a bounded resource budget.",
+        "thought": "Find or create repository evidence proving `Independent validations run in parallel under a bounded resource budget.`."
+      },
+      {
         "goal_id": "G4",
         "id": "evidence:12984ab52272",
         "kind": "evidence_requirement",
@@ -2616,6 +3913,20 @@
         "kind": "evidence_requirement",
         "term": "Unexpected failures leave diagnostic breadcrumbs.",
         "thought": "Find or create repository evidence proving `Unexpected failures leave diagnostic breadcrumbs.`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:149263c3d9b2",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:14fae6b63c32",
+        "kind": "evidence_requirement",
+        "term": "validation",
+        "thought": "Find or create repository evidence proving `validation`."
       },
       {
         "goal_id": "G5.S1",
@@ -2632,11 +3943,25 @@
         "thought": "Find or create repository evidence proving `data/refactor_supervisor`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:158b89b3c5ba",
+        "kind": "evidence_requirement",
+        "term": "command",
+        "thought": "Find or create repository evidence proving `command`."
+      },
+      {
         "goal_id": "G8.S1",
         "id": "evidence:16c492a057ee",
         "kind": "evidence_requirement",
         "term": "python scripts/refactor_agent_supervisor.py status",
         "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py status`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:177f1310ca0b",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py`."
       },
       {
         "goal_id": "G5",
@@ -2660,6 +3985,13 @@
         "thought": "Find or create repository evidence proving `Output is stable enough for automation.`."
       },
       {
+        "goal_id": "G9",
+        "id": "evidence:19f89602ded3",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py`."
+      },
+      {
         "goal_id": "G3",
         "id": "evidence:1ab18953883b",
         "kind": "evidence_requirement",
@@ -2679,6 +4011,20 @@
         "kind": "evidence_requirement",
         "term": "applications/complaint_workspace.py",
         "thought": "Find or create repository evidence proving `applications/complaint_workspace.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:1c70b2d9f142",
+        "kind": "evidence_requirement",
+        "term": "The manifest is an authoritative live projection rather than a launch-time snapshot.",
+        "thought": "Find or create repository evidence proving `The manifest is an authoritative live projection rather than a launch-time snapshot.`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:1e21182f34d4",
+        "kind": "evidence_requirement",
+        "term": "Workers claim ready tasks",
+        "thought": "Find or create repository evidence proving `Workers claim ready tasks`."
       },
       {
         "goal_id": "G6.S1",
@@ -2702,6 +4048,20 @@
         "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/documents.py`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:21433f823556",
+        "kind": "evidence_requirement",
+        "term": "and provider identity.",
+        "thought": "Find or create repository evidence proving `and provider identity.`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:2277746cfd70",
+        "kind": "evidence_requirement",
+        "term": "docs/ARCHITECTURE.md",
+        "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
         "goal_id": "G7.S1",
         "id": "evidence:2305c3ff692b",
         "kind": "evidence_requirement",
@@ -2709,11 +4069,25 @@
         "thought": "Find or create repository evidence proving `and support-path summaries.`."
       },
       {
+        "goal_id": "G9",
+        "id": "evidence:2361993edef8",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py`."
+      },
+      {
         "goal_id": "G2",
         "id": "evidence:248ec277c0c0",
         "kind": "evidence_requirement",
         "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
         "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:25cd1c982912",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py`."
       },
       {
         "goal_id": "G4",
@@ -2737,11 +4111,39 @@
         "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/logic.py`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:27dfda6199f9",
+        "kind": "evidence_requirement",
+        "term": "A persistent scheduler discovers new and refilled tasks without restart.",
+        "thought": "Find or create repository evidence proving `A persistent scheduler discovers new and refilled tasks without restart.`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:27f4926dff1b",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:285497b521ea",
+        "kind": "evidence_requirement",
+        "term": "Planner output explains every co-location or separation decision.",
+        "thought": "Find or create repository evidence proving `Planner output explains every co-location or separation decision.`."
+      },
+      {
         "goal_id": "G6.S1",
         "id": "evidence:2982c4ca7deb",
         "kind": "evidence_requirement",
         "term": "mediator/mediator.py",
         "thought": "Find or create repository evidence proving `mediator/mediator.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:2a940fca3e7c",
+        "kind": "evidence_requirement",
+        "term": "complaint_generator/data_migration.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/data_migration.py`."
       },
       {
         "goal_id": "G4.S1",
@@ -2756,6 +4158,34 @@
         "kind": "evidence_requirement",
         "term": "integrations/ipfs_datasets/graphs.py",
         "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/graphs.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:2bf6be26f524",
+        "kind": "evidence_requirement",
+        "term": "dependencies",
+        "thought": "Find or create repository evidence proving `dependencies`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:2c402b52c56b",
+        "kind": "evidence_requirement",
+        "term": "and expected objective delta.",
+        "thought": "Find or create repository evidence proving `and expected objective delta.`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:2c4a95501423",
+        "kind": "evidence_requirement",
+        "term": "Legacy markdown tasks migrate idempotently with board namespace provenance.",
+        "thought": "Find or create repository evidence proving `Legacy markdown tasks migrate idempotently with board namespace provenance.`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:2d259415543c",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py`."
       },
       {
         "goal_id": "G2",
@@ -2779,13 +4209,6 @@
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q`."
       },
       {
-        "goal_id": "G1.S2",
-        "id": "evidence:2dd0cfc09d8b",
-        "kind": "evidence_requirement",
-        "term": "scripts/check_hacc_routers.py",
-        "thought": "Find or create repository evidence proving `scripts/check_hacc_routers.py`."
-      },
-      {
         "goal_id": "G7.S1",
         "id": "evidence:2dddba8d82f8",
         "kind": "evidence_requirement",
@@ -2807,11 +4230,53 @@
         "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/loader.py`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:2f43951e8ace",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:2f523796544f",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:302da1b1da8d",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py`."
+      },
+      {
         "goal_id": "G3.S2",
         "id": "evidence:3066a3488de0",
         "kind": "evidence_requirement",
         "term": "python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q",
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:31774e462e3f",
+        "kind": "evidence_requirement",
+        "term": "and token-budget constraints.",
+        "thought": "Find or create repository evidence proving `and token-budget constraints.`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:31e2085140cb",
+        "kind": "evidence_requirement",
+        "term": "Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.",
+        "thought": "Find or create repository evidence proving `Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:3244b8e1ead7",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py`."
       },
       {
         "goal_id": "G8.S2",
@@ -2821,11 +4286,46 @@
         "thought": "Find or create repository evidence proving `subgoal`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:332e95cc0ba5",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:33434141901c",
+        "kind": "evidence_requirement",
+        "term": "One conflict fingerprint invokes at most one active resolver attempt.",
+        "thought": "Find or create repository evidence proving `One conflict fingerprint invokes at most one active resolver attempt.`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:344284fa2c8f",
+        "kind": "evidence_requirement",
+        "term": "Cache keys include target commit",
+        "thought": "Find or create repository evidence proving `Cache keys include target commit`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:34b47a2b4937",
+        "kind": "evidence_requirement",
+        "term": "complaint_generator/email_agentic_search.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/email_agentic_search.py`."
+      },
+      {
         "goal_id": "G6.S1",
         "id": "evidence:353d54b8affb",
         "kind": "evidence_requirement",
         "term": "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q",
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:35f81a3c59bd",
+        "kind": "evidence_requirement",
+        "term": "cooldowns",
+        "thought": "Find or create repository evidence proving `cooldowns`."
       },
       {
         "goal_id": "G4.S1",
@@ -2870,6 +4370,13 @@
         "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py seed --once`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:3897020a9ebb",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py`."
+      },
+      {
         "goal_id": "G4.S1",
         "id": "evidence:395841e4d5b8",
         "kind": "evidence_requirement",
@@ -2877,11 +4384,25 @@
         "thought": "Find or create repository evidence proving `docs/VERIFICATION_SUMMARY.md`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:3984a0fbfb8b",
+        "kind": "evidence_requirement",
+        "term": "lane",
+        "thought": "Find or create repository evidence proving `lane`."
+      },
+      {
         "goal_id": "G1.S2",
         "id": "evidence:3a929734c50f",
         "kind": "evidence_requirement",
         "term": "Explicit exceptions are isolated to scripts/tests.",
         "thought": "Find or create repository evidence proving `Explicit exceptions are isolated to scripts/tests.`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:3ace7810e7a0",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py`."
       },
       {
         "goal_id": "G1",
@@ -2898,6 +4419,41 @@
         "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:3b5e022fed04",
+        "kind": "evidence_requirement",
+        "term": "import",
+        "thought": "Find or create repository evidence proving `import`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:3b8c00b2c051",
+        "kind": "evidence_requirement",
+        "term": "Conflict surfaces include all predicted files",
+        "thought": "Find or create repository evidence proving `Conflict surfaces include all predicted files`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:3d1d2e6b424e",
+        "kind": "evidence_requirement",
+        "term": "Clean worktrees and dependency setups can be pooled without sharing task-local mutations.",
+        "thought": "Find or create repository evidence proving `Clean worktrees and dependency setups can be pooled without sharing task-local mutations.`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:3d4cbff62563",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:3d73595e0859",
+        "kind": "evidence_requirement",
+        "term": "release drained or blocked leases",
+        "thought": "Find or create repository evidence proving `release drained or blocked leases`."
+      },
+      {
         "goal_id": "G4.S1",
         "id": "evidence:3e5a049ce73d",
         "kind": "evidence_requirement",
@@ -2912,11 +4468,25 @@
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_package_imports.py -q`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:3f39664214ee",
+        "kind": "evidence_requirement",
+        "term": "interface",
+        "thought": "Find or create repository evidence proving `interface`."
+      },
+      {
         "goal_id": "G1",
         "id": "evidence:3fa03927433c",
         "kind": "evidence_requirement",
         "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
         "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:4046867c879c",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py`."
       },
       {
         "goal_id": "G1.S1",
@@ -2926,11 +4496,18 @@
         "thought": "Find or create repository evidence proving `web`."
       },
       {
-        "goal_id": "G1",
-        "id": "evidence:43a7105d32ce",
+        "goal_id": "G9.S4",
+        "id": "evidence:40d8fd734b15",
         "kind": "evidence_requirement",
-        "term": "integrations/ipfs_datasets/loader.py",
-        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/loader.py`."
+        "term": "Deleted and renamed files invalidate stale evidence deterministically.",
+        "thought": "Find or create repository evidence proving `Deleted and renamed files invalidate stale evidence deterministically.`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:40eba8a99788",
+        "kind": "evidence_requirement",
+        "term": "and available worker capacity.",
+        "thought": "Find or create repository evidence proving `and available worker capacity.`."
       },
       {
         "goal_id": "G1.S2",
@@ -2940,11 +4517,18 @@
         "thought": "Find or create repository evidence proving `applications/complaint_workspace.py`."
       },
       {
-        "goal_id": "G1.S2",
-        "id": "evidence:46134510e994",
+        "goal_id": "G9.S4",
+        "id": "evidence:44a4615cec76",
         "kind": "evidence_requirement",
-        "term": "scripts/generate_email_search_plan.py",
-        "thought": "Find or create repository evidence proving `scripts/generate_email_search_plan.py`."
+        "term": "active",
+        "thought": "Find or create repository evidence proving `active`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:455e2c3ecd3e",
+        "kind": "evidence_requirement",
+        "term": "and resolver phases.",
+        "thought": "Find or create repository evidence proving `and resolver phases.`."
       },
       {
         "goal_id": "G5.S1",
@@ -2975,6 +4559,20 @@
         "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/search.py`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:476688243000",
+        "kind": "evidence_requirement",
+        "term": "Bounded failures enter quarantine with a durable receipt instead of a polling retry loop.",
+        "thought": "Find or create repository evidence proving `Bounded failures enter quarantine with a durable receipt instead of a polling retry loop.`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:48a89ae918ce",
+        "kind": "evidence_requirement",
+        "term": "leases",
+        "thought": "Find or create repository evidence proving `leases`."
+      },
+      {
         "goal_id": "G4.S1",
         "id": "evidence:496db8fdb7b5",
         "kind": "evidence_requirement",
@@ -2989,11 +4587,25 @@
         "thought": "Find or create repository evidence proving `complaint_generator/ui_optimizer_daemon.py`."
       },
       {
+        "goal_id": "G1",
+        "id": "evidence:49a5376ab1ad",
+        "kind": "evidence_requirement",
+        "term": "scripts/graphrag_email_manifest.py",
+        "thought": "Find or create repository evidence proving `scripts/graphrag_email_manifest.py`."
+      },
+      {
         "goal_id": "G2.S1",
         "id": "evidence:4a9fee2a9a92",
         "kind": "evidence_requirement",
         "term": "mediator/mediator.py",
         "thought": "Find or create repository evidence proving `mediator/mediator.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:4ade93ace1c3",
+        "kind": "evidence_requirement",
+        "term": "and steal conflict-safe work.",
+        "thought": "Find or create repository evidence proving `and steal conflict-safe work.`."
       },
       {
         "goal_id": "G1.S1",
@@ -3003,11 +4615,25 @@
         "thought": "Find or create repository evidence proving `applications/complaint_workspace.py`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:4c1e68cbfdec",
+        "kind": "evidence_requirement",
+        "term": "Lane count remains within configured capacity and no task executes under two accepted leases.",
+        "thought": "Find or create repository evidence proving `Lane count remains within configured capacity and no task executes under two accepted leases.`."
+      },
+      {
         "goal_id": "G4.S1",
         "id": "evidence:4cc11403347a",
         "kind": "evidence_requirement",
         "term": "python -m pytest tests/test_package_imports.py -q",
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_package_imports.py -q`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:4e4af863f172",
+        "kind": "evidence_requirement",
+        "term": "cost",
+        "thought": "Find or create repository evidence proving `cost`."
       },
       {
         "goal_id": "G5.S1",
@@ -3024,11 +4650,53 @@
         "thought": "Find or create repository evidence proving `scripts/refactor_agent_supervisor.py`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:4f9c453f5336",
+        "kind": "evidence_requirement",
+        "term": "Every task has a stable canonical key or CID independent of board path and display id.",
+        "thought": "Find or create repository evidence proving `Every task has a stable canonical key or CID independent of board path and display id.`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:4fc2b7c0f858",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py`."
+      },
+      {
         "goal_id": "G6.S2",
         "id": "evidence:526271bedff3",
         "kind": "evidence_requirement",
         "term": "log",
         "thought": "Find or create repository evidence proving `log`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:52d7445e78e7",
+        "kind": "evidence_requirement",
+        "term": "and generated artifacts.",
+        "thought": "Find or create repository evidence proving `and generated artifacts.`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:5375b0df5b0d",
+        "kind": "evidence_requirement",
+        "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+        "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:53bf21d96049",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:53c21dc0b76e",
+        "kind": "evidence_requirement",
+        "term": "scripts/run_hacc_grounded_pipeline.py",
+        "thought": "Find or create repository evidence proving `scripts/run_hacc_grounded_pipeline.py`."
       },
       {
         "goal_id": "G3.S1",
@@ -3045,11 +4713,53 @@
         "thought": "Find or create repository evidence proving `tests/test_claim_support_review_playwright_smoke.py`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:55977d49d67a",
+        "kind": "evidence_requirement",
+        "term": "AST symbols",
+        "thought": "Find or create repository evidence proving `AST symbols`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:56e43939df7b",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:57092292476d",
+        "kind": "evidence_requirement",
+        "term": "Branches",
+        "thought": "Find or create repository evidence proving `Branches`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:570a1f7187dc",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py`."
+      },
+      {
         "goal_id": "G6",
         "id": "evidence:57743ddde152",
         "kind": "evidence_requirement",
         "term": "integrations/ipfs_datasets/scraper_daemon.py",
         "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/scraper_daemon.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:59e44c0286c5",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:5a2e18905882",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q`."
       },
       {
         "goal_id": "G1.S1",
@@ -3071,6 +4781,13 @@
         "kind": "evidence_requirement",
         "term": "Docs and JSON state are regenerated each cycle.",
         "thought": "Find or create repository evidence proving `Docs and JSON state are regenerated each cycle.`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:5c4a700f5141",
+        "kind": "evidence_requirement",
+        "term": "completions",
+        "thought": "Find or create repository evidence proving `completions`."
       },
       {
         "goal_id": "G3.S1",
@@ -3143,6 +4860,13 @@
         "thought": "Find or create repository evidence proving `tests/test_claim_support_review_playwright_smoke.py`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:66acc7212e26",
+        "kind": "evidence_requirement",
+        "term": "Heartbeats report measured CPU",
+        "thought": "Find or create repository evidence proving `Heartbeats report measured CPU`."
+      },
+      {
         "goal_id": "G6.S2",
         "id": "evidence:66acd5d30249",
         "kind": "evidence_requirement",
@@ -3164,11 +4888,46 @@
         "thought": "Find or create repository evidence proving `mediator/claim_support_hooks.py`."
       },
       {
+        "goal_id": "G1.S2",
+        "id": "evidence:6a0b36b67b0f",
+        "kind": "evidence_requirement",
+        "term": "complaint_generator/email_credentials.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/email_credentials.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:6a0c4a2ab7d7",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q`."
+      },
+      {
         "goal_id": "G1",
         "id": "evidence:6a6ad7dced1b",
         "kind": "evidence_requirement",
         "term": "applications/complaint_cli.py",
         "thought": "Find or create repository evidence proving `applications/complaint_cli.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:6a9bd2bf61d3",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:6ac9668b3b19",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:6afc20c3c91d",
+        "kind": "evidence_requirement",
+        "term": "All implementation lanes enqueue merge candidates instead of racing the target checkout.",
+        "thought": "Find or create repository evidence proving `All implementation lanes enqueue merge candidates instead of racing the target checkout.`."
       },
       {
         "goal_id": "G6.S2",
@@ -3192,6 +4951,13 @@
         "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
       },
       {
+        "goal_id": "G9",
+        "id": "evidence:6e63cef2aa27",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py`."
+      },
+      {
         "goal_id": "G2",
         "id": "evidence:6f512fa4c448",
         "kind": "evidence_requirement",
@@ -3204,6 +4970,48 @@
         "kind": "evidence_requirement",
         "term": "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q",
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:71722b79d460",
+        "kind": "evidence_requirement",
+        "term": "and dependency state.",
+        "thought": "Find or create repository evidence proving `and dependency state.`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:71c7a83bea63",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:721cb4ec98ff",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:72e3e70f329d",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:734e4683d26d",
+        "kind": "evidence_requirement",
+        "term": "scripts/import_gmail_evidence.py",
+        "thought": "Find or create repository evidence proving `scripts/import_gmail_evidence.py`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:737cc3f5d678",
+        "kind": "evidence_requirement",
+        "term": "relevant environment",
+        "thought": "Find or create repository evidence proving `relevant environment`."
       },
       {
         "goal_id": "G2.S2",
@@ -3220,6 +5028,13 @@
         "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:74b3f6492b53",
+        "kind": "evidence_requirement",
+        "term": "quota",
+        "thought": "Find or create repository evidence proving `quota`."
+      },
+      {
         "goal_id": "G4.S1",
         "id": "evidence:74e12a60c885",
         "kind": "evidence_requirement",
@@ -3227,11 +5042,53 @@
         "thought": "Find or create repository evidence proving `A documented test lane map exists.`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:7508b2b6458b",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py`."
+      },
+      {
         "goal_id": "G2.S2",
         "id": "evidence:758793de854b",
         "kind": "evidence_requirement",
         "term": "One handler group is isolated.",
         "thought": "Find or create repository evidence proving `One handler group is isolated.`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:779cf2814d5e",
+        "kind": "evidence_requirement",
+        "term": "Cold and warm paths produce equivalent plans and validation results with measured warm-path savings.",
+        "thought": "Find or create repository evidence proving `Cold and warm paths produce equivalent plans and validation results with measured warm-path savings.`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:784a21b3fee7",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:788871f87e19",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:79cb6b8af252",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:79cf6b03c139",
+        "kind": "evidence_requirement",
+        "term": "A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.",
+        "thought": "Find or create repository evidence proving `A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.`."
       },
       {
         "goal_id": "G6",
@@ -3255,6 +5112,13 @@
         "thought": "Find or create repository evidence proving `Makefile`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:7b9c6a1dbffa",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py`."
+      },
+      {
         "goal_id": "G4.S1",
         "id": "evidence:7c659b984581",
         "kind": "evidence_requirement",
@@ -3269,6 +5133,13 @@
         "thought": "Find or create repository evidence proving `mediator/claim_support_hooks.py`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:7d73471148aa",
+        "kind": "evidence_requirement",
+        "term": "Goal",
+        "thought": "Find or create repository evidence proving `Goal`."
+      },
+      {
         "goal_id": "G2.S1",
         "id": "evidence:7dda6ee05254",
         "kind": "evidence_requirement",
@@ -3276,11 +5147,32 @@
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q`."
       },
       {
+        "goal_id": "G9",
+        "id": "evidence:7deedab5bd01",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py`."
+      },
+      {
         "goal_id": "G8.S1",
         "id": "evidence:7df9382aeb79",
         "kind": "evidence_requirement",
         "term": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
         "thought": "Find or create repository evidence proving `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:7e1a32580c3c",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:7f24c0995db9",
+        "kind": "evidence_requirement",
+        "term": "active phase",
+        "thought": "Find or create repository evidence proving `active phase`."
       },
       {
         "goal_id": "G2.S1",
@@ -3304,11 +5196,32 @@
         "thought": "Find or create repository evidence proving `and validation.`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:82140567dd44",
+        "kind": "evidence_requirement",
+        "term": "disk",
+        "thought": "Find or create repository evidence proving `disk`."
+      },
+      {
         "goal_id": "G6.S2",
         "id": "evidence:828cb0b1deb9",
         "kind": "evidence_requirement",
         "term": "artifacts",
         "thought": "Find or create repository evidence proving `artifacts`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:82ee5819b283",
+        "kind": "evidence_requirement",
+        "term": "Router failure falls back to deterministic planning without blocking ready work.",
+        "thought": "Find or create repository evidence proving `Router failure falls back to deterministic planning without blocking ready work.`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:8316425fdc5c",
+        "kind": "evidence_requirement",
+        "term": "scripts/run_hacc_adversarial_report.py",
+        "thought": "Find or create repository evidence proving `scripts/run_hacc_adversarial_report.py`."
       },
       {
         "goal_id": "G3.S2",
@@ -3318,11 +5231,25 @@
         "thought": "Find or create repository evidence proving `Callers do not branch on fragile strings.`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:841f72b6fe9b",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q`."
+      },
+      {
         "goal_id": "G6.S2",
         "id": "evidence:84d0c09fedbd",
         "kind": "evidence_requirement",
         "term": "status",
         "thought": "Find or create repository evidence proving `status`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:84f2ca04f104",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py`."
       },
       {
         "goal_id": "G6",
@@ -3344,6 +5271,34 @@
         "kind": "evidence_requirement",
         "term": "Entrypoints are grouped by CLI",
         "thought": "Find or create repository evidence proving `Entrypoints are grouped by CLI`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:8711fa740d78",
+        "kind": "evidence_requirement",
+        "term": "Scheduler honors llm_router health",
+        "thought": "Find or create repository evidence proving `Scheduler honors llm_router health`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:87e84ab102bb",
+        "kind": "evidence_requirement",
+        "term": "slack",
+        "thought": "Find or create repository evidence proving `slack`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:8835a8a04536",
+        "kind": "evidence_requirement",
+        "term": "merge",
+        "thought": "Find or create repository evidence proving `merge`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:88d45b78eab0",
+        "kind": "evidence_requirement",
+        "term": "scripts/graphrag_email_manifest.py",
+        "thought": "Find or create repository evidence proving `scripts/graphrag_email_manifest.py`."
       },
       {
         "goal_id": "G8.S1",
@@ -3374,11 +5329,46 @@
         "thought": "Find or create repository evidence proving `query`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:8ba0fc497e00",
+        "kind": "evidence_requirement",
+        "term": "merge wait",
+        "thought": "Find or create repository evidence proving `merge wait`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:8ba53e6bd83a",
+        "kind": "evidence_requirement",
+        "term": "Cycles and missing dependencies produce bounded repair evidence rather than deadlock.",
+        "thought": "Find or create repository evidence proving `Cycles and missing dependencies produce bounded repair evidence rather than deadlock.`."
+      },
+      {
         "goal_id": "G2.S2",
         "id": "evidence:8d04f2411aea",
         "kind": "evidence_requirement",
         "term": "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q",
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_claim_support_review_playwright_smoke.py -q`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:8d54530561df",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:8da6b26379ae",
+        "kind": "evidence_requirement",
+        "term": "scripts/master_case_email.py",
+        "thought": "Find or create repository evidence proving `scripts/master_case_email.py`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:8e7660bedb49",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py`."
       },
       {
         "goal_id": "G7",
@@ -3395,18 +5385,18 @@
         "thought": "Find or create repository evidence proving `Status payloads include status`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:904b589c7c46",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py`."
+      },
+      {
         "goal_id": "G2",
         "id": "evidence:90aad5a29c12",
         "kind": "evidence_requirement",
         "term": "applications/dashboard_ui.py",
         "thought": "Find or create repository evidence proving `applications/dashboard_ui.py`."
-      },
-      {
-        "goal_id": "G1.S2",
-        "id": "evidence:90ad9322e670",
-        "kind": "evidence_requirement",
-        "term": "scripts/backfill_claim_testimony_links.py",
-        "thought": "Find or create repository evidence proving `scripts/backfill_claim_testimony_links.py`."
       },
       {
         "goal_id": "G3",
@@ -3430,11 +5420,39 @@
         "thought": "Find or create repository evidence proving `and implemented.`."
       },
       {
-        "goal_id": "G1.S2",
-        "id": "evidence:92c9e2129c1c",
+        "goal_id": "G9.S4",
+        "id": "evidence:927f11e8a0b4",
         "kind": "evidence_requirement",
-        "term": "scripts/generate_hacc_email_seed_plan.py",
-        "thought": "Find or create repository evidence proving `scripts/generate_hacc_email_seed_plan.py`."
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:9413d02fb823",
+        "kind": "evidence_requirement",
+        "term": "The train deduplicates by canonical task and commit",
+        "thought": "Find or create repository evidence proving `The train deduplicates by canonical task and commit`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:956ed40bdd4d",
+        "kind": "evidence_requirement",
+        "term": "scripts/run_gmail_duckdb_pipeline.py",
+        "thought": "Find or create repository evidence proving `scripts/run_gmail_duckdb_pipeline.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:969d50121f8d",
+        "kind": "evidence_requirement",
+        "term": "Priority includes critical-path length",
+        "thought": "Find or create repository evidence proving `Priority includes critical-path length`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:96ff840be27d",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py`."
       },
       {
         "goal_id": "G6.S2",
@@ -3465,6 +5483,13 @@
         "thought": "Find or create repository evidence proving `pyproject.toml`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:9b06b30a8336",
+        "kind": "evidence_requirement",
+        "term": "idle",
+        "thought": "Find or create repository evidence proving `idle`."
+      },
+      {
         "goal_id": "G2.S2",
         "id": "evidence:9b1643a62a81",
         "kind": "evidence_requirement",
@@ -3484,6 +5509,13 @@
         "kind": "evidence_requirement",
         "term": "python -m pytest --collect-only -q",
         "thought": "Find or create repository evidence proving `python -m pytest --collect-only -q`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:9cff44eb56a2",
+        "kind": "evidence_requirement",
+        "term": "and escalates to broader validation before merge completion.",
+        "thought": "Find or create repository evidence proving `and escalates to broader validation before merge completion.`."
       },
       {
         "goal_id": "G5.S1",
@@ -3507,11 +5539,32 @@
         "thought": "Find or create repository evidence proving `python scripts/refactor_agent_supervisor.py status`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:a0cca41d0f08",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py`."
+      },
+      {
         "goal_id": "G8",
         "id": "evidence:a15c8b005efe",
         "kind": "evidence_requirement",
         "term": "scripts/refactor_agent_supervisor.py",
         "thought": "Find or create repository evidence proving `scripts/refactor_agent_supervisor.py`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:a27b3895c31c",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:a2ca3aaa0827",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py`."
       },
       {
         "goal_id": "G8",
@@ -3535,11 +5588,53 @@
         "thought": "Find or create repository evidence proving `Screenshots still render with representative support states.`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:a545bea4caae",
+        "kind": "evidence_requirement",
+        "term": "One event-derived snapshot reports ready",
+        "thought": "Find or create repository evidence proving `One event-derived snapshot reports ready`."
+      },
+      {
         "goal_id": "G8.S2",
         "id": "evidence:a598166d8478",
         "kind": "evidence_requirement",
         "term": "Payloads include goal",
         "thought": "Find or create repository evidence proving `Payloads include goal`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:a7104a18ca3a",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:a7c63f0a0ead",
+        "kind": "evidence_requirement",
+        "term": "and receipts carry canonical identity.",
+        "thought": "Find or create repository evidence proving `and receipts carry canonical identity.`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:a8699af15372",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:a8984f209f48",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:a8f2806dbc4c",
+        "kind": "evidence_requirement",
+        "term": "memory",
+        "thought": "Find or create repository evidence proving `memory`."
       },
       {
         "goal_id": "G8.S2",
@@ -3584,6 +5679,13 @@
         "thought": "Find or create repository evidence proving `tests`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:ad242ca6eaf8",
+        "kind": "evidence_requirement",
+        "term": "risk",
+        "thought": "Find or create repository evidence proving `risk`."
+      },
+      {
         "goal_id": "G6",
         "id": "evidence:ad721f8eae07",
         "kind": "evidence_requirement",
@@ -3605,6 +5707,13 @@
         "thought": "Find or create repository evidence proving `applications/ui_review.py`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:ae7d0b0d51ed",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py`."
+      },
+      {
         "goal_id": "G4",
         "id": "evidence:aec270d94d62",
         "kind": "evidence_requirement",
@@ -3619,6 +5728,20 @@
         "thought": "Find or create repository evidence proving `lib/formal_logic`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:b0906225d409",
+        "kind": "evidence_requirement",
+        "term": "migration",
+        "thought": "Find or create repository evidence proving `migration`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:b13a5662e9f5",
+        "kind": "evidence_requirement",
+        "term": "Actual branch diffs and conflict receipts update future conflict weights.",
+        "thought": "Find or create repository evidence proving `Actual branch diffs and conflict receipts update future conflict weights.`."
+      },
+      {
         "goal_id": "G7.S1",
         "id": "evidence:b14bb61fab3f",
         "kind": "evidence_requirement",
@@ -3626,11 +5749,11 @@
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q`."
       },
       {
-        "goal_id": "G1.S2",
-        "id": "evidence:b16aa98bc5a1",
+        "goal_id": "G9.S3",
+        "id": "evidence:b2164f70b9f1",
         "kind": "evidence_requirement",
-        "term": "scripts/agentic_scraper_cli.py",
-        "thought": "Find or create repository evidence proving `scripts/agentic_scraper_cli.py`."
+        "term": "Idle lanes advertise zero occupied capacity and can be reassigned.",
+        "thought": "Find or create repository evidence proving `Idle lanes advertise zero occupied capacity and can be reassigned.`."
       },
       {
         "goal_id": "G3",
@@ -3638,6 +5761,13 @@
         "kind": "evidence_requirement",
         "term": "mediator/evidence_hooks.py",
         "thought": "Find or create repository evidence proving `mediator/evidence_hooks.py`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:b2c7f787b17c",
+        "kind": "evidence_requirement",
+        "term": "objective validation repair",
+        "thought": "Find or create repository evidence proving `objective validation repair`."
       },
       {
         "goal_id": "G6.S2",
@@ -3668,6 +5798,13 @@
         "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:b5b8b9e8060b",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q`."
+      },
+      {
         "goal_id": "G6.S2",
         "id": "evidence:b6368928630c",
         "kind": "evidence_requirement",
@@ -3675,11 +5812,25 @@
         "thought": "Find or create repository evidence proving `Docs explain where to find pid`."
       },
       {
+        "goal_id": "G9.S2",
+        "id": "evidence:b73bf4424e07",
+        "kind": "evidence_requirement",
+        "term": "Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.",
+        "thought": "Find or create repository evidence proving `Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.`."
+      },
+      {
         "goal_id": "G3.S2",
         "id": "evidence:b75f163d96cd",
         "kind": "evidence_requirement",
         "term": "degraded",
         "thought": "Find or create repository evidence proving `degraded`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:b7ef5ed34420",
+        "kind": "evidence_requirement",
+        "term": "context",
+        "thought": "Find or create repository evidence proving `context`."
       },
       {
         "goal_id": "G8.S1",
@@ -3690,10 +5841,10 @@
       },
       {
         "goal_id": "G1.S2",
-        "id": "evidence:bb85e6d6f242",
+        "id": "evidence:bb142c11f46f",
         "kind": "evidence_requirement",
-        "term": "integrations/ipfs_datasets/loader.py",
-        "thought": "Find or create repository evidence proving `integrations/ipfs_datasets/loader.py`."
+        "term": "complaint_generator/email_graphrag.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/email_graphrag.py`."
       },
       {
         "goal_id": "G8.S1",
@@ -3701,6 +5852,20 @@
         "kind": "evidence_requirement",
         "term": "data/refactor_supervisor/refactor_goals.json",
         "thought": "Find or create repository evidence proving `data/refactor_supervisor/refactor_goals.json`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:bba6fed65d3a",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:bbe2b7ca9d35",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py`."
       },
       {
         "goal_id": "G3.S1",
@@ -3722,6 +5887,20 @@
         "kind": "evidence_requirement",
         "term": "Running seed twice does not duplicate active tasks.",
         "thought": "Find or create repository evidence proving `Running seed twice does not duplicate active tasks.`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:bdcb540beb86",
+        "kind": "evidence_requirement",
+        "term": "rebases on the latest target",
+        "thought": "Find or create repository evidence proving `rebases on the latest target`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:bdde20fc9ba1",
+        "kind": "evidence_requirement",
+        "term": "and configured objective priority.",
+        "thought": "Find or create repository evidence proving `and configured objective priority.`."
       },
       {
         "goal_id": "G6.S2",
@@ -3752,6 +5931,27 @@
         "thought": "Find or create repository evidence proving `pyproject.toml`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:c11725387ac3",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:c22cfb2de881",
+        "kind": "evidence_requirement",
+        "term": "scripts/import_local_eml_directory.py",
+        "thought": "Find or create repository evidence proving `scripts/import_local_eml_directory.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:c25110f8c209",
+        "kind": "evidence_requirement",
+        "term": "validation proof",
+        "thought": "Find or create repository evidence proving `validation proof`."
+      },
+      {
         "goal_id": "G7.S1",
         "id": "evidence:c2bbea09ee6c",
         "kind": "evidence_requirement",
@@ -3759,11 +5959,46 @@
         "thought": "Find or create repository evidence proving `tests/test_review_surface_site_playwright.py`."
       },
       {
-        "goal_id": "G1.S2",
-        "id": "evidence:c72881ae0ff5",
+        "goal_id": "G9.S2",
+        "id": "evidence:c2ceb4055b89",
         "kind": "evidence_requirement",
-        "term": "scripts/gmail_duckdb_daemon.py",
-        "thought": "Find or create repository evidence proving `scripts/gmail_duckdb_daemon.py`."
+        "term": "Only tasks whose prerequisite merge receipts succeeded are claimable.",
+        "thought": "Find or create repository evidence proving `Only tasks whose prerequisite merge receipts succeeded are claimable.`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:c42b65d57a6b",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:c5ab4cc20812",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:c5abbd9a555d",
+        "kind": "evidence_requirement",
+        "term": "Metrics include queue wait",
+        "thought": "Find or create repository evidence proving `Metrics include queue wait`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:c75fb1bda58f",
+        "kind": "evidence_requirement",
+        "term": "conflict and retry rate",
+        "thought": "Find or create repository evidence proving `conflict and retry rate`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:c871a9029f07",
+        "kind": "evidence_requirement",
+        "term": "blocked",
+        "thought": "Find or create repository evidence proving `blocked`."
       },
       {
         "goal_id": "G4",
@@ -3771,6 +6006,20 @@
         "kind": "evidence_requirement",
         "term": "docs/ARCHITECTURE.md",
         "thought": "Find or create repository evidence proving `docs/ARCHITECTURE.md`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:cab0d8d767eb",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:cba7aa34790e",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q`."
       },
       {
         "goal_id": "G8.S1",
@@ -3785,6 +6034,13 @@
         "kind": "evidence_requirement",
         "term": "python -m pytest tests/test_ipfs_adapter_layer.py -q",
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_ipfs_adapter_layer.py -q`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:ccf0be45f4d7",
+        "kind": "evidence_requirement",
+        "term": "and cost.",
+        "thought": "Find or create repository evidence proving `and cost.`."
       },
       {
         "goal_id": "G2",
@@ -3815,6 +6071,13 @@
         "thought": "Find or create repository evidence proving `tests`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:d3a129bf7414",
+        "kind": "evidence_requirement",
+        "term": "Refill cannot create a second active task for the same canonical work item.",
+        "thought": "Find or create repository evidence proving `Refill cannot create a second active task for the same canonical work item.`."
+      },
+      {
         "goal_id": "G1.S1",
         "id": "evidence:d63a7f01e052",
         "kind": "evidence_requirement",
@@ -3827,6 +6090,13 @@
         "kind": "evidence_requirement",
         "term": "scripts/synthesize_hacc_complaint.py",
         "thought": "Find or create repository evidence proving `scripts/synthesize_hacc_complaint.py`."
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "evidence:d7ba591b1be5",
+        "kind": "evidence_requirement",
+        "term": "Impact selection is conservative",
+        "thought": "Find or create repository evidence proving `Impact selection is conservative`."
       },
       {
         "goal_id": "G6.S1",
@@ -3843,18 +6113,25 @@
         "thought": "Find or create repository evidence proving `Duplicated tasks are merged or explicitly scoped.`."
       },
       {
+        "goal_id": "G9",
+        "id": "evidence:da587f177f06",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:db7581a81aed",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py`."
+      },
+      {
         "goal_id": "G3.S1",
         "id": "evidence:dc1a9b971692",
         "kind": "evidence_requirement",
         "term": "All adapter groups report stable keys.",
         "thought": "Find or create repository evidence proving `All adapter groups report stable keys.`."
-      },
-      {
-        "goal_id": "G1.S2",
-        "id": "evidence:dc6156b37f89",
-        "kind": "evidence_requirement",
-        "term": "scripts/generate_decision_trees.py",
-        "thought": "Find or create repository evidence proving `scripts/generate_decision_trees.py`."
       },
       {
         "goal_id": "G7.S1",
@@ -3871,6 +6148,13 @@
         "thought": "Find or create repository evidence proving `mediator`."
       },
       {
+        "goal_id": "G9",
+        "id": "evidence:de335a914565",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py`."
+      },
+      {
         "goal_id": "G8.S2",
         "id": "evidence:de7d9a07ab7b",
         "kind": "evidence_requirement",
@@ -3878,11 +6162,32 @@
         "thought": "Find or create repository evidence proving `Status output or a new command lists next tasks by priority.`."
       },
       {
-        "goal_id": "G1",
-        "id": "evidence:dffc51113899",
+        "goal_id": "G9.S2",
+        "id": "evidence:dea74c6e709c",
         "kind": "evidence_requirement",
-        "term": "applications/document_api.py",
-        "thought": "Find or create repository evidence proving `applications/document_api.py`."
+        "term": "and validation prerequisites become explicit DAG edges with provenance.",
+        "thought": "Find or create repository evidence proving `and validation prerequisites become explicit DAG edges with provenance.`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:df17bdef6568",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:df5bd31de44a",
+        "kind": "evidence_requirement",
+        "term": "events",
+        "thought": "Find or create repository evidence proving `events`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:e0a1f18dd526",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py`."
       },
       {
         "goal_id": "G3.S2",
@@ -3892,11 +6197,25 @@
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:e1b38044b34a",
+        "kind": "evidence_requirement",
+        "term": "explainable",
+        "thought": "Find or create repository evidence proving `explainable`."
+      },
+      {
         "goal_id": "G2.S2",
         "id": "evidence:e26b7efa6497",
         "kind": "evidence_requirement",
         "term": "Fixture builders are named and reusable.",
         "thought": "Find or create repository evidence proving `Fixture builders are named and reusable.`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:e29594ce8e5e",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py`."
       },
       {
         "goal_id": "G8",
@@ -3920,6 +6239,13 @@
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:e35dca22d6b6",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py`."
+      },
+      {
         "goal_id": "G1.S2",
         "id": "evidence:e4c396fb1ffa",
         "kind": "evidence_requirement",
@@ -3927,11 +6253,39 @@
         "thought": "Find or create repository evidence proving `applications/complaint_cli.py`."
       },
       {
-        "goal_id": "G1.S2",
-        "id": "evidence:e58b507b3ebe",
+        "goal_id": "G9.S1",
+        "id": "evidence:e60b8a5484c4",
         "kind": "evidence_requirement",
-        "term": "scripts/enrich_email_timeline_authorities.py",
-        "thought": "Find or create repository evidence proving `scripts/enrich_email_timeline_authorities.py`."
+        "term": "retries",
+        "thought": "Find or create repository evidence proving `retries`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:e611883a2074",
+        "kind": "evidence_requirement",
+        "term": "complaint_generator/agentic_evidence_download.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/agentic_evidence_download.py`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:e67d8789d960",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:e6db94d5d757",
+        "kind": "evidence_requirement",
+        "term": "age",
+        "thought": "Find or create repository evidence proving `age`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:e7c74ea61e99",
+        "kind": "evidence_requirement",
+        "term": "Every metric is keyed by canonical goal",
+        "thought": "Find or create repository evidence proving `Every metric is keyed by canonical goal`."
       },
       {
         "goal_id": "G3.S2",
@@ -3939,6 +6293,20 @@
         "kind": "evidence_requirement",
         "term": "Interfaces specify persistence",
         "thought": "Find or create repository evidence proving `Interfaces specify persistence`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:e904e20cc791",
+        "kind": "evidence_requirement",
+        "term": "submodules",
+        "thought": "Find or create repository evidence proving `submodules`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:eaf1a15f8ff6",
+        "kind": "evidence_requirement",
+        "term": "scripts/process_hacc_pdfs_to_kg.py",
+        "thought": "Find or create repository evidence proving `scripts/process_hacc_pdfs_to_kg.py`."
       },
       {
         "goal_id": "G6",
@@ -3955,11 +6323,32 @@
         "thought": "Find or create repository evidence proving `playwright/server.js`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:ed1e769b882f",
+        "kind": "evidence_requirement",
+        "term": "implementation and validation duration",
+        "thought": "Find or create repository evidence proving `implementation and validation duration`."
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "evidence:ed541024c30e",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py`."
+      },
+      {
         "goal_id": "G3.S2",
         "id": "evidence:ef31188d6fc1",
         "kind": "evidence_requirement",
         "term": "Logic status distinguishes unavailable",
         "thought": "Find or create repository evidence proving `Logic status distinguishes unavailable`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:efdcabf51e4b",
+        "kind": "evidence_requirement",
+        "term": "interfaces",
+        "thought": "Find or create repository evidence proving `interfaces`."
       },
       {
         "goal_id": "G5.S1",
@@ -3983,6 +6372,13 @@
         "thought": "Find or create repository evidence proving `mediator/mediator.py`."
       },
       {
+        "goal_id": "G9.S4",
+        "id": "evidence:f0d370c0d204",
+        "kind": "evidence_requirement",
+        "term": "subgoal",
+        "thought": "Find or create repository evidence proving `subgoal`."
+      },
+      {
         "goal_id": "G6",
         "id": "evidence:f0ebe5884b9c",
         "kind": "evidence_requirement",
@@ -3990,11 +6386,67 @@
         "thought": "Find or create repository evidence proving `docs/observability/TROUBLESHOOTING.md`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:f1ae52ce4778",
+        "kind": "evidence_requirement",
+        "term": "and preserves priority plus age fairness.",
+        "thought": "Find or create repository evidence proving `and preserves priority plus age fairness.`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:f2598c52d46c",
+        "kind": "evidence_requirement",
+        "term": "complaint_generator/email_authority_enrichment.py",
+        "thought": "Find or create repository evidence proving `complaint_generator/email_authority_enrichment.py`."
+      },
+      {
         "goal_id": "G8",
         "id": "evidence:f3c9c110124e",
         "kind": "evidence_requirement",
         "term": "data/refactor_supervisor/refactor_goals.json",
         "thought": "Find or create repository evidence proving `data/refactor_supervisor/refactor_goals.json`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:f4888c327f9e",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:f4f649fa8ab9",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:f56dc3cd8d39",
+        "kind": "evidence_requirement",
+        "term": "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
+        "thought": "Find or create repository evidence proving `data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md`."
+      },
+      {
+        "goal_id": "G9",
+        "id": "evidence:f617360e921f",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:f6d45ae4a3d0",
+        "kind": "evidence_requirement",
+        "term": "task",
+        "thought": "Find or create repository evidence proving `task`."
+      },
+      {
+        "goal_id": "G1.S2",
+        "id": "evidence:f6dd90ff37fe",
+        "kind": "evidence_requirement",
+        "term": "scripts/import_gmail_evidence.py",
+        "thought": "Find or create repository evidence proving `scripts/import_gmail_evidence.py`."
       },
       {
         "goal_id": "G5.S1",
@@ -4025,11 +6477,25 @@
         "thought": "Find or create repository evidence proving `mediator/state.py`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:f9297029af09",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py`."
+      },
+      {
         "goal_id": "G1.S2",
         "id": "evidence:fa07cb938291",
         "kind": "evidence_requirement",
         "term": "Degraded mode still imports cleanly.",
         "thought": "Find or create repository evidence proving `Degraded mode still imports cleanly.`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:fa1d3d193d04",
+        "kind": "evidence_requirement",
+        "term": "Scheduler decisions consume the same snapshot exposed to operators.",
+        "thought": "Find or create repository evidence proving `Scheduler decisions consume the same snapshot exposed to operators.`."
       },
       {
         "goal_id": "G5",
@@ -4046,11 +6512,39 @@
         "thought": "Find or create repository evidence proving `mediator/state.py`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:fa3b8f3d9fce",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:fa5d549fb7eb",
+        "kind": "evidence_requirement",
+        "term": "AST and evidence records are reused by blob hash and only changed files are reparsed.",
+        "thought": "Find or create repository evidence proving `AST and evidence records are reused by blob hash and only changed files are reparsed.`."
+      },
+      {
         "goal_id": "G5.S1",
         "id": "evidence:fa5f0a514335",
         "kind": "evidence_requirement",
         "term": "Stop command terminates the daemon cleanly.",
         "thought": "Find or create repository evidence proving `Stop command terminates the daemon cleanly.`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:fa749a213c0f",
+        "kind": "evidence_requirement",
+        "term": "Candidates declare predicted files and symbols",
+        "thought": "Find or create repository evidence proving `Candidates declare predicted files and symbols`."
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "evidence:fac3b20b59c5",
+        "kind": "evidence_requirement",
+        "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py",
+        "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py`."
       },
       {
         "goal_id": "G1.S2",
@@ -4060,6 +6554,13 @@
         "thought": "Find or create repository evidence proving `python -m pytest tests/test_ipfs_adapter_layer.py -q`."
       },
       {
+        "goal_id": "G9.S1",
+        "id": "evidence:fc4dbfc7ad7e",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q`."
+      },
+      {
         "goal_id": "G8.S1",
         "id": "evidence:fc5866207ab9",
         "kind": "evidence_requirement",
@@ -4067,11 +6568,25 @@
         "thought": "Find or create repository evidence proving `docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md`."
       },
       {
-        "goal_id": "G1.S2",
-        "id": "evidence:fd937b37b2d6",
+        "goal_id": "G9.S2",
+        "id": "evidence:fdc295838f4b",
         "kind": "evidence_requirement",
-        "term": "applications/document_api.py",
-        "thought": "Find or create repository evidence proving `applications/document_api.py`."
+        "term": "Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.",
+        "thought": "Find or create repository evidence proving `Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.`."
+      },
+      {
+        "goal_id": "G1",
+        "id": "evidence:fe1be3fc60f0",
+        "kind": "evidence_requirement",
+        "term": "scripts/import_local_eml_directory.py",
+        "thought": "Find or create repository evidence proving `scripts/import_local_eml_directory.py`."
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "evidence:fec8cde945a6",
+        "kind": "evidence_requirement",
+        "term": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q",
+        "thought": "Find or create repository evidence proving `PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q`."
       },
       {
         "goal_id": "G8",
@@ -4081,6 +6596,13 @@
         "thought": "Find or create repository evidence proving `docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md`."
       },
       {
+        "goal_id": "G9.S3",
+        "id": "evidence:fefe8fdacc31",
+        "kind": "evidence_requirement",
+        "term": "latency",
+        "thought": "Find or create repository evidence proving `latency`."
+      },
+      {
         "goal_id": "G1.S2",
         "id": "evidence:ff9cc437b297",
         "kind": "evidence_requirement",
@@ -4088,11 +6610,18 @@
         "thought": "Find or create repository evidence proving `Production direct imports are replaced or documented.`."
       },
       {
+        "goal_id": "G1.S2",
+        "id": "evidence:ffd947f5320d",
+        "kind": "evidence_requirement",
+        "term": "scripts/run_hacc_preset_matrix.py",
+        "thought": "Find or create repository evidence proving `scripts/run_hacc_preset_matrix.py`."
+      },
+      {
         "goal_id": "G1",
         "id": "goal:G1",
         "kind": "goal",
         "priority": "P0",
-        "status": "active",
+        "status": "completed",
         "thought": "Stabilize repository boundaries",
         "title": "Stabilize repository boundaries",
         "track": "ops"
@@ -4122,7 +6651,7 @@
         "id": "goal:G2",
         "kind": "goal",
         "priority": "P0",
-        "status": "active",
+        "status": "completed",
         "thought": "Decompose oversized orchestration modules",
         "title": "Decompose oversized orchestration modules",
         "track": "ops"
@@ -4182,7 +6711,7 @@
         "id": "goal:G4",
         "kind": "goal",
         "priority": "P1",
-        "status": "active",
+        "status": "completed",
         "thought": "Improve validation speed and confidence",
         "title": "Improve validation speed and confidence",
         "track": "ops"
@@ -4202,7 +6731,7 @@
         "id": "goal:G5",
         "kind": "goal",
         "priority": "P0",
-        "status": "active",
+        "status": "completed",
         "thought": "Make automation observable and refillable",
         "title": "Make automation observable and refillable",
         "track": "ops"
@@ -4298,6 +6827,56 @@
         "track": "ops"
       },
       {
+        "goal_id": "G9",
+        "id": "goal:G9",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "completed",
+        "thought": "Increase agent-supervisor planning quality and throughput",
+        "title": "Increase agent-supervisor planning quality and throughput",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G9.S1",
+        "id": "goal:G9.S1",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Establish canonical coordination and merge flow",
+        "title": "Establish canonical coordination and merge flow",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G9.S2",
+        "id": "goal:G9.S2",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Plan from dependencies, conflicts, and objective value",
+        "title": "Plan from dependencies, conflicts, and objective value",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G9.S3",
+        "id": "goal:G9.S3",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Adapt execution capacity and validation cost",
+        "title": "Adapt execution capacity and validation cost",
+        "track": "ops"
+      },
+      {
+        "goal_id": "G9.S4",
+        "id": "goal:G9.S4",
+        "kind": "goal",
+        "priority": "P0",
+        "status": "active",
+        "thought": "Close the scheduler feedback and lifecycle loop",
+        "title": "Close the scheduler feedback and lifecycle loop",
+        "track": "ops"
+      },
+      {
         "command": "python -m pytest --collect-only -q",
         "goal_id": "G4",
         "id": "validation:033e169ea47e",
@@ -4312,9 +6891,30 @@
         "thought": "Run this validation before closing the goal."
       },
       {
+        "command": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q",
+        "goal_id": "G9.S1",
+        "id": "validation:0f1c31ceff26",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q",
+        "goal_id": "G9.S4",
+        "id": "validation:1121ae702863",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
         "command": "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q, python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q",
         "goal_id": "G3.S2",
         "id": "validation:1406d98f373c",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q",
+        "goal_id": "G9.S3",
+        "id": "validation:1b2a7a8e07a2",
         "kind": "validation_strategy",
         "thought": "Run this validation before closing the goal."
       },
@@ -4389,6 +6989,13 @@
         "thought": "Run this validation before closing the goal."
       },
       {
+        "command": "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q",
+        "goal_id": "G9.S2",
+        "id": "validation:99ef1b6d42e6",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
         "command": "python -m pytest tests/test_review_api.py -q, python -m pytest tests/test_claim_support_review_playwright_smoke.py -q",
         "goal_id": "G2.S2",
         "id": "validation:a662b17ac165",
@@ -4427,6 +7034,13 @@
         "command": "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q, python scripts/refactor_agent_supervisor.py status",
         "goal_id": "G6.S2",
         "id": "validation:e41cb08333ec",
+        "kind": "validation_strategy",
+        "thought": "Run this validation before closing the goal."
+      },
+      {
+        "command": "python -m pytest --collect-only -q",
+        "goal_id": "G9",
+        "id": "validation:e8684e936096",
         "kind": "validation_strategy",
         "thought": "Run this validation before closing the goal."
       },
