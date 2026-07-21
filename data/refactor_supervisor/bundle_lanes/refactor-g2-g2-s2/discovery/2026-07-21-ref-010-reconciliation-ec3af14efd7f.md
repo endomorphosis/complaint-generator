@@ -122,3 +122,61 @@ Work surface: `1` candidates, `1` sampled records.
   ]
 }
 ```
+
+## Resolution Evidence
+
+Resolved on 2026-07-21 by merging the stale backlogged branch
+`implementation/ref-007-attempt-1-1784663183` into `main` and rerunning the
+scoped lane reconciliation pass.
+
+Preflight conflict before resolution:
+
+- Exact preflight command: `git merge-tree --write-tree main implementation/ref-007-attempt-1-1784663183`.
+- Result: return code `1`, `CONFLICT (add/add)` in `scripts/refactor_agent_supervisor.py`.
+
+Deliberate merge decision:
+
+- Merged branch commit `c0ab3ee` via merge commit `7792c3e`.
+- Kept the `main` side of `scripts/refactor_agent_supervisor.py` for the
+  supervisor merge-resolver/watchdog guardrails already preserved on `main`.
+- Preserved the stale branch's non-conflicting application changes in
+  `applications/complaint_workspace.py` and `applications/review_api.py`.
+- Preserved the branch's active-bundle todo parser hunk in follow-up commit
+  `f1bb602` because it matches the generated checkbox-plus-heading todo format.
+
+Validation:
+
+- `python -m pytest tests/test_review_api.py -q` passed on the stale branch
+  before merge: 36 passed, 1 warning.
+- `python -m pytest tests/test_review_api.py -q` failed on `main` before merge:
+  2 failed, 34 passed, 1 warning.
+- `python -m pytest tests/test_review_api.py -q` passed on `main` after merge:
+  36 passed, 1 warning.
+
+Scoped reconciliation rerun:
+
+```sh
+PYTHONPATH=/home/barberb/complaint-generator/ipfs_datasets_py/ipfs_accelerate_py \
+python -m ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor \
+  --once --reconciliation-only \
+  --todo-path /home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md \
+  --state-dir /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/state \
+  --state-prefix agent_refactor_g2_g2_s2 \
+  --task-prefix REF- \
+  --worktree-root /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s2 \
+  --worktree-submodule-path ipfs_datasets_py/ipfs_accelerate_py \
+  --worktree-reconciliation-max-merges 1 \
+  --no-worktree-scan-cache \
+  --log-level INFO
+```
+
+Result:
+
+- `main_checkout_dirty`: `false`.
+- `raw_main_checkout_dirty`: `false`.
+- `candidate_count`: decreased from `1` to `0`.
+- `preflight_blocked_count`: decreased from `1` to `0`.
+- `reconciliation_guardrail_count`: `0`.
+- `worktree_cleanup.removed_count`: `1`; the stale worktree
+  `ref-007-attempt-1-1784663183` and branch
+  `implementation/ref-007-attempt-1-1784663183` were removed after the merge.
