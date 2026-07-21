@@ -1,7 +1,7 @@
 # REF-034 Reconciliation Guardrail
 
 Date: 2026-07-21
-Fingerprint: 58176a0bb299301c09175102b78e2b0657e6131a
+Fingerprint: 21ac8f2f53fc2c0e8eb66551ba6b77d864efa7d9
 Kind: preflight_merge_conflict
 Reason: preflight_merge_conflict
 Candidate count: 2
@@ -30,6 +30,7 @@ Track: ops
   - Conflict paths:
     - `applications/complaint_workspace.py`
     - `data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md`
+    - `data/refactor_supervisor/objective_graph.json`
     - `data/refactor_supervisor/refactor_objective_heap.md`
     - `tests/test_package_imports.py`
 
@@ -102,6 +103,7 @@ Work surface: `2` candidates, `2` sampled records.
   "conflict_path_counts": {
     "applications/complaint_workspace.py": 2,
     "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md": 1,
+    "data/refactor_supervisor/objective_graph.json": 1,
     "data/refactor_supervisor/refactor_objective_heap.md": 1,
     "docs/ARCHITECTURE.md": 1,
     "docs/REFACTOR_SUPERVISOR_TASKBOARD.md": 1,
@@ -110,7 +112,7 @@ Work surface: `2` candidates, `2` sampled records.
     "tests/test_package_imports.py": 2
   },
   "dedupe_key": "reconciliation_guardrail:preflight_merge_conflict",
-  "fingerprint": "58176a0bb299301c09175102b78e2b0657e6131a",
+  "fingerprint": "21ac8f2f53fc2c0e8eb66551ba6b77d864efa7d9",
   "kind": "preflight_merge_conflict",
   "main_dirty_evidence": {},
   "reason": "preflight_merge_conflict",
@@ -132,6 +134,7 @@ Work surface: `2` candidates, `2` sampled records.
     "scripts/refactor_agent_supervisor.py",
     "tests/test_package_imports.py",
     "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
+    "data/refactor_supervisor/objective_graph.json",
     "data/refactor_supervisor/refactor_objective_heap.md"
   ],
   "sample_worktrees": [
@@ -148,6 +151,7 @@ Work surface: `2` candidates, `2` sampled records.
     "applications/complaint_workspace.py",
     "tests/test_package_imports.py",
     "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
+    "data/refactor_supervisor/objective_graph.json",
     "data/refactor_supervisor/refactor_objective_heap.md",
     "docs/ARCHITECTURE.md",
     "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",

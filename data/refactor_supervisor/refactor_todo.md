@@ -678,7 +678,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Completion: manual
 - Priority: P1
 - Track: ops
-- Fingerprint: 58176a0bb299301c09175102b78e2b0657e6131a
+- Fingerprint: 21ac8f2f53fc2c0e8eb66551ba6b77d864efa7d9
 - Dedupe key: reconciliation_guardrail:preflight_merge_conflict
 - Depends on:
 - Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_todo.md
