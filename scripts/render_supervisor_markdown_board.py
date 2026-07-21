@@ -43,6 +43,11 @@ def _task_status(task: dict[str, Any]) -> str:
     return STATUS_MAP.get(str(task.get("status") or "planned"), "todo")
 
 
+def _daemon_task_id(task_id: str) -> str:
+    task_id = str(task_id).strip()
+    return task_id if task_id.startswith("SUP-") else f"SUP-{task_id}"
+
+
 def render_board(board: dict[str, Any]) -> str:
     lines = [
         "# IPFS Supervisor Daemon Task Board",
@@ -54,10 +59,11 @@ def render_board(board: dict[str, Any]) -> str:
 
     for task in board.get("tasks", []):
         canonical_task_id = str(task["task_id"])
-        task_id = f"SUP-{canonical_task_id}"
+        task_id = _daemon_task_id(canonical_task_id)
         title = str(task["title"])
         target_files = [str(item) for item in task.get("target_files", [])]
         validation = [str(item) for item in task.get("validation_commands", [])]
+        dependencies = [_daemon_task_id(str(item)) for item in task.get("depends_on", [])]
         acceptance = " ".join(str(item).strip() for item in task.get("acceptance_criteria", []) if str(item).strip())
         outputs = target_files[:]
         if task.get("source_doc"):
@@ -72,7 +78,7 @@ def render_board(board: dict[str, Any]) -> str:
                 "- Completion: validation",
                 f"- Priority: {task.get('priority', 'P2')}",
                 f"- Track: {str(task_id).split('-', 1)[0].lower()}",
-                f"- Depends on: {_csv([str(item) for item in task.get('depends_on', [])])}",
+                f"- Depends on: {_csv(dependencies)}",
                 f"- Outputs: {_csv(outputs)}",
                 f"- Validation: {'; '.join(validation)}",
                 f"- Acceptance: {acceptance}",

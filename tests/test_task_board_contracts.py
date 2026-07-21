@@ -116,6 +116,7 @@ def test_markdown_projection_rejects_duplicate_outputs(tmp_path: Path) -> None:
                 "",
                 "## SUP-CONTRACT-PAYLOADS Payload contract validation",
                 "",
+                "- Depends on: PAYLOAD-ROOT",
                 "- Outputs: docs/PAYLOAD_CONTRACTS.md, docs/PAYLOAD_CONTRACTS.md",
                 "- Source doc: docs/PAYLOAD_CONTRACTS.md",
                 "- Canonical task id: CONTRACT-PAYLOADS",
@@ -131,6 +132,7 @@ def test_markdown_projection_rejects_duplicate_outputs(tmp_path: Path) -> None:
                 "task_id": "CONTRACT-PAYLOADS",
                 "status": "validation_required",
                 "source_doc": "docs/PAYLOAD_CONTRACTS.md",
+                "depends_on": ["PAYLOAD-ROOT"],
             }
         ]
     }
@@ -141,7 +143,11 @@ def test_markdown_projection_rejects_duplicate_outputs(tmp_path: Path) -> None:
         repo_root=tmp_path,
     )
 
-    assert errors == [
-        "ipfs_supervisor_task_board.md:5: Outputs contains duplicate entry "
+    assert (
+        "ipfs_supervisor_task_board.md: missing line '- Depends on: SUP-PAYLOAD-ROOT' "
+        "for SUP-CONTRACT-PAYLOADS"
+    ) in errors
+    assert (
+        "ipfs_supervisor_task_board.md:6: Outputs contains duplicate entry "
         "'docs/PAYLOAD_CONTRACTS.md'"
-    ]
+    ) in errors

@@ -387,28 +387,39 @@ def _validate_markdown_projection(
     if not isinstance(tasks, list):
         return []
 
+    def daemon_task_id(task_id: str) -> str:
+        task_id = str(task_id).strip()
+        return task_id if task_id.startswith("SUP-") else f"SUP-{task_id}"
+
     for task in tasks:
         if not isinstance(task, dict):
             continue
         task_id = task.get("task_id")
         if not isinstance(task_id, str):
             continue
-        heading = f"## SUP-{task_id} "
+        rendered_task_id = daemon_task_id(task_id)
+        heading = f"## {rendered_task_id} "
         if text.count(heading) != 1:
             errors.append(
                 f"{_display_path(markdown_path, repo_root)}: expected exactly one "
-                f"markdown section for SUP-{task_id}"
+                f"markdown section for {rendered_task_id}"
             )
+        expected_dependencies = ", ".join(
+            daemon_task_id(dependency)
+            for dependency in task.get("depends_on", [])
+            if isinstance(dependency, str) and dependency.strip()
+        )
         for field_name, expected in (
             ("Canonical task id", task_id),
             ("Canonical status", str(task.get("status", ""))),
             ("Source doc", str(task.get("source_doc", ""))),
+            ("Depends on", expected_dependencies),
         ):
             line = f"- {field_name}: {expected}"
             if line not in text:
                 errors.append(
                     f"{_display_path(markdown_path, repo_root)}: missing line {line!r} "
-                    f"for SUP-{task_id}"
+                    f"for {rendered_task_id}"
                 )
 
     for line_number, line in enumerate(text.splitlines(), start=1):

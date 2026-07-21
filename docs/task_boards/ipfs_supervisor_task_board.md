@@ -51,7 +51,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P1
 - Track: sup
-- Depends on: CSR-M2
+- Depends on: SUP-CSR-M2
 - Outputs: integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, complaint_phases/dependency_graph.py, mediator/claim_support_hooks.py, templates/claim_support_review.html, docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_claim_support_hooks.py -q; python -m pytest tests/test_review_api.py -q
 - Acceptance: Each claim element can show a graph-backed support path. Review flows reuse persisted graph snapshots. Entity resolution reduces duplicate source nodes.
@@ -65,7 +65,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P1
 - Track: sup
-- Depends on: CSR-M2
+- Depends on: SUP-CSR-M2
 - Outputs: integrations/ipfs_datasets/vector_store.py, integrations/ipfs_datasets/documents.py, mediator/claim_support_hooks.py, templates/claim_support_review.html, docs/PAYLOAD_CONTRACTS.md, docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_m4_retrieval_sessions.py -q; python -m pytest tests/test_claim_support_hooks.py -q
 - Acceptance: Operators can inspect ranked chunks for a claim element. Retrieval sessions are replayable. Questions can cite retrieval context.
@@ -79,7 +79,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P0
 - Track: sup
-- Depends on: CSR-M2
+- Depends on: SUP-CSR-M2
 - Outputs: integrations/ipfs_datasets/logic.py, integrations/ipfs_datasets/graphrag.py, mediator/claim_support_hooks.py, complaint_phases/legal_graph.py, complaint_phases/neurosymbolic_matcher.py, templates/claim_support_review.html, docs/PAYLOAD_CONTRACTS.md, docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_claim_support_hooks.py -q; python -m pytest tests/test_probate_integration.py -q
 - Acceptance: Review payloads distinguish supported, missing, contradicted, uncertain, and exception-barred elements. Proof results include concise explanations tied to facts, authorities, or failed predicates. Dashboard shows facts applied to law.
@@ -93,7 +93,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P1
 - Track: sup
-- Depends on: CSR-M5
+- Depends on: SUP-CSR-M5
 - Outputs: templates/claim_support_review.html, templates/document.html, mediator/claim_support_hooks.py, applications/server.py, docs/APPLICATIONS.md, docs/PAYLOAD_CONTRACTS.md, docs/CLAIM_SUPPORT_REVIEW_DASHBOARD_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_document_pipeline.py -q; python -m pytest tests/test_review_api.py -q
 - Acceptance: Operators can move from intake to proof review to drafting impact in one workflow. Unresolved elements expose visible next actions. Document generation consumes validated support state.
@@ -141,7 +141,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Acceptance: Mediator explains each question proof objective. Repeated questions fall without reducing claim-element coverage.
 - Source doc: docs/INTAKE_EVIDENCE_EXECUTION_BACKLOG.md
 - Canonical task id: IE-B2
-- Canonical status: validation_required
+- Canonical status: complete
 
 ## SUP-IE-B3 Claim ambiguity and contradiction workflow
 
@@ -247,7 +247,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P0
 - Track: sup
-- Depends on: IPFS-M0
+- Depends on: SUP-IPFS-M0
 - Outputs: integrations/ipfs_datasets/documents.py, integrations/ipfs_datasets/types.py, integrations/ipfs_datasets/provenance.py, mediator/evidence_hooks.py, mediator/web_evidence_hooks.py, mediator/legal_authority_hooks.py, docs/PAYLOAD_CONTRACTS.md, docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md
 - Validation: python -m pytest tests/test_evidence_hooks.py -q; python -m pytest tests/test_web_evidence_hooks.py -q; python -m pytest tests/test_legal_authority_hooks.py -q
 - Acceptance: Evidence, web evidence, and authority text produce one parse contract family. Document-format handling does not leak into mediator code.
@@ -261,7 +261,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P0
 - Track: sup
-- Depends on: IPFS-M1
+- Depends on: SUP-IPFS-M1
 - Outputs: integrations/ipfs_datasets/graphs.py, mediator/claim_support_hooks.py, mediator/evidence_hooks.py, mediator/web_evidence_hooks.py, mediator/legal_authority_hooks.py, mediator/mediator.py, complaint_phases/knowledge_graph.py, complaint_phases/dependency_graph.py, docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md
 - Validation: python -m pytest tests/test_claim_support_hooks.py -q; python -m pytest tests/test_review_api.py -q; python -m pytest tests/test_evidence_hooks.py tests/test_claim_support_hooks.py tests/test_legal_authority_hooks.py -q
 - Acceptance: Mediator review flows explain coverage using provenance-backed support traces.
@@ -275,7 +275,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P1
 - Track: sup
-- Depends on: IPFS-M2
+- Depends on: SUP-IPFS-M2
 - Outputs: integrations/ipfs_datasets/graphrag.py, integrations/ipfs_datasets/logic.py, complaint_phases/legal_graph.py, complaint_phases/neurosymbolic_matcher.py, complaint_phases/phase_manager.py, mediator/claim_support_hooks.py, mediator/mediator.py, docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md
 - Validation: python -m pytest tests/test_m3_graphrag_quality_scoring.py -q; python -m pytest tests/test_ipfs_logic_adapter.py -q; python -m pytest tests/test_m5_legal_proof_contradiction_engine.py -q
 - Acceptance: Support strength, missing premises, and contradictions surface before drafting for at least one complaint workflow.
@@ -289,7 +289,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P1
 - Track: sup
-- Depends on: IPFS-M3
+- Depends on: SUP-IPFS-M3
 - Outputs: applications/review_api.py, mediator/mediator.py, mediator/web_evidence_hooks.py, docs/APPLICATIONS.md, docs/PAYLOAD_CONTRACTS.md, docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md
 - Validation: python -m pytest tests/test_review_api.py -q; python -m pytest tests/test_web_evidence_hooks.py tests/test_claim_support_hooks.py tests/test_review_api.py -q
 - Acceptance: Operators can inspect coverage, contradictions, provenance, and queued enrichment work without raw tables.
@@ -303,7 +303,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P0
 - Track: sup
-- Depends on: IPFS-M4
+- Depends on: SUP-IPFS-M4
 - Outputs: document_pipeline.py, applications/document_api.py, templates/document.html, mediator/mediator.py, mediator/claim_support_hooks.py, claim_support_review.py, docs/APPLICATIONS.md, docs/PAYLOAD_CONTRACTS.md, docs/IPFS_DATASETS_PY_MILESTONE_CHECKLIST.md
 - Validation: python -m pytest tests/test_document_pipeline.py -q; python -m pytest tests/test_claim_support_review_template.py -q; python -m pytest tests/test_review_api.py -q
 - Acceptance: At least one complaint workflow emits a filing draft with explicit readiness and warning metadata. Operators can move from support review into drafting without losing provenance.
@@ -331,7 +331,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P0
 - Track: sup
-- Depends on: TEMP-T0
+- Depends on: SUP-TEMP-T0
 - Outputs: complaint_phases/intake_case_file.py, mediator/claim_support_hooks.py, mediator/mediator.py, docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_t1_t3_temporal_next_steps.py -q; python -m pytest tests/test_claim_support_hooks.py tests/test_mediator_three_phase.py -q; python -m pytest tests/test_review_api.py -q
 - Acceptance: Claim-level temporal summaries are reproducible from one graph assembly path. Temporal readiness traces to fact and relation IDs. Temporal warnings align with graph issues.
@@ -345,7 +345,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P0
 - Track: sup
-- Depends on: TEMP-T1
+- Depends on: SUP-TEMP-T1
 - Outputs: complaint_analysis/decision_trees.py, complaint_analysis/legal_patterns.py, complaint_analysis/temporal_rule_profiles.py, docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_claim_support_hooks.py -q; python -m pytest tests/test_review_api.py -q
 - Acceptance: At least one claim type evaluates chronology against an explicit rule profile. Proof failures identify missing events, ordering relations, or legal-window violations. Rule-profile evaluation is independent of HTML rendering.
@@ -359,7 +359,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P0
 - Track: sup
-- Depends on: TEMP-T2
+- Depends on: SUP-TEMP-T2
 - Outputs: mediator/claim_support_hooks.py, claim_support_review.py, integrations/ipfs_datasets/logic.py, docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_claim_support_hooks.py tests/test_review_api.py -q; python -m pytest tests/test_claim_support_review_dashboard_flow.py -q
 - Acceptance: Theorem exports are reproducible from persisted proof bundles. Operator formula previews come from the same bundle used for proof execution. Proof failures identify concrete missing facts or relations.
@@ -373,7 +373,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P1
 - Track: sup
-- Depends on: TEMP-T3
+- Depends on: SUP-TEMP-T3
 - Outputs: mediator/claim_support_hooks.py, complaint_phases/denoiser.py, mediator/mediator.py, intake_status.py, docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_mediator_three_phase.py tests/test_intake_status.py -q; python -m pytest tests/test_claim_support_review_dashboard_flow.py -q
 - Acceptance: Each blocking temporal issue yields explicit next action. Operators can see the affected rule or fact. Follow-up planning distinguishes temporal gaps from non-temporal missingness.
@@ -387,7 +387,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P1
 - Track: sup
-- Depends on: TEMP-T4
+- Depends on: SUP-TEMP-T4
 - Outputs: templates/claim_support_review.html, templates/document.html, templates/optimization_trace.html, applications/review_api.py, applications/document_api.py, docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_claim_support_review_dashboard_flow.py tests/test_claim_support_review_playwright_smoke.py -q; python -m pytest tests/test_claim_support_review_template.py -q
 - Acceptance: Operators can move from summary metrics to concrete chronology blockers. Drafting surfaces do not overstate readiness when timing rules are unproved. Review and document flows consume the same temporal proof payloads.
@@ -401,7 +401,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 - Completion: validation
 - Priority: P0
 - Track: sup
-- Depends on: TEMP-T5
+- Depends on: SUP-TEMP-T5
 - Outputs: tests/test_t1_t3_temporal_next_steps.py, tests/test_temporal_rule_profiles.py, tests/test_claim_support_hooks.py, tests/test_review_api.py, tests/test_mediator_three_phase.py, tests/test_claim_support_review_dashboard_flow.py, tests/test_claim_support_review_playwright_smoke.py, tests/test_intake_status.py, docs/TEMPORAL_TIMELINE_PROOF_EXECUTION_BACKLOG.md
 - Validation: python -m pytest tests/test_claim_support_hooks.py tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py tests/test_claim_support_review_playwright_smoke.py tests/test_mediator_three_phase.py tests/test_intake_status.py -q; python scripts/run_claim_support_review_regression.py --browser on
 - Acceptance: Chronology regressions fail on payload drift and UI drift. At least one gold case proves sufficient ordering and one fails for an explainable temporal reason.

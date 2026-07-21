@@ -286,7 +286,7 @@
       "task_id": "IE-B2",
       "title": "Proof-directed question planner",
       "source_doc": "docs/INTAKE_EVIDENCE_EXECUTION_BACKLOG.md",
-      "status": "validation_required",
+      "status": "complete",
       "priority": "P0",
       "target_files": [
         "complaint_phases/denoiser.py",
