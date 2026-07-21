@@ -495,7 +495,15 @@ class Mediator:
 			)
 
 		scored_candidates.sort(key=_sort_key)
-		selected = scored_candidates[:max_questions]
+		denoiser = getattr(self, 'denoiser', None)
+		if denoiser is not None and hasattr(denoiser, '_select_proof_directed_candidates'):
+			selected = denoiser._select_proof_directed_candidates(
+				scored_candidates,
+				max_questions=max_questions,
+				preserve_order=True,
+			)
+		else:
+			selected = scored_candidates[:max_questions]
 		return self._apply_exhibit_ready_intake_questioning(
 			selected,
 			gap_context=gap_context,
@@ -1657,6 +1665,9 @@ class Mediator:
 		explanation['intake_priority_match_count'] = intake_priority_match_count
 		explanation['blocker_closure_match_count'] = blocker_closure_match_count
 		annotated['ranking_explanation'] = explanation
+		denoiser = getattr(self, 'denoiser', None)
+		if denoiser is not None and hasattr(denoiser, '_annotate_proof_directed_candidate'):
+			annotated = denoiser._annotate_proof_directed_candidate(annotated)
 		return annotated
 
 	def io(self, text):
@@ -7466,6 +7477,20 @@ class Mediator:
 			'expected_update_kind': _pick_str(question_payload.get('expected_update_kind')),
 			'priority_reason': _pick_str(question_payload.get('priority_reason')),
 			'expected_proof_gain': _pick_str(question_payload.get('expected_proof_gain')),
+			'proof_objective': _pick_str(
+				question_payload.get('proof_objective'),
+				ranking_explanation.get('proof_objective'),
+			),
+			'proof_objective_id': _pick_str(
+				question_payload.get('proof_objective_id'),
+				question_payload.get('question_objective_key'),
+				ranking_explanation.get('proof_objective_id'),
+				ranking_explanation.get('question_objective_key'),
+			),
+			'coverage_key': _pick_str(
+				question_payload.get('coverage_key'),
+				ranking_explanation.get('coverage_key'),
+			),
 			'phase1_section': _pick_str(
 				question_payload.get('phase1_section'),
 				ranking_explanation.get('phase1_section'),
@@ -7526,26 +7551,45 @@ class Mediator:
 		summary = {
 			'count': 0,
 			'question_objective_counts': {},
+			'proof_objective_counts': {},
 			'expected_update_kind_counts': {},
 			'target_claim_type_counts': {},
 			'target_element_id_counts': {},
+			'novelty_score_total': 0.0,
+			'novelty_score_count': 0,
+			'average_novelty_score': 0.0,
 		}
 		normalized_records = [record for record in records if isinstance(record, dict)] if isinstance(records, list) else []
 		summary['count'] = len(normalized_records)
 		for record in normalized_records:
 			intent = record.get('intake_question_intent') if isinstance(record.get('intake_question_intent'), dict) else {}
 			question_objective = str(intent.get('question_objective') or '').strip()
+			proof_objective_id = str(intent.get('proof_objective_id') or intent.get('proof_objective') or '').strip()
 			expected_update_kind = str(intent.get('expected_update_kind') or '').strip()
 			target_claim_type = str(intent.get('target_claim_type') or '').strip()
 			target_element_id = str(intent.get('target_element_id') or '').strip()
 			if question_objective:
 				summary['question_objective_counts'][question_objective] = summary['question_objective_counts'].get(question_objective, 0) + 1
+			if proof_objective_id:
+				summary['proof_objective_counts'][proof_objective_id] = summary['proof_objective_counts'].get(proof_objective_id, 0) + 1
 			if expected_update_kind:
 				summary['expected_update_kind_counts'][expected_update_kind] = summary['expected_update_kind_counts'].get(expected_update_kind, 0) + 1
 			if target_claim_type:
 				summary['target_claim_type_counts'][target_claim_type] = summary['target_claim_type_counts'].get(target_claim_type, 0) + 1
 			if target_element_id:
 				summary['target_element_id_counts'][target_element_id] = summary['target_element_id_counts'].get(target_element_id, 0) + 1
+			try:
+				novelty_score = float(intent.get('novelty_score'))
+			except (TypeError, ValueError):
+				novelty_score = None
+			if novelty_score is not None:
+				summary['novelty_score_total'] += novelty_score
+				summary['novelty_score_count'] += 1
+		if summary['novelty_score_count']:
+			summary['average_novelty_score'] = round(
+				float(summary['novelty_score_total']) / float(summary['novelty_score_count']),
+				4,
+			)
 		return summary
 
 	def _summarize_proof_lead_collection(self, proof_leads: Any) -> Dict[str, Any]:

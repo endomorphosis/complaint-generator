@@ -1136,6 +1136,351 @@ class ComplaintDenoiser:
     def _normalize_question_text(self, text: str) -> str:
         return (text or "").strip().lower()
 
+    def _normalize_question_objective_token(self, value: Any) -> str:
+        cleaned = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+        return cleaned
+
+    def _question_similarity_tokens(self, text: str) -> Set[str]:
+        stop_words = {
+            "a", "an", "and", "are", "as", "at", "be", "by", "can", "did", "do", "does", "for",
+            "from", "have", "how", "i", "in", "is", "it", "of", "on", "or", "please", "that",
+            "the", "this", "to", "was", "were", "what", "when", "where", "which", "who", "why",
+            "with", "you", "your",
+        }
+        return {
+            token
+            for token in re.findall(r"[a-z0-9]+", str(text or "").lower())
+            if len(token) > 2 and token not in stop_words
+        }
+
+    def _question_text_similarity(self, left: str, right: str) -> float:
+        left_tokens = self._question_similarity_tokens(left)
+        right_tokens = self._question_similarity_tokens(right)
+        if not left_tokens or not right_tokens:
+            return 0.0
+        overlap = len(left_tokens.intersection(right_tokens))
+        union = len(left_tokens.union(right_tokens))
+        return float(overlap) / float(max(union, 1))
+
+    def _question_context(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
+        context = candidate.get("context") if isinstance(candidate, dict) else {}
+        return context if isinstance(context, dict) else {}
+
+    def _question_ranking_explanation(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
+        explanation = candidate.get("ranking_explanation") if isinstance(candidate, dict) else {}
+        return explanation if isinstance(explanation, dict) else {}
+
+    def _question_target_claim_type(self, candidate: Dict[str, Any]) -> str:
+        context = self._question_context(candidate)
+        explanation = self._question_ranking_explanation(candidate)
+        return self._normalize_question_objective_token(
+            candidate.get("target_claim_type")
+            or context.get("claim_type")
+            or context.get("claim_name")
+            or explanation.get("target_claim_type")
+        )
+
+    def _question_target_element_id(self, candidate: Dict[str, Any]) -> str:
+        context = self._question_context(candidate)
+        explanation = self._question_ranking_explanation(candidate)
+        return self._normalize_question_objective_token(
+            candidate.get("target_element_id")
+            or context.get("target_element_id")
+            or context.get("claim_element_id")
+            or context.get("requirement_id")
+            or explanation.get("target_element_id")
+        )
+
+    def _question_gap_id(self, candidate: Dict[str, Any]) -> str:
+        context = self._question_context(candidate)
+        return self._normalize_question_objective_token(
+            context.get("deterministic_update_key")
+            or context.get("gap_id")
+            or context.get("temporal_issue_id")
+            or context.get("issue_id")
+            or context.get("node_id")
+        )
+
+    def _question_expected_update_kind(self, candidate: Dict[str, Any]) -> str:
+        context = self._question_context(candidate)
+        explanation = self._question_ranking_explanation(candidate)
+        return self._normalize_question_objective_token(
+            candidate.get("expected_update_kind")
+            or context.get("expected_update_kind")
+            or explanation.get("expected_update_kind")
+        )
+
+    def _question_objective_value(self, candidate: Dict[str, Any]) -> str:
+        context = self._question_context(candidate)
+        explanation = self._question_ranking_explanation(candidate)
+        return self._normalize_question_objective_token(
+            candidate.get("question_objective")
+            or context.get("question_objective")
+            or explanation.get("question_objective")
+            or candidate.get("type")
+        )
+
+    def _question_extraction_target_signature(self, candidate: Dict[str, Any]) -> str:
+        context = self._question_context(candidate)
+        targets = [
+            self._normalize_question_objective_token(target)
+            for target in (
+                candidate.get("extraction_targets")
+                or context.get("extraction_targets")
+                or []
+            )
+            if str(target or "").strip()
+        ]
+        return "+".join(sorted(dict.fromkeys(targets))[:6])
+
+    def _question_coverage_key(self, candidate: Dict[str, Any]) -> str:
+        qtype = self._normalize_question_objective_token(candidate.get("type") if isinstance(candidate, dict) else "")
+        claim_type = self._question_target_claim_type(candidate)
+        element_id = self._question_target_element_id(candidate)
+        gap_id = self._question_gap_id(candidate)
+        update_kind = self._question_expected_update_kind(candidate)
+        objective = self._question_objective_value(candidate)
+        target_signature = self._question_extraction_target_signature(candidate)
+        if element_id:
+            return f"claim_element:{claim_type}:{element_id}"
+        if gap_id:
+            return f"gap:{claim_type}:{gap_id}"
+        if target_signature:
+            return f"targets:{claim_type}:{qtype}:{target_signature}"
+        return f"objective:{claim_type}:{qtype}:{objective}:{update_kind}"
+
+    def _question_objective_key(self, candidate: Dict[str, Any]) -> str:
+        qtype = self._normalize_question_objective_token(candidate.get("type") if isinstance(candidate, dict) else "")
+        objective = self._question_objective_value(candidate)
+        claim_type = self._question_target_claim_type(candidate)
+        element_id = self._question_target_element_id(candidate)
+        gap_id = self._question_gap_id(candidate)
+        update_kind = self._question_expected_update_kind(candidate)
+        target_signature = self._question_extraction_target_signature(candidate)
+        target_key = element_id or gap_id or target_signature or self._normalize_question_text(str(candidate.get("question", "")))[:80]
+        return "|".join(
+            value
+            for value in (qtype, objective, claim_type, target_key, update_kind)
+            if value
+        )
+
+    def _question_proof_objective_text(self, candidate: Dict[str, Any]) -> str:
+        objective = str(candidate.get("question_objective") or "").strip() or "clarify the intake record"
+        update_kind = str(candidate.get("expected_update_kind") or "").strip()
+        claim_type = str(candidate.get("target_claim_type") or self._question_context(candidate).get("claim_type") or "").strip()
+        element_id = str(candidate.get("target_element_id") or self._question_context(candidate).get("target_element_id") or "").strip()
+        target_bits = []
+        if claim_type:
+            target_bits.append(claim_type.replace("_", " "))
+        if element_id:
+            target_bits.append(element_id.replace("_", " "))
+        target_text = " / ".join(target_bits) if target_bits else "the current complaint record"
+        update_text = f" and should {update_kind.replace('_', ' ')}" if update_kind else ""
+        return f"{objective.replace('_', ' ')} for {target_text}{update_text}."
+
+    def _expected_proof_gain_score(self, value: Any) -> float:
+        if isinstance(value, (int, float)):
+            return max(0.0, min(1.0, float(value)))
+        normalized = str(value or "").strip().lower()
+        if normalized in {"critical", "very_high", "very high"}:
+            return 0.95
+        if normalized == "high":
+            return 0.82
+        if normalized == "medium":
+            return 0.56
+        if normalized == "low":
+            return 0.28
+        try:
+            return max(0.0, min(1.0, float(normalized)))
+        except Exception:
+            return 0.5
+
+    def _iter_asked_question_payloads(self) -> List[Dict[str, Any]]:
+        payloads: List[Dict[str, Any]] = []
+        for item in self.questions_asked:
+            if not isinstance(item, dict):
+                continue
+            question = item.get("question")
+            if isinstance(question, dict):
+                payloads.append(question)
+            elif "type" in item or "question" in item:
+                payloads.append(item)
+        return payloads
+
+    def _recent_question_objective_keys(self) -> Set[str]:
+        return {
+            self._question_objective_key(question)
+            for question in self._iter_asked_question_payloads()
+            if isinstance(question, dict)
+        }
+
+    def _candidate_novelty_metadata(
+        self,
+        candidate: Dict[str, Any],
+        *,
+        selected: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        selected = selected if isinstance(selected, list) else []
+        candidate_text = str(candidate.get("question") or "")
+        objective_key = self._question_objective_key(candidate)
+        coverage_key = self._question_coverage_key(candidate)
+        best_similarity = 0.0
+        best_source = ""
+        duplicate_objective = False
+
+        for source_name, questions in (
+            ("asked", self._iter_asked_question_payloads()),
+            ("selected", selected),
+        ):
+            for existing in questions:
+                if not isinstance(existing, dict):
+                    continue
+                if self._question_objective_key(existing) == objective_key:
+                    duplicate_objective = True
+                    best_source = source_name
+                    best_similarity = max(best_similarity, 1.0)
+                    continue
+                similarity = self._question_text_similarity(candidate_text, str(existing.get("question") or ""))
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_source = source_name
+
+        novelty_score = max(0.0, min(1.0, 1.0 - best_similarity))
+        if duplicate_objective:
+            novelty_score = min(novelty_score, 0.12)
+        return {
+            "novelty_score": round(float(novelty_score), 4),
+            "max_similarity": round(float(best_similarity), 4),
+            "duplicate_objective": bool(duplicate_objective),
+            "nearest_source": best_source,
+            "objective_key": objective_key,
+            "coverage_key": coverage_key,
+        }
+
+    def _annotate_proof_directed_candidate(
+        self,
+        candidate: Dict[str, Any],
+        *,
+        selected: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        if not isinstance(candidate, dict):
+            return candidate
+        enriched = dict(candidate)
+        explanation = dict(enriched.get("ranking_explanation", {}) if isinstance(enriched.get("ranking_explanation"), dict) else {})
+        question_reason = str(enriched.get("question_reason") or explanation.get("question_reason") or "").strip()
+        if not question_reason:
+            question_reason = "This question targets a remaining proof objective in the intake record."
+            enriched["question_reason"] = question_reason
+        enriched.setdefault("priority_reason", question_reason)
+        proof_objective_key = self._question_objective_key(enriched)
+        coverage_key = self._question_coverage_key(enriched)
+        proof_objective_text = str(enriched.get("proof_objective") or "").strip() or self._question_proof_objective_text(enriched)
+        novelty = self._candidate_novelty_metadata(enriched, selected=selected)
+        gain_score = self._expected_proof_gain_score(enriched.get("expected_proof_gain"))
+
+        enriched["proof_objective"] = proof_objective_text
+        enriched["proof_objective_id"] = proof_objective_key
+        enriched["question_objective_key"] = proof_objective_key
+        enriched["coverage_key"] = coverage_key
+        enriched["novelty_score"] = float(novelty["novelty_score"])
+        enriched["expected_proof_gain_score"] = gain_score
+        enriched["proof_gain_metadata"] = {
+            "expected_update_kind": str(enriched.get("expected_update_kind") or ""),
+            "expected_proof_gain": str(enriched.get("expected_proof_gain") or ""),
+            "expected_proof_gain_score": gain_score,
+            "claim_criticality": str(enriched.get("claim_criticality") or explanation.get("claim_criticality") or ""),
+            "contradiction_risk": "high" if str(enriched.get("type") or "").strip().lower() == "contradiction" else "normal",
+            "novelty_score": float(novelty["novelty_score"]),
+        }
+        enriched["novelty_metadata"] = novelty
+
+        explanation.setdefault("question_objective", str(enriched.get("question_objective") or ""))
+        explanation["proof_objective"] = proof_objective_text
+        explanation["proof_objective_id"] = proof_objective_key
+        explanation["question_objective_key"] = proof_objective_key
+        explanation["coverage_key"] = coverage_key
+        explanation["question_reason"] = question_reason
+        explanation["priority_reason"] = str(enriched.get("priority_reason") or "")
+        explanation["expected_proof_gain"] = str(enriched.get("expected_proof_gain") or "")
+        explanation["expected_proof_gain_score"] = gain_score
+        explanation["novelty_score"] = float(novelty["novelty_score"])
+        explanation["novelty_metadata"] = novelty
+        enriched["ranking_explanation"] = explanation
+
+        signals = dict(enriched.get("selector_signals", {}) if isinstance(enriched.get("selector_signals"), dict) else {})
+        signals.setdefault("question_objective", str(enriched.get("question_objective") or ""))
+        signals["proof_objective"] = proof_objective_text
+        signals["proof_objective_id"] = proof_objective_key
+        signals["question_objective_key"] = proof_objective_key
+        signals["coverage_key"] = coverage_key
+        signals["novelty_score"] = float(novelty["novelty_score"])
+        signals["expected_proof_gain_score"] = gain_score
+        enriched["selector_signals"] = signals
+        return enriched
+
+    def _select_proof_directed_candidates(
+        self,
+        candidates: List[Dict[str, Any]],
+        *,
+        max_questions: int,
+        preserve_order: bool = True,
+    ) -> List[Dict[str, Any]]:
+        if max_questions <= 0:
+            return []
+        ordered = [candidate for candidate in (candidates or []) if isinstance(candidate, dict)]
+        if not preserve_order:
+            ordered.sort(key=self._default_candidate_sort_key)
+
+        selected: List[Dict[str, Any]] = []
+        seen_text_keys: Set[Tuple[str, str]] = set()
+        seen_objective_keys: Set[str] = set(self._recent_question_objective_keys())
+        selected_objective_keys: Set[str] = set()
+        seen_coverage_keys: Set[str] = {
+            self._question_coverage_key(question)
+            for question in self._iter_asked_question_payloads()
+            if isinstance(question, dict)
+        }
+        suppressed_duplicates: List[Dict[str, Any]] = []
+
+        for raw_candidate in ordered:
+            candidate = self._annotate_proof_directed_candidate(raw_candidate, selected=selected)
+            qtype = self._normalize_question_objective_token(candidate.get("type"))
+            text_key = (self._normalize_question_text(str(candidate.get("question", ""))), qtype)
+            objective_key = str(candidate.get("question_objective_key") or self._question_objective_key(candidate))
+            coverage_key = str(candidate.get("coverage_key") or self._question_coverage_key(candidate))
+            bypass = qtype in _BYPASS_DEDUPLICATION_QUESTION_TYPES
+            exact_duplicate = text_key in seen_text_keys
+            repeated_objective = objective_key in seen_objective_keys or objective_key in selected_objective_keys
+            semantic_duplicate = any(
+                self._question_text_similarity(str(candidate.get("question") or ""), str(existing.get("question") or "")) >= 0.84
+                for existing in selected
+            )
+            preserves_new_coverage = bool(coverage_key and coverage_key not in seen_coverage_keys)
+
+            if exact_duplicate and not preserves_new_coverage:
+                suppressed_duplicates.append(candidate)
+                continue
+            if not bypass and (repeated_objective or semantic_duplicate) and not preserves_new_coverage:
+                suppressed_duplicates.append(candidate)
+                continue
+
+            seen_text_keys.add(text_key)
+            selected_objective_keys.add(objective_key)
+            if coverage_key:
+                seen_coverage_keys.add(coverage_key)
+            selected.append(candidate)
+            if len(selected) >= max_questions:
+                break
+
+        for candidate in selected:
+            signals = dict(candidate.get("selector_signals", {}) if isinstance(candidate.get("selector_signals"), dict) else {})
+            signals["suppressed_duplicate_candidate_count"] = len(suppressed_duplicates)
+            candidate["selector_signals"] = signals
+            explanation = dict(candidate.get("ranking_explanation", {}) if isinstance(candidate.get("ranking_explanation"), dict) else {})
+            explanation["suppressed_duplicate_candidate_count"] = len(suppressed_duplicates)
+            candidate["ranking_explanation"] = explanation
+        return selected[:max_questions]
+
     def _already_asked(self, question_text: str) -> bool:
         norm = self._normalize_question_text(question_text)
         for item in self.questions_asked:
@@ -1503,12 +1848,15 @@ class ComplaintDenoiser:
             'proof_priority': int(question_payload.get('proof_priority', self._phase1_proof_priority(question_type))),
             'blocking_level': str(question_payload.get('blocking_level') or ''),
             'phase1_section': str(question_payload.get('phase1_section') or ''),
+            'question_objective': str(question_payload.get('question_objective') or ''),
+            'question_reason': str(question_payload.get('question_reason') or ''),
             'question_goal': str(question_payload.get('question_goal') or question_payload.get('question_objective') or ''),
             'question_strategy': str(question_payload.get('question_strategy') or 'default_generation'),
             'target_claim_type': str(question_payload.get('target_claim_type') or ''),
             'target_element_id': str(question_payload.get('target_element_id') or ''),
             'target_fact_type': str(question_payload.get('target_fact_type') or ''),
             'expected_update_kind': str(question_payload.get('expected_update_kind') or ''),
+            'expected_proof_gain': str(question_payload.get('expected_proof_gain') or ''),
             'recommended_resolution_lane': str(question_payload.get('recommended_resolution_lane') or ''),
             'workflow_phase': str(question_payload.get('workflow_phase') or ''),
             'workflow_phase_rank': int(question_payload.get('workflow_phase_rank')) if question_payload.get('workflow_phase_rank') is not None else 99,
@@ -1516,7 +1864,7 @@ class ComplaintDenoiser:
             'patchability_markers': list(question_payload.get('patchability_markers') or []),
             'follow_up_tags': list(follow_up_tags),
         }
-        return question_payload
+        return self._annotate_proof_directed_candidate(question_payload)
 
     def _question_follow_up_tags(
         self,
@@ -2400,35 +2748,39 @@ class ComplaintDenoiser:
     ) -> List[Dict[str, Any]]:
         """Collect ranked question candidates before final rendering/exploration."""
         questions: List[Dict[str, Any]] = []
+        candidate_budget = max(int(max_questions or 0), 0)
+        if candidate_budget <= 0:
+            return []
+        working_pool_limit = max(candidate_budget * 4, candidate_budget + 12)
 
-        contradiction_questions = self._build_contradiction_questions(dependency_graph, max_questions)
+        contradiction_questions = self._build_contradiction_questions(dependency_graph, working_pool_limit)
         questions.extend(contradiction_questions)
 
         claim_element_questions = self._build_claim_element_questions(
             intake_case_file,
-            max(0, max_questions - len(questions)),
+            working_pool_limit,
         )
-        questions.extend(claim_element_questions[:max(0, max_questions - len(questions))])
+        questions.extend(claim_element_questions[:working_pool_limit])
 
         proof_lead_questions = self._build_proof_lead_questions(
             intake_case_file,
-            max(0, max_questions - len(questions)),
+            working_pool_limit,
         )
-        questions.extend(proof_lead_questions[:max(0, max_questions - len(questions))])
+        questions.extend(proof_lead_questions[:working_pool_limit])
 
         temporal_gap_questions = self._build_claim_temporal_gap_questions(
             intake_case_file,
-            max(0, max_questions - len(questions)),
+            working_pool_limit,
         )
-        questions.extend(temporal_gap_questions[:max(0, max_questions - len(questions))])
+        questions.extend(temporal_gap_questions[:working_pool_limit])
 
         history_follow_up_questions = self._build_history_follow_up_questions(
-            max(0, max_questions - len(questions)),
+            working_pool_limit,
         )
-        questions.extend(history_follow_up_questions[:max(0, max_questions - len(questions))])
+        questions.extend(history_follow_up_questions[:working_pool_limit])
 
         kg_gaps = knowledge_graph.find_gaps()
-        for gap in kg_gaps[:max(0, max_questions - len(questions))]:
+        for gap in kg_gaps[:working_pool_limit]:
             if gap['type'] == 'low_confidence_entity':
                 questions.append(self._question_candidate(
                     source='knowledge_graph_gap',
@@ -2525,7 +2877,7 @@ class ComplaintDenoiser:
                 ))
 
         unsatisfied = dependency_graph.find_unsatisfied_requirements()
-        for req in unsatisfied[:max(0, max_questions - len(questions))]:
+        for req in unsatisfied[:working_pool_limit]:
             missing_deps = req.get('missing_dependencies', [])
             for dep in missing_deps[:2]:
                 questions.append(self._question_candidate(
@@ -2540,9 +2892,9 @@ class ComplaintDenoiser:
                     },
                     priority='high',
                 ))
-                if len(questions) >= max_questions:
+                if len(questions) >= working_pool_limit:
                     break
-            if len(questions) >= max_questions:
+            if len(questions) >= working_pool_limit:
                 break
 
         blocker_issues = []
@@ -2551,7 +2903,7 @@ class ComplaintDenoiser:
                 blocker_issues = dependency_graph.get_blocker_follow_up_issues()
             except Exception:
                 blocker_issues = []
-        for issue in blocker_issues[:max(0, max_questions - len(questions))]:
+        for issue in blocker_issues[:working_pool_limit]:
             if not isinstance(issue, dict):
                 continue
             questions.append(self._question_candidate(
@@ -2572,7 +2924,7 @@ class ComplaintDenoiser:
                 },
                 priority='high' if str(issue.get('severity') or '').lower() == 'blocking' else 'medium',
             ))
-            if len(questions) >= max_questions:
+            if len(questions) >= working_pool_limit:
                 break
 
         priority_order = {'high': 0, 'medium': 1, 'low': 2}
@@ -2590,22 +2942,47 @@ class ComplaintDenoiser:
         for q in questions:
             if not isinstance(q, dict):
                 continue
+            q = self._annotate_proof_directed_candidate(q)
             q_type = str(q.get('type') or q.get('question_type') or '').strip().lower()
-            q_element = str(
-                (q.get('context') or {}).get('requirement_id')
-                or (q.get('context') or {}).get('claim_element_id')
-                or (q.get('context') or {}).get('target_element_id')
-                or ''
-            ).strip().lower()
+            q_element = self._question_target_element_id(q)
+            q_objective_key = str(q.get('question_objective_key') or self._question_objective_key(q))
             # Only deduplicate candidates that explicitly target a specific element;
             # generic/clarification questions are always kept.
             if q_element and q_type not in _BYPASS_DEDUPLICATION_QUESTION_TYPES:
-                objective_key = f'{q_type}::{q_element}'
-                if objective_key in seen_objective_keys:
+                if q_objective_key in seen_objective_keys:
                     continue
-                seen_objective_keys.add(objective_key)
+                seen_objective_keys.add(q_objective_key)
             deduped.append(q)
-        return deduped[:max_questions]
+        selected = self._select_proof_directed_candidates(
+            deduped,
+            max_questions=candidate_budget,
+            preserve_order=True,
+        )
+        for required_source in ('intake_claim_element_gap', 'intake_proof_gap'):
+            if any(candidate.get('candidate_source') == required_source for candidate in selected):
+                continue
+            source_candidate = next(
+                (
+                    candidate
+                    for candidate in deduped
+                    if isinstance(candidate, dict) and candidate.get('candidate_source') == required_source
+                ),
+                None,
+            )
+            if not source_candidate:
+                continue
+            source_candidate = self._annotate_proof_directed_candidate(source_candidate, selected=selected)
+            if len(selected) < candidate_budget:
+                selected.append(source_candidate)
+                continue
+            replacement_index = None
+            for index in range(len(selected) - 1, -1, -1):
+                if selected[index].get('candidate_source') in {'knowledge_graph_gap', 'standard_intake_backstop'}:
+                    replacement_index = index
+                    break
+            if replacement_index is not None:
+                selected[replacement_index] = source_candidate
+        return selected[:candidate_budget]
 
     def _default_candidate_sort_key(self, candidate: Dict[str, Any]) -> Tuple[int, int, int]:
         priority_order = {'high': 0, 'medium': 1, 'low': 2}
@@ -2867,21 +3244,15 @@ class ComplaintDenoiser:
         def _finalize(items: Any, *, dedupe: bool) -> List[Dict[str, Any]]:
             normalized_items = [candidate for candidate in (items or []) if isinstance(candidate, dict)]
             if not dedupe:
-                return normalized_items[:max_questions]
-            seen_keys = set()
-            finalized: List[Dict[str, Any]] = []
-            for candidate in normalized_items:
-                candidate_key = (
-                    self._normalize_question_text(str(candidate.get('question', ''))),
-                    str(candidate.get('type', '')).strip().lower(),
-                )
-                if candidate_key in seen_keys:
-                    continue
-                seen_keys.add(candidate_key)
-                finalized.append(candidate)
-                if len(finalized) >= max_questions:
-                    break
-            return finalized
+                return [
+                    self._annotate_proof_directed_candidate(candidate)
+                    for candidate in normalized_items[:max_questions]
+                ]
+            return self._select_proof_directed_candidates(
+                normalized_items,
+                max_questions=max_questions,
+                preserve_order=True,
+            )
 
         selected: Any = None
         if callable(selector):
@@ -2927,6 +3298,7 @@ class ComplaintDenoiser:
                     fallback_candidates.sort(
                         key=lambda candidate: (
                             -float(candidate.get('actor_critic_score', 0.0) or 0.0),
+                            -float(candidate.get('novelty_score', 1.0) or 0.0),
                             self._default_candidate_sort_key(candidate),
                         )
                     )
@@ -2955,6 +3327,7 @@ class ComplaintDenoiser:
                 fallback_candidates.sort(
                     key=lambda candidate: (
                         -float(candidate.get('actor_critic_score', 0.0) or 0.0),
+                        -float(candidate.get('novelty_score', 1.0) or 0.0),
                         self._default_candidate_sort_key(candidate),
                     )
                 )
@@ -2964,6 +3337,7 @@ class ComplaintDenoiser:
             normalized_candidates.sort(
                 key=lambda candidate: (
                     -float(candidate.get('actor_critic_score', 0.0) or 0.0),
+                    -float(candidate.get('novelty_score', 1.0) or 0.0),
                     self._default_candidate_sort_key(candidate),
                 )
             )
