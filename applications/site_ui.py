@@ -19,7 +19,30 @@ def _load_template(name: str) -> str:
 
 
 def _load_sdk_playground_template() -> str:
-    return _SDK_PLAYGROUND_TEMPLATE.read_text()
+    if _SDK_PLAYGROUND_TEMPLATE.exists():
+        return _SDK_PLAYGROUND_TEMPLATE.read_text()
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDK Playground</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; background: #f7f7f4; color: #152334; }
+        main { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+        a { color: #0a5570; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <main>
+        <h1>SDK Playground</h1>
+        <p>The optional ipfs_datasets SDK playground asset is not installed in this checkout.</p>
+        <p><a href="/dashboards">Back to dashboards</a></p>
+    </main>
+</body>
+</html>
+"""
 
 
 def create_core_site_ui_router() -> APIRouter:
