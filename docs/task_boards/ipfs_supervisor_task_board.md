@@ -271,7 +271,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-IPFS-M3 Support-quality and validation layer
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Track: sup
