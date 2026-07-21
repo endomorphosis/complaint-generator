@@ -369,7 +369,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-TEMP-T4 Temporal contradiction and follow-up planner
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Track: sup
