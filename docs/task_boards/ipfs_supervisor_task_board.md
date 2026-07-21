@@ -383,7 +383,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-TEMP-T5 Review, drafting, and optimization integration
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P1
 - Track: sup
