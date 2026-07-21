@@ -8,7 +8,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-007 Extract complaint workspace request handlers from UI state helpers
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G2
