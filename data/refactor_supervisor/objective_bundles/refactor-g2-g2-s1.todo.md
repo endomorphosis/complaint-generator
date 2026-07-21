@@ -58,6 +58,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Outputs: data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g2-g2-s1.todo.md
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery/2026-07-21-ref-007-reconciliation-a92a0e5a0feb.md
 - Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery/2026-07-21-ref-007-reconciliation-a92a0e5a0feb.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
+- Reconciliation result: Main checkout dirt was preserved in commit `f20703f1bb2a732fa78daf8c031fb315232baa1e`, the lane reconciliation pass reran at `2026-07-21T20:06:01Z`, and the `main_checkout_dirty` blocker count for this guardrail decreased from `1` to `0`; remaining merge candidates are preflight conflicts tracked separately.
 
 ## REF-008 Resolve 2 preflight-conflicting backlogged worktree merges
 
