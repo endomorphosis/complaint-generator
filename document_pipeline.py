@@ -3466,8 +3466,8 @@ class FormalComplaintDocumentBuilder:
         )
         proof_readiness_score = float(packet_summary.get("proof_readiness_score", 0.0) or 0.0)
 
-        # T5: Gate drafting readiness on legal temporal rule profile failures, not
-        # only on aggregate proof-readiness score and unresolved issue counts.  If any
+        # T5: Gate drafting readiness on legal temporal rule profile gaps, not
+        # only on aggregate proof-readiness score and unresolved issue counts. If any
         # claim element has a failed or partial temporal rule-profile evaluation the
         # chronology is legally insufficient and the summary must surface that clearly.
         claim_reasoning_review = summary.get("claim_reasoning_review")
@@ -3501,6 +3501,7 @@ class FormalComplaintDocumentBuilder:
             unresolved_issue_count > 0
             or temporal_gap_task_count > 0
             or temporal_rule_profile_failed_element_count > 0
+            or temporal_rule_profile_partial_element_count > 0
         )
         if not chronology_blocked and proof_readiness_score <= 0.0 and not unresolved_issue_ids:
             return {}
