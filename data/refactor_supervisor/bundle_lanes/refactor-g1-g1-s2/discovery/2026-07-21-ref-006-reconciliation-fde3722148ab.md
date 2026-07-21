@@ -129,3 +129,34 @@ Work surface: `1` candidates, `1` sampled records.
   "top_conflict_paths": []
 }
 ```
+
+## Reconciliation Result
+
+Resolved: 2026-07-21T20:24Z
+
+- Classified the dirty main checkout evidence from this guardrail. The original
+  blocker was `scripts/refactor_agent_supervisor.py`; that work was preserved on
+  main by the prior reconciliation commit
+  `f20703f1bb2a732fa78daf8c031fb315232baa1e`
+  (`chore(refactor): preserve merge watchdog pacing`).
+- Before the rerun, the current main checkout had a separate generated
+  retry-budget guardrail artifact for `refactor-g2-g2-s1`. That output was
+  preserved with commit `81ab5a8ff25abe126f321a2894f328c7f0272597`
+  (`chore(refactor): preserve ref-005 retry guardrail`) so the reconciliation
+  pass could safely mutate main if needed.
+- Reran the scoped `refactor/g1/g1-s2` reconciliation-only supervisor pass at
+  `2026-07-21T20:24:41Z` with `--worktree-reconciliation-max-merges 1` and
+  `--no-worktree-scan-cache`.
+- The rerun event records `main_checkout_dirty: false`,
+  `raw_main_checkout_dirty: false`, and an empty `main_status_short` list.
+- The `main_checkout_dirty` blocker count for this guardrail decreased from
+  `1` to `0`. The pass processed one remaining candidate and classified it as a
+  separate `preflight_merge_conflict` on `scripts/refactor_agent_supervisor.py`;
+  REF-006 no longer owns a dirty-main blocker.
+
+Post-repair evidence source:
+`data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/state/agent_refactor_g1_g1_s2_supervisor_events.jsonl`
+contains the rerun pass with target signature
+`81ab5a8ff25abe126f321a2894f328c7f0272597`,
+`candidate_count: 1`, `processed_count: 1`,
+`preflight_blocked_count: 1`, and `reconciliation_guardrail_count: 0`.
