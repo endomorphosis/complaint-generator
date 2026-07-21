@@ -1297,9 +1297,13 @@ def test_claim_support_review_payload_returns_matrix_and_summary():
             "resolution_status_counts": {"still_open": 1},
             "temporal_gap_task_count": 1,
             "temporal_gap_targeted_task_count": 1,
+            "temporal_next_action_count": 0,
             "temporal_rule_status_counts": {"partial": 1},
             "temporal_rule_blocking_reason_counts": {"Need retaliation chronology sequencing.": 1},
             "temporal_resolution_status_counts": {"still_open": 1},
+            "temporal_follow_up_target_counts": {},
+            "temporal_question_objective_counts": {},
+            "temporal_proof_criticality_counts": {},
         }
         assert intake_case_summary["alignment_task_update_summary"] == {
             "count": 2,
@@ -1312,9 +1316,13 @@ def test_claim_support_review_payload_returns_matrix_and_summary():
             "promoted_document_count": 0,
             "temporal_gap_task_count": 0,
             "temporal_gap_targeted_task_count": 0,
+            "temporal_next_action_count": 0,
             "temporal_rule_status_counts": {},
             "temporal_rule_blocking_reason_counts": {},
             "temporal_resolution_status_counts": {},
+            "temporal_follow_up_target_counts": {},
+            "temporal_question_objective_counts": {},
+            "temporal_proof_criticality_counts": {},
         }
         claim_support_packet_summary = intake_case_summary["claim_support_packet_summary"]
         assert claim_support_packet_summary["claim_count"] == 1
@@ -5000,9 +5008,13 @@ def test_claim_support_document_payload_persists_and_refreshes_review():
         "resolution_status_counts": {"still_open": 1},
         "temporal_gap_task_count": 1,
         "temporal_gap_targeted_task_count": 1,
+        "temporal_next_action_count": 0,
         "temporal_rule_status_counts": {"partial": 1},
         "temporal_rule_blocking_reason_counts": {"Need retaliation chronology sequencing.": 1},
         "temporal_resolution_status_counts": {"still_open": 1},
+        "temporal_follow_up_target_counts": {},
+        "temporal_question_objective_counts": {},
+        "temporal_proof_criticality_counts": {},
     }
     assert payload["post_save_review"]["intake_case_summary"]["claim_support_packet_summary"]["temporal_gap_task_count"] == 1
     assert payload["post_save_review"]["intake_case_summary"]["claim_support_packet_summary"]["claim_support_unresolved_temporal_issue_count"] == 1
