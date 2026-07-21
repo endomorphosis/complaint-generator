@@ -2120,8 +2120,108 @@ class ClaimSupportHook:
             'temporal_proof_objectives': [str(profile.get('rule_frame_id') or '').strip()] if str(profile.get('rule_frame_id') or '').strip() else [],
         }
 
-        return {
+        relation_predicate_map = {
+            'Before': 'before',
+            'After': 'after',
+            'SameTime': 'same_time',
+            'Overlaps': 'overlaps',
+            'During': 'during',
+            'Meets': 'meets',
+        }
+        missing_relations: List[Dict[str, Any]] = []
+        for predicate in missing_temporal_predicates:
+            match = re.match(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\(([^,()]+),([^,()]+)\)\s*$', predicate)
+            if not match:
+                continue
+            predicate_name = match.group(1)
+            relation_type = relation_predicate_map.get(predicate_name, self._normalize_reasoning_key(predicate_name))
+            source_fact_id = match.group(2).strip()
+            target_fact_id = match.group(3).strip()
+            missing_relations.append({
+                'predicate': predicate,
+                'relation_type': relation_type,
+                'source_fact_id': source_fact_id,
+                'target_fact_id': target_fact_id,
+            })
+
+        normalized_fact_tags = {
+            str(fact.get('fact_id') or '').strip(): {
+                self._normalize_reasoning_key(tag)
+                for tag in (fact.get('element_tags', []) or [])
+                if str(tag or '').strip()
+            }
+            for fact in facts
+            if isinstance(fact, dict) and str(fact.get('fact_id') or '').strip()
+        }
+        present_roles = set()
+        for tags in normalized_fact_tags.values():
+            if 'protected_activity' in tags or 'protectedactivity' in tags:
+                present_roles.add('protected_activity')
+            if 'adverse_action' in tags or 'adverseaction' in tags:
+                present_roles.add('adverse_action')
+        required_roles = []
+        if self._normalize_reasoning_key(claim_type) in {'retaliation', 'employment_retaliation'} or 'retaliation' in self._normalize_reasoning_key(claim_type).split('_'):
+            required_roles = ['protected_activity', 'adverse_action']
+        missing_fact_roles = [
+            role_name
+            for role_name in required_roles
+            if role_name not in present_roles
+        ]
+
+        blocking_explanations: List[Dict[str, Any]] = []
+        for reason in [
+            str(reason).strip()
+            for reason in (profile.get('blocking_reasons', []) or [])
+            if str(reason).strip()
+        ]:
+            blocking_explanations.append({
+                'reason': reason,
+                'rule_frame_id': str(profile.get('rule_frame_id') or ''),
+                'profile_id': str(profile.get('profile_id') or ''),
+                'affected_fact_ids': list(matched_fact_ids or fact_ids),
+                'missing_fact_roles': list(missing_fact_roles),
+                'missing_relations': list(missing_relations),
+                'temporal_issue_ids': list(issue_ids),
+                'missing_temporal_predicates': list(missing_temporal_predicates),
+                'required_provenance_kinds': list(required_provenance_kinds),
+            })
+        if not blocking_explanations and (issue_ids or missing_temporal_predicates or missing_fact_roles):
+            blocking_explanations.append({
+                'reason': 'Temporal proof bundle has unresolved chronology inputs.',
+                'rule_frame_id': str(profile.get('rule_frame_id') or ''),
+                'profile_id': str(profile.get('profile_id') or ''),
+                'affected_fact_ids': list(matched_fact_ids or fact_ids),
+                'missing_fact_roles': list(missing_fact_roles),
+                'missing_relations': list(missing_relations),
+                'temporal_issue_ids': list(issue_ids),
+                'missing_temporal_predicates': list(missing_temporal_predicates),
+                'required_provenance_kinds': list(required_provenance_kinds),
+            })
+
+        proof_input_digest_payload = {
+            'contract_version': 'claim_support_temporal_proof_bundle_v1',
             'proof_bundle_id': proof_bundle_id,
+            'claim_type': str(claim_type or ''),
+            'claim_element_id': str(element.get('element_id') or ''),
+            'profile_id': str(profile.get('profile_id') or ''),
+            'rule_frame_id': str(profile.get('rule_frame_id') or ''),
+            'temporal_fact_ids': fact_ids,
+            'temporal_relation_ids': relation_ids,
+            'temporal_issue_ids': issue_ids,
+            'tdfol_formulas': tdfol_formulas,
+            'dcec_formulas': dcec_formulas,
+            'theorem_export_metadata': theorem_export_metadata,
+        }
+        bundle_digest = hashlib.sha256(
+            json.dumps(proof_input_digest_payload, sort_keys=True, separators=(',', ':'), default=str).encode('utf-8')
+        ).hexdigest()
+
+        return {
+            'contract_version': 'claim_support_temporal_proof_bundle_v1',
+            'proof_bundle_id': proof_bundle_id,
+            'persistence_key': proof_bundle_id,
+            'bundle_digest': bundle_digest,
+            'proof_input_digest': bundle_digest,
             'claim_type': str(claim_type or ''),
             'claim_element_id': str(element.get('element_id') or ''),
             'claim_element_text': str(element.get('element_text') or ''),
@@ -2140,6 +2240,9 @@ class ClaimSupportHook:
             'testimony_record_ids': testimony_record_ids,
             'missing_temporal_predicates': missing_temporal_predicates,
             'required_provenance_kinds': required_provenance_kinds,
+            'missing_fact_roles': missing_fact_roles,
+            'missing_relations': missing_relations,
+            'blocking_explanations': blocking_explanations,
             'blocking_reasons': [
                 str(reason).strip()
                 for reason in (profile.get('blocking_reasons', []) or [])
@@ -2156,23 +2259,36 @@ class ClaimSupportHook:
                 if isinstance(follow_up, dict)
             ],
             'theorem_exports': {
-                'tdfol_formulas': tdfol_formulas[:10],
-                'dcec_formulas': dcec_formulas[:10],
+                'tdfol_formulas': tdfol_formulas,
+                'dcec_formulas': dcec_formulas,
+                'tdfol_preview': tdfol_formulas[:3],
+                'dcec_preview': dcec_formulas[:3],
+                'tdfol_formula_count': len(tdfol_formulas),
+                'dcec_formula_count': len(dcec_formulas),
                 # T3: per-formula certainty maps so consumers can distinguish facts asserted
                 # directly ("certain") from relations inferred from date anchors ("inferred").
                 'tdfol_formula_certainties': {
                     formula: tdfol_formula_certainties.get(formula, 'certain')
-                    for formula in tdfol_formulas[:10]
+                    for formula in tdfol_formulas
                 },
                 'dcec_formula_certainties': {
                     formula: dcec_formula_certainties.get(formula, 'certain')
-                    for formula in dcec_formulas[:10]
+                    for formula in dcec_formulas
                 },
                 'theorem_export_metadata': theorem_export_metadata,
+                'proof_execution_source': 'temporal_proof_bundle',
+                'proof_bundle_digest': bundle_digest,
             },
             'theorem_export_counts': {
                 'tdfol_formula_count': len(tdfol_formulas),
                 'dcec_formula_count': len(dcec_formulas),
+            },
+            'proof_execution_inputs': {
+                'source': 'temporal_proof_bundle',
+                'tdfol_formulas': tdfol_formulas,
+                'dcec_formulas': dcec_formulas,
+                'theorem_export_metadata': theorem_export_metadata,
+                'proof_bundle_digest': bundle_digest,
             },
         }
 
@@ -3360,6 +3476,10 @@ class ClaimSupportHook:
         reasoning_payload = {
             'predicates': predicates,
             'claim_support_temporal_handoff': claim_support_temporal_handoff,
+            'temporal_proof_bundle': temporal_proof_bundle,
+            'proof_bundles': {
+                temporal_proof_bundle.get('persistence_key') or temporal_proof_bundle.get('proof_bundle_id'): temporal_proof_bundle
+            } if isinstance(temporal_proof_bundle, dict) and temporal_proof_bundle.get('proof_bundle_id') else {},
         }
         logic_proof = prove_claim_elements(reasoning_payload)
         logic_contradictions = check_contradictions(reasoning_payload)

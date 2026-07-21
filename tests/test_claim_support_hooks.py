@@ -2841,6 +2841,8 @@ class TestClaimSupportHook:
             assert captured['hybrid_payload']['predicates'] == captured['predicates']
             assert captured['proof_payload']['claim_support_temporal_handoff'] == captured['hybrid_payload']['claim_support_temporal_handoff']
             assert captured['contradiction_payload']['claim_support_temporal_handoff'] == captured['hybrid_payload']['claim_support_temporal_handoff']
+            assert captured['proof_payload']['temporal_proof_bundle']['proof_bundle_id'] == 'retaliation:retaliation_1:retaliation_temporal_profile_v1'
+            assert captured['hybrid_payload']['proof_bundles']['retaliation:retaliation_1:retaliation_temporal_profile_v1']['proof_bundle_id'] == 'retaliation:retaliation_1:retaliation_temporal_profile_v1'
             assert {'claim_element', 'support_trace', 'temporal_fact', 'temporal_proof_lead', 'temporal_relation', 'temporal_consistency', 'temporal_issue'} <= predicate_types
             assert 'Timeline fact: Employee complained to HR.' in captured['seed_text']
             assert 'Timeline relation: fact_1 before fact_2' in captured['seed_text']
@@ -2876,67 +2878,89 @@ class TestClaimSupportHook:
                 'has_contradictory_dates': False,
                 'has_limitations_risk': False,
             }
-            assert diagnostics['temporal_proof_bundle'] == {
-                'proof_bundle_id': 'retaliation:retaliation_1:retaliation_temporal_profile_v1',
+            temporal_proof_bundle = diagnostics['temporal_proof_bundle']
+            assert temporal_proof_bundle['contract_version'] == 'claim_support_temporal_proof_bundle_v1'
+            assert temporal_proof_bundle['proof_bundle_id'] == 'retaliation:retaliation_1:retaliation_temporal_profile_v1'
+            assert temporal_proof_bundle['persistence_key'] == temporal_proof_bundle['proof_bundle_id']
+            assert len(temporal_proof_bundle['bundle_digest']) == 64
+            assert temporal_proof_bundle['proof_input_digest'] == temporal_proof_bundle['bundle_digest']
+            assert temporal_proof_bundle['claim_type'] == 'retaliation'
+            assert temporal_proof_bundle['claim_element_id'] == 'retaliation:1'
+            assert temporal_proof_bundle['claim_element_text'] == 'Protected activity'
+            assert temporal_proof_bundle['profile_id'] == 'retaliation_temporal_profile_v1'
+            assert temporal_proof_bundle['rule_frame_id'] == 'retaliation_temporal_frame'
+            assert temporal_proof_bundle['element_role'] == 'protected_activity'
+            assert temporal_proof_bundle['status'] == 'satisfied'
+            assert temporal_proof_bundle['available'] is True
+            assert temporal_proof_bundle['matched_fact_ids'] == ['fact_1']
+            assert temporal_proof_bundle['matched_relation_ids'] == []
+            assert temporal_proof_bundle['temporal_fact_ids'] == ['fact_1', 'fact_2']
+            assert temporal_proof_bundle['temporal_relation_ids'] == ['timeline_relation_001']
+            assert temporal_proof_bundle['timeline_anchor_ids'] == ['anchor_hr_complaint', 'anchor_termination_notice']
+            assert temporal_proof_bundle['temporal_issue_ids'] == ['temporal_reverse_before_001']
+            assert temporal_proof_bundle['missing_temporal_predicates'] == ['Before(fact_1,fact_2)']
+            assert temporal_proof_bundle['required_provenance_kinds'] == ['document_artifact']
+            assert temporal_proof_bundle['missing_relations'] == [
+                {
+                    'predicate': 'Before(fact_1,fact_2)',
+                    'relation_type': 'before',
+                    'source_fact_id': 'fact_1',
+                    'target_fact_id': 'fact_2',
+                }
+            ]
+            assert temporal_proof_bundle['blocking_explanations'][0]['missing_relations'] == temporal_proof_bundle['missing_relations']
+            assert temporal_proof_bundle['theorem_exports']['tdfol_formulas'] == [
+                'ProtectedActivity(fact_1)',
+                'AdverseAction(fact_2)',
+                'Before(fact_1,fact_2)',
+            ]
+            assert temporal_proof_bundle['theorem_exports']['dcec_formulas'] == [
+                'Happens(fact_1,t_2025_03_01)',
+                'Happens(fact_2,t_2025_04_15)',
+            ]
+            assert temporal_proof_bundle['theorem_exports']['tdfol_preview'] == [
+                'ProtectedActivity(fact_1)',
+                'AdverseAction(fact_2)',
+                'Before(fact_1,fact_2)',
+            ]
+            assert temporal_proof_bundle['theorem_exports']['proof_execution_source'] == 'temporal_proof_bundle'
+            assert temporal_proof_bundle['theorem_exports']['proof_bundle_digest'] == temporal_proof_bundle['bundle_digest']
+            assert temporal_proof_bundle['theorem_exports']['theorem_export_metadata'] == {
+                'contract_version': 'claim_support_temporal_handoff_v1',
                 'claim_type': 'retaliation',
                 'claim_element_id': 'retaliation:1',
-                'claim_element_text': 'Protected activity',
-                'profile_id': 'retaliation_temporal_profile_v1',
+                'proof_bundle_id': 'retaliation:retaliation_1:retaliation_temporal_profile_v1',
                 'rule_frame_id': 'retaliation_temporal_frame',
-                'element_role': 'protected_activity',
-                'status': 'satisfied',
-                'available': True,
-                'matched_fact_ids': ['fact_1'],
-                'matched_relation_ids': [],
+                'chronology_blocked': True,
+                'chronology_task_count': 1,
+                'unresolved_temporal_issue_ids': ['temporal_reverse_before_001'],
+                'event_ids': ['fact_1', 'fact_2'],
                 'temporal_fact_ids': ['fact_1', 'fact_2'],
                 'temporal_relation_ids': ['timeline_relation_001'],
                 'timeline_anchor_ids': ['anchor_hr_complaint', 'anchor_termination_notice'],
+                'timeline_issue_ids': ['temporal_reverse_before_001'],
                 'temporal_issue_ids': ['temporal_reverse_before_001'],
-                'source_artifact_ids': [],
-                'testimony_record_ids': [],
                 'missing_temporal_predicates': ['Before(fact_1,fact_2)'],
                 'required_provenance_kinds': ['document_artifact'],
-                'blocking_reasons': [],
-                'warnings': [],
-                'recommended_follow_ups': [],
-                'theorem_exports': {
-                    'tdfol_formulas': ['ProtectedActivity(fact_1)', 'AdverseAction(fact_2)', 'Before(fact_1,fact_2)'],
-                    'dcec_formulas': ['Happens(fact_1,t_2025_03_01)', 'Happens(fact_2,t_2025_04_15)'],
-                    'tdfol_formula_certainties': {
-                        'ProtectedActivity(fact_1)': 'certain',
-                        'AdverseAction(fact_2)': 'certain',
-                        'Before(fact_1,fact_2)': 'certain',
-                    },
-                    'dcec_formula_certainties': {
-                        'Happens(fact_1,t_2025_03_01)': 'certain',
-                        'Happens(fact_2,t_2025_04_15)': 'certain',
-                    },
-                    'theorem_export_metadata': {
-                        'contract_version': 'claim_support_temporal_handoff_v1',
-                        'claim_type': 'retaliation',
-                        'claim_element_id': 'retaliation:1',
-                        'proof_bundle_id': 'retaliation:retaliation_1:retaliation_temporal_profile_v1',
-                        'rule_frame_id': 'retaliation_temporal_frame',
-                        'chronology_blocked': True,
-                        'chronology_task_count': 1,
-                        'unresolved_temporal_issue_ids': ['temporal_reverse_before_001'],
-                        'event_ids': ['fact_1', 'fact_2'],
-                        'temporal_fact_ids': ['fact_1', 'fact_2'],
-                        'temporal_relation_ids': ['timeline_relation_001'],
-                        'timeline_anchor_ids': ['anchor_hr_complaint', 'anchor_termination_notice'],
-                        'timeline_issue_ids': ['temporal_reverse_before_001'],
-                        'temporal_issue_ids': ['temporal_reverse_before_001'],
-                        'missing_temporal_predicates': ['Before(fact_1,fact_2)'],
-                        'required_provenance_kinds': ['document_artifact'],
-                        'temporal_proof_bundle_ids': ['retaliation:retaliation_1:retaliation_temporal_profile_v1'],
-                        'temporal_proof_objectives': ['retaliation_temporal_frame'],
-                    },
-                },
-                'theorem_export_counts': {
-                    'tdfol_formula_count': 3,
-                    'dcec_formula_count': 2,
-                },
+                'temporal_proof_bundle_ids': ['retaliation:retaliation_1:retaliation_temporal_profile_v1'],
+                'temporal_proof_objectives': ['retaliation_temporal_frame'],
             }
+            assert temporal_proof_bundle['proof_execution_inputs']['source'] == 'temporal_proof_bundle'
+            assert temporal_proof_bundle['proof_execution_inputs']['tdfol_formulas'] == temporal_proof_bundle['theorem_exports']['tdfol_formulas']
+            assert temporal_proof_bundle['theorem_export_counts'] == {
+                'tdfol_formula_count': 3,
+                'dcec_formula_count': 2,
+            }
+            from integrations.ipfs_datasets.logic import export_theorem_from_proof_bundle
+
+            first_export = export_theorem_from_proof_bundle(temporal_proof_bundle)
+            second_export = export_theorem_from_proof_bundle(temporal_proof_bundle)
+            assert first_export['lean4'] == second_export['lean4']
+            assert first_export['coq'] == second_export['coq']
+            assert first_export['proof_bundle_digest'] == temporal_proof_bundle['bundle_digest']
+            assert first_export['tdfol_formula_count'] == 3
+            assert first_export['dcec_formula_count'] == 2
+            assert 'ProtectedActivity(fact_1)' in first_export['lean4']
             assert diagnostics['claim_support_temporal_handoff'] == {
                 'claim_type': 'retaliation',
                 'claim_element_id': 'retaliation:1',

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -2046,12 +2047,20 @@ def summarize_claim_reasoning_review(
             element_theorem_export_metadata = {}
         element_temporal_proof_bundle_tdfol_preview = [
             str(formula)
-            for formula in (theorem_exports.get("tdfol_formulas", []) or [])
+            for formula in (
+                theorem_exports.get("tdfol_preview")
+                or theorem_exports.get("tdfol_formulas")
+                or []
+            )
             if str(formula).strip()
         ][:preview_limit]
         element_temporal_proof_bundle_dcec_preview = [
             str(formula)
-            for formula in (theorem_exports.get("dcec_formulas", []) or [])
+            for formula in (
+                theorem_exports.get("dcec_preview")
+                or theorem_exports.get("dcec_formulas")
+                or []
+            )
             if str(formula).strip()
         ][:preview_limit]
         hybrid_tdfol_count = len(hybrid_tdfol_formulas)
@@ -2113,20 +2122,34 @@ def summarize_claim_reasoning_review(
             else:
                 bundle_key = ""
             if bundle_key:
-                proof_bundles[bundle_key] = {
-                    "proof_bundle_id": element_temporal_proof_bundle_id,
-                    "status": element_temporal_proof_bundle_status,
-                    "rule_frame_id": element_temporal_rule_frame_id,
-                    "fact_ids": element_temporal_proof_bundle_fact_ids,
-                    "relation_ids": element_temporal_proof_bundle_relation_ids,
-                    "issue_ids": element_temporal_proof_bundle_issue_ids,
-                    "tdfol_preview": element_temporal_proof_bundle_tdfol_preview,
-                    "dcec_preview": element_temporal_proof_bundle_dcec_preview,
-                    "theorem_export_metadata": element_theorem_export_metadata,
-                    "blocking_reasons": element_temporal_rule_blocking_reasons,
-                    "warnings": element_temporal_rule_warnings,
-                    "recommended_follow_ups": element_temporal_rule_follow_ups,
-                }
+                persisted_bundle = deepcopy(temporal_proof_bundle)
+                if not isinstance(persisted_bundle, dict):
+                    persisted_bundle = {}
+                persisted_bundle.setdefault("proof_bundle_id", element_temporal_proof_bundle_id)
+                persisted_bundle.setdefault("status", element_temporal_proof_bundle_status)
+                persisted_bundle.setdefault("rule_frame_id", element_temporal_rule_frame_id)
+                persisted_bundle["fact_ids"] = list(
+                    persisted_bundle.get("fact_ids")
+                    or persisted_bundle.get("temporal_fact_ids")
+                    or element_temporal_proof_bundle_fact_ids
+                )
+                persisted_bundle["relation_ids"] = list(
+                    persisted_bundle.get("relation_ids")
+                    or persisted_bundle.get("temporal_relation_ids")
+                    or element_temporal_proof_bundle_relation_ids
+                )
+                persisted_bundle["issue_ids"] = list(
+                    persisted_bundle.get("issue_ids")
+                    or persisted_bundle.get("temporal_issue_ids")
+                    or element_temporal_proof_bundle_issue_ids
+                )
+                persisted_bundle["tdfol_preview"] = element_temporal_proof_bundle_tdfol_preview
+                persisted_bundle["dcec_preview"] = element_temporal_proof_bundle_dcec_preview
+                persisted_bundle.setdefault("theorem_export_metadata", element_theorem_export_metadata)
+                persisted_bundle.setdefault("blocking_reasons", element_temporal_rule_blocking_reasons)
+                persisted_bundle.setdefault("warnings", element_temporal_rule_warnings)
+                persisted_bundle.setdefault("recommended_follow_ups", element_temporal_rule_follow_ups)
+                proof_bundles[bundle_key] = persisted_bundle
         if bool(element_theorem_export_metadata.get("chronology_blocked", False)):
             theorem_export_blocked_element_count += 1
         theorem_export_chronology_task_count += int(
