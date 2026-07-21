@@ -6,19 +6,9 @@ import argparse
 import json
 import os
 import socket
-import sys
 import time
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from backends import LLMRouterBackend, WorkstationBackendDatabases, WorkstationBackendModels
-from mediator import Mediator
 
 
 def load_config(path: str) -> Dict[str, Any]:
@@ -27,6 +17,8 @@ def load_config(path: str) -> Dict[str, Any]:
 
 
 def build_backends(config: Dict[str, Any], backend_id: Optional[str] = None) -> List[Any]:
+    from backends import LLMRouterBackend, WorkstationBackendDatabases, WorkstationBackendModels
+
     mediator_config = config.get('MEDIATOR', {})
     backend_ids = mediator_config.get('backends', [])
     if backend_id:
@@ -73,7 +65,9 @@ def build_backends(config: Dict[str, Any], backend_id: Optional[str] = None) -> 
     return backends
 
 
-def create_mediator(config_path: str, backend_id: Optional[str] = None, allow_no_backend: bool = False) -> Mediator:
+def create_mediator(config_path: str, backend_id: Optional[str] = None, allow_no_backend: bool = False) -> Any:
+    from mediator import Mediator
+
     if not os.path.exists(config_path):
         if allow_no_backend:
             return Mediator(backends=[])
