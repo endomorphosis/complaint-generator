@@ -56,6 +56,44 @@ _RESERVED_EXAMPLE_URL_RE = re.compile(
     re.IGNORECASE,
 )
 
+_HYPOTHESIS_REQUIRED_TESTS = (
+    "test_mcplusplus_v39_session84_properties.py",
+    "test_mcplusplus_v39_session84_recovery.py",
+    "test_observability_property_based.py",
+    "test_property_based_extraction_testing.py",
+    "test_ontology_comparator.py",
+    "test_ontology_critic_hypothesis.py",
+    "test_score_analyzer.py",
+)
+
+_OPTIONAL_UPSTREAM_REQUIRED_TESTS = (
+    "test_agentic_evidence_download.py",
+    "test_attachment_text_extractor.py",
+    "test_complaint_generator_tools.py",
+    "test_docket_workspace_surface.py",
+    "test_email_agentic_search.py",
+    "test_email_authority_enrichment.py",
+    "test_email_duckdb_index.py",
+    "test_email_graphrag.py",
+    "test_email_import.py",
+    "test_email_seed_planner.py",
+    "test_email_timeline_handoff.py",
+    "test_evidence_relevance.py",
+)
+
+_OPTIONAL_UPSTREAM_MODULES = (
+    "ipfs_datasets_py.processors.legal_data.email_relevance",
+    "ipfs_datasets_py.processors.legal_data.email_agentic_search",
+    "ipfs_datasets_py.processors.legal_data.email_authority_enrichment",
+    "ipfs_datasets_py.processors.legal_data.email_corpus",
+    "ipfs_datasets_py.processors.legal_data.email_import",
+    "ipfs_datasets_py.processors.legal_data.email_seed_planner",
+    "ipfs_datasets_py.processors.legal_data.email_timeline_handoff",
+    "ipfs_datasets_py.processors.legal_data.workspace_dataset",
+    "ipfs_datasets_py.processors.multimedia.attachment_text_extractor",
+    "ipfs_datasets_py.processors.multimedia.email_duckdb_index",
+)
+
 
 def _truthy_env(name: str) -> bool:
     value = os.environ.get(name, "").strip().lower()
@@ -66,6 +104,34 @@ def _strip_reserved_example_urls(text: str) -> str:
     """Ignore reserved example-domain fixtures when auto-classifying network tests."""
 
     return _RESERVED_EXAMPLE_URL_RE.sub("reserved-example-url", text)
+
+
+def _candidate_ipfs_dataset_roots(repo_root: str) -> list[str]:
+    """Return local or supervisor-parent ipfs_datasets_py checkouts."""
+
+    root = os.path.abspath(repo_root)
+    candidates: list[str] = []
+    current = root
+    while True:
+        candidate = os.path.join(current, "ipfs_datasets_py")
+        if candidate not in candidates:
+            candidates.append(candidate)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return candidates
+
+
+def _select_ipfs_dataset_root(repo_root: str) -> str:
+    """Prefer a complete checkout, falling back to the worktree seed."""
+
+    fallback = os.path.join(repo_root, "ipfs_datasets_py")
+    for candidate in _candidate_ipfs_dataset_roots(repo_root):
+        expected_init = os.path.join(candidate, "ipfs_datasets_py", "__init__.py")
+        if os.path.isfile(expected_init):
+            return candidate
+    return fallback
 
 
 def pytest_addoption(parser):
@@ -97,11 +163,24 @@ def pytest_addoption(parser):
     )
 
 
+def pytest_ignore_collect(collection_path, path=None, config=None):
+    """Avoid collection-time import errors for optional property-test deps."""
+
+    candidate = str(collection_path if collection_path is not None else path)
+    if importlib.util.find_spec("hypothesis") is None:
+        if any(name in candidate for name in _HYPOTHESIS_REQUIRED_TESTS):
+            return True
+    if any(name in candidate for name in _OPTIONAL_UPSTREAM_REQUIRED_TESTS):
+        if any(importlib.util.find_spec(module) is None for module in _OPTIONAL_UPSTREAM_MODULES):
+            return True
+    return None
+
+
 def pytest_configure() -> None:
     """Ensure the ipfs_datasets_py submodule package is importable in tests."""
 
     repo_root = os.path.dirname(os.path.dirname(__file__))
-    submodule_root = os.path.join(repo_root, "ipfs_datasets_py")
+    submodule_root = _select_ipfs_dataset_root(repo_root)
     if os.path.isdir(submodule_root) and submodule_root not in sys.path:
         sys.path.insert(0, submodule_root)
 
