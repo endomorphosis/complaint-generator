@@ -75,7 +75,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-009 Resolve merge retry-budget failure for REF-005
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
@@ -83,3 +83,4 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Outputs: mediator/mediator.py, mediator/__init__.py, data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery/2026-07-21-ref-009-ref-005-merge-retry-budget.md
 - Acceptance: Merge retry-budget guardrail filed this from repeated merge failures in REF-005. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/discovery/2026-07-21-ref-009-ref-005-merge-retry-budget.md to fix the merge blocker, verify the intended implementation changes are committed in their owning repository or submodule, run `ipfs-accelerate-agent-merge-resolver --events-path ... --apply` when the conflict is semantic, then mark this repair task completed so the supervisor can release REF-005 from strategy blocked_tasks.
+- Repair result: REF-005 branch `implementation/ref-005-attempt-1-1784663197` now has sanitizer commits `a1e01a3` and `6531aad`; its final diff from baseline is mediator-only, the script add/add conflict no longer appears in `git merge-tree`, and `REF-005` was removed from the lane strategy `blocked_tasks`.
