@@ -109,13 +109,15 @@ def merge_resolver_command() -> str:
     return shlex.join(
         (
             "env",
-            f"PYTHONPATH={ACCELERATE_REPO}",
+            f"PYTHONPATH={ACCELERATE_REPO}{os.pathsep}{PROJECT_ROOT}",
+            "AGENT_MERGE_LLM_ROUTER_CONFIG=config.llm_router.json",
+            "AGENT_MERGE_LLM_ROUTER_BACKEND_ID=llm-router-codex",
+            "AGENT_MERGE_LLM_ROUTER_MAX_TOKENS=4096",
             "CODEX_MERGE_RESOLVER_TIMEOUT_SECONDS=300",
             "COPILOT_MERGE_RESOLVER_TIMEOUT_SECONDS=300",
             "AGENT_RESOLVER_LOCK_TIMEOUT_SECONDS=60",
             sys.executable,
-            "-m",
-            "ipfs_accelerate_py.agent_supervisor.llm_merge_resolver_fallback",
+            str(PROJECT_ROOT / "scripts" / "llm_router_merge_resolver.py"),
         )
     )
 
@@ -1252,6 +1254,13 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
         str(float(args.merge_resolver_timeout)),
         "--merge-reconciliation-max-merges",
         str(int(args.merge_reconciliation_max_merges)),
+        "--auto-commit-generated-dirty",
+        "--generated-dirty-commit-subject",
+        "Agent: commit refactor supervisor generated outputs",
+        "--generated-dirty-max-paths",
+        str(int(args.generated_dirty_max_paths)),
+        "--generated-dirty-stale-lock-seconds",
+        str(float(args.generated_dirty_stale_lock_seconds)),
         "--check-interval",
         str(float(args.interval_s)),
         "--daemon-interval",
@@ -1355,6 +1364,13 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
         str(float(args.merge_resolver_timeout)),
         "--merge-reconciliation-max-merges",
         str(int(args.merge_reconciliation_max_merges)),
+        "--auto-commit-generated-dirty",
+        "--generated-dirty-commit-subject",
+        "Agent: commit refactor lane generated outputs",
+        "--generated-dirty-max-paths",
+        str(int(args.generated_dirty_max_paths)),
+        "--generated-dirty-stale-lock-seconds",
+        str(float(args.generated_dirty_stale_lock_seconds)),
         "--coordination-path",
         str(BUNDLE_COORDINATION_PATH),
         "--claimant-did",
@@ -1686,6 +1702,8 @@ def add_parallel_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-restarts", type=int, default=3)
     parser.add_argument("--merge-resolver-timeout", type=float, default=900.0)
     parser.add_argument("--merge-reconciliation-max-merges", type=int, default=2)
+    parser.add_argument("--generated-dirty-max-paths", type=int, default=200)
+    parser.add_argument("--generated-dirty-stale-lock-seconds", type=float, default=300.0)
     parser.add_argument("--lease-ms", type=int, default=300000)
     parser.add_argument("--full-scan", action="store_true", help="Run the expensive upstream objective AST scan before planning lanes.")
     parser.add_argument("--skip-active-bundle", action="store_true", default=True)
@@ -1717,6 +1735,8 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--max-restarts", type=int, default=10)
     start.add_argument("--merge-resolver-timeout", type=float, default=900.0)
     start.add_argument("--merge-reconciliation-max-merges", type=int, default=2)
+    start.add_argument("--generated-dirty-max-paths", type=int, default=200)
+    start.add_argument("--generated-dirty-stale-lock-seconds", type=float, default=300.0)
 
     plan_parallel = sub.add_parser("plan-parallel", help="Plan goal/subgoal/AST bundle lanes without launching them.")
     add_parallel_args(plan_parallel)

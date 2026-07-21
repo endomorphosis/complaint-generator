@@ -181,7 +181,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g8
 - Goal: Prepare incremental implementation slices
-- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, data/refactor_supervisor/refactor_goals.json, scripts/refactor_agent_supervisor.py, tests/test_refactor_agent_supervisor.py, data/refactor_supervisor/discovery/2026-07-21-ref-031-objective-validation-repair.md, objective validation repair
+- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, data/refactor_supervisor/refactor_goals.json, scripts/refactor_agent_supervisor.py, tests/test_refactor_agent_supervisor.py
 - Validation: python -m pytest --collect-only -q
 
 ## G8.S1 Convert existing roadmaps into executable slices

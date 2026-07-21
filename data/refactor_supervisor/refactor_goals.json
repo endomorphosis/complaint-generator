@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-21T19:45:39Z",
+  "generated_at": "2026-07-21T21:12:30Z",
   "goals": [
     {
       "id": "G1",
@@ -729,11 +729,11 @@
   "scan": {
     "largest_python_files": [
       {
-        "lines": 10852,
+        "lines": 10551,
         "path": "mediator/mediator.py"
       },
       {
-        "lines": 7881,
+        "lines": 8094,
         "path": "applications/complaint_workspace.py"
       },
       {
@@ -753,11 +753,11 @@
         "path": "complaint_phases/denoiser.py"
       },
       {
-        "lines": 5562,
+        "lines": 5646,
         "path": "applications/dashboard_ui.py"
       },
       {
-        "lines": 5309,
+        "lines": 5118,
         "path": "mediator/claim_support_hooks.py"
       },
       {
@@ -834,11 +834,11 @@
       "pyproject": true,
       "pytest_ini": true
     },
-    "python_file_count": 433,
-    "python_total_lines": 243492,
-    "scanned_at": "2026-07-21T19:45:39Z",
+    "python_file_count": 436,
+    "python_total_lines": 244126,
+    "scanned_at": "2026-07-21T21:12:30Z",
     "signals": {
-      "broad_exception_count": 374,
+      "broad_exception_count": 375,
       "direct_ipfs_import_count": 231,
       "direct_ipfs_imports": [
         "applications/complaint_cli.py:265",
@@ -847,24 +847,24 @@
         "applications/complaint_cli.py:410",
         "applications/complaint_cli.py:411",
         "applications/complaint_cli.py:479",
-        "applications/complaint_workspace.py:1581",
-        "applications/complaint_workspace.py:3933",
-        "applications/complaint_workspace.py:4940",
-        "applications/complaint_workspace.py:5004",
-        "applications/complaint_workspace.py:5049",
-        "applications/complaint_workspace.py:5935",
-        "applications/complaint_workspace.py:6208",
-        "applications/complaint_workspace.py:6405",
-        "applications/complaint_workspace.py:6483",
-        "applications/complaint_workspace.py:6987",
-        "applications/complaint_workspace.py:7124",
-        "applications/complaint_workspace.py:7161",
-        "applications/complaint_workspace.py:7197",
-        "applications/complaint_workspace.py:7239",
-        "applications/complaint_workspace.py:7255",
-        "applications/complaint_workspace.py:7281",
-        "applications/complaint_workspace.py:7312",
-        "applications/dashboard_ui.py:809",
+        "applications/complaint_workspace.py:1582",
+        "applications/complaint_workspace.py:4211",
+        "applications/complaint_workspace.py:5186",
+        "applications/complaint_workspace.py:5250",
+        "applications/complaint_workspace.py:5295",
+        "applications/complaint_workspace.py:6148",
+        "applications/complaint_workspace.py:6421",
+        "applications/complaint_workspace.py:6618",
+        "applications/complaint_workspace.py:6696",
+        "applications/complaint_workspace.py:7200",
+        "applications/complaint_workspace.py:7337",
+        "applications/complaint_workspace.py:7374",
+        "applications/complaint_workspace.py:7410",
+        "applications/complaint_workspace.py:7452",
+        "applications/complaint_workspace.py:7468",
+        "applications/complaint_workspace.py:7494",
+        "applications/complaint_workspace.py:7525",
+        "applications/dashboard_ui.py:892",
         "complaint_generator/agentic_evidence_download.py:10",
         "complaint_generator/data_migration.py:13",
         "complaint_generator/email_agentic_search.py:5",
@@ -1045,7 +1045,7 @@
       "silent_pass_count": 120,
       "sys_path_mutation_count": 58,
       "sys_path_mutations": [
-        "applications/complaint_workspace.py:44",
+        "applications/complaint_workspace.py:45",
         "applications/document_api.py:28",
         "integrations/ipfs_datasets/loader.py:113",
         "scripts/agentic_complaint_evidence_scraper.py:11",

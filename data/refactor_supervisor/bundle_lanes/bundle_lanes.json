@@ -1,6 +1,6 @@
 {
   "bundle_index_path": "data/refactor_supervisor/objective_bundles/index.json",
-  "generated_at": "2026-07-21T19:45:51.811540+00:00",
+  "generated_at": "2026-07-21T21:11:18.349748+00:00",
   "lanes": [
     {
       "bundle_key": "refactor/g1/g1-s1",
@@ -28,10 +28,24 @@
         "3",
         "--implementation-timeout",
         "1800.0",
-        "--implement"
+        "--no-implement",
+        "--llm-merge-resolver-command",
+        "env PYTHONPATH=/home/barberb/complaint-generator/ipfs_datasets_py/ipfs_accelerate_py:/home/barberb/complaint-generator AGENT_MERGE_LLM_ROUTER_CONFIG=config.llm_router.json AGENT_MERGE_LLM_ROUTER_BACKEND_ID=llm-router-codex AGENT_MERGE_LLM_ROUTER_MAX_TOKENS=4096 CODEX_MERGE_RESOLVER_TIMEOUT_SECONDS=300 COPILOT_MERGE_RESOLVER_TIMEOUT_SECONDS=300 AGENT_RESOLVER_LOCK_TIMEOUT_SECONDS=60 /home/barberb/bin/python /home/barberb/complaint-generator/scripts/llm_router_merge_resolver.py",
+        "--llm-merge-resolver-timeout-seconds",
+        "900.0",
+        "--merge-reconciliation-max-merges",
+        "2",
+        "--auto-commit-generated-dirty",
+        "--generated-dirty-commit-subject",
+        "Agent: commit refactor lane generated outputs",
+        "--no-generated-dirty-submodule-gitlinks",
+        "--generated-dirty-max-paths",
+        "200",
+        "--generated-dirty-stale-lock-seconds",
+        "300.0"
       ],
       "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
-      "goal_cid": "baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga",
+      "goal_cid": "baguqeeragy3v7asel52iz5mdizybgmrvam2j3zfzwskmefgwsflp2bpybsga",
       "log_path": "data/refactor_supervisor/bundle_lanes/logs/refactor-g1-g1-s1.log",
       "parallel_lane": "refactor/g1/g1-s1",
       "queue_payload": {
@@ -41,42 +55,10 @@
         "parallel_lane": "refactor/g1/g1-s1",
         "profile_g": {
           "artifacts": {
-            "baguqeera6fyvg5b54oql2h7ej55ahy44jmqmj6ffywzy5aomsvy36iuedyla": {
-              "candidate_input_cids": [
-                "baguqeera4oekg5xbs26gqpb4tsc4qzfr6ldhmehcy7hpxyurq4co4ovs5hca"
-              ],
+            "baguqeera4zjag6dz7afzmvmi36szi6iszbnfswuqi6nldqwivfjok74rqfva": {
               "correlation_id": "refactor/g1/g1-s1",
-              "created_at_ms": 1784663151768,
-              "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
-              "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
-              "parents": [
-                "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba"
-              ],
-              "schema": "mcp++/profile-g/plan-branch@1",
-              "score_millionths": 1000000,
-              "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba",
-              "task_template_cids": [
-                "baguqeera4tydojdulvderm2aklwculxgj6huqr53tnfwqomodknxm5cqd4gq"
-              ]
-            },
-            "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba": {
-              "correlation_id": "refactor/g1/g1-s1",
-              "created_at_ms": 1784663151768,
-              "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
-              "decomposition_method": "objective-bundle-v1",
-              "goal_cid": "baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga",
-              "objective_cid": "baguqeeraktvwg4ahetzzkbzvg4z5xbemc77673jtrozs3tvj4vcc4jvz7fqq",
-              "parent_subgoal_cid": null,
-              "parents": [
-                "baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga"
-              ],
-              "schema": "mcp++/profile-g/subgoal@1",
-              "selection_cid": null
-            },
-            "baguqeeraeawe7oh2hjcfswym7soidz46a6yqddo77mvxatl45tgzxi7beyga": {
-              "correlation_id": "refactor/g1/g1-s1",
-              "created_at_ms": 1784663151768,
-              "deadline_ms": 1784749551768,
+              "created_at_ms": 1784668278334,
+              "deadline_ms": 1784754678334,
               "dependency_task_cids": [],
               "execution_mode": "idempotent",
               "expected_value_millionths": 500000,
@@ -85,18 +67,18 @@
               "interface_cid": "baguqeeraim3neo6bsotfc6t45jrguyalmrgvkzzsladvegxg4m2wf4b4m4eq",
               "max_attempts": 3,
               "parents": [
-                "baguqeerazralxcqzwe7dtwlfdhz2mrvvvozojquth7ruxeqcm2p2hb43ctba"
+                "baguqeeraqydyuqndoimfphueeilqjotatdltguwap3mqhizky6yx6kfvefla"
               ],
-              "plan_branch_cid": "baguqeera6fyvg5b54oql2h7ej55ahy44jmqmj6ffywzy5aomsvy36iuedyla",
+              "plan_branch_cid": "baguqeeravhwkjehsvgfartwkwmvnbu6wp7cl2zdbbb3sivxrspr7gwq5d62a",
               "resource_class": "cpu-small",
               "schema": "mcp++/profile-g/task@1",
-              "selection_cid": "baguqeerazralxcqzwe7dtwlfdhz2mrvvvozojquth7ruxeqcm2p2hb43ctba",
-              "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba",
+              "selection_cid": "baguqeeraqydyuqndoimfphueeilqjotatdltguwap3mqhizky6yx6kfvefla",
+              "subgoal_cid": "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha",
               "tool": "codex.todo_bundle"
             },
-            "baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga": {
+            "baguqeeragy3v7asel52iz5mdizybgmrvam2j3zfzwskmefgwsflp2bpybsga": {
               "correlation_id": "refactor/g1/g1-s1",
-              "created_at_ms": 1784663151768,
+              "created_at_ms": 1784668278334,
               "labels": [
                 "accelerator",
                 "daemon-lane"
@@ -108,24 +90,56 @@
               "policy_cid": "baguqeeral4wzcdlaxbodlogup4rsldfyluh5gzuk3yfgcgl5kh3ztsuncexq",
               "schema": "mcp++/profile-g/goal@1"
             },
-            "baguqeerazralxcqzwe7dtwlfdhz2mrvvvozojquth7ruxeqcm2p2hb43ctba": {
+            "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha": {
               "correlation_id": "refactor/g1/g1-s1",
-              "created_at_ms": 1784663151768,
+              "created_at_ms": 1784668278334,
+              "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
+              "decomposition_method": "objective-bundle-v1",
+              "goal_cid": "baguqeeragy3v7asel52iz5mdizybgmrvam2j3zfzwskmefgwsflp2bpybsga",
+              "objective_cid": "baguqeeraktvwg4ahetzzkbzvg4z5xbemc77673jtrozs3tvj4vcc4jvz7fqq",
+              "parent_subgoal_cid": null,
               "parents": [
-                "baguqeera6fyvg5b54oql2h7ej55ahy44jmqmj6ffywzy5aomsvy36iuedyla"
+                "baguqeeragy3v7asel52iz5mdizybgmrvam2j3zfzwskmefgwsflp2bpybsga"
               ],
-              "plan_branch_cid": "baguqeera6fyvg5b54oql2h7ej55ahy44jmqmj6ffywzy5aomsvy36iuedyla",
+              "schema": "mcp++/profile-g/subgoal@1",
+              "selection_cid": null
+            },
+            "baguqeeraqydyuqndoimfphueeilqjotatdltguwap3mqhizky6yx6kfvefla": {
+              "correlation_id": "refactor/g1/g1-s1",
+              "created_at_ms": 1784668278334,
+              "parents": [
+                "baguqeeravhwkjehsvgfartwkwmvnbu6wp7cl2zdbbb3sivxrspr7gwq5d62a"
+              ],
+              "plan_branch_cid": "baguqeeravhwkjehsvgfartwkwmvnbu6wp7cl2zdbbb3sivxrspr7gwq5d62a",
               "policy_decision_cid": "baguqeeranoby7kw4ywxcblazniv6ppopsmxzlcnbjv7mxtm5mhs3stea2a5a",
               "proof_cid": "baguqeeralac6fxtaxtj7fbln3bflsc7ujpasb4n5es2f4q4g5j4lecntmzha",
               "reason_cid": "baguqeera7s7ycz2v6kp5tiqj6wwm7oalphdosb4rfercey7f7zvjnviywblq",
               "schema": "mcp++/profile-g/plan-selection@1",
               "selector_did": "did:web:ipfs-accelerate.local",
-              "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba"
+              "subgoal_cid": "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha"
+            },
+            "baguqeeravhwkjehsvgfartwkwmvnbu6wp7cl2zdbbb3sivxrspr7gwq5d62a": {
+              "candidate_input_cids": [
+                "baguqeera4oekg5xbs26gqpb4tsc4qzfr6ldhmehcy7hpxyurq4co4ovs5hca"
+              ],
+              "correlation_id": "refactor/g1/g1-s1",
+              "created_at_ms": 1784668278334,
+              "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
+              "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
+              "parents": [
+                "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha"
+              ],
+              "schema": "mcp++/profile-g/plan-branch@1",
+              "score_millionths": 1000000,
+              "subgoal_cid": "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha",
+              "task_template_cids": [
+                "baguqeera4tydojdulvderm2aklwculxgj6huqr53tnfwqomodknxm5cqd4gq"
+              ]
             }
           },
           "goal": {
             "correlation_id": "refactor/g1/g1-s1",
-            "created_at_ms": 1784663151768,
+            "created_at_ms": 1784668278334,
             "labels": [
               "accelerator",
               "daemon-lane"
@@ -137,60 +151,60 @@
             "policy_cid": "baguqeeral4wzcdlaxbodlogup4rsldfyluh5gzuk3yfgcgl5kh3ztsuncexq",
             "schema": "mcp++/profile-g/goal@1"
           },
-          "goal_cid": "baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga",
+          "goal_cid": "baguqeeragy3v7asel52iz5mdizybgmrvam2j3zfzwskmefgwsflp2bpybsga",
           "plan_branch": {
             "candidate_input_cids": [
               "baguqeera4oekg5xbs26gqpb4tsc4qzfr6ldhmehcy7hpxyurq4co4ovs5hca"
             ],
             "correlation_id": "refactor/g1/g1-s1",
-            "created_at_ms": 1784663151768,
+            "created_at_ms": 1784668278334,
             "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
             "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
             "parents": [
-              "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba"
+              "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha"
             ],
             "schema": "mcp++/profile-g/plan-branch@1",
             "score_millionths": 1000000,
-            "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba",
+            "subgoal_cid": "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha",
             "task_template_cids": [
               "baguqeera4tydojdulvderm2aklwculxgj6huqr53tnfwqomodknxm5cqd4gq"
             ]
           },
-          "plan_branch_cid": "baguqeera6fyvg5b54oql2h7ej55ahy44jmqmj6ffywzy5aomsvy36iuedyla",
+          "plan_branch_cid": "baguqeeravhwkjehsvgfartwkwmvnbu6wp7cl2zdbbb3sivxrspr7gwq5d62a",
           "selection": {
             "correlation_id": "refactor/g1/g1-s1",
-            "created_at_ms": 1784663151768,
+            "created_at_ms": 1784668278334,
             "parents": [
-              "baguqeera6fyvg5b54oql2h7ej55ahy44jmqmj6ffywzy5aomsvy36iuedyla"
+              "baguqeeravhwkjehsvgfartwkwmvnbu6wp7cl2zdbbb3sivxrspr7gwq5d62a"
             ],
-            "plan_branch_cid": "baguqeera6fyvg5b54oql2h7ej55ahy44jmqmj6ffywzy5aomsvy36iuedyla",
+            "plan_branch_cid": "baguqeeravhwkjehsvgfartwkwmvnbu6wp7cl2zdbbb3sivxrspr7gwq5d62a",
             "policy_decision_cid": "baguqeeranoby7kw4ywxcblazniv6ppopsmxzlcnbjv7mxtm5mhs3stea2a5a",
             "proof_cid": "baguqeeralac6fxtaxtj7fbln3bflsc7ujpasb4n5es2f4q4g5j4lecntmzha",
             "reason_cid": "baguqeera7s7ycz2v6kp5tiqj6wwm7oalphdosb4rfercey7f7zvjnviywblq",
             "schema": "mcp++/profile-g/plan-selection@1",
             "selector_did": "did:web:ipfs-accelerate.local",
-            "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba"
+            "subgoal_cid": "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha"
           },
-          "selection_cid": "baguqeerazralxcqzwe7dtwlfdhz2mrvvvozojquth7ruxeqcm2p2hb43ctba",
+          "selection_cid": "baguqeeraqydyuqndoimfphueeilqjotatdltguwap3mqhizky6yx6kfvefla",
           "subgoal": {
             "correlation_id": "refactor/g1/g1-s1",
-            "created_at_ms": 1784663151768,
+            "created_at_ms": 1784668278334,
             "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
             "decomposition_method": "objective-bundle-v1",
-            "goal_cid": "baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga",
+            "goal_cid": "baguqeeragy3v7asel52iz5mdizybgmrvam2j3zfzwskmefgwsflp2bpybsga",
             "objective_cid": "baguqeeraktvwg4ahetzzkbzvg4z5xbemc77673jtrozs3tvj4vcc4jvz7fqq",
             "parent_subgoal_cid": null,
             "parents": [
-              "baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga"
+              "baguqeeragy3v7asel52iz5mdizybgmrvam2j3zfzwskmefgwsflp2bpybsga"
             ],
             "schema": "mcp++/profile-g/subgoal@1",
             "selection_cid": null
           },
-          "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba",
+          "subgoal_cid": "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha",
           "task": {
             "correlation_id": "refactor/g1/g1-s1",
-            "created_at_ms": 1784663151768,
-            "deadline_ms": 1784749551768,
+            "created_at_ms": 1784668278334,
+            "deadline_ms": 1784754678334,
             "dependency_task_cids": [],
             "execution_mode": "idempotent",
             "expected_value_millionths": 500000,
@@ -199,16 +213,16 @@
             "interface_cid": "baguqeeraim3neo6bsotfc6t45jrguyalmrgvkzzsladvegxg4m2wf4b4m4eq",
             "max_attempts": 3,
             "parents": [
-              "baguqeerazralxcqzwe7dtwlfdhz2mrvvvozojquth7ruxeqcm2p2hb43ctba"
+              "baguqeeraqydyuqndoimfphueeilqjotatdltguwap3mqhizky6yx6kfvefla"
             ],
-            "plan_branch_cid": "baguqeera6fyvg5b54oql2h7ej55ahy44jmqmj6ffywzy5aomsvy36iuedyla",
+            "plan_branch_cid": "baguqeeravhwkjehsvgfartwkwmvnbu6wp7cl2zdbbb3sivxrspr7gwq5d62a",
             "resource_class": "cpu-small",
             "schema": "mcp++/profile-g/task@1",
-            "selection_cid": "baguqeerazralxcqzwe7dtwlfdhz2mrvvvozojquth7ruxeqcm2p2hb43ctba",
-            "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba",
+            "selection_cid": "baguqeeraqydyuqndoimfphueeilqjotatdltguwap3mqhizky6yx6kfvefla",
+            "subgoal_cid": "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha",
             "tool": "codex.todo_bundle"
           },
-          "task_cid": "baguqeeraeawe7oh2hjcfswym7soidz46a6yqddo77mvxatl45tgzxi7beyga"
+          "task_cid": "baguqeera4zjag6dz7afzmvmi36szi6iszbnfswuqi6nldqwivfjok74rqfva"
         },
         "source_todo": "data/refactor_supervisor/refactor_todo.md",
         "tasks": [
@@ -381,1646 +395,19 @@
       "source_todo": "data/refactor_supervisor/refactor_todo.md",
       "state_dir": "data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s1/state",
       "state_prefix": "agent_refactor_g1_g1_s1",
-      "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba",
-      "task_cid": "baguqeeraeawe7oh2hjcfswym7soidz46a6yqddo77mvxatl45tgzxi7beyga",
+      "subgoal_cid": "baguqeeramjobm24fz2xnda4ltbgbmf4go4mw23t24ur24ryszg6cqz5k6rha",
+      "task_cid": "baguqeera4zjag6dz7afzmvmi36szi6iszbnfswuqi6nldqwivfjok74rqfva",
       "task_ids": [
         "REF-001",
         "REF-002"
       ],
       "todo_path": "data/refactor_supervisor/objective_bundles/refactor-g1-g1-s1.todo.md",
       "worktree_root": "data/refactor_supervisor/bundle_lanes/worktrees/refactor-g1-g1-s1"
-    },
-    {
-      "bundle_key": "refactor/g1/g1-s2",
-      "command": [
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor",
-        "--todo-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md",
-        "--state-dir",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/state",
-        "--state-prefix",
-        "agent_refactor_g1_g1_s2",
-        "--task-prefix",
-        "REF-",
-        "--worktree-root",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g1-g1-s2",
-        "--daemon-interval",
-        "120.0",
-        "--stale-seconds",
-        "1800.0",
-        "--check-interval",
-        "120.0",
-        "--max-restarts",
-        "3",
-        "--implementation-timeout",
-        "1800.0",
-        "--implement"
-      ],
-      "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
-      "goal_cid": "baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq",
-      "log_path": "data/refactor_supervisor/bundle_lanes/logs/refactor-g1-g1-s2.log",
-      "parallel_lane": "refactor/g1/g1-s2",
-      "queue_payload": {
-        "bundle_key": "refactor/g1/g1-s2",
-        "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
-        "objective_bundle_index": "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/index.json",
-        "parallel_lane": "refactor/g1/g1-s2",
-        "profile_g": {
-          "artifacts": {
-            "baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq": {
-              "correlation_id": "refactor/g1/g1-s2",
-              "created_at_ms": 1784663151769,
-              "labels": [
-                "accelerator",
-                "daemon-lane"
-              ],
-              "objective_cid": "baguqeera4aukj3atnb26b7wf2hupqx3cky7xqjoggiay454m6fmke6bd5q2q",
-              "owner_did": "did:web:ipfs-accelerate.local",
-              "parent_goal_cids": [],
-              "parents": [],
-              "policy_cid": "baguqeeral4wzcdlaxbodlogup4rsldfyluh5gzuk3yfgcgl5kh3ztsuncexq",
-              "schema": "mcp++/profile-g/goal@1"
-            },
-            "baguqeera7j7rqeogmpim5xiym7edk4pwv2ppoktsnyk4773ft6btrhsf26rq": {
-              "candidate_input_cids": [
-                "baguqeerapci7oclou62hppidtykg56w4eywpccl67ffryv6xb3dxyq5klwba"
-              ],
-              "correlation_id": "refactor/g1/g1-s2",
-              "created_at_ms": 1784663151769,
-              "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
-              "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
-              "parents": [
-                "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba"
-              ],
-              "schema": "mcp++/profile-g/plan-branch@1",
-              "score_millionths": 1000000,
-              "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba",
-              "task_template_cids": [
-                "baguqeera6q3y53b4heyplwyiak3xxwrrvq4vf6dch5fnqrtbrmr2nmrv5gza"
-              ]
-            },
-            "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba": {
-              "correlation_id": "refactor/g1/g1-s2",
-              "created_at_ms": 1784663151769,
-              "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
-              "decomposition_method": "objective-bundle-v1",
-              "goal_cid": "baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq",
-              "objective_cid": "baguqeera4aukj3atnb26b7wf2hupqx3cky7xqjoggiay454m6fmke6bd5q2q",
-              "parent_subgoal_cid": null,
-              "parents": [
-                "baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq"
-              ],
-              "schema": "mcp++/profile-g/subgoal@1",
-              "selection_cid": null
-            },
-            "baguqeerauwreipqo5w5kxaqk4cjbwvet4wr5osfadzq2eyshwcxiknujojqa": {
-              "correlation_id": "refactor/g1/g1-s2",
-              "created_at_ms": 1784663151769,
-              "parents": [
-                "baguqeera7j7rqeogmpim5xiym7edk4pwv2ppoktsnyk4773ft6btrhsf26rq"
-              ],
-              "plan_branch_cid": "baguqeera7j7rqeogmpim5xiym7edk4pwv2ppoktsnyk4773ft6btrhsf26rq",
-              "policy_decision_cid": "baguqeeranoby7kw4ywxcblazniv6ppopsmxzlcnbjv7mxtm5mhs3stea2a5a",
-              "proof_cid": "baguqeeraxjrha4wcur3ntg25fery5ypuk3mrg6yg24ceztrce2wospq3vjwa",
-              "reason_cid": "baguqeera7s7ycz2v6kp5tiqj6wwm7oalphdosb4rfercey7f7zvjnviywblq",
-              "schema": "mcp++/profile-g/plan-selection@1",
-              "selector_did": "did:web:ipfs-accelerate.local",
-              "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba"
-            },
-            "baguqeerayzdoiholjfev2nimlo7cfzutnagreli6djwkflt3vpyicqppjvma": {
-              "correlation_id": "refactor/g1/g1-s2",
-              "created_at_ms": 1784663151769,
-              "deadline_ms": 1784749551769,
-              "dependency_task_cids": [],
-              "execution_mode": "idempotent",
-              "expected_value_millionths": 500000,
-              "idempotency_key": "1ca8d9dfad980cac2aecdaf753e250a1",
-              "input_cid": "baguqeerapci7oclou62hppidtykg56w4eywpccl67ffryv6xb3dxyq5klwba",
-              "interface_cid": "baguqeeraim3neo6bsotfc6t45jrguyalmrgvkzzsladvegxg4m2wf4b4m4eq",
-              "max_attempts": 3,
-              "parents": [
-                "baguqeerauwreipqo5w5kxaqk4cjbwvet4wr5osfadzq2eyshwcxiknujojqa"
-              ],
-              "plan_branch_cid": "baguqeera7j7rqeogmpim5xiym7edk4pwv2ppoktsnyk4773ft6btrhsf26rq",
-              "resource_class": "cpu-small",
-              "schema": "mcp++/profile-g/task@1",
-              "selection_cid": "baguqeerauwreipqo5w5kxaqk4cjbwvet4wr5osfadzq2eyshwcxiknujojqa",
-              "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba",
-              "tool": "codex.todo_bundle"
-            }
-          },
-          "goal": {
-            "correlation_id": "refactor/g1/g1-s2",
-            "created_at_ms": 1784663151769,
-            "labels": [
-              "accelerator",
-              "daemon-lane"
-            ],
-            "objective_cid": "baguqeera4aukj3atnb26b7wf2hupqx3cky7xqjoggiay454m6fmke6bd5q2q",
-            "owner_did": "did:web:ipfs-accelerate.local",
-            "parent_goal_cids": [],
-            "parents": [],
-            "policy_cid": "baguqeeral4wzcdlaxbodlogup4rsldfyluh5gzuk3yfgcgl5kh3ztsuncexq",
-            "schema": "mcp++/profile-g/goal@1"
-          },
-          "goal_cid": "baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq",
-          "plan_branch": {
-            "candidate_input_cids": [
-              "baguqeerapci7oclou62hppidtykg56w4eywpccl67ffryv6xb3dxyq5klwba"
-            ],
-            "correlation_id": "refactor/g1/g1-s2",
-            "created_at_ms": 1784663151769,
-            "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
-            "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
-            "parents": [
-              "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba"
-            ],
-            "schema": "mcp++/profile-g/plan-branch@1",
-            "score_millionths": 1000000,
-            "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba",
-            "task_template_cids": [
-              "baguqeera6q3y53b4heyplwyiak3xxwrrvq4vf6dch5fnqrtbrmr2nmrv5gza"
-            ]
-          },
-          "plan_branch_cid": "baguqeera7j7rqeogmpim5xiym7edk4pwv2ppoktsnyk4773ft6btrhsf26rq",
-          "selection": {
-            "correlation_id": "refactor/g1/g1-s2",
-            "created_at_ms": 1784663151769,
-            "parents": [
-              "baguqeera7j7rqeogmpim5xiym7edk4pwv2ppoktsnyk4773ft6btrhsf26rq"
-            ],
-            "plan_branch_cid": "baguqeera7j7rqeogmpim5xiym7edk4pwv2ppoktsnyk4773ft6btrhsf26rq",
-            "policy_decision_cid": "baguqeeranoby7kw4ywxcblazniv6ppopsmxzlcnbjv7mxtm5mhs3stea2a5a",
-            "proof_cid": "baguqeeraxjrha4wcur3ntg25fery5ypuk3mrg6yg24ceztrce2wospq3vjwa",
-            "reason_cid": "baguqeera7s7ycz2v6kp5tiqj6wwm7oalphdosb4rfercey7f7zvjnviywblq",
-            "schema": "mcp++/profile-g/plan-selection@1",
-            "selector_did": "did:web:ipfs-accelerate.local",
-            "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba"
-          },
-          "selection_cid": "baguqeerauwreipqo5w5kxaqk4cjbwvet4wr5osfadzq2eyshwcxiknujojqa",
-          "subgoal": {
-            "correlation_id": "refactor/g1/g1-s2",
-            "created_at_ms": 1784663151769,
-            "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
-            "decomposition_method": "objective-bundle-v1",
-            "goal_cid": "baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq",
-            "objective_cid": "baguqeera4aukj3atnb26b7wf2hupqx3cky7xqjoggiay454m6fmke6bd5q2q",
-            "parent_subgoal_cid": null,
-            "parents": [
-              "baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq"
-            ],
-            "schema": "mcp++/profile-g/subgoal@1",
-            "selection_cid": null
-          },
-          "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba",
-          "task": {
-            "correlation_id": "refactor/g1/g1-s2",
-            "created_at_ms": 1784663151769,
-            "deadline_ms": 1784749551769,
-            "dependency_task_cids": [],
-            "execution_mode": "idempotent",
-            "expected_value_millionths": 500000,
-            "idempotency_key": "1ca8d9dfad980cac2aecdaf753e250a1",
-            "input_cid": "baguqeerapci7oclou62hppidtykg56w4eywpccl67ffryv6xb3dxyq5klwba",
-            "interface_cid": "baguqeeraim3neo6bsotfc6t45jrguyalmrgvkzzsladvegxg4m2wf4b4m4eq",
-            "max_attempts": 3,
-            "parents": [
-              "baguqeerauwreipqo5w5kxaqk4cjbwvet4wr5osfadzq2eyshwcxiknujojqa"
-            ],
-            "plan_branch_cid": "baguqeera7j7rqeogmpim5xiym7edk4pwv2ppoktsnyk4773ft6btrhsf26rq",
-            "resource_class": "cpu-small",
-            "schema": "mcp++/profile-g/task@1",
-            "selection_cid": "baguqeerauwreipqo5w5kxaqk4cjbwvet4wr5osfadzq2eyshwcxiknujojqa",
-            "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba",
-            "tool": "codex.todo_bundle"
-          },
-          "task_cid": "baguqeerayzdoiholjfev2nimlo7cfzutnagreli6djwkflt3vpyicqppjvma"
-        },
-        "source_todo": "data/refactor_supervisor/refactor_todo.md",
-        "tasks": [
-          {
-            "ast_symbols": [
-              "_ensure_local_ipfs_datasets_path",
-              "DEFAULT_USER_ID",
-              "DEFAULT_UI_UX_OPTIMIZER_METHOD",
-              "DEFAULT_UI_UX_OPTIMIZER_PRIORITY",
-              "DEFAULT_LLM_DRAFT_PROVIDER",
-              "DEFAULT_LLM_DRAFT_TIMEOUT_SECONDS",
-              "MIKE_STATUS_CONTRACT_VERSION",
-              "MIKE_HANDOFF_CONTRACT_VERSION",
-              "MIKE_SYNC_CONTRACT_VERSION",
-              "MAX_MIKE_HANDOFF_PARAGRAPHS",
-              "MAX_MIKE_WEAK_LINKS_DISPLAY",
-              "DEFAULT_UI_UX_SCREENSHOT_TARGET",
-              "_DATA_DIR",
-              "_SESSION_DIR",
-              "_DOCKET_ISSUE_ENTITY_KEYWORDS",
-              "_utc_now",
-              "_slugify_user_id",
-              "_split_lines",
-              "_unique_preserve_order",
-              "_slugify_graph_id",
-              "_normalize_annotation_tags",
-              "_build_schema_guided_tooling_recommendations",
-              "_normalize_fragment",
-              "_extract_person_name",
-              "_extract_defendant_name",
-              "_condense_timeline_text",
-              "_sentence_fragment",
-              "_event_fragment",
-              "_adverse_action_clause",
-              "_pleading_activity_fragment",
-              "_pleading_sentence",
-              "_timeline_clause_fragment",
-              "_llm_draft_timeout_for_provider",
-              "_resolve_llm_draft_backend",
-              "_resolve_llm_draft_backend_candidates",
-              "_pleading_timeline_sentence",
-              "_formalize_relief_item",
-              "_court_header_line",
-              "_build_export_structure_summary",
-              "_slugify_filename",
-              "_normalize_claim_type",
-              "_claim_type_display_name",
-              "_claim_element_label",
-              "_formal_evidence_summary_item",
-              "_compact_evidence_reference_item",
-              "_exhibit_label",
-              "_evidence_display_title",
-              "_evidence_priority",
-              "_claim_type_filing_guidance",
-              "_claim_type_count_heading",
-              "_claim_type_required_allegations",
-              "_claim_type_formal_example_snippet",
-              "_strip_code_fences",
-              "_normalize_llm_complaint_body",
-              "_parse_json_object",
-              "_required_formal_complaint_markers",
-              "_formal_complaint_forbidden_meta_phrases",
-              "_formal_complaint_validation_issues",
-              "_build_complaint_output_release_gate",
-              "_release_gate_score_from_verdict",
-              "_build_local_client_release_gate_for_state",
-              "_has_required_formal_complaint_markers",
-              "_looks_like_formal_complaint_candidate",
-              "generate_decentralized_id",
-              "_default_state",
-              "ComplaintWorkspaceService",
-              "repo_root",
-              "candidate",
-              "candidate_text",
-              "normalized",
-              "snapshot",
-              "hint_index",
-              "filter_dimensions",
-              "piece_ids",
-              "add_recommendation",
-              "text",
-              "candidates",
-              "compact",
-              "segments",
-              "sentence_parts"
-            ],
-            "bundle_strategy": "goal_subgoal_ast",
-            "candidate_kind": "seed",
-            "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-            "goal_id": "G1.S2",
-            "goal_packet_goal_ids": [
-              "G1",
-              "G1.S2"
-            ],
-            "goal_packet_key": "G1.S2",
-            "goal_packet_role": "seed",
-            "goal_packet_task_count": 1,
-            "goal_packet_work_item_count": 12,
-            "graph_depth": 1,
-            "merge_family": "G1",
-            "merge_key": "refactor/g1/g1-s2",
-            "merge_role": "seed",
-            "missing_evidence": [
-              "The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.",
-              "No production entrypoint mutates sys.path for normal imports.",
-              "Explicit exceptions are isolated to scripts/tests."
-            ],
-            "parent_goal_ids": [
-              "G1"
-            ],
-            "paths": [
-              "applications/complaint_workspace.py",
-              "applications/document_api.py",
-              "integrations/ipfs_datasets/loader.py",
-              "scripts/agentic_complaint_evidence_scraper.py",
-              "scripts/agentic_scraper_cli.py",
-              "scripts/backfill_claim_testimony_links.py",
-              "scripts/check_hacc_routers.py",
-              "scripts/enrich_email_timeline_authorities.py",
-              "scripts/generate_decision_trees.py",
-              "scripts/generate_email_search_plan.py",
-              "scripts/generate_hacc_email_seed_plan.py",
-              "scripts/gmail_duckdb_daemon.py"
-            ],
-            "surplus_group": "refactor/g1/g1-s2",
-            "task_id": "REF-003",
-            "todo_vector_key": "ref-003-replaceproductionsys-pathmutationwithpackage-lev",
-            "validation": [
-              "python -m pytest tests/test_package_imports.py -q"
-            ],
-            "work_item_count": 12,
-            "work_scope": "goal_subgoal_ast_locality"
-          },
-          {
-            "ast_symbols": [
-              "DEFAULT_UI_UX_SCREENSHOT_TARGET",
-              "DEFAULT_UI_UX_OPTIMIZER_METHOD",
-              "DEFAULT_UI_UX_OPTIMIZER_PRIORITY",
-              "app",
-              "service",
-              "_print",
-              "_split_multiline_values",
-              "_parse_json_option",
-              "session",
-              "identity",
-              "questions",
-              "claim_elements",
-              "tools",
-              "answer",
-              "chat_turn",
-              "chat",
-              "add_evidence",
-              "import_gmail_evidence_command",
-              "import_local_evidence_command",
-              "migrate_legacy_session_command",
-              "run_gmail_duckdb_pipeline_command",
-              "search_email_duckdb_command",
-              "review",
-              "mediator_prompt",
-              "complaint_readiness",
-              "ui_readiness",
-              "client_release_gate",
-              "capabilities",
-              "tooling_contract",
-              "workspace_data_schema",
-              "migrate_legacy_workspace_data_command",
-              "search_workspace_data",
-              "view_workspace_data",
-              "generate",
-              "update_draft",
-              "build_mike_handoff",
-              "mike_status",
-              "sync_mike_draft",
-              "export_packet",
-              "export_markdown",
-              "export_docx",
-              "export_pdf",
-              "analyze_output",
-              "formal_diagnostics",
-              "filing_provenance",
-              "provider_diagnostics",
-              "docket_view",
-              "docket_search",
-              "docket_metadata",
-              "docket_graph",
-              "review_exports",
-              "set_claim_type",
-              "update_synopsis",
-              "reset",
-              "review_ui",
-              "optimize_ui",
-              "browser_audit",
-              "ui_optimizer_start",
-              "ui_optimizer_status",
-              "ui_optimizer_stop",
-              "main",
-              "values",
-              "candidate",
-              "payload",
-              "accepted_turns",
-              "parser",
-              "_run_import",
-              "_run_pipeline",
-              "relief_items",
-              "raw_body",
-              "citation_links",
-              "structured_deltas",
-              "editor_metadata",
-              "goal_items",
-              "result",
-              "supplemental_artifacts",
-              "_MiniTyperApp",
-              "_MiniTyperModule",
-              "typer",
-              "parsed"
-            ],
-            "bundle_strategy": "goal_subgoal_ast",
-            "candidate_kind": "seed",
-            "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-            "goal_id": "G1.S2",
-            "goal_packet_goal_ids": [
-              "G1",
-              "G1.S2"
-            ],
-            "goal_packet_key": "G1.S2",
-            "goal_packet_role": "seed",
-            "goal_packet_task_count": 1,
-            "goal_packet_work_item_count": 2,
-            "graph_depth": 1,
-            "merge_family": "G1",
-            "merge_key": "refactor/g1/g1-s2",
-            "merge_role": "seed",
-            "missing_evidence": [
-              "Optional dependency behavior should stay behind the adapter boundary.",
-              "Production direct imports are replaced or documented.",
-              "Degraded mode still imports cleanly."
-            ],
-            "parent_goal_ids": [
-              "G1"
-            ],
-            "paths": [
-              "applications/complaint_cli.py",
-              "applications/complaint_workspace.py"
-            ],
-            "surplus_group": "refactor/g1/g1-s2",
-            "task_id": "REF-004",
-            "todo_vector_key": "ref-004-routedirectipfs-datasets-pyimportsthroughintegra",
-            "validation": [
-              "python -m pytest tests/test_ipfs_adapter_layer.py -q"
-            ],
-            "work_item_count": 2,
-            "work_scope": "goal_subgoal_ast_locality"
-          }
-        ],
-        "todo_path": "data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md"
-      },
-      "source_todo": "data/refactor_supervisor/refactor_todo.md",
-      "state_dir": "data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/state",
-      "state_prefix": "agent_refactor_g1_g1_s2",
-      "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba",
-      "task_cid": "baguqeerayzdoiholjfev2nimlo7cfzutnagreli6djwkflt3vpyicqppjvma",
-      "task_ids": [
-        "REF-003",
-        "REF-004"
-      ],
-      "todo_path": "data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md",
-      "worktree_root": "data/refactor_supervisor/bundle_lanes/worktrees/refactor-g1-g1-s2"
-    },
-    {
-      "bundle_key": "refactor/g2/g2-s1",
-      "command": [
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor",
-        "--todo-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g2-g2-s1.todo.md",
-        "--state-dir",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/state",
-        "--state-prefix",
-        "agent_refactor_g2_g2_s1",
-        "--task-prefix",
-        "REF-",
-        "--worktree-root",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s1",
-        "--daemon-interval",
-        "120.0",
-        "--stale-seconds",
-        "1800.0",
-        "--check-interval",
-        "120.0",
-        "--max-restarts",
-        "3",
-        "--implementation-timeout",
-        "1800.0",
-        "--implement"
-      ],
-      "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
-      "goal_cid": "baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma",
-      "log_path": "data/refactor_supervisor/bundle_lanes/logs/refactor-g2-g2-s1.log",
-      "parallel_lane": "refactor/g2/g2-s1",
-      "queue_payload": {
-        "bundle_key": "refactor/g2/g2-s1",
-        "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
-        "objective_bundle_index": "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/index.json",
-        "parallel_lane": "refactor/g2/g2-s1",
-        "profile_g": {
-          "artifacts": {
-            "baguqeera7zb2viqwrwc6hek56aennzr3bbsvacf7acrmhzhyz73l5uljlfjq": {
-              "correlation_id": "refactor/g2/g2-s1",
-              "created_at_ms": 1784663151771,
-              "deadline_ms": 1784749551771,
-              "dependency_task_cids": [],
-              "execution_mode": "idempotent",
-              "expected_value_millionths": 500000,
-              "idempotency_key": "30f8f958f8262e1c7fde843388079482",
-              "input_cid": "baguqeerabszburtp4vqrzjjffyhgcjfqpjiyx4j3q7rmpjal6fwtcw46kfzq",
-              "interface_cid": "baguqeeraim3neo6bsotfc6t45jrguyalmrgvkzzsladvegxg4m2wf4b4m4eq",
-              "max_attempts": 3,
-              "parents": [
-                "baguqeeraud7phg5t7aru47rkomvk2y33vw5zhcyju4e6ok6ed3ujxtra2cya"
-              ],
-              "plan_branch_cid": "baguqeeranjq6xdpvntolh74lmfjycgs5uwu2gyktlqorgqr25kx37tcgu5eq",
-              "resource_class": "cpu-small",
-              "schema": "mcp++/profile-g/task@1",
-              "selection_cid": "baguqeeraud7phg5t7aru47rkomvk2y33vw5zhcyju4e6ok6ed3ujxtra2cya",
-              "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq",
-              "tool": "codex.todo_bundle"
-            },
-            "baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma": {
-              "correlation_id": "refactor/g2/g2-s1",
-              "created_at_ms": 1784663151771,
-              "labels": [
-                "accelerator",
-                "daemon-lane"
-              ],
-              "objective_cid": "baguqeera6c5oagi57y6iufv3tyhfutemgvhu44rdx7zryujjswmabe5obruq",
-              "owner_did": "did:web:ipfs-accelerate.local",
-              "parent_goal_cids": [],
-              "parents": [],
-              "policy_cid": "baguqeeral4wzcdlaxbodlogup4rsldfyluh5gzuk3yfgcgl5kh3ztsuncexq",
-              "schema": "mcp++/profile-g/goal@1"
-            },
-            "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq": {
-              "correlation_id": "refactor/g2/g2-s1",
-              "created_at_ms": 1784663151771,
-              "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
-              "decomposition_method": "objective-bundle-v1",
-              "goal_cid": "baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma",
-              "objective_cid": "baguqeera6c5oagi57y6iufv3tyhfutemgvhu44rdx7zryujjswmabe5obruq",
-              "parent_subgoal_cid": null,
-              "parents": [
-                "baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma"
-              ],
-              "schema": "mcp++/profile-g/subgoal@1",
-              "selection_cid": null
-            },
-            "baguqeeranjq6xdpvntolh74lmfjycgs5uwu2gyktlqorgqr25kx37tcgu5eq": {
-              "candidate_input_cids": [
-                "baguqeerabszburtp4vqrzjjffyhgcjfqpjiyx4j3q7rmpjal6fwtcw46kfzq"
-              ],
-              "correlation_id": "refactor/g2/g2-s1",
-              "created_at_ms": 1784663151771,
-              "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
-              "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
-              "parents": [
-                "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq"
-              ],
-              "schema": "mcp++/profile-g/plan-branch@1",
-              "score_millionths": 1000000,
-              "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq",
-              "task_template_cids": [
-                "baguqeeranz6gtbdsevgdilsnarkdlfxtykcem3xnfroskeztjioy5zluu3wq"
-              ]
-            },
-            "baguqeeraud7phg5t7aru47rkomvk2y33vw5zhcyju4e6ok6ed3ujxtra2cya": {
-              "correlation_id": "refactor/g2/g2-s1",
-              "created_at_ms": 1784663151771,
-              "parents": [
-                "baguqeeranjq6xdpvntolh74lmfjycgs5uwu2gyktlqorgqr25kx37tcgu5eq"
-              ],
-              "plan_branch_cid": "baguqeeranjq6xdpvntolh74lmfjycgs5uwu2gyktlqorgqr25kx37tcgu5eq",
-              "policy_decision_cid": "baguqeeranoby7kw4ywxcblazniv6ppopsmxzlcnbjv7mxtm5mhs3stea2a5a",
-              "proof_cid": "baguqeeravzvk4gsyjkesdpwuazeeuuyti445ilepfcrlccaenvrvzafvfmba",
-              "reason_cid": "baguqeera7s7ycz2v6kp5tiqj6wwm7oalphdosb4rfercey7f7zvjnviywblq",
-              "schema": "mcp++/profile-g/plan-selection@1",
-              "selector_did": "did:web:ipfs-accelerate.local",
-              "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq"
-            }
-          },
-          "goal": {
-            "correlation_id": "refactor/g2/g2-s1",
-            "created_at_ms": 1784663151771,
-            "labels": [
-              "accelerator",
-              "daemon-lane"
-            ],
-            "objective_cid": "baguqeera6c5oagi57y6iufv3tyhfutemgvhu44rdx7zryujjswmabe5obruq",
-            "owner_did": "did:web:ipfs-accelerate.local",
-            "parent_goal_cids": [],
-            "parents": [],
-            "policy_cid": "baguqeeral4wzcdlaxbodlogup4rsldfyluh5gzuk3yfgcgl5kh3ztsuncexq",
-            "schema": "mcp++/profile-g/goal@1"
-          },
-          "goal_cid": "baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma",
-          "plan_branch": {
-            "candidate_input_cids": [
-              "baguqeerabszburtp4vqrzjjffyhgcjfqpjiyx4j3q7rmpjal6fwtcw46kfzq"
-            ],
-            "correlation_id": "refactor/g2/g2-s1",
-            "created_at_ms": 1784663151771,
-            "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
-            "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
-            "parents": [
-              "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq"
-            ],
-            "schema": "mcp++/profile-g/plan-branch@1",
-            "score_millionths": 1000000,
-            "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq",
-            "task_template_cids": [
-              "baguqeeranz6gtbdsevgdilsnarkdlfxtykcem3xnfroskeztjioy5zluu3wq"
-            ]
-          },
-          "plan_branch_cid": "baguqeeranjq6xdpvntolh74lmfjycgs5uwu2gyktlqorgqr25kx37tcgu5eq",
-          "selection": {
-            "correlation_id": "refactor/g2/g2-s1",
-            "created_at_ms": 1784663151771,
-            "parents": [
-              "baguqeeranjq6xdpvntolh74lmfjycgs5uwu2gyktlqorgqr25kx37tcgu5eq"
-            ],
-            "plan_branch_cid": "baguqeeranjq6xdpvntolh74lmfjycgs5uwu2gyktlqorgqr25kx37tcgu5eq",
-            "policy_decision_cid": "baguqeeranoby7kw4ywxcblazniv6ppopsmxzlcnbjv7mxtm5mhs3stea2a5a",
-            "proof_cid": "baguqeeravzvk4gsyjkesdpwuazeeuuyti445ilepfcrlccaenvrvzafvfmba",
-            "reason_cid": "baguqeera7s7ycz2v6kp5tiqj6wwm7oalphdosb4rfercey7f7zvjnviywblq",
-            "schema": "mcp++/profile-g/plan-selection@1",
-            "selector_did": "did:web:ipfs-accelerate.local",
-            "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq"
-          },
-          "selection_cid": "baguqeeraud7phg5t7aru47rkomvk2y33vw5zhcyju4e6ok6ed3ujxtra2cya",
-          "subgoal": {
-            "correlation_id": "refactor/g2/g2-s1",
-            "created_at_ms": 1784663151771,
-            "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
-            "decomposition_method": "objective-bundle-v1",
-            "goal_cid": "baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma",
-            "objective_cid": "baguqeera6c5oagi57y6iufv3tyhfutemgvhu44rdx7zryujjswmabe5obruq",
-            "parent_subgoal_cid": null,
-            "parents": [
-              "baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma"
-            ],
-            "schema": "mcp++/profile-g/subgoal@1",
-            "selection_cid": null
-          },
-          "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq",
-          "task": {
-            "correlation_id": "refactor/g2/g2-s1",
-            "created_at_ms": 1784663151771,
-            "deadline_ms": 1784749551771,
-            "dependency_task_cids": [],
-            "execution_mode": "idempotent",
-            "expected_value_millionths": 500000,
-            "idempotency_key": "30f8f958f8262e1c7fde843388079482",
-            "input_cid": "baguqeerabszburtp4vqrzjjffyhgcjfqpjiyx4j3q7rmpjal6fwtcw46kfzq",
-            "interface_cid": "baguqeeraim3neo6bsotfc6t45jrguyalmrgvkzzsladvegxg4m2wf4b4m4eq",
-            "max_attempts": 3,
-            "parents": [
-              "baguqeeraud7phg5t7aru47rkomvk2y33vw5zhcyju4e6ok6ed3ujxtra2cya"
-            ],
-            "plan_branch_cid": "baguqeeranjq6xdpvntolh74lmfjycgs5uwu2gyktlqorgqr25kx37tcgu5eq",
-            "resource_class": "cpu-small",
-            "schema": "mcp++/profile-g/task@1",
-            "selection_cid": "baguqeeraud7phg5t7aru47rkomvk2y33vw5zhcyju4e6ok6ed3ujxtra2cya",
-            "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq",
-            "tool": "codex.todo_bundle"
-          },
-          "task_cid": "baguqeera7zb2viqwrwc6hek56aennzr3bbsvacf7acrmhzhyz73l5uljlfjq"
-        },
-        "source_todo": "data/refactor_supervisor/refactor_todo.md",
-        "tasks": [
-          {
-            "ast_symbols": [
-              "ALIGNMENT_TASK_UPDATE_HISTORY_LIMIT",
-              "FOLLOW_UP_REVIEWABLE_ESCALATION_STATUSES",
-              "Mediator",
-              "__init__",
-              "reset",
-              "resume",
-              "get_state",
-              "set_state",
-              "response",
-              "select_intake_question_candidates",
-              "_phase_focus_rank",
-              "_phase_focus_bonus",
-              "_is_document_question_candidate",
-              "_build_exhibit_ready_document_question",
-              "_apply_exhibit_ready_intake_questioning",
-              "_is_exact_dates_closure_match",
-              "_is_staff_names_titles_closure_match",
-              "_is_hearing_request_timing_closure_match",
-              "_is_response_dates_closure_match",
-              "_is_causation_sequence_match",
-              "_build_intake_claim_pressure_map",
-              "_build_intake_selector_legal_graph",
-              "_build_intake_matching_pressure_map",
-              "_build_intake_workflow_action_queue",
-              "_summarize_intake_workflow_action_queue",
-              "_build_evidence_workflow_action_queue",
-              "_get_document_provenance_summary",
-              "_get_document_grounding_lane_outcome_summary",
-              "_get_document_grounding_recovery_action",
-              "_get_document_grounding_improvement_next_action",
-              "_summarize_evidence_workflow_action_queue",
-              "_build_question_workflow_action_matches",
-              "_build_chronology_objective_ledger",
-              "_match_chronology_objective_ledger",
-              "_annotate_intake_question_candidate",
-              "io",
-              "process",
-              "finalize",
-              "analyze_complaint_legal_issues",
-              "_extract_document_chronology_priority_hints",
-              "build_inquiry_gap_context",
-              "get_current_inquiry_payload",
-              "io_payload",
-              "get_legal_analysis",
-              "submit_evidence",
-              "submit_evidence_file",
-              "get_user_evidence",
-              "get_evidence_graph",
-              "get_evidence_chunks",
-              "get_evidence_facts",
-              "get_authority_facts",
-              "retrieve_evidence",
-              "analyze_evidence",
-              "get_scraper_runs",
-              "get_scraper_run_details",
-              "get_scraper_tactic_performance",
-              "enqueue_agentic_scraper_job",
-              "get_scraper_queue",
-              "get_scraper_queue_job",
-              "run_next_agentic_scraper_job",
-              "search_legal_authorities",
-              "store_legal_authorities",
-              "get_legal_authorities",
-              "analyze_legal_authorities",
-              "get_claim_support",
-              "get_claim_requirements",
-              "summarize_claim_support",
-              "get_claim_support_facts",
-              "get_claim_overview",
-              "get_claim_coverage_matrix",
-              "get_claim_support_gaps",
-              "get_claim_support_validation",
-              "save_claim_testimony_record",
-              "get_claim_testimony_records",
-              "save_claim_support_document",
-              "get_claim_contradiction_candidates",
-              "persist_claim_support_diagnostics",
-              "prune_claim_support_diagnostic_snapshots",
-              "get_claim_support_diagnostic_snapshots",
-              "get_recent_claim_follow_up_execution"
-            ],
-            "bundle_strategy": "goal_subgoal_ast",
-            "candidate_kind": "seed",
-            "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-            "goal_id": "G2.S1",
-            "goal_packet_goal_ids": [
-              "G2",
-              "G2.S1"
-            ],
-            "goal_packet_key": "G2.S1",
-            "goal_packet_role": "seed",
-            "goal_packet_task_count": 1,
-            "goal_packet_work_item_count": 2,
-            "graph_depth": 1,
-            "merge_family": "G2",
-            "merge_key": "refactor/g2/g2-s1",
-            "merge_role": "seed",
-            "missing_evidence": [
-              "The mediator is the largest runtime file and carries high regression risk.",
-              "One cohesive service is extracted.",
-              "Existing imports continue to resolve."
-            ],
-            "parent_goal_ids": [
-              "G2"
-            ],
-            "paths": [
-              "mediator/mediator.py",
-              "mediator/__init__.py"
-            ],
-            "surplus_group": "refactor/g2/g2-s1",
-            "task_id": "REF-005",
-            "todo_vector_key": "ref-005-splitmediator-mediator-pybyworkflowservicewhilep",
-            "validation": [
-              "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q"
-            ],
-            "work_item_count": 2,
-            "work_scope": "goal_subgoal_ast_locality"
-          },
-          {
-            "ast_symbols": [
-              "ClaimSupportHook",
-              "DUCKDB_AVAILABLE",
-              "_CONTENT_ORIGIN_ARTIFACT_FAMILY",
-              "_ARTIFACT_FAMILY_CORPUS_FAMILY",
-              "__init__",
-              "_get_default_db_path",
-              "_with_intake_summary_handoff",
-              "_resolve_artifact_identity",
-              "_prepare_duckdb_path",
-              "_check_duckdb_availability",
-              "_initialize_schema",
-              "_make_element_id",
-              "_make_testimony_id",
-              "_summarize_testimony_records",
-              "_testimony_quality_summary",
-              "_build_testimony_fact_text",
-              "_build_testimony_support_label",
-              "_build_testimony_support_link",
-              "_get_testimony_support_links",
-              "_get_enriched_claim_support_links",
-              "_tokenize_text",
-              "_extract_match_text",
-              "_normalize_graph_summary",
-              "_build_graph_trace",
-              "_summarize_graph_traces",
-              "_summarize_authority_treatment_signals",
-              "_summarize_authority_rule_candidates",
-              "_recommended_support_gap_action",
-              "_build_support_trace",
-              "_extract_record_parse_summary",
-              "_normalize_support_fact",
-              "_build_support_packet_lineage_summary",
-              "_build_support_packet",
-              "_summarize_support_packets",
-              "_collect_support_traces_from_links",
-              "_summarize_support_traces",
-              "_extract_logic_contradiction_count",
-              "_extract_logic_proof_counts",
-              "_extract_ontology_validation_signal",
-              "_extract_temporal_rule_profile",
-              "_build_temporal_proof_bundle",
-              "_build_claim_support_temporal_handoff",
-              "_build_validation_decision_trace",
-              "_proof_gaps_for_element",
-              "_recommended_validation_action",
-              "_element_has_parse_quality_gap",
-              "_extract_proof_gap_types",
-              "_has_reasoning_gap_signals",
-              "_normalize_reasoning_key",
-              "_get_temporal_reasoning_context",
-              "_build_reasoning_predicates",
-              "_build_reasoning_ontology_fallback",
-              "_summarize_adapter_result",
-              "_run_element_reasoning_diagnostics",
-              "_summarize_claim_reasoning_diagnostics",
-              "_summarize_claim_validation_decisions",
-              "_build_claim_validation",
-              "_fact_polarity",
-              "_fact_overlap_terms",
-              "_normalize_required_support_kinds",
-              "_normalize_snapshot_retention_limit",
-              "_prune_snapshot_history",
-              "_build_claim_support_state_token",
-              "_normalize_query_text",
-              "_hash_query_text",
-              "resolve_claim_element",
-              "register_claim_requirements",
-              "get_claim_requirements",
-              "add_support_link",
-              "upsert_support_link",
-              "get_support_links",
-              "_enrich_support_link",
-              "_coverage_status_for_element",
-              "summarize_claim_support",
-              "get_claim_support_facts",
-              "get_claim_support_traces",
-              "get_claim_element_summary",
-              "get_claim_overview",
-              "get_claim_coverage_matrix",
-              "get_claim_support_validation"
-            ],
-            "bundle_strategy": "goal_subgoal_ast",
-            "candidate_kind": "seed",
-            "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-            "goal_id": "G2.S1",
-            "goal_packet_goal_ids": [
-              "G2",
-              "G2.S1"
-            ],
-            "goal_packet_key": "G2.S1",
-            "goal_packet_role": "seed",
-            "goal_packet_task_count": 1,
-            "goal_packet_work_item_count": 1,
-            "graph_depth": 1,
-            "merge_family": "G2",
-            "merge_key": "refactor/g2/g2-s1",
-            "merge_role": "seed",
-            "missing_evidence": [
-              "Claim support hooks are large enough to hide unrelated concerns.",
-              "At least one cohesive helper group moves behind a stable import.",
-              "No payload contract changes without tests."
-            ],
-            "parent_goal_ids": [
-              "G2"
-            ],
-            "paths": [
-              "mediator/claim_support_hooks.py"
-            ],
-            "surplus_group": "refactor/g2/g2-s1",
-            "task_id": "REF-006",
-            "todo_vector_key": "ref-006-moveclaimsupportorchestrationhelpersintofocusedp",
-            "validation": [
-              "python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q"
-            ],
-            "work_item_count": 1,
-            "work_scope": "goal_subgoal_ast_locality"
-          }
-        ],
-        "todo_path": "data/refactor_supervisor/objective_bundles/refactor-g2-g2-s1.todo.md"
-      },
-      "source_todo": "data/refactor_supervisor/refactor_todo.md",
-      "state_dir": "data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/state",
-      "state_prefix": "agent_refactor_g2_g2_s1",
-      "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq",
-      "task_cid": "baguqeera7zb2viqwrwc6hek56aennzr3bbsvacf7acrmhzhyz73l5uljlfjq",
-      "task_ids": [
-        "REF-005",
-        "REF-006"
-      ],
-      "todo_path": "data/refactor_supervisor/objective_bundles/refactor-g2-g2-s1.todo.md",
-      "worktree_root": "data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s1"
-    },
-    {
-      "bundle_key": "refactor/g2/g2-s2",
-      "command": [
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor",
-        "--todo-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md",
-        "--state-dir",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/state",
-        "--state-prefix",
-        "agent_refactor_g2_g2_s2",
-        "--task-prefix",
-        "REF-",
-        "--worktree-root",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s2",
-        "--daemon-interval",
-        "120.0",
-        "--stale-seconds",
-        "1800.0",
-        "--check-interval",
-        "120.0",
-        "--max-restarts",
-        "3",
-        "--implementation-timeout",
-        "1800.0",
-        "--implement"
-      ],
-      "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
-      "goal_cid": "baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla",
-      "log_path": "data/refactor_supervisor/bundle_lanes/logs/refactor-g2-g2-s2.log",
-      "parallel_lane": "refactor/g2/g2-s2",
-      "queue_payload": {
-        "bundle_key": "refactor/g2/g2-s2",
-        "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
-        "objective_bundle_index": "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/index.json",
-        "parallel_lane": "refactor/g2/g2-s2",
-        "profile_g": {
-          "artifacts": {
-            "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa": {
-              "correlation_id": "refactor/g2/g2-s2",
-              "created_at_ms": 1784663151772,
-              "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
-              "decomposition_method": "objective-bundle-v1",
-              "goal_cid": "baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla",
-              "objective_cid": "baguqeeravluj56k6z64wi3at6lqherusmdftoexg7xdtrvr2maqhqjn3ewia",
-              "parent_subgoal_cid": null,
-              "parents": [
-                "baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla"
-              ],
-              "schema": "mcp++/profile-g/subgoal@1",
-              "selection_cid": null
-            },
-            "baguqeerajkmpj7xdyxsgjpliu56p7izlpnscgxyzkha4ps2zgwunrf7b2cjq": {
-              "correlation_id": "refactor/g2/g2-s2",
-              "created_at_ms": 1784663151772,
-              "deadline_ms": 1784749551772,
-              "dependency_task_cids": [],
-              "execution_mode": "idempotent",
-              "expected_value_millionths": 500000,
-              "idempotency_key": "ffa9978a5d98e09e151176bfa824fc21",
-              "input_cid": "baguqeerajs4wxzn4zsdmq2rq7bx4h7mgiwdp2irisk3fv7oejpgvwh5mfdja",
-              "interface_cid": "baguqeeraim3neo6bsotfc6t45jrguyalmrgvkzzsladvegxg4m2wf4b4m4eq",
-              "max_attempts": 3,
-              "parents": [
-                "baguqeeraqyvvods55bquiidsnho3n37e5liu57q7b6pudoef37skfsl5vvoq"
-              ],
-              "plan_branch_cid": "baguqeerapksvjtperdirkxu6pqzxgokqmc2ln44ge44eqxybcgwdzjt7cg4q",
-              "resource_class": "cpu-small",
-              "schema": "mcp++/profile-g/task@1",
-              "selection_cid": "baguqeeraqyvvods55bquiidsnho3n37e5liu57q7b6pudoef37skfsl5vvoq",
-              "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa",
-              "tool": "codex.todo_bundle"
-            },
-            "baguqeerapksvjtperdirkxu6pqzxgokqmc2ln44ge44eqxybcgwdzjt7cg4q": {
-              "candidate_input_cids": [
-                "baguqeerajs4wxzn4zsdmq2rq7bx4h7mgiwdp2irisk3fv7oejpgvwh5mfdja"
-              ],
-              "correlation_id": "refactor/g2/g2-s2",
-              "created_at_ms": 1784663151772,
-              "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
-              "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
-              "parents": [
-                "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa"
-              ],
-              "schema": "mcp++/profile-g/plan-branch@1",
-              "score_millionths": 1000000,
-              "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa",
-              "task_template_cids": [
-                "baguqeerannkggudbgacew46wkjw4cjsfku4kvh5m4ts3zwu7advw2nkxgfiq"
-              ]
-            },
-            "baguqeeraqyvvods55bquiidsnho3n37e5liu57q7b6pudoef37skfsl5vvoq": {
-              "correlation_id": "refactor/g2/g2-s2",
-              "created_at_ms": 1784663151772,
-              "parents": [
-                "baguqeerapksvjtperdirkxu6pqzxgokqmc2ln44ge44eqxybcgwdzjt7cg4q"
-              ],
-              "plan_branch_cid": "baguqeerapksvjtperdirkxu6pqzxgokqmc2ln44ge44eqxybcgwdzjt7cg4q",
-              "policy_decision_cid": "baguqeeranoby7kw4ywxcblazniv6ppopsmxzlcnbjv7mxtm5mhs3stea2a5a",
-              "proof_cid": "baguqeera527bcdcbeunptmsspo6bwc7yoyevuoppore2rzguiq2pjczp7xqa",
-              "reason_cid": "baguqeera7s7ycz2v6kp5tiqj6wwm7oalphdosb4rfercey7f7zvjnviywblq",
-              "schema": "mcp++/profile-g/plan-selection@1",
-              "selector_did": "did:web:ipfs-accelerate.local",
-              "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa"
-            },
-            "baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla": {
-              "correlation_id": "refactor/g2/g2-s2",
-              "created_at_ms": 1784663151772,
-              "labels": [
-                "accelerator",
-                "daemon-lane"
-              ],
-              "objective_cid": "baguqeeravluj56k6z64wi3at6lqherusmdftoexg7xdtrvr2maqhqjn3ewia",
-              "owner_did": "did:web:ipfs-accelerate.local",
-              "parent_goal_cids": [],
-              "parents": [],
-              "policy_cid": "baguqeeral4wzcdlaxbodlogup4rsldfyluh5gzuk3yfgcgl5kh3ztsuncexq",
-              "schema": "mcp++/profile-g/goal@1"
-            }
-          },
-          "goal": {
-            "correlation_id": "refactor/g2/g2-s2",
-            "created_at_ms": 1784663151772,
-            "labels": [
-              "accelerator",
-              "daemon-lane"
-            ],
-            "objective_cid": "baguqeeravluj56k6z64wi3at6lqherusmdftoexg7xdtrvr2maqhqjn3ewia",
-            "owner_did": "did:web:ipfs-accelerate.local",
-            "parent_goal_cids": [],
-            "parents": [],
-            "policy_cid": "baguqeeral4wzcdlaxbodlogup4rsldfyluh5gzuk3yfgcgl5kh3ztsuncexq",
-            "schema": "mcp++/profile-g/goal@1"
-          },
-          "goal_cid": "baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla",
-          "plan_branch": {
-            "candidate_input_cids": [
-              "baguqeerajs4wxzn4zsdmq2rq7bx4h7mgiwdp2irisk3fv7oejpgvwh5mfdja"
-            ],
-            "correlation_id": "refactor/g2/g2-s2",
-            "created_at_ms": 1784663151772,
-            "evaluator_cid": "baguqeeraersk6l3ykgjtkteojjhwwxct3hgvm7qlprtaf4wmiqixp54fkraq",
-            "explanation_cid": "baguqeeraqfner7tgxsf62tc5kdo3qa4kbpfjn2gfgpquqhbqzasio33ub5xq",
-            "parents": [
-              "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa"
-            ],
-            "schema": "mcp++/profile-g/plan-branch@1",
-            "score_millionths": 1000000,
-            "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa",
-            "task_template_cids": [
-              "baguqeerannkggudbgacew46wkjw4cjsfku4kvh5m4ts3zwu7advw2nkxgfiq"
-            ]
-          },
-          "plan_branch_cid": "baguqeerapksvjtperdirkxu6pqzxgokqmc2ln44ge44eqxybcgwdzjt7cg4q",
-          "selection": {
-            "correlation_id": "refactor/g2/g2-s2",
-            "created_at_ms": 1784663151772,
-            "parents": [
-              "baguqeerapksvjtperdirkxu6pqzxgokqmc2ln44ge44eqxybcgwdzjt7cg4q"
-            ],
-            "plan_branch_cid": "baguqeerapksvjtperdirkxu6pqzxgokqmc2ln44ge44eqxybcgwdzjt7cg4q",
-            "policy_decision_cid": "baguqeeranoby7kw4ywxcblazniv6ppopsmxzlcnbjv7mxtm5mhs3stea2a5a",
-            "proof_cid": "baguqeera527bcdcbeunptmsspo6bwc7yoyevuoppore2rzguiq2pjczp7xqa",
-            "reason_cid": "baguqeera7s7ycz2v6kp5tiqj6wwm7oalphdosb4rfercey7f7zvjnviywblq",
-            "schema": "mcp++/profile-g/plan-selection@1",
-            "selector_did": "did:web:ipfs-accelerate.local",
-            "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa"
-          },
-          "selection_cid": "baguqeeraqyvvods55bquiidsnho3n37e5liu57q7b6pudoef37skfsl5vvoq",
-          "subgoal": {
-            "correlation_id": "refactor/g2/g2-s2",
-            "created_at_ms": 1784663151772,
-            "decomposer_cid": "baguqeeranuxs3x5mqou4dfm66gk25zfpe4uxx2a5hj2rshbjcqj7qxco5ahq",
-            "decomposition_method": "objective-bundle-v1",
-            "goal_cid": "baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla",
-            "objective_cid": "baguqeeravluj56k6z64wi3at6lqherusmdftoexg7xdtrvr2maqhqjn3ewia",
-            "parent_subgoal_cid": null,
-            "parents": [
-              "baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla"
-            ],
-            "schema": "mcp++/profile-g/subgoal@1",
-            "selection_cid": null
-          },
-          "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa",
-          "task": {
-            "correlation_id": "refactor/g2/g2-s2",
-            "created_at_ms": 1784663151772,
-            "deadline_ms": 1784749551772,
-            "dependency_task_cids": [],
-            "execution_mode": "idempotent",
-            "expected_value_millionths": 500000,
-            "idempotency_key": "ffa9978a5d98e09e151176bfa824fc21",
-            "input_cid": "baguqeerajs4wxzn4zsdmq2rq7bx4h7mgiwdp2irisk3fv7oejpgvwh5mfdja",
-            "interface_cid": "baguqeeraim3neo6bsotfc6t45jrguyalmrgvkzzsladvegxg4m2wf4b4m4eq",
-            "max_attempts": 3,
-            "parents": [
-              "baguqeeraqyvvods55bquiidsnho3n37e5liu57q7b6pudoef37skfsl5vvoq"
-            ],
-            "plan_branch_cid": "baguqeerapksvjtperdirkxu6pqzxgokqmc2ln44ge44eqxybcgwdzjt7cg4q",
-            "resource_class": "cpu-small",
-            "schema": "mcp++/profile-g/task@1",
-            "selection_cid": "baguqeeraqyvvods55bquiidsnho3n37e5liu57q7b6pudoef37skfsl5vvoq",
-            "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa",
-            "tool": "codex.todo_bundle"
-          },
-          "task_cid": "baguqeerajkmpj7xdyxsgjpliu56p7izlpnscgxyzkha4ps2zgwunrf7b2cjq"
-        },
-        "source_todo": "data/refactor_supervisor/refactor_todo.md",
-        "tasks": [
-          {
-            "ast_symbols": [
-              "_ensure_local_ipfs_datasets_path",
-              "DEFAULT_USER_ID",
-              "DEFAULT_UI_UX_OPTIMIZER_METHOD",
-              "DEFAULT_UI_UX_OPTIMIZER_PRIORITY",
-              "DEFAULT_LLM_DRAFT_PROVIDER",
-              "DEFAULT_LLM_DRAFT_TIMEOUT_SECONDS",
-              "MIKE_STATUS_CONTRACT_VERSION",
-              "MIKE_HANDOFF_CONTRACT_VERSION",
-              "MIKE_SYNC_CONTRACT_VERSION",
-              "MAX_MIKE_HANDOFF_PARAGRAPHS",
-              "MAX_MIKE_WEAK_LINKS_DISPLAY",
-              "DEFAULT_UI_UX_SCREENSHOT_TARGET",
-              "_DATA_DIR",
-              "_SESSION_DIR",
-              "_DOCKET_ISSUE_ENTITY_KEYWORDS",
-              "_utc_now",
-              "_slugify_user_id",
-              "_split_lines",
-              "_unique_preserve_order",
-              "_slugify_graph_id",
-              "_normalize_annotation_tags",
-              "_build_schema_guided_tooling_recommendations",
-              "_normalize_fragment",
-              "_extract_person_name",
-              "_extract_defendant_name",
-              "_condense_timeline_text",
-              "_sentence_fragment",
-              "_event_fragment",
-              "_adverse_action_clause",
-              "_pleading_activity_fragment",
-              "_pleading_sentence",
-              "_timeline_clause_fragment",
-              "_llm_draft_timeout_for_provider",
-              "_resolve_llm_draft_backend",
-              "_resolve_llm_draft_backend_candidates",
-              "_pleading_timeline_sentence",
-              "_formalize_relief_item",
-              "_court_header_line",
-              "_build_export_structure_summary",
-              "_slugify_filename",
-              "_normalize_claim_type",
-              "_claim_type_display_name",
-              "_claim_element_label",
-              "_formal_evidence_summary_item",
-              "_compact_evidence_reference_item",
-              "_exhibit_label",
-              "_evidence_display_title",
-              "_evidence_priority",
-              "_claim_type_filing_guidance",
-              "_claim_type_count_heading",
-              "_claim_type_required_allegations",
-              "_claim_type_formal_example_snippet",
-              "_strip_code_fences",
-              "_normalize_llm_complaint_body",
-              "_parse_json_object",
-              "_required_formal_complaint_markers",
-              "_formal_complaint_forbidden_meta_phrases",
-              "_formal_complaint_validation_issues",
-              "_build_complaint_output_release_gate",
-              "_release_gate_score_from_verdict",
-              "_build_local_client_release_gate_for_state",
-              "_has_required_formal_complaint_markers",
-              "_looks_like_formal_complaint_candidate",
-              "generate_decentralized_id",
-              "_default_state",
-              "ComplaintWorkspaceService",
-              "repo_root",
-              "candidate",
-              "candidate_text",
-              "normalized",
-              "snapshot",
-              "hint_index",
-              "filter_dimensions",
-              "piece_ids",
-              "add_recommendation",
-              "text",
-              "candidates",
-              "compact",
-              "segments",
-              "sentence_parts"
-            ],
-            "bundle_strategy": "goal_subgoal_ast",
-            "candidate_kind": "seed",
-            "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-            "goal_id": "G2.S2",
-            "goal_packet_goal_ids": [
-              "G2",
-              "G2.S2"
-            ],
-            "goal_packet_key": "G2.S2",
-            "goal_packet_role": "seed",
-            "goal_packet_task_count": 1,
-            "goal_packet_work_item_count": 1,
-            "graph_depth": 1,
-            "merge_family": "G2",
-            "merge_key": "refactor/g2/g2-s2",
-            "merge_role": "seed",
-            "missing_evidence": [
-              "The workspace module mixes UI routing, state shaping, and workflow calls.",
-              "One handler group is isolated.",
-              "Routes keep the same response shape."
-            ],
-            "parent_goal_ids": [
-              "G2"
-            ],
-            "paths": [
-              "applications/complaint_workspace.py"
-            ],
-            "surplus_group": "refactor/g2/g2-s2",
-            "task_id": "REF-007",
-            "todo_vector_key": "ref-007-extractcomplaintworkspacerequesthandlersfromuist",
-            "validation": [
-              "python -m pytest tests/test_review_api.py -q"
-            ],
-            "work_item_count": 1,
-            "work_scope": "goal_subgoal_ast_locality"
-          },
-          {
-            "ast_symbols": [
-              "DashboardEntry",
-              "_IPFS_DATASETS_TEMPLATES_DIR",
-              "_IPFS_DATASETS_STATIC_DIR",
-              "_COMPLAINT_DASHBOARD_LINKS",
-              "_IPFS_DASHBOARD_ENTRIES",
-              "_IPFS_DASHBOARD_MAP",
-              "_LAYPERSON_HUB_ADVANCED_DASHBOARD_SLUGS",
-              "_CAPABILITY_CARDS",
-              "_JOURNEY_DETAIL_PANELS",
-              "_PACKAGE_CAPABILITY_MATRIX",
-              "_IMPROVEMENT_PLAN_ITEMS",
-              "_ENTRY_PATH_CARDS",
-              "_DASHBOARD_SUBSECTION_INDEX",
-              "_render_feature_chips",
-              "_render_link_row",
-              "_render_subsection_nav",
-              "_render_entry_path_cards",
-              "_render_dashboard_subsection_index",
-              "_render_capability_cards",
-              "_render_improvement_plan",
-              "_render_journey_detail_panels",
-              "_render_package_capability_matrix",
-              "_render_dashboard_section_nav",
-              "_DashboardUndefined",
-              "_DashboardMetrics",
-              "_IPFS_DASHBOARD_ENV",
-              "_static_url_for",
-              "_build_ipfs_dashboard_context",
-              "_render_ipfs_dashboard",
-              "_render_shell_page",
-              "_render_dashboard_hub",
-              "create_dashboard_ui_router",
-              "attach_dashboard_ui_routes",
-              "cards",
-              "panels",
-              "__call__",
-              "__iter__",
-              "__len__",
-              "items",
-              "keys",
-              "values",
-              "__init__",
-              "normalized_filename",
-              "template",
-              "shell_links",
-              "top_links",
-              "iframe_src",
-              "raw_src",
-              "complaint_links",
-              "ipfs_markup",
-              "capability_cards",
-              "journey_detail_panels",
-              "package_capability_matrix",
-              "dashboard_section_nav",
-              "improvement_plan",
-              "entry_path_cards",
-              "dashboard_subsection_index",
-              "docket_input_type",
-              "normalized_docket_path",
-              "router",
-              "legacy_mcp_dashboard_root",
-              "mcp_analytics_history",
-              "dashboard_hub",
-              "ipfs_datasets_dashboard_shell",
-              "ipfs_datasets_dashboard_raw",
-              "steps",
-              "entry"
-            ],
-            "bundle_strategy": "goal_subgoal_ast",
-            "candidate_kind": "seed",
-            "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-            "goal_id": "G2.S2",
-            "goal_packet_goal_ids": [
-              "G2",
-              "G2.S2"
-            ],
-            "goal_packet_key": "G2.S2",
-            "goal_packet_role": "seed",
-            "goal_packet_task_count": 1,
-            "goal_packet_work_item_count": 2,
-            "graph_depth": 1,
-            "merge_family": "G2",
-            "merge_key": "refactor/g2/g2-s2",
-            "merge_role": "seed",
-            "missing_evidence": [
-              "Dashboard behavior is harder to test when fixtures and live assembly are interleaved.",
-              "Fixture builders are named and reusable.",
-              "Playwright smoke tests remain stable."
-            ],
-            "parent_goal_ids": [
-              "G2"
-            ],
-            "paths": [
-              "applications/dashboard_ui.py",
-              "playwright/server.js"
-            ],
-            "surplus_group": "refactor/g2/g2-s2",
-            "task_id": "REF-008",
-            "todo_vector_key": "ref-008-separatedashboardfixturedatafromliveroutelogic",
-            "validation": [
-              "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q"
-            ],
-            "work_item_count": 2,
-            "work_scope": "goal_subgoal_ast_locality"
-          }
-        ],
-        "todo_path": "data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md"
-      },
-      "source_todo": "data/refactor_supervisor/refactor_todo.md",
-      "state_dir": "data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/state",
-      "state_prefix": "agent_refactor_g2_g2_s2",
-      "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa",
-      "task_cid": "baguqeerajkmpj7xdyxsgjpliu56p7izlpnscgxyzkha4ps2zgwunrf7b2cjq",
-      "task_ids": [
-        "REF-007",
-        "REF-008"
-      ],
-      "todo_path": "data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md",
-      "worktree_root": "data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s2"
     }
   ],
-  "planned_count": 4,
+  "planned_count": 1,
   "repo_root": "/home/barberb/complaint-generator",
   "schema": "ipfs_accelerate_py.agent_supervisor.bundle_supervisor",
-  "started": [
-    {
-      "accepted": true,
-      "bundle_key": "refactor/g1/g1-s1",
-      "command": [
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.leased_lane",
-        "--coordination-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/coordination.sqlite3",
-        "--grant-json",
-        "{\"attempt\": 1, \"claim_cid\": \"baguqeerac4j776aqgfap7u35bz6r3zt7fzbnucwg2ugcyhal62b5s2uiiafq\", \"claimant_did\": \"did:web:complaint-generator.local\", \"fencing_token\": 1, \"goal_cid\": \"baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga\", \"lease_expires_at_ms\": 1784663451787, \"logical_epoch\": 1, \"resolution_cid\": \"baguqeeragotlv5fhly7ay6zchvjoyjw22523uoccg23rdrssogwghddzxkia\", \"subgoal_cid\": \"baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba\", \"task_cid\": \"baguqeeraeawe7oh2hjcfswym7soidz46a6yqddo77mvxatl45tgzxi7beyga\"}",
-        "--lease-ms",
-        "300000",
-        "--heartbeat-interval",
-        "5.0",
-        "--capacity-millionths",
-        "1000000",
-        "--",
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor",
-        "--todo-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g1-g1-s1.todo.md",
-        "--state-dir",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s1/state",
-        "--state-prefix",
-        "agent_refactor_g1_g1_s1",
-        "--task-prefix",
-        "REF-",
-        "--worktree-root",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g1-g1-s1",
-        "--daemon-interval",
-        "120.0",
-        "--stale-seconds",
-        "1800.0",
-        "--check-interval",
-        "120.0",
-        "--max-restarts",
-        "3",
-        "--implementation-timeout",
-        "1800.0",
-        "--implement"
-      ],
-      "lease": {
-        "attempt": 1,
-        "claim_cid": "baguqeerac4j776aqgfap7u35bz6r3zt7fzbnucwg2ugcyhal62b5s2uiiafq",
-        "claimant_did": "did:web:complaint-generator.local",
-        "fencing_token": 1,
-        "goal_cid": "baguqeerag4cnqms7mmstklqcmsmfrilk2auzeakmfxnivk6ykg6ocl2mqlga",
-        "lease_expires_at_ms": 1784663451787,
-        "logical_epoch": 1,
-        "resolution_cid": "baguqeeragotlv5fhly7ay6zchvjoyjw22523uoccg23rdrssogwghddzxkia",
-        "subgoal_cid": "baguqeerac63altydmagkdutne53av5n6rru54jrosmsupewi42wv52drrpba",
-        "task_cid": "baguqeeraeawe7oh2hjcfswym7soidz46a6yqddo77mvxatl45tgzxi7beyga"
-      },
-      "log_path": "data/refactor_supervisor/bundle_lanes/logs/refactor-g1-g1-s1.log",
-      "pid": 695040,
-      "pid_path": "data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s1/state/agent_refactor_g1_g1_s1_bundle_supervisor.pid"
-    },
-    {
-      "accepted": true,
-      "bundle_key": "refactor/g1/g1-s2",
-      "command": [
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.leased_lane",
-        "--coordination-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/coordination.sqlite3",
-        "--grant-json",
-        "{\"attempt\": 1, \"claim_cid\": \"baguqeeraw4as243mbpc7obvx7jbx5qhvcotcuwvclvbzy3fzbdtnlrgvwmfa\", \"claimant_did\": \"did:web:complaint-generator.local\", \"fencing_token\": 1, \"goal_cid\": \"baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq\", \"lease_expires_at_ms\": 1784663451794, \"logical_epoch\": 1, \"resolution_cid\": \"baguqeeraeqm6xh3l7tvq7eopmip3ex7mhwmy37knouizaup4c6gzyjsvcgxq\", \"subgoal_cid\": \"baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba\", \"task_cid\": \"baguqeerayzdoiholjfev2nimlo7cfzutnagreli6djwkflt3vpyicqppjvma\"}",
-        "--lease-ms",
-        "300000",
-        "--heartbeat-interval",
-        "5.0",
-        "--capacity-millionths",
-        "1000000",
-        "--",
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor",
-        "--todo-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md",
-        "--state-dir",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/state",
-        "--state-prefix",
-        "agent_refactor_g1_g1_s2",
-        "--task-prefix",
-        "REF-",
-        "--worktree-root",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g1-g1-s2",
-        "--daemon-interval",
-        "120.0",
-        "--stale-seconds",
-        "1800.0",
-        "--check-interval",
-        "120.0",
-        "--max-restarts",
-        "3",
-        "--implementation-timeout",
-        "1800.0",
-        "--implement"
-      ],
-      "lease": {
-        "attempt": 1,
-        "claim_cid": "baguqeeraw4as243mbpc7obvx7jbx5qhvcotcuwvclvbzy3fzbdtnlrgvwmfa",
-        "claimant_did": "did:web:complaint-generator.local",
-        "fencing_token": 1,
-        "goal_cid": "baguqeera243rf6ifx3px4tniwxyahvmbpp57rvjvz3ajwgryffqyxxn56lxq",
-        "lease_expires_at_ms": 1784663451794,
-        "logical_epoch": 1,
-        "resolution_cid": "baguqeeraeqm6xh3l7tvq7eopmip3ex7mhwmy37knouizaup4c6gzyjsvcgxq",
-        "subgoal_cid": "baguqeeraisfdcydde3hjs7mzusranifc3rgqwos565bfou63vnedadqrs5ba",
-        "task_cid": "baguqeerayzdoiholjfev2nimlo7cfzutnagreli6djwkflt3vpyicqppjvma"
-      },
-      "log_path": "data/refactor_supervisor/bundle_lanes/logs/refactor-g1-g1-s2.log",
-      "pid": 695041,
-      "pid_path": "data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/state/agent_refactor_g1_g1_s2_bundle_supervisor.pid"
-    },
-    {
-      "accepted": true,
-      "bundle_key": "refactor/g2/g2-s1",
-      "command": [
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.leased_lane",
-        "--coordination-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/coordination.sqlite3",
-        "--grant-json",
-        "{\"attempt\": 1, \"claim_cid\": \"baguqeerag4nfw2bp7fa5dyd7srxxf2brujzmcqkhfrbe3wnpwphxvtkoq4lq\", \"claimant_did\": \"did:web:complaint-generator.local\", \"fencing_token\": 1, \"goal_cid\": \"baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma\", \"lease_expires_at_ms\": 1784663451800, \"logical_epoch\": 1, \"resolution_cid\": \"baguqeeraphihcgstadoacjyztm6ve6dwean32oshv3vfnc6a7e2tv7fe54hq\", \"subgoal_cid\": \"baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq\", \"task_cid\": \"baguqeera7zb2viqwrwc6hek56aennzr3bbsvacf7acrmhzhyz73l5uljlfjq\"}",
-        "--lease-ms",
-        "300000",
-        "--heartbeat-interval",
-        "5.0",
-        "--capacity-millionths",
-        "1000000",
-        "--",
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor",
-        "--todo-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g2-g2-s1.todo.md",
-        "--state-dir",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/state",
-        "--state-prefix",
-        "agent_refactor_g2_g2_s1",
-        "--task-prefix",
-        "REF-",
-        "--worktree-root",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s1",
-        "--daemon-interval",
-        "120.0",
-        "--stale-seconds",
-        "1800.0",
-        "--check-interval",
-        "120.0",
-        "--max-restarts",
-        "3",
-        "--implementation-timeout",
-        "1800.0",
-        "--implement"
-      ],
-      "lease": {
-        "attempt": 1,
-        "claim_cid": "baguqeerag4nfw2bp7fa5dyd7srxxf2brujzmcqkhfrbe3wnpwphxvtkoq4lq",
-        "claimant_did": "did:web:complaint-generator.local",
-        "fencing_token": 1,
-        "goal_cid": "baguqeeracxnqdc66ud5dd2xrpcspbvz2vgv7byq4gnnt5azrfjh3d44vhzma",
-        "lease_expires_at_ms": 1784663451800,
-        "logical_epoch": 1,
-        "resolution_cid": "baguqeeraphihcgstadoacjyztm6ve6dwean32oshv3vfnc6a7e2tv7fe54hq",
-        "subgoal_cid": "baguqeerakxvjvrjjfep3aqhjcmphtjjzscjymgt3enhialcti7gm23uf4fwq",
-        "task_cid": "baguqeera7zb2viqwrwc6hek56aennzr3bbsvacf7acrmhzhyz73l5uljlfjq"
-      },
-      "log_path": "data/refactor_supervisor/bundle_lanes/logs/refactor-g2-g2-s1.log",
-      "pid": 695042,
-      "pid_path": "data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s1/state/agent_refactor_g2_g2_s1_bundle_supervisor.pid"
-    },
-    {
-      "accepted": true,
-      "bundle_key": "refactor/g2/g2-s2",
-      "command": [
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.leased_lane",
-        "--coordination-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/coordination.sqlite3",
-        "--grant-json",
-        "{\"attempt\": 1, \"claim_cid\": \"baguqeeraewz4ik5a3lqecjfn75pk4bync2e2wordkajzekk2wmjp7ltgtnsa\", \"claimant_did\": \"did:web:complaint-generator.local\", \"fencing_token\": 1, \"goal_cid\": \"baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla\", \"lease_expires_at_ms\": 1784663451805, \"logical_epoch\": 1, \"resolution_cid\": \"baguqeeraojkc56cwwrlk3za5cydhc3luxut3trgw4kznznqeipch2bsrmuqa\", \"subgoal_cid\": \"baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa\", \"task_cid\": \"baguqeerajkmpj7xdyxsgjpliu56p7izlpnscgxyzkha4ps2zgwunrf7b2cjq\"}",
-        "--lease-ms",
-        "300000",
-        "--heartbeat-interval",
-        "5.0",
-        "--capacity-millionths",
-        "1000000",
-        "--",
-        "/home/barberb/bin/python",
-        "-m",
-        "ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor",
-        "--todo-path",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md",
-        "--state-dir",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/state",
-        "--state-prefix",
-        "agent_refactor_g2_g2_s2",
-        "--task-prefix",
-        "REF-",
-        "--worktree-root",
-        "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g2-g2-s2",
-        "--daemon-interval",
-        "120.0",
-        "--stale-seconds",
-        "1800.0",
-        "--check-interval",
-        "120.0",
-        "--max-restarts",
-        "3",
-        "--implementation-timeout",
-        "1800.0",
-        "--implement"
-      ],
-      "lease": {
-        "attempt": 1,
-        "claim_cid": "baguqeeraewz4ik5a3lqecjfn75pk4bync2e2wordkajzekk2wmjp7ltgtnsa",
-        "claimant_did": "did:web:complaint-generator.local",
-        "fencing_token": 1,
-        "goal_cid": "baguqeerasnnua5xdd7kno4vpuxu5w5d7f6zsqrb642utywcmk6qw33wocyla",
-        "lease_expires_at_ms": 1784663451805,
-        "logical_epoch": 1,
-        "resolution_cid": "baguqeeraojkc56cwwrlk3za5cydhc3luxut3trgw4kznznqeipch2bsrmuqa",
-        "subgoal_cid": "baguqeeract4ec5emg6o4gpvhyo7s7fyndtikofqp2b65gvt4jhsf56gxdpoa",
-        "task_cid": "baguqeerajkmpj7xdyxsgjpliu56p7izlpnscgxyzkha4ps2zgwunrf7b2cjq"
-      },
-      "log_path": "data/refactor_supervisor/bundle_lanes/logs/refactor-g2-g2-s2.log",
-      "pid": 695043,
-      "pid_path": "data/refactor_supervisor/bundle_lanes/refactor-g2-g2-s2/state/agent_refactor_g2_g2_s2_bundle_supervisor.pid"
-    }
-  ],
-  "started_count": 4
+  "started": [],
+  "started_count": 0
 }
