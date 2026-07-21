@@ -1655,6 +1655,14 @@ def build_temporal_relation_registry(
             list(source_fact.get("testimony_record_ids") or [])
             + list(target_fact.get("testimony_record_ids") or [])
         )
+        inference_basis = _normalize_text(relation.get("inference_basis") or "normalized_temporal_context")
+        inference_mode = _normalize_text(relation.get("inference_mode") or "")
+        if not inference_mode:
+            inference_mode = (
+                "derived_from_structured_sequence"
+                if inference_basis == "structured_timeline_sequence"
+                else "derived_from_temporal_context"
+            )
         registry.append(
             {
                 **relation,
@@ -1674,8 +1682,8 @@ def build_temporal_relation_registry(
                     list(source_fact.get("source_span_refs") or [])
                     + list(target_fact.get("source_span_refs") or [])
                 ),
-                "inference_mode": "explicit",
-                "inference_basis": _normalize_text(relation.get("inference_basis") or "normalized_temporal_context"),
+                "inference_mode": inference_mode,
+                "inference_basis": inference_basis,
                 "explanation": (
                     f"{source_fact_id or 'unknown_fact'} {str(relation.get('relation_type') or 'related_to')} "
                     f"{target_fact_id or 'unknown_fact'} based on normalized temporal context."
