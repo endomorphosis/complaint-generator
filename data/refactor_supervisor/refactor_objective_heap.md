@@ -21,7 +21,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g1/g1-s1
 - Goal: Map package ownership and runtime entrypoints
-- Evidence: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs., python -m pytest tests/test_package_imports.py -q
+- Evidence: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs., python -m pytest tests/test_package_imports.py -q, data/refactor_supervisor/discovery/2026-07-21-ref-048-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest tests/test_package_imports.py -q
 
 ## G1.S2 Remove ad hoc import path behavior from production surfaces
