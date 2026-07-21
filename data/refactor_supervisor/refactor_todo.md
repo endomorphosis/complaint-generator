@@ -669,3 +669,27 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: validation_gate
 - Todo vector key: a6b0c4054bac33c2
 - Acceptance: Objective scan filed this gap for G7. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-033-objective-gap-eaafaa004d33.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-034 Resolve 3 preflight-conflicting backlogged worktree merges
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Fingerprint: 9c835d7af6245b4daef691c8cbcc07adb1c227c5
+- Dedupe key: reconciliation_guardrail:preflight_merge_conflict
+- Depends on:
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-034-reconciliation-9c835d7af624.md
+- Acceptance: Reconciliation guardrail filed this because 3 branch or worktree cleanup candidates are blocked by preflight_merge_conflict. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-034-reconciliation-9c835d7af624.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
+
+## REF-035 Resolve validation retry-budget failure for REF-031
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Acceptance: Retry-budget guardrail filed this from repeated validation failures in REF-031. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-035-ref-031-retry-budget.md to fix the validation blocker, then mark this repair task completed so the supervisor can release REF-031 from strategy blocked_tasks.
