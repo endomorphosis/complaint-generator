@@ -327,7 +327,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-TEMP-T1 Claim-scoped temporal graph assembly
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
