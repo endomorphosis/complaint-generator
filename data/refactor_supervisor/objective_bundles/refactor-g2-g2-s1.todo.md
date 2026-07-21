@@ -62,7 +62,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-008 Resolve 2 preflight-conflicting backlogged worktree merges
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
