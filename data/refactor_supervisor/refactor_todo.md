@@ -460,7 +460,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-028 Close objective gap: Stabilize repository boundaries
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
