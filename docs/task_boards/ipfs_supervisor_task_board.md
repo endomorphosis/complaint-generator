@@ -131,7 +131,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-IE-B2 Proof-directed question planner
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
