@@ -143,6 +143,13 @@ Make question selection optimize for proof gain, not only generic gap reduction.
 - the mediator can explain what proof objective each question serves
 - repeated questions fall without reducing claim-element coverage
 
+### Emitted structure
+
+- `question_candidates[]` and selected intake questions now carry `proof_objective`, `proof_objective_id`, `question_objective_key`, `coverage_key`, `expected_proof_gain_score`, `proof_gain_metadata`, `novelty_score`, and `novelty_metadata`.
+- `ranking_explanation` and `selector_signals` preserve the same proof-objective and novelty fields so UI traces, adversarial scoring, and status summaries can explain why a question was selected.
+- Candidate collection over-gathers from each source, then suppresses exact, semantic, and recent-objective repeats with coverage-aware keys so duplicate asks do not crowd out distinct claim-element targets.
+- Intake fact/proof-lead intent snapshots preserve `proof_objective`, `proof_objective_id`, `coverage_key`, and `novelty_score`; intent summaries expose proof-objective counts and average novelty.
+
 ### Suggested validation
 
 - `./.venv/bin/python -m pytest tests/test_mediator.py -q`
