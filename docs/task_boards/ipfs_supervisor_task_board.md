@@ -355,7 +355,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-TEMP-T3 Theorem export and proof bundles
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
