@@ -532,7 +532,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-030 Close objective gap: Harden adapter contracts and degraded mode
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
