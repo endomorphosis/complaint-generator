@@ -330,6 +330,7 @@ Protect chronology behavior with targeted regressions and legal gold cases.
 - [x] add deadline and limitations-window cases — covered in `test_temporal_rule_profiles.py` (T6.8/T6.8b, T6.9/T6.9b/T6.9c)
 - [x] add theorem-export regression cases tied to proof bundles — `test_t1_t3_temporal_next_steps.py` (test_t3_certain_fact_formulas_annotated_as_certain, test_t3_inferred_relation_formula_annotated_as_inferred, test_t3_dcec_formula_certainties_present, test_t3_proof_bundles_keyed_by_claim_element)
 - [x] keep browser smoke coverage for operator-visible timeline and packet readiness state — `test_document_preview_smoke_renders_chronology_blocker_summary` and `test_document_preview_smoke_chronology_blocker_absent_when_no_blockers` in `tests/test_claim_support_review_playwright_smoke.py` cover `#document-chronology-blocker-summary` chip rendering
+- [x] enforce gold cases in the focused regression runner — `scripts/run_claim_support_review_regression.py` now includes `tests/test_t1_t3_temporal_next_steps.py`, `tests/test_temporal_rule_profiles.py`, `tests/test_mediator_three_phase.py`, and `tests/test_intake_status.py` in the base slice so payload, proof, mediator, and intake chronology drift fail under the same command
 
 ### Acceptance criteria
 
