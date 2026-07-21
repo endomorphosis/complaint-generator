@@ -694,3 +694,213 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
 - Validation: python -m pytest --collect-only -q
 - Acceptance: Retry-budget guardrail filed this from repeated validation failures in REF-031. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-035-ref-031-retry-budget.md to fix the validation blocker, then mark this repair task completed so the supervisor can release REF-031 from strategy blocked_tasks.
+
+- [ ] Task checkbox-36: REF-036 Introduce canonical task identity and a durable supervisor task ledger
+
+## REF-036 Introduce canonical task identity and a durable supervisor task ledger
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G9
+- Depends on: 
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q
+- Bundle: refactor/g9/g9-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S1
+- Missing evidence: Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous.
+- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, DEFAULT_AST_DATASET_MAX_CHARS, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, BundleWriteResult, utc_now, split_terms, objective_tokens, text_embedding, cosine, normalize_field_key, parse_goal_heap, safe_bundle_key, repo_relative_path
+- Merge key: refactor/g9/g9-s1
+- Candidate kind: seed
+- Todo vector key: ref-036-introducecanonicaltaskidentityandadurablesupervi
+- Acceptance: Every task has a stable canonical key or CID independent of board path and display id.; Legacy markdown tasks migrate idempotently with board namespace provenance.; Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.; Refill cannot create a second active task for the same canonical work item.
+
+- [ ] Task checkbox-37: REF-037 Replace static bundle launch with a dynamic leased worker pool
+
+## REF-037 Replace static bundle launch with a dynamic leased worker pool
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G9
+- Depends on: REF-036
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q
+- Bundle: refactor/g9/g9-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S1
+- Missing evidence: The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.
+- AST symbols: logger, BundleLaneSpec, resolve_repo_path, lane_state_prefix, implementation_supervisor_command, plan_bundle_lanes, launch_bundle_lanes, check_lane_health, write_bundle_lane_manifest, default_state_root, build_arg_parser, run_bundle_supervisor, main, to_dict, path, command, payload, parser, implement_group, repo_root, state_root, worktree_root, log_dir, manifest_path, bundle_index_path, lanes, started, args, bundle_key, safe_key
+- Merge key: refactor/g9/g9-s1
+- Candidate kind: seed
+- Todo vector key: ref-037-replacestaticbundlelaunchwithadynamicleasedworke
+- Acceptance: A persistent scheduler discovers new and refilled tasks without restart.; Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work.; Lane count remains within configured capacity and no task executes under two accepted leases.; The manifest is an authoritative live projection rather than a launch-time snapshot.
+
+- [ ] Task checkbox-38: REF-038 Integrate a deduplicating single-consumer merge train
+
+## REF-038 Integrate a deduplicating single-consumer merge train
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G9
+- Depends on: REF-037
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q
+- Bundle: refactor/g9/g9-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S1
+- Missing evidence: Independent lanes currently race to merge and repeatedly retry the same failed branches.
+- AST symbols: MergeRequest, _PRIORITY_ORDER, MergeQueue, to_dict, from_dict, __init__, enqueue, dequeue, complete, fail, requeue, pending_count, processing_count, has_pending_for_task, _purge_stale, status, now, request_id, request, file_name, file_path, tmp_path, pending, completed, purged, processing_path, completed_path, pending_path, data, failed_path
+- Merge key: refactor/g9/g9-s1
+- Candidate kind: seed
+- Todo vector key: ref-038-integrateadeduplicatingsingle-consumermergetrain
+- Acceptance: All implementation lanes enqueue merge candidates instead of racing the target checkout.; The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness.; One conflict fingerprint invokes at most one active resolver attempt.; Bounded failures enter quarantine with a durable receipt instead of a polling retry loop.
+
+- [ ] Task checkbox-39: REF-039 Materialize a task dependency DAG and schedule its critical path
+
+## REF-039 Materialize a task dependency DAG and schedule its critical path
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G9
+- Depends on: REF-037
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q
+- Bundle: refactor/g9/g9-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S2
+- Missing evidence: Goal parents are currently sorting hints while generated Profile G tasks carry no dependency task CIDs.
+- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, DEFAULT_AST_DATASET_MAX_CHARS, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, BundleWriteResult, utc_now, split_terms, objective_tokens, text_embedding, cosine, normalize_field_key, parse_goal_heap, safe_bundle_key, repo_relative_path
+- Merge key: refactor/g9/g9-s2
+- Candidate kind: seed
+- Todo vector key: ref-039-materializeataskdependencydagandscheduleitscriti
+- Acceptance: Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance.; Only tasks whose prerequisite merge receipts succeeded are claimable.; Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority.; Cycles and missing dependencies produce bounded repair evidence rather than deadlock.
+
+- [ ] Task checkbox-40: REF-040 Build an AST and changed-path conflict graph for lane coloring
+
+## REF-040 Build an AST and changed-path conflict graph for lane coloring
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G9
+- Depends on: REF-039
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q
+- Bundle: refactor/g9/g9-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S2
+- Missing evidence: The current conflict domain uses one path root and lightweight semantic similarity, which misses multi-file and symbol overlap.
+- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, DEFAULT_AST_DATASET_MAX_CHARS, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, BundleWriteResult, utc_now, split_terms, objective_tokens, text_embedding, cosine, normalize_field_key, parse_goal_heap, safe_bundle_key, repo_relative_path
+- Merge key: refactor/g9/g9-s2
+- Candidate kind: seed
+- Todo vector key: ref-040-buildanastandchanged-pathconflictgraphforlanecol
+- Acceptance: Conflict surfaces include all predicted files, AST symbols, interfaces, submodules, and generated artifacts.; Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.; Actual branch diffs and conflict receipts update future conflict weights.; Planner output explains every co-location or separation decision.
+
+- [ ] Task checkbox-41: REF-041 Use llm_router to generate and evaluate structured plan branches
+
+## REF-041 Use llm_router to generate and evaluate structured plan branches
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: G9
+- Depends on: REF-039
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q
+- Bundle: refactor/g9/g9-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S2
+- Missing evidence: Profile G currently records a single constant-scored plan branch and the LLM proposal router is not part of scheduler decisions.
+- AST symbols: PromptBuilder, BootstrapCallback, DEFAULT_OPEN_TASK_STATUSES, DEFAULT_TASK_PROPOSAL_TEST_OUTPUT, TaskProposalRouterError, TaskProposalRouterConfig, TaskProposalRouterCliConfig, TaskProposalRoutePaths, TaskProposalRouteSpec, _repo_path, build_task_proposal_route_paths, _task_values, _task_value, task_metadata_lines, build_task_proposal_prompt, standard_task_proposal_requested_outputs, build_task_proposal_prompt_builder, build_task_proposal_router_cli_config, run_configured_task_proposal_router_cli, ConfiguredTaskProposalRouterRunner, build_configured_task_proposal_router_runner, build_repo_task_proposal_router_runner, build_repo_task_proposal_route_runner, build_repo_task_proposal_route_runner_from_spec, select_proposal_task, _artifact_relative_path, run_task_proposal_router, build_task_proposal_router_parser, run_task_proposal_router_cli, resolved
+- Merge key: refactor/g9/g9-s2
+- Candidate kind: seed
+- Todo vector key: ref-041-usellm-routertogenerateandevaluatestructuredplan
+- Acceptance: Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.; Candidates declare predicted files and symbols, dependencies, validation proof, cost, risk, and expected objective delta.; A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.; Router failure falls back to deterministic planning without blocking ready work.
+
+- [ ] Task checkbox-42: REF-042 Schedule lanes from live resources and llm_router provider capacity
+
+## REF-042 Schedule lanes from live resources and llm_router provider capacity
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: G9
+- Depends on: REF-037, REF-041
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q
+- Bundle: refactor/g9/g9-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S3
+- Missing evidence: Resource class, capability fit, and lane capacity are currently static even when workers are idle or providers are rate-limited.
+- AST symbols: logger, BundleLaneSpec, resolve_repo_path, lane_state_prefix, implementation_supervisor_command, plan_bundle_lanes, launch_bundle_lanes, check_lane_health, write_bundle_lane_manifest, default_state_root, build_arg_parser, run_bundle_supervisor, main, to_dict, path, command, payload, parser, implement_group, repo_root, state_root, worktree_root, log_dir, manifest_path, bundle_index_path, lanes, started, args, bundle_key, safe_key
+- Merge key: refactor/g9/g9-s3
+- Candidate kind: seed
+- Todo vector key: ref-042-schedulelanesfromliveresourcesandllm-routerprovi
+- Acceptance: Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity.; Scheduler honors llm_router health, quota, latency, context, and token-budget constraints.; Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.; Idle lanes advertise zero occupied capacity and can be reassigned.
+
+- [ ] Task checkbox-43: REF-043 Add impact-selected cached and parallel validation stages
+
+## REF-043 Add impact-selected cached and parallel validation stages
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: G9
+- Depends on: REF-038
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q
+- Bundle: refactor/g9/g9-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S3
+- Missing evidence: Validation commands currently run serially without changed-file impact selection or reusable baseline results.
+- AST symbols: split_validation_commands, text, in_single_quote, in_double_quote, escaped, flush, command, REPO_ROOT, logger, TASK_HEADER_PREFIX, DEFAULT_TRACKS, PRIORITY_ORDER, DEFAULT_IMPLEMENTATION_TIMEOUT_SECONDS, LLM_MERGE_RESOLVER_COMMAND_ENV, LLM_MERGE_RESOLVER_TIMEOUT_ENV, DAEMON_MERGE_RECONCILIATION_MAX_ENV, DEFAULT_DAEMON_MERGE_RECONCILIATION_MAX, DAEMON_MERGED_WORKTREE_CLEANUP_MAX_ENV, DEFAULT_DAEMON_MERGED_WORKTREE_CLEANUP_MAX, DAEMON_HOOK_TIMEOUT_ENV, DEFAULT_DAEMON_HOOK_TIMEOUT_SECONDS, MERGE_RECONCILIATION_MAX_AGE_ENV, DEFAULT_MERGE_RECONCILIATION_MAX_AGE_SECONDS, UNSUPPORTED_TYPESCRIPT_VALIDATION_FLAGS, RECENT_NO_CHANGE_COOLDOWN_SECONDS, NO_CHANGE_SELECTION_PENALTY, UNRESOLVED_MERGE_SELECTION_PENALTY, TRANSIENT_MERGE_LOCK_REASONS, TRANSIENT_MERGE_RETRY_BUDGET_WHEN_DISABLED, IMPLEMENTATION_TASK_CLAIM_LOCK_KIND
+- Merge key: refactor/g9/g9-s3
+- Candidate kind: seed
+- Todo vector key: ref-043-addimpact-selectedcachedandparallelvalidationsta
+- Acceptance: Cheap deterministic checks run before expensive tests and fail fast.; Independent validations run in parallel under a bounded resource budget.; Cache keys include target commit, command, relevant environment, and dependency state.; Impact selection is conservative, explainable, and escalates to broader validation before merge completion.
+
+- [ ] Task checkbox-44: REF-044 Publish authoritative throughput metrics and scheduler state
+
+## REF-044 Publish authoritative throughput metrics and scheduler state
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: G9
+- Depends on: REF-037, REF-038, REF-039
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q
+- Bundle: refactor/g9/g9-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S4
+- Missing evidence: Status is split across launch manifests, wrapper files, lane state, and event logs, so planners cannot measure useful capacity.
+- AST symbols: _EVENT_LOG_MAX_BYTES_ENV, _DEFAULT_EVENT_LOG_MAX_BYTES, _EVENT_LOG_RETAIN_RECENT_ENV, _DEFAULT_EVENT_LOG_RETAIN_RECENT, utc_now, unique_backup_path, repair_jsonl_event_log, read_jsonl_events, append_jsonl_event, rotate_event_log_if_needed, stamp, quarantine_path, event, max_bytes, retain_recent, total_count, archive_events, retained_events, archive_path, suffix, candidate, backup_path, lines, line, file_size, logger, pid_alive, read_lane_manifest, check_lane_pid, check_lane_heartbeat
+- Merge key: refactor/g9/g9-s4
+- Candidate kind: seed
+- Todo vector key: ref-044-publishauthoritativethroughputmetricsandschedule
+- Acceptance: One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases.; Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost.; Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity.; Scheduler decisions consume the same snapshot exposed to operators.
+
+- [ ] Task checkbox-45: REF-045 Make AST scans and implementation workspaces incremental and reusable
+
+## REF-045 Make AST scans and implementation workspaces incremental and reusable
+
+- Status: todo
+- Completion: manual
+- Priority: P2
+- Track: G9
+- Depends on: REF-040, REF-042, REF-043, REF-044
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q
+- Bundle: refactor/g9/g9-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G9.S4
+- Missing evidence: Refill scans reread the tracked codebase and each implementation creates fresh worktree and submodule setup even when inputs are unchanged.
+- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, DEFAULT_AST_DATASET_MAX_CHARS, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, BundleWriteResult, utc_now, split_terms, objective_tokens, text_embedding, cosine, normalize_field_key, parse_goal_heap, safe_bundle_key, repo_relative_path
+- Merge key: refactor/g9/g9-s4
+- Candidate kind: seed
+- Todo vector key: ref-045-makeastscansandimplementationworkspacesincrement
+- Acceptance: AST and evidence records are reused by blob hash and only changed files are reparsed.; Deleted and renamed files invalidate stale evidence deterministically.; Clean worktrees and dependency setups can be pooled without sharing task-local mutations.; Cold and warm paths produce equivalent plans and validation results with measured warm-path savings.

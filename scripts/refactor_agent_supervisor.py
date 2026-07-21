@@ -1058,10 +1058,52 @@ def _render_seed_todo(goals: list[dict[str, Any]]) -> str:
     index = 1
     for task in flatten_tasks(goals):
         task_id = task.task_id or f"{TASK_PREFIX}{index:03d}"
-        lines.append(_task_block(task, task_id, index))
+        lines.append(_task_block(task, task_id, _task_checkbox_index(task_id, index)))
         lines.append("")
         index += 1
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _task_checkbox_index(task_id: str, fallback: int) -> int:
+    match = re.fullmatch(rf"{re.escape(TASK_PREFIX)}(\d+)", task_id)
+    return int(match.group(1)) if match else fallback
+
+
+def _append_missing_explicit_seed_tasks(path: Path, goals: list[dict[str, Any]]) -> bool:
+    if not path.exists():
+        return False
+
+    text = path.read_text(encoding="utf-8", errors="replace")
+    header_pattern = re.compile(
+        rf"^##\s+({re.escape(TASK_PREFIX)}\d+)\s+(.+?)\s*$",
+        re.MULTILINE,
+    )
+    existing_titles = {match.group(1): match.group(2) for match in header_pattern.finditer(text)}
+    additions: list[str] = []
+    for fallback, task in enumerate(flatten_tasks(goals), start=1):
+        if not task.task_id:
+            continue
+        existing_title = existing_titles.get(task.task_id)
+        if existing_title is not None:
+            if existing_title != task.title:
+                raise RuntimeError(
+                    f"Explicit seed id {task.task_id} already names {existing_title!r}, "
+                    f"not {task.title!r}"
+                )
+            continue
+        additions.append(
+            _task_block(
+                task,
+                task.task_id,
+                _task_checkbox_index(task.task_id, fallback),
+            )
+        )
+        existing_titles[task.task_id] = task.title
+
+    if not additions:
+        return False
+    path.write_text(text.rstrip() + "\n\n" + "\n\n".join(additions) + "\n", encoding="utf-8")
+    return True
 
 
 def _safe_bundle_key(value: str) -> str:
@@ -1151,7 +1193,7 @@ def write_seed_bundle_index(
             continue
         safe_key = _safe_bundle_key(bundle_key)
         shard_path = BUNDLE_DIR / f"{safe_key}.todo.md"
-        block = _task_block(task, task_id, task_index)
+        block = _task_block(task, task_id, _task_checkbox_index(task_id, task_index))
         if shard_path.exists():
             shard_text = shard_path.read_text(encoding="utf-8", errors="replace")
         else:
@@ -1241,6 +1283,19 @@ def _todo_counts() -> dict[str, int]:
     return task_status_counts(parse_markdown_tasks(TODO_PATH.read_text(encoding="utf-8", errors="replace")))
 
 
+def _todo_task_header_count(path: Path = TODO_PATH) -> int:
+    if not path.exists():
+        return 0
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return len(
+        re.findall(
+            rf"^##\s+{re.escape(TASK_PREFIX)}\d+\b",
+            text,
+            flags=re.MULTILINE,
+        )
+    )
+
+
 def seed_taskboard(
     *,
     refill_floor: int = 20,
@@ -1256,8 +1311,10 @@ def seed_taskboard(
     goal_tree = _json_goal_tree(goals, scan)
     GOALS_PATH.write_text(json.dumps(goal_tree, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     objective_changed = _ensure_text(OBJECTIVE_PATH, _render_objective_heap(goals), overwrite=True)
-    existing_todo_total = sum(_todo_counts().values()) if TODO_PATH.exists() else 0
-    todo_changed = _ensure_text(TODO_PATH, _render_seed_todo(goals), overwrite=existing_todo_total == 0)
+    existing_todo_headers = _todo_task_header_count()
+    todo_changed = _ensure_text(TODO_PATH, _render_seed_todo(goals), overwrite=existing_todo_headers == 0)
+    if existing_todo_headers:
+        todo_changed = _append_missing_explicit_seed_tasks(TODO_PATH, goals) or todo_changed
     bundle_seed = write_seed_bundle_index(goals, exclude_bundle_keys=exclude_bundle_keys)
 
     objective_result: dict[str, Any] = {"skipped": True, "reason": "fast_seed"}
