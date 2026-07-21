@@ -299,7 +299,7 @@ Edit the JSON board first, then regenerate this markdown projection.
 
 ## SUP-IPFS-M5 Drafting and filing readiness
 
-- Status: todo
+- Status: completed
 - Completion: validation
 - Priority: P0
 - Track: sup
