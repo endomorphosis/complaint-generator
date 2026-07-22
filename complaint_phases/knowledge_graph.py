@@ -9,15 +9,34 @@ import json
 import logging
 import re
 import os
-from typing import Dict, List, Optional, Any, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Any, Mapping, Set, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, UTC
+
+if TYPE_CHECKING:
+    from integrations.ipfs_datasets.graphs import GraphPersistence, GraphQuery
 
 
 def _utc_now_isoformat() -> str:
     return datetime.now(UTC).isoformat()
 
 logger = logging.getLogger(__name__)
+
+
+def _merge_provenance(*records: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Merge non-empty provenance fields without discarding nested metadata."""
+    merged: Dict[str, Any] = {}
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        for key, value in record.items():
+            if value in (None, "", [], (), {}):
+                continue
+            if isinstance(value, Mapping) and isinstance(merged.get(key), Mapping):
+                merged[key] = {**dict(merged[key]), **dict(value)}
+            else:
+                merged[str(key)] = value
+    return merged
 
 
 @dataclass
@@ -29,6 +48,7 @@ class Entity:
     attributes: Dict[str, Any] = field(default_factory=dict)
     confidence: float = 1.0
     source: str = "complaint"  # complaint, evidence, inference
+    provenance: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -44,6 +64,7 @@ class Relationship:
     attributes: Dict[str, Any] = field(default_factory=dict)
     confidence: float = 1.0
     source: str = "complaint"
+    provenance: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -57,14 +78,57 @@ class KnowledgeGraph:
     to enable reasoning, gap detection, and iterative denoising.
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        graph_id: str = "",
+        graph_version: str = "0",
+        provenance: Optional[Mapping[str, Any]] = None,
+        persistence: Optional['GraphPersistence'] = None,
+        query_backend: Optional['GraphQuery'] = None,
+    ):
         self.entities: Dict[str, Entity] = {}
         self.relationships: Dict[str, Relationship] = {}
+        self._persistence = persistence
+        self._query_backend = query_backend
+        created_at = _utc_now_isoformat()
         self.metadata = {
-            'created_at': _utc_now_isoformat(),
-            'last_updated': _utc_now_isoformat(),
-            'version': '1.0'
+            'created_at': created_at,
+            'last_updated': created_at,
+            'version': '1.0',
+            'graph_id': str(graph_id or ''),
+            'graph_version': str(graph_version or '0'),
+            'revision': 0,
+            'provenance': _merge_provenance(provenance),
         }
+
+    @property
+    def graph_id(self) -> str:
+        """Stable logical identifier assigned to persisted versions of this graph."""
+        return str(self.metadata.get('graph_id') or '')
+
+    @property
+    def graph_version(self) -> str:
+        """Current in-memory revision or persisted version identifier."""
+        return str(self.metadata.get('graph_version') or '0')
+
+    @property
+    def provenance(self) -> Dict[str, Any]:
+        """Graph-level source lineage inherited by snapshots and queries."""
+        value = self.metadata.get('provenance')
+        return dict(value) if isinstance(value, Mapping) else {}
+
+    def bind_graph_services(
+        self,
+        *,
+        persistence: Optional['GraphPersistence'] = None,
+        query_backend: Optional['GraphQuery'] = None,
+    ) -> None:
+        """Attach persistence/query ports without serializing runtime services."""
+        if persistence is not None:
+            self._persistence = persistence
+        if query_backend is not None:
+            self._query_backend = query_backend
     
     def add_entity(self, entity: Entity) -> str:
         """Add an entity to the graph."""
@@ -438,15 +502,154 @@ class KnowledgeGraph:
                 if entity.confidence > existing.confidence:
                     existing.confidence = entity.confidence
                     existing.attributes.update(entity.attributes)
+                existing.provenance = _merge_provenance(existing.provenance, entity.provenance)
         
         for rel in other_graph.relationships.values():
             if rel.id not in self.relationships:
                 self.add_relationship(rel)
+
+        self.metadata['provenance'] = _merge_provenance(
+            self.provenance,
+            other_graph.provenance,
+        )
+
+    def to_graph_payload(self, *, source_id: Optional[str] = None) -> Dict[str, Any]:
+        """Return the normalized list-based payload consumed by graph adapters."""
+        resolved_source_id = str(source_id or self.provenance.get('source_id') or '')
+        return {
+            'status': 'available',
+            'source_id': resolved_source_id,
+            'entities': [entity.to_dict() for entity in self.entities.values()],
+            'relationships': [relationship.to_dict() for relationship in self.relationships.values()],
+            'metadata': {
+                **self.metadata,
+                'graph_id': self.graph_id,
+                'graph_version': self.graph_version,
+                'provenance': self.provenance,
+            },
+        }
+
+    def persist(
+        self,
+        *,
+        persistence: Optional['GraphPersistence'] = None,
+        source_id: Optional[str] = None,
+        provenance: Optional[Mapping[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Persist the current immutable snapshot through the graph adapter port.
+
+        When no backend is bound, the adapter returns the same explicit noop
+        contract used by existing degraded deployments.
+        """
+        from integrations.ipfs_datasets.graphs import persist_graph_snapshot
+
+        effective_provenance = _merge_provenance(self.provenance, provenance)
+        result = persist_graph_snapshot(
+            self.to_graph_payload(source_id=source_id),
+            graph_id=self.graph_id or None,
+            graph_version=None if self.graph_version == '0' else self.graph_version,
+            graph_changed=bool(self.entities or self.relationships),
+            existing_graph=bool(self.metadata.get('snapshot_id')),
+            persistence_metadata=metadata,
+            provenance=effective_provenance,
+            persistence=persistence if persistence is not None else self._persistence,
+        )
+        self.metadata['graph_id'] = str(result.get('graph_id') or self.graph_id)
+        self.metadata['graph_version'] = str(result.get('graph_version') or self.graph_version)
+        self.metadata['snapshot_id'] = str(result.get('snapshot_id') or '')
+        self.metadata['content_hash'] = str(result.get('content_hash') or '')
+        self.metadata['provenance'] = _merge_provenance(
+            effective_provenance,
+            result.get('provenance') if isinstance(result.get('provenance'), Mapping) else None,
+        )
+        return result
+
+    def _support_facts(self, claim_element_id: str, claim_element_text: str) -> List[Dict[str, Any]]:
+        """Project fact entities into fallback support-query records."""
+        claim_entities = {
+            entity.id
+            for entity in self.entities.values()
+            if entity.id == claim_element_id
+            or (
+                claim_element_text
+                and entity.type in {'claim', 'claim_element'}
+                and entity.name == claim_element_text
+            )
+        }
+        supported_fact_ids: Set[str] = set()
+        if claim_entities:
+            for relationship in self.relationships.values():
+                if relationship.relation_type in {'supports', 'supported_by'}:
+                    if relationship.target_id in claim_entities:
+                        supported_fact_ids.add(relationship.source_id)
+                    if relationship.source_id in claim_entities:
+                        supported_fact_ids.add(relationship.target_id)
+
+        facts: List[Dict[str, Any]] = []
+        for entity in self.entities.values():
+            if entity.type not in {'fact', 'evidence', 'authority'}:
+                continue
+            if claim_entities and entity.id not in supported_fact_ids:
+                continue
+            attributes = entity.attributes if isinstance(entity.attributes, dict) else {}
+            entity_provenance = _merge_provenance(
+                self.provenance,
+                entity.provenance,
+                attributes.get('provenance') if isinstance(attributes.get('provenance'), Mapping) else None,
+            )
+            facts.append({
+                **attributes,
+                'fact_id': entity.id,
+                'text': str(attributes.get('text') or attributes.get('description') or entity.name),
+                'confidence': entity.confidence,
+                'claim_element_id': str(attributes.get('claim_element_id') or claim_element_id or ''),
+                'claim_element_text': str(attributes.get('claim_element_text') or claim_element_text or ''),
+                'support_kind': str(attributes.get('support_kind') or entity.type),
+                'source_table': str(attributes.get('source_table') or entity.source or 'knowledge_graph'),
+                'provenance': entity_provenance,
+            })
+        return facts
+
+    def query_support(
+        self,
+        claim_element_id: str,
+        *,
+        claim_type: Optional[str] = None,
+        claim_element_text: Optional[str] = None,
+        support_facts: Optional[List[Dict[str, Any]]] = None,
+        max_results: int = 10,
+        filters: Optional[Mapping[str, Any]] = None,
+        provenance: Optional[Mapping[str, Any]] = None,
+        query_backend: Optional['GraphQuery'] = None,
+    ) -> Dict[str, Any]:
+        """Query claim support through a backend, retaining local fallback scoring."""
+        from integrations.ipfs_datasets.graphs import query_graph_support
+
+        resolved_text = str(claim_element_text or '')
+        facts = support_facts
+        if facts is None:
+            facts = self._support_facts(str(claim_element_id or ''), resolved_text)
+        return query_graph_support(
+            str(claim_element_id or ''),
+            graph_id=self.graph_id or None,
+            graph_version=self.graph_version,
+            support_facts=facts,
+            claim_type=claim_type,
+            claim_element_text=resolved_text,
+            max_results=max_results,
+            filters=filters,
+            provenance=_merge_provenance(self.provenance, provenance),
+            query_backend=query_backend if query_backend is not None else self._query_backend,
+        )
     
     def to_dict(self) -> dict:
         """Serialize to dictionary."""
         return {
-            'metadata': self.metadata,
+            'metadata': dict(self.metadata),
+            'graph_id': self.graph_id,
+            'graph_version': self.graph_version,
+            'provenance': self.provenance,
             'entities': {eid: e.to_dict() for eid, e in self.entities.items()},
             'relationships': {rid: r.to_dict() for rid, r in self.relationships.items()}
         }
@@ -458,18 +661,52 @@ class KnowledgeGraph:
         logger.info(f"Knowledge graph saved to {filepath}")
     
     @classmethod
-    def from_dict(cls, data: dict) -> 'KnowledgeGraph':
+    def from_dict(
+        cls,
+        data: dict,
+        *,
+        persistence: Optional['GraphPersistence'] = None,
+        query_backend: Optional['GraphQuery'] = None,
+    ) -> 'KnowledgeGraph':
         """Deserialize from dictionary."""
-        graph = cls()
-        graph.metadata = data['metadata']
-        
-        for eid, edata in data['entities'].items():
+        if not isinstance(data, Mapping):
+            raise TypeError('knowledge graph data must be a mapping')
+        stored_metadata = data.get('metadata') if isinstance(data.get('metadata'), Mapping) else {}
+        merged_provenance = _merge_provenance(
+            stored_metadata.get('provenance') if isinstance(stored_metadata.get('provenance'), Mapping) else None,
+            data.get('provenance') if isinstance(data.get('provenance'), Mapping) else None,
+        )
+        graph = cls(
+            graph_id=str(data.get('graph_id') or stored_metadata.get('graph_id') or ''),
+            graph_version=str(data.get('graph_version') or stored_metadata.get('graph_version') or '0'),
+            provenance=merged_provenance,
+            persistence=persistence,
+            query_backend=query_backend,
+        )
+        graph.metadata.update(dict(stored_metadata))
+        graph.metadata['graph_id'] = graph.graph_id
+        graph.metadata['graph_version'] = graph.graph_version
+        graph.metadata['provenance'] = merged_provenance
+
+        raw_entities = data.get('entities', {})
+        entity_records = raw_entities.items() if isinstance(raw_entities, Mapping) else (
+            (str(item.get('id') or ''), item)
+            for item in raw_entities or []
+            if isinstance(item, Mapping)
+        )
+        for eid, edata in entity_records:
             entity = Entity(**edata)
-            graph.entities[eid] = entity
-        
-        for rid, rdata in data['relationships'].items():
+            graph.entities[str(eid or entity.id)] = entity
+
+        raw_relationships = data.get('relationships', {})
+        relationship_records = raw_relationships.items() if isinstance(raw_relationships, Mapping) else (
+            (str(item.get('id') or ''), item)
+            for item in raw_relationships or []
+            if isinstance(item, Mapping)
+        )
+        for rid, rdata in relationship_records:
             rel = Relationship(**rdata)
-            graph.relationships[rid] = rel
+            graph.relationships[str(rid or rel.id)] = rel
         
         return graph
     
@@ -482,7 +719,12 @@ class KnowledgeGraph:
         return cls.from_dict(data)
     
     def _update_metadata(self):
-        """Update last_updated timestamp."""
+        """Update timestamps and invalidate the previous immutable snapshot."""
+        revision = int(self.metadata.get('revision', 0) or 0) + 1
+        self.metadata['revision'] = revision
+        self.metadata['graph_version'] = str(revision)
+        self.metadata.pop('snapshot_id', None)
+        self.metadata.pop('content_hash', None)
         self.metadata['last_updated'] = _utc_now_isoformat()
     
     def summary(self) -> Dict[str, Any]:
