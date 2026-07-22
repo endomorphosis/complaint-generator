@@ -1,5 +1,5 @@
 {
-  "active_task_count": 44,
+  "active_task_count": 35,
   "bundle_contexts": [
     {
       "active_task_ids": [
@@ -484,126 +484,6 @@
     },
     {
       "active_task_ids": [
-        "REF-031",
-        "REF-047"
-      ],
-      "all_outputs": [
-        "data/refactor_supervisor/discovery",
-        "data/refactor_supervisor/refactor_objective_heap.md"
-      ],
-      "ast_symbols": [
-        "complaint generator refactor objective heap",
-        "g1 s1 map package ownership and runtime entrypoints",
-        "g1 s2 remove ad hoc import path behavior from production surfaces",
-        "g1 stabilize repository boundaries",
-        "g1.s1 map package ownership and runtime entrypoints",
-        "g1.s2 remove ad hoc import path behavior from production surfaces",
-        "g2 decompose oversized orchestration modules",
-        "g2 s1 extract mediator service seams",
-        "g2 s2 reduce application surface coupling",
-        "g2.s1 extract mediator service seams",
-        "g2.s2 reduce application surface coupling",
-        "g3 harden adapter contracts and degraded mode",
-        "g3 s1 normalize ipfs datasets adapter payloads",
-        "g3 s2 clarify graph graphrag and logic adapter boundaries",
-        "g3.s1 normalize ipfs datasets adapter payloads",
-        "g3.s2 clarify graph, graphrag, and logic adapter boundaries",
-        "g4 improve validation speed and confidence",
-        "g4 s1 create focused test lanes for refactor work",
-        "g4.s1 create focused test lanes for refactor work",
-        "g5 make automation observable and refillable",
-        "g5 s1 operate durable refactor taskboard",
-        "g5.s1 operate a durable refactor taskboard",
-        "g6 pay down error handling and observability debt",
-        "g6 pay down error-handling and observability debt",
-        "g6 s1 replace silent failures with typed outcomes",
-        "g6 s2 unify runtime status payloads",
-        "g6.s1 replace silent failures with typed outcomes",
-        "g6.s2 unify runtime status payloads",
-        "g7 rationalize frontend and review surfaces",
-        "g7 s1 separate review api contracts from display assembly",
-        "g7.s1 separate review api contracts from display assembly",
-        "g8 prepare incremental implementation slices",
-        "g8 s1 convert existing roadmaps into executable slices",
-        "g8 s2 keep generated artifacts reviewable",
-        "g8.s1 convert existing roadmaps into executable slices",
-        "g8.s2 keep generated artifacts reviewable",
-        "g9 increase agent supervisor planning quality and throughput",
-        "g9 increase agent-supervisor planning quality and throughput",
-        "g9 s1 establish canonical coordination and merge flow",
-        "g9 s2 plan from dependencies conflicts and objective value",
-        "g9 s3 adapt execution capacity and validation cost",
-        "g9 s4 close the scheduler feedback and lifecycle loop",
-        "g9.s1 establish canonical coordination and merge flow",
-        "g9.s2 plan from dependencies, conflicts, and objective value",
-        "g9.s3 adapt execution capacity and validation cost",
-        "g9.s4 close the scheduler feedback and lifecycle loop"
-      ],
-      "bundle_keys": [
-        "refactor/g8"
-      ],
-      "candidate_kinds": [
-        "validation_gate"
-      ],
-      "compact_context": "bundle_context/cb0d59ba6344; merge_ready=true; active=REF-031, REF-047; goals=G8; merge_family=objective/G8; work_items=1-1; packet_work=0; missing=objective validation repair; outputs=data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md; ast=complaint generator refactor objective heap, g1 s1 map package ownership and runtime entrypoints, g1 s2 remove ad hoc import path behavior from production surfaces, g1 stabilize repository boundaries, g1.s1 map package ownership and runtime entrypoints, g1.s2 remove ad hoc import path behavior from production surfaces, g2 decompose oversized orchestration modules, g2 s1 extract mediator service seams, g2 s2 reduce application surface coupling, g2.s1 extract mediator service seams, g2.s2 reduce application surface coupling, g3 harden adapter contracts and degraded mode",
-      "compact_context_tokens": 121,
-      "confidence": "high",
-      "context_key": "bundle_context/cb0d59ba6344",
-      "goal_ids": [
-        "G8"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_depth_max": 0,
-      "graph_depth_min": 0,
-      "graph_parent_ids": [],
-      "merge_families": [
-        "objective/G8"
-      ],
-      "merge_keys": [
-        "73c2c19911fd953e"
-      ],
-      "merge_ready": true,
-      "merge_ready_task_ids": [
-        "REF-031",
-        "REF-047"
-      ],
-      "merge_roles": [
-        "validation_gate"
-      ],
-      "missing_evidence": [
-        "objective validation repair"
-      ],
-      "raw_prompt_tokens": 290,
-      "representative_task_id": "REF-031",
-      "shared_outputs": [
-        "data/refactor_supervisor/discovery",
-        "data/refactor_supervisor/refactor_objective_heap.md"
-      ],
-      "source_key": "merge_key/69b382b8a0c6",
-      "source_type": "merge_key",
-      "surplus_groups": [
-        "objective/G8"
-      ],
-      "task_ids": [
-        "REF-031",
-        "REF-047"
-      ],
-      "validation": [
-        "python -m pytest --collect-only -q"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 2,
-      "work_scopes": [
-        "objective_validation_repair"
-      ]
-    },
-    {
-      "active_task_ids": [
         "REF-042",
         "REF-043"
       ],
@@ -760,173 +640,6 @@
       "work_item_count_max": 3,
       "work_item_count_min": 1,
       "work_item_count_total": 4,
-      "work_scopes": []
-    },
-    {
-      "active_task_ids": [
-        "REF-037",
-        "REF-038"
-      ],
-      "all_outputs": [
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py"
-      ],
-      "ast_symbols": [
-        "__enter__",
-        "__exit__",
-        "__future__",
-        "__future__.annotations",
-        "__init__",
-        "_bundle",
-        "_bundle_cluster_key",
-        "_claim_payload",
-        "_configured_command_template",
-        "_current",
-        "_default_output",
-        "_emit",
-        "_env_default_items",
-        "_env_default_value",
-        "_env_int",
-        "_event_fingerprint",
-        "_expire",
-        "_first_non_empty",
-        "_git",
-        "_goal_packet_group_key",
-        "_grant",
-        "_handle_signal",
-        "_heartbeat_count",
-        "_implementation_supervisor_namespace_track_spec",
-        "_inferred_supervisor_status_path",
-        "_init_schema",
-        "_link",
-        "_load_resolved_events",
-        "_mapping_value",
-        "_master_paths",
-        "_maybe_save",
-        "_merge_entries",
-        "_merge_present_evidence",
-        "_merge_result",
-        "_missing_command_error",
-        "_parse_int",
-        "_parse_status_timestamp",
-        "_path_root",
-        "_purge_stale",
-        "_put_artifact",
-        "_read_json_dict",
-        "_relative_or_absolute_path",
-        "_remove_stale_pid_marker_if_unchanged",
-        "_resolution_payload",
-        "_resolve_path",
-        "_save_resolved_events",
-        "_seed_repo",
-        "_sequence",
-        "_task_mapping",
-        "_terminate_pid",
-        "_unique_strings",
-        "_without_detach",
-        "active lease",
-        "active_lease",
-        "adapt goal bundle",
-        "adapt_goal_bundle",
-        "add goal packet aggregate findings",
-        "add_goal_packet_aggregate_findings",
-        "append group",
-        "append_group",
-        "argparse",
-        "args",
-        "assign goal subgoal packets",
-        "assign_goal_subgoal_packets",
-        "ast",
-        "ast dataset payload",
-        "ast_dataset_payload",
-        "base64",
-        "board namespace from path",
-        "board_namespace_from_path",
-        "build arg parser",
-        "build bundle task payloads",
-        "build configured merge resolver arg parser",
-        "build configured merge resolver runner",
-        "build configured multi supervisor cli runner",
-        "build configured multi supervisor launcher",
-        "build llm merge resolver invoker",
-        "build merge prompt",
-        "build merge prompt callback",
-        "build namespace merge resolver runner"
-      ],
-      "bundle_keys": [
-        "refactor/g9/g9-s1"
-      ],
-      "candidate_kinds": [
-        "seed"
-      ],
-      "compact_context": "bundle_context/a2e491732a99; merge_ready=true; active=REF-037, REF-038; goals=G9.S1; merge_family=G9.S1; work_items=1-1; packet_work=0; missing=Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous., Independent lanes currently race to merge and repeatedly retry the same failed branches., The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.; outputs=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py; ast=__enter__, __exit__, __future__, __future__.annotations, __init__, _bundle, _bundle_cluster_key, _claim_payload, _configured_command_template, _current, _default_output, _emit",
-      "compact_context_tokens": 146,
-      "confidence": "high",
-      "context_key": "bundle_context/a2e491732a99",
-      "goal_ids": [
-        "G9.S1"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_depth_max": 0,
-      "graph_depth_min": 0,
-      "graph_parent_ids": [],
-      "merge_families": [
-        "G9.S1"
-      ],
-      "merge_keys": [
-        "refactor/g9/g9-s1"
-      ],
-      "merge_ready": true,
-      "merge_ready_task_ids": [
-        "REF-037",
-        "REF-038"
-      ],
-      "merge_roles": [
-        "seed"
-      ],
-      "missing_evidence": [
-        "Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous.",
-        "Independent lanes currently race to merge and repeatedly retry the same failed branches.",
-        "The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work."
-      ],
-      "raw_prompt_tokens": 506,
-      "representative_task_id": "REF-037",
-      "shared_outputs": [],
-      "source_key": "merge_key/30a040574acd",
-      "source_type": "merge_key",
-      "surplus_groups": [
-        "G9.S1"
-      ],
-      "task_ids": [
-        "REF-036",
-        "REF-037",
-        "REF-038"
-      ],
-      "validation": [
-        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
-        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q",
-        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 3,
       "work_scopes": []
     },
     {
@@ -1390,158 +1103,6 @@
       "validation": [
         "python scripts/refactor_agent_supervisor.py seed --once",
         "python scripts/refactor_agent_supervisor.py status"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 2,
-      "work_scopes": []
-    },
-    {
-      "active_task_ids": [
-        "REF-001",
-        "REF-002"
-      ],
-      "all_outputs": [
-        "applications/complaint_workspace.py",
-        "complaint_phases/denoiser.py",
-        "docs/ARCHITECTURE.md",
-        "mediator/mediator.py",
-        "pyproject.toml",
-        "scripts/synthesize_hacc_complaint.py",
-        "tests/test_claim_support_review_playwright_smoke.py",
-        "tests/test_review_api.py"
-      ],
-      "ast_symbols": [
-        "adding new analysis features",
-        "adding new backends",
-        "adding new complaint types",
-        "adding new hooks",
-        "adversarial harness",
-        "adversarial testing flow",
-        "allowed import direction",
-        "architecture overview",
-        "authentication",
-        "backend router",
-        "caching",
-        "complaint analysis",
-        "complaint intake flow",
-        "complaint phases",
-        "complaint phases evidence storage",
-        "complaint phases legal research",
-        "complaint phases \u2194 evidence storage",
-        "complaint phases \u2194 legal research",
-        "component layers",
-        "core",
-        "current extraction priorities",
-        "data flow",
-        "data privacy",
-        "deployment architecture",
-        "development",
-        "documentation",
-        "duckdb tables",
-        "evidence storage",
-        "evidence storage flow",
-        "extensibility",
-        "future enhancements",
-        "input validation",
-        "integration points",
-        "ipfs network",
-        "json state files",
-        "layer 1: user interface",
-        "layer 2: mediator (orchestration)",
-        "layer 3: feature modules",
-        "layer 4: external services",
-        "layer external services",
-        "layer feature modules",
-        "layer mediator orchestration",
-        "layer user interface",
-        "legal data sources",
-        "legal research flow",
-        "llm integration",
-        "llm providers",
-        "logging",
-        "mediator adversarial harness",
-        "mediator backends",
-        "mediator complaint analysis",
-        "mediator complaint phases",
-        "mediator \u2194 adversarial harness",
-        "mediator \u2194 backends",
-        "mediator \u2194 complaint analysis",
-        "mediator \u2194 complaint phases",
-        "metrics to track",
-        "monitoring and observability",
-        "optimization",
-        "package ownership boundaries",
-        "parallelism",
-        "performance considerations",
-        "planned features",
-        "production (recommended)",
-        "production recommended",
-        "public runtime entrypoints",
-        "refactor dependency rules",
-        "research areas",
-        "runtime entrypoint and ownership map",
-        "scaling strategy",
-        "security considerations",
-        "see also",
-        "shared code rule",
-        "state management",
-        "system architecture",
-        "technology stack",
-        "testing"
-      ],
-      "bundle_keys": [
-        "refactor/g1/g1-s1"
-      ],
-      "candidate_kinds": [],
-      "compact_context": "bundle_context/a73d30a3661a; merge_ready=true; active=REF-001, REF-002; goals=G1.S1; merge_family=G1.S1; work_items=1-1; packet_work=0; missing=Large modules dominate change risk and need explicit boundaries before extraction., Refactors need a clear import direction to avoid moving complexity around.; outputs=applications/complaint_workspace.py, complaint_phases/denoiser.py, docs/ARCHITECTURE.md, mediator/mediator.py; ast=adding new analysis features, adding new backends, adding new complaint types, adding new hooks, adversarial harness, adversarial testing flow, allowed import direction, architecture overview, authentication, backend router, caching, complaint analysis",
-      "compact_context_tokens": 90,
-      "confidence": "medium",
-      "context_key": "bundle_context/a73d30a3661a",
-      "goal_ids": [
-        "G1.S1"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_depth_max": 0,
-      "graph_depth_min": 0,
-      "graph_parent_ids": [],
-      "merge_families": [
-        "G1.S1"
-      ],
-      "merge_keys": [
-        "419974cf3f0fbfd2",
-        "f0d284f2161d394b"
-      ],
-      "merge_ready": true,
-      "merge_ready_task_ids": [
-        "REF-001",
-        "REF-002"
-      ],
-      "merge_roles": [
-        "candidate"
-      ],
-      "missing_evidence": [
-        "Large modules dominate change risk and need explicit boundaries before extraction.",
-        "Refactors need a clear import direction to avoid moving complexity around."
-      ],
-      "raw_prompt_tokens": 137,
-      "representative_task_id": "REF-001",
-      "shared_outputs": [],
-      "source_key": "merge_family/a82eb010147d",
-      "source_type": "merge_family",
-      "surplus_groups": [
-        "G1.S1"
-      ],
-      "task_ids": [
-        "REF-001",
-        "REF-002"
-      ],
-      "validation": [
-        "python -m pytest tests/test_package_imports.py -q"
       ],
       "work_item_count_max": 1,
       "work_item_count_min": 1,
@@ -2736,8 +2297,6 @@
     },
     {
       "active_task_ids": [
-        "REF-001",
-        "REF-002",
         "REF-003",
         "REF-004",
         "REF-005",
@@ -2763,13 +2322,8 @@
         "REF-025",
         "REF-026",
         "REF-027",
-        "REF-030",
-        "REF-031",
         "REF-032",
         "REF-033",
-        "REF-035",
-        "REF-037",
-        "REF-038",
         "REF-039",
         "REF-040",
         "REF-041",
@@ -2777,9 +2331,7 @@
         "REF-043",
         "REF-044",
         "REF-045",
-        "REF-046",
-        "REF-047",
-        "REF-048"
+        "REF-049"
       ],
       "all_outputs": [
         "Makefile",
@@ -2982,10 +2534,10 @@
         "seed",
         "validation_gate"
       ],
-      "compact_context": "bundle_context/22184f98c449; merge_ready=true; active=REF-001, REF-002, REF-003, REF-004, REF-005, REF-006, REF-007, REF-008, REF-009, REF-010, REF-011, REF-012, REF-013, REF-014, REF-015, REF-016, REF-017, REF-018, REF-019, REF-020, REF-021, REF-022, REF-023, REF-024, REF-025, REF-026, REF-027, REF-030, REF-031, REF-032, REF-033, REF-035, REF-037, REF-038, REF-039, REF-040, REF-041, REF-042, REF-043, REF-044, REF-045, REF-046, REF-047, REF-048; goals=G1, G1.S1, G1.S2, G2, G2.S1, G2.S2, G3, G3.S1, G3.S2, G4.S1, G5.S1, G6, G6.S1, G6.S2, G7, G7.S1, G8, G8.S1, G8.S2, G9.S1, G9.S2, G9.S3, G9.S4; parents=G1; merge_family=G1.S1, G1.S2, G2.S1, G2.S2, G3.S1, G3.S2, G4.S1, G5.S1, G6.S1, G6.S2, G7.S1, G8.S1, G8.S2, G9.S1, G9.S2, G9.S3, G9.S4, a41af84b05eb2f41, aa25b1104b8e4d16, b4a80d7a4254dd15, f967c11c4ddddcbd, objective/G1, objective/G1.S1, objective/G2, objective/G3, objective/G6, objective/G7, objective/G8; work_items=1-5; packet_work=0; missing=A robust board still needs a practical starting order., Agents need a simple way to see the next work without opening DuckDB manually., Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous., Claim support hooks are large enough to hide unrelated concerns., Dashboard behavior is harder to test when fixtures and live assembly are interleaved., Dependency drift is a recurring refactor risk., Document parsing is still fallback-oriented and should be reusable across ingestion paths., Existing roadmap work should feed the automated taskboard rather than drift separately., Formal validation should fail predictably when unavailable., Goal parents are currently sorting hints while generated Profile G tasks carry no dependency task CIDs., Graph support currently lacks a durable query plane., Independent lanes currently race to merge and repeatedly retry the same failed branches., Large Playwright tests should share fixture setup before UI refactors., Large modules dominate change risk and need explicit boundaries before extraction., Long-running automation needs inspectable state and a clean stop path., Multiple daemon surfaces should be inspectable with the same status fields., Operators need consistent guidance for stalled background workflows., Optional dependency behavior should stay behind the adapter boundary., Profile G currently records a single constant-scored plan branch and the LLM proposal router is not part of scheduler decisions., Refactors need a clear import direction to avoid moving complexity around., Refill scans reread the tracked codebase and each implementation creates fresh worktree and submodule setup even when inputs are unchanged., Resource class, Review screens depend on stable payloads that should not be assembled ad hoc in route handlers., Silent failures hide regressions during long-running automation., Status is split across launch manifests, The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work., The current conflict domain uses one path root and lightweight semantic similarity, The existing backlog identifies adapter capability reporting as incomplete., The mediator is the largest runtime file and carries high regression risk., The repo has many tests; refactor agents need fast confidence lanes., The requested supervisor needs a refill loop and visible board state., The scan found many broad exception handlers; refactors need predictable failure semantics., The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive., The supervisor itself should not duplicate tasks or emit malformed payloads., The workspace module mixes UI routing, Validation commands currently run serially without changed-file impact selection or reusable baseline results., and event logs, and lane capacity are currently static even when workers are idle or providers are rate-limited., and workflow calls., capability fit, lane state, objective validation repair, so planners cannot measure useful capacity., state shaping, which misses multi-file and symbol overlap., wrapper files; outputs=Makefile, applications/complaint_cli.py, applications/complaint_workspace.py, applications/dashboard_ui.py; ast=1. collector not initialized, 1. missing trace context in metrics, 1. phase 2 denoising (new methods), 1. threshold not configured, 1. tracer not initialized, 1. unchecked latency history, 2. phase 3 denoising (new methods), 2. records not being made, 2. spans not starting/ending, 2. timeout set too long, 2. timestamp misalignment, 2. unlimited trace buffering",
-      "compact_context_tokens": 701,
+      "compact_context": "bundle_context/c88ede694fe4; merge_ready=true; active=REF-003, REF-004, REF-005, REF-006, REF-007, REF-008, REF-009, REF-010, REF-011, REF-012, REF-013, REF-014, REF-015, REF-016, REF-017, REF-018, REF-019, REF-020, REF-021, REF-022, REF-023, REF-024, REF-025, REF-026, REF-027, REF-032, REF-033, REF-039, REF-040, REF-041, REF-042, REF-043, REF-044, REF-045, REF-049; goals=G1, G1.S1, G1.S2, G2, G2.S1, G2.S2, G3, G3.S1, G3.S2, G4.S1, G5.S1, G6, G6.S1, G6.S2, G7, G7.S1, G8, G8.S1, G8.S2, G9.S1, G9.S2, G9.S3, G9.S4; parents=G1, G9; merge_family=G1.S1, G1.S2, G2.S1, G2.S2, G3.S1, G3.S2, G4.S1, G5.S1, G6.S1, G6.S2, G7.S1, G8.S1, G8.S2, G9.S1, G9.S2, G9.S3, G9.S4, a41af84b05eb2f41, aa25b1104b8e4d16, b4a80d7a4254dd15, f967c11c4ddddcbd, objective/G1, objective/G1.S1, objective/G2, objective/G3, objective/G6, objective/G7, objective/G8, objective/G9.S1; work_items=1-5; packet_work=0; missing=A robust board still needs a practical starting order., Agents need a simple way to see the next work without opening DuckDB manually., Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous., Claim support hooks are large enough to hide unrelated concerns., Dashboard behavior is harder to test when fixtures and live assembly are interleaved., Dependency drift is a recurring refactor risk., Document parsing is still fallback-oriented and should be reusable across ingestion paths., Existing roadmap work should feed the automated taskboard rather than drift separately., Formal validation should fail predictably when unavailable., Goal parents are currently sorting hints while generated Profile G tasks carry no dependency task CIDs., Graph support currently lacks a durable query plane., Independent lanes currently race to merge and repeatedly retry the same failed branches., Large Playwright tests should share fixture setup before UI refactors., Large modules dominate change risk and need explicit boundaries before extraction., Long-running automation needs inspectable state and a clean stop path., Multiple daemon surfaces should be inspectable with the same status fields., Operators need consistent guidance for stalled background workflows., Optional dependency behavior should stay behind the adapter boundary., Profile G currently records a single constant-scored plan branch and the LLM proposal router is not part of scheduler decisions., Refactors need a clear import direction to avoid moving complexity around., Refill scans reread the tracked codebase and each implementation creates fresh worktree and submodule setup even when inputs are unchanged., Resource class, Review screens depend on stable payloads that should not be assembled ad hoc in route handlers., Silent failures hide regressions during long-running automation., Status is split across launch manifests, The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work., The current conflict domain uses one path root and lightweight semantic similarity, The existing backlog identifies adapter capability reporting as incomplete., The mediator is the largest runtime file and carries high regression risk., The repo has many tests; refactor agents need fast confidence lanes., The requested supervisor needs a refill loop and visible board state., The scan found many broad exception handlers; refactors need predictable failure semantics., The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive., The supervisor itself should not duplicate tasks or emit malformed payloads., The workspace module mixes UI routing, Validation commands currently run serially without changed-file impact selection or reusable baseline results., and event logs, and lane capacity are currently static even when workers are idle or providers are rate-limited., and workflow calls., capability fit, lane state, objective validation repair, so planners cannot measure useful capacity., state shaping, which misses multi-file and symbol overlap., wrapper files; outputs=Makefile, applications/complaint_cli.py, applications/complaint_workspace.py, applications/dashboard_ui.py; ast=1. collector not initialized, 1. missing trace context in metrics, 1. phase 2 denoising (new methods), 1. threshold not configured, 1. tracer not initialized, 1. unchecked latency history, 2. phase 3 denoising (new methods), 2. records not being made, 2. spans not starting/ending, 2. timeout set too long, 2. timestamp misalignment, 2. unlimited trace buffering",
+      "compact_context_tokens": 687,
       "confidence": "low",
-      "context_key": "bundle_context/22184f98c449",
+      "context_key": "bundle_context/c88ede694fe4",
       "goal_ids": [
         "G1",
         "G1.S1",
@@ -3019,7 +2571,8 @@
       "graph_depth_max": 1,
       "graph_depth_min": 0,
       "graph_parent_ids": [
-        "G1"
+        "G1",
+        "G9"
       ],
       "merge_families": [
         "G1.S1",
@@ -3049,7 +2602,8 @@
         "objective/G3",
         "objective/G6",
         "objective/G7",
-        "objective/G8"
+        "objective/G8",
+        "objective/G9.S1"
       ],
       "merge_keys": [
         "00d917ffe721c4d1",
@@ -3071,6 +2625,7 @@
         "73c2c19911fd953e",
         "8d8729a2f9073978",
         "9c3d2b35296e9add",
+        "a225a5aae9962519",
         "a41af84b05eb2f41",
         "aa25b1104b8e4d16",
         "adc78ee2026547db",
@@ -3096,8 +2651,6 @@
       ],
       "merge_ready": true,
       "merge_ready_task_ids": [
-        "REF-001",
-        "REF-002",
         "REF-003",
         "REF-004",
         "REF-005",
@@ -3123,13 +2676,8 @@
         "REF-025",
         "REF-026",
         "REF-027",
-        "REF-030",
-        "REF-031",
         "REF-032",
         "REF-033",
-        "REF-035",
-        "REF-037",
-        "REF-038",
         "REF-039",
         "REF-040",
         "REF-041",
@@ -3137,9 +2685,7 @@
         "REF-043",
         "REF-044",
         "REF-045",
-        "REF-046",
-        "REF-047",
-        "REF-048"
+        "REF-049"
       ],
       "merge_roles": [
         "candidate",
@@ -3194,10 +2740,10 @@
         "which misses multi-file and symbol overlap.",
         "wrapper files"
       ],
-      "raw_prompt_tokens": 4822,
-      "representative_task_id": "REF-001",
+      "raw_prompt_tokens": 5428,
+      "representative_task_id": "REF-003",
       "shared_outputs": [],
-      "source_key": "vector_cluster/b6fa02e4927f",
+      "source_key": "vector_cluster/9a3724b8380d",
       "source_type": "vector_cluster",
       "surplus_groups": [
         "G1.S1",
@@ -3223,7 +2769,8 @@
         "objective/G3",
         "objective/G6",
         "objective/G7",
-        "objective/G8"
+        "objective/G8",
+        "objective/G9.S1"
       ],
       "task_ids": [
         "REF-001",
@@ -3273,21 +2820,22 @@
         "REF-045",
         "REF-046",
         "REF-047",
-        "REF-048"
+        "REF-048",
+        "REF-049"
       ],
       "validation": [
         "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
         "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q",
         "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q",
         "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q",
         "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q",
         "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q",
-        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q",
-        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q"
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q"
       ],
       "work_item_count_max": 5,
       "work_item_count_min": 1,
-      "work_item_count_total": 53,
+      "work_item_count_total": 54,
       "work_scopes": [
         "objective_validation_repair"
       ]
@@ -3499,9 +3047,9 @@
         "_get_default_db_path"
       ],
       "bundle_key": "refactor/g1/g1-s1",
-      "centroid_sha1": "4ce9ef730e3cccd75f252e584987b916efe83d59",
+      "centroid_sha1": "ae18c5b70696418461132450218a89d0aa5085af",
       "cluster_key": "todo/g1/f676b773",
-      "estimated_prompt_tokens": 4822,
+      "estimated_prompt_tokens": 5428,
       "goal_packet_keys": [],
       "merge_families": [
         "G1.S1",
@@ -3531,7 +3079,8 @@
         "objective/G3",
         "objective/G6",
         "objective/G7",
-        "objective/G8"
+        "objective/G8",
+        "objective/G9.S1"
       ],
       "merge_keys": [
         "00d917ffe721c4d1",
@@ -3553,6 +3102,7 @@
         "73c2c19911fd953e",
         "8d8729a2f9073978",
         "9c3d2b35296e9add",
+        "a225a5aae9962519",
         "a41af84b05eb2f41",
         "aa25b1104b8e4d16",
         "adc78ee2026547db",
@@ -3600,7 +3150,8 @@
         "objective/G3",
         "objective/G6",
         "objective/G7",
-        "objective/G8"
+        "objective/G8",
+        "objective/G9.S1"
       ],
       "task_ids": [
         "REF-001",
@@ -3650,7 +3201,8 @@
         "REF-045",
         "REF-046",
         "REF-047",
-        "REF-048"
+        "REF-048",
+        "REF-049"
       ]
     }
   ],
@@ -3662,12 +3214,12 @@
     "manager_result": null,
     "manifest_path": "/home/barberb/complaint-generator/data/refactor_supervisor/objective_datasets/ref-todo-vector-index.manifest.json",
     "parquet_path": null,
-    "row_count": 48
+    "row_count": 49
   },
   "embedding_dimensions": 64,
-  "estimated_compact_context_tokens": 2620,
-  "estimated_execution_packet_tokens": 3253,
-  "estimated_raw_prompt_tokens": 4265,
+  "estimated_compact_context_tokens": 2249,
+  "estimated_execution_packet_tokens": 2742,
+  "estimated_raw_prompt_tokens": 3558,
   "execution_packets": [
     {
       "active_task_ids": [
@@ -4475,285 +4027,6 @@
     },
     {
       "active_task_ids": [
-        "REF-031",
-        "REF-047"
-      ],
-      "all_outputs": [
-        "data/refactor_supervisor/discovery",
-        "data/refactor_supervisor/refactor_objective_heap.md"
-      ],
-      "ast_symbols": [
-        "complaint generator refactor objective heap",
-        "g1 s1 map package ownership and runtime entrypoints",
-        "g1 s2 remove ad hoc import path behavior from production surfaces",
-        "g1 stabilize repository boundaries",
-        "g1.s1 map package ownership and runtime entrypoints",
-        "g1.s2 remove ad hoc import path behavior from production surfaces",
-        "g2 decompose oversized orchestration modules",
-        "g2 s1 extract mediator service seams",
-        "g2 s2 reduce application surface coupling",
-        "g2.s1 extract mediator service seams",
-        "g2.s2 reduce application surface coupling",
-        "g3 harden adapter contracts and degraded mode",
-        "g3 s1 normalize ipfs datasets adapter payloads",
-        "g3 s2 clarify graph graphrag and logic adapter boundaries",
-        "g3.s1 normalize ipfs datasets adapter payloads",
-        "g3.s2 clarify graph, graphrag, and logic adapter boundaries",
-        "g4 improve validation speed and confidence",
-        "g4 s1 create focused test lanes for refactor work",
-        "g4.s1 create focused test lanes for refactor work",
-        "g5 make automation observable and refillable",
-        "g5 s1 operate durable refactor taskboard",
-        "g5.s1 operate a durable refactor taskboard",
-        "g6 pay down error handling and observability debt",
-        "g6 pay down error-handling and observability debt",
-        "g6 s1 replace silent failures with typed outcomes",
-        "g6 s2 unify runtime status payloads",
-        "g6.s1 replace silent failures with typed outcomes",
-        "g6.s2 unify runtime status payloads",
-        "g7 rationalize frontend and review surfaces",
-        "g7 s1 separate review api contracts from display assembly",
-        "g7.s1 separate review api contracts from display assembly",
-        "g8 prepare incremental implementation slices",
-        "g8 s1 convert existing roadmaps into executable slices",
-        "g8 s2 keep generated artifacts reviewable",
-        "g8.s1 convert existing roadmaps into executable slices",
-        "g8.s2 keep generated artifacts reviewable",
-        "g9 increase agent supervisor planning quality and throughput",
-        "g9 increase agent-supervisor planning quality and throughput",
-        "g9 s1 establish canonical coordination and merge flow",
-        "g9 s2 plan from dependencies conflicts and objective value",
-        "g9 s3 adapt execution capacity and validation cost",
-        "g9 s4 close the scheduler feedback and lifecycle loop",
-        "g9.s1 establish canonical coordination and merge flow",
-        "g9.s2 plan from dependencies, conflicts, and objective value",
-        "g9.s3 adapt execution capacity and validation cost",
-        "g9.s4 close the scheduler feedback and lifecycle loop"
-      ],
-      "bundle_keys": [
-        "refactor/g8"
-      ],
-      "candidate_kinds": [
-        "validation_gate"
-      ],
-      "compact_packet": "execution_packet/0e9a9419303d;primary=REF-031;ids=REF-031,REF-047;mf=objective/G8;w=2;pw=0;miss=objective validation repair;out=data/refactor_supervisor/discovery,data/refactor_supervisor/refactor_objective_heap.md;ast=complaint generator refactor objective heap,g1 s1 map package ownership and runtime entrypoints,g1 s2 remove ad hoc import path behavior from production surfaces,g1 stabilize repository boundaries,g1.s1 map package ownership and runtime entrypoints,g1.s2 remove ad hoc import path behavior from production surfaces,g2 decompose oversized orchestration modules,g2 s1 extract mediator service seams,g2 s2 reduce application surface coupling,g2.s1 extract mediator service seams,g2.s2 reduce application surface coupling,g3 harden adapter contracts and degraded mode;todo=REF-031[w1;m=objective validation repair;o=data/refactor_supervisor/discovery,data/refactor_supervisor/refactor_objective_heap.md]|REF-047[w1;m=objective validation repair;o=data/refactor_supervisor/discovery,data/refactor_supervisor/refactor_objective_heap.md]",
-      "compact_packet_tokens": 150,
-      "confidence": "high",
-      "estimated_token_savings": 140,
-      "goal_ids": [
-        "G8"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_parent_ids": [],
-      "merge_families": [
-        "objective/G8"
-      ],
-      "merge_keys": [
-        "73c2c19911fd953e"
-      ],
-      "merge_ready": true,
-      "merge_roles": [
-        "validation_gate"
-      ],
-      "missing_evidence": [
-        "objective validation repair"
-      ],
-      "packet_key": "execution_packet/0e9a9419303d",
-      "primary_task_id": "REF-031",
-      "raw_prompt_tokens": 290,
-      "shared_outputs": [
-        "data/refactor_supervisor/discovery",
-        "data/refactor_supervisor/refactor_objective_heap.md"
-      ],
-      "source_context_key": "bundle_context/cb0d59ba6344",
-      "source_key": "merge_key/69b382b8a0c6",
-      "source_type": "merge_key",
-      "surplus_groups": [
-        "objective/G8"
-      ],
-      "task_ids": [
-        "REF-031",
-        "REF-047"
-      ],
-      "task_summaries": [
-        "REF-031[w1;m=objective validation repair;o=data/refactor_supervisor/discovery,data/refactor_supervisor/refactor_objective_heap.md]",
-        "REF-047[w1;m=objective validation repair;o=data/refactor_supervisor/discovery,data/refactor_supervisor/refactor_objective_heap.md]"
-      ],
-      "validation": [
-        "python -m pytest --collect-only -q"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 2,
-      "work_scopes": [
-        "objective_validation_repair"
-      ]
-    },
-    {
-      "active_task_ids": [
-        "REF-038",
-        "REF-037"
-      ],
-      "all_outputs": [
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py"
-      ],
-      "ast_symbols": [
-        "__enter__",
-        "__exit__",
-        "__future__",
-        "__future__.annotations",
-        "__init__",
-        "_claim_payload",
-        "_configured_command_template",
-        "_current",
-        "_default_output",
-        "_emit",
-        "_env_default_items",
-        "_env_default_value",
-        "_env_int",
-        "_event_fingerprint",
-        "_expire",
-        "_grant",
-        "_handle_signal",
-        "_heartbeat_count",
-        "_implementation_supervisor_namespace_track_spec",
-        "_inferred_supervisor_status_path",
-        "_init_schema",
-        "_link",
-        "_load_resolved_events",
-        "_master_paths",
-        "_merge_result",
-        "_missing_command_error",
-        "_parse_status_timestamp",
-        "_purge_stale",
-        "_put_artifact",
-        "_read_json_dict",
-        "_relative_or_absolute_path",
-        "_remove_stale_pid_marker_if_unchanged",
-        "_resolution_payload",
-        "_resolve_path",
-        "_save_resolved_events",
-        "_terminate_pid",
-        "_without_detach",
-        "active lease",
-        "active_lease",
-        "adapt goal bundle",
-        "adapt_goal_bundle",
-        "argparse",
-        "args",
-        "base64",
-        "build arg parser",
-        "build configured merge resolver arg parser",
-        "build configured merge resolver runner",
-        "build configured multi supervisor cli runner",
-        "build configured multi supervisor launcher",
-        "build llm merge resolver invoker",
-        "build merge prompt",
-        "build merge prompt callback",
-        "build namespace merge resolver runner",
-        "build namespace merge resolver runner from spec",
-        "build parser",
-        "build repo implementation multi supervisor launcher",
-        "build resolver payload callback",
-        "build_arg_parser",
-        "build_configured_merge_resolver_arg_parser",
-        "build_configured_merge_resolver_runner",
-        "build_configured_multi_supervisor_cli_runner",
-        "build_configured_multi_supervisor_launcher",
-        "build_llm_merge_resolver_invoker",
-        "build_merge_prompt",
-        "build_merge_prompt_callback",
-        "build_namespace_merge_resolver_runner",
-        "build_namespace_merge_resolver_runner_from_spec",
-        "build_parser",
-        "build_repo_implementation_multi_supervisor_launcher",
-        "build_resolver_payload_callback",
-        "bundlelanespec",
-        "bundlelanespec to dict",
-        "bundlelanespec.to_dict",
-        "callback",
-        "canonical profile bytes",
-        "canonical_profile_g_bytes",
-        "check",
-        "check event idempotency",
-        "check lane health",
-        "check_event_idempotency"
-      ],
-      "bundle_keys": [
-        "refactor/g9/g9-s1"
-      ],
-      "candidate_kinds": [
-        "seed"
-      ],
-      "compact_packet": "execution_packet/afbacaa7e017;primary=REF-038;ids=REF-038,REF-037;mf=G9.S1;w=2;pw=0;miss=Independent lanes currently race to merge and repeatedly retry the same failed branches.,The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.;out=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py;ast=__enter__,__exit__,__future__,__future__.annotations,__init__,_claim_payload,_configured_command_template,_current,_default_output,_emit,_env_default_items,_env_default_value;todo=REF-038[w1;m=Independent lanes currently race to merge and repeatedly retry the same failed branches.;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py]|REF-037[w1;m=The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py]",
-      "compact_packet_tokens": 236,
-      "confidence": "high",
-      "estimated_token_savings": 85,
-      "goal_ids": [
-        "G9.S1"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_parent_ids": [],
-      "merge_families": [
-        "G9.S1"
-      ],
-      "merge_keys": [
-        "refactor/g9/g9-s1"
-      ],
-      "merge_ready": true,
-      "merge_roles": [
-        "seed"
-      ],
-      "missing_evidence": [
-        "Independent lanes currently race to merge and repeatedly retry the same failed branches.",
-        "The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work."
-      ],
-      "packet_key": "execution_packet/afbacaa7e017",
-      "primary_task_id": "REF-038",
-      "raw_prompt_tokens": 321,
-      "shared_outputs": [],
-      "source_context_key": "bundle_context/a2e491732a99",
-      "source_key": "merge_key/30a040574acd",
-      "source_type": "merge_key",
-      "surplus_groups": [
-        "G9.S1"
-      ],
-      "task_ids": [
-        "REF-037",
-        "REF-038"
-      ],
-      "task_summaries": [
-        "REF-038[w1;m=Independent lanes currently race to merge and repeatedly retry the same failed branches.;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py]",
-        "REF-037[w1;m=The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py]"
-      ],
-      "validation": [
-        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q",
-        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 2,
-      "work_scopes": []
-    },
-    {
-      "active_task_ids": [
         "REF-007",
         "REF-008"
       ],
@@ -5170,158 +4443,6 @@
       "validation": [
         "python scripts/refactor_agent_supervisor.py seed --once",
         "python scripts/refactor_agent_supervisor.py status"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 2,
-      "work_scopes": []
-    },
-    {
-      "active_task_ids": [
-        "REF-002",
-        "REF-001"
-      ],
-      "all_outputs": [
-        "applications/complaint_workspace.py",
-        "complaint_phases/denoiser.py",
-        "docs/ARCHITECTURE.md",
-        "mediator/mediator.py",
-        "pyproject.toml",
-        "scripts/synthesize_hacc_complaint.py",
-        "tests/test_claim_support_review_playwright_smoke.py",
-        "tests/test_review_api.py"
-      ],
-      "ast_symbols": [
-        "adding new analysis features",
-        "adding new backends",
-        "adding new complaint types",
-        "adding new hooks",
-        "adversarial harness",
-        "adversarial testing flow",
-        "allowed import direction",
-        "architecture overview",
-        "authentication",
-        "backend router",
-        "caching",
-        "complaint analysis",
-        "complaint intake flow",
-        "complaint phases",
-        "complaint phases evidence storage",
-        "complaint phases legal research",
-        "complaint phases \u2194 evidence storage",
-        "complaint phases \u2194 legal research",
-        "component layers",
-        "core",
-        "current extraction priorities",
-        "data flow",
-        "data privacy",
-        "deployment architecture",
-        "development",
-        "documentation",
-        "duckdb tables",
-        "evidence storage",
-        "evidence storage flow",
-        "extensibility",
-        "future enhancements",
-        "input validation",
-        "integration points",
-        "ipfs network",
-        "json state files",
-        "layer 1: user interface",
-        "layer 2: mediator (orchestration)",
-        "layer 3: feature modules",
-        "layer 4: external services",
-        "layer external services",
-        "layer feature modules",
-        "layer mediator orchestration",
-        "layer user interface",
-        "legal data sources",
-        "legal research flow",
-        "llm integration",
-        "llm providers",
-        "logging",
-        "mediator adversarial harness",
-        "mediator backends",
-        "mediator complaint analysis",
-        "mediator complaint phases",
-        "mediator \u2194 adversarial harness",
-        "mediator \u2194 backends",
-        "mediator \u2194 complaint analysis",
-        "mediator \u2194 complaint phases",
-        "metrics to track",
-        "monitoring and observability",
-        "optimization",
-        "package ownership boundaries",
-        "parallelism",
-        "performance considerations",
-        "planned features",
-        "production (recommended)",
-        "production recommended",
-        "public runtime entrypoints",
-        "refactor dependency rules",
-        "research areas",
-        "runtime entrypoint and ownership map",
-        "scaling strategy",
-        "security considerations",
-        "see also",
-        "shared code rule",
-        "state management",
-        "system architecture",
-        "technology stack",
-        "testing"
-      ],
-      "bundle_keys": [
-        "refactor/g1/g1-s1"
-      ],
-      "candidate_kinds": [],
-      "compact_packet": "execution_packet/01d9dc94d405;primary=REF-002;ids=REF-002,REF-001;mf=G1.S1;w=2;pw=0;miss=Large modules dominate change risk and need explicit boundaries before extraction.,Refactors need a clear import direction to avoid moving complexity around.;out=applications/complaint_workspace.py,complaint_phases/denoiser.py,docs/ARCHITECTURE.md,mediator/mediator.py,pyproject.toml;ast=adding new analysis features,adding new backends,adding new complaint types,adding new hooks,adversarial harness,adversarial testing flow,allowed import direction,architecture overview,authentication,backend router,caching,complaint analysis;todo=REF-002[w1;m=Refactors need a clear import direction to avoid moving complexity around.;o=docs/ARCHITECTURE.md,pyproject.toml]|REF-001[w1;m=Large modules dominate change risk and need explicit boundaries before extraction.;o=mediator/mediator.py,applications/complaint_workspace.py]",
-      "compact_packet_tokens": 125,
-      "confidence": "medium",
-      "estimated_token_savings": 12,
-      "goal_ids": [
-        "G1.S1"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_parent_ids": [],
-      "merge_families": [
-        "G1.S1"
-      ],
-      "merge_keys": [
-        "419974cf3f0fbfd2",
-        "f0d284f2161d394b"
-      ],
-      "merge_ready": true,
-      "merge_roles": [
-        "candidate"
-      ],
-      "missing_evidence": [
-        "Large modules dominate change risk and need explicit boundaries before extraction.",
-        "Refactors need a clear import direction to avoid moving complexity around."
-      ],
-      "packet_key": "execution_packet/01d9dc94d405",
-      "primary_task_id": "REF-002",
-      "raw_prompt_tokens": 137,
-      "shared_outputs": [],
-      "source_context_key": "bundle_context/a73d30a3661a",
-      "source_key": "merge_family/a82eb010147d",
-      "source_type": "merge_family",
-      "surplus_groups": [
-        "G1.S1"
-      ],
-      "task_ids": [
-        "REF-001",
-        "REF-002"
-      ],
-      "task_summaries": [
-        "REF-002[w1;m=Refactors need a clear import direction to avoid moving complexity around.;o=docs/ARCHITECTURE.md,pyproject.toml]",
-        "REF-001[w1;m=Large modules dominate change risk and need explicit boundaries before extraction.;o=mediator/mediator.py,applications/complaint_workspace.py]"
-      ],
-      "validation": [
-        "python -m pytest tests/test_package_imports.py -q"
       ],
       "work_item_count_max": 1,
       "work_item_count_min": 1,
@@ -6515,7 +5636,7 @@
       "candidate_kinds": [
         "seed"
       ],
-      "compact_packet": "execution_packet/a5f1575f694f;primary=REF-044;ids=REF-044,REF-007,REF-042,REF-040,REF-014,REF-016;mf=G2.S2,G4.S1,G5.S1,G9.S2,G9.S3,G9.S4;w=15;pw=0;miss=Dependency drift is a recurring refactor risk.,Long-running automation needs inspectable state and a clean stop path.,Resource class,Status is split across launch manifests,The current conflict domain uses one path root and lightweight semantic similarity,The workspace module mixes UI routing,and event logs,and lane capacity are currently static even when workers are idle or providers are rate-limited.,and workflow calls.,capability fit;out=applications/complaint_workspace.py,data/refactor_supervisor,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py;ast=__enter__,__exit__,__future__,__future__.annotations,__init__,_bundle_cluster_key,_check_cycle,_claim_payload,_compact_context_text,_compact_execution_packet_text,_compact_record_summary,_current;todo=REF-044[w5;m=Status is split across launch manifests,wrapper files,lane state;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py]|REF-007[w3;m=The workspace module mixes UI routing,state shaping,and workflow calls.;o=applications/complaint_workspace.py]|REF-042[w3;m=Resource class,capability fit,and lane capacity are currently static even when workers are idle or providers are rate-limited.;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py]|REF-040[w2;m=The current conflict domain uses one path root and lightweight semantic similarity,which misses multi-file and symbol overlap.;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py]|REF-014[w1;m=Dependency drift is a recurring refactor risk.;o=tests,pyproject.toml]|REF-016[w1;m=Long-running automation needs inspectable state and a clean stop path.;o=data/refactor_supervisor]",
+      "compact_packet": "execution_packet/21666c007b86;primary=REF-044;ids=REF-044,REF-007,REF-042,REF-040,REF-014,REF-016;mf=G2.S2,G4.S1,G5.S1,G9.S2,G9.S3,G9.S4;w=15;pw=0;miss=Dependency drift is a recurring refactor risk.,Long-running automation needs inspectable state and a clean stop path.,Resource class,Status is split across launch manifests,The current conflict domain uses one path root and lightweight semantic similarity,The workspace module mixes UI routing,and event logs,and lane capacity are currently static even when workers are idle or providers are rate-limited.,and workflow calls.,capability fit;out=applications/complaint_workspace.py,data/refactor_supervisor,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py;ast=__enter__,__exit__,__future__,__future__.annotations,__init__,_bundle_cluster_key,_check_cycle,_claim_payload,_compact_context_text,_compact_execution_packet_text,_compact_record_summary,_current;todo=REF-044[w5;m=Status is split across launch manifests,wrapper files,lane state;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py]|REF-007[w3;m=The workspace module mixes UI routing,state shaping,and workflow calls.;o=applications/complaint_workspace.py]|REF-042[w3;m=Resource class,capability fit,and lane capacity are currently static even when workers are idle or providers are rate-limited.;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py]|REF-040[w2;m=The current conflict domain uses one path root and lightweight semantic similarity,which misses multi-file and symbol overlap.;o=ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py,ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py]|REF-014[w1;m=Dependency drift is a recurring refactor risk.;o=tests,pyproject.toml]|REF-016[w1;m=Long-running automation needs inspectable state and a clean stop path.;o=data/refactor_supervisor]",
       "compact_packet_tokens": 365,
       "confidence": "low",
       "estimated_token_savings": 278,
@@ -6571,12 +5692,12 @@
         "which misses multi-file and symbol overlap.",
         "wrapper files"
       ],
-      "packet_key": "execution_packet/a5f1575f694f",
+      "packet_key": "execution_packet/21666c007b86",
       "primary_task_id": "REF-044",
       "raw_prompt_tokens": 643,
       "shared_outputs": [],
-      "source_context_key": "bundle_context/22184f98c449",
-      "source_key": "vector_cluster/b6fa02e4927f",
+      "source_context_key": "bundle_context/c88ede694fe4",
+      "source_key": "vector_cluster/9a3724b8380d",
       "source_type": "vector_cluster",
       "surplus_groups": [
         "G2.S2",
@@ -6616,7 +5737,7 @@
       "work_scopes": []
     }
   ],
-  "generated_at": "2026-07-21T22:48:20.276118+00:00",
+  "generated_at": "2026-07-22T00:57:57.646855+00:00",
   "merge_candidates": [
     {
       "active_task_ids": [
@@ -7083,118 +6204,6 @@
     },
     {
       "active_task_ids": [
-        "REF-031",
-        "REF-047"
-      ],
-      "all_outputs": [
-        "data/refactor_supervisor/discovery",
-        "data/refactor_supervisor/refactor_objective_heap.md"
-      ],
-      "ast_symbols": [
-        "complaint generator refactor objective heap",
-        "g1 s1 map package ownership and runtime entrypoints",
-        "g1 s2 remove ad hoc import path behavior from production surfaces",
-        "g1 stabilize repository boundaries",
-        "g1.s1 map package ownership and runtime entrypoints",
-        "g1.s2 remove ad hoc import path behavior from production surfaces",
-        "g2 decompose oversized orchestration modules",
-        "g2 s1 extract mediator service seams",
-        "g2 s2 reduce application surface coupling",
-        "g2.s1 extract mediator service seams",
-        "g2.s2 reduce application surface coupling",
-        "g3 harden adapter contracts and degraded mode",
-        "g3 s1 normalize ipfs datasets adapter payloads",
-        "g3 s2 clarify graph graphrag and logic adapter boundaries",
-        "g3.s1 normalize ipfs datasets adapter payloads",
-        "g3.s2 clarify graph, graphrag, and logic adapter boundaries",
-        "g4 improve validation speed and confidence",
-        "g4 s1 create focused test lanes for refactor work",
-        "g4.s1 create focused test lanes for refactor work",
-        "g5 make automation observable and refillable",
-        "g5 s1 operate durable refactor taskboard",
-        "g5.s1 operate a durable refactor taskboard",
-        "g6 pay down error handling and observability debt",
-        "g6 pay down error-handling and observability debt",
-        "g6 s1 replace silent failures with typed outcomes",
-        "g6 s2 unify runtime status payloads",
-        "g6.s1 replace silent failures with typed outcomes",
-        "g6.s2 unify runtime status payloads",
-        "g7 rationalize frontend and review surfaces",
-        "g7 s1 separate review api contracts from display assembly",
-        "g7.s1 separate review api contracts from display assembly",
-        "g8 prepare incremental implementation slices",
-        "g8 s1 convert existing roadmaps into executable slices",
-        "g8 s2 keep generated artifacts reviewable",
-        "g8.s1 convert existing roadmaps into executable slices",
-        "g8.s2 keep generated artifacts reviewable",
-        "g9 increase agent supervisor planning quality and throughput",
-        "g9 increase agent-supervisor planning quality and throughput",
-        "g9 s1 establish canonical coordination and merge flow",
-        "g9 s2 plan from dependencies conflicts and objective value",
-        "g9 s3 adapt execution capacity and validation cost",
-        "g9 s4 close the scheduler feedback and lifecycle loop",
-        "g9.s1 establish canonical coordination and merge flow",
-        "g9.s2 plan from dependencies, conflicts, and objective value",
-        "g9.s3 adapt execution capacity and validation cost",
-        "g9.s4 close the scheduler feedback and lifecycle loop"
-      ],
-      "blocked_task_ids": [],
-      "bundle_keys": [
-        "refactor/g8"
-      ],
-      "candidate_key": "merge_key/69b382b8a0c6",
-      "cluster_keys": [
-        "todo/g1/f676b773"
-      ],
-      "completed_task_ids": [],
-      "confidence": "high",
-      "estimated_prompt_tokens": 290,
-      "goal_ids": [
-        "G8"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_depth_max": 0,
-      "graph_depth_min": 0,
-      "graph_parent_ids": [],
-      "group_type": "merge_key",
-      "group_value": "73c2c19911fd953e",
-      "merge_families": [
-        "objective/G8"
-      ],
-      "merge_keys": [
-        "73c2c19911fd953e"
-      ],
-      "merge_ready_task_ids": [
-        "REF-031",
-        "REF-047"
-      ],
-      "merge_roles": [
-        "validation_gate"
-      ],
-      "missing_evidence": [
-        "objective validation repair"
-      ],
-      "shared_outputs": [
-        "data/refactor_supervisor/discovery",
-        "data/refactor_supervisor/refactor_objective_heap.md"
-      ],
-      "surplus_groups": [
-        "objective/G8"
-      ],
-      "task_ids": [
-        "REF-031",
-        "REF-047"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 2
-    },
-    {
-      "active_task_ids": [
         "REF-042",
         "REF-043"
       ],
@@ -7501,167 +6510,6 @@
       "work_item_count_max": 5,
       "work_item_count_min": 1,
       "work_item_count_total": 6
-    },
-    {
-      "active_task_ids": [
-        "REF-037",
-        "REF-038"
-      ],
-      "all_outputs": [
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py",
-        "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py"
-      ],
-      "ast_symbols": [
-        "__enter__",
-        "__exit__",
-        "__future__",
-        "__future__.annotations",
-        "__init__",
-        "_bundle",
-        "_bundle_cluster_key",
-        "_claim_payload",
-        "_configured_command_template",
-        "_current",
-        "_default_output",
-        "_emit",
-        "_env_default_items",
-        "_env_default_value",
-        "_env_int",
-        "_event_fingerprint",
-        "_expire",
-        "_first_non_empty",
-        "_git",
-        "_goal_packet_group_key",
-        "_grant",
-        "_handle_signal",
-        "_heartbeat_count",
-        "_implementation_supervisor_namespace_track_spec",
-        "_inferred_supervisor_status_path",
-        "_init_schema",
-        "_link",
-        "_load_resolved_events",
-        "_mapping_value",
-        "_master_paths",
-        "_maybe_save",
-        "_merge_entries",
-        "_merge_present_evidence",
-        "_merge_result",
-        "_missing_command_error",
-        "_parse_int",
-        "_parse_status_timestamp",
-        "_path_root",
-        "_purge_stale",
-        "_put_artifact",
-        "_read_json_dict",
-        "_relative_or_absolute_path",
-        "_remove_stale_pid_marker_if_unchanged",
-        "_resolution_payload",
-        "_resolve_path",
-        "_save_resolved_events",
-        "_seed_repo",
-        "_sequence",
-        "_task_mapping",
-        "_terminate_pid",
-        "_unique_strings",
-        "_without_detach",
-        "active lease",
-        "active_lease",
-        "adapt goal bundle",
-        "adapt_goal_bundle",
-        "add goal packet aggregate findings",
-        "add_goal_packet_aggregate_findings",
-        "append group",
-        "append_group",
-        "argparse",
-        "args",
-        "assign goal subgoal packets",
-        "assign_goal_subgoal_packets",
-        "ast",
-        "ast dataset payload",
-        "ast_dataset_payload",
-        "base64",
-        "board namespace from path",
-        "board_namespace_from_path",
-        "build arg parser",
-        "build bundle task payloads",
-        "build configured merge resolver arg parser",
-        "build configured merge resolver runner",
-        "build configured multi supervisor cli runner",
-        "build configured multi supervisor launcher",
-        "build llm merge resolver invoker",
-        "build merge prompt",
-        "build merge prompt callback",
-        "build namespace merge resolver runner"
-      ],
-      "blocked_task_ids": [],
-      "bundle_keys": [
-        "refactor/g9/g9-s1"
-      ],
-      "candidate_key": "merge_key/30a040574acd",
-      "cluster_keys": [
-        "todo/g1/f676b773"
-      ],
-      "completed_task_ids": [
-        "REF-036"
-      ],
-      "confidence": "high",
-      "estimated_prompt_tokens": 506,
-      "goal_ids": [
-        "G9.S1"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_depth_max": 0,
-      "graph_depth_min": 0,
-      "graph_parent_ids": [],
-      "group_type": "merge_key",
-      "group_value": "refactor/g9/g9-s1",
-      "merge_families": [
-        "G9.S1"
-      ],
-      "merge_keys": [
-        "refactor/g9/g9-s1"
-      ],
-      "merge_ready_task_ids": [
-        "REF-037",
-        "REF-038"
-      ],
-      "merge_roles": [
-        "seed"
-      ],
-      "missing_evidence": [
-        "Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous.",
-        "Independent lanes currently race to merge and repeatedly retry the same failed branches.",
-        "The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work."
-      ],
-      "shared_outputs": [],
-      "surplus_groups": [
-        "G9.S1"
-      ],
-      "task_ids": [
-        "REF-036",
-        "REF-037",
-        "REF-038"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 3
     },
     {
       "active_task_ids": [
@@ -9105,156 +7953,6 @@
     },
     {
       "active_task_ids": [
-        "REF-001",
-        "REF-002"
-      ],
-      "all_outputs": [
-        "applications/complaint_workspace.py",
-        "complaint_phases/denoiser.py",
-        "docs/ARCHITECTURE.md",
-        "mediator/mediator.py",
-        "pyproject.toml",
-        "scripts/synthesize_hacc_complaint.py",
-        "tests/test_claim_support_review_playwright_smoke.py",
-        "tests/test_review_api.py"
-      ],
-      "ast_symbols": [
-        "adding new analysis features",
-        "adding new backends",
-        "adding new complaint types",
-        "adding new hooks",
-        "adversarial harness",
-        "adversarial testing flow",
-        "allowed import direction",
-        "architecture overview",
-        "authentication",
-        "backend router",
-        "caching",
-        "complaint analysis",
-        "complaint intake flow",
-        "complaint phases",
-        "complaint phases evidence storage",
-        "complaint phases legal research",
-        "complaint phases \u2194 evidence storage",
-        "complaint phases \u2194 legal research",
-        "component layers",
-        "core",
-        "current extraction priorities",
-        "data flow",
-        "data privacy",
-        "deployment architecture",
-        "development",
-        "documentation",
-        "duckdb tables",
-        "evidence storage",
-        "evidence storage flow",
-        "extensibility",
-        "future enhancements",
-        "input validation",
-        "integration points",
-        "ipfs network",
-        "json state files",
-        "layer 1: user interface",
-        "layer 2: mediator (orchestration)",
-        "layer 3: feature modules",
-        "layer 4: external services",
-        "layer external services",
-        "layer feature modules",
-        "layer mediator orchestration",
-        "layer user interface",
-        "legal data sources",
-        "legal research flow",
-        "llm integration",
-        "llm providers",
-        "logging",
-        "mediator adversarial harness",
-        "mediator backends",
-        "mediator complaint analysis",
-        "mediator complaint phases",
-        "mediator \u2194 adversarial harness",
-        "mediator \u2194 backends",
-        "mediator \u2194 complaint analysis",
-        "mediator \u2194 complaint phases",
-        "metrics to track",
-        "monitoring and observability",
-        "optimization",
-        "package ownership boundaries",
-        "parallelism",
-        "performance considerations",
-        "planned features",
-        "production (recommended)",
-        "production recommended",
-        "public runtime entrypoints",
-        "refactor dependency rules",
-        "research areas",
-        "runtime entrypoint and ownership map",
-        "scaling strategy",
-        "security considerations",
-        "see also",
-        "shared code rule",
-        "state management",
-        "system architecture",
-        "technology stack",
-        "testing"
-      ],
-      "blocked_task_ids": [],
-      "bundle_keys": [
-        "refactor/g1/g1-s1"
-      ],
-      "candidate_key": "merge_family/a82eb010147d",
-      "cluster_keys": [
-        "todo/g1/f676b773"
-      ],
-      "completed_task_ids": [],
-      "confidence": "medium",
-      "estimated_prompt_tokens": 137,
-      "goal_ids": [
-        "G1.S1"
-      ],
-      "goal_packet_goal_ids": [],
-      "goal_packet_keys": [],
-      "goal_packet_roles": [],
-      "goal_packet_task_count_max": 0,
-      "goal_packet_work_item_count_max": 0,
-      "graph_depth_max": 0,
-      "graph_depth_min": 0,
-      "graph_parent_ids": [],
-      "group_type": "merge_family",
-      "group_value": "G1.S1",
-      "merge_families": [
-        "G1.S1"
-      ],
-      "merge_keys": [
-        "419974cf3f0fbfd2",
-        "f0d284f2161d394b"
-      ],
-      "merge_ready_task_ids": [
-        "REF-001",
-        "REF-002"
-      ],
-      "merge_roles": [
-        "candidate"
-      ],
-      "missing_evidence": [
-        "Large modules dominate change risk and need explicit boundaries before extraction.",
-        "Refactors need a clear import direction to avoid moving complexity around."
-      ],
-      "shared_outputs": [],
-      "surplus_groups": [
-        "G1.S1"
-      ],
-      "task_ids": [
-        "REF-001",
-        "REF-002"
-      ],
-      "work_item_count_max": 1,
-      "work_item_count_min": 1,
-      "work_item_count_total": 2
-    },
-    {
-      "active_task_ids": [
-        "REF-001",
-        "REF-002",
         "REF-003",
         "REF-004",
         "REF-005",
@@ -9280,13 +7978,8 @@
         "REF-025",
         "REF-026",
         "REF-027",
-        "REF-030",
-        "REF-031",
         "REF-032",
         "REF-033",
-        "REF-035",
-        "REF-037",
-        "REF-038",
         "REF-039",
         "REF-040",
         "REF-041",
@@ -9294,9 +7987,7 @@
         "REF-043",
         "REF-044",
         "REF-045",
-        "REF-046",
-        "REF-047",
-        "REF-048"
+        "REF-049"
       ],
       "all_outputs": [
         "Makefile",
@@ -9470,9 +8161,7 @@
         "_build_temporal_reasoning_payload",
         "_build_testimony_fact_text"
       ],
-      "blocked_task_ids": [
-        "REF-034"
-      ],
+      "blocked_task_ids": [],
       "bundle_keys": [
         "refactor/g1",
         "refactor/g1/g1-s1",
@@ -9498,17 +8187,28 @@
         "refactor/g9/g9-s3",
         "refactor/g9/g9-s4"
       ],
-      "candidate_key": "vector_cluster/b6fa02e4927f",
+      "candidate_key": "vector_cluster/9a3724b8380d",
       "cluster_keys": [
         "todo/g1/f676b773"
       ],
       "completed_task_ids": [
+        "REF-001",
+        "REF-002",
         "REF-028",
         "REF-029",
-        "REF-036"
+        "REF-030",
+        "REF-031",
+        "REF-034",
+        "REF-035",
+        "REF-036",
+        "REF-037",
+        "REF-038",
+        "REF-046",
+        "REF-047",
+        "REF-048"
       ],
       "confidence": "low",
-      "estimated_prompt_tokens": 4822,
+      "estimated_prompt_tokens": 5428,
       "goal_ids": [
         "G1",
         "G1.S1",
@@ -9542,7 +8242,8 @@
       "graph_depth_max": 1,
       "graph_depth_min": 0,
       "graph_parent_ids": [
-        "G1"
+        "G1",
+        "G9"
       ],
       "group_type": "vector_cluster",
       "group_value": "todo/g1/f676b773",
@@ -9574,7 +8275,8 @@
         "objective/G3",
         "objective/G6",
         "objective/G7",
-        "objective/G8"
+        "objective/G8",
+        "objective/G9.S1"
       ],
       "merge_keys": [
         "00d917ffe721c4d1",
@@ -9596,6 +8298,7 @@
         "73c2c19911fd953e",
         "8d8729a2f9073978",
         "9c3d2b35296e9add",
+        "a225a5aae9962519",
         "a41af84b05eb2f41",
         "aa25b1104b8e4d16",
         "adc78ee2026547db",
@@ -9698,7 +8401,8 @@
         "objective/G3",
         "objective/G6",
         "objective/G7",
-        "objective/G8"
+        "objective/G8",
+        "objective/G9.S1"
       ],
       "task_ids": [
         "REF-001",
@@ -9748,11 +8452,12 @@
         "REF-045",
         "REF-046",
         "REF-047",
-        "REF-048"
+        "REF-048",
+        "REF-049"
       ],
       "work_item_count_max": 5,
       "work_item_count_min": 1,
-      "work_item_count_total": 53
+      "work_item_count_total": 54
     }
   ],
   "objective_path": "data/refactor_supervisor/refactor_objective_heap.md",
@@ -9864,7 +8569,7 @@
         "REF-028"
       ],
       "source_line": 8,
-      "status": "todo",
+      "status": "completed",
       "surplus_group": "G1.S1",
       "task_id": "REF-001",
       "title": "Create an entrypoint and ownership map for the largest runtime modules",
@@ -10057,8 +8762,8 @@
         "REF-004",
         "REF-028"
       ],
-      "source_line": 25,
-      "status": "todo",
+      "source_line": 26,
+      "status": "completed",
       "surplus_group": "G1.S1",
       "task_id": "REF-002",
       "title": "Document allowed dependency direction between applications, mediator, phases, integrations, and lib",
@@ -10508,7 +9213,7 @@
         "REF-009",
         "REF-040"
       ],
-      "source_line": 42,
+      "source_line": 44,
       "status": "todo",
       "surplus_group": "G1.S2",
       "task_id": "REF-003",
@@ -10823,7 +9528,7 @@
         "REF-048",
         "REF-028"
       ],
-      "source_line": 59,
+      "source_line": 61,
       "status": "todo",
       "surplus_group": "G1.S2",
       "task_id": "REF-004",
@@ -10990,7 +9695,7 @@
         "REF-013",
         "REF-048"
       ],
-      "source_line": 76,
+      "source_line": 78,
       "status": "todo",
       "surplus_group": "G2.S1",
       "task_id": "REF-005",
@@ -11567,7 +10272,7 @@
         "REF-029",
         "REF-007"
       ],
-      "source_line": 93,
+      "source_line": 95,
       "status": "todo",
       "surplus_group": "G2.S1",
       "task_id": "REF-006",
@@ -11684,7 +10389,7 @@
         "REF-005",
         "REF-029"
       ],
-      "source_line": 110,
+      "source_line": 112,
       "status": "todo",
       "surplus_group": "G2.S2",
       "task_id": "REF-007",
@@ -12082,7 +10787,7 @@
         "REF-031",
         "REF-047"
       ],
-      "source_line": 127,
+      "source_line": 129,
       "status": "todo",
       "surplus_group": "G2.S2",
       "task_id": "REF-008",
@@ -12277,7 +10982,7 @@
         "REF-011",
         "REF-026"
       ],
-      "source_line": 144,
+      "source_line": 146,
       "status": "todo",
       "surplus_group": "G3.S1",
       "task_id": "REF-009",
@@ -12718,7 +11423,7 @@
         "REF-011",
         "REF-026"
       ],
-      "source_line": 161,
+      "source_line": 163,
       "status": "todo",
       "surplus_group": "G3.S1",
       "task_id": "REF-010",
@@ -13150,7 +11855,7 @@
         "REF-009",
         "REF-010"
       ],
-      "source_line": 178,
+      "source_line": 180,
       "status": "todo",
       "surplus_group": "G3.S2",
       "task_id": "REF-011",
@@ -13333,7 +12038,7 @@
         "REF-009",
         "REF-010"
       ],
-      "source_line": 195,
+      "source_line": 197,
       "status": "todo",
       "surplus_group": "G3.S2",
       "task_id": "REF-012",
@@ -13498,7 +12203,7 @@
         "REF-046",
         "REF-024"
       ],
-      "source_line": 212,
+      "source_line": 214,
       "status": "todo",
       "surplus_group": "G4.S1",
       "task_id": "REF-013",
@@ -13614,7 +12319,7 @@
         "REF-048",
         "REF-002"
       ],
-      "source_line": 229,
+      "source_line": 231,
       "status": "todo",
       "surplus_group": "G4.S1",
       "task_id": "REF-014",
@@ -13945,7 +12650,7 @@
         "REF-032",
         "REF-030"
       ],
-      "source_line": 246,
+      "source_line": 248,
       "status": "todo",
       "surplus_group": "G5.S1",
       "task_id": "REF-015",
@@ -14060,7 +12765,7 @@
         "REF-048",
         "REF-030"
       ],
-      "source_line": 263,
+      "source_line": 265,
       "status": "todo",
       "surplus_group": "G5.S1",
       "task_id": "REF-016",
@@ -14491,7 +13196,7 @@
         "REF-006",
         "REF-032"
       ],
-      "source_line": 280,
+      "source_line": 282,
       "status": "todo",
       "surplus_group": "G6.S1",
       "task_id": "REF-017",
@@ -14961,7 +13666,7 @@
         "REF-048",
         "REF-032"
       ],
-      "source_line": 297,
+      "source_line": 299,
       "status": "todo",
       "surplus_group": "G6.S1",
       "task_id": "REF-018",
@@ -15294,7 +13999,7 @@
         "REF-017",
         "REF-041"
       ],
-      "source_line": 314,
+      "source_line": 316,
       "status": "todo",
       "surplus_group": "G6.S2",
       "task_id": "REF-019",
@@ -15669,7 +14374,7 @@
         "REF-018",
         "REF-031"
       ],
-      "source_line": 331,
+      "source_line": 333,
       "status": "todo",
       "surplus_group": "G6.S2",
       "task_id": "REF-020",
@@ -16464,7 +15169,7 @@
         "REF-033",
         "REF-001"
       ],
-      "source_line": 348,
+      "source_line": 350,
       "status": "todo",
       "surplus_group": "G7.S1",
       "task_id": "REF-021",
@@ -16755,7 +15460,7 @@
         "REF-001",
         "REF-006"
       ],
-      "source_line": 365,
+      "source_line": 367,
       "status": "todo",
       "surplus_group": "G7.S1",
       "task_id": "REF-022",
@@ -17055,7 +15760,7 @@
         "REF-030",
         "REF-029"
       ],
-      "source_line": 382,
+      "source_line": 384,
       "status": "todo",
       "surplus_group": "G8.S1",
       "task_id": "REF-023",
@@ -17243,7 +15948,7 @@
         "REF-031",
         "REF-047"
       ],
-      "source_line": 399,
+      "source_line": 401,
       "status": "todo",
       "surplus_group": "G8.S1",
       "task_id": "REF-024",
@@ -17516,7 +16221,7 @@
         "REF-010",
         "REF-015"
       ],
-      "source_line": 416,
+      "source_line": 418,
       "status": "todo",
       "surplus_group": "G8.S2",
       "task_id": "REF-025",
@@ -17790,7 +16495,7 @@
         "REF-011",
         "REF-009"
       ],
-      "source_line": 433,
+      "source_line": 435,
       "status": "todo",
       "surplus_group": "G8.S2",
       "task_id": "REF-026",
@@ -17857,6 +16562,7 @@
         "ref 046 resolve merge retry budget failure for ref 001",
         "ref 047 close objective gap prepare incremental implementation slices",
         "ref 048 close objective gap map package ownership and runtime entrypoints",
+        "ref 049 close objective gap establish canonical coordination and merge flow",
         "ref-001 create an entrypoint and ownership map for the largest runtime modules",
         "ref-002 document allowed dependency direction between applications, mediator, phases, integrations, and lib",
         "ref-003 replace production sys.path mutation with package-level imports or adapter loader calls",
@@ -17904,7 +16610,8 @@
         "ref-045 make ast scans and implementation workspaces incremental and reusable",
         "ref-046 resolve merge retry-budget failure for ref-001",
         "ref-047 close objective gap: prepare incremental implementation slices",
-        "ref-048 close objective gap: map package ownership and runtime entrypoints"
+        "ref-048 close objective gap: map package ownership and runtime entrypoints",
+        "ref-049 close objective gap: establish canonical coordination and merge flow"
       ],
       "bundle_key": "",
       "bundle_shard": "",
@@ -18002,7 +16709,7 @@
         "REF-031",
         "REF-047"
       ],
-      "source_line": 448,
+      "source_line": 450,
       "status": "todo",
       "surplus_group": "",
       "task_id": "REF-027",
@@ -18165,7 +16872,7 @@
         "REF-029",
         "REF-033"
       ],
-      "source_line": 461,
+      "source_line": 463,
       "status": "completed",
       "surplus_group": "objective/G1",
       "task_id": "REF-028",
@@ -18328,7 +17035,7 @@
         "REF-028",
         "REF-032"
       ],
-      "source_line": 497,
+      "source_line": 499,
       "status": "completed",
       "surplus_group": "objective/G2",
       "task_id": "REF-029",
@@ -18491,8 +17198,8 @@
         "REF-029",
         "REF-028"
       ],
-      "source_line": 533,
-      "status": "todo",
+      "source_line": 535,
+      "status": "completed",
       "surplus_group": "objective/G3",
       "task_id": "REF-030",
       "title": "Close objective gap: Harden adapter contracts and degraded mode",
@@ -18654,15 +17361,15 @@
         "REF-032",
         "REF-028"
       ],
-      "source_line": 568,
-      "status": "todo",
+      "source_line": 571,
+      "status": "completed",
       "surplus_group": "objective/G8",
       "task_id": "REF-031",
       "title": "Close objective gap: Prepare incremental implementation slices",
       "token_count": 145,
       "track": "ops",
       "validation": [
-        "python -m pytest --collect-only -q"
+        "test -f data/refactor_supervisor/discovery/2026-07-21-ref-031-objective-validation-repair.md"
       ],
       "vector_key": "bf05e040a4792343",
       "work_item_count": 1,
@@ -18817,7 +17524,7 @@
         "REF-029",
         "REF-031"
       ],
-      "source_line": 604,
+      "source_line": 608,
       "status": "todo",
       "surplus_group": "objective/G6",
       "task_id": "REF-032",
@@ -18980,7 +17687,7 @@
         "REF-030",
         "REF-031"
       ],
-      "source_line": 639,
+      "source_line": 643,
       "status": "todo",
       "surplus_group": "objective/G7",
       "task_id": "REF-033",
@@ -19047,6 +17754,7 @@
         "ref 046 resolve merge retry budget failure for ref 001",
         "ref 047 close objective gap prepare incremental implementation slices",
         "ref 048 close objective gap map package ownership and runtime entrypoints",
+        "ref 049 close objective gap establish canonical coordination and merge flow",
         "ref-001 create an entrypoint and ownership map for the largest runtime modules",
         "ref-002 document allowed dependency direction between applications, mediator, phases, integrations, and lib",
         "ref-003 replace production sys.path mutation with package-level imports or adapter loader calls",
@@ -19094,7 +17802,8 @@
         "ref-045 make ast scans and implementation workspaces incremental and reusable",
         "ref-046 resolve merge retry-budget failure for ref-001",
         "ref-047 close objective gap: prepare incremental implementation slices",
-        "ref-048 close objective gap: map package ownership and runtime entrypoints"
+        "ref-048 close objective gap: map package ownership and runtime entrypoints",
+        "ref-049 close objective gap: establish canonical coordination and merge flow"
       ],
       "bundle_key": "",
       "bundle_shard": "",
@@ -19192,8 +17901,8 @@
         "REF-031",
         "REF-047"
       ],
-      "source_line": 674,
-      "status": "blocked",
+      "source_line": 678,
+      "status": "completed",
       "surplus_group": "",
       "task_id": "REF-034",
       "title": "Resolve 2 preflight-conflicting backlogged worktree merges",
@@ -19353,15 +18062,15 @@
         "REF-028",
         "REF-030"
       ],
-      "source_line": 688,
-      "status": "todo",
+      "source_line": 693,
+      "status": "completed",
       "surplus_group": "",
       "task_id": "REF-035",
       "title": "Resolve validation retry-budget failure for REF-031",
       "token_count": 80,
       "track": "ops",
       "validation": [
-        "python -m pytest --collect-only -q"
+        "test -f data/refactor_supervisor/discovery/2026-07-21-ref-031-objective-validation-repair.md"
       ],
       "vector_key": "35e50e43e723b2d0",
       "work_item_count": 0,
@@ -20128,11 +18837,11 @@
       "related_task_ids": [
         "REF-037",
         "REF-038",
+        "REF-049",
         "REF-039",
-        "REF-040",
-        "REF-045"
+        "REF-040"
       ],
-      "source_line": 701,
+      "source_line": 707,
       "status": "completed",
       "surplus_group": "G9.S1",
       "task_id": "REF-036",
@@ -20614,10 +19323,10 @@
         "REF-038",
         "REF-042",
         "REF-039",
-        "REF-044"
+        "REF-049"
       ],
-      "source_line": 723,
-      "status": "todo",
+      "source_line": 729,
+      "status": "completed",
       "surplus_group": "G9.S1",
       "task_id": "REF-037",
       "title": "Replace static bundle launch with a dynamic leased worker pool",
@@ -20898,12 +19607,12 @@
       "related_task_ids": [
         "REF-037",
         "REF-036",
+        "REF-049",
         "REF-044",
-        "REF-041",
-        "REF-045"
+        "REF-041"
       ],
-      "source_line": 744,
-      "status": "todo",
+      "source_line": 750,
+      "status": "completed",
       "surplus_group": "G9.S1",
       "task_id": "REF-038",
       "title": "Integrate a deduplicating single-consumer merge train",
@@ -21441,7 +20150,7 @@
         "REF-037",
         "REF-045"
       ],
-      "source_line": 765,
+      "source_line": 771,
       "status": "todo",
       "surplus_group": "G9.S2",
       "task_id": "REF-039",
@@ -21939,7 +20648,7 @@
         "REF-045",
         "REF-044"
       ],
-      "source_line": 786,
+      "source_line": 792,
       "status": "todo",
       "surplus_group": "G9.S2",
       "task_id": "REF-040",
@@ -22224,7 +20933,7 @@
         "REF-038",
         "REF-042"
       ],
-      "source_line": 807,
+      "source_line": 813,
       "status": "todo",
       "surplus_group": "G9.S2",
       "task_id": "REF-041",
@@ -22550,7 +21259,7 @@
         "REF-039",
         "REF-036"
       ],
-      "source_line": 828,
+      "source_line": 834,
       "status": "todo",
       "surplus_group": "G9.S3",
       "task_id": "REF-042",
@@ -22673,10 +21382,10 @@
         "REF-042",
         "REF-044",
         "REF-038",
-        "REF-036",
-        "REF-041"
+        "REF-049",
+        "REF-036"
       ],
-      "source_line": 849,
+      "source_line": 855,
       "status": "todo",
       "surplus_group": "G9.S3",
       "task_id": "REF-043",
@@ -22920,7 +21629,7 @@
         "REF-039",
         "REF-040"
       ],
-      "source_line": 870,
+      "source_line": 876,
       "status": "todo",
       "surplus_group": "G9.S4",
       "task_id": "REF-044",
@@ -23395,7 +22104,7 @@
         "REF-036",
         "REF-037"
       ],
-      "source_line": 891,
+      "source_line": 897,
       "status": "todo",
       "surplus_group": "G9.S4",
       "task_id": "REF-045",
@@ -23514,8 +22223,8 @@
         "REF-048",
         "REF-037"
       ],
-      "source_line": 910,
-      "status": "todo",
+      "source_line": 916,
+      "status": "completed",
       "surplus_group": "",
       "task_id": "REF-046",
       "title": "Resolve merge retry-budget failure for REF-001",
@@ -23677,15 +22386,15 @@
         "REF-032",
         "REF-028"
       ],
-      "source_line": 921,
-      "status": "todo",
+      "source_line": 928,
+      "status": "completed",
       "surplus_group": "objective/G8",
       "task_id": "REF-047",
       "title": "Close objective gap: Prepare incremental implementation slices",
       "token_count": 145,
       "track": "ops",
       "validation": [
-        "python -m pytest --collect-only -q"
+        "test -f data/refactor_supervisor/discovery/2026-07-21-ref-031-objective-validation-repair.md"
       ],
       "vector_key": "bf05e040a4792343",
       "work_item_count": 1,
@@ -23842,8 +22551,8 @@
         "REF-029",
         "REF-030"
       ],
-      "source_line": 958,
-      "status": "todo",
+      "source_line": 966,
+      "status": "completed",
       "surplus_group": "objective/G1.S1",
       "task_id": "REF-048",
       "title": "Close objective gap: Map package ownership and runtime entrypoints",
@@ -23855,11 +22564,176 @@
       "vector_key": "9ca9d1d1566fc3e7",
       "work_item_count": 1,
       "work_scope": "objective_validation_repair"
+    },
+    {
+      "acceptance": "Objective scan filed this gap for G9.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-049-objective-gap-f92bbf64160c.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.",
+      "ast_query": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py, Every task has a stable canonical key or CID independent of board path and display id., Legacy markdown tasks migrate idempotently with board namespace provenance., Branches, events, retries, cooldowns, leases, and receipts carry canonical identity., Refill cannot create a second active task for the same canonical work item., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py, A persistent scheduler discovers new and refilled tasks without restart., Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work., Lane count remains within configured capacity and no task executes under two accepted leases., The manifest is an authoritative live projection rather than a launch-time snapshot., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py, All implementation lanes enqueue merge candidates instead of racing the target checkout., The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness., One conflict fingerprint invokes at most one active resolver attempt., Bounded failures enter quarantine with a durable receipt instead of a polling retry loop., PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q",
+      "ast_symbols": [
+        "complaint generator refactor objective heap",
+        "g1 s1 map package ownership and runtime entrypoints",
+        "g1 s2 remove ad hoc import path behavior from production surfaces",
+        "g1 stabilize repository boundaries",
+        "g1.s1 map package ownership and runtime entrypoints",
+        "g1.s2 remove ad hoc import path behavior from production surfaces",
+        "g2 decompose oversized orchestration modules",
+        "g2 s1 extract mediator service seams",
+        "g2 s2 reduce application surface coupling",
+        "g2.s1 extract mediator service seams",
+        "g2.s2 reduce application surface coupling",
+        "g3 harden adapter contracts and degraded mode",
+        "g3 s1 normalize ipfs datasets adapter payloads",
+        "g3 s2 clarify graph graphrag and logic adapter boundaries",
+        "g3.s1 normalize ipfs datasets adapter payloads",
+        "g3.s2 clarify graph, graphrag, and logic adapter boundaries",
+        "g4 improve validation speed and confidence",
+        "g4 s1 create focused test lanes for refactor work",
+        "g4.s1 create focused test lanes for refactor work",
+        "g5 make automation observable and refillable",
+        "g5 s1 operate durable refactor taskboard",
+        "g5.s1 operate a durable refactor taskboard",
+        "g6 pay down error handling and observability debt",
+        "g6 pay down error-handling and observability debt",
+        "g6 s1 replace silent failures with typed outcomes",
+        "g6 s2 unify runtime status payloads",
+        "g6.s1 replace silent failures with typed outcomes",
+        "g6.s2 unify runtime status payloads",
+        "g7 rationalize frontend and review surfaces",
+        "g7 s1 separate review api contracts from display assembly",
+        "g7.s1 separate review api contracts from display assembly",
+        "g8 prepare incremental implementation slices",
+        "g8 s1 convert existing roadmaps into executable slices",
+        "g8 s2 keep generated artifacts reviewable",
+        "g8.s1 convert existing roadmaps into executable slices",
+        "g8.s2 keep generated artifacts reviewable",
+        "g9 increase agent supervisor planning quality and throughput",
+        "g9 increase agent-supervisor planning quality and throughput",
+        "g9 s1 establish canonical coordination and merge flow",
+        "g9 s2 plan from dependencies conflicts and objective value",
+        "g9 s3 adapt execution capacity and validation cost",
+        "g9 s4 close the scheduler feedback and lifecycle loop",
+        "g9.s1 establish canonical coordination and merge flow",
+        "g9.s2 plan from dependencies, conflicts, and objective value",
+        "g9.s3 adapt execution capacity and validation cost",
+        "g9.s4 close the scheduler feedback and lifecycle loop"
+      ],
+      "bundle_key": "refactor/g9/g9-s1",
+      "bundle_shard": "data/refactor_supervisor/objective_bundles/refactor-g9-g9-s1.todo.md",
+      "bundle_strategy": "explicit",
+      "candidate_kind": "validation_gate",
+      "conflict_policy": "prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts",
+      "embedding": [
+        0.17845999144126465,
+        0.006609629312639431,
+        0.013219258625278863,
+        0.04626740518847602,
+        0.006609629312639431,
+        0.18506962075390407,
+        0.05948666381375488,
+        0.03965777587583658,
+        0.5618184915743516,
+        0.006609629312639431,
+        0.006609629312639431,
+        0.0,
+        0.033048146563197156,
+        0.01982888793791829,
+        0.05287703450111545,
+        0.05948666381375488,
+        0.01982888793791829,
+        0.013219258625278863,
+        0.006609629312639431,
+        0.01982888793791829,
+        0.0,
+        0.01982888793791829,
+        0.006609629312639431,
+        0.006609629312639431,
+        0.026438517250557726,
+        0.033048146563197156,
+        0.026438517250557726,
+        0.013219258625278863,
+        0.026438517250557726,
+        0.05287703450111545,
+        0.05948666381375488,
+        0.11236369831487032,
+        0.026438517250557726,
+        0.01982888793791829,
+        0.01982888793791829,
+        0.09914443968959147,
+        0.6213051553881065,
+        0.13219258625278862,
+        0.04626740518847602,
+        0.05287703450111545,
+        0.05948666381375488,
+        0.05287703450111545,
+        0.033048146563197156,
+        0.01982888793791829,
+        0.05287703450111545,
+        0.033048146563197156,
+        0.07931555175167317,
+        0.05287703450111545,
+        0.013219258625278863,
+        0.013219258625278863,
+        0.03965777587583658,
+        0.0,
+        0.006609629312639431,
+        0.013219258625278863,
+        0.04626740518847602,
+        0.04626740518847602,
+        0.11897332762750976,
+        0.0,
+        0.06609629312639431,
+        0.11897332762750976,
+        0.026438517250557726,
+        0.31065257769405324,
+        0.033048146563197156,
+        0.033048146563197156
+      ],
+      "embedding_query": "Establish canonical coordination and merge flow",
+      "goal_id": "G9.S1",
+      "goal_packet_goal_ids": [],
+      "goal_packet_key": "",
+      "goal_packet_role": "",
+      "goal_packet_task_count": 0,
+      "goal_packet_work_item_count": 0,
+      "graph_depth": 1,
+      "graph_parents": [
+        "G9"
+      ],
+      "merge_family": "objective/G9.S1",
+      "merge_key": "a225a5aae9962519",
+      "merge_role": "validation_gate",
+      "missing_evidence": [
+        "objective validation repair"
+      ],
+      "outputs": [
+        "data/refactor_supervisor/discovery",
+        "data/refactor_supervisor/refactor_objective_heap.md"
+      ],
+      "priority": "P0",
+      "related_task_ids": [
+        "REF-036",
+        "REF-037",
+        "REF-038",
+        "REF-044",
+        "REF-039"
+      ],
+      "source_line": 1004,
+      "status": "todo",
+      "surplus_group": "objective/G9.S1",
+      "task_id": "REF-049",
+      "title": "Close objective gap: Establish canonical coordination and merge flow",
+      "token_count": 606,
+      "track": "ops",
+      "validation": [
+        "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q, PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q"
+      ],
+      "vector_key": "de6b4676e018ecd7",
+      "work_item_count": 1,
+      "work_scope": "objective_validation_repair"
     }
   ],
   "repo_root": "/home/barberb/complaint-generator",
   "schema": "ipfs_accelerate_py.agent_supervisor.todo_vector_index",
-  "task_count": 48,
+  "task_count": 49,
   "task_header_prefix": "## REF-",
   "todo_path": "data/refactor_supervisor/refactor_todo.md"
 }
