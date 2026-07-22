@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from typing import Optional, Sequence
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,10 +26,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
+
+    # Keep the optional scraper stack behind the command boundary so importing
+    # this entrypoint (and requesting --help) does not require its dependencies.
     from complaint_generator.agentic_evidence_download import run_agentic_evidence_download
 
-    args = build_parser().parse_args()
     payload = run_agentic_evidence_download(
         complaint_query=args.complaint_query,
         complaint_keywords=args.complaint_keyword,
