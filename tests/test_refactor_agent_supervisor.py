@@ -141,6 +141,7 @@ def _isolate_status_paths(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(supervisor, "STATUS_PATH", tmp_path / "status.json")
     monkeypatch.setattr(supervisor, "PID_PATH", tmp_path / "supervisor.pid")
     monkeypatch.setattr(supervisor, "TASK_STATE_PATH", tmp_path / "task-state.json")
+    monkeypatch.setattr(supervisor, "MANAGED_DAEMON_PID_PATH", tmp_path / "managed-daemon.pid")
     monkeypatch.setattr(supervisor, "GOALS_PATH", tmp_path / "goals.json")
     monkeypatch.setattr(supervisor, "TODO_PATH", tmp_path / "todo.md")
     monkeypatch.setattr(supervisor, "QUEUE_PATH", tmp_path / "queue.duckdb")
@@ -395,19 +396,41 @@ def test_stop_daemon_terminates_process_group_and_cleans_pid(tmp_path, monkeypat
         text=True,
         start_new_session=True,
     )
+    managed = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import signal,sys,time; "
+                "signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); "
+                "print('managed-ready', flush=True); time.sleep(60)"
+            ),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
     try:
         assert child.stdout is not None
         assert child.stdout.readline().strip() == "ready"
+        assert managed.stdout is not None
+        assert managed.stdout.readline().strip() == "managed-ready"
         supervisor.PID_PATH.write_text(f"{child.pid}\n", encoding="utf-8")
+        supervisor.MANAGED_DAEMON_PID_PATH.write_text(f"{managed.pid}\n", encoding="utf-8")
 
         result = supervisor.stop_daemon()
 
         child.wait(timeout=2)
+        managed.wait(timeout=2)
         assert result["status"] == "stopped"
         assert result["pid"] == child.pid
         assert result["pid_alive"] is False
         assert result["signal_scope"] == "process_group"
+        assert result["managed_daemon_pid"] == managed.pid
+        assert result["managed_daemon_pid_alive"] is False
+        assert result["managed_daemon_signal_scope"] == "process_group"
         assert not supervisor.PID_PATH.exists()
+        assert not supervisor.MANAGED_DAEMON_PID_PATH.exists()
         persisted = json.loads(supervisor.STATUS_PATH.read_text(encoding="utf-8"))
         assert persisted["status"] == "stopped"
         assert persisted["pid"] == child.pid
@@ -417,3 +440,38 @@ def test_stop_daemon_terminates_process_group_and_cleans_pid(tmp_path, monkeypat
         if child.poll() is None:
             child.terminate()
             child.wait(timeout=2)
+        if managed.poll() is None:
+            managed.terminate()
+            managed.wait(timeout=2)
+
+
+def test_stop_daemon_stops_orphaned_managed_worker(tmp_path, monkeypatch) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "STOP_TIMEOUT_SECONDS", 5.0)
+    monkeypatch.setattr(
+        supervisor,
+        "_collect_counts",
+        lambda: ({"todo": {}, "queue": {}}, {}),
+    )
+    managed = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import signal,sys,time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(0)); time.sleep(60)",
+        ],
+        start_new_session=True,
+    )
+    try:
+        supervisor.MANAGED_DAEMON_PID_PATH.write_text(f"{managed.pid}\n", encoding="utf-8")
+
+        result = supervisor.stop_daemon()
+
+        managed.wait(timeout=2)
+        assert result["status"] == "stopped"
+        assert result["pid"] == 0
+        assert result["managed_daemon_pid"] == managed.pid
+        assert result["managed_daemon_pid_alive"] is False
+    finally:
+        if managed.poll() is None:
+            managed.terminate()
+            managed.wait(timeout=2)

@@ -41,6 +41,7 @@ EVENTS_PATH = STATE_ROOT / "events.jsonl"
 REFILL_STATE_PATH = STATE_ROOT / "refill_state.json"
 SUPERVISOR_STATE_DIR = STATE_ROOT / "supervisor_state"
 TASK_STATE_PATH = SUPERVISOR_STATE_DIR / "complaint_generator_refactor_task_state.json"
+MANAGED_DAEMON_PID_PATH = SUPERVISOR_STATE_DIR / "complaint_generator_refactor_managed_daemon.pid"
 WORKTREE_ROOT = STATE_ROOT / "worktrees"
 BUNDLE_LANE_ROOT = STATE_ROOT / "bundle_lanes"
 BUNDLE_LANE_MANIFEST = BUNDLE_LANE_ROOT / "bundle_lanes.json"
@@ -2441,53 +2442,86 @@ def stop_merge_resolver_watchdog() -> dict[str, Any]:
 
 
 def stop_daemon() -> dict[str, Any]:
-    if not PID_PATH.exists():
-        result = {"status": "not_running", "pid": 0, "pid_alive": False, "status_path": str(STATUS_PATH)}
-        _write_status(result)
-        return result
     try:
         pid = int(PID_PATH.read_text(encoding="utf-8").strip())
-    except Exception:
+    except (OSError, ValueError):
         pid = 0
-    if not _pid_alive(pid):
+    try:
+        managed_pid = int(MANAGED_DAEMON_PID_PATH.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        managed_pid = 0
+    supervisor_alive = _pid_alive(pid)
+    managed_alive = _pid_alive(managed_pid)
+    if not supervisor_alive:
         PID_PATH.unlink(missing_ok=True)
-        result = {"status": "not_running", "pid": pid, "pid_alive": False, "status_path": str(STATUS_PATH)}
+    if not managed_alive:
+        MANAGED_DAEMON_PID_PATH.unlink(missing_ok=True)
+    if not supervisor_alive and not managed_alive:
+        result = {
+            "status": "not_running",
+            "pid": pid,
+            "pid_alive": False,
+            "managed_daemon_pid": managed_pid,
+            "managed_daemon_pid_alive": False,
+            "status_path": str(STATUS_PATH),
+        }
         _write_status(result)
         return result
 
-    signal_scope = "process"
-    try:
-        # ``start_daemon`` creates a new session. Signalling its group also gives the
-        # supervised implementation worker a chance to handle SIGTERM and exit.
-        process_group_id = os.getpgid(pid)
-        if process_group_id == pid:
-            os.killpg(process_group_id, signal.SIGTERM)
-            signal_scope = "process_group"
-        else:
-            os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass
-    except PermissionError as exc:
-        return {
-            "status": "stop_failed",
-            "pid": pid,
-            "pid_alive": True,
-            "status_path": str(STATUS_PATH),
-            "error": f"{type(exc).__name__}: {exc}",
-        }
+    signal_scope = "none"
+    if supervisor_alive:
+        try:
+            process_group_id = os.getpgid(pid)
+            if process_group_id == pid:
+                os.killpg(process_group_id, signal.SIGTERM)
+                signal_scope = "process_group"
+            else:
+                os.kill(pid, signal.SIGTERM)
+                signal_scope = "process"
+        except ProcessLookupError:
+            pass
+        except PermissionError as exc:
+            return {
+                "status": "stop_failed",
+                "pid": pid,
+                "pid_alive": True,
+                "status_path": str(STATUS_PATH),
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+    managed_signal_scope = "none"
+    if managed_pid and managed_pid != pid and _pid_alive(managed_pid):
+        try:
+            managed_process_group_id = os.getpgid(managed_pid)
+            if managed_process_group_id == managed_pid:
+                os.killpg(managed_process_group_id, signal.SIGTERM)
+                managed_signal_scope = "process_group"
+            else:
+                os.kill(managed_pid, signal.SIGTERM)
+                managed_signal_scope = "process"
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            managed_signal_scope = "permission_denied"
 
     deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
-    while _pid_alive(pid) and time.monotonic() < deadline:
+    while (_pid_alive(pid) or _pid_alive(managed_pid)) and time.monotonic() < deadline:
         time.sleep(STOP_POLL_SECONDS)
-    stopped = not _pid_alive(pid)
+    supervisor_stopped = not _pid_alive(pid)
+    managed_stopped = not _pid_alive(managed_pid)
+    stopped = supervisor_stopped and managed_stopped
     if stopped:
         PID_PATH.unlink(missing_ok=True)
+        MANAGED_DAEMON_PID_PATH.unlink(missing_ok=True)
     result = {
         "status": "stopped" if stopped else "stopping",
         "pid": pid,
-        "pid_alive": not stopped,
+        "pid_alive": not supervisor_stopped,
         "signal": "SIGTERM",
         "signal_scope": signal_scope,
+        "managed_daemon_pid": managed_pid,
+        "managed_daemon_pid_alive": not managed_stopped,
+        "managed_daemon_signal_scope": managed_signal_scope,
         "status_path": str(STATUS_PATH),
     }
     counts, count_errors = _collect_counts()
@@ -2538,6 +2572,7 @@ def status_payload() -> dict[str, Any]:
         "merge_resolver_enabled_for_new_launches": True,
         "status_path": str(STATUS_PATH),
         "upstream_status_path": str(UPSTREAM_SUPERVISOR_STATUS_PATH),
+        "managed_daemon_pid_path": str(MANAGED_DAEMON_PID_PATH),
     }
     if STATUS_PATH.exists():
         try:
@@ -2567,6 +2602,14 @@ def status_payload() -> dict[str, Any]:
             if upstream_heartbeat:
                 payload["heartbeat"] = upstream_heartbeat
                 payload["heartbeat_at"] = upstream_heartbeat
+    managed_pid = 0
+    if MANAGED_DAEMON_PID_PATH.exists():
+        try:
+            managed_pid = int(MANAGED_DAEMON_PID_PATH.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            managed_pid = 0
+    payload["managed_daemon_pid"] = managed_pid
+    payload["managed_daemon_pid_alive"] = _pid_alive(managed_pid)
 
     counts, count_errors = _collect_counts()
     payload["counts"] = counts
