@@ -95,6 +95,17 @@ include = [
 
 [tool.complaint_generator.import_boundaries]
 description = "Production package import boundaries documented in docs/ARCHITECTURE.md."
+production_packages = [
+  "adversarial_harness",
+  "applications",
+  "backends",
+  "complaint_analysis",
+  "complaint_generator",
+  "complaint_phases",
+  "integrations",
+  "lib",
+  "mediator",
+]
 enforced_packages = [
   "applications",
   "mediator",
@@ -104,6 +115,48 @@ enforced_packages = [
 ]
 shared_code_package = "lib"
 shared_code_rule = "Keep code in its owning layer until two or more production consumers need the same side-effect-light helper; then move the stable helper or data contract to lib."
+
+# Direct access to optional dependencies is restricted separately from the
+# package-layer graph.  Exceptions are deliberately file-specific: they record
+# compatibility shims and pre-existing migration debt without exempting tests,
+# whole production packages, or future modules from the adapter requirement.
+[tool.complaint_generator.import_boundaries.restricted_imports.ipfs_datasets_py]
+allowed_adapter_paths = [
+  "integrations/ipfs_datasets",
+]
+exception_policy = "Each exception must name one production Python file and its exact imported modules. Remove the imports through an adapter and delete the exception together."
+
+[tool.complaint_generator.import_boundaries.restricted_imports.ipfs_datasets_py.temporary_exceptions]
+"applications/complaint_cli.py" = [
+  "ipfs_datasets_py.processors.legal_data.email_auth",
+  "ipfs_datasets_py.processors.legal_data.email_corpus",
+  "ipfs_datasets_py.processors.legal_data.email_import",
+  "ipfs_datasets_py.processors.legal_data.email_pipeline",
+]
+"applications/complaint_workspace.py" = [
+  "ipfs_datasets_py.mcp_server.secrets_vault",
+  "ipfs_datasets_py.processors.auth.ucan",
+]
+"complaint_generator/agentic_evidence_download.py" = ["ipfs_datasets_py.processors.legal_data.email_relevance"]
+"complaint_generator/data_migration.py" = ["ipfs_datasets_py.processors.legal_data"]
+"complaint_generator/email_agentic_search.py" = ["ipfs_datasets_py.processors.legal_data"]
+"complaint_generator/email_authority_enrichment.py" = ["ipfs_datasets_py.processors.legal_data"]
+"complaint_generator/email_credentials.py" = ["ipfs_datasets_py.processors.legal_data"]
+"complaint_generator/email_graphrag.py" = [
+  "ipfs_datasets_py.processors.legal_data",
+  "ipfs_datasets_py.processors.multimedia.attachment_text_extractor",
+]
+"complaint_generator/email_import.py" = ["ipfs_datasets_py.processors.legal_data"]
+"complaint_generator/email_oauth.py" = ["ipfs_datasets_py.processors.legal_data.email_auth"]
+"complaint_generator/email_pipeline.py" = ["ipfs_datasets_py.processors.legal_data.email_pipeline"]
+"complaint_generator/email_seed_planner.py" = ["ipfs_datasets_py.processors.legal_data.email_seed_planner"]
+"complaint_generator/email_timeline_handoff.py" = ["ipfs_datasets_py.processors.legal_data.email_timeline_handoff"]
+"complaint_generator/evidence_relevance.py" = ["ipfs_datasets_py.processors.legal_data.email_relevance"]
+"lib/knowledge_graph_export.py" = [
+  "ipfs_datasets_py.knowledge_graphs.exceptions",
+  "ipfs_datasets_py.knowledge_graphs.migration.neo4j_exporter",
+]
+"lib/knowledge_graph_formats.py" = ["ipfs_datasets_py.knowledge_graphs.migration.formats"]
 
 [tool.complaint_generator.import_boundaries.allowed_imports]
 applications = [

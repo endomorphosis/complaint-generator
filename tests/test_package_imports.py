@@ -6,8 +6,9 @@ import runpy
 import sys
 import tomllib
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable, Mapping, Sequence
 
 from lib.runtime_ownership import (
     RUNTIME_ENTRYPOINT_GROUPS,
@@ -70,12 +71,22 @@ def test_largest_runtime_modules_have_ownership_records() -> None:
         assert record["entrypoints"], f"missing entrypoints for {module_path}"
 
 
-def _load_boundary_config() -> tuple[list[str], dict[str, list[str]]]:
+@dataclass(frozen=True, order=True)
+class RestrictedImportViolation:
+    """One statically discoverable production import that bypasses an adapter."""
+
+    relative_path: str
+    line_number: int
+    imported_module: str
+    restricted_module: str
+
+    def describe(self) -> str:
+        return f"{self.relative_path}:{self.line_number}: imports {self.imported_module}"
+
+
+def _load_boundary_config() -> dict[str, Any]:
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
-    boundary_config = pyproject["tool"]["complaint_generator"]["import_boundaries"]
-    enforced_packages = list(boundary_config["enforced_packages"])
-    allowed_imports = dict(boundary_config["allowed_imports"])
-    return enforced_packages, allowed_imports
+    return dict(pyproject["tool"]["complaint_generator"]["import_boundaries"])
 
 
 def _python_files(package_name: str) -> Iterable[Path]:
@@ -98,8 +109,83 @@ def _absolute_import_roots(file_path: Path) -> set[str]:
     return import_roots
 
 
+def _imported_modules(file_path: Path) -> list[tuple[int, str]]:
+    """Return static imports, including common literal dynamic-import forms."""
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        tree = ast.parse(file_path.read_text(encoding="utf-8"), filename=str(file_path))
+
+    imports: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imports.extend((node.lineno, alias.name) for alias in node.names)
+            continue
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imports.append((node.lineno, node.module))
+            continue
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+
+        first_argument = node.args[0]
+        if not isinstance(first_argument, ast.Constant) or not isinstance(first_argument.value, str):
+            continue
+        if isinstance(node.func, ast.Name) and node.func.id == "__import__":
+            imports.append((node.lineno, first_argument.value))
+        elif (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "import_module"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "importlib"
+        ):
+            imports.append((node.lineno, first_argument.value))
+
+    return imports
+
+
+def _module_matches(imported_module: str, restricted_module: str) -> bool:
+    return imported_module == restricted_module or imported_module.startswith(f"{restricted_module}.")
+
+
+def _path_is_within(relative_path: Path, configured_path: str) -> bool:
+    allowed_path = Path(configured_path)
+    return relative_path == allowed_path or relative_path.is_relative_to(allowed_path)
+
+
+def _restricted_import_violations(
+    repo_root: Path,
+    production_packages: Sequence[str],
+    restricted_imports: Mapping[str, Mapping[str, Any]],
+) -> list[RestrictedImportViolation]:
+    """Scan configured production packages; tests and other repo files stay out of scope."""
+
+    violations: list[RestrictedImportViolation] = []
+    for package_name in production_packages:
+        for file_path in sorted((repo_root / package_name).rglob("*.py")):
+            relative_path = file_path.relative_to(repo_root)
+            imported_modules = _imported_modules(file_path)
+            for restricted_module, rule in restricted_imports.items():
+                adapter_paths = list(rule["allowed_adapter_paths"])
+                if any(_path_is_within(relative_path, path) for path in adapter_paths):
+                    continue
+                for line_number, imported_module in imported_modules:
+                    if _module_matches(imported_module, restricted_module):
+                        violations.append(
+                            RestrictedImportViolation(
+                                relative_path=relative_path.as_posix(),
+                                line_number=line_number,
+                                imported_module=imported_module,
+                                restricted_module=restricted_module,
+                            )
+                        )
+
+    return sorted(violations)
+
+
 def test_configured_package_import_boundaries_are_enforced():
-    enforced_packages, allowed_imports = _load_boundary_config()
+    boundary_config = _load_boundary_config()
+    enforced_packages = list(boundary_config["enforced_packages"])
+    allowed_imports = dict(boundary_config["allowed_imports"])
     enforced_package_set = set(enforced_packages)
     violations: list[str] = []
 
@@ -122,8 +208,49 @@ def test_configured_package_import_boundaries_are_enforced():
     )
 
 
+def test_import_boundary_config_covers_distributed_production_packages():
+    pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
+    boundary_config = dict(pyproject["tool"]["complaint_generator"]["import_boundaries"])
+    production_packages = list(boundary_config["production_packages"])
+    package_includes = pyproject["tool"]["setuptools"]["packages"]["find"]["include"]
+    distributed_package_roots = {pattern.split(".", 1)[0] for pattern in package_includes}
+
+    assert len(production_packages) == len(set(production_packages))
+    assert set(production_packages) == distributed_package_roots
+    assert "tests" not in production_packages
+    for package_name in production_packages:
+        assert (REPO_ROOT / package_name / "__init__.py").is_file()
+
+    enforced_packages = set(boundary_config["enforced_packages"])
+    allowed_imports = dict(boundary_config["allowed_imports"])
+    assert set(allowed_imports) == enforced_packages
+    for package_name, allowed_packages in allowed_imports.items():
+        assert package_name in allowed_packages
+        assert set(allowed_packages) <= enforced_packages
+
+    for restricted_module, rule in dict(boundary_config["restricted_imports"]).items():
+        adapter_paths = list(rule["allowed_adapter_paths"])
+        assert adapter_paths, f"{restricted_module} has no adapter path"
+        for configured_path in adapter_paths:
+            path = Path(configured_path)
+            assert not path.is_absolute() and ".." not in path.parts and len(path.parts) >= 2
+            assert path.parts[0] in production_packages
+            assert (REPO_ROOT / path).is_dir()
+
+        for configured_path, imported_modules in dict(rule.get("temporary_exceptions", {})).items():
+            path = Path(configured_path)
+            assert path.parts and path.suffix == ".py"
+            assert not path.is_absolute() and ".." not in path.parts
+            assert path.parts[0] in production_packages
+            assert (REPO_ROOT / path).is_file()
+            assert imported_modules
+            assert all(_module_matches(module, restricted_module) for module in imported_modules)
+
+
 def test_import_boundary_config_is_documented():
-    enforced_packages, allowed_imports = _load_boundary_config()
+    boundary_config = _load_boundary_config()
+    enforced_packages = list(boundary_config["enforced_packages"])
+    allowed_imports = dict(boundary_config["allowed_imports"])
     architecture = ARCHITECTURE_PATH.read_text(encoding="utf-8")
 
     assert "### Allowed Import Direction" in architecture
@@ -132,6 +259,97 @@ def test_import_boundary_config_is_documented():
     for package_name in enforced_packages:
         expected_imports = ", ".join(f"`{import_name}/`" for import_name in allowed_imports[package_name])
         assert f"| `{package_name}/` | {expected_imports} |" in architecture
+
+
+def test_restricted_production_imports_use_configured_adapters():
+    boundary_config = _load_boundary_config()
+    restricted_imports = dict(boundary_config["restricted_imports"])
+    violations = _restricted_import_violations(
+        REPO_ROOT,
+        list(boundary_config["production_packages"]),
+        restricted_imports,
+    )
+
+    unexpected = []
+    for violation in violations:
+        rule = restricted_imports[violation.restricted_module]
+        exceptions = dict(rule.get("temporary_exceptions", {}))
+        allowed_modules = set(exceptions.get(violation.relative_path, []))
+        if violation.imported_module not in allowed_modules:
+            unexpected.append(violation.describe())
+
+    assert not unexpected, (
+        "Production modules must import restricted optional dependencies through their "
+        f"configured adapter paths. Found direct imports: {unexpected}"
+    )
+
+
+def test_restricted_import_exceptions_are_precise_and_current():
+    boundary_config = _load_boundary_config()
+    restricted_imports = dict(boundary_config["restricted_imports"])
+    violations = _restricted_import_violations(
+        REPO_ROOT,
+        list(boundary_config["production_packages"]),
+        restricted_imports,
+    )
+
+    violations_by_module: dict[str, set[tuple[str, str]]] = {}
+    for violation in violations:
+        violations_by_module.setdefault(violation.restricted_module, set()).add(
+            (violation.relative_path, violation.imported_module)
+        )
+
+    for restricted_module, rule in restricted_imports.items():
+        exception_map = dict(rule.get("temporary_exceptions", {}))
+        exception_pairs = {
+            (relative_path, imported_module)
+            for relative_path, imported_modules in exception_map.items()
+            for imported_module in imported_modules
+        }
+        assert all(len(modules) == len(set(modules)) for modules in exception_map.values()), (
+            f"duplicate exception modules for {restricted_module}"
+        )
+        assert exception_pairs == violations_by_module.get(restricted_module, set()), (
+            f"Exceptions for {restricted_module} must exactly describe current production debt. "
+            "Route removed imports through the adapter and delete their exception; add no broad "
+            "or stale exemptions."
+        )
+
+
+def test_restricted_import_detector_excludes_tests_but_catches_production(tmp_path: Path):
+    production_file = tmp_path / "applications" / "direct.py"
+    adapter_file = tmp_path / "integrations" / "ipfs_datasets" / "adapter.py"
+    test_file = tmp_path / "tests" / "test_upstream_contract.py"
+    for file_path in (production_file, adapter_file, test_file):
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+    production_file.write_text(
+        "import ipfs_datasets_py\n"
+        "from ipfs_datasets_py.logic import prove\n"
+        "import importlib\n"
+        "dynamic = importlib.import_module('ipfs_datasets_py.dynamic')\n"
+        "legacy = __import__('ipfs_datasets_py.legacy')\n",
+        encoding="utf-8",
+    )
+    adapter_file.write_text("import ipfs_datasets_py.logic\n", encoding="utf-8")
+    test_file.write_text("from ipfs_datasets_py import optimizers\n", encoding="utf-8")
+
+    violations = _restricted_import_violations(
+        tmp_path,
+        ["applications", "integrations"],
+        {
+            "ipfs_datasets_py": {
+                "allowed_adapter_paths": ["integrations/ipfs_datasets"],
+                "temporary_exceptions": {},
+            }
+        },
+    )
+
+    assert [violation.describe() for violation in violations] == [
+        "applications/direct.py:1: imports ipfs_datasets_py",
+        "applications/direct.py:2: imports ipfs_datasets_py.logic",
+        "applications/direct.py:4: imports ipfs_datasets_py.dynamic",
+        "applications/direct.py:5: imports ipfs_datasets_py.legacy",
+    ]
 
 
 def _is_sys_path_mutator_call(node: ast.AST) -> bool:
