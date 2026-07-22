@@ -2613,7 +2613,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-114 Review swallowed exception path in examples/codex_multi_run_autopatch_loop.py:139
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
