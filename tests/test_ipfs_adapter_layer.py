@@ -41,6 +41,7 @@ from integrations.ipfs_datasets.graphrag import (
     analyze_pdf_relationships,
     batch_process_pdfs,
     build_ontology,
+    create_ontology_generator,
     cross_analyze_pdf_documents,
     extract_pdf_entities,
     ingest_pdf_to_graphrag,
@@ -1388,6 +1389,43 @@ def test_stubbed_adapters_expose_canonical_operation_metadata():
 
     assert refinement_result['metadata']['rounds'] == 2
     assert refinement_result['metadata']['details']['rounds'] == 2
+
+
+def test_create_ontology_generator_does_not_swallow_initialization_failure():
+    class FailingOntologyGenerator:
+        def __init__(self):
+            raise RuntimeError('ontology model initialization failed')
+
+    with patch(
+        'integrations.ipfs_datasets.graphrag.OntologyGenerator',
+        FailingOntologyGenerator,
+    ), pytest.raises(RuntimeError, match='ontology model initialization failed'):
+        create_ontology_generator()
+
+
+def test_build_ontology_reports_generator_initialization_failure():
+    class FailingOntologyGenerator:
+        def __init__(self):
+            raise RuntimeError('ontology model initialization failed')
+
+    with patch(
+        'integrations.ipfs_datasets.graphrag.OntologyGenerator',
+        FailingOntologyGenerator,
+    ):
+        result = build_ontology('Employment retaliation policy.')
+
+    assert result['status'] == 'error'
+    assert result['ontology'] is None
+    assert result['metadata']['text_length'] == 30
+    assert result['metadata']['error'] == 'ontology model initialization failed'
+    assert result['metadata']['operation'] == 'build_ontology'
+    assert result['metadata']['backend_available'] is True
+    assert result['metadata']['implementation_status'] == 'error'
+    assert result['metadata']['details'] == {
+        'operation': 'build_ontology',
+        'backend_available': True,
+        'implementation_status': 'error',
+    }
 
 
 def test_logic_stubbed_adapters_summarize_temporal_predicate_shapes():
