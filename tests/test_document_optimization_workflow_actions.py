@@ -41,6 +41,27 @@ def test_requested_relief_extraction_failure_is_logged_and_uses_claim_fallback(c
     assert str(warning.exc_info[1]) == "requested-relief extractor unavailable"
 
 
+def test_mediator_failure_is_logged_and_returns_optional_context_fallback(caplog):
+    mediator = Mock()
+    mediator.get_user_evidence.side_effect = RuntimeError("mediator storage unavailable")
+    optimizer = AgenticDocumentOptimizer(mediator)
+
+    with caplog.at_level(logging.WARNING, logger="document_optimization"):
+        result = optimizer._call_mediator("get_user_evidence", user_id="user-1")
+
+    assert result is None
+    mediator.get_user_evidence.assert_called_once_with(user_id="user-1")
+    warning = next(
+        record
+        for record in caplog.records
+        if "Mediator method get_user_evidence failed" in record.getMessage()
+    )
+    assert "user-1" not in warning.getMessage()
+    assert warning.exc_info is not None
+    assert isinstance(warning.exc_info[1], RuntimeError)
+    assert str(warning.exc_info[1]) == "mediator storage unavailable"
+
+
 def test_build_support_context_preserves_evidence_workflow_actions():
     mediator = Mock()
     mediator.summarize_claim_support.return_value = {}
