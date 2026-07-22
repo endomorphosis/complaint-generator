@@ -122,6 +122,13 @@ def _upstream_bundle_runner():
     return build_arg_parser, run_bundle_supervisor
 
 
+def _upstream_bundle_payload_builder():
+    _ensure_accelerate_import_path()
+    from ipfs_accelerate_py.agent_supervisor.objective_graph import build_bundle_task_payloads
+
+    return build_bundle_task_payloads
+
+
 def merge_resolver_command() -> str:
     return shlex.join(
         (
@@ -992,17 +999,43 @@ def flatten_tasks(goals: list[dict[str, Any]]) -> list[RefactorTask]:
     return tasks
 
 
-def _json_goal_tree(goals: list[dict[str, Any]], scan: dict[str, Any]) -> dict[str, Any]:
+def _resolved_seed_task_ids(goals: list[dict[str, Any]]) -> dict[int, str]:
+    return {
+        id(task): task.task_id or f"{TASK_PREFIX}{index:03d}"
+        for index, task in enumerate(flatten_tasks(goals), start=1)
+    }
+
+
+def _json_goal_tree(
+    goals: list[dict[str, Any]],
+    scan: dict[str, Any],
+    *,
+    synchronization: dict[str, Any] | None = None,
+    taskboard: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    resolved_task_ids = _resolved_seed_task_ids(goals)
+    statuses = {
+        str(item.get("task_id")): str(item.get("status"))
+        for item in (taskboard or {}).get("tasks", [])
+        if isinstance(item, dict) and item.get("task_id")
+    }
     out_goals: list[dict[str, Any]] = []
     for goal in goals:
         goal_out = {k: v for k, v in goal.items() if k != "subgoals"}
         goal_out["subgoals"] = []
         for subgoal in goal.get("subgoals", []):
             subgoal_out = {k: v for k, v in subgoal.items() if k != "tasks"}
-            subgoal_out["tasks"] = [task.payload() for task in subgoal.get("tasks", [])]
+            subgoal_out["tasks"] = []
+            for task in subgoal.get("tasks", []):
+                task_payload = task.payload()
+                task_id = resolved_task_ids[id(task)]
+                task_payload["task_id"] = task_id
+                task_payload["status"] = statuses.get(task_id, "unknown")
+                subgoal_out["tasks"].append(task_payload)
             goal_out["subgoals"].append(subgoal_out)
         out_goals.append(goal_out)
-    return {
+    payload = {
+        "schema": "complaint_generator.refactor_supervisor.goals.v1",
         "objective": "Refactor complaint-generator safely and incrementally.",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_supervisor_module": "ipfs_accelerate_py.agent_supervisor",
@@ -1013,6 +1046,11 @@ def _json_goal_tree(goals: list[dict[str, Any]], scan: dict[str, Any]) -> dict[s
         "scan": scan,
         "goals": out_goals,
     }
+    if synchronization is not None:
+        payload["synchronization"] = dict(synchronization)
+    if taskboard is not None:
+        payload["taskboard"] = dict(taskboard)
+    return payload
 
 
 def _goal_evidence(task: RefactorTask) -> str:
@@ -1241,7 +1279,13 @@ def write_seed_bundle_index(
             {
                 "task_id": task_id,
                 "status": statuses.get(task_id, "todo"),
+                "title": task.title,
+                "priority": task.priority,
                 "goal_id": task.subgoal_id,
+                "parent_goal_id": task.goal_id,
+                "subgoal_id": task.subgoal_id,
+                "rationale": task.rationale,
+                "acceptance": list(task.acceptance),
                 "graph_depth": 1,
                 "parent_goal_ids": [task.goal_id],
                 "missing_evidence": [task.rationale, *task.acceptance],
@@ -1283,6 +1327,270 @@ def write_seed_bundle_index(
         "task_count": sum(len(bundle.get("tasks", [])) for bundle in bundles.values()),
         "excluded_bundle_keys": sorted(excluded),
     }
+
+
+def _taskboard_snapshot() -> dict[str, Any]:
+    """Return the complete markdown board projection used by JSON and docs."""
+
+    if not TODO_PATH.exists():
+        return {"task_count": 0, "tasks": []}
+    text = TODO_PATH.read_text(encoding="utf-8", errors="replace")
+    headers = list(
+        re.finditer(
+            rf"^##\s+({re.escape(TASK_PREFIX)}\d+)\s+(.+?)\s*$",
+            text,
+            flags=re.MULTILINE,
+        )
+    )
+    if not headers:
+        parse_markdown_tasks, _task_status_counts = _upstream_task_board_helpers()
+        tasks = []
+        for task in parse_markdown_tasks(text):
+            match = re.match(rf"({re.escape(TASK_PREFIX)}\d+)\b\s*(.*)", task.title)
+            if match:
+                tasks.append(
+                    {
+                        "task_id": match.group(1),
+                        "checkbox_id": task.checkbox_id,
+                        "title": match.group(2).strip(),
+                        "status": task.status,
+                    }
+                )
+        return {"task_count": len(tasks), "tasks": tasks}
+    status_aliases = {
+        "todo": "needed",
+        "needed": "needed",
+        "in_progress": "in-progress",
+        "in-progress": "in-progress",
+        "in progress": "in-progress",
+        "running": "in-progress",
+        "completed": "complete",
+        "complete": "complete",
+        "done": "complete",
+        "blocked": "blocked",
+    }
+    tasks: list[dict[str, Any]] = []
+    for index, header in enumerate(headers):
+        block_end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        block = text[header.end() : block_end]
+        status_match = re.search(r"^- Status:\s*(\S+)", block, flags=re.MULTILINE)
+        raw_status = status_match.group(1).strip().lower() if status_match else "todo"
+        task_id = header.group(1)
+        numeric_id = re.fullmatch(rf"{re.escape(TASK_PREFIX)}(\d+)", task_id)
+        tasks.append(
+            {
+                "task_id": task_id,
+                "checkbox_id": int(numeric_id.group(1)) if numeric_id else index + 1,
+                "title": header.group(2).strip(),
+                "status": status_aliases.get(raw_status, raw_status),
+            }
+        )
+    return {"task_count": len(tasks), "tasks": tasks}
+
+
+def _active_todo_task_ids() -> set[str]:
+    """Return task ids that still represent runnable work on the markdown board."""
+
+    return {
+        str(item["task_id"])
+        for item in _taskboard_snapshot()["tasks"]
+        if item["status"] in {"needed", "in-progress"}
+    }
+
+
+def _task_ids_from_queue_payload(payload: dict[str, Any]) -> set[str]:
+    task_ids = {
+        str(item.get("task_id"))
+        for item in payload.get("tasks", [])
+        if isinstance(item, dict) and item.get("task_id")
+    }
+    if not task_ids and payload.get("task_id"):
+        task_ids.add(str(payload["task_id"]))
+    return task_ids
+
+
+def _queue_payload_contract(payload: dict[str, Any], active_task_ids: set[str]) -> dict[str, Any]:
+    """Project an upstream bundle payload into the stable refactor queue contract."""
+
+    tasks = [
+        dict(item)
+        for item in payload.get("tasks", [])
+        if isinstance(item, dict) and str(item.get("task_id") or "") in active_task_ids
+    ]
+    task_ids = [str(item["task_id"]) for item in tasks]
+    goal_ids = list(
+        dict.fromkeys(
+            str(
+                item.get("parent_goal_id")
+                or (item.get("parent_goal_ids") or [""])[0]
+                or item.get("goal_id")
+            )
+            for item in tasks
+            if item.get("parent_goal_id") or item.get("goal_id") or item.get("parent_goal_ids")
+        )
+    )
+    subgoal_ids = list(
+        dict.fromkeys(
+            str(item.get("subgoal_id") or item.get("goal_packet_key") or "")
+            for item in tasks
+            if item.get("subgoal_id") or item.get("goal_packet_key")
+        )
+    )
+    priorities = [str(item.get("priority") or "P2") for item in tasks]
+    acceptance = list(
+        dict.fromkeys(
+            str(value)
+            for item in tasks
+            for value in item.get("acceptance", [])
+            if value
+        )
+    )
+    validation = list(
+        dict.fromkeys(
+            str(value)
+            for item in tasks
+            for value in item.get("validation", [])
+            if value
+        )
+    )
+    files = list(
+        dict.fromkeys(
+            str(value)
+            for item in tasks
+            for value in item.get("paths", [])
+            if value
+        )
+    )
+    titles = [str(item.get("title") or item["task_id"]) for item in tasks]
+    contracted = dict(payload)
+    contracted.update(
+        {
+            "schema": "complaint_generator.refactor_supervisor.bundle_task.v1",
+            "supervisor": "refactor_agent_supervisor",
+            "bundle_key": str(payload.get("bundle_key") or ""),
+            "task_ids": task_ids,
+            "tasks": tasks,
+            "work_item_count": len(task_ids),
+            "goal_id": goal_ids[0] if len(goal_ids) == 1 else goal_ids,
+            "subgoal_id": subgoal_ids[0] if len(subgoal_ids) == 1 else subgoal_ids,
+            "priority": min(priorities, key=lambda value: int(value[1:]) if value[1:].isdigit() else 99)
+            if priorities
+            else "P2",
+            "title": "; ".join(titles),
+            "acceptance": acceptance,
+            "validation": validation,
+            "files": files,
+        }
+    )
+    return contracted
+
+
+def refill_bundle_queue(*, refill_floor: int, enabled: bool = True) -> dict[str, Any]:
+    """Keep enough unique, runnable generated work items represented in the queue.
+
+    Queue rows are goal/subgoal bundles, so the configured floor is measured in
+    unique active taskboard work items rather than raw rows. This prevents the
+    refiller from duplicating a cohesive active bundle merely to inflate a row
+    count.
+    """
+
+    floor = max(0, int(refill_floor))
+    result: dict[str, Any] = {
+        "enabled": bool(enabled),
+        "configured_floor": floor,
+        "floor_unit": "active_taskboard_work_items",
+        "submitted_bundle_count": 0,
+        "submitted_task_ids": [],
+        "queued_work_items_before": 0,
+        "queued_work_items_after": 0,
+        "floor_satisfied": floor == 0,
+        "available_work_items": 0,
+    }
+    index_path = BUNDLE_DIR / "index.json"
+    if not enabled:
+        result["reason"] = "bundle submission disabled"
+        return result
+    if not index_path.exists():
+        result["reason"] = "bundle index is missing"
+        return result
+
+    active_task_ids = _active_todo_task_ids()
+    result["available_work_items"] = len(active_task_ids)
+    if not active_task_ids or floor == 0:
+        result["floor_satisfied"] = floor == 0
+        result["reason"] = "no active taskboard work" if active_task_ids == set() else "floor is zero"
+        return result
+
+    TaskQueue = _task_queue_class()
+    queue = TaskQueue(str(QUEUE_PATH))
+    try:
+        queued = queue.list(status="queued", limit=1000, task_types=TASK_TYPES)
+        running = queue.list(status="running", limit=1000, task_types=TASK_TYPES)
+        active_queue_items = [*queued, *running]
+        active_bundle_keys = {
+            str(item.get("payload", {}).get("bundle_key") or "")
+            for item in active_queue_items
+            if isinstance(item.get("payload"), dict)
+        }
+        covered_task_ids: set[str] = set()
+        for item in active_queue_items:
+            payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+            covered_task_ids.update(_task_ids_from_queue_payload(payload) & active_task_ids)
+        result["queued_work_items_before"] = len(covered_task_ids)
+
+        build_bundle_task_payloads = _upstream_bundle_payload_builder()
+        candidates = [
+            _queue_payload_contract(dict(payload), active_task_ids)
+            for payload in build_bundle_task_payloads(index_path)
+        ]
+        candidates = [candidate for candidate in candidates if candidate["task_ids"]]
+        candidates.sort(
+            key=lambda item: (
+                int(str(item.get("priority") or "P9")[1:])
+                if str(item.get("priority") or "P9")[1:].isdigit()
+                else 9,
+                str(item.get("bundle_key") or ""),
+            )
+        )
+        result["available_bundle_count"] = len(candidates)
+        submitted_queue_ids: list[str] = []
+        submitted_task_ids: list[str] = []
+        for payload in candidates:
+            if len(covered_task_ids) >= floor:
+                break
+            bundle_key = str(payload["bundle_key"])
+            if bundle_key in active_bundle_keys:
+                continue
+            task_ids = set(payload["task_ids"]) & active_task_ids
+            if not task_ids or task_ids <= covered_task_ids:
+                continue
+            submitted_queue_ids.append(
+                queue.submit(
+                    task_type=TASK_TYPES[0],
+                    model_name=MODEL_NAME,
+                    payload=payload,
+                )
+            )
+            active_bundle_keys.add(bundle_key)
+            covered_task_ids.update(task_ids)
+            submitted_task_ids.extend(sorted(task_ids))
+
+        result.update(
+            {
+                "submitted_bundle_count": len(submitted_queue_ids),
+                "submitted_queue_ids": submitted_queue_ids,
+                "submitted_task_ids": submitted_task_ids,
+                "queued_work_items_after": len(covered_task_ids),
+                "floor_satisfied": len(covered_task_ids) >= floor,
+            }
+        )
+        if not result["floor_satisfied"]:
+            result["reason"] = "fewer unique active generated work items are available than the configured floor"
+        return result
+    finally:
+        close = getattr(queue, "close", None)
+        if callable(close):
+            close()
 
 
 def _ensure_text(path: Path, text: str, *, overwrite: bool = True) -> bool:
@@ -1375,30 +1683,46 @@ def _todo_counts() -> dict[str, int]:
     if not TODO_PATH.exists():
         return {"needed": 0, "in_progress": 0, "complete": 0, "blocked": 0}
     counts = {"needed": 0, "in_progress": 0, "complete": 0, "blocked": 0}
-    parse_task_file = _upstream_portal_task_parser()
-    for task in parse_task_file(TODO_PATH, TASK_HEADER_PREFIX):
-        status = str(task.status or "todo").strip().lower().replace("_", "-")
-        if status in {"completed", "complete", "done"}:
-            counts["complete"] += 1
-        elif status == "blocked":
-            counts["blocked"] += 1
-        elif status in {"in-progress", "in progress", "running"}:
-            counts["in_progress"] += 1
-        else:
-            counts["needed"] += 1
+    count_keys = {
+        "needed": "needed",
+        "in-progress": "in_progress",
+        "complete": "complete",
+        "blocked": "blocked",
+    }
+    for item in _taskboard_snapshot()["tasks"]:
+        key = count_keys.get(str(item.get("status") or ""))
+        if key:
+            counts[key] += 1
     return counts
 
 
 def _queue_counts() -> dict[str, int]:
-    counts = {"queued": 0, "running": 0, "completed": 0, "failed": 0}
+    statuses = ("queued", "running", "completed", "failed")
+    counts = {
+        **{status: 0 for status in statuses},
+        **{f"{status}_work_items": 0 for status in statuses},
+    }
     if not QUEUE_PATH.exists():
         return counts
     TaskQueue = _task_queue_class()
     queue = TaskQueue(str(QUEUE_PATH))
-    return {
-        status: queue.count(status=status, task_types=TASK_TYPES)
-        for status in counts
-    }
+    try:
+        active_task_ids = _active_todo_task_ids()
+        for status in statuses:
+            items = queue.list(status=status, limit=1000, task_types=TASK_TYPES)
+            counts[status] = queue.count(status=status, task_types=TASK_TYPES)
+            task_ids: set[str] = set()
+            for item in items:
+                payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+                task_ids.update(_task_ids_from_queue_payload(payload))
+            if status in {"queued", "running"}:
+                task_ids &= active_task_ids
+            counts[f"{status}_work_items"] = len(task_ids)
+        return counts
+    finally:
+        close = getattr(queue, "close", None)
+        if callable(close):
+            close()
 
 
 def _collect_counts() -> tuple[dict[str, dict[str, int]], dict[str, str]]:
@@ -1483,6 +1807,8 @@ def _seed_status_summary(result: dict[str, Any]) -> dict[str, Any]:
         "objective_result": dict(result.get("objective_result") or {}),
         "backlog_result": dict(result.get("backlog_result") or {}),
         "bundle_seed": dict(result.get("bundle_seed") or {}),
+        "status_projection": dict(result.get("status_projection") or {}),
+        "queue_refill": dict(result.get("queue_refill") or {}),
     }
 
 
@@ -1508,11 +1834,10 @@ def seed_taskboard(
     exclude_bundle_keys: set[str] | None = None,
 ) -> dict[str, Any]:
     STATE_ROOT.mkdir(parents=True, exist_ok=True)
+    existing_goal_tree = _load_json_object(GOALS_PATH)
     scan = scan_codebase()
     goals = build_goals(scan)
 
-    goal_tree = _json_goal_tree(goals, scan)
-    GOALS_PATH.write_text(json.dumps(goal_tree, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     objective_changed = _ensure_text(OBJECTIVE_PATH, _render_objective_heap(goals), overwrite=True)
     existing_todo_headers = _todo_task_header_count()
     todo_changed = _ensure_text(TODO_PATH, _render_seed_todo(goals), overwrite=existing_todo_headers == 0)
@@ -1562,7 +1887,6 @@ def seed_taskboard(
                 "2",
                 "--max-refinement-depth",
                 "3",
-                "--submit-bundles" if submit_bundles else "--no-todo-vector-index",
                 "--queue-path",
                 str(QUEUE_PATH),
                 "--queue-task-type",
@@ -1609,8 +1933,36 @@ def seed_taskboard(
         backlog_args = backlog_parser().parse_args(backlog_argv)
         backlog_result = run_backlog_refinery(backlog_args)
 
+    queue_refill = refill_bundle_queue(refill_floor=refill_floor, enabled=submit_bundles)
     counts, count_errors = _collect_counts()
-    _write_taskboard_doc(goals, scan, counts, objective_result, backlog_result)
+    taskboard = _taskboard_snapshot()
+    synchronized_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    synchronization = {
+        "synchronized_at": synchronized_at,
+        "configured_refill_floor": max(0, int(refill_floor)),
+        "goal_count": len(goals),
+        "subgoal_count": sum(len(goal.get("subgoals", [])) for goal in goals),
+        "task_count": len(flatten_tasks(goals)),
+        "counts": counts,
+        "queue_refill": queue_refill,
+        "status_projection": status_projection,
+        "objective_result": objective_result,
+        "backlog_result": backlog_result,
+    }
+    goal_tree = _json_goal_tree(goals, scan, synchronization=synchronization, taskboard=taskboard)
+    implementation_claims = existing_goal_tree.get("implementation_claims")
+    if isinstance(implementation_claims, list):
+        goal_tree["implementation_claims"] = implementation_claims
+    GOALS_PATH.write_text(json.dumps(goal_tree, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_taskboard_doc(
+        goals,
+        scan,
+        counts,
+        objective_result,
+        backlog_result,
+        queue_refill=queue_refill,
+        taskboard=taskboard,
+    )
     _write_status(
         {
             "status": "seeded",
@@ -1631,6 +1983,7 @@ def seed_taskboard(
                 "backlog_result": backlog_result,
                 "bundle_seed": bundle_seed,
                 "status_projection": status_projection,
+                "queue_refill": queue_refill,
             },
         }
     )
@@ -1642,6 +1995,7 @@ def seed_taskboard(
         "backlog_result": backlog_result,
         "bundle_seed": bundle_seed,
         "status_projection": status_projection,
+        "queue_refill": queue_refill,
         "scan": scan,
     }
 
@@ -1652,9 +2006,19 @@ def _write_taskboard_doc(
     counts: dict[str, Any],
     objective_result: dict[str, Any],
     backlog_result: dict[str, Any],
+    *,
+    queue_refill: dict[str, Any],
+    taskboard: dict[str, Any],
 ) -> None:
     todo_counts = counts.get("todo") or {}
     queue_counts = counts.get("queue") or {}
+    task_statuses = {
+        str(item.get("task_id")): str(item.get("status"))
+        for item in taskboard.get("tasks", [])
+        if isinstance(item, dict) and item.get("task_id")
+    }
+    status_marks = {"needed": " ", "in-progress": "~", "complete": "x", "blocked": "!"}
+    resolved_task_ids = _resolved_seed_task_ids(goals)
     lines = [
         "# Refactor Supervisor Taskboard",
         "",
@@ -1683,6 +2047,11 @@ def _write_taskboard_doc(
         f"- Bundle queue queued: {queue_counts.get('queued', 0)}",
         f"- Bundle queue running: {queue_counts.get('running', 0)}",
         f"- Bundle queue completed: {queue_counts.get('completed', 0)}",
+        f"- Queued active work items: {queue_counts.get('queued_work_items', 0)}",
+        f"- Running active work items: {queue_counts.get('running_work_items', 0)}",
+        f"- Configured refill floor: {queue_refill.get('configured_floor', 0)} active work items",
+        f"- Refill floor satisfied: {'yes' if queue_refill.get('floor_satisfied') else 'no'}",
+        f"- Bundles submitted this cycle: {queue_refill.get('submitted_bundle_count', 0)}",
         f"- Objective tasks generated this cycle: {objective_result.get('generated_count', 0)}",
         f"- Backlog codebase tasks generated this cycle: {backlog_result.get('codebase_generated_count', 0)}",
         "",
@@ -1701,6 +2070,8 @@ def _write_taskboard_doc(
         "`python scripts/refactor_agent_supervisor.py status`.",
         "- Stop the background supervisor and its managed workers cleanly with "
         "`python scripts/refactor_agent_supervisor.py stop`.",
+        "- Each seed/daemon cycle regenerates this document and `refactor_goals.json` after "
+        "deduplicating active goal/subgoal bundles and refilling queued work to the configured floor.",
         "",
         "## Goals",
         "",
@@ -1712,12 +2083,26 @@ def _write_taskboard_doc(
             lines.append(f"#### {subgoal['id']}: {subgoal['title']}")
             lines.append("")
             for task in subgoal.get("tasks", []):
-                lines.append(f"- [{task.priority}] {task.title}")
+                task_id = resolved_task_ids[id(task)]
+                status = task_statuses.get(task_id, "unknown")
+                lines.append(f"- [{status_marks.get(status, '?')}] [{task.priority}] {task.title}")
                 if task.files:
                     lines.append(f"  - Files: {', '.join(f'`{f}`' for f in task.files)}")
                 lines.append(f"  - Acceptance: {'; '.join(task.acceptance)}")
                 lines.append(f"  - Validation: {'; '.join(f'`{v}`' for v in task.validation)}")
             lines.append("")
+    seed_task_ids = set(resolved_task_ids.values())
+    generated_tasks = [
+        item
+        for item in taskboard.get("tasks", [])
+        if isinstance(item, dict) and item.get("task_id") not in seed_task_ids
+    ]
+    if generated_tasks:
+        lines.extend(["## Generated and Refined Tasks", ""])
+        for item in generated_tasks:
+            mark = status_marks.get(str(item.get("status")), "?")
+            lines.append(f"- [{mark}] {item.get('task_id')} {item.get('title')}")
+        lines.append("")
     TASKBOARD_DOC_PATH.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 

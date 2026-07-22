@@ -1,6 +1,1164 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-22T03:46:05Z",
+  "generated_at": "2026-07-22T04:00:53Z",
+  "goals": [
+    {
+      "id": "G1",
+      "priority": "P0",
+      "subgoals": [
+        {
+          "id": "G1.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "A short module ownership map exists.",
+                "Entrypoints are grouped by CLI, web, mediator, and workflow role."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "mediator/mediator.py",
+                "applications/complaint_workspace.py",
+                "tests/test_claim_support_review_playwright_smoke.py",
+                "scripts/synthesize_hacc_complaint.py",
+                "tests/test_review_api.py",
+                "complaint_phases/denoiser.py"
+              ],
+              "goal_id": "G1",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Large modules dominate change risk and need explicit boundaries before extraction.",
+              "stable_key": "g1:g1.s1:create an entrypoint and ownership map for the largest runtime modules",
+              "status": "complete",
+              "subgoal_id": "G1.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-001",
+              "title": "Create an entrypoint and ownership map for the largest runtime modules",
+              "validation": [
+                "python -m pytest tests/test_package_imports.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Architecture docs identify allowed imports.",
+                "New work has a simple rule for where shared code belongs."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "docs/ARCHITECTURE.md",
+                "pyproject.toml"
+              ],
+              "goal_id": "G1",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Refactors need a clear import direction to avoid moving complexity around.",
+              "stable_key": "g1:g1.s1:document allowed dependency direction between applications, mediator, phases, integrations, and lib",
+              "status": "complete",
+              "subgoal_id": "G1.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-002",
+              "title": "Document allowed dependency direction between applications, mediator, phases, integrations, and lib",
+              "validation": [
+                "python -m pytest tests/test_package_imports.py -q"
+              ]
+            }
+          ],
+          "title": "Map package ownership and runtime entrypoints"
+        },
+        {
+          "id": "G1.S2",
+          "tasks": [
+            {
+              "acceptance": [
+                "No production entrypoint mutates sys.path for normal imports.",
+                "Explicit exceptions are isolated to scripts/tests."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "scripts/graphrag_email_manifest.py",
+                "scripts/import_gmail_evidence.py",
+                "scripts/import_local_eml_directory.py",
+                "scripts/master_case_email.py",
+                "scripts/process_hacc_pdfs_to_kg.py",
+                "scripts/run_gmail_duckdb_pipeline.py",
+                "scripts/run_hacc_adversarial_report.py",
+                "scripts/run_hacc_grounded_pipeline.py",
+                "scripts/run_hacc_preset_matrix.py"
+              ],
+              "goal_id": "G1",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.",
+              "stable_key": "g1:g1.s2:replace production sys.path mutation with package-level imports or adapter loader calls",
+              "status": "needed",
+              "subgoal_id": "G1.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-003",
+              "title": "Replace production sys.path mutation with package-level imports or adapter loader calls",
+              "validation": [
+                "python -m pytest tests/test_package_imports.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Production direct imports are replaced or documented.",
+                "Degraded mode still imports cleanly."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "applications/complaint_cli.py",
+                "applications/complaint_workspace.py",
+                "applications/dashboard_ui.py",
+                "complaint_generator/agentic_evidence_download.py",
+                "complaint_generator/data_migration.py",
+                "complaint_generator/email_agentic_search.py",
+                "complaint_generator/email_authority_enrichment.py",
+                "complaint_generator/email_credentials.py",
+                "complaint_generator/email_graphrag.py"
+              ],
+              "goal_id": "G1",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Optional dependency behavior should stay behind the adapter boundary.",
+              "stable_key": "g1:g1.s2:route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing",
+              "status": "needed",
+              "subgoal_id": "G1.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-004",
+              "title": "Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing",
+              "validation": [
+                "python -m pytest tests/test_ipfs_adapter_layer.py -q"
+              ]
+            }
+          ],
+          "title": "Remove ad hoc import path behavior from production surfaces"
+        }
+      ],
+      "title": "Stabilize repository boundaries"
+    },
+    {
+      "id": "G2",
+      "priority": "P0",
+      "subgoals": [
+        {
+          "id": "G2.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "One cohesive service is extracted.",
+                "Existing imports continue to resolve."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "mediator/mediator.py",
+                "mediator/__init__.py"
+              ],
+              "goal_id": "G2",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "The mediator is the largest runtime file and carries high regression risk.",
+              "stable_key": "g2:g2.s1:split mediator/mediator.py by workflow service while preserving public api compatibility",
+              "status": "needed",
+              "subgoal_id": "G2.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-005",
+              "title": "Split mediator/mediator.py by workflow service while preserving public API compatibility",
+              "validation": [
+                "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "At least one cohesive helper group moves behind a stable import.",
+                "No payload contract changes without tests."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "mediator/claim_support_hooks.py"
+              ],
+              "goal_id": "G2",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Claim support hooks are large enough to hide unrelated concerns.",
+              "stable_key": "g2:g2.s1:move claim support orchestration helpers into focused private modules",
+              "status": "needed",
+              "subgoal_id": "G2.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-006",
+              "title": "Move claim support orchestration helpers into focused private modules",
+              "validation": [
+                "python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q"
+              ]
+            }
+          ],
+          "title": "Extract mediator service seams"
+        },
+        {
+          "id": "G2.S2",
+          "tasks": [
+            {
+              "acceptance": [
+                "One handler group is isolated.",
+                "Routes keep the same response shape."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "applications/complaint_workspace.py"
+              ],
+              "goal_id": "G2",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "The workspace module mixes UI routing, state shaping, and workflow calls.",
+              "stable_key": "g2:g2.s2:extract complaint workspace request handlers from ui state helpers",
+              "status": "needed",
+              "subgoal_id": "G2.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-007",
+              "title": "Extract complaint workspace request handlers from UI state helpers",
+              "validation": [
+                "python -m pytest tests/test_review_api.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Fixture builders are named and reusable.",
+                "Playwright smoke tests remain stable."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "applications/dashboard_ui.py",
+                "playwright/server.js"
+              ],
+              "goal_id": "G2",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Dashboard behavior is harder to test when fixtures and live assembly are interleaved.",
+              "stable_key": "g2:g2.s2:separate dashboard fixture data from live route logic",
+              "status": "needed",
+              "subgoal_id": "G2.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-008",
+              "title": "Separate dashboard fixture data from live route logic",
+              "validation": [
+                "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q"
+              ]
+            }
+          ],
+          "title": "Reduce application surface coupling"
+        }
+      ],
+      "title": "Decompose oversized orchestration modules"
+    },
+    {
+      "id": "G3",
+      "priority": "P0",
+      "subgoals": [
+        {
+          "id": "G3.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "All adapter groups report stable keys.",
+                "Missing optional extras produce actionable reasons."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "integrations/ipfs_datasets/capabilities.py",
+                "integrations/ipfs_datasets/loader.py"
+              ],
+              "goal_id": "G3",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "The existing backlog identifies adapter capability reporting as incomplete.",
+              "stable_key": "g3:g3.s1:standardize capability status and degraded-reason payloads across adapters",
+              "status": "needed",
+              "subgoal_id": "G3.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-009",
+              "title": "Standardize capability status and degraded-reason payloads across adapters",
+              "validation": [
+                "python -m pytest tests/test_ipfs_adapter_layer.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Evidence, authority, and web ingestion can call one parse contract.",
+                "Fallback mode preserves current behavior."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "integrations/ipfs_datasets/documents.py",
+                "mediator/evidence_hooks.py"
+              ],
+              "goal_id": "G3",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Document parsing is still fallback-oriented and should be reusable across ingestion paths.",
+              "stable_key": "g3:g3.s1:promote document parsing into a shared ingestion contract",
+              "status": "needed",
+              "subgoal_id": "G3.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-010",
+              "title": "Promote document parsing into a shared ingestion contract",
+              "validation": [
+                "python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q"
+              ]
+            }
+          ],
+          "title": "Normalize IPFS datasets adapter payloads"
+        },
+        {
+          "id": "G3.S2",
+          "tasks": [
+            {
+              "acceptance": [
+                "Interfaces specify persistence, query, and provenance fields.",
+                "Fallback graph behavior remains covered."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "integrations/ipfs_datasets/graphs.py",
+                "complaint_phases/knowledge_graph.py"
+              ],
+              "goal_id": "G3",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Graph support currently lacks a durable query plane.",
+              "stable_key": "g3:g3.s2:define graph persistence and query interfaces before moving support scoring",
+              "status": "needed",
+              "subgoal_id": "G3.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-011",
+              "title": "Define graph persistence and query interfaces before moving support scoring",
+              "validation": [
+                "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Logic status distinguishes unavailable, degraded, and implemented.",
+                "Callers do not branch on fragile strings."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "integrations/ipfs_datasets/logic.py",
+                "lib/formal_logic"
+              ],
+              "goal_id": "G3",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Formal validation should fail predictably when unavailable.",
+              "stable_key": "g3:g3.s2:turn not_implemented logic paths into explicit capability-gated contracts",
+              "status": "needed",
+              "subgoal_id": "G3.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-012",
+              "title": "Turn not_implemented logic paths into explicit capability-gated contracts",
+              "validation": [
+                "python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q"
+              ]
+            }
+          ],
+          "title": "Clarify graph, GraphRAG, and logic adapter boundaries"
+        }
+      ],
+      "title": "Harden adapter contracts and degraded mode"
+    },
+    {
+      "id": "G4",
+      "priority": "P1",
+      "subgoals": [
+        {
+          "id": "G4.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "A documented test lane map exists.",
+                "Each P0 workstream has a named validation command."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "pytest.ini",
+                "Makefile",
+                "docs/VERIFICATION_SUMMARY.md"
+              ],
+              "goal_id": "G4",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "The repo has many tests; refactor agents need fast confidence lanes.",
+              "stable_key": "g4:g4.s1:define smoke, adapter, mediator, document, and ui test lanes",
+              "status": "needed",
+              "subgoal_id": "G4.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-013",
+              "title": "Define smoke, adapter, mediator, document, and UI test lanes",
+              "validation": [
+                "python -m pytest --collect-only -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Tests catch direct production imports where adapters are required.",
+                "Tests avoid blocking intentional test-only imports."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "tests",
+                "pyproject.toml"
+              ],
+              "goal_id": "G4",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Dependency drift is a recurring refactor risk.",
+              "stable_key": "g4:g4.s1:add import and dependency-boundary tests for production modules",
+              "status": "needed",
+              "subgoal_id": "G4.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-014",
+              "title": "Add import and dependency-boundary tests for production modules",
+              "validation": [
+                "python -m pytest tests/test_package_imports.py -q"
+              ]
+            }
+          ],
+          "title": "Create focused test lanes for refactor work"
+        }
+      ],
+      "title": "Improve validation speed and confidence"
+    },
+    {
+      "id": "G5",
+      "priority": "P0",
+      "subgoals": [
+        {
+          "id": "G5.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "Queued task count is maintained above the configured floor.",
+                "Docs and JSON state are regenerated each cycle."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "scripts/refactor_agent_supervisor.py",
+                "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
+              ],
+              "goal_id": "G5",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "The requested supervisor needs a refill loop and visible board state.",
+              "stable_key": "g5:g5.s1:keep the refactor taskboard synchronized with generated goals and subgoals",
+              "status": "needed",
+              "subgoal_id": "G5.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-015",
+              "title": "Keep the refactor taskboard synchronized with generated goals and subgoals",
+              "validation": [
+                "python scripts/refactor_agent_supervisor.py seed --once"
+              ]
+            },
+            {
+              "acceptance": [
+                "Status JSON includes pid, heartbeat, scan summary, and counts.",
+                "Stop command terminates the daemon cleanly."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "data/refactor_supervisor"
+              ],
+              "goal_id": "G5",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Long-running automation needs inspectable state and a clean stop path.",
+              "stable_key": "g5:g5.s1:record supervisor status, scan metrics, and queue counts for handoff",
+              "status": "complete",
+              "subgoal_id": "G5.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-016",
+              "title": "Record supervisor status, scan metrics, and queue counts for handoff",
+              "validation": [
+                "python scripts/refactor_agent_supervisor.py status"
+              ]
+            }
+          ],
+          "title": "Operate a durable refactor taskboard"
+        }
+      ],
+      "title": "Make automation observable and refillable"
+    },
+    {
+      "id": "G6",
+      "priority": "P1",
+      "subgoals": [
+        {
+          "id": "G6.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "Top production broad-exception clusters are documented.",
+                "At least one cluster returns a typed degraded result."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "mediator/mediator.py",
+                "mediator/evidence_hooks.py",
+                "integrations/ipfs_datasets/search.py"
+              ],
+              "goal_id": "G6",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "The scan found many broad exception handlers; refactors need predictable failure semantics.",
+              "stable_key": "g6:g6.s1:audit broad exception handlers in mediator and adapter paths",
+              "status": "needed",
+              "subgoal_id": "G6.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-017",
+              "title": "Audit broad exception handlers in mediator and adapter paths",
+              "validation": [
+                "python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Intentional ignores are named.",
+                "Unexpected failures leave diagnostic breadcrumbs."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "applications/ui_review.py",
+                "complaint_generator/ui_optimizer_daemon.py",
+                "mediator/state.py"
+              ],
+              "goal_id": "G6",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Silent failures hide regressions during long-running automation.",
+              "stable_key": "g6:g6.s1:convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks",
+              "status": "needed",
+              "subgoal_id": "G6.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-018",
+              "title": "Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks",
+              "validation": [
+                "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q"
+              ]
+            }
+          ],
+          "title": "Replace silent failures with typed outcomes"
+        },
+        {
+          "id": "G6.S2",
+          "tasks": [
+            {
+              "acceptance": [
+                "Status payloads include status, pid, updated_at, artifacts, and last_error where applicable.",
+                "Existing CLI tests remain compatible."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "complaint_generator/ui_optimizer_daemon.py",
+                "integrations/ipfs_datasets/scraper_daemon.py",
+                "scripts/gmail_duckdb_daemon.py"
+              ],
+              "goal_id": "G6",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Multiple daemon surfaces should be inspectable with the same status fields.",
+              "stable_key": "g6:g6.s2:standardize daemon status payload shape across ui, scraper, gmail, and refactor supervisors",
+              "status": "needed",
+              "subgoal_id": "G6.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-019",
+              "title": "Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors",
+              "validation": [
+                "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Docs explain where to find pid, log, status, and queue files.",
+                "Troubleshooting includes stale running task recovery."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "docs/OBSERVABILITY_INDEX.md",
+                "docs/observability/TROUBLESHOOTING.md"
+              ],
+              "goal_id": "G6",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P2",
+              "rationale": "Operators need consistent guidance for stalled background workflows.",
+              "stable_key": "g6:g6.s2:add queue count and last-cycle metrics to long-running automation docs",
+              "status": "needed",
+              "subgoal_id": "G6.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-020",
+              "title": "Add queue count and last-cycle metrics to long-running automation docs",
+              "validation": [
+                "python scripts/refactor_agent_supervisor.py status"
+              ]
+            }
+          ],
+          "title": "Unify runtime status payloads"
+        }
+      ],
+      "title": "Pay down error-handling and observability debt"
+    },
+    {
+      "id": "G7",
+      "priority": "P1",
+      "subgoals": [
+        {
+          "id": "G7.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "DTO helpers cover coverage, follow-up, and support-path summaries.",
+                "Route response snapshots stay stable."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "applications/review_api.py",
+                "applications/ui_review.py",
+                "mediator/claim_support_hooks.py"
+              ],
+              "goal_id": "G7",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Review screens depend on stable payloads that should not be assembled ad hoc in route handlers.",
+              "stable_key": "g7:g7.s1:move review payload normalization behind explicit dto helpers",
+              "status": "needed",
+              "subgoal_id": "G7.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-021",
+              "title": "Move review payload normalization behind explicit DTO helpers",
+              "validation": [
+                "python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Shared builders remove repeated setup.",
+                "Screenshots still render with representative support states."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "tests/test_claim_support_review_playwright_smoke.py",
+                "tests/test_review_surface_site_playwright.py"
+              ],
+              "goal_id": "G7",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Large Playwright tests should share fixture setup before UI refactors.",
+              "stable_key": "g7:g7.s1:create fixture builders for playwright review and dashboard smoke tests",
+              "status": "needed",
+              "subgoal_id": "G7.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-022",
+              "title": "Create fixture builders for Playwright review and dashboard smoke tests",
+              "validation": [
+                "python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q"
+              ]
+            }
+          ],
+          "title": "Separate review API contracts from display assembly"
+        }
+      ],
+      "title": "Rationalize frontend and review surfaces"
+    },
+    {
+      "id": "G8",
+      "priority": "P0",
+      "subgoals": [
+        {
+          "id": "G8.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "Each P0 backlog workstream maps to at least one refactor goal.",
+                "Duplicated tasks are merged or explicitly scoped."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md",
+                "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
+              ],
+              "goal_id": "G8",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Existing roadmap work should feed the automated taskboard rather than drift separately.",
+              "stable_key": "g8:g8.s1:cross-link ipfs datasets execution backlog tasks to refactor supervisor goals",
+              "status": "needed",
+              "subgoal_id": "G8.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-023",
+              "title": "Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals",
+              "validation": [
+                "python scripts/refactor_agent_supervisor.py seed --once"
+              ]
+            },
+            {
+              "acceptance": [
+                "The first three claims are small, testable, and dependency-ordered.",
+                "Each claim names exact validation commands."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "data/refactor_supervisor/refactor_goals.json"
+              ],
+              "goal_id": "G8",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "A robust board still needs a practical starting order.",
+              "stable_key": "g8:g8.s1:define first three implementation claims from the queued taskboard",
+              "status": "needed",
+              "subgoal_id": "G8.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-024",
+              "title": "Define first three implementation claims from the queued taskboard",
+              "validation": [
+                "python scripts/refactor_agent_supervisor.py status"
+              ]
+            }
+          ],
+          "title": "Convert existing roadmaps into executable slices"
+        },
+        {
+          "id": "G8.S2",
+          "tasks": [
+            {
+              "acceptance": [
+                "Status output or a new command lists next tasks by priority.",
+                "Output is stable enough for automation."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "scripts/refactor_agent_supervisor.py"
+              ],
+              "goal_id": "G8",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Agents need a simple way to see the next work without opening DuckDB manually.",
+              "stable_key": "g8:g8.s2:add a taskboard inspection command that prints queued refactor tasks compactly",
+              "status": "needed",
+              "subgoal_id": "G8.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-025",
+              "title": "Add a taskboard inspection command that prints queued refactor tasks compactly",
+              "validation": [
+                "python scripts/refactor_agent_supervisor.py status"
+              ]
+            },
+            {
+              "acceptance": [
+                "Running seed twice does not duplicate active tasks.",
+                "Payloads include goal, subgoal, priority, acceptance, and validation."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "tests/test_refactor_agent_supervisor.py",
+                "scripts/refactor_agent_supervisor.py"
+              ],
+              "goal_id": "G8",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "The supervisor itself should not duplicate tasks or emit malformed payloads.",
+              "stable_key": "g8:g8.s2:create tests for refactor supervisor seed idempotence and task payload schema",
+              "status": "needed",
+              "subgoal_id": "G8.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-026",
+              "title": "Create tests for refactor supervisor seed idempotence and task payload schema",
+              "validation": [
+                "python -m pytest tests/test_refactor_agent_supervisor.py -q"
+              ]
+            }
+          ],
+          "title": "Keep generated artifacts reviewable"
+        }
+      ],
+      "title": "Prepare incremental implementation slices"
+    },
+    {
+      "id": "G9",
+      "priority": "P0",
+      "subgoals": [
+        {
+          "id": "G9.S1",
+          "tasks": [
+            {
+              "acceptance": [
+                "Every task has a stable canonical key or CID independent of board path and display id.",
+                "Legacy markdown tasks migrate idempotently with board namespace provenance.",
+                "Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.",
+                "Refill cannot create a second active task for the same canonical work item."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous.",
+              "stable_key": "g9:g9.s1:introduce canonical task identity and a durable supervisor task ledger",
+              "status": "complete",
+              "subgoal_id": "G9.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-036",
+              "title": "Introduce canonical task identity and a durable supervisor task ledger",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "A persistent scheduler discovers new and refilled tasks without restart.",
+                "Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work.",
+                "Lane count remains within configured capacity and no task executes under two accepted leases.",
+                "The manifest is an authoritative live projection rather than a launch-time snapshot."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-036"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.",
+              "stable_key": "g9:g9.s1:replace static bundle launch with a dynamic leased worker pool",
+              "status": "complete",
+              "subgoal_id": "G9.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-037",
+              "title": "Replace static bundle launch with a dynamic leased worker pool",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "All implementation lanes enqueue merge candidates instead of racing the target checkout.",
+                "The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness.",
+                "One conflict fingerprint invokes at most one active resolver attempt.",
+                "Bounded failures enter quarantine with a durable receipt instead of a polling retry loop."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-037"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Independent lanes currently race to merge and repeatedly retry the same failed branches.",
+              "stable_key": "g9:g9.s1:integrate a deduplicating single-consumer merge train",
+              "status": "complete",
+              "subgoal_id": "G9.S1",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-038",
+              "title": "Integrate a deduplicating single-consumer merge train",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q"
+              ]
+            }
+          ],
+          "title": "Establish canonical coordination and merge flow"
+        },
+        {
+          "id": "G9.S2",
+          "tasks": [
+            {
+              "acceptance": [
+                "Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance.",
+                "Only tasks whose prerequisite merge receipts succeeded are claimable.",
+                "Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority.",
+                "Cycles and missing dependencies produce bounded repair evidence rather than deadlock."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-037"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "Goal parents are currently sorting hints while generated Profile G tasks carry no dependency task CIDs.",
+              "stable_key": "g9:g9.s2:materialize a task dependency dag and schedule its critical path",
+              "status": "complete",
+              "subgoal_id": "G9.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-039",
+              "title": "Materialize a task dependency DAG and schedule its critical path",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Conflict surfaces include all predicted files, AST symbols, interfaces, submodules, and generated artifacts.",
+                "Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.",
+                "Actual branch diffs and conflict receipts update future conflict weights.",
+                "Planner output explains every co-location or separation decision."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-039"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P0",
+              "rationale": "The current conflict domain uses one path root and lightweight semantic similarity, which misses multi-file and symbol overlap.",
+              "stable_key": "g9:g9.s2:build an ast and changed-path conflict graph for lane coloring",
+              "status": "complete",
+              "subgoal_id": "G9.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-040",
+              "title": "Build an AST and changed-path conflict graph for lane coloring",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.",
+                "Candidates declare predicted files and symbols, dependencies, validation proof, cost, risk, and expected objective delta.",
+                "A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.",
+                "Router failure falls back to deterministic planning without blocking ready work."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-039"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Profile G currently records a single constant-scored plan branch and the LLM proposal router is not part of scheduler decisions.",
+              "stable_key": "g9:g9.s2:use llm_router to generate and evaluate structured plan branches",
+              "status": "needed",
+              "subgoal_id": "G9.S2",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-041",
+              "title": "Use llm_router to generate and evaluate structured plan branches",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q"
+              ]
+            }
+          ],
+          "title": "Plan from dependencies, conflicts, and objective value"
+        },
+        {
+          "id": "G9.S3",
+          "tasks": [
+            {
+              "acceptance": [
+                "Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity.",
+                "Scheduler honors llm_router health, quota, latency, context, and token-budget constraints.",
+                "Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.",
+                "Idle lanes advertise zero occupied capacity and can be reassigned."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-037",
+                "REF-041"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Resource class, capability fit, and lane capacity are currently static even when workers are idle or providers are rate-limited.",
+              "stable_key": "g9:g9.s3:schedule lanes from live resources and llm_router provider capacity",
+              "status": "needed",
+              "subgoal_id": "G9.S3",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-042",
+              "title": "Schedule lanes from live resources and llm_router provider capacity",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "Cheap deterministic checks run before expensive tests and fail fast.",
+                "Independent validations run in parallel under a bounded resource budget.",
+                "Cache keys include target commit, command, relevant environment, and dependency state.",
+                "Impact selection is conservative, explainable, and escalates to broader validation before merge completion."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-038"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Validation commands currently run serially without changed-file impact selection or reusable baseline results.",
+              "stable_key": "g9:g9.s3:add impact-selected cached and parallel validation stages",
+              "status": "needed",
+              "subgoal_id": "G9.S3",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-043",
+              "title": "Add impact-selected cached and parallel validation stages",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q"
+              ]
+            }
+          ],
+          "title": "Adapt execution capacity and validation cost"
+        },
+        {
+          "id": "G9.S4",
+          "tasks": [
+            {
+              "acceptance": [
+                "One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases.",
+                "Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost.",
+                "Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity.",
+                "Scheduler decisions consume the same snapshot exposed to operators."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-037",
+                "REF-038",
+                "REF-039"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P1",
+              "rationale": "Status is split across launch manifests, wrapper files, lane state, and event logs, so planners cannot measure useful capacity.",
+              "stable_key": "g9:g9.s4:publish authoritative throughput metrics and scheduler state",
+              "status": "needed",
+              "subgoal_id": "G9.S4",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-044",
+              "title": "Publish authoritative throughput metrics and scheduler state",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q"
+              ]
+            },
+            {
+              "acceptance": [
+                "AST and evidence records are reused by blob hash and only changed files are reparsed.",
+                "Deleted and renamed files invalidate stale evidence deterministically.",
+                "Clean worktrees and dependency setups can be pooled without sharing task-local mutations.",
+                "Cold and warm paths produce equivalent plans and validation results with measured warm-path savings."
+              ],
+              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
+              "depends_on": [
+                "REF-040",
+                "REF-042",
+                "REF-043",
+                "REF-044"
+              ],
+              "files": [
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
+                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py"
+              ],
+              "goal_id": "G9",
+              "objective": "Refactor complaint-generator safely and incrementally.",
+              "priority": "P2",
+              "rationale": "Refill scans reread the tracked codebase and each implementation creates fresh worktree and submodule setup even when inputs are unchanged.",
+              "stable_key": "g9:g9.s4:make ast scans and implementation workspaces incremental and reusable",
+              "status": "needed",
+              "subgoal_id": "G9.S4",
+              "supervisor": "refactor_agent_supervisor",
+              "task_id": "REF-045",
+              "title": "Make AST scans and implementation workspaces incremental and reusable",
+              "validation": [
+                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q"
+              ]
+            }
+          ],
+          "title": "Close the scheduler feedback and lifecycle loop"
+        }
+      ],
+      "title": "Increase agent-supervisor planning quality and throughput"
+    }
+  ],
   "implementation_claims": [
     {
       "acceptance": [
@@ -67,1128 +1225,6 @@
       "validation": [
         "python -m pytest tests/test_ipfs_adapter_layer.py -q"
       ]
-    }
-  ],
-  "goals": [
-    {
-      "id": "G1",
-      "priority": "P0",
-      "subgoals": [
-        {
-          "id": "G1.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "A short module ownership map exists.",
-                "Entrypoints are grouped by CLI, web, mediator, and workflow role."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "mediator/mediator.py",
-                "applications/complaint_workspace.py",
-                "tests/test_claim_support_review_playwright_smoke.py",
-                "scripts/synthesize_hacc_complaint.py",
-                "tests/test_review_api.py",
-                "complaint_phases/denoiser.py"
-              ],
-              "goal_id": "G1",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Large modules dominate change risk and need explicit boundaries before extraction.",
-              "stable_key": "g1:g1.s1:create an entrypoint and ownership map for the largest runtime modules",
-              "subgoal_id": "G1.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Create an entrypoint and ownership map for the largest runtime modules",
-              "validation": [
-                "python -m pytest tests/test_package_imports.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Architecture docs identify allowed imports.",
-                "New work has a simple rule for where shared code belongs."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "docs/ARCHITECTURE.md",
-                "pyproject.toml"
-              ],
-              "goal_id": "G1",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Refactors need a clear import direction to avoid moving complexity around.",
-              "stable_key": "g1:g1.s1:document allowed dependency direction between applications, mediator, phases, integrations, and lib",
-              "subgoal_id": "G1.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Document allowed dependency direction between applications, mediator, phases, integrations, and lib",
-              "validation": [
-                "python -m pytest tests/test_package_imports.py -q"
-              ]
-            }
-          ],
-          "title": "Map package ownership and runtime entrypoints"
-        },
-        {
-          "id": "G1.S2",
-          "tasks": [
-            {
-              "acceptance": [
-                "No production entrypoint mutates sys.path for normal imports.",
-                "Explicit exceptions are isolated to scripts/tests."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "scripts/graphrag_email_manifest.py",
-                "scripts/import_gmail_evidence.py",
-                "scripts/import_local_eml_directory.py",
-                "scripts/master_case_email.py",
-                "scripts/process_hacc_pdfs_to_kg.py",
-                "scripts/run_gmail_duckdb_pipeline.py",
-                "scripts/run_hacc_adversarial_report.py",
-                "scripts/run_hacc_grounded_pipeline.py",
-                "scripts/run_hacc_preset_matrix.py"
-              ],
-              "goal_id": "G1",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.",
-              "stable_key": "g1:g1.s2:replace production sys.path mutation with package-level imports or adapter loader calls",
-              "subgoal_id": "G1.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Replace production sys.path mutation with package-level imports or adapter loader calls",
-              "validation": [
-                "python -m pytest tests/test_package_imports.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Production direct imports are replaced or documented.",
-                "Degraded mode still imports cleanly."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "applications/complaint_cli.py",
-                "applications/complaint_workspace.py",
-                "applications/dashboard_ui.py",
-                "complaint_generator/agentic_evidence_download.py",
-                "complaint_generator/data_migration.py",
-                "complaint_generator/email_agentic_search.py",
-                "complaint_generator/email_authority_enrichment.py",
-                "complaint_generator/email_credentials.py",
-                "complaint_generator/email_graphrag.py"
-              ],
-              "goal_id": "G1",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Optional dependency behavior should stay behind the adapter boundary.",
-              "stable_key": "g1:g1.s2:route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing",
-              "subgoal_id": "G1.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing",
-              "validation": [
-                "python -m pytest tests/test_ipfs_adapter_layer.py -q"
-              ]
-            }
-          ],
-          "title": "Remove ad hoc import path behavior from production surfaces"
-        }
-      ],
-      "title": "Stabilize repository boundaries"
-    },
-    {
-      "id": "G2",
-      "priority": "P0",
-      "subgoals": [
-        {
-          "id": "G2.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "One cohesive service is extracted.",
-                "Existing imports continue to resolve."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "mediator/mediator.py",
-                "mediator/__init__.py"
-              ],
-              "goal_id": "G2",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "The mediator is the largest runtime file and carries high regression risk.",
-              "stable_key": "g2:g2.s1:split mediator/mediator.py by workflow service while preserving public api compatibility",
-              "subgoal_id": "G2.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Split mediator/mediator.py by workflow service while preserving public API compatibility",
-              "validation": [
-                "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "At least one cohesive helper group moves behind a stable import.",
-                "No payload contract changes without tests."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "mediator/claim_support_hooks.py"
-              ],
-              "goal_id": "G2",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Claim support hooks are large enough to hide unrelated concerns.",
-              "stable_key": "g2:g2.s1:move claim support orchestration helpers into focused private modules",
-              "subgoal_id": "G2.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Move claim support orchestration helpers into focused private modules",
-              "validation": [
-                "python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q"
-              ]
-            }
-          ],
-          "title": "Extract mediator service seams"
-        },
-        {
-          "id": "G2.S2",
-          "tasks": [
-            {
-              "acceptance": [
-                "One handler group is isolated.",
-                "Routes keep the same response shape."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "applications/complaint_workspace.py"
-              ],
-              "goal_id": "G2",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "The workspace module mixes UI routing, state shaping, and workflow calls.",
-              "stable_key": "g2:g2.s2:extract complaint workspace request handlers from ui state helpers",
-              "subgoal_id": "G2.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Extract complaint workspace request handlers from UI state helpers",
-              "validation": [
-                "python -m pytest tests/test_review_api.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Fixture builders are named and reusable.",
-                "Playwright smoke tests remain stable."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "applications/dashboard_ui.py",
-                "playwright/server.js"
-              ],
-              "goal_id": "G2",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Dashboard behavior is harder to test when fixtures and live assembly are interleaved.",
-              "stable_key": "g2:g2.s2:separate dashboard fixture data from live route logic",
-              "subgoal_id": "G2.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Separate dashboard fixture data from live route logic",
-              "validation": [
-                "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q"
-              ]
-            }
-          ],
-          "title": "Reduce application surface coupling"
-        }
-      ],
-      "title": "Decompose oversized orchestration modules"
-    },
-    {
-      "id": "G3",
-      "priority": "P0",
-      "subgoals": [
-        {
-          "id": "G3.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "All adapter groups report stable keys.",
-                "Missing optional extras produce actionable reasons."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "integrations/ipfs_datasets/capabilities.py",
-                "integrations/ipfs_datasets/loader.py"
-              ],
-              "goal_id": "G3",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "The existing backlog identifies adapter capability reporting as incomplete.",
-              "stable_key": "g3:g3.s1:standardize capability status and degraded-reason payloads across adapters",
-              "subgoal_id": "G3.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Standardize capability status and degraded-reason payloads across adapters",
-              "validation": [
-                "python -m pytest tests/test_ipfs_adapter_layer.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Evidence, authority, and web ingestion can call one parse contract.",
-                "Fallback mode preserves current behavior."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "integrations/ipfs_datasets/documents.py",
-                "mediator/evidence_hooks.py"
-              ],
-              "goal_id": "G3",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Document parsing is still fallback-oriented and should be reusable across ingestion paths.",
-              "stable_key": "g3:g3.s1:promote document parsing into a shared ingestion contract",
-              "subgoal_id": "G3.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Promote document parsing into a shared ingestion contract",
-              "validation": [
-                "python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q"
-              ]
-            }
-          ],
-          "title": "Normalize IPFS datasets adapter payloads"
-        },
-        {
-          "id": "G3.S2",
-          "tasks": [
-            {
-              "acceptance": [
-                "Interfaces specify persistence, query, and provenance fields.",
-                "Fallback graph behavior remains covered."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "integrations/ipfs_datasets/graphs.py",
-                "complaint_phases/knowledge_graph.py"
-              ],
-              "goal_id": "G3",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Graph support currently lacks a durable query plane.",
-              "stable_key": "g3:g3.s2:define graph persistence and query interfaces before moving support scoring",
-              "subgoal_id": "G3.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Define graph persistence and query interfaces before moving support scoring",
-              "validation": [
-                "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Logic status distinguishes unavailable, degraded, and implemented.",
-                "Callers do not branch on fragile strings."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "integrations/ipfs_datasets/logic.py",
-                "lib/formal_logic"
-              ],
-              "goal_id": "G3",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Formal validation should fail predictably when unavailable.",
-              "stable_key": "g3:g3.s2:turn not_implemented logic paths into explicit capability-gated contracts",
-              "subgoal_id": "G3.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Turn not_implemented logic paths into explicit capability-gated contracts",
-              "validation": [
-                "python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q"
-              ]
-            }
-          ],
-          "title": "Clarify graph, GraphRAG, and logic adapter boundaries"
-        }
-      ],
-      "title": "Harden adapter contracts and degraded mode"
-    },
-    {
-      "id": "G4",
-      "priority": "P1",
-      "subgoals": [
-        {
-          "id": "G4.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "A documented test lane map exists.",
-                "Each P0 workstream has a named validation command."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "pytest.ini",
-                "Makefile",
-                "docs/VERIFICATION_SUMMARY.md"
-              ],
-              "goal_id": "G4",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "The repo has many tests; refactor agents need fast confidence lanes.",
-              "stable_key": "g4:g4.s1:define smoke, adapter, mediator, document, and ui test lanes",
-              "subgoal_id": "G4.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Define smoke, adapter, mediator, document, and UI test lanes",
-              "validation": [
-                "python -m pytest --collect-only -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Tests catch direct production imports where adapters are required.",
-                "Tests avoid blocking intentional test-only imports."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "tests",
-                "pyproject.toml"
-              ],
-              "goal_id": "G4",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Dependency drift is a recurring refactor risk.",
-              "stable_key": "g4:g4.s1:add import and dependency-boundary tests for production modules",
-              "subgoal_id": "G4.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Add import and dependency-boundary tests for production modules",
-              "validation": [
-                "python -m pytest tests/test_package_imports.py -q"
-              ]
-            }
-          ],
-          "title": "Create focused test lanes for refactor work"
-        }
-      ],
-      "title": "Improve validation speed and confidence"
-    },
-    {
-      "id": "G5",
-      "priority": "P0",
-      "subgoals": [
-        {
-          "id": "G5.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "Queued task count is maintained above the configured floor.",
-                "Docs and JSON state are regenerated each cycle."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "scripts/refactor_agent_supervisor.py",
-                "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
-              ],
-              "goal_id": "G5",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "The requested supervisor needs a refill loop and visible board state.",
-              "stable_key": "g5:g5.s1:keep the refactor taskboard synchronized with generated goals and subgoals",
-              "subgoal_id": "G5.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Keep the refactor taskboard synchronized with generated goals and subgoals",
-              "validation": [
-                "python scripts/refactor_agent_supervisor.py seed --once"
-              ]
-            },
-            {
-              "acceptance": [
-                "Status JSON includes pid, heartbeat, scan summary, and counts.",
-                "Stop command terminates the daemon cleanly."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "data/refactor_supervisor"
-              ],
-              "goal_id": "G5",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Long-running automation needs inspectable state and a clean stop path.",
-              "stable_key": "g5:g5.s1:record supervisor status, scan metrics, and queue counts for handoff",
-              "subgoal_id": "G5.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Record supervisor status, scan metrics, and queue counts for handoff",
-              "validation": [
-                "python scripts/refactor_agent_supervisor.py status"
-              ]
-            }
-          ],
-          "title": "Operate a durable refactor taskboard"
-        }
-      ],
-      "title": "Make automation observable and refillable"
-    },
-    {
-      "id": "G6",
-      "priority": "P1",
-      "subgoals": [
-        {
-          "id": "G6.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "Top production broad-exception clusters are documented.",
-                "At least one cluster returns a typed degraded result."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "mediator/mediator.py",
-                "mediator/evidence_hooks.py",
-                "integrations/ipfs_datasets/search.py"
-              ],
-              "goal_id": "G6",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "The scan found many broad exception handlers; refactors need predictable failure semantics.",
-              "stable_key": "g6:g6.s1:audit broad exception handlers in mediator and adapter paths",
-              "subgoal_id": "G6.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Audit broad exception handlers in mediator and adapter paths",
-              "validation": [
-                "python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Intentional ignores are named.",
-                "Unexpected failures leave diagnostic breadcrumbs."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "applications/ui_review.py",
-                "complaint_generator/ui_optimizer_daemon.py",
-                "mediator/state.py"
-              ],
-              "goal_id": "G6",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Silent failures hide regressions during long-running automation.",
-              "stable_key": "g6:g6.s1:convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks",
-              "subgoal_id": "G6.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks",
-              "validation": [
-                "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q"
-              ]
-            }
-          ],
-          "title": "Replace silent failures with typed outcomes"
-        },
-        {
-          "id": "G6.S2",
-          "tasks": [
-            {
-              "acceptance": [
-                "Status payloads include status, pid, updated_at, artifacts, and last_error where applicable.",
-                "Existing CLI tests remain compatible."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "complaint_generator/ui_optimizer_daemon.py",
-                "integrations/ipfs_datasets/scraper_daemon.py",
-                "scripts/gmail_duckdb_daemon.py"
-              ],
-              "goal_id": "G6",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Multiple daemon surfaces should be inspectable with the same status fields.",
-              "stable_key": "g6:g6.s2:standardize daemon status payload shape across ui, scraper, gmail, and refactor supervisors",
-              "subgoal_id": "G6.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors",
-              "validation": [
-                "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Docs explain where to find pid, log, status, and queue files.",
-                "Troubleshooting includes stale running task recovery."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "docs/OBSERVABILITY_INDEX.md",
-                "docs/observability/TROUBLESHOOTING.md"
-              ],
-              "goal_id": "G6",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P2",
-              "rationale": "Operators need consistent guidance for stalled background workflows.",
-              "stable_key": "g6:g6.s2:add queue count and last-cycle metrics to long-running automation docs",
-              "subgoal_id": "G6.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Add queue count and last-cycle metrics to long-running automation docs",
-              "validation": [
-                "python scripts/refactor_agent_supervisor.py status"
-              ]
-            }
-          ],
-          "title": "Unify runtime status payloads"
-        }
-      ],
-      "title": "Pay down error-handling and observability debt"
-    },
-    {
-      "id": "G7",
-      "priority": "P1",
-      "subgoals": [
-        {
-          "id": "G7.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "DTO helpers cover coverage, follow-up, and support-path summaries.",
-                "Route response snapshots stay stable."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "applications/review_api.py",
-                "applications/ui_review.py",
-                "mediator/claim_support_hooks.py"
-              ],
-              "goal_id": "G7",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Review screens depend on stable payloads that should not be assembled ad hoc in route handlers.",
-              "stable_key": "g7:g7.s1:move review payload normalization behind explicit dto helpers",
-              "subgoal_id": "G7.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Move review payload normalization behind explicit DTO helpers",
-              "validation": [
-                "python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Shared builders remove repeated setup.",
-                "Screenshots still render with representative support states."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "tests/test_claim_support_review_playwright_smoke.py",
-                "tests/test_review_surface_site_playwright.py"
-              ],
-              "goal_id": "G7",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Large Playwright tests should share fixture setup before UI refactors.",
-              "stable_key": "g7:g7.s1:create fixture builders for playwright review and dashboard smoke tests",
-              "subgoal_id": "G7.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Create fixture builders for Playwright review and dashboard smoke tests",
-              "validation": [
-                "python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q"
-              ]
-            }
-          ],
-          "title": "Separate review API contracts from display assembly"
-        }
-      ],
-      "title": "Rationalize frontend and review surfaces"
-    },
-    {
-      "id": "G8",
-      "priority": "P0",
-      "subgoals": [
-        {
-          "id": "G8.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "Each P0 backlog workstream maps to at least one refactor goal.",
-                "Duplicated tasks are merged or explicitly scoped."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md",
-                "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
-              ],
-              "goal_id": "G8",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Existing roadmap work should feed the automated taskboard rather than drift separately.",
-              "stable_key": "g8:g8.s1:cross-link ipfs datasets execution backlog tasks to refactor supervisor goals",
-              "subgoal_id": "G8.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals",
-              "validation": [
-                "python scripts/refactor_agent_supervisor.py seed --once"
-              ]
-            },
-            {
-              "acceptance": [
-                "The first three claims are small, testable, and dependency-ordered.",
-                "Each claim names exact validation commands."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "data/refactor_supervisor/refactor_goals.json"
-              ],
-              "goal_id": "G8",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "A robust board still needs a practical starting order.",
-              "stable_key": "g8:g8.s1:define first three implementation claims from the queued taskboard",
-              "subgoal_id": "G8.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Define first three implementation claims from the queued taskboard",
-              "validation": [
-                "python scripts/refactor_agent_supervisor.py status"
-              ]
-            }
-          ],
-          "title": "Convert existing roadmaps into executable slices"
-        },
-        {
-          "id": "G8.S2",
-          "tasks": [
-            {
-              "acceptance": [
-                "Status output or a new command lists next tasks by priority.",
-                "Output is stable enough for automation."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "scripts/refactor_agent_supervisor.py"
-              ],
-              "goal_id": "G8",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Agents need a simple way to see the next work without opening DuckDB manually.",
-              "stable_key": "g8:g8.s2:add a taskboard inspection command that prints queued refactor tasks compactly",
-              "subgoal_id": "G8.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Add a taskboard inspection command that prints queued refactor tasks compactly",
-              "validation": [
-                "python scripts/refactor_agent_supervisor.py status"
-              ]
-            },
-            {
-              "acceptance": [
-                "Running seed twice does not duplicate active tasks.",
-                "Payloads include goal, subgoal, priority, acceptance, and validation."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "tests/test_refactor_agent_supervisor.py",
-                "scripts/refactor_agent_supervisor.py"
-              ],
-              "goal_id": "G8",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "The supervisor itself should not duplicate tasks or emit malformed payloads.",
-              "stable_key": "g8:g8.s2:create tests for refactor supervisor seed idempotence and task payload schema",
-              "subgoal_id": "G8.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
-              "title": "Create tests for refactor supervisor seed idempotence and task payload schema",
-              "validation": [
-                "python -m pytest tests/test_refactor_agent_supervisor.py -q"
-              ]
-            }
-          ],
-          "title": "Keep generated artifacts reviewable"
-        }
-      ],
-      "title": "Prepare incremental implementation slices"
-    },
-    {
-      "id": "G9",
-      "priority": "P0",
-      "subgoals": [
-        {
-          "id": "G9.S1",
-          "tasks": [
-            {
-              "acceptance": [
-                "Every task has a stable canonical key or CID independent of board path and display id.",
-                "Legacy markdown tasks migrate idempotently with board namespace provenance.",
-                "Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.",
-                "Refill cannot create a second active task for the same canonical work item."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/persistent_task_queue.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous.",
-              "stable_key": "g9:g9.s1:introduce canonical task identity and a durable supervisor task ledger",
-              "subgoal_id": "G9.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-036",
-              "title": "Introduce canonical task identity and a durable supervisor task ledger",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "A persistent scheduler discovers new and refilled tasks without restart.",
-                "Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work.",
-                "Lane count remains within configured capacity and no task executes under two accepted leases.",
-                "The manifest is an authoritative live projection rather than a launch-time snapshot."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-036"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.",
-              "stable_key": "g9:g9.s1:replace static bundle launch with a dynamic leased worker pool",
-              "subgoal_id": "G9.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-037",
-              "title": "Replace static bundle launch with a dynamic leased worker pool",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "All implementation lanes enqueue merge candidates instead of racing the target checkout.",
-                "The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness.",
-                "One conflict fingerprint invokes at most one active resolver attempt.",
-                "Bounded failures enter quarantine with a durable receipt instead of a polling retry loop."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-037"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Independent lanes currently race to merge and repeatedly retry the same failed branches.",
-              "stable_key": "g9:g9.s1:integrate a deduplicating single-consumer merge train",
-              "subgoal_id": "G9.S1",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-038",
-              "title": "Integrate a deduplicating single-consumer merge train",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q"
-              ]
-            }
-          ],
-          "title": "Establish canonical coordination and merge flow"
-        },
-        {
-          "id": "G9.S2",
-          "tasks": [
-            {
-              "acceptance": [
-                "Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance.",
-                "Only tasks whose prerequisite merge receipts succeeded are claimable.",
-                "Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority.",
-                "Cycles and missing dependencies produce bounded repair evidence rather than deadlock."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-037"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "Goal parents are currently sorting hints while generated Profile G tasks carry no dependency task CIDs.",
-              "stable_key": "g9:g9.s2:materialize a task dependency dag and schedule its critical path",
-              "subgoal_id": "G9.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-039",
-              "title": "Materialize a task dependency DAG and schedule its critical path",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Conflict surfaces include all predicted files, AST symbols, interfaces, submodules, and generated artifacts.",
-                "Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.",
-                "Actual branch diffs and conflict receipts update future conflict weights.",
-                "Planner output explains every co-location or separation decision."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-039"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P0",
-              "rationale": "The current conflict domain uses one path root and lightweight semantic similarity, which misses multi-file and symbol overlap.",
-              "stable_key": "g9:g9.s2:build an ast and changed-path conflict graph for lane coloring",
-              "subgoal_id": "G9.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-040",
-              "title": "Build an AST and changed-path conflict graph for lane coloring",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.",
-                "Candidates declare predicted files and symbols, dependencies, validation proof, cost, risk, and expected objective delta.",
-                "A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.",
-                "Router failure falls back to deterministic planning without blocking ready work."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-039"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Profile G currently records a single constant-scored plan branch and the LLM proposal router is not part of scheduler decisions.",
-              "stable_key": "g9:g9.s2:use llm_router to generate and evaluate structured plan branches",
-              "subgoal_id": "G9.S2",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-041",
-              "title": "Use llm_router to generate and evaluate structured plan branches",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q"
-              ]
-            }
-          ],
-          "title": "Plan from dependencies, conflicts, and objective value"
-        },
-        {
-          "id": "G9.S3",
-          "tasks": [
-            {
-              "acceptance": [
-                "Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity.",
-                "Scheduler honors llm_router health, quota, latency, context, and token-budget constraints.",
-                "Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.",
-                "Idle lanes advertise zero occupied capacity and can be reassigned."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-037",
-                "REF-041"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Resource class, capability fit, and lane capacity are currently static even when workers are idle or providers are rate-limited.",
-              "stable_key": "g9:g9.s3:schedule lanes from live resources and llm_router provider capacity",
-              "subgoal_id": "G9.S3",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-042",
-              "title": "Schedule lanes from live resources and llm_router provider capacity",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "Cheap deterministic checks run before expensive tests and fail fast.",
-                "Independent validations run in parallel under a bounded resource budget.",
-                "Cache keys include target commit, command, relevant environment, and dependency state.",
-                "Impact selection is conservative, explainable, and escalates to broader validation before merge completion."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-038"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Validation commands currently run serially without changed-file impact selection or reusable baseline results.",
-              "stable_key": "g9:g9.s3:add impact-selected cached and parallel validation stages",
-              "subgoal_id": "G9.S3",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-043",
-              "title": "Add impact-selected cached and parallel validation stages",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q"
-              ]
-            }
-          ],
-          "title": "Adapt execution capacity and validation cost"
-        },
-        {
-          "id": "G9.S4",
-          "tasks": [
-            {
-              "acceptance": [
-                "One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases.",
-                "Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost.",
-                "Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity.",
-                "Scheduler decisions consume the same snapshot exposed to operators."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-037",
-                "REF-038",
-                "REF-039"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P1",
-              "rationale": "Status is split across launch manifests, wrapper files, lane state, and event logs, so planners cannot measure useful capacity.",
-              "stable_key": "g9:g9.s4:publish authoritative throughput metrics and scheduler state",
-              "subgoal_id": "G9.S4",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-044",
-              "title": "Publish authoritative throughput metrics and scheduler state",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q"
-              ]
-            },
-            {
-              "acceptance": [
-                "AST and evidence records are reused by blob hash and only changed files are reparsed.",
-                "Deleted and renamed files invalidate stale evidence deterministically.",
-                "Clean worktrees and dependency setups can be pooled without sharing task-local mutations.",
-                "Cold and warm paths produce equivalent plans and validation results with measured warm-path savings."
-              ],
-              "created_by": "ipfs_accelerate_py.p2p_tasks.TaskQueue",
-              "depends_on": [
-                "REF-040",
-                "REF-042",
-                "REF-043",
-                "REF-044"
-              ],
-              "files": [
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
-                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py"
-              ],
-              "goal_id": "G9",
-              "objective": "Refactor complaint-generator safely and incrementally.",
-              "priority": "P2",
-              "rationale": "Refill scans reread the tracked codebase and each implementation creates fresh worktree and submodule setup even when inputs are unchanged.",
-              "stable_key": "g9:g9.s4:make ast scans and implementation workspaces incremental and reusable",
-              "subgoal_id": "G9.S4",
-              "supervisor": "refactor_agent_supervisor",
-              "task_id": "REF-045",
-              "title": "Make AST scans and implementation workspaces incremental and reusable",
-              "validation": [
-                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q"
-              ]
-            }
-          ],
-          "title": "Close the scheduler feedback and lifecycle loop"
-        }
-      ],
-      "title": "Increase agent-supervisor planning quality and throughput"
     }
   ],
   "objective": "Refactor complaint-generator safely and incrementally.",
@@ -1303,8 +1339,8 @@
       "pytest_ini": true
     },
     "python_file_count": 439,
-    "python_total_lines": 245160,
-    "scanned_at": "2026-07-22T03:46:05Z",
+    "python_total_lines": 245387,
+    "scanned_at": "2026-07-22T04:00:37Z",
     "signals": {
       "broad_exception_count": 375,
       "direct_ipfs_import_count": 215,
@@ -1510,7 +1546,7 @@
         "tests/unit/optimizers/graphrag/test_score_analyzer.py:19",
         "tests/unit_tests/optimizers/graphrag/test_domain_aware_config.py:16"
       ],
-      "silent_pass_count": 120,
+      "silent_pass_count": 122,
       "sys_path_mutation_count": 46,
       "sys_path_mutations": [
         "scripts/graphrag_email_manifest.py:9",
@@ -1568,6 +1604,359 @@
     },
     "test_file_count": 262
   },
+  "schema": "complaint_generator.refactor_supervisor.goals.v1",
   "source_supervisor_module": "ipfs_accelerate_py.agent_supervisor",
+  "synchronization": {
+    "backlog_result": {
+      "reason": "fast_seed",
+      "skipped": true
+    },
+    "configured_refill_floor": 20,
+    "counts": {
+      "queue": {
+        "completed": 0,
+        "completed_work_items": 0,
+        "failed": 0,
+        "failed_work_items": 0,
+        "queued": 11,
+        "queued_work_items": 21,
+        "running": 0,
+        "running_work_items": 0
+      },
+      "todo": {
+        "blocked": 0,
+        "complete": 18,
+        "in_progress": 0,
+        "needed": 31
+      }
+    },
+    "goal_count": 9,
+    "objective_result": {
+      "reason": "fast_seed",
+      "skipped": true
+    },
+    "queue_refill": {
+      "available_bundle_count": 15,
+      "available_work_items": 31,
+      "configured_floor": 20,
+      "enabled": true,
+      "floor_satisfied": true,
+      "floor_unit": "active_taskboard_work_items",
+      "queued_work_items_after": 21,
+      "queued_work_items_before": 21,
+      "submitted_bundle_count": 0,
+      "submitted_queue_ids": [],
+      "submitted_task_ids": []
+    },
+    "status_projection": {
+      "blocked_count": 0,
+      "completed_count": 18,
+      "task_count": 49,
+      "updated": {},
+      "updated_file_count": 0
+    },
+    "subgoal_count": 17,
+    "synchronized_at": "2026-07-22T04:00:53Z",
+    "task_count": 36
+  },
+  "taskboard": {
+    "task_count": 49,
+    "tasks": [
+      {
+        "checkbox_id": 1,
+        "status": "complete",
+        "task_id": "REF-001",
+        "title": "Create an entrypoint and ownership map for the largest runtime modules"
+      },
+      {
+        "checkbox_id": 2,
+        "status": "complete",
+        "task_id": "REF-002",
+        "title": "Document allowed dependency direction between applications, mediator, phases, integrations, and lib"
+      },
+      {
+        "checkbox_id": 3,
+        "status": "needed",
+        "task_id": "REF-003",
+        "title": "Replace production sys.path mutation with package-level imports or adapter loader calls"
+      },
+      {
+        "checkbox_id": 4,
+        "status": "needed",
+        "task_id": "REF-004",
+        "title": "Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing"
+      },
+      {
+        "checkbox_id": 5,
+        "status": "needed",
+        "task_id": "REF-005",
+        "title": "Split mediator/mediator.py by workflow service while preserving public API compatibility"
+      },
+      {
+        "checkbox_id": 6,
+        "status": "needed",
+        "task_id": "REF-006",
+        "title": "Move claim support orchestration helpers into focused private modules"
+      },
+      {
+        "checkbox_id": 7,
+        "status": "needed",
+        "task_id": "REF-007",
+        "title": "Extract complaint workspace request handlers from UI state helpers"
+      },
+      {
+        "checkbox_id": 8,
+        "status": "needed",
+        "task_id": "REF-008",
+        "title": "Separate dashboard fixture data from live route logic"
+      },
+      {
+        "checkbox_id": 9,
+        "status": "needed",
+        "task_id": "REF-009",
+        "title": "Standardize capability status and degraded-reason payloads across adapters"
+      },
+      {
+        "checkbox_id": 10,
+        "status": "needed",
+        "task_id": "REF-010",
+        "title": "Promote document parsing into a shared ingestion contract"
+      },
+      {
+        "checkbox_id": 11,
+        "status": "needed",
+        "task_id": "REF-011",
+        "title": "Define graph persistence and query interfaces before moving support scoring"
+      },
+      {
+        "checkbox_id": 12,
+        "status": "needed",
+        "task_id": "REF-012",
+        "title": "Turn not_implemented logic paths into explicit capability-gated contracts"
+      },
+      {
+        "checkbox_id": 13,
+        "status": "needed",
+        "task_id": "REF-013",
+        "title": "Define smoke, adapter, mediator, document, and UI test lanes"
+      },
+      {
+        "checkbox_id": 14,
+        "status": "needed",
+        "task_id": "REF-014",
+        "title": "Add import and dependency-boundary tests for production modules"
+      },
+      {
+        "checkbox_id": 15,
+        "status": "needed",
+        "task_id": "REF-015",
+        "title": "Keep the refactor taskboard synchronized with generated goals and subgoals"
+      },
+      {
+        "checkbox_id": 16,
+        "status": "complete",
+        "task_id": "REF-016",
+        "title": "Record supervisor status, scan metrics, and queue counts for handoff"
+      },
+      {
+        "checkbox_id": 17,
+        "status": "needed",
+        "task_id": "REF-017",
+        "title": "Audit broad exception handlers in mediator and adapter paths"
+      },
+      {
+        "checkbox_id": 18,
+        "status": "needed",
+        "task_id": "REF-018",
+        "title": "Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks"
+      },
+      {
+        "checkbox_id": 19,
+        "status": "needed",
+        "task_id": "REF-019",
+        "title": "Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors"
+      },
+      {
+        "checkbox_id": 20,
+        "status": "needed",
+        "task_id": "REF-020",
+        "title": "Add queue count and last-cycle metrics to long-running automation docs"
+      },
+      {
+        "checkbox_id": 21,
+        "status": "needed",
+        "task_id": "REF-021",
+        "title": "Move review payload normalization behind explicit DTO helpers"
+      },
+      {
+        "checkbox_id": 22,
+        "status": "needed",
+        "task_id": "REF-022",
+        "title": "Create fixture builders for Playwright review and dashboard smoke tests"
+      },
+      {
+        "checkbox_id": 23,
+        "status": "needed",
+        "task_id": "REF-023",
+        "title": "Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals"
+      },
+      {
+        "checkbox_id": 24,
+        "status": "needed",
+        "task_id": "REF-024",
+        "title": "Define first three implementation claims from the queued taskboard"
+      },
+      {
+        "checkbox_id": 25,
+        "status": "needed",
+        "task_id": "REF-025",
+        "title": "Add a taskboard inspection command that prints queued refactor tasks compactly"
+      },
+      {
+        "checkbox_id": 26,
+        "status": "needed",
+        "task_id": "REF-026",
+        "title": "Create tests for refactor supervisor seed idempotence and task payload schema"
+      },
+      {
+        "checkbox_id": 27,
+        "status": "needed",
+        "task_id": "REF-027",
+        "title": "Resolve dirty main checkout blocking 2 worktree merges"
+      },
+      {
+        "checkbox_id": 28,
+        "status": "complete",
+        "task_id": "REF-028",
+        "title": "Close objective gap: Stabilize repository boundaries"
+      },
+      {
+        "checkbox_id": 29,
+        "status": "complete",
+        "task_id": "REF-029",
+        "title": "Close objective gap: Decompose oversized orchestration modules"
+      },
+      {
+        "checkbox_id": 30,
+        "status": "complete",
+        "task_id": "REF-030",
+        "title": "Close objective gap: Harden adapter contracts and degraded mode"
+      },
+      {
+        "checkbox_id": 31,
+        "status": "complete",
+        "task_id": "REF-031",
+        "title": "Close objective gap: Prepare incremental implementation slices"
+      },
+      {
+        "checkbox_id": 32,
+        "status": "needed",
+        "task_id": "REF-032",
+        "title": "Close objective gap: Pay down error-handling and observability debt"
+      },
+      {
+        "checkbox_id": 33,
+        "status": "needed",
+        "task_id": "REF-033",
+        "title": "Close objective gap: Rationalize frontend and review surfaces"
+      },
+      {
+        "checkbox_id": 34,
+        "status": "complete",
+        "task_id": "REF-034",
+        "title": "Resolve 2 preflight-conflicting backlogged worktree merges"
+      },
+      {
+        "checkbox_id": 35,
+        "status": "complete",
+        "task_id": "REF-035",
+        "title": "Resolve validation retry-budget failure for REF-031"
+      },
+      {
+        "checkbox_id": 36,
+        "status": "complete",
+        "task_id": "REF-036",
+        "title": "Introduce canonical task identity and a durable supervisor task ledger"
+      },
+      {
+        "checkbox_id": 37,
+        "status": "complete",
+        "task_id": "REF-037",
+        "title": "Replace static bundle launch with a dynamic leased worker pool"
+      },
+      {
+        "checkbox_id": 38,
+        "status": "complete",
+        "task_id": "REF-038",
+        "title": "Integrate a deduplicating single-consumer merge train"
+      },
+      {
+        "checkbox_id": 39,
+        "status": "complete",
+        "task_id": "REF-039",
+        "title": "Materialize a task dependency DAG and schedule its critical path"
+      },
+      {
+        "checkbox_id": 40,
+        "status": "complete",
+        "task_id": "REF-040",
+        "title": "Build an AST and changed-path conflict graph for lane coloring"
+      },
+      {
+        "checkbox_id": 41,
+        "status": "needed",
+        "task_id": "REF-041",
+        "title": "Use llm_router to generate and evaluate structured plan branches"
+      },
+      {
+        "checkbox_id": 42,
+        "status": "needed",
+        "task_id": "REF-042",
+        "title": "Schedule lanes from live resources and llm_router provider capacity"
+      },
+      {
+        "checkbox_id": 43,
+        "status": "needed",
+        "task_id": "REF-043",
+        "title": "Add impact-selected cached and parallel validation stages"
+      },
+      {
+        "checkbox_id": 44,
+        "status": "needed",
+        "task_id": "REF-044",
+        "title": "Publish authoritative throughput metrics and scheduler state"
+      },
+      {
+        "checkbox_id": 45,
+        "status": "needed",
+        "task_id": "REF-045",
+        "title": "Make AST scans and implementation workspaces incremental and reusable"
+      },
+      {
+        "checkbox_id": 46,
+        "status": "complete",
+        "task_id": "REF-046",
+        "title": "Resolve merge retry-budget failure for REF-001"
+      },
+      {
+        "checkbox_id": 47,
+        "status": "complete",
+        "task_id": "REF-047",
+        "title": "Close objective gap: Prepare incremental implementation slices"
+      },
+      {
+        "checkbox_id": 48,
+        "status": "complete",
+        "task_id": "REF-048",
+        "title": "Close objective gap: Map package ownership and runtime entrypoints"
+      },
+      {
+        "checkbox_id": 49,
+        "status": "complete",
+        "task_id": "REF-049",
+        "title": "Close objective gap: Establish canonical coordination and merge flow"
+      }
+    ]
+  },
   "todo_path": "data/refactor_supervisor/refactor_todo.md"
 }

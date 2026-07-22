@@ -9,6 +9,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g1-g1-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "A short module ownership map exists.",
+            "Entrypoints are grouped by CLI, web, mediator, and workflow role."
+          ],
           "ast_symbols": [
             "MODULE_OWNERSHIP",
             "RUNTIME_ENTRYPOINT_ROLE",
@@ -113,6 +117,7 @@
             "A short module ownership map exists.",
             "Entrypoints are grouped by CLI, web, mediator, and workflow role."
           ],
+          "parent_goal_id": "G1",
           "parent_goal_ids": [
             "G1"
           ],
@@ -124,8 +129,13 @@
             "tests/test_review_api.py",
             "complaint_phases/denoiser.py"
           ],
+          "priority": "P0",
+          "rationale": "Large modules dominate change risk and need explicit boundaries before extraction.",
+          "status": "completed",
+          "subgoal_id": "G1.S1",
           "surplus_group": "refactor/g1/g1-s1",
           "task_id": "REF-001",
+          "title": "Create an entrypoint and ownership map for the largest runtime modules",
           "todo_vector_key": "ref-001-createanentrypointandownershipmapforthelargestru",
           "validation": [
             "python -m pytest tests/test_package_imports.py -q"
@@ -134,6 +144,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Architecture docs identify allowed imports.",
+            "New work has a simple rule for where shared code belongs."
+          ],
           "ast_symbols": [],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -157,6 +171,7 @@
             "Architecture docs identify allowed imports.",
             "New work has a simple rule for where shared code belongs."
           ],
+          "parent_goal_id": "G1",
           "parent_goal_ids": [
             "G1"
           ],
@@ -164,8 +179,13 @@
             "docs/ARCHITECTURE.md",
             "pyproject.toml"
           ],
+          "priority": "P0",
+          "rationale": "Refactors need a clear import direction to avoid moving complexity around.",
+          "status": "completed",
+          "subgoal_id": "G1.S1",
           "surplus_group": "refactor/g1/g1-s1",
           "task_id": "REF-002",
+          "title": "Document allowed dependency direction between applications, mediator, phases, integrations, and lib",
           "todo_vector_key": "ref-002-documentalloweddependencydirectionbetweenapplica",
           "validation": [
             "python -m pytest tests/test_package_imports.py -q"
@@ -183,6 +203,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "No production entrypoint mutates sys.path for normal imports.",
+            "Explicit exceptions are isolated to scripts/tests."
+          ],
           "ast_symbols": [
             "build_parser",
             "main",
@@ -287,6 +311,7 @@
             "No production entrypoint mutates sys.path for normal imports.",
             "Explicit exceptions are isolated to scripts/tests."
           ],
+          "parent_goal_id": "G1",
           "parent_goal_ids": [
             "G1"
           ],
@@ -301,8 +326,13 @@
             "scripts/run_hacc_grounded_pipeline.py",
             "scripts/run_hacc_preset_matrix.py"
           ],
+          "priority": "P0",
+          "rationale": "The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.",
+          "status": "todo",
+          "subgoal_id": "G1.S2",
           "surplus_group": "refactor/g1/g1-s2",
           "task_id": "REF-003",
+          "title": "Replace production sys.path mutation with package-level imports or adapter loader calls",
           "todo_vector_key": "ref-003-replaceproductionsys-pathmutationwithpackage-lev",
           "validation": [
             "python -m pytest tests/test_package_imports.py -q"
@@ -311,6 +341,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Production direct imports are replaced or documented.",
+            "Degraded mode still imports cleanly."
+          ],
           "ast_symbols": [
             "DEFAULT_UI_UX_SCREENSHOT_TARGET",
             "DEFAULT_UI_UX_OPTIMIZER_METHOD",
@@ -415,6 +449,7 @@
             "Production direct imports are replaced or documented.",
             "Degraded mode still imports cleanly."
           ],
+          "parent_goal_id": "G1",
           "parent_goal_ids": [
             "G1"
           ],
@@ -429,8 +464,13 @@
             "complaint_generator/email_credentials.py",
             "complaint_generator/email_graphrag.py"
           ],
+          "priority": "P0",
+          "rationale": "Optional dependency behavior should stay behind the adapter boundary.",
+          "status": "todo",
+          "subgoal_id": "G1.S2",
           "surplus_group": "refactor/g1/g1-s2",
           "task_id": "REF-004",
+          "title": "Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing",
           "todo_vector_key": "ref-004-routedirectipfs-datasets-pyimportsthroughintegra",
           "validation": [
             "python -m pytest tests/test_ipfs_adapter_layer.py -q"
@@ -448,6 +488,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g2-g2-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "One cohesive service is extracted.",
+            "Existing imports continue to resolve."
+          ],
           "ast_symbols": [
             "MODULE_OWNERSHIP",
             "RUNTIME_ENTRYPOINT_ROLE",
@@ -552,6 +596,7 @@
             "One cohesive service is extracted.",
             "Existing imports continue to resolve."
           ],
+          "parent_goal_id": "G2",
           "parent_goal_ids": [
             "G2"
           ],
@@ -559,8 +604,13 @@
             "mediator/mediator.py",
             "mediator/__init__.py"
           ],
+          "priority": "P0",
+          "rationale": "The mediator is the largest runtime file and carries high regression risk.",
+          "status": "todo",
+          "subgoal_id": "G2.S1",
           "surplus_group": "refactor/g2/g2-s1",
           "task_id": "REF-005",
+          "title": "Split mediator/mediator.py by workflow service while preserving public API compatibility",
           "todo_vector_key": "ref-005-splitmediator-mediator-pybyworkflowservicewhilep",
           "validation": [
             "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q"
@@ -569,6 +619,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "At least one cohesive helper group moves behind a stable import.",
+            "No payload contract changes without tests."
+          ],
           "ast_symbols": [
             "ClaimSupportHook",
             "DUCKDB_AVAILABLE",
@@ -673,14 +727,20 @@
             "At least one cohesive helper group moves behind a stable import.",
             "No payload contract changes without tests."
           ],
+          "parent_goal_id": "G2",
           "parent_goal_ids": [
             "G2"
           ],
           "paths": [
             "mediator/claim_support_hooks.py"
           ],
+          "priority": "P0",
+          "rationale": "Claim support hooks are large enough to hide unrelated concerns.",
+          "status": "todo",
+          "subgoal_id": "G2.S1",
           "surplus_group": "refactor/g2/g2-s1",
           "task_id": "REF-006",
+          "title": "Move claim support orchestration helpers into focused private modules",
           "todo_vector_key": "ref-006-moveclaimsupportorchestrationhelpersintofocusedp",
           "validation": [
             "python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q"
@@ -698,6 +758,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g2-g2-s2.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "One handler group is isolated.",
+            "Routes keep the same response shape."
+          ],
           "ast_symbols": [
             "_require_ipfs_attr",
             "MODULE_OWNERSHIP",
@@ -802,14 +866,20 @@
             "One handler group is isolated.",
             "Routes keep the same response shape."
           ],
+          "parent_goal_id": "G2",
           "parent_goal_ids": [
             "G2"
           ],
           "paths": [
             "applications/complaint_workspace.py"
           ],
+          "priority": "P1",
+          "rationale": "The workspace module mixes UI routing, state shaping, and workflow calls.",
+          "status": "todo",
+          "subgoal_id": "G2.S2",
           "surplus_group": "refactor/g2/g2-s2",
           "task_id": "REF-007",
+          "title": "Extract complaint workspace request handlers from UI state helpers",
           "todo_vector_key": "ref-007-extractcomplaintworkspacerequesthandlersfromuist",
           "validation": [
             "python -m pytest tests/test_review_api.py -q"
@@ -818,6 +888,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Fixture builders are named and reusable.",
+            "Playwright smoke tests remain stable."
+          ],
           "ast_symbols": [
             "DashboardEntry",
             "DashboardFixtures",
@@ -921,6 +995,7 @@
             "Fixture builders are named and reusable.",
             "Playwright smoke tests remain stable."
           ],
+          "parent_goal_id": "G2",
           "parent_goal_ids": [
             "G2"
           ],
@@ -928,8 +1003,13 @@
             "applications/dashboard_ui.py",
             "playwright/server.js"
           ],
+          "priority": "P1",
+          "rationale": "Dashboard behavior is harder to test when fixtures and live assembly are interleaved.",
+          "status": "todo",
+          "subgoal_id": "G2.S2",
           "surplus_group": "refactor/g2/g2-s2",
           "task_id": "REF-008",
+          "title": "Separate dashboard fixture data from live route logic",
           "todo_vector_key": "ref-008-separatedashboardfixturedatafromliveroutelogic",
           "validation": [
             "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q"
@@ -947,6 +1027,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g3-g3-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "All adapter groups report stable keys.",
+            "Missing optional extras produce actionable reasons."
+          ],
           "ast_symbols": [
             "get_ipfs_datasets_capabilities",
             "summarize_ipfs_datasets_capabilities",
@@ -1018,6 +1102,7 @@
             "All adapter groups report stable keys.",
             "Missing optional extras produce actionable reasons."
           ],
+          "parent_goal_id": "G3",
           "parent_goal_ids": [
             "G3"
           ],
@@ -1025,8 +1110,13 @@
             "integrations/ipfs_datasets/capabilities.py",
             "integrations/ipfs_datasets/loader.py"
           ],
+          "priority": "P0",
+          "rationale": "The existing backlog identifies adapter capability reporting as incomplete.",
+          "status": "todo",
+          "subgoal_id": "G3.S1",
           "surplus_group": "refactor/g3/g3-s1",
           "task_id": "REF-009",
+          "title": "Standardize capability status and degraded-reason payloads across adapters",
           "todo_vector_key": "ref-009-standardizecapabilitystatusanddegraded-reasonpay",
           "validation": [
             "python -m pytest tests/test_ipfs_adapter_layer.py -q"
@@ -1035,6 +1125,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Evidence, authority, and web ingestion can call one parse contract.",
+            "Fallback mode preserves current behavior."
+          ],
           "ast_symbols": [
             "DOCUMENTS_AVAILABLE",
             "DOCUMENTS_ERROR",
@@ -1139,6 +1233,7 @@
             "Evidence, authority, and web ingestion can call one parse contract.",
             "Fallback mode preserves current behavior."
           ],
+          "parent_goal_id": "G3",
           "parent_goal_ids": [
             "G3"
           ],
@@ -1146,8 +1241,13 @@
             "integrations/ipfs_datasets/documents.py",
             "mediator/evidence_hooks.py"
           ],
+          "priority": "P0",
+          "rationale": "Document parsing is still fallback-oriented and should be reusable across ingestion paths.",
+          "status": "todo",
+          "subgoal_id": "G3.S1",
           "surplus_group": "refactor/g3/g3-s1",
           "task_id": "REF-010",
+          "title": "Promote document parsing into a shared ingestion contract",
           "todo_vector_key": "ref-010-promotedocumentparsingintoasharedingestioncontra",
           "validation": [
             "python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q"
@@ -1165,6 +1265,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g3-g3-s2.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Interfaces specify persistence, query, and provenance fields.",
+            "Fallback graph behavior remains covered."
+          ],
           "ast_symbols": [
             "KNOWLEDGE_GRAPHS_AVAILABLE",
             "GRAPHS_ERROR",
@@ -1269,6 +1373,7 @@
             "Interfaces specify persistence, query, and provenance fields.",
             "Fallback graph behavior remains covered."
           ],
+          "parent_goal_id": "G3",
           "parent_goal_ids": [
             "G3"
           ],
@@ -1276,8 +1381,13 @@
             "integrations/ipfs_datasets/graphs.py",
             "complaint_phases/knowledge_graph.py"
           ],
+          "priority": "P1",
+          "rationale": "Graph support currently lacks a durable query plane.",
+          "status": "todo",
+          "subgoal_id": "G3.S2",
           "surplus_group": "refactor/g3/g3-s2",
           "task_id": "REF-011",
+          "title": "Define graph persistence and query interfaces before moving support scoring",
           "todo_vector_key": "ref-011-definegraphpersistenceandqueryinterfacesbeforemo",
           "validation": [
             "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q"
@@ -1286,6 +1396,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Logic status distinguishes unavailable, degraded, and implemented.",
+            "Callers do not branch on fragile strings."
+          ],
           "ast_symbols": [
             "LOGIC_AVAILABLE",
             "LOGIC_ERROR",
@@ -1390,6 +1504,7 @@
             "Logic status distinguishes unavailable, degraded, and implemented.",
             "Callers do not branch on fragile strings."
           ],
+          "parent_goal_id": "G3",
           "parent_goal_ids": [
             "G3"
           ],
@@ -1397,8 +1512,13 @@
             "integrations/ipfs_datasets/logic.py",
             "lib/formal_logic"
           ],
+          "priority": "P1",
+          "rationale": "Formal validation should fail predictably when unavailable.",
+          "status": "todo",
+          "subgoal_id": "G3.S2",
           "surplus_group": "refactor/g3/g3-s2",
           "task_id": "REF-012",
+          "title": "Turn not_implemented logic paths into explicit capability-gated contracts",
           "todo_vector_key": "ref-012-turnnot-implementedlogicpathsintoexplicitcapabil",
           "validation": [
             "python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q"
@@ -1416,6 +1536,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "A documented test lane map exists.",
+            "Each P0 workstream has a named validation command."
+          ],
           "ast_symbols": [],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -1439,6 +1563,7 @@
             "A documented test lane map exists.",
             "Each P0 workstream has a named validation command."
           ],
+          "parent_goal_id": "G4",
           "parent_goal_ids": [
             "G4"
           ],
@@ -1447,8 +1572,13 @@
             "Makefile",
             "docs/VERIFICATION_SUMMARY.md"
           ],
+          "priority": "P1",
+          "rationale": "The repo has many tests; refactor agents need fast confidence lanes.",
+          "status": "todo",
+          "subgoal_id": "G4.S1",
           "surplus_group": "refactor/g4/g4-s1",
           "task_id": "REF-013",
+          "title": "Define smoke, adapter, mediator, document, and UI test lanes",
           "todo_vector_key": "ref-013-definesmokeadaptermediatordocumentanduitestlanes",
           "validation": [
             "python -m pytest --collect-only -q"
@@ -1457,6 +1587,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Tests catch direct production imports where adapters are required.",
+            "Tests avoid blocking intentional test-only imports."
+          ],
           "ast_symbols": [],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -1480,6 +1614,7 @@
             "Tests catch direct production imports where adapters are required.",
             "Tests avoid blocking intentional test-only imports."
           ],
+          "parent_goal_id": "G4",
           "parent_goal_ids": [
             "G4"
           ],
@@ -1487,8 +1622,13 @@
             "tests",
             "pyproject.toml"
           ],
+          "priority": "P1",
+          "rationale": "Dependency drift is a recurring refactor risk.",
+          "status": "todo",
+          "subgoal_id": "G4.S1",
           "surplus_group": "refactor/g4/g4-s1",
           "task_id": "REF-014",
+          "title": "Add import and dependency-boundary tests for production modules",
           "todo_vector_key": "ref-014-addimportanddependency-boundarytestsforproductio",
           "validation": [
             "python -m pytest tests/test_package_imports.py -q"
@@ -1506,6 +1646,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g5-g5-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Queued task count is maintained above the configured floor.",
+            "Docs and JSON state are regenerated each cycle."
+          ],
           "ast_symbols": [
             "PROJECT_ROOT",
             "ACCELERATE_REPO",
@@ -1523,6 +1667,7 @@
             "REFILL_STATE_PATH",
             "SUPERVISOR_STATE_DIR",
             "TASK_STATE_PATH",
+            "MANAGED_DAEMON_PID_PATH",
             "WORKTREE_ROOT",
             "BUNDLE_LANE_ROOT",
             "BUNDLE_LANE_MANIFEST",
@@ -1552,6 +1697,7 @@
             "_upstream_task_board_helpers",
             "_upstream_portal_task_parser",
             "_upstream_bundle_runner",
+            "_upstream_bundle_payload_builder",
             "merge_resolver_command",
             "RefactorTask",
             "_iter_py_files",
@@ -1561,6 +1707,7 @@
             "_task",
             "_paths_from_locations",
             "flatten_tasks",
+            "_resolved_seed_task_ids",
             "_json_goal_tree",
             "_goal_evidence",
             "_render_objective_heap",
@@ -1571,6 +1718,11 @@
             "_task_ast_symbols",
             "_task_block",
             "write_seed_bundle_index",
+            "_taskboard_snapshot",
+            "_active_todo_task_ids",
+            "_task_ids_from_queue_payload",
+            "_queue_payload_contract",
+            "refill_bundle_queue",
             "_ensure_text",
             "_durable_task_statuses",
             "_project_task_statuses",
@@ -1578,15 +1730,7 @@
             "_todo_counts",
             "_queue_counts",
             "_collect_counts",
-            "_scan_summary",
-            "_load_json_object",
-            "_status_scan_summary",
-            "_status_counts",
-            "_seed_status_summary",
-            "_todo_task_header_count",
-            "seed_taskboard",
-            "_write_taskboard_doc",
-            "_write_status"
+            "_scan_summary"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -1610,6 +1754,7 @@
             "Queued task count is maintained above the configured floor.",
             "Docs and JSON state are regenerated each cycle."
           ],
+          "parent_goal_id": "G5",
           "parent_goal_ids": [
             "G5"
           ],
@@ -1617,8 +1762,13 @@
             "scripts/refactor_agent_supervisor.py",
             "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
           ],
+          "priority": "P0",
+          "rationale": "The requested supervisor needs a refill loop and visible board state.",
+          "status": "todo",
+          "subgoal_id": "G5.S1",
           "surplus_group": "refactor/g5/g5-s1",
           "task_id": "REF-015",
+          "title": "Keep the refactor taskboard synchronized with generated goals and subgoals",
           "todo_vector_key": "ref-015-keeptherefactortaskboardsynchronizedwithgenerate",
           "validation": [
             "python scripts/refactor_agent_supervisor.py seed --once"
@@ -1627,6 +1777,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Status JSON includes pid, heartbeat, scan summary, and counts.",
+            "Stop command terminates the daemon cleanly."
+          ],
           "ast_symbols": [],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -1650,14 +1804,20 @@
             "Status JSON includes pid, heartbeat, scan summary, and counts.",
             "Stop command terminates the daemon cleanly."
           ],
+          "parent_goal_id": "G5",
           "parent_goal_ids": [
             "G5"
           ],
           "paths": [
             "data/refactor_supervisor"
           ],
+          "priority": "P0",
+          "rationale": "Long-running automation needs inspectable state and a clean stop path.",
+          "status": "completed",
+          "subgoal_id": "G5.S1",
           "surplus_group": "refactor/g5/g5-s1",
           "task_id": "REF-016",
+          "title": "Record supervisor status, scan metrics, and queue counts for handoff",
           "todo_vector_key": "ref-016-recordsupervisorstatusscanmetricsandqueuecountsf",
           "validation": [
             "python scripts/refactor_agent_supervisor.py status"
@@ -1675,6 +1835,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g6-g6-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Top production broad-exception clusters are documented.",
+            "At least one cluster returns a typed degraded result."
+          ],
           "ast_symbols": [
             "MODULE_OWNERSHIP",
             "RUNTIME_ENTRYPOINT_ROLE",
@@ -1779,6 +1943,7 @@
             "Top production broad-exception clusters are documented.",
             "At least one cluster returns a typed degraded result."
           ],
+          "parent_goal_id": "G6",
           "parent_goal_ids": [
             "G6"
           ],
@@ -1787,8 +1952,13 @@
             "mediator/evidence_hooks.py",
             "integrations/ipfs_datasets/search.py"
           ],
+          "priority": "P1",
+          "rationale": "The scan found many broad exception handlers; refactors need predictable failure semantics.",
+          "status": "todo",
+          "subgoal_id": "G6.S1",
           "surplus_group": "refactor/g6/g6-s1",
           "task_id": "REF-017",
+          "title": "Audit broad exception handlers in mediator and adapter paths",
           "todo_vector_key": "ref-017-auditbroadexceptionhandlersinmediatorandadapterp",
           "validation": [
             "python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q"
@@ -1797,6 +1967,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Intentional ignores are named.",
+            "Unexpected failures leave diagnostic breadcrumbs."
+          ],
           "ast_symbols": [
             "DEFAULT_COMPLAINT_OUTPUT_REVIEW_TIMEOUT_S",
             "DEFAULT_UI_REVIEW_TIMEOUT_S",
@@ -1901,6 +2075,7 @@
             "Intentional ignores are named.",
             "Unexpected failures leave diagnostic breadcrumbs."
           ],
+          "parent_goal_id": "G6",
           "parent_goal_ids": [
             "G6"
           ],
@@ -1909,8 +2084,13 @@
             "complaint_generator/ui_optimizer_daemon.py",
             "mediator/state.py"
           ],
+          "priority": "P1",
+          "rationale": "Silent failures hide regressions during long-running automation.",
+          "status": "todo",
+          "subgoal_id": "G6.S1",
           "surplus_group": "refactor/g6/g6-s1",
           "task_id": "REF-018",
+          "title": "Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks",
           "todo_vector_key": "ref-018-convertsilentpassblocksinuser-facingworkflowsint",
           "validation": [
             "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q"
@@ -1928,6 +2108,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g6-g6-s2.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Status payloads include status, pid, updated_at, artifacts, and last_error where applicable.",
+            "Existing CLI tests remain compatible."
+          ],
           "ast_symbols": [
             "_STOP_REQUESTED",
             "PROJECT_ROOT",
@@ -2032,6 +2216,7 @@
             "Status payloads include status, pid, updated_at, artifacts, and last_error where applicable.",
             "Existing CLI tests remain compatible."
           ],
+          "parent_goal_id": "G6",
           "parent_goal_ids": [
             "G6"
           ],
@@ -2040,8 +2225,13 @@
             "integrations/ipfs_datasets/scraper_daemon.py",
             "scripts/gmail_duckdb_daemon.py"
           ],
+          "priority": "P1",
+          "rationale": "Multiple daemon surfaces should be inspectable with the same status fields.",
+          "status": "todo",
+          "subgoal_id": "G6.S2",
           "surplus_group": "refactor/g6/g6-s2",
           "task_id": "REF-019",
+          "title": "Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors",
           "todo_vector_key": "ref-019-standardizedaemonstatuspayloadshapeacrossuiscrap",
           "validation": [
             "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q"
@@ -2050,6 +2240,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Docs explain where to find pid, log, status, and queue files.",
+            "Troubleshooting includes stale running task recovery."
+          ],
           "ast_symbols": [],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -2073,6 +2267,7 @@
             "Docs explain where to find pid, log, status, and queue files.",
             "Troubleshooting includes stale running task recovery."
           ],
+          "parent_goal_id": "G6",
           "parent_goal_ids": [
             "G6"
           ],
@@ -2080,8 +2275,13 @@
             "docs/OBSERVABILITY_INDEX.md",
             "docs/observability/TROUBLESHOOTING.md"
           ],
+          "priority": "P2",
+          "rationale": "Operators need consistent guidance for stalled background workflows.",
+          "status": "todo",
+          "subgoal_id": "G6.S2",
           "surplus_group": "refactor/g6/g6-s2",
           "task_id": "REF-020",
+          "title": "Add queue count and last-cycle metrics to long-running automation docs",
           "todo_vector_key": "ref-020-addqueuecountandlast-cyclemetricstolong-runninga",
           "validation": [
             "python scripts/refactor_agent_supervisor.py status"
@@ -2099,6 +2299,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g7-g7-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "DTO helpers cover coverage, follow-up, and support-path summaries.",
+            "Route response snapshots stay stable."
+          ],
           "ast_symbols": [
             "REVIEW_EXECUTION_COMPATIBILITY_NOTICE",
             "REVIEW_EXECUTION_SUNSET",
@@ -2203,6 +2407,7 @@
             "DTO helpers cover coverage, follow-up, and support-path summaries.",
             "Route response snapshots stay stable."
           ],
+          "parent_goal_id": "G7",
           "parent_goal_ids": [
             "G7"
           ],
@@ -2211,8 +2416,13 @@
             "applications/ui_review.py",
             "mediator/claim_support_hooks.py"
           ],
+          "priority": "P1",
+          "rationale": "Review screens depend on stable payloads that should not be assembled ad hoc in route handlers.",
+          "status": "todo",
+          "subgoal_id": "G7.S1",
           "surplus_group": "refactor/g7/g7-s1",
           "task_id": "REF-021",
+          "title": "Move review payload normalization behind explicit DTO helpers",
           "todo_vector_key": "ref-021-movereviewpayloadnormalizationbehindexplicitdtoh",
           "validation": [
             "python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q"
@@ -2221,6 +2431,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Shared builders remove repeated setup.",
+            "Screenshots still render with representative support states."
+          ],
           "ast_symbols": [
             "requests",
             "uvicorn",
@@ -2325,6 +2539,7 @@
             "Shared builders remove repeated setup.",
             "Screenshots still render with representative support states."
           ],
+          "parent_goal_id": "G7",
           "parent_goal_ids": [
             "G7"
           ],
@@ -2332,8 +2547,13 @@
             "tests/test_claim_support_review_playwright_smoke.py",
             "tests/test_review_surface_site_playwright.py"
           ],
+          "priority": "P1",
+          "rationale": "Large Playwright tests should share fixture setup before UI refactors.",
+          "status": "todo",
+          "subgoal_id": "G7.S1",
           "surplus_group": "refactor/g7/g7-s1",
           "task_id": "REF-022",
+          "title": "Create fixture builders for Playwright review and dashboard smoke tests",
           "todo_vector_key": "ref-022-createfixturebuildersforplaywrightreviewanddashb",
           "validation": [
             "python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q"
@@ -2351,6 +2571,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Each P0 backlog workstream maps to at least one refactor goal.",
+            "Duplicated tasks are merged or explicitly scoped."
+          ],
           "ast_symbols": [],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -2374,6 +2598,7 @@
             "Each P0 backlog workstream maps to at least one refactor goal.",
             "Duplicated tasks are merged or explicitly scoped."
           ],
+          "parent_goal_id": "G8",
           "parent_goal_ids": [
             "G8"
           ],
@@ -2381,8 +2606,13 @@
             "docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md",
             "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
           ],
+          "priority": "P0",
+          "rationale": "Existing roadmap work should feed the automated taskboard rather than drift separately.",
+          "status": "todo",
+          "subgoal_id": "G8.S1",
           "surplus_group": "refactor/g8/g8-s1",
           "task_id": "REF-023",
+          "title": "Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals",
           "todo_vector_key": "ref-023-cross-linkipfsdatasetsexecutionbacklogtaskstoref",
           "validation": [
             "python scripts/refactor_agent_supervisor.py seed --once"
@@ -2391,6 +2621,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "The first three claims are small, testable, and dependency-ordered.",
+            "Each claim names exact validation commands."
+          ],
           "ast_symbols": [],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -2414,14 +2648,20 @@
             "The first three claims are small, testable, and dependency-ordered.",
             "Each claim names exact validation commands."
           ],
+          "parent_goal_id": "G8",
           "parent_goal_ids": [
             "G8"
           ],
           "paths": [
             "data/refactor_supervisor/refactor_goals.json"
           ],
+          "priority": "P0",
+          "rationale": "A robust board still needs a practical starting order.",
+          "status": "todo",
+          "subgoal_id": "G8.S1",
           "surplus_group": "refactor/g8/g8-s1",
           "task_id": "REF-024",
+          "title": "Define first three implementation claims from the queued taskboard",
           "todo_vector_key": "ref-024-definefirstthreeimplementationclaimsfromthequeue",
           "validation": [
             "python scripts/refactor_agent_supervisor.py status"
@@ -2439,6 +2679,10 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g8-g8-s2.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Status output or a new command lists next tasks by priority.",
+            "Output is stable enough for automation."
+          ],
           "ast_symbols": [
             "PROJECT_ROOT",
             "ACCELERATE_REPO",
@@ -2456,6 +2700,7 @@
             "REFILL_STATE_PATH",
             "SUPERVISOR_STATE_DIR",
             "TASK_STATE_PATH",
+            "MANAGED_DAEMON_PID_PATH",
             "WORKTREE_ROOT",
             "BUNDLE_LANE_ROOT",
             "BUNDLE_LANE_MANIFEST",
@@ -2485,6 +2730,7 @@
             "_upstream_task_board_helpers",
             "_upstream_portal_task_parser",
             "_upstream_bundle_runner",
+            "_upstream_bundle_payload_builder",
             "merge_resolver_command",
             "RefactorTask",
             "_iter_py_files",
@@ -2494,6 +2740,7 @@
             "_task",
             "_paths_from_locations",
             "flatten_tasks",
+            "_resolved_seed_task_ids",
             "_json_goal_tree",
             "_goal_evidence",
             "_render_objective_heap",
@@ -2504,6 +2751,11 @@
             "_task_ast_symbols",
             "_task_block",
             "write_seed_bundle_index",
+            "_taskboard_snapshot",
+            "_active_todo_task_ids",
+            "_task_ids_from_queue_payload",
+            "_queue_payload_contract",
+            "refill_bundle_queue",
             "_ensure_text",
             "_durable_task_statuses",
             "_project_task_statuses",
@@ -2511,15 +2763,7 @@
             "_todo_counts",
             "_queue_counts",
             "_collect_counts",
-            "_scan_summary",
-            "_load_json_object",
-            "_status_scan_summary",
-            "_status_counts",
-            "_seed_status_summary",
-            "_todo_task_header_count",
-            "seed_taskboard",
-            "_write_taskboard_doc",
-            "_write_status"
+            "_scan_summary"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -2543,14 +2787,20 @@
             "Status output or a new command lists next tasks by priority.",
             "Output is stable enough for automation."
           ],
+          "parent_goal_id": "G8",
           "parent_goal_ids": [
             "G8"
           ],
           "paths": [
             "scripts/refactor_agent_supervisor.py"
           ],
+          "priority": "P1",
+          "rationale": "Agents need a simple way to see the next work without opening DuckDB manually.",
+          "status": "todo",
+          "subgoal_id": "G8.S2",
           "surplus_group": "refactor/g8/g8-s2",
           "task_id": "REF-025",
+          "title": "Add a taskboard inspection command that prints queued refactor tasks compactly",
           "todo_vector_key": "ref-025-addataskboardinspectioncommandthatprintsqueuedre",
           "validation": [
             "python scripts/refactor_agent_supervisor.py status"
@@ -2559,6 +2809,10 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Running seed twice does not duplicate active tasks.",
+            "Payloads include goal, subgoal, priority, acceptance, and validation."
+          ],
           "ast_symbols": [
             "SCRIPT_PATH",
             "SPEC",
@@ -2568,6 +2822,8 @@
             "router_resolver",
             "_git",
             "test_renderers_use_supervisor_validation_command_delimiter",
+            "test_queue_refill_maintains_work_item_floor_without_duplicate_active_bundles",
+            "test_goal_json_projects_header_statuses_and_resolves_seed_task_ids",
             "test_merge_watchdog_skips_aborted_historical_merge",
             "test_router_commit_preserves_unrelated_dirty_paths",
             "test_merge_watchdog_has_explicit_stop_command",
@@ -2575,13 +2831,26 @@
             "test_status_snapshot_has_stable_handoff_metrics",
             "test_status_uses_live_upstream_heartbeat",
             "test_durable_status_projection_repairs_primary_counts_and_bundle_shards",
+            "test_seed_bundle_index_carries_durable_member_status",
             "test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval",
             "test_status_projects_dynamic_parallel_scheduler_manifest",
             "test_parallel_scheduler_has_explicit_stop_command",
             "test_stop_daemon_terminates_process_group_and_cleans_pid",
+            "test_stop_daemon_stops_orphaned_managed_worker",
             "task",
             "goals",
             "expected",
+            "bundle_dir",
+            "todo_path",
+            "payloads",
+            "FakeQueue",
+            "first",
+            "second",
+            "queued_payload",
+            "seed_task",
+            "taskboard",
+            "payload",
+            "projected",
             "repo",
             "events_path",
             "result",
@@ -2591,17 +2860,23 @@
             "scan_summary",
             "persisted",
             "inspected",
-            "payload",
             "shard",
-            "projected",
             "shard_text",
+            "index",
+            "member",
             "Process",
             "fake_popen",
             "args",
             "command",
             "child",
+            "managed",
+            "__init__",
+            "list",
+            "submit",
+            "close",
             "pid",
             "poll",
+            "task_id",
             "PROJECT_ROOT",
             "ACCELERATE_REPO",
             "STATE_ROOT",
@@ -2618,28 +2893,7 @@
             "REFILL_STATE_PATH",
             "SUPERVISOR_STATE_DIR",
             "TASK_STATE_PATH",
-            "WORKTREE_ROOT",
-            "BUNDLE_LANE_ROOT",
-            "BUNDLE_LANE_MANIFEST",
-            "BUNDLE_COORDINATION_PATH",
-            "BUNDLE_SCHEDULER_PID_PATH",
-            "BUNDLE_SCHEDULER_LOG_PATH",
-            "MERGE_RESOLVER_PID_PATH",
-            "MERGE_RESOLVER_STATUS_PATH",
-            "MERGE_RESOLVER_LOG_PATH",
-            "MERGE_RESOLVER_REGISTRY_DIR",
-            "STATUS_PATH",
-            "PID_PATH",
-            "LOG_PATH",
-            "UPSTREAM_SUPERVISOR_STATUS_PATH",
-            "TASKBOARD_DOC_PATH",
-            "TASK_PREFIX",
-            "TASK_HEADER_PREFIX",
-            "TASK_TYPES",
-            "MODEL_NAME",
-            "STATUS_SCHEMA",
-            "STOP_TIMEOUT_SECONDS",
-            "STOP_POLL_SECONDS"
+            "MANAGED_DAEMON_PID_PATH"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -2663,6 +2917,7 @@
             "Running seed twice does not duplicate active tasks.",
             "Payloads include goal, subgoal, priority, acceptance, and validation."
           ],
+          "parent_goal_id": "G8",
           "parent_goal_ids": [
             "G8"
           ],
@@ -2670,8 +2925,13 @@
             "tests/test_refactor_agent_supervisor.py",
             "scripts/refactor_agent_supervisor.py"
           ],
+          "priority": "P1",
+          "rationale": "The supervisor itself should not duplicate tasks or emit malformed payloads.",
+          "status": "todo",
+          "subgoal_id": "G8.S2",
           "surplus_group": "refactor/g8/g8-s2",
           "task_id": "REF-026",
+          "title": "Create tests for refactor supervisor seed idempotence and task payload schema",
           "todo_vector_key": "ref-026-createtestsforrefactorsupervisorseedidempotencea",
           "validation": [
             "python -m pytest tests/test_refactor_agent_supervisor.py -q"
@@ -2689,6 +2949,12 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g9-g9-s1.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Every task has a stable canonical key or CID independent of board path and display id.",
+            "Legacy markdown tasks migrate idempotently with board namespace provenance.",
+            "Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.",
+            "Refill cannot create a second active task for the same canonical work item."
+          ],
           "ast_symbols": [
             "TASK_IDENTITY_SCHEMA",
             "canonical_json_bytes",
@@ -2795,6 +3061,7 @@
             "Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.",
             "Refill cannot create a second active task for the same canonical work item."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -2807,8 +3074,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py"
           ],
+          "priority": "P0",
+          "rationale": "Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous.",
+          "status": "completed",
+          "subgoal_id": "G9.S1",
           "surplus_group": "refactor/g9/g9-s1",
           "task_id": "REF-036",
+          "title": "Introduce canonical task identity and a durable supervisor task ledger",
           "todo_vector_key": "ref-036-introducecanonicaltaskidentityandadurablesupervi",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
@@ -2817,6 +3089,12 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "A persistent scheduler discovers new and refilled tasks without restart.",
+            "Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work.",
+            "Lane count remains within configured capacity and no task executes under two accepted leases.",
+            "The manifest is an authoritative live projection rather than a launch-time snapshot."
+          ],
           "ast_symbols": [
             "logger",
             "BundleLaneSpec",
@@ -2925,6 +3203,7 @@
             "Lane count remains within configured capacity and no task executes under two accepted leases.",
             "The manifest is an authoritative live projection rather than a launch-time snapshot."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -2935,8 +3214,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py"
           ],
+          "priority": "P0",
+          "rationale": "The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.",
+          "status": "completed",
+          "subgoal_id": "G9.S1",
           "surplus_group": "refactor/g9/g9-s1",
           "task_id": "REF-037",
+          "title": "Replace static bundle launch with a dynamic leased worker pool",
           "todo_vector_key": "ref-037-replacestaticbundlelaunchwithadynamicleasedworke",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q"
@@ -2945,6 +3229,12 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "All implementation lanes enqueue merge candidates instead of racing the target checkout.",
+            "The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness.",
+            "One conflict fingerprint invokes at most one active resolver attempt.",
+            "Bounded failures enter quarantine with a durable receipt instead of a polling retry loop."
+          ],
           "ast_symbols": [
             "_PRIORITY_ORDER",
             "_ACTIVE_STATES",
@@ -3053,6 +3343,7 @@
             "One conflict fingerprint invokes at most one active resolver attempt.",
             "Bounded failures enter quarantine with a durable receipt instead of a polling retry loop."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -3063,8 +3354,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py"
           ],
+          "priority": "P0",
+          "rationale": "Independent lanes currently race to merge and repeatedly retry the same failed branches.",
+          "status": "completed",
+          "subgoal_id": "G9.S1",
           "surplus_group": "refactor/g9/g9-s1",
           "task_id": "REF-038",
+          "title": "Integrate a deduplicating single-consumer merge train",
           "todo_vector_key": "ref-038-integrateadeduplicatingsingle-consumermergetrain",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q"
@@ -3082,6 +3378,12 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g9-g9-s2.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance.",
+            "Only tasks whose prerequisite merge receipts succeeded are claimable.",
+            "Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority.",
+            "Cycles and missing dependencies produce bounded repair evidence rather than deadlock."
+          ],
           "ast_symbols": [
             "DEFAULT_EMBEDDING_DIMENSIONS",
             "DEFAULT_EMBEDDING_MIN_SCORE",
@@ -3190,6 +3492,7 @@
             "Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority.",
             "Cycles and missing dependencies produce bounded repair evidence rather than deadlock."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -3199,8 +3502,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py"
           ],
+          "priority": "P0",
+          "rationale": "Goal parents are currently sorting hints while generated Profile G tasks carry no dependency task CIDs.",
+          "status": "completed",
+          "subgoal_id": "G9.S2",
           "surplus_group": "refactor/g9/g9-s2",
           "task_id": "REF-039",
+          "title": "Materialize a task dependency DAG and schedule its critical path",
           "todo_vector_key": "ref-039-materializeataskdependencydagandscheduleitscriti",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
@@ -3209,6 +3517,12 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Conflict surfaces include all predicted files, AST symbols, interfaces, submodules, and generated artifacts.",
+            "Lane planning colors the conflict graph so overlapping tasks do not run concurrently unless explicitly allowed.",
+            "Actual branch diffs and conflict receipts update future conflict weights.",
+            "Planner output explains every co-location or separation decision."
+          ],
           "ast_symbols": [
             "CONFLICT_RECEIPT_STATUSES",
             "_payload",
@@ -3317,6 +3631,7 @@
             "Actual branch diffs and conflict receipts update future conflict weights.",
             "Planner output explains every co-location or separation decision."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -3327,8 +3642,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py"
           ],
+          "priority": "P0",
+          "rationale": "The current conflict domain uses one path root and lightweight semantic similarity, which misses multi-file and symbol overlap.",
+          "status": "completed",
+          "subgoal_id": "G9.S2",
           "surplus_group": "refactor/g9/g9-s2",
           "task_id": "REF-040",
+          "title": "Build an AST and changed-path conflict graph for lane coloring",
           "todo_vector_key": "ref-040-buildanastandchanged-pathconflictgraphforlanecol",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
@@ -3337,6 +3657,12 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Each eligible subgoal can produce multiple schema-validated plan branches through llm_router.",
+            "Candidates declare predicted files and symbols, dependencies, validation proof, cost, risk, and expected objective delta.",
+            "A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.",
+            "Router failure falls back to deterministic planning without blocking ready work."
+          ],
           "ast_symbols": [
             "PromptBuilder",
             "BootstrapCallback",
@@ -3445,6 +3771,7 @@
             "A deterministic evaluator selects a branch and retains rejected alternatives plus rationale.",
             "Router failure falls back to deterministic planning without blocking ready work."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -3454,8 +3781,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py"
           ],
+          "priority": "P1",
+          "rationale": "Profile G currently records a single constant-scored plan branch and the LLM proposal router is not part of scheduler decisions.",
+          "status": "todo",
+          "subgoal_id": "G9.S2",
           "surplus_group": "refactor/g9/g9-s2",
           "task_id": "REF-041",
+          "title": "Use llm_router to generate and evaluate structured plan branches",
           "todo_vector_key": "ref-041-usellm-routertogenerateandevaluatestructuredplan",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q"
@@ -3473,6 +3805,12 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g9-g9-s3.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "Heartbeats report measured CPU, memory, disk, active phase, and available worker capacity.",
+            "Scheduler honors llm_router health, quota, latency, context, and token-budget constraints.",
+            "Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.",
+            "Idle lanes advertise zero occupied capacity and can be reassigned."
+          ],
           "ast_symbols": [
             "logger",
             "BundleLaneSpec",
@@ -3582,6 +3920,7 @@
             "Concurrency scales within configured limits and applies backpressure before provider or host exhaustion.",
             "Idle lanes advertise zero occupied capacity and can be reassigned."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -3592,8 +3931,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py"
           ],
+          "priority": "P1",
+          "rationale": "Resource class, capability fit, and lane capacity are currently static even when workers are idle or providers are rate-limited.",
+          "status": "todo",
+          "subgoal_id": "G9.S3",
           "surplus_group": "refactor/g9/g9-s3",
           "task_id": "REF-042",
+          "title": "Schedule lanes from live resources and llm_router provider capacity",
           "todo_vector_key": "ref-042-schedulelanesfromliveresourcesandllm-routerprovi",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q"
@@ -3602,6 +3946,12 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "Cheap deterministic checks run before expensive tests and fail fast.",
+            "Independent validations run in parallel under a bounded resource budget.",
+            "Cache keys include target commit, command, relevant environment, and dependency state.",
+            "Impact selection is conservative, explainable, and escalates to broader validation before merge completion."
+          ],
           "ast_symbols": [
             "split_validation_commands",
             "text",
@@ -3710,6 +4060,7 @@
             "Cache keys include target commit, command, relevant environment, and dependency state.",
             "Impact selection is conservative, explainable, and escalates to broader validation before merge completion."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -3719,8 +4070,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py"
           ],
+          "priority": "P1",
+          "rationale": "Validation commands currently run serially without changed-file impact selection or reusable baseline results.",
+          "status": "todo",
+          "subgoal_id": "G9.S3",
           "surplus_group": "refactor/g9/g9-s3",
           "task_id": "REF-043",
+          "title": "Add impact-selected cached and parallel validation stages",
           "todo_vector_key": "ref-043-addimpact-selectedcachedandparallelvalidationsta",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q"
@@ -3738,6 +4094,12 @@
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g9-g9-s4.todo.md",
       "tasks": [
         {
+          "acceptance": [
+            "One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases.",
+            "Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost.",
+            "Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity.",
+            "Scheduler decisions consume the same snapshot exposed to operators."
+          ],
           "ast_symbols": [
             "_EVENT_LOG_MAX_BYTES_ENV",
             "_DEFAULT_EVENT_LOG_MAX_BYTES",
@@ -3848,6 +4210,7 @@
             "Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity.",
             "Scheduler decisions consume the same snapshot exposed to operators."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -3858,8 +4221,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py"
           ],
+          "priority": "P1",
+          "rationale": "Status is split across launch manifests, wrapper files, lane state, and event logs, so planners cannot measure useful capacity.",
+          "status": "todo",
+          "subgoal_id": "G9.S4",
           "surplus_group": "refactor/g9/g9-s4",
           "task_id": "REF-044",
+          "title": "Publish authoritative throughput metrics and scheduler state",
           "todo_vector_key": "ref-044-publishauthoritativethroughputmetricsandschedule",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q"
@@ -3868,6 +4236,12 @@
           "work_scope": "goal_subgoal_ast_locality"
         },
         {
+          "acceptance": [
+            "AST and evidence records are reused by blob hash and only changed files are reparsed.",
+            "Deleted and renamed files invalidate stale evidence deterministically.",
+            "Clean worktrees and dependency setups can be pooled without sharing task-local mutations.",
+            "Cold and warm paths produce equivalent plans and validation results with measured warm-path savings."
+          ],
           "ast_symbols": [
             "DEFAULT_EMBEDDING_DIMENSIONS",
             "DEFAULT_EMBEDDING_MIN_SCORE",
@@ -3979,6 +4353,7 @@
             "Clean worktrees and dependency setups can be pooled without sharing task-local mutations.",
             "Cold and warm paths produce equivalent plans and validation results with measured warm-path savings."
           ],
+          "parent_goal_id": "G9",
           "parent_goal_ids": [
             "G9"
           ],
@@ -3989,8 +4364,13 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py"
           ],
+          "priority": "P2",
+          "rationale": "Refill scans reread the tracked codebase and each implementation creates fresh worktree and submodule setup even when inputs are unchanged.",
+          "status": "todo",
+          "subgoal_id": "G9.S4",
           "surplus_group": "refactor/g9/g9-s4",
           "task_id": "REF-045",
+          "title": "Make AST scans and implementation workspaces incremental and reusable",
           "todo_vector_key": "ref-045-makeastscansandimplementationworkspacesincrement",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q"
@@ -4001,7 +4381,7 @@
       ]
     }
   },
-  "generated_at": "2026-07-22T03:45:24Z",
+  "generated_at": "2026-07-22T04:00:52Z",
   "schema": "complaint_generator.refactor_seed_bundle_index",
   "source_todo": "data/refactor_supervisor/refactor_todo.md"
 }
