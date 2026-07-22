@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-018 Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G6
