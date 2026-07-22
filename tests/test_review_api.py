@@ -32,7 +32,12 @@ from claim_support_review import (
 from applications.review_api import (
     REVIEW_EXECUTION_SUNSET,
     create_review_api_app,
+    normalize_coverage_summary_dto,
+    normalize_follow_up_summary_dto,
+    normalize_review_response_dto,
+    normalize_support_path_summary_dto,
 )
+from applications.ui_review import normalize_ui_review_payload_dto
 from lib.runtime_ownership import RUNTIME_ROLE_WEB, require_module_ownership
 
 
@@ -43,6 +48,81 @@ def test_review_api_runtime_ownership_is_web_entrypoint() -> None:
     assert {entrypoint.name for entrypoint in ownership.entrypoints} == {
         "attach_claim_support_review_routes",
         "create_review_api_app",
+    }
+
+
+def test_review_response_dto_preserves_stable_summary_snapshot() -> None:
+    snapshot = {
+        "claim_coverage_summary": {
+            "retaliation": {
+                "status_counts": {"covered": 1, "missing": 0},
+                "support_trace_summary": {"trace_count": 2},
+            }
+        },
+        "claim_coverage_matrix": {
+            "retaliation": {
+                "support_packet_summary": {"total_packet_count": 2},
+                "elements": [
+                    {
+                        "graph_trace_summary": {"graph_id_count": 1},
+                        "extension_field": "preserved",
+                    }
+                ],
+            }
+        },
+        "follow_up_plan_summary": {
+            "retaliation": {"task_count": 1, "extension_metric": 7}
+        },
+        "follow_up_history_summary": {
+            "retaliation": {"total_entry_count": 2}
+        },
+    }
+
+    normalized = normalize_review_response_dto(snapshot)
+
+    assert normalized == snapshot
+    assert normalized is not snapshot
+    assert normalized["claim_coverage_matrix"] is not snapshot["claim_coverage_matrix"]
+
+
+def test_review_summary_dto_helpers_guard_non_mapping_values() -> None:
+    assert normalize_coverage_summary_dto({"retaliation": None}) == {
+        "retaliation": {}
+    }
+    assert normalize_follow_up_summary_dto({"retaliation": ["invalid"]}) == {
+        "retaliation": {}
+    }
+    assert normalize_support_path_summary_dto("invalid") == {}
+    assert normalize_review_response_dto(
+        {
+            "claim_coverage_summary": "invalid",
+            "claim_coverage_matrix": {
+                "retaliation": {"support_packet_summary": ["invalid"]}
+            },
+            "follow_up_plan_summary": None,
+        }
+    ) == {
+        "claim_coverage_summary": {},
+        "claim_coverage_matrix": {
+            "retaliation": {"support_packet_summary": {}}
+        },
+        "follow_up_plan_summary": {},
+    }
+
+
+def test_ui_review_payload_dto_preserves_extensions_and_guards_collections() -> None:
+    assert normalize_ui_review_payload_dto(
+        {
+            "summary": "Review complete.",
+            "issues": "invalid",
+            "complaint_journey": None,
+            "extension_field": {"preserved": True},
+        }
+    ) == {
+        "summary": "Review complete.",
+        "issues": [],
+        "complaint_journey": {},
+        "extension_field": {"preserved": True},
     }
 
 
