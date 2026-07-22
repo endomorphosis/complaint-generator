@@ -173,6 +173,38 @@ def _build_progress_summary(args: argparse.Namespace) -> dict[str, Any]:
     return summary
 
 
+def _status_artifacts(
+    *,
+    args: argparse.Namespace,
+    pid_file: Path,
+    status_file: Path,
+    log_file: Path,
+    progress_summary: dict[str, Any],
+    last_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the stable artifact manifest used by daemon status consumers."""
+
+    artifacts: dict[str, Any] = {
+        "evidence_root": str(Path(args.evidence_root).expanduser().resolve()),
+        "duckdb_output_dir": str(Path(args.duckdb_output_dir).expanduser().resolve()),
+        "pid_file": str(pid_file),
+        "status_file": str(status_file),
+        "log_file": str(log_file),
+    }
+    for key in ("artifact_root", "manifest_path", "checkpoint_path", "progress_path"):
+        value = progress_summary.get(key)
+        if value:
+            artifacts[key] = str(value)
+
+    if isinstance(last_result, dict):
+        duckdb_index = last_result.get("duckdb_index")
+        if isinstance(duckdb_index, dict):
+            for key, value in duckdb_index.items():
+                if value and (key.endswith("_path") or key.endswith("_dir")):
+                    artifacts[key] = str(value)
+    return artifacts
+
+
 def _write_status(
     *,
     status_file: Path,
@@ -192,8 +224,22 @@ def _write_status(
             pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
         except Exception:
             pid = None
+    now = datetime.now(UTC).isoformat()
+    progress_summary = _build_progress_summary(args)
+    artifacts = _status_artifacts(
+        args=args,
+        pid_file=pid_file,
+        status_file=status_file,
+        log_file=log_file,
+        progress_summary=progress_summary,
+        last_result=last_result,
+    )
     payload = {
         "status": state,
+        "pid": pid,
+        "updated_at": now,
+        "artifacts": artifacts,
+        "last_error": error,
         "user_id": args.user_id,
         "gmail_user": str(args.gmail_user or ""),
         "addresses": list(args.addresses or []),
@@ -211,15 +257,15 @@ def _write_status(
         "cycle_count": int(cycle_count),
         "phase": str(phase or state),
         "consecutive_errors": int(consecutive_errors or 0),
-        "pid": pid,
         "pid_file": str(pid_file),
+        "status_file": str(status_file),
         "log_file": str(log_file),
         "duckdb_output_dir": str(Path(args.duckdb_output_dir).expanduser().resolve()),
         "evidence_root": str(Path(args.evidence_root).expanduser().resolve()),
-        "last_updated_at": datetime.now(UTC).isoformat(),
+        "last_updated_at": now,
         "last_result": last_result,
         "error": error,
-        "progress_summary": _build_progress_summary(args),
+        "progress_summary": progress_summary,
     }
     _write_json(status_file, payload)
     return payload
@@ -511,6 +557,7 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
             state=final_state,
             args=args,
             last_result=last_result,
+            error=status_state.get("error"),
             cycle_count=cycle_count,
             phase=final_state,
             consecutive_errors=consecutive_errors,
@@ -640,6 +687,14 @@ def _status_payload(args: argparse.Namespace) -> dict[str, Any]:
     pid_file, status_file, log_file = _resolve_runtime_paths(args)
     payload: dict[str, Any] = {
         "status": "missing",
+        "updated_at": datetime.now(UTC).isoformat(),
+        "artifacts": {
+            "duckdb_output_dir": str(Path(args.duckdb_output_dir).expanduser().resolve()),
+            "pid_file": str(pid_file),
+            "status_file": str(status_file),
+            "log_file": str(log_file),
+        },
+        "last_error": None,
         "pid_file": str(pid_file),
         "status_file": str(status_file),
         "log_file": str(log_file),
@@ -655,7 +710,16 @@ def _status_payload(args: argparse.Namespace) -> dict[str, Any]:
     payload["running"] = _pid_is_running(int(payload["pid"] or 0))
     if status_file.exists():
         payload["status"] = "ok"
-        payload["status_payload"] = json.loads(status_file.read_text(encoding="utf-8"))
+        status_payload = json.loads(status_file.read_text(encoding="utf-8"))
+        payload["status_payload"] = status_payload
+        if isinstance(status_payload, dict):
+            payload["updated_at"] = str(
+                status_payload.get("updated_at")
+                or status_payload.get("last_updated_at")
+                or payload["updated_at"]
+            )
+            payload["artifacts"] = dict(status_payload.get("artifacts") or payload["artifacts"])
+            payload["last_error"] = status_payload.get("last_error", status_payload.get("error"))
     return payload
 
 

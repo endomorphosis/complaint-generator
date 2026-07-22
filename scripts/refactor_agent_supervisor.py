@@ -2252,6 +2252,31 @@ def _validate_ipfs_p0_cross_link_goals(
         raise ValueError(f"IPFS P0 cross-links reference unknown refactor subgoals: {unknown}")
 
 
+def _status_artifacts() -> dict[str, str]:
+    """Return canonical artifact paths for the common daemon status contract."""
+
+    return {
+        "state_root": str(STATE_ROOT),
+        "objective_path": str(OBJECTIVE_PATH),
+        "todo_path": str(TODO_PATH),
+        "bundle_dir": str(BUNDLE_DIR),
+        "graph_path": str(GRAPH_PATH),
+        "queue_path": str(QUEUE_PATH),
+        "pid_file": str(PID_PATH),
+        "status_file": str(STATUS_PATH),
+        "log_file": str(LOG_PATH),
+    }
+
+
+def _status_last_error(payload: dict[str, Any]) -> str | None:
+    if payload.get("last_error") is not None:
+        return str(payload["last_error"])
+    for key, value in payload.items():
+        if value and (key == "error" or key.endswith("_error")):
+            return str(value)
+    return None
+
+
 def _write_status(payload: dict[str, Any]) -> None:
     """Atomically persist a complete, stable operator handoff snapshot."""
 
@@ -2263,6 +2288,11 @@ def _write_status(payload: dict[str, Any]) -> None:
     current["updated_at"] = now
     current["heartbeat"] = now
     current["heartbeat_at"] = now
+    existing_artifacts = current.get("artifacts")
+    current["artifacts"] = {
+        **_status_artifacts(),
+        **(dict(existing_artifacts) if isinstance(existing_artifacts, dict) else {}),
+    }
 
     try:
         current["pid"] = int(current.get("pid") or 0)
@@ -2283,6 +2313,7 @@ def _write_status(payload: dict[str, Any]) -> None:
     current["counts"] = counts
     current["todo_counts"] = dict(counts.get("todo") or {})
     current["queue_counts"] = dict(counts.get("queue") or {})
+    current["last_error"] = _status_last_error(current)
 
     temporary_path = STATUS_PATH.with_name(f".{STATUS_PATH.name}.{os.getpid()}.tmp")
     try:
@@ -3089,6 +3120,9 @@ def status_payload() -> dict[str, Any]:
         "schema": STATUS_SCHEMA,
         "status": "not_running",
         "pid": 0,
+        "updated_at": None,
+        "artifacts": _status_artifacts(),
+        "last_error": None,
         "pid_alive": False,
         "heartbeat": None,
         "heartbeat_at": None,
@@ -3257,6 +3291,12 @@ def status_payload() -> dict[str, Any]:
             merge_payload["pid"] = merge_pid
             merge_payload["pid_alive"] = _pid_alive(merge_pid)
         payload["merge_resolver_watchdog"] = merge_payload
+    existing_artifacts = payload.get("artifacts")
+    payload["artifacts"] = {
+        **_status_artifacts(),
+        **(dict(existing_artifacts) if isinstance(existing_artifacts, dict) else {}),
+    }
+    payload["last_error"] = _status_last_error(payload)
     return payload
 
 

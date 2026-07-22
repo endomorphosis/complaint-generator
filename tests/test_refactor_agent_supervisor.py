@@ -431,6 +431,9 @@ def test_status_snapshot_has_stable_handoff_metrics(tmp_path, monkeypatch) -> No
     assert persisted["pid"] == 0
     assert persisted["pid_alive"] is False
     assert persisted["heartbeat"] == persisted["heartbeat_at"] == persisted["updated_at"]
+    assert persisted["artifacts"]["status_file"] == str(supervisor.STATUS_PATH)
+    assert persisted["artifacts"]["queue_path"] == str(supervisor.QUEUE_PATH)
+    assert persisted["last_error"] is None
     assert persisted["scan_summary"] == scan_summary
     assert persisted["counts"] == counts
     assert persisted["todo_counts"] == counts["todo"]
@@ -439,6 +442,9 @@ def test_status_snapshot_has_stable_handoff_metrics(tmp_path, monkeypatch) -> No
     inspected = supervisor.status_payload()
     assert inspected["pid"] == 0
     assert inspected["heartbeat"] == persisted["heartbeat"]
+    assert inspected["updated_at"] == persisted["updated_at"]
+    assert inspected["artifacts"] == persisted["artifacts"]
+    assert inspected["last_error"] is None
     assert inspected["heartbeat_age_seconds"] is not None
     assert inspected["scan_summary"] == scan_summary
     assert inspected["counts"] == counts
