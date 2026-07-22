@@ -3545,11 +3545,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-211-migrateexistinggoalsandexposetrustworthycompleti
 - Acceptance: Legacy completed goals migrate idempotently to provisional or verified state based on available evidence, never by optimistic default.; Status and manifest projections show lifecycle state, confidence, uncovered criteria, stale evidence, analyzer health, exhaustion quorum, and reopen reasons.; Schema versioning and compatibility readers preserve existing boards, events, and automation during rollout.; The migration can be previewed and resumed safely after interruption.
 
-- [ ] Task checkbox-212: REF-212 Add end-to-end regression tests for truthful goal completion and autonomous refill
+- [x] Task checkbox-212: REF-212 Add end-to-end regression tests for truthful goal completion and autonomous refill
 
 ## REF-212 Add end-to-end regression tests for truthful goal completion and autonomous refill
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
