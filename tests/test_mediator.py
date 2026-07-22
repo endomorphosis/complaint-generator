@@ -81,6 +81,18 @@ class TestMediatorBasics:
         except ImportError as e:
             pytest.skip(f"Mediator module has dependency issues: {e}")
 
+    def test_workflow_service_imports_preserve_compatibility(self):
+        """Both the original and concise workflow service names stay importable."""
+        from mediator import Mediator, WorkflowActionService, WorkflowService
+        from mediator.mediator import Mediator as ModuleMediator
+        from mediator.workflow_service import (
+            WorkflowActionService as ModuleWorkflowActionService,
+        )
+
+        assert Mediator is ModuleMediator
+        assert WorkflowActionService is ModuleWorkflowActionService
+        assert WorkflowService is WorkflowActionService
+
 
 class TestMediatorWithMocks:
     """Test cases for Mediator with mocked dependencies"""
@@ -105,6 +117,32 @@ class TestMediatorWithMocks:
             assert mediator.state is not None
         except ImportError as e:
             pytest.skip(f"Mediator class has dependency issues: {e}")
+
+    def test_mediator_workflow_methods_delegate_through_public_service_api(self):
+        """Legacy Mediator helpers remain stable compatibility shims."""
+        from mediator import Mediator, WorkflowActionService
+
+        mock_backend = Mock()
+        mock_backend.id = 'test-backend'
+        mediator = Mediator(backends=[mock_backend])
+
+        assert isinstance(mediator.workflow_actions, WorkflowActionService)
+        mediator.workflow_actions.build_intake_action_queue = Mock(
+            return_value=[{'rank': 1, 'phase_name': 'intake_questioning'}]
+        )
+
+        result = mediator._build_intake_workflow_action_queue(
+            {'intake_sections': {}},
+            {'due_process': {'missing_count': 1}},
+            {},
+        )
+
+        assert result == [{'rank': 1, 'phase_name': 'intake_questioning'}]
+        mediator.workflow_actions.build_intake_action_queue.assert_called_once_with(
+            {'intake_sections': {}},
+            {'due_process': {'missing_count': 1}},
+            {},
+        )
 
     def test_mediator_logs_canonical_ipfs_adapter_startup_payload(self):
         """Mediator startup should log the canonical adapter capability payload without rebuilding it inline."""

@@ -7,8 +7,18 @@ from intake_status import (
 )
 
 
+__all__ = ['WorkflowActionService', 'WorkflowService']
+
+
 class WorkflowActionService:
-	"""Builds mediator workflow action queues and document-grounding handoff actions."""
+	"""Build mediator workflow queues and document-grounding handoff actions.
+
+	The service is intentionally composed into :class:`mediator.Mediator` rather
+	than inherited by it.  The public methods below are the service boundary for
+	new callers.  Underscore-prefixed methods remain in place because older code
+	may have reached them through ``Mediator`` or the previously exported service
+	class.
+	"""
 
 	def __init__(
 		self,
@@ -23,6 +33,83 @@ class WorkflowActionService:
 
 	def __getattr__(self, name):
 		return getattr(self._mediator, name)
+
+	def build_intake_action_queue(
+		self,
+		intake_case_file: Dict[str, Any],
+		claim_pressure: Dict[str, Dict[str, Any]],
+		matching_pressure: Dict[str, Dict[str, Any]],
+	) -> List[Dict[str, Any]]:
+		"""Build the ordered action queue for the intake workflow."""
+		return self._build_intake_workflow_action_queue(
+			intake_case_file,
+			claim_pressure,
+			matching_pressure,
+		)
+
+	def summarize_intake_action_queue(self, queue: Any) -> Dict[str, Any]:
+		"""Summarize an intake action queue without changing its payload."""
+		return self._summarize_intake_workflow_action_queue(queue)
+
+	def build_evidence_action_queue(
+		self,
+		alignment_evidence_tasks: Any,
+		evidence_gaps: Any,
+	) -> List[Dict[str, Any]]:
+		"""Build the ordered action queue for evidence and grounding work."""
+		return self._build_evidence_workflow_action_queue(
+			alignment_evidence_tasks,
+			evidence_gaps,
+		)
+
+	def summarize_evidence_action_queue(self, queue: Any) -> Dict[str, Any]:
+		"""Summarize an evidence action queue without changing its payload."""
+		return self._summarize_evidence_workflow_action_queue(queue)
+
+	def build_question_action_matches(
+		self,
+		candidate: Dict[str, Any],
+		workflow_action_queue: List[Dict[str, Any]],
+	) -> Dict[str, Any]:
+		"""Return workflow-priority signals for an intake question candidate."""
+		return self._build_question_workflow_action_matches(
+			candidate,
+			workflow_action_queue,
+		)
+
+	def get_document_provenance_summary(self) -> Dict[str, Any]:
+		"""Return the current formal document provenance summary."""
+		return self._get_document_provenance_summary()
+
+	def get_document_grounding_lane_outcome_summary(self) -> Dict[str, Any]:
+		"""Return outcomes from the current document-grounding lanes."""
+		return self._get_document_grounding_lane_outcome_summary()
+
+	def get_document_grounding_recovery_action(
+		self,
+		*,
+		provisional_evidence_workflow_action_queue: Any = None,
+		alignment_evidence_tasks: Any = None,
+	) -> Dict[str, Any]:
+		"""Resolve the next recovery action for weak document grounding."""
+		return self._get_document_grounding_recovery_action(
+			provisional_evidence_workflow_action_queue=provisional_evidence_workflow_action_queue,
+			alignment_evidence_tasks=alignment_evidence_tasks,
+		)
+
+	def get_document_grounding_improvement_next_action(
+		self,
+		*,
+		provisional_evidence_workflow_action_queue: Any = None,
+		alignment_evidence_tasks: Any = None,
+		document_grounding_recovery_action: Any = None,
+	) -> Dict[str, Any]:
+		"""Resolve the next learned improvement action for document grounding."""
+		return self._get_document_grounding_improvement_next_action(
+			provisional_evidence_workflow_action_queue=provisional_evidence_workflow_action_queue,
+			alignment_evidence_tasks=alignment_evidence_tasks,
+			document_grounding_recovery_action=document_grounding_recovery_action,
+		)
 
 	def _build_intake_workflow_action_queue(
 		self,
@@ -403,3 +490,8 @@ class WorkflowActionService:
 			'workflow_action_phase': matched_phase,
 			'workflow_action_focus_areas': matched_focus_areas,
 		}
+
+
+# A concise name for new integrations.  Keep WorkflowActionService as the
+# defining class so its identity and name remain stable for existing callers.
+WorkflowService = WorkflowActionService
