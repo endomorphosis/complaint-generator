@@ -45,3 +45,16 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Candidate kind: seed
 - Todo vector key: ref-018-convertsilentpassblocksinuser-facingworkflowsint
 - Acceptance: Intentional ignores are named.; Unexpected failures leave diagnostic breadcrumbs.
+
+## REF-019 Resolve dirty main checkout blocking 1 worktree merges
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Fingerprint: 4140732a4a7b55e4df04caeb4d7b10fdaedebe78
+- Dedupe key: reconciliation_guardrail:main_checkout_dirty
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g6-g6-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g6-g6-s1.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g6-g6-s1/discovery/2026-07-22-ref-019-reconciliation-4140732a4a7b.md
+- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g6-g6-s1/discovery/2026-07-22-ref-019-reconciliation-4140732a4a7b.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
