@@ -57,6 +57,10 @@ PID_PATH = STATE_ROOT / "refactor_supervisor.pid"
 LOG_PATH = STATE_ROOT / "refactor_supervisor.log"
 UPSTREAM_SUPERVISOR_STATUS_PATH = SUPERVISOR_STATE_DIR / "complaint_generator_refactor_supervisor_status.json"
 TASKBOARD_DOC_PATH = PROJECT_ROOT / "docs" / "REFACTOR_SUPERVISOR_TASKBOARD.md"
+IPFS_EXECUTION_BACKLOG_PATH = PROJECT_ROOT / "docs" / "IPFS_DATASETS_PY_EXECUTION_BACKLOG.md"
+
+IPFS_P0_CROSS_LINKS_START = "<!-- refactor-supervisor:p0-cross-links:start -->"
+IPFS_P0_CROSS_LINKS_END = "<!-- refactor-supervisor:p0-cross-links:end -->"
 
 TASK_PREFIX = "REF-"
 TASK_HEADER_PREFIX = "## REF-"
@@ -1015,6 +1019,21 @@ def _json_goal_tree(goals: list[dict[str, Any]], scan: dict[str, Any]) -> dict[s
     }
 
 
+def _merge_goal_tree_extensions(
+    generated: dict[str, Any],
+    existing: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep planning extensions that are not owned by the seed renderer.
+
+    Follow-on planning tasks may add durable top-level data such as
+    ``implementation_claims`` to the generated goal tree.  A fast seed owns and
+    refreshes its standard fields, but must not erase those adjacent artifacts.
+    """
+
+    extensions = {key: value for key, value in existing.items() if key not in generated}
+    return {**extensions, **generated}
+
+
 def _goal_evidence(task: RefactorTask) -> str:
     evidence = [*task.files, *task.acceptance, *task.validation]
     return ", ".join(dict.fromkeys(item for item in evidence if item)) or task.title
@@ -1197,10 +1216,12 @@ def write_seed_bundle_index(
     goals: list[dict[str, Any]],
     *,
     exclude_bundle_keys: set[str] | None = None,
+    task_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
     bundles: dict[str, dict[str, Any]] = {}
     excluded = exclude_bundle_keys or set()
+    statuses = task_statuses or {}
     task_index = 1
     for task in flatten_tasks(goals):
         task_id = task.task_id or f"{TASK_PREFIX}{task_index:03d}"
@@ -1238,6 +1259,7 @@ def write_seed_bundle_index(
         info["tasks"].append(
             {
                 "task_id": task_id,
+                "status": statuses.get(task_id, "todo"),
                 "goal_id": task.subgoal_id,
                 "graph_depth": 1,
                 "parent_goal_ids": [task.goal_id],
@@ -1509,13 +1531,20 @@ def seed_taskboard(
     goals = build_goals(scan)
 
     goal_tree = _json_goal_tree(goals, scan)
+    existing_goal_tree = _load_json_object(GOALS_PATH) if GOALS_PATH.exists() else {}
+    goal_tree = _merge_goal_tree_extensions(goal_tree, existing_goal_tree)
     GOALS_PATH.write_text(json.dumps(goal_tree, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     objective_changed = _ensure_text(OBJECTIVE_PATH, _render_objective_heap(goals), overwrite=True)
     existing_todo_headers = _todo_task_header_count()
     todo_changed = _ensure_text(TODO_PATH, _render_seed_todo(goals), overwrite=existing_todo_headers == 0)
     if existing_todo_headers:
         todo_changed = _append_missing_explicit_seed_tasks(TODO_PATH, goals) or todo_changed
-    bundle_seed = write_seed_bundle_index(goals, exclude_bundle_keys=exclude_bundle_keys)
+    durable_statuses = _durable_task_statuses()
+    bundle_seed = write_seed_bundle_index(
+        goals,
+        exclude_bundle_keys=exclude_bundle_keys,
+        task_statuses=durable_statuses,
+    )
     status_projection = synchronize_taskboard_statuses()
     todo_changed = bool(todo_changed or str(TODO_PATH) in status_projection["updated"])
 
@@ -1694,9 +1723,12 @@ def _write_taskboard_doc(
         "- Stop the background supervisor and its managed workers cleanly with "
         "`python scripts/refactor_agent_supervisor.py stop`.",
         "",
-        "## Goals",
-        "",
     ]
+    cross_links = _read_ipfs_p0_cross_links()
+    if cross_links:
+        _validate_ipfs_p0_cross_link_goals(cross_links, goals)
+        lines.extend([*cross_links, ""])
+    lines.extend(["## Goals", ""])
     for goal in goals:
         lines.append(f"### {goal['id']}: {goal['title']} ({goal['priority']})")
         lines.append("")
@@ -1711,6 +1743,75 @@ def _write_taskboard_doc(
                 lines.append(f"  - Validation: {'; '.join(f'`{v}`' for v in task.validation)}")
             lines.append("")
     TASKBOARD_DOC_PATH.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+
+def _read_ipfs_p0_cross_links(path: Path | None = None) -> list[str]:
+    """Return the canonical IPFS P0-to-refactor mapping for board projection.
+
+    The execution backlog owns this mapping because its work-package IDs are the
+    stable roadmap identifiers.  The generated taskboard projects the marked
+    section verbatim so a seed cycle cannot silently discard or fork the map.
+    """
+
+    source_path = path or IPFS_EXECUTION_BACKLOG_PATH
+    if not source_path.exists():
+        return []
+
+    text = source_path.read_text(encoding="utf-8")
+    start_count = text.count(IPFS_P0_CROSS_LINKS_START)
+    end_count = text.count(IPFS_P0_CROSS_LINKS_END)
+    if start_count != 1 or end_count != 1:
+        raise ValueError(
+            f"{source_path} must contain exactly one P0 cross-link start/end marker pair"
+        )
+
+    before, remainder = text.split(IPFS_P0_CROSS_LINKS_START, 1)
+    section, after = remainder.split(IPFS_P0_CROSS_LINKS_END, 1)
+    if not before or not after or not section.strip():
+        raise ValueError(f"{source_path} contains an empty or misplaced P0 cross-link section")
+    section_lines = section.strip().splitlines()
+
+    p0_workstreams: set[str] = set()
+    for line in text.splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) >= 4 and re.fullmatch(r"W\d+", cells[0]) and cells[3] == "P0":
+            p0_workstreams.add(cells[0])
+
+    mapped_workstreams: set[str] = set()
+    for line in section_lines:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not cells:
+            continue
+        match = re.match(r"(W\d+)\b", cells[0])
+        if not match:
+            continue
+        if len(cells) < 4 or not re.search(r"G\d+\.S\d+", cells[1]):
+            raise ValueError(f"{source_path} has an incomplete cross-link row for {match.group(1)}")
+        mapped_workstreams.add(match.group(1))
+
+    if mapped_workstreams != p0_workstreams:
+        missing = sorted(p0_workstreams - mapped_workstreams)
+        unexpected = sorted(mapped_workstreams - p0_workstreams)
+        raise ValueError(
+            f"{source_path} P0 cross-link coverage mismatch; missing={missing}, unexpected={unexpected}"
+        )
+    return section_lines
+
+
+def _validate_ipfs_p0_cross_link_goals(
+    cross_links: list[str],
+    goals: list[dict[str, Any]],
+) -> None:
+    referenced = set(re.findall(r"G\d+\.S\d+", "\n".join(cross_links)))
+    available = {
+        str(subgoal.get("id"))
+        for goal in goals
+        for subgoal in goal.get("subgoals", [])
+        if subgoal.get("id")
+    }
+    unknown = sorted(referenced - available)
+    if unknown:
+        raise ValueError(f"IPFS P0 cross-links reference unknown refactor subgoals: {unknown}")
 
 
 def _write_status(payload: dict[str, Any]) -> None:
