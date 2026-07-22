@@ -1825,6 +1825,84 @@ def _queue_counts() -> dict[str, int]:
             close()
 
 
+def _priority_sort_key(value: Any) -> tuple[int, int, str]:
+    """Return a deterministic ordering key for taskboard priority values."""
+
+    priority = str(value or "").strip().upper()
+    match = re.fullmatch(r"P(\d+)", priority)
+    if match:
+        return (0, int(match.group(1)), priority)
+    return (1, 0, priority)
+
+
+def _compact_string_list(value: Any) -> list[str]:
+    """Normalize a queue payload collection into a stable compact JSON list."""
+
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        values = list(value)
+    else:
+        values = []
+    return sorted(
+        {
+            str(item).strip()
+            for item in values
+            if item is not None and str(item).strip()
+        }
+    )
+
+
+def _queued_task_summaries(*, limit: int = 10) -> list[dict[str, Any]]:
+    """List queued refactor work compactly in stable priority order.
+
+    ``TaskQueue.list`` ordering is a storage detail and is not guaranteed to be
+    priority-aware. Read a bounded board snapshot, normalize the fields useful
+    to agents and automation, and apply explicit tie-breakers before limiting
+    the result.
+    """
+
+    result_limit = max(0, int(limit))
+    if result_limit == 0 or not QUEUE_PATH.exists():
+        return []
+
+    TaskQueue = _task_queue_class()
+    queue = TaskQueue(str(QUEUE_PATH))
+    try:
+        summaries: list[dict[str, Any]] = []
+        for item in queue.list(status="queued", limit=1000, task_types=TASK_TYPES):
+            if not isinstance(item, dict):
+                continue
+            raw_payload = item.get("payload")
+            payload = raw_payload if isinstance(raw_payload, dict) else {}
+            files = _compact_string_list(payload.get("files") or payload.get("paths"))
+            summaries.append(
+                {
+                    "task_id": str(item.get("task_id") or ""),
+                    "priority": str(payload.get("priority") or "").strip().upper() or None,
+                    "goal_id": payload.get("goal_id"),
+                    "subgoal_id": payload.get("subgoal_id"),
+                    "title": str(payload.get("title") or "").strip() or None,
+                    "files": files,
+                }
+            )
+
+        summaries.sort(
+            key=lambda item: (
+                _priority_sort_key(item["priority"]),
+                str(item["goal_id"] or ""),
+                str(item["subgoal_id"] or ""),
+                str(item["task_id"] or ""),
+                str(item["title"] or ""),
+            )
+        )
+        return summaries[:result_limit]
+    finally:
+        close = getattr(queue, "close", None)
+        if callable(close):
+            close()
+
+
 def _collect_counts() -> tuple[dict[str, dict[str, int]], dict[str, str]]:
     """Return current board counts without making status reporting brittle."""
 
@@ -3153,6 +3231,7 @@ def status_payload() -> dict[str, Any]:
         "heartbeat": None,
         "heartbeat_at": None,
         "scan_summary": {},
+        "next_tasks": [],
         "counts": {
             "todo": {"needed": 0, "in_progress": 0, "complete": 0, "blocked": 0},
             "queue": {"queued": 0, "running": 0, "completed": 0, "failed": 0},
@@ -3236,23 +3315,11 @@ def status_payload() -> dict[str, Any]:
     if payload["status"] in {"running", "starting", "started"} and not payload["pid_alive"]:
         payload["status"] = "stale"
 
-    if QUEUE_PATH.exists():
-        try:
-            TaskQueue = _task_queue_class()
-            queue = TaskQueue(str(QUEUE_PATH))
-            payload["next_tasks"] = [
-                {
-                    "task_id": item.get("task_id"),
-                    "priority": (item.get("payload") or {}).get("priority"),
-                    "goal_id": (item.get("payload") or {}).get("goal_id"),
-                    "subgoal_id": (item.get("payload") or {}).get("subgoal_id"),
-                    "title": (item.get("payload") or {}).get("title"),
-                    "files": (item.get("payload") or {}).get("files", []),
-                }
-                for item in queue.list(status="queued", limit=10, task_types=TASK_TYPES)
-            ]
-        except Exception as exc:
-            payload["queue_error"] = str(exc)
+    payload["next_tasks"] = []
+    try:
+        payload["next_tasks"] = _queued_task_summaries(limit=10)
+    except Exception as exc:
+        payload["queue_error"] = f"{type(exc).__name__}: {exc}"
     if TODO_PATH.exists():
         parse_markdown_tasks, _task_status_counts = _upstream_task_board_helpers()
         tasks = parse_markdown_tasks(TODO_PATH.read_text(encoding="utf-8", errors="replace"))
