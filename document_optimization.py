@@ -15,6 +15,7 @@ from intake_status import (
 )
 from complaint_phases import ComplaintPhase
 from claim_support_review import summarize_claim_reasoning_review
+from integrations.ipfs_datasets.loader import import_attr_optional
 
 try:
     from integrations.ipfs_datasets.llm import generate_text_with_metadata
@@ -37,13 +38,6 @@ except Exception:
 
     def get_embeddings_router(*args, **kwargs):
         return None
-
-try:
-    from integrations.ipfs_datasets.loader import import_attr_optional
-except Exception:
-    def import_attr_optional(*args, **kwargs):
-        return None, None
-
 
 OptimizerLLMRouter, _optimizer_router_error = import_attr_optional(
     "ipfs_datasets_py.optimizers.agentic",
