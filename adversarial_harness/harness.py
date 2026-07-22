@@ -489,24 +489,50 @@ class AdversarialHarness:
         """Call mediator_factory with optional per-session DB paths if supported."""
         try:
             sig = inspect.signature(self.mediator_factory)
-            params = sig.parameters
-            accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
-            kwargs: Dict[str, Any] = {}
-            if accepts_kwargs or "evidence_db_path" in params:
-                kwargs["evidence_db_path"] = evidence_db_path
-            if accepts_kwargs or "legal_authority_db_path" in params:
-                kwargs["legal_authority_db_path"] = legal_authority_db_path
-            if accepts_kwargs or "claim_support_db_path" in params:
-                kwargs["claim_support_db_path"] = claim_support_db_path
-            if session_id is not None and (accepts_kwargs or "session_id" in params):
-                kwargs["session_id"] = session_id
-            if session_dir is not None and (accepts_kwargs or "session_dir" in params):
-                kwargs["session_dir"] = session_dir
-            if kwargs:
-                return self.mediator_factory(**kwargs)
-        except Exception:
-            pass
-        return self.mediator_factory()
+        except (TypeError, ValueError):
+            # Some extension and dynamically generated callables do not expose
+            # an inspectable signature. Retain no-argument factory compatibility
+            # for those callables, while making the loss of session-scoped paths
+            # observable. Factory execution deliberately remains outside this
+            # recovery boundary so constructor failures are never retried or
+            # replaced by a second, argument-less invocation.
+            logger.warning(
+                "Could not inspect mediator factory %s; calling it without "
+                "session-specific arguments",
+                type(self.mediator_factory).__name__,
+                exc_info=True,
+            )
+            return self.mediator_factory()
+
+        params = sig.parameters
+        accepts_kwargs = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in params.values()
+        )
+
+        def accepts_keyword(name: str) -> bool:
+            parameter = params.get(name)
+            return accepts_kwargs or (
+                parameter is not None
+                and parameter.kind in {
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                }
+            )
+
+        kwargs: Dict[str, Any] = {}
+        if accepts_keyword("evidence_db_path"):
+            kwargs["evidence_db_path"] = evidence_db_path
+        if accepts_keyword("legal_authority_db_path"):
+            kwargs["legal_authority_db_path"] = legal_authority_db_path
+        if accepts_keyword("claim_support_db_path"):
+            kwargs["claim_support_db_path"] = claim_support_db_path
+        if session_id is not None and accepts_keyword("session_id"):
+            kwargs["session_id"] = session_id
+        if session_dir is not None and accepts_keyword("session_dir"):
+            kwargs["session_dir"] = session_dir
+
+        return self.mediator_factory(**kwargs)
 
     def _ensure_session_db_paths(
         self,
