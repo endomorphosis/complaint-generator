@@ -215,8 +215,16 @@ def _runtime_backend_probe() -> dict[str, Any]:
             resolved = discovered_cmd
             try:
                 setattr(backend, "_cmd", discovered_cmd)
-            except Exception:
-                pass
+            except Exception as exc:
+                return {
+                    "backend": backend,
+                    "backend_name": backend_name,
+                    "status": "unavailable",
+                    "reason": (
+                        "failed to configure discovered ipfs CLI binary "
+                        f"{discovered_cmd!r}: {type(exc).__name__}: {exc}"
+                    ),
+                }
         if not resolved:
             return {
                 "backend": backend,
