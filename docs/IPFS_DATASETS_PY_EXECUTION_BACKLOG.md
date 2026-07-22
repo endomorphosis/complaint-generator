@@ -91,6 +91,28 @@ These are the main execution targets:
 | W9 | Legal corpus search and authority treatment | Planned | P0 | Claim elements can be researched for support, opposition, and authority reliability |
 | W10 | Drafting and filing readiness | Planned | P0 | Formal complaint drafts become support-aware, citation-aware, and validation-aware |
 
+<!-- refactor-supervisor:p0-cross-links:start -->
+## P0 Refactor Supervisor Cross-Links
+
+This is the canonical mapping from the P0 IPFS roadmap to the generated refactor taskboard. The supervisor copies this marked section into `docs/REFACTOR_SUPERVISOR_TASKBOARD.md` on every seed run. References such as `G3.S1` identify the goal definitions rendered under **Goals** on that board.
+
+| IPFS workstream | Refactor goal(s) | Package coverage | Merge and scope rule |
+|---|---|---|---|
+| W1 Adapter hardening | [G1.S2](REFACTOR_SUPERVISOR_TASKBOARD.md#g1s2-remove-ad-hoc-import-path-behavior-from-production-surfaces), [G3.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g3s1-normalize-ipfs-datasets-adapter-payloads) | W1.1 capability reporting maps to G3.S1; W1.2 production import cleanup maps to G1.S2. | Treat the matching supervisor tasks as the same implementation claims: carry both the W and G identifiers instead of queuing duplicates. W1 owns IPFS acceptance details; the goals own repository-boundary and adapter-contract acceptance. |
+| W2 Unified acquisition and provenance | [G2.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g2s1-extract-mediator-service-seams), [G3.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g3s1-normalize-ipfs-datasets-adapter-payloads) | W2.1-W2.3 and W2.5 supply the shared types and payload contracts covered by G3.S1; mediator-hook changes in W2.2-W2.4 also use the G2.S1 extraction seam. | The functional data/provenance work remains in W2. G2.S1 only owns extracting mediator responsibilities and G3.S1 only owns normalized adapter contracts. W2.4's scraper acquisition queue is explicitly distinct from the refactor supervisor queue in G5.S1. |
+| W3 Document and chunk services | [G2.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g2s1-extract-mediator-service-seams), [G3.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g3s1-normalize-ipfs-datasets-adapter-payloads) | W3.1-W3.3 are the roadmap detail for G3.S1's shared ingestion-contract task; hook extraction required by W3.2-W3.3 maps to G2.S1. | Merge W3 parse-contract work with the G3.S1 implementation claim. Use G2.S1 only when moving orchestration across module seams, not as a second parsing implementation. |
+| W4 Graph persistence and support queries | [G2.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g2s1-extract-mediator-service-seams), [G3.S2](REFACTOR_SUPERVISOR_TASKBOARD.md#g3s2-clarify-graph-graphrag-and-logic-adapter-boundaries) | W4.1-W4.4 implement the graph persistence/query interfaces named by G3.S2; mediator query-orchestration extraction maps to G2.S1. | One graph contract/query slice carries W4 and G3.S2. G2.S1 is separately scoped to module decomposition and must not reimplement graph behavior. |
+| W9 Legal corpus search and authority treatment | [G2.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g2s1-extract-mediator-service-seams), [G3.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g3s1-normalize-ipfs-datasets-adapter-payloads), [G3.S2](REFACTOR_SUPERVISOR_TASKBOARD.md#g3s2-clarify-graph-graphrag-and-logic-adapter-boundaries) | W9.1-W9.3 use normalized legal/type contracts under G3.S1; W9.4 uses graph boundaries under G3.S2; mediator extraction uses G2.S1 when needed. | W9 owns new legal-search, treatment, and rule-matching behavior. The refactor goals constrain adapter payloads and module boundaries only, so those refactor claims do not duplicate W9 features. |
+| W10 Drafting and filing readiness | [G2.S2](REFACTOR_SUPERVISOR_TASKBOARD.md#g2s2-reduce-application-surface-coupling), [G4.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g4s1-create-focused-test-lanes-for-refactor-work), [G7.S1](REFACTOR_SUPERVISOR_TASKBOARD.md#g7s1-separate-review-api-contracts-from-display-assembly) | W10.1-W10.2 consume explicit review DTOs under G7.S1; W10.3 application separation maps to G2.S2; W10.4 focused validation maps to G4.S1. | W10 owns drafting/export capability. G7.S1 owns reusable review payload assembly, G2.S2 owns application decoupling, and G4.S1 owns test-lane structure; shared files do not make these duplicate feature tasks. |
+
+Execution rules:
+
+1. Every implementation claim for a mapped package records both IDs, for example `W3.1 / G3.S1`, in its title or task metadata.
+2. When the table says to merge, there is one queued implementation claim with the union of acceptance criteria and validation commands, not parallel backlog and refactor copies.
+3. When the table explicitly separates scopes, claims may remain separate only if their titles and acceptance criteria name the functional, contract, decomposition, UI, or validation boundary shown above.
+4. The P1 workstreams remain roadmap-owned until a supervisor goal explicitly adopts them; this does not affect P0 coverage.
+<!-- refactor-supervisor:p0-cross-links:end -->
+
 ## W1: Adapter Hardening
 
 Status: In Progress

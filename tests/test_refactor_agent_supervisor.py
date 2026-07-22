@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -203,6 +204,114 @@ def test_goal_json_projects_header_statuses_and_resolves_seed_task_ids(tmp_path,
     assert taskboard["tasks"][1]["task_id"] == "REF-027"
     assert projected["task_id"] == "REF-001"
     assert projected["status"] == "complete"
+
+
+def test_seed_goal_tree_preserves_follow_on_planning_extensions() -> None:
+    generated = {
+        "generated_at": "new",
+        "goals": [{"id": "G1"}],
+        "scan": {"python_file_count": 1},
+    }
+    existing = {
+        "generated_at": "old",
+        "goals": [{"id": "stale"}],
+        "implementation_claims": [{"id": "CLAIM-001"}],
+    }
+
+    merged = supervisor._merge_goal_tree_extensions(generated, existing)
+
+    assert merged["generated_at"] == "new"
+    assert merged["goals"] == [{"id": "G1"}]
+    assert merged["implementation_claims"] == [{"id": "CLAIM-001"}]
+
+
+def test_taskboard_projects_canonical_ipfs_p0_cross_links(tmp_path, monkeypatch) -> None:
+    backlog = tmp_path / "ipfs-backlog.md"
+    taskboard = tmp_path / "taskboard.md"
+    backlog.write_text(
+        "# Backlog\n\n"
+        "| ID | Workstream | Status | Priority | Outcome |\n"
+        "|---|---|---|---|---|\n"
+        "| W1 | Adapter | In Progress | P0 | Stable contracts |\n\n"
+        f"{supervisor.IPFS_P0_CROSS_LINKS_START}\n"
+        "## P0 Refactor Supervisor Cross-Links\n\n"
+        "| IPFS workstream | Refactor goal(s) | Package coverage | Merge and scope rule |\n"
+        "|---|---|---|---|\n"
+        "| W1 | G3.S1 | W1.1 | Merge matching claims. |\n"
+        f"{supervisor.IPFS_P0_CROSS_LINKS_END}\n\n"
+        "## Workstream details\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(supervisor, "IPFS_EXECUTION_BACKLOG_PATH", backlog)
+    monkeypatch.setattr(supervisor, "TASKBOARD_DOC_PATH", taskboard)
+    scan = {
+        "python_file_count": 1,
+        "python_total_lines": 2,
+        "test_file_count": 3,
+        "signals": {
+            "direct_ipfs_import_count": 0,
+            "sys_path_mutation_count": 0,
+            "broad_exception_count": 0,
+        },
+    }
+
+    goals = [
+        {
+            "id": "G3",
+            "subgoals": [{"id": "G3.S1", "title": "Contracts", "tasks": []}],
+            "title": "Adapters",
+            "priority": "P0",
+        }
+    ]
+    supervisor._write_taskboard_doc(
+        goals,
+        scan,
+        {},
+        {},
+        {},
+        queue_refill={},
+        taskboard={},
+    )
+
+    rendered = taskboard.read_text(encoding="utf-8")
+    assert rendered.count("## P0 Refactor Supervisor Cross-Links") == 1
+    assert "| W1 | G3.S1 | W1.1 | Merge matching claims. |" in rendered
+    assert rendered.index("## P0 Refactor Supervisor Cross-Links") < rendered.index("## Goals")
+
+
+def test_ipfs_p0_cross_link_markers_must_be_unique(tmp_path) -> None:
+    backlog = tmp_path / "ipfs-backlog.md"
+    backlog.write_text(
+        "# Backlog\n\n"
+        f"{supervisor.IPFS_P0_CROSS_LINKS_START}\n"
+        "mapping\n",
+        encoding="utf-8",
+    )
+
+    try:
+        supervisor._read_ipfs_p0_cross_links(backlog)
+    except ValueError as exc:
+        assert "exactly one" in str(exc)
+    else:
+        raise AssertionError("malformed mapping markers should fail taskboard generation")
+
+
+def test_repository_ipfs_p0_cross_links_cover_the_overview_and_known_goals() -> None:
+    section = supervisor._read_ipfs_p0_cross_links()
+    goals = supervisor.build_goals({"signals": {}})
+
+    supervisor._validate_ipfs_p0_cross_link_goals(section, goals)
+
+    rows = [line for line in section if re.match(r"^\| W\d+\b", line)]
+    assert [re.match(r"^\| (W\d+)\b", line).group(1) for line in rows] == [
+        "W1",
+        "W2",
+        "W3",
+        "W4",
+        "W9",
+        "W10",
+    ]
+    assert all("Merge and scope rule" not in row and row.count("|") >= 5 for row in rows)
 
 
 def test_merge_watchdog_skips_aborted_historical_merge(tmp_path, monkeypatch) -> None:
