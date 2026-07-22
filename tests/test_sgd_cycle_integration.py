@@ -17,6 +17,7 @@ def _load_session_sgd_report_module():
 
 _sgd = _load_session_sgd_report_module()
 _find_session_json_files = _sgd._find_session_json_files
+_safe_int = _sgd._safe_int
 _summarize_session = _sgd._summarize_session
 _write_report = _sgd._write_report
 
@@ -59,6 +60,27 @@ class MockMediator:
 			'next_action': {'action': 'complete_intake'},
 			'phase_completion': {'intake': True},
 		}
+
+
+def test_safe_int_treats_expected_conversion_failures_as_missing():
+	assert _safe_int("42") == 42
+	assert _safe_int(None) is None
+	assert _safe_int("not-an-integer") is None
+	assert _safe_int([]) is None
+	assert _safe_int(float("inf")) is None
+
+
+def test_safe_int_does_not_swallow_unexpected_conversion_failures():
+	class BrokenInteger:
+		def __int__(self):
+			raise RuntimeError("unexpected conversion failure")
+
+	try:
+		_safe_int(BrokenInteger())
+	except RuntimeError as exc:
+		assert str(exc) == "unexpected conversion failure"
+	else:
+		raise AssertionError("_safe_int swallowed an unexpected RuntimeError")
 
 
 def test_batch_persist_then_sgd_report(tmp_path):

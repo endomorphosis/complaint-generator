@@ -40,7 +40,7 @@ def _safe_int(value: Any) -> Optional[int]:
 		if value is None:
 			return None
 		return int(value)
-	except Exception:
+	except (TypeError, ValueError, OverflowError):
 		return None
 
 
