@@ -1,31 +1,40 @@
 # REF-015 Reconciliation Guardrail
 
 Date: 2026-07-22
-Fingerprint: c66aac1f89b6e352ccf7535152a2ddb8cf591117
+Fingerprint: b594c6a97b301266455d1e44271d960d8bf7b21c
 Kind: main_checkout_dirty
 Reason: main_checkout_dirty
-Candidate count: 1
+Candidate count: 2
 Priority: P1
 Track: ops
 
 ## Main Checkout Status
 
 - ` M data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
+- ` M data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md`
+- `?? data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/`
 
 ## Main Checkout Evidence
 
-- Path categories: `modified=1`
+- Path categories: `modified=2, untracked=1`
 - Status paths:
   - `data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
+  - `data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md`
+  - `data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1`
 - Name status:
   - `M	data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
+  - `M	data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md`
 - Diff stat:
-  - `.../bundle_lanes/bundle_lanes.json                 | 1003136 ++++++++++++++++-`
-  - ` 1 file changed, 1002912 insertions(+), 224 deletions(-)`
+  - `.../bundle_lanes/bundle_lanes.json                 | 937345 +++++++++++++++++-`
+  - ` .../objective_bundles/refactor-g8-g8-s1.todo.md    |     13 +`
+  - ` 2 files changed, 937134 insertions(+), 224 deletions(-)`
+- Untracked paths:
+  - `data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1`
 
 ## Sample Branches Or Worktrees
 
-- `implementation/ref-014-0fe33c0cb7c7-attempt-1-1784692026` at `/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g4-g4-s1/ref-014-0fe33c0cb7c7-attempt-1-1784692026`
+- `rescue/worktree/implementation-ref-013-d4fc48536ac0-attempt-1-1784693051-3c65dce8f628` at `/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g4-g4-s1/ref-013-d4fc48536ac0-attempt-1-1784693051`
+- `implementation/ref-015-25ad7db2c606-attempt-1-1784693208` at `/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g4-g4-s1/ref-015-25ad7db2c606-attempt-1-1784693208`
 
 ## Why This Blocks Progress
 
@@ -44,7 +53,7 @@ worktree cleanup skip count decreases.
 
 ## Reconciliation Plan
 
-Work surface: `1` candidates, `1` sampled records.
+Work surface: `2` candidates, `2` sampled records.
 
 ### Suggested Actions
 
@@ -86,22 +95,30 @@ Work surface: `1` candidates, `1` sampled records.
       "scope": "backlogged_worktrees"
     }
   ],
-  "candidate_count": 1,
+  "candidate_count": 2,
   "conflict_path_counts": {},
   "dedupe_key": "reconciliation_guardrail:main_checkout_dirty",
-  "fingerprint": "c66aac1f89b6e352ccf7535152a2ddb8cf591117",
+  "fingerprint": "b594c6a97b301266455d1e44271d960d8bf7b21c",
   "kind": "main_checkout_dirty",
   "main_dirty_evidence": {
-    "diff_stat": ".../bundle_lanes/bundle_lanes.json                 | 1003136 ++++++++++++++++-\n 1 file changed, 1002912 insertions(+), 224 deletions(-)",
-    "name_status": "M\tdata/refactor_supervisor/bundle_lanes/bundle_lanes.json",
+    "diff_stat": ".../bundle_lanes/bundle_lanes.json                 | 937345 +++++++++++++++++-\n .../objective_bundles/refactor-g8-g8-s1.todo.md    |     13 +\n 2 files changed, 937134 insertions(+), 224 deletions(-)",
+    "name_status": "M\tdata/refactor_supervisor/bundle_lanes/bundle_lanes.json\nM\tdata/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md",
     "path_categories": {
-      "modified": 1
+      "modified": 2,
+      "untracked": 1
     },
     "status_paths": [
-      "data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
+      "data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
+      "data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md",
+      "data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1"
     ],
     "status_short": [
-      " M data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
+      " M data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
+      " M data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md",
+      "?? data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/"
+    ],
+    "untracked_paths": [
+      "data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1"
     ]
   },
   "reason": "main_checkout_dirty",
@@ -111,14 +128,18 @@ Work surface: `1` candidates, `1` sampled records.
     "Keep todo, objective, discovery, and strategy files parseable after reconciliation."
   ],
   "sample_branches": [
-    "implementation/ref-014-0fe33c0cb7c7-attempt-1-1784692026"
+    "rescue/worktree/implementation-ref-013-d4fc48536ac0-attempt-1-1784693051-3c65dce8f628",
+    "implementation/ref-015-25ad7db2c606-attempt-1-1784693208"
   ],
-  "sample_count": 1,
+  "sample_count": 2,
   "sample_status_paths": [
-    "data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
+    "data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
+    "data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md",
+    "data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1"
   ],
   "sample_worktrees": [
-    "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g4-g4-s1/ref-014-0fe33c0cb7c7-attempt-1-1784692026"
+    "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g4-g4-s1/ref-013-d4fc48536ac0-attempt-1-1784693051",
+    "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g4-g4-s1/ref-015-25ad7db2c606-attempt-1-1784693208"
   ],
   "success_signals": [
     "candidate_count_decreases",
