@@ -43,7 +43,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-003 Replace production sys.path mutation with package-level imports or adapter loader calls
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G1
