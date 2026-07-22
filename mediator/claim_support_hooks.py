@@ -105,14 +105,27 @@ class ClaimSupportHook:
         )
 
     def _prepare_duckdb_path(self):
+        """Prepare the filesystem path used by DuckDB.
+
+        An empty file is not a valid DuckDB database, but callers commonly
+        supply a path created by ``NamedTemporaryFile``. Remove that empty
+        placeholder so DuckDB can initialize the database itself. Preparation
+        remains best-effort because ``_initialize_schema`` owns the connection
+        error path, while filesystem failures are logged here for diagnosis.
+        """
         try:
             path = Path(self.db_path)
             if path.parent and not path.parent.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)
             if path.exists() and path.is_file() and path.stat().st_size == 0:
                 path.unlink()
-        except Exception:
-            pass
+        except OSError as exc:
+            self.mediator.log(
+                'claim_support_db_path_prepare_error',
+                db_path=self.db_path,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
 
     def _check_duckdb_availability(self):
         if not DUCKDB_AVAILABLE:
