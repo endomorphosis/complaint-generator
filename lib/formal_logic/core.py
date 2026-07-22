@@ -113,7 +113,7 @@ class Proposition(ABC):
 
     @abstractmethod
     def evaluate(self, model: Dict[str, Any]) -> bool:
-        raise NotImplementedError
+        """Evaluate this proposition against the truth assignments in ``model``."""
 
 
 @dataclass(frozen=True)
