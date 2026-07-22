@@ -148,3 +148,25 @@ def test_build_prompt_does_not_swallow_unexpected_count_conversion_failure() -> 
 
     with pytest.raises(RuntimeError, match="unexpected count conversion failure"):
         _build_prompt({"kg_sessions_with_data": BrokenCount()})
+
+
+@pytest.mark.parametrize("metric", ["not-a-number", object(), 10**1000])
+def test_build_prompt_ignores_malformed_gap_delta_metric(metric: object) -> None:
+    prompt = _build_prompt({"kg_avg_gaps_delta_per_iter": metric})
+
+    assert "Knowledge graph gaps are flat/increasing per iteration" not in prompt
+
+
+def test_build_prompt_flags_flat_or_increasing_gap_delta() -> None:
+    prompt = _build_prompt({"kg_avg_gaps_delta_per_iter": "0.0"})
+
+    assert "Knowledge graph gaps are flat/increasing per iteration" in prompt
+
+
+def test_build_prompt_does_not_swallow_unexpected_gap_delta_conversion_failure() -> None:
+    class BrokenMetric:
+        def __float__(self) -> float:
+            raise RuntimeError("unexpected gap delta conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected gap delta conversion failure"):
+        _build_prompt({"kg_avg_gaps_delta_per_iter": BrokenMetric()})
