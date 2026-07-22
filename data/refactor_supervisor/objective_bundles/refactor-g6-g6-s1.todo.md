@@ -8,7 +8,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-017 Audit broad exception handlers in mediator and adapter paths
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G6
