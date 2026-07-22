@@ -27,7 +27,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
