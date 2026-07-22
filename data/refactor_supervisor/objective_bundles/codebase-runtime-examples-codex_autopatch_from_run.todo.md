@@ -254,7 +254,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-106 Review swallowed exception path in examples/codex_autopatch_from_run.py:173
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -316,7 +316,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-108 Review swallowed exception path in examples/codex_autopatch_from_run.py:1674
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
