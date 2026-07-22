@@ -82,7 +82,9 @@ def _parse_codex_human_reset_at(msg: str) -> Optional[datetime]:
         try:
             dt = datetime.strptime(cleaned, fmt)
             return dt.replace(tzinfo=timezone.utc)
-        except Exception:
+        except ValueError:
+            # Provider reset messages are untrusted and may not match either
+            # supported format. Unexpected parser failures must remain visible.
             continue
     return None
 

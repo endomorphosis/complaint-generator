@@ -18,6 +18,7 @@ def _load_codex_autopatch_module():
 
 _codex_autopatch = _load_codex_autopatch_module()
 _parse_iso_dt = _codex_autopatch._parse_iso_dt
+_parse_codex_human_reset_at = _codex_autopatch._parse_codex_human_reset_at
 _debug_extract_reset_info_from_message = _codex_autopatch._debug_extract_reset_info_from_message
 _extract_rate_limit_reset_info_with_exec_fallback = _codex_autopatch._extract_rate_limit_reset_info_with_exec_fallback
 _pick_reset_at_raw_from_rate_limit_artifact = _codex_autopatch._pick_reset_at_raw_from_rate_limit_artifact
@@ -39,6 +40,24 @@ def test_parse_iso_dt_does_not_swallow_unexpected_parser_failure(
 
     with pytest.raises(RuntimeError, match="unexpected datetime parser failure"):
         _parse_iso_dt("2026-07-22T12:00:00+00:00")
+
+
+def test_parse_human_reset_at_rejects_malformed_provider_timestamp() -> None:
+    assert _parse_codex_human_reset_at("try again at someday around lunch.") is None
+
+
+def test_parse_human_reset_at_does_not_swallow_unexpected_parser_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingDateTime:
+        @staticmethod
+        def strptime(_value: str, _format: str) -> datetime:
+            raise RuntimeError("unexpected datetime parser failure")
+
+    monkeypatch.setattr(_codex_autopatch, "datetime", FailingDateTime)
+
+    with pytest.raises(RuntimeError, match="unexpected datetime parser failure"):
+        _parse_codex_human_reset_at("try again at Jul 22nd, 2026 12:00 PM.")
 
 
 def test_parse_try_again_at_human_timestamp() -> None:
