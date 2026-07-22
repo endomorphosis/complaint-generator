@@ -2920,3 +2920,189 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 6e1fbcf47fed79d4
 - Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/legal.py:662. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-123-codebase-scan-6e1fbcf47fed.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-124 Review swallowed exception path in integrations/ipfs_datasets/llm.py:78
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/llm.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/llm.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-llm
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-llm.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-llm
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/llm.py
+- AST symbols: __future__, __future__.annotations, _build_arch_router_prompt, _build_huggingface_router_request, _coalesce_env, _coerce_bool, _env_value, _extract_arch_router_config, _is_huggingface_router_request, _normalize_arch_router_routes, _normalize_headers, _parse_arch_router_route, _pop_first_string, _prepare_generate_text_call, _provider_preflight_error, _resolve_hf_token, _resolve_openai_api_key, _select_huggingface_arch_route, _slugify_route_name, _strip_code_fences, _temporary_env, build arch router prompt, build huggingface router request, coalesce env, coerce bool, contextlib, contextlib contextmanager, contextlib.contextmanager, env value, extract arch router config, future, future annotations, generate text via router, generate text with metadata, generate_text_via_router, generate_text_with_metadata, importlib, ipfs datasets py mcp server secrets vault, ipfs datasets py mcp server secrets vault get secrets vault, ipfs_datasets_py.mcp_server.secrets_vault, ipfs_datasets_py.mcp_server.secrets_vault.get_secrets_vault, is huggingface router request, json, keyring, llm router status, llm_router_status, loader, loader import attr optional, loader.import_attr_optional, normalize arch router routes, normalize headers, os, parse arch router route, pop first string, prepare generate text call, provider preflight error, re, resolve hf token, resolve openai api key, select huggingface arch route, shutil, slugify route name, strip code fences, temporary env, threading, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing mapping, typing optional, typing.any, typing.dict, typing.mapping, typing.optional
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-llm
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/llm.py:78
+- Merge key: codebase/runtime/integrations-ipfs_datasets-llm
+- Merge family: integrations/ipfs_datasets/llm.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 2d77448bbfcc8106
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/llm.py:78. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-124-codebase-scan-2d77448bbfcc.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-125 Review swallowed exception path in integrations/ipfs_datasets/llm.py:96
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/llm.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/llm.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-llm
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-llm.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-llm
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/llm.py
+- AST symbols: __future__, __future__.annotations, _build_arch_router_prompt, _build_huggingface_router_request, _coalesce_env, _coerce_bool, _env_value, _extract_arch_router_config, _is_huggingface_router_request, _normalize_arch_router_routes, _normalize_headers, _parse_arch_router_route, _pop_first_string, _prepare_generate_text_call, _provider_preflight_error, _resolve_hf_token, _resolve_openai_api_key, _select_huggingface_arch_route, _slugify_route_name, _strip_code_fences, _temporary_env, build arch router prompt, build huggingface router request, coalesce env, coerce bool, contextlib, contextlib contextmanager, contextlib.contextmanager, env value, extract arch router config, future, future annotations, generate text via router, generate text with metadata, generate_text_via_router, generate_text_with_metadata, importlib, ipfs datasets py mcp server secrets vault, ipfs datasets py mcp server secrets vault get secrets vault, ipfs_datasets_py.mcp_server.secrets_vault, ipfs_datasets_py.mcp_server.secrets_vault.get_secrets_vault, is huggingface router request, json, keyring, llm router status, llm_router_status, loader, loader import attr optional, loader.import_attr_optional, normalize arch router routes, normalize headers, os, parse arch router route, pop first string, prepare generate text call, provider preflight error, re, resolve hf token, resolve openai api key, select huggingface arch route, shutil, slugify route name, strip code fences, temporary env, threading, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing mapping, typing optional, typing.any, typing.dict, typing.mapping, typing.optional
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-llm
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/llm.py:96
+- Merge key: codebase/runtime/integrations-ipfs_datasets-llm
+- Merge family: integrations/ipfs_datasets/llm.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 9d6be93589b36c91
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/llm.py:96. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-125-codebase-scan-9d6be93589b3.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-126 Review swallowed exception path in integrations/ipfs_datasets/llm.py:127
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/llm.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/llm.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-llm
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-llm.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-llm
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/llm.py
+- AST symbols: __future__, __future__.annotations, _build_arch_router_prompt, _build_huggingface_router_request, _coalesce_env, _coerce_bool, _env_value, _extract_arch_router_config, _is_huggingface_router_request, _normalize_arch_router_routes, _normalize_headers, _parse_arch_router_route, _pop_first_string, _prepare_generate_text_call, _provider_preflight_error, _resolve_hf_token, _resolve_openai_api_key, _select_huggingface_arch_route, _slugify_route_name, _strip_code_fences, _temporary_env, build arch router prompt, build huggingface router request, coalesce env, coerce bool, contextlib, contextlib contextmanager, contextlib.contextmanager, env value, extract arch router config, future, future annotations, generate text via router, generate text with metadata, generate_text_via_router, generate_text_with_metadata, importlib, ipfs datasets py mcp server secrets vault, ipfs datasets py mcp server secrets vault get secrets vault, ipfs_datasets_py.mcp_server.secrets_vault, ipfs_datasets_py.mcp_server.secrets_vault.get_secrets_vault, is huggingface router request, json, keyring, llm router status, llm_router_status, loader, loader import attr optional, loader.import_attr_optional, normalize arch router routes, normalize headers, os, parse arch router route, pop first string, prepare generate text call, provider preflight error, re, resolve hf token, resolve openai api key, select huggingface arch route, shutil, slugify route name, strip code fences, temporary env, threading, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing mapping, typing optional, typing.any, typing.dict, typing.mapping, typing.optional
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-llm
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/llm.py:127
+- Merge key: codebase/runtime/integrations-ipfs_datasets-llm
+- Merge family: integrations/ipfs_datasets/llm.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 5ad6e5b2a62e8746
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/llm.py:127. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-126-codebase-scan-5ad6e5b2a62e.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-127 Review swallowed exception path in integrations/ipfs_datasets/llm.py:137
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/llm.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/llm.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-llm
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-llm.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-llm
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/llm.py
+- AST symbols: __future__, __future__.annotations, _build_arch_router_prompt, _build_huggingface_router_request, _coalesce_env, _coerce_bool, _env_value, _extract_arch_router_config, _is_huggingface_router_request, _normalize_arch_router_routes, _normalize_headers, _parse_arch_router_route, _pop_first_string, _prepare_generate_text_call, _provider_preflight_error, _resolve_hf_token, _resolve_openai_api_key, _select_huggingface_arch_route, _slugify_route_name, _strip_code_fences, _temporary_env, build arch router prompt, build huggingface router request, coalesce env, coerce bool, contextlib, contextlib contextmanager, contextlib.contextmanager, env value, extract arch router config, future, future annotations, generate text via router, generate text with metadata, generate_text_via_router, generate_text_with_metadata, importlib, ipfs datasets py mcp server secrets vault, ipfs datasets py mcp server secrets vault get secrets vault, ipfs_datasets_py.mcp_server.secrets_vault, ipfs_datasets_py.mcp_server.secrets_vault.get_secrets_vault, is huggingface router request, json, keyring, llm router status, llm_router_status, loader, loader import attr optional, loader.import_attr_optional, normalize arch router routes, normalize headers, os, parse arch router route, pop first string, prepare generate text call, provider preflight error, re, resolve hf token, resolve openai api key, select huggingface arch route, shutil, slugify route name, strip code fences, temporary env, threading, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing mapping, typing optional, typing.any, typing.dict, typing.mapping, typing.optional
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-llm
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/llm.py:137
+- Merge key: codebase/runtime/integrations-ipfs_datasets-llm
+- Merge family: integrations/ipfs_datasets/llm.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 16bcf37c319c0b0e
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/llm.py:137. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-127-codebase-scan-16bcf37c319c.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-128 Review swallowed exception path in integrations/ipfs_datasets/llm.py:331
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/llm.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/llm.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-llm
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-llm.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-llm
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/llm.py
+- AST symbols: __future__, __future__.annotations, _build_arch_router_prompt, _build_huggingface_router_request, _coalesce_env, _coerce_bool, _env_value, _extract_arch_router_config, _is_huggingface_router_request, _normalize_arch_router_routes, _normalize_headers, _parse_arch_router_route, _pop_first_string, _prepare_generate_text_call, _provider_preflight_error, _resolve_hf_token, _resolve_openai_api_key, _select_huggingface_arch_route, _slugify_route_name, _strip_code_fences, _temporary_env, build arch router prompt, build huggingface router request, coalesce env, coerce bool, contextlib, contextlib contextmanager, contextlib.contextmanager, env value, extract arch router config, future, future annotations, generate text via router, generate text with metadata, generate_text_via_router, generate_text_with_metadata, importlib, ipfs datasets py mcp server secrets vault, ipfs datasets py mcp server secrets vault get secrets vault, ipfs_datasets_py.mcp_server.secrets_vault, ipfs_datasets_py.mcp_server.secrets_vault.get_secrets_vault, is huggingface router request, json, keyring, llm router status, llm_router_status, loader, loader import attr optional, loader.import_attr_optional, normalize arch router routes, normalize headers, os, parse arch router route, pop first string, prepare generate text call, provider preflight error, re, resolve hf token, resolve openai api key, select huggingface arch route, shutil, slugify route name, strip code fences, temporary env, threading, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing mapping, typing optional, typing.any, typing.dict, typing.mapping, typing.optional
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-llm
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/llm.py:331
+- Merge key: codebase/runtime/integrations-ipfs_datasets-llm
+- Merge family: integrations/ipfs_datasets/llm.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 878fee469cd69e98
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/llm.py:331. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-128-codebase-scan-878fee469cd6.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-129 Review swallowed exception path in integrations/ipfs_datasets/loader.py:353
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/loader.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/loader.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-loader
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-loader.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-loader
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/loader.py
+- AST symbols: __future__, __future__.annotations, __str__, _build_import_failure, _candidate_ipfs_source_roots, _import_module_preserving_sys_path, _loaded_package_matches, _matches_package_root, _package_dir_for_root, _prime_repo_package, _runner, _should_retry_with_repo_paths, actionable import failure message, actionable_import_failure_message, as dict, as_dict, asyncio, build import failure, build import failure diagnostic, build_import_failure_diagnostic, candidate ipfs source roots, dataclasses, dataclasses dataclass, dataclasses.dataclass, ensure import paths, ensure_import_paths, functools, functools lru cache, functools.lru_cache, future, future annotations, get repo paths, get_repo_paths, import attr optional, import failure message, import failure missing module, import failure type, import module optional, import module preserving sys path, import_attr_optional, import_failure_message, import_failure_missing_module, import_failure_type, import_module_optional, importfailure, importfailure as dict, importfailure str, importfailure.__str__, importfailure.as_dict, importlib, importlib util, importlib.util, loaded package matches, matches package root, optional dependency install command, optional_dependency_install_command, package dir for root, pathlib, pathlib path, pathlib.path, prime repo package, re, repopaths, run async compat, run_async_compat, runner, should retry with repo paths, str, sys, threading, typing, typing any, typing.any
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-loader
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/loader.py:353
+- Merge key: codebase/runtime/integrations-ipfs_datasets-loader
+- Merge family: integrations/ipfs_datasets/loader.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 992a753ac8550677
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/loader.py:353. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-129-codebase-scan-992a753ac855.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
