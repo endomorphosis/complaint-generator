@@ -1778,12 +1778,25 @@ def _ensure_text(path: Path, text: str, *, overwrite: bool = True) -> bool:
     return True
 
 
+def _canonical_projection_status(value: Any) -> str:
+    status = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if status in {"done", "complete", "completed"}:
+        return "completed"
+    if status in {"blocked", "on_hold"}:
+        return "blocked"
+    if status in {"active", "in_progress"}:
+        return "in_progress"
+    if status in {"ready", "todo", "queued", "needed", ""}:
+        return "todo"
+    return ""
+
+
 def _durable_task_statuses() -> dict[str, str]:
     statuses: dict[str, str] = {}
     if TODO_PATH.exists():
         parse_task_file = _upstream_portal_task_parser()
         for task in parse_task_file(TODO_PATH, TASK_HEADER_PREFIX):
-            statuses[task.task_id] = str(task.status or "todo").strip().lower()
+            statuses[task.task_id] = _canonical_projection_status(task.status)
     state = _load_json_object(TASK_STATE_PATH)
     for task_id in state.get("blocked_task_ids", []) or []:
         statuses.setdefault(str(task_id), "blocked")
@@ -1793,7 +1806,7 @@ def _durable_task_statuses() -> dict[str, str]:
 
 
 def _durable_canonical_task_statuses(statuses: dict[str, str]) -> dict[str, str]:
-    terminal_statuses = {"blocked", "completed"}
+    status_rank = {"todo": 0, "in_progress": 1, "blocked": 2, "completed": 3}
     state = _load_json_object(TASK_STATE_PATH)
     identities = state.get("task_identities")
     identity_by_task_id = identities if isinstance(identities, dict) else {}
@@ -1807,7 +1820,8 @@ def _durable_canonical_task_statuses(statuses: dict[str, str]) -> dict[str, str]
 
     canonical_statuses: dict[str, str] = {}
     for task_id, status in statuses.items():
-        if status not in terminal_statuses:
+        status = _canonical_projection_status(status)
+        if status not in status_rank:
             continue
         identity = identity_by_task_id.get(task_id)
         canonical_task_cid = (
@@ -1821,7 +1835,7 @@ def _durable_canonical_task_statuses(statuses: dict[str, str]) -> dict[str, str]
         if not canonical_task_cid:
             continue
         previous = canonical_statuses.get(canonical_task_cid)
-        if previous != "completed" or status == "completed":
+        if previous is None or status_rank[status] > status_rank[previous]:
             canonical_statuses[canonical_task_cid] = status
     return canonical_statuses
 
@@ -1863,8 +1877,9 @@ def _project_task_statuses(path: Path, statuses: dict[str, str]) -> list[str]:
         checkbox = checkbox_pattern.match(line)
         if checkbox:
             task_id = checkbox.group("task_id")
-            status = statuses.get(task_id, "")
-            mark = "x" if status == "completed" else "!" if status == "blocked" else checkbox.group("mark")
+            status = _canonical_projection_status(statuses.get(task_id, ""))
+            marks = {"todo": " ", "in_progress": "~", "completed": "x", "blocked": "!"}
+            mark = marks.get(status, checkbox.group("mark"))
             if mark != checkbox.group("mark"):
                 line = f"{checkbox.group('prefix')}{mark}{checkbox.group('suffix')}"
                 updated.add(task_id)
@@ -1872,8 +1887,8 @@ def _project_task_statuses(path: Path, statuses: dict[str, str]) -> list[str]:
         if header:
             current_task_id = header.group("task_id")
         status_line = status_pattern.match(line)
-        status = statuses.get(current_task_id, "")
-        if status_line and status in {"completed", "blocked"}:
+        status = _canonical_projection_status(statuses.get(current_task_id, ""))
+        if status_line and status:
             projected = f"{status_line.group('prefix')}{status}"
             if projected != line:
                 line = projected
