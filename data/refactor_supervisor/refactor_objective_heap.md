@@ -43,7 +43,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g2
 - Goal: Decompose oversized orchestration modules
-- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js
+- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js, data/refactor_supervisor/discovery/2026-07-22-ref-050-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest --collect-only -q
 
 ## G2.S1 Extract mediator service seams
