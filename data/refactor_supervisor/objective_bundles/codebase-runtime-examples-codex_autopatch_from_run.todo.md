@@ -37,7 +37,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-099 Review swallowed exception path in examples/codex_autopatch_from_run.py:83
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
