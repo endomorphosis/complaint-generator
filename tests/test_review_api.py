@@ -33,6 +33,17 @@ from applications.review_api import (
     REVIEW_EXECUTION_SUNSET,
     create_review_api_app,
 )
+from lib.runtime_ownership import RUNTIME_ROLE_WEB, require_module_ownership
+
+
+def test_review_api_runtime_ownership_is_web_entrypoint() -> None:
+    ownership = require_module_ownership("applications.review_api")
+
+    assert ownership.role == RUNTIME_ROLE_WEB
+    assert {entrypoint.name for entrypoint in ownership.entrypoints} == {
+        "attach_claim_support_review_routes",
+        "create_review_api_app",
+    }
 
 
 def _build_hook_backed_review_api_mediator(db_path: str):
