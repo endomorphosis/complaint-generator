@@ -52,7 +52,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Completion: manual
 - Priority: P1
 - Track: ops
-- Fingerprint: c66aac1f89b6e352ccf7535152a2ddb8cf591117
+- Fingerprint: 4a439b7d25c40ec485c7de85df707e389ecd7ae2
 - Dedupe key: reconciliation_guardrail:main_checkout_dirty
 - Depends on:
 - Outputs: data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md
@@ -72,3 +72,14 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Outputs: data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-015-reconciliation-c66aac1f89b6.md
 - Acceptance: Reconciliation guardrail filed this because 2 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-015-reconciliation-c66aac1f89b6.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
+
+## REF-016 Resolve dependency guardrail for REF-015
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-016-dependency-guardrail.md
+- Acceptance: Dependency guardrail filed this because REF-015 has missing, self-referential, cyclic, or duplicate task-id metadata. Use the evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-016-dependency-guardrail.md to repair the todo board metadata or add the missing prerequisite task, then verify the original task can become ready once its real dependencies complete.
