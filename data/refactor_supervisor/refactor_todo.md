@@ -3503,11 +3503,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-209-detectcontradictoryevidenceandautomaticallyreope
 - Acceptance: Novel mapped findings, failed required validations, changed evidence surfaces, and invalidated audit receipts reopen verified or provisional goals deterministically.; Reopening records the contradiction, impacted criteria, invalidated evidence, source receipt, and newly scheduled work.; Unrelated findings do not churn completed goals, and repeated identical contradictions are idempotent.; Parent and dependent goal states are recalculated without erasing historical completion receipts.
 
-- [ ] Task checkbox-210: REF-210 Generate bounded goals, subgoals, and tasks from uncovered or inconclusive evidence
+- [x] Task checkbox-210: REF-210 Generate bounded goals, subgoals, and tasks from uncovered or inconclusive evidence
 
 ## REF-210 Generate bounded goals, subgoals, and tasks from uncovered or inconclusive evidence
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G10
