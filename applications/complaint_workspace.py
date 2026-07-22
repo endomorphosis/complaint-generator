@@ -88,10 +88,6 @@ MIKE_WORKFLOW_STATE_LABELS: Dict[str, str] = {
     "synced_clean": "Synced clean",
     "synced_with_conflicts": "Synced with conflicts",
 }
-DEFAULT_UI_UX_SCREENSHOT_TARGET = (
-    "tests/test_website_cohesion_playwright.py::"
-    "test_homepage_navigation_can_drive_a_full_complaint_journey_with_real_handoffs"
-)
 DEFAULT_UI_UX_SCREENSHOT_TARGET = "playwright/tests/complaint-flow.spec.js"
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / ".complaint_workspace"
