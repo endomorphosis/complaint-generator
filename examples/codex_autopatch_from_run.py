@@ -357,12 +357,21 @@ def _build_prompt(
     graphs_dynamics_health = cycle_summary.get("graphs_dynamics_health")
 
     focus: List[str] = []
+    kg_avg_entities_raw = optimizer.get("kg_avg_total_entities")
+    try:
+        kg_avg_entities = float(kg_avg_entities_raw) if kg_avg_entities_raw is not None else None
+    except (TypeError, ValueError):
+        # Optimizer reports may contain missing or non-numeric metric values.
+        # Ignore only those expected conversion failures; unexpected defects
+        # must remain visible instead of being swallowed by best-effort focus
+        # generation below.
+        kg_avg_entities = None
+
     try:
         kg_with = int(optimizer.get("kg_sessions_with_data") or 0)
         dg_with = int(optimizer.get("dg_sessions_with_data") or 0)
         kg_empty = int(optimizer.get("kg_sessions_empty") or 0)
         dg_empty = int(optimizer.get("dg_sessions_empty") or 0)
-        kg_avg_entities = optimizer.get("kg_avg_total_entities")
         dg_avg_nodes = optimizer.get("dg_avg_total_nodes")
         kg_d_entities = optimizer.get("kg_avg_entities_delta_per_iter")
         kg_d_rels = optimizer.get("kg_avg_relationships_delta_per_iter")
@@ -371,12 +380,8 @@ def _build_prompt(
 
         if kg_with > 0 and kg_empty == kg_with:
             focus.append("Knowledge graphs are empty across analyzed sessions")
-        elif kg_avg_entities is not None:
-            try:
-                if float(kg_avg_entities) < 2.0:
-                    focus.append("Knowledge graphs are very small on average")
-            except Exception:
-                pass
+        elif kg_avg_entities is not None and kg_avg_entities < 2.0:
+            focus.append("Knowledge graphs are very small on average")
 
         # Dynamics: if gaps aren't shrinking or graphs aren't growing, steer to denoiser answer processing.
         if kg_not_reducing > 0:
