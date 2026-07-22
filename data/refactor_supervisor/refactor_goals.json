@@ -1,6 +1,74 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
   "generated_at": "2026-07-22T01:51:15Z",
+  "implementation_claims": [
+    {
+      "acceptance": [
+        "The IPFS datasets adapter loader imports without mutating sys.path.",
+        "Missing optional dependencies continue to use the existing degraded-mode loader path."
+      ],
+      "depends_on": [],
+      "files": [
+        "integrations/ipfs_datasets/loader.py"
+      ],
+      "goal_id": "G1",
+      "id": "CLAIM-001",
+      "priority": "P0",
+      "sequence": 1,
+      "source_task_id": "REF-003",
+      "subgoal_id": "G1.S2",
+      "title": "Remove runtime path bootstrapping from the IPFS datasets adapter loader",
+      "validation": [
+        "python -m pytest tests/test_package_imports.py -q"
+      ]
+    },
+    {
+      "acceptance": [
+        "Every adapter capability group reports the same stable status and degraded-reason keys.",
+        "Missing optional extras produce actionable degraded reasons without changing loader fallback behavior."
+      ],
+      "depends_on": [
+        "CLAIM-001"
+      ],
+      "files": [
+        "integrations/ipfs_datasets/capabilities.py",
+        "integrations/ipfs_datasets/loader.py"
+      ],
+      "goal_id": "G3",
+      "id": "CLAIM-002",
+      "priority": "P0",
+      "sequence": 2,
+      "source_task_id": "REF-009",
+      "subgoal_id": "G3.S1",
+      "title": "Standardize adapter capability status and degraded-reason payloads",
+      "validation": [
+        "python -m pytest tests/test_ipfs_adapter_layer.py -q"
+      ]
+    },
+    {
+      "acceptance": [
+        "Complaint CLI and workspace production paths import IPFS datasets capabilities through integrations.ipfs_datasets.",
+        "Both application modules still import when the optional IPFS datasets dependency is unavailable."
+      ],
+      "depends_on": [
+        "CLAIM-002"
+      ],
+      "files": [
+        "applications/complaint_cli.py",
+        "applications/complaint_workspace.py"
+      ],
+      "goal_id": "G1",
+      "id": "CLAIM-003",
+      "priority": "P0",
+      "sequence": 3,
+      "source_task_id": "REF-004",
+      "subgoal_id": "G1.S2",
+      "title": "Route complaint application IPFS imports through the adapter boundary",
+      "validation": [
+        "python -m pytest tests/test_ipfs_adapter_layer.py -q"
+      ]
+    }
+  ],
   "goals": [
     {
       "id": "G1",
