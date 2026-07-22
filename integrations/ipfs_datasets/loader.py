@@ -395,6 +395,10 @@ def import_module_optional(module_name: str) -> tuple[Any | None, ImportFailure 
                 )
         return None, _build_import_failure(exc, module_name=module_name)
     except Exception as exc:
+        # Intentional optional-provider boundary: return the exception's type,
+        # message, and missing-module metadata to the caller.  Do not narrow
+        # this to ImportError—provider module initialization can raise any
+        # ordinary Exception—or broaden it to process-control BaseExceptions.
         return None, _build_import_failure(exc, module_name=module_name)
 
 
