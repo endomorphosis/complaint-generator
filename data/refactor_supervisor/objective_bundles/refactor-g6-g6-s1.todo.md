@@ -52,7 +52,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Completion: manual
 - Priority: P1
 - Track: ops
-- Fingerprint: 4140732a4a7b55e4df04caeb4d7b10fdaedebe78
+- Fingerprint: 66ee8a07a0216d067bd3c247e52d327e5e401956
 - Dedupe key: reconciliation_guardrail:main_checkout_dirty
 - Depends on:
 - Outputs: data/refactor_supervisor/bundle_lanes/refactor-g6-g6-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g6-g6-s1.todo.md
