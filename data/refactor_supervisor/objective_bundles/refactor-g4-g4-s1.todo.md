@@ -8,7 +8,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-013 Define smoke, adapter, mediator, document, and UI test lanes
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G4
