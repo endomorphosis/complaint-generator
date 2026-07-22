@@ -4,26 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-## REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
-
-- Status: completed
-- Completion: manual
-- Priority: P0
-- Track: G10
-- Depends on: REF-200
-- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scan_receipts.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py
-- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q
-- Bundle: refactor/g10/g10-s1
-- Bundle strategy: goal/subgoal bundle with AST-symbol locality
-- Goal id: G10.S1
-- Missing evidence: A zero novel-finding count is not diagnosable without knowing what the analyzer discovered, parsed, skipped, rejected, or failed to inspect.
-- AST symbols: logger, DEFAULT_CODEBASE_SCAN_MIN_OPEN_TASKS, DEFAULT_CODEBASE_SCAN_MAX_FINDINGS, DEFAULT_CODEBASE_SCAN_COOLDOWN_SECONDS, DEFAULT_OBJECTIVE_SCAN_MIN_OPEN_TASKS, DEFAULT_OBJECTIVE_SCAN_MAX_FINDINGS, DEFAULT_OBJECTIVE_SCAN_COOLDOWN_SECONDS, DEFAULT_VALIDATION_RETRY_BUDGET, DEFAULT_MERGE_RETRY_BUDGET, DEFAULT_IMPLEMENTATION_RETRY_BUDGET, DEFAULT_STALE_GIT_LOCK_SECONDS, DEFAULT_GENERATED_DIRTY_HARD_PATH_CAP, DEFAULT_GENERATED_DIRTY_MAX_DELETE_PATHS, DEFAULT_GENERATED_DIRTY_ALLOW_DELETIONS, DEFAULT_DEPENDENCY_GUARDRAIL_MAX_FINDINGS, DEFAULT_RECONCILIATION_GUARDRAIL_MAX_FINDINGS, DEFAULT_TASK_ID_PREFIX, DEFAULT_TASK_HEADER_PREFIX, CODEBASE_SCAN_MAX_FILE_BYTES, CODEBASE_SCAN_SUFFIXES, CODEBASE_SCAN_SKIP_PARTS, CODEBASE_SCAN_SKIP_PREFIXES, ANNOTATION_FOLLOWUP_RE, CodebaseFinding, utc_now, task_id_prefix, task_header_prefix, split_csv, task_ids_from_todo_text, task_block_is_present
-- Merge key: refactor/g10/g10-s1
-- Candidate kind: seed
-- Todo vector key: ref-201-instrumentscaninventoryparsercoverageexclusionsa
-- Acceptance: Receipts count git roots, tracked files, eligible files, parsed files, cache hits, excluded files, parser failures, raw candidates, seen candidates, deduplicated candidates, and appended tasks.; Every skipped file and parser failure has a bounded reason code plus representative paths, with full details available as a durable artifact.; Candidate accounting balances from raw detection through filtering and task materialization.; Incremental and exhaustive scans report equivalent coverage dimensions.
-
-- [ ] Task checkbox-203: REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
+- [x] Task checkbox-203: REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
 
 ## REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
 
@@ -85,25 +66,3 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Candidate kind: seed
 - Todo vector key: ref-205-escalatelow-backloganalysisthroughastandllm-rout
 - Acceptance: A policy escalates from incremental static scan to exhaustive AST coverage and then schema-constrained llm_router proposals when healthy backlog remains below target.; Each escalation records cost, scope, novelty, confidence, rejected candidates, and the objective terms it attempted to cover.; Router failure or low-confidence output produces an analysis-inconclusive result and deterministic fallback, never a false completion.; Rate, token, retry, and novelty limits prevent an unbounded task-generation loop.
-
-## REF-206 Resolve dependency guardrail for REF-203
-
-- Status: completed
-- Completion: manual
-- Priority: P1
-- Track: ops
-- Depends on:
-- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g10-g10-s2.todo.md
-- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery/2026-07-22-ref-206-dependency-guardrail.md
-- Acceptance: Dependency guardrail filed this because REF-203 has missing, self-referential, cyclic, or duplicate task-id metadata. Use the evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery/2026-07-22-ref-206-dependency-guardrail.md to repair the todo board metadata or add the missing prerequisite task, then verify the original task can become ready once its real dependencies complete.
-
-## REF-207 Resolve dependency guardrail for REF-204
-
-- Status: todo
-- Completion: manual
-- Priority: P1
-- Track: ops
-- Depends on:
-- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g10-g10-s2.todo.md
-- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery/2026-07-22-ref-207-dependency-guardrail.md
-- Acceptance: Dependency guardrail filed this because REF-204 has missing, self-referential, cyclic, or duplicate task-id metadata. Use the evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery/2026-07-22-ref-207-dependency-guardrail.md to repair the todo board metadata or add the missing prerequisite task, then verify the original task can become ready once its real dependencies complete.
