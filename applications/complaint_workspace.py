@@ -16,7 +16,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Set
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Set
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from xml.sax.saxutils import escape
 
@@ -1632,28 +1632,101 @@ def _default_state(user_id: str) -> Dict[str, Any]:
     }
 
 
+class _ComplaintWorkspaceHandlerBackend(Protocol):
+    """Narrow service contract required by the request-handler boundary."""
+
+    def _load_state(self, user_id: str) -> Dict[str, Any]: ...
+
+    def _save_state(self, state: Dict[str, Any]) -> Dict[str, Any]: ...
+
+    def _build_question_status(self, answers: Dict[str, Any]) -> List[Dict[str, Any]]: ...
+
+    def _next_question(self, answers: Dict[str, Any]) -> Optional[Dict[str, str]]: ...
+
+    def _question_by_id(self, question_id: Optional[str]) -> Optional[Dict[str, str]]: ...
+
+    def _build_review(self, state: Dict[str, Any]) -> Dict[str, Any]: ...
+
+    def _build_case_synopsis(self, state: Dict[str, Any]) -> str: ...
+
+    def _build_intake_chat_payload(
+        self,
+        state: Dict[str, Any],
+        *,
+        accepted_answer: Optional[Dict[str, Any]] = None,
+        requested_question_id: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    def _build_draft(
+        self,
+        state: Dict[str, Any],
+        requested_relief: Optional[List[str]] = None,
+        *,
+        use_llm: bool = False,
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        config_path: Optional[str] = None,
+        backend_id: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+    def import_local_evidence(
+        self,
+        user_id: Optional[str],
+        *,
+        paths: List[str],
+        claim_element_id: str = "causation",
+        kind: str = "document",
+        evidence_root: Optional[str] = None,
+    ) -> Dict[str, Any]: ...
+
+
 class ComplaintWorkspaceRequestHandlers:
-    """Request-facing workspace handlers that preserve route/MCP payload shapes."""
+    """Request-facing mutations isolated from workspace state-shaping helpers.
 
-    def __init__(self, workspace: "ComplaintWorkspaceService") -> None:
+    ``ComplaintWorkspaceService`` retains its public methods as a compatibility
+    facade. This class owns the request lifecycle and depends only on the narrow
+    backend contract above, making the handler group independently testable while
+    keeping the route, CLI, package, and MCP response shapes stable.
+    """
+
+    def __init__(
+        self,
+        workspace: _ComplaintWorkspaceHandlerBackend,
+        *,
+        now: Optional[Callable[[], str]] = None,
+    ) -> None:
         self.workspace = workspace
+        self._now = now
 
-    def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
-        workspace = self.workspace
-        normalized_user_id = str(user_id or DEFAULT_USER_ID)
-        state = workspace._save_state(workspace._load_state(normalized_user_id))
+    @staticmethod
+    def _normalize_user_id(user_id: Optional[str]) -> str:
+        return str(user_id or DEFAULT_USER_ID)
+
+    def _load_state(self, user_id: Optional[str]) -> Dict[str, Any]:
+        return self.workspace._load_state(self._normalize_user_id(user_id))
+
+    def _timestamp(self) -> str:
+        return self._now() if self._now is not None else _utc_now()
+
+    def _build_session_payload(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Compose the stable session response shared by request entrypoints."""
+
         answers = state.get("intake_answers") or {}
         return {
             "session": deepcopy(state),
-            "questions": workspace._build_question_status(answers),
-            "next_question": workspace._next_question(answers),
-            "review": workspace._build_review(state),
-            "case_synopsis": workspace._build_case_synopsis(state),
+            "questions": self.workspace._build_question_status(answers),
+            "next_question": self.workspace._next_question(answers),
+            "review": self.workspace._build_review(state),
+            "case_synopsis": self.workspace._build_case_synopsis(state),
         }
+
+    def get_session(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        state = self.workspace._save_state(self._load_state(user_id))
+        return self._build_session_payload(state)
 
     def submit_intake_answers(self, user_id: Optional[str], answers: Dict[str, Any]) -> Dict[str, Any]:
         workspace = self.workspace
-        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state = self._load_state(user_id)
         answer_map = state.setdefault("intake_answers", {})
         history = state.setdefault("intake_history", [])
         for question in _INTAKE_QUESTIONS:
@@ -1661,7 +1734,7 @@ class ComplaintWorkspaceRequestHandlers:
             if not value:
                 continue
             answer_map[question["id"]] = value
-            history.append({"question_id": question["id"], "answer": value, "captured_at": _utc_now()})
+            history.append({"question_id": question["id"], "answer": value, "captured_at": self._timestamp()})
         workspace._save_state(state)
         return self.get_session(str(state.get("user_id")))
 
@@ -1673,7 +1746,7 @@ class ComplaintWorkspaceRequestHandlers:
         question_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         workspace = self.workspace
-        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state = self._load_state(user_id)
         target_question = (
             workspace._question_by_id(question_id)
             if question_id
@@ -1693,7 +1766,7 @@ class ComplaintWorkspaceRequestHandlers:
             accepted_answer = {
                 "question_id": target_question["id"],
                 "answer": normalized_message,
-                "captured_at": _utc_now(),
+                "captured_at": self._timestamp(),
             }
             history.append(deepcopy(accepted_answer))
 
@@ -1716,7 +1789,7 @@ class ComplaintWorkspaceRequestHandlers:
         attachment_names: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         workspace = self.workspace
-        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state = self._load_state(user_id)
         evidence_store = state.setdefault("evidence", {"testimony": [], "documents": []})
         collection_key = "documents" if kind == "document" else "testimony"
         record = {
@@ -1727,7 +1800,7 @@ class ComplaintWorkspaceRequestHandlers:
             "content": content,
             "source": source or "",
             "attachment_names": [str(item).strip() for item in list(attachment_names or []) if str(item).strip()],
-            "saved_at": _utc_now(),
+            "saved_at": self._timestamp(),
         }
         evidence_store.setdefault(collection_key, []).append(record)
         workspace._save_state(state)
@@ -1832,7 +1905,7 @@ class ComplaintWorkspaceRequestHandlers:
         backend_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         workspace = self.workspace
-        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state = self._load_state(user_id)
         draft = workspace._build_draft(
             state,
             requested_relief=requested_relief,
@@ -1862,7 +1935,7 @@ class ComplaintWorkspaceRequestHandlers:
         requested_relief: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         workspace = self.workspace
-        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state = self._load_state(user_id)
         draft = deepcopy(state.get("draft") or workspace._build_draft(state))
         if title is not None:
             draft["title"] = title
@@ -1870,7 +1943,7 @@ class ComplaintWorkspaceRequestHandlers:
             draft["body"] = body
         if requested_relief is not None:
             draft["requested_relief"] = requested_relief
-        draft["updated_at"] = _utc_now()
+        draft["updated_at"] = self._timestamp()
         state["draft"] = draft
         workspace._save_state(state)
         return {
@@ -1882,7 +1955,7 @@ class ComplaintWorkspaceRequestHandlers:
 
     def update_case_synopsis(self, user_id: Optional[str], synopsis: Optional[str]) -> Dict[str, Any]:
         workspace = self.workspace
-        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state = self._load_state(user_id)
         state["case_synopsis"] = str(synopsis or "").strip()
         workspace._save_state(state)
         session = self.get_session(str(state.get("user_id")))
@@ -1896,7 +1969,7 @@ class ComplaintWorkspaceRequestHandlers:
 
     def update_claim_type(self, user_id: Optional[str], claim_type: Optional[str]) -> Dict[str, Any]:
         workspace = self.workspace
-        state = workspace._load_state(str(user_id or DEFAULT_USER_ID))
+        state = self._load_state(user_id)
         state["claim_type"] = _normalize_claim_type(claim_type)
         workspace._save_state(state)
         session = self.get_session(str(state.get("user_id")))
@@ -1912,7 +1985,7 @@ class ComplaintWorkspaceRequestHandlers:
 
     def reset_session(self, user_id: Optional[str]) -> Dict[str, Any]:
         workspace = self.workspace
-        state = _default_state(str(user_id or DEFAULT_USER_ID))
+        state = _default_state(self._normalize_user_id(user_id))
         workspace._save_state(state)
         return self.get_session(str(state["user_id"]))
 
