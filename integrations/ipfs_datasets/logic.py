@@ -179,8 +179,15 @@ def get_logic_capability_report() -> Dict[str, Any]:
     """Return a JSON-ready summary of all formal-logic capabilities."""
 
     capabilities = get_logic_capabilities()
+    state_counts = {
+        state.value: sum(
+            capability.state is state for capability in capabilities.values()
+        )
+        for state in LogicCapabilityState
+    }
     return {
         "schema_version": LOGIC_CAPABILITY_SCHEMA_VERSION,
+        "state_counts": state_counts,
         "capabilities": {
             operation.value: capability.as_dict()
             for operation, capability in capabilities.items()
