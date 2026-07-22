@@ -3293,7 +3293,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: 018923b8aa31e26f
 - Acceptance: Codebase scan filed this finding from lib/knowledge_graph_formats.py:82. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-135-codebase-scan-018923b8aa31.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
 
-- [ ] Task checkbox-200: REF-200 Define a typed refill scan result and terminal reason taxonomy
+- [x] Task checkbox-200: REF-200 Define a typed refill scan result and terminal reason taxonomy
 
 ## REF-200 Define a typed refill scan result and terminal reason taxonomy
 
@@ -3339,7 +3339,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
