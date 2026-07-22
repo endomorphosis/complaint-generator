@@ -1,7 +1,7 @@
 # REF-015 Reconciliation Guardrail
 
 Date: 2026-07-22
-Fingerprint: 4a439b7d25c40ec485c7de85df707e389ecd7ae2
+Fingerprint: 3a2a8187bdd6c81d29b026a91c15be4cd0d6dc4f
 Kind: main_checkout_dirty
 Reason: main_checkout_dirty
 Candidate count: 1
@@ -11,44 +11,17 @@ Track: ops
 ## Main Checkout Status
 
 - ` M data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
-- ` M data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md`
-- ` M data/refactor_supervisor/objective_bundles/index.json`
-- ` M data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md`
-- ` M data/refactor_supervisor/refactor_goals.json`
-- ` M data/refactor_supervisor/refactor_objective_heap.md`
-- ` M docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
-- `?? data/refactor_supervisor/merge_resolver_registry/`
 
 ## Main Checkout Evidence
 
-- Path categories: `modified=7, untracked=1`
+- Path categories: `modified=1`
 - Status paths:
   - `data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
-  - `data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md`
-  - `data/refactor_supervisor/objective_bundles/index.json`
-  - `data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md`
-  - `data/refactor_supervisor/refactor_goals.json`
-  - `data/refactor_supervisor/refactor_objective_heap.md`
-  - `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
-  - `data/refactor_supervisor/merge_resolver_registry`
 - Name status:
   - `M	data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
-  - `M	data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md`
-  - `M	data/refactor_supervisor/objective_bundles/index.json`
-  - `M	data/refactor_supervisor/refactor_goals.json`
-  - `M	data/refactor_supervisor/refactor_objective_heap.md`
-  - `M	docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
 - Diff stat:
-  - `.../bundle_lanes/bundle_lanes.json                 | 950967 +-----------------`
-  - ` ...26-07-21-ref-027-reconciliation-ca0bd08b3975.md |     48 +-`
-  - ` .../objective_bundles/index.json                   |     56 +-`
-  - ` .../objective_bundles/refactor-g8-g8-s1.todo.md    |      2 +-`
-  - ` data/refactor_supervisor/refactor_goals.json       |     47 +-`
-  - ` .../refactor_supervisor/refactor_objective_heap.md |     50 +-`
-  - ` docs/REFACTOR_SUPERVISOR_TASKBOARD.md              |     14 +-`
-  - ` 7 files changed, 31939 insertions(+), 919245 deletions(-)`
-- Untracked paths:
-  - `data/refactor_supervisor/merge_resolver_registry`
+  - `.../bundle_lanes/bundle_lanes.json                 | 5464 ++++++++++----------`
+  - ` 1 file changed, 2732 insertions(+), 2732 deletions(-)`
 
 ## Sample Branches Or Worktrees
 
@@ -116,37 +89,19 @@ Work surface: `1` candidates, `1` sampled records.
   "candidate_count": 1,
   "conflict_path_counts": {},
   "dedupe_key": "reconciliation_guardrail:main_checkout_dirty",
-  "fingerprint": "4a439b7d25c40ec485c7de85df707e389ecd7ae2",
+  "fingerprint": "3a2a8187bdd6c81d29b026a91c15be4cd0d6dc4f",
   "kind": "main_checkout_dirty",
   "main_dirty_evidence": {
-    "diff_stat": ".../bundle_lanes/bundle_lanes.json                 | 950967 +-----------------\n ...26-07-21-ref-027-reconciliation-ca0bd08b3975.md |     48 +-\n .../objective_bundles/index.json                   |     56 +-\n .../objective_bundles/refactor-g8-g8-s1.todo.md    |      2 +-\n data/refactor_supervisor/refactor_goals.json       |     47 +-\n .../refactor_supervisor/refactor_objective_heap.md |     50 +-\n docs/REFACTOR_SUPERVISOR_TASKBOARD.md              |     14 +-\n 7 files changed, 31939 insertions(+), 919245 deletions(-)",
-    "name_status": "M\tdata/refactor_supervisor/bundle_lanes/bundle_lanes.json\nM\tdata/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md\nM\tdata/refactor_supervisor/objective_bundles/index.json\nM\tdata/refactor_supervisor/refactor_goals.json\nM\tdata/refactor_supervisor/refactor_objective_heap.md\nM\tdocs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+    "diff_stat": ".../bundle_lanes/bundle_lanes.json                 | 5464 ++++++++++----------\n 1 file changed, 2732 insertions(+), 2732 deletions(-)",
+    "name_status": "M\tdata/refactor_supervisor/bundle_lanes/bundle_lanes.json",
     "path_categories": {
-      "modified": 7,
-      "untracked": 1
+      "modified": 1
     },
     "status_paths": [
-      "data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
-      "data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md",
-      "data/refactor_supervisor/objective_bundles/index.json",
-      "data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md",
-      "data/refactor_supervisor/refactor_goals.json",
-      "data/refactor_supervisor/refactor_objective_heap.md",
-      "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-      "data/refactor_supervisor/merge_resolver_registry"
+      "data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
     ],
     "status_short": [
-      " M data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
-      " M data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md",
-      " M data/refactor_supervisor/objective_bundles/index.json",
-      " M data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md",
-      " M data/refactor_supervisor/refactor_goals.json",
-      " M data/refactor_supervisor/refactor_objective_heap.md",
-      " M docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-      "?? data/refactor_supervisor/merge_resolver_registry/"
-    ],
-    "untracked_paths": [
-      "data/refactor_supervisor/merge_resolver_registry"
+      " M data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
     ]
   },
   "reason": "main_checkout_dirty",
@@ -160,14 +115,7 @@ Work surface: `1` candidates, `1` sampled records.
   ],
   "sample_count": 1,
   "sample_status_paths": [
-    "data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
-    "data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md",
-    "data/refactor_supervisor/objective_bundles/index.json",
-    "data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md",
-    "data/refactor_supervisor/refactor_goals.json",
-    "data/refactor_supervisor/refactor_objective_heap.md",
-    "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-    "data/refactor_supervisor/merge_resolver_registry"
+    "data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
   ],
   "sample_worktrees": [
     "/home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g4-g4-s1/ref-013-d4fc48536ac0-attempt-1-1784693051"
