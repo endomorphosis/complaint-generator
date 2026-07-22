@@ -377,12 +377,20 @@ def _build_prompt(
         # focus generation below.
         kg_d_entities = None
 
+    dg_avg_nodes_raw = optimizer.get("dg_avg_total_nodes")
+    try:
+        dg_avg_nodes = float(dg_avg_nodes_raw) if dg_avg_nodes_raw is not None else None
+    except (TypeError, ValueError):
+        # Persisted optimizer metrics can be malformed. Treat only expected
+        # numeric conversion failures as missing data; unexpected failures
+        # must remain observable instead of being hidden by prompt generation.
+        dg_avg_nodes = None
+
     try:
         kg_with = int(optimizer.get("kg_sessions_with_data") or 0)
         dg_with = int(optimizer.get("dg_sessions_with_data") or 0)
         kg_empty = int(optimizer.get("kg_sessions_empty") or 0)
         dg_empty = int(optimizer.get("dg_sessions_empty") or 0)
-        dg_avg_nodes = optimizer.get("dg_avg_total_nodes")
         kg_d_rels = optimizer.get("kg_avg_relationships_delta_per_iter")
         kg_d_gaps = optimizer.get("kg_avg_gaps_delta_per_iter")
         kg_not_reducing = int(optimizer.get("kg_sessions_gaps_not_reducing") or 0)
@@ -412,12 +420,8 @@ def _build_prompt(
 
         if dg_with > 0 and dg_empty == dg_with:
             focus.append("Dependency graphs are empty across analyzed sessions")
-        elif dg_avg_nodes is not None:
-            try:
-                if float(dg_avg_nodes) < 2.0:
-                    focus.append("Dependency graphs are very small on average")
-            except Exception:
-                pass
+        elif dg_avg_nodes is not None and dg_avg_nodes < 2.0:
+            focus.append("Dependency graphs are very small on average")
     except Exception:
         focus = focus
 
