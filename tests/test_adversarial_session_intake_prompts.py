@@ -1226,6 +1226,35 @@ def test_document_generation_logs_formalization_transition_failure_and_continues
     assert "formalization transition failed" in caplog.text
 
 
+def test_document_generation_logs_formalization_graph_failure_and_continues(caplog):
+    class _FailingGraphMediator(_DocumentMediator):
+        def __init__(self):
+            super().__init__()
+            self.phase_manager = _PhaseManagerStub(
+                {
+                    (ComplaintPhase.INTAKE, "knowledge_graph"): object(),
+                    (ComplaintPhase.INTAKE, "dependency_graph"): object(),
+                    (ComplaintPhase.INTAKE, "intake_case_file"): {},
+                    (ComplaintPhase.FORMALIZATION, "legal_graph"): None,
+                }
+            )
+            self.neurosymbolic_matcher = object()
+
+        def _build_intake_selector_legal_graph(self, intake_case_file):
+            raise RuntimeError("formalization graph bootstrap failed")
+
+    mediator = _FailingGraphMediator()
+    session = _make_document_session(mediator)
+
+    with caplog.at_level("WARNING", logger="adversarial_harness.session"):
+        result = session._run_document_generation({"type": "housing_discrimination"})
+
+    assert result["ready_to_file"] is True
+    assert mediator.document_kwargs["user_id"] == "document_session"
+    assert "Could not prepare formalization graphs for adversarial session document_session" in caplog.text
+    assert "formalization graph bootstrap failed" in caplog.text
+
+
 def test_session_builds_fallback_document_packet_when_builder_is_unavailable():
     mediator = _FallbackDocumentMediator()
     session = _make_fallback_document_session(mediator)

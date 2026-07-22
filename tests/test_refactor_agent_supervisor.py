@@ -734,6 +734,12 @@ def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_
 ## REF-002 Second task
 
 - Status: completed
+
+- [ ] Task checkbox-3: REF-003 Reopened task
+
+## REF-003 Reopened task
+
+- Status: todo
 """,
         encoding="utf-8",
     )
@@ -750,6 +756,12 @@ def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_
 ## REF-002 Second task
 
 - Status: todo
+
+- [!] Task checkbox-3: REF-003 Reopened task
+
+## REF-003 Reopened task
+
+- Status: blocked
 """,
         encoding="utf-8",
     )
@@ -773,7 +785,7 @@ def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_
 
     assert projected["completed_count"] == 2
     assert supervisor._todo_counts() == {
-        "needed": 0,
+        "needed": 1,
         "in_progress": 0,
         "complete": 2,
         "blocked": 0,
@@ -782,7 +794,9 @@ def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_
     shard_text = shard.read_text(encoding="utf-8")
     assert "- [x] Task checkbox-1: REF-001" in shard_text
     assert "- [x] Task checkbox-2: REF-002" in shard_text
+    assert "- [ ] Task checkbox-3: REF-003" in shard_text
     assert shard_text.count("- Status: completed") == 2
+    assert "## REF-003 Reopened task\n\n- Status: todo" in shard_text
     colliding_text = colliding_shard.read_text(encoding="utf-8")
     assert "- [ ] Task checkbox-1: REF-001 Different repair task" in colliding_text
     assert "- Status: todo" in colliding_text
