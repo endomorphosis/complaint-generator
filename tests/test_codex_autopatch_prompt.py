@@ -109,3 +109,42 @@ def test_build_prompt_does_not_swallow_unexpected_dependency_node_conversion_fai
 
     with pytest.raises(RuntimeError, match="unexpected dependency node metric conversion failure"):
         _build_prompt({"dg_avg_total_nodes": BrokenMetric()})
+
+
+@pytest.mark.parametrize(
+    "metric_name",
+    [
+        "kg_sessions_with_data",
+        "dg_sessions_with_data",
+        "kg_sessions_empty",
+        "dg_sessions_empty",
+        "kg_sessions_gaps_not_reducing",
+    ],
+)
+def test_build_prompt_defaults_malformed_optimizer_counts_to_zero(metric_name: str) -> None:
+    prompt = _build_prompt({metric_name: "not-a-count"})
+
+    assert "Knowledge graphs are empty across analyzed sessions" not in prompt
+    assert "Dependency graphs are empty across analyzed sessions" not in prompt
+    assert "Knowledge graph gaps are not reducing across iterations" not in prompt
+
+
+def test_build_prompt_malformed_count_does_not_suppress_other_diagnostics() -> None:
+    prompt = _build_prompt(
+        {
+            "kg_sessions_with_data": "not-a-count",
+            "dg_sessions_with_data": 2,
+            "dg_sessions_empty": 2,
+        }
+    )
+
+    assert "Dependency graphs are empty across analyzed sessions" in prompt
+
+
+def test_build_prompt_does_not_swallow_unexpected_count_conversion_failure() -> None:
+    class BrokenCount:
+        def __int__(self) -> int:
+            raise RuntimeError("unexpected count conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected count conversion failure"):
+        _build_prompt({"kg_sessions_with_data": BrokenCount()})

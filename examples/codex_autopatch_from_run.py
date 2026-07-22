@@ -314,6 +314,17 @@ def _pick_worst_sessions(session_docs: List[Dict[str, Any]], k: int) -> List[Dic
     return sorted_docs[: max(0, int(k))]
 
 
+def _optimizer_count(optimizer: Dict[str, Any], key: str) -> int:
+    """Return a persisted optimizer count, defaulting malformed values to zero."""
+    value = optimizer.get(key)
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def _build_prompt(
     *,
     run_dir: str,
@@ -395,39 +406,36 @@ def _build_prompt(
         # must remain observable instead of being hidden by prompt generation.
         dg_avg_nodes = None
 
-    try:
-        kg_with = int(optimizer.get("kg_sessions_with_data") or 0)
-        dg_with = int(optimizer.get("dg_sessions_with_data") or 0)
-        kg_empty = int(optimizer.get("kg_sessions_empty") or 0)
-        dg_empty = int(optimizer.get("dg_sessions_empty") or 0)
-        kg_d_gaps = optimizer.get("kg_avg_gaps_delta_per_iter")
-        kg_not_reducing = int(optimizer.get("kg_sessions_gaps_not_reducing") or 0)
+    kg_with = _optimizer_count(optimizer, "kg_sessions_with_data")
+    dg_with = _optimizer_count(optimizer, "dg_sessions_with_data")
+    kg_empty = _optimizer_count(optimizer, "kg_sessions_empty")
+    dg_empty = _optimizer_count(optimizer, "dg_sessions_empty")
+    kg_d_gaps = optimizer.get("kg_avg_gaps_delta_per_iter")
+    kg_not_reducing = _optimizer_count(optimizer, "kg_sessions_gaps_not_reducing")
 
-        if kg_with > 0 and kg_empty == kg_with:
-            focus.append("Knowledge graphs are empty across analyzed sessions")
-        elif kg_avg_entities is not None and kg_avg_entities < 2.0:
-            focus.append("Knowledge graphs are very small on average")
+    if kg_with > 0 and kg_empty == kg_with:
+        focus.append("Knowledge graphs are empty across analyzed sessions")
+    elif kg_avg_entities is not None and kg_avg_entities < 2.0:
+        focus.append("Knowledge graphs are very small on average")
 
-        # Dynamics: if gaps aren't shrinking or graphs aren't growing, steer to denoiser answer processing.
-        if kg_not_reducing > 0:
-            focus.append("Knowledge graph gaps are not reducing across iterations")
-        if kg_d_gaps is not None:
-            try:
-                if float(kg_d_gaps) >= 0.0:
-                    focus.append("Knowledge graph gaps are flat/increasing per iteration")
-            except Exception:
-                pass
-        if kg_d_entities is not None and kg_d_entities < 0.1:
-            focus.append("Knowledge graph is not growing per iteration")
-        if kg_d_rels is not None and kg_d_rels < 0.05:
-            focus.append("Knowledge graph relationships are not growing per iteration")
+    # Dynamics: if gaps aren't shrinking or graphs aren't growing, steer to denoiser answer processing.
+    if kg_not_reducing > 0:
+        focus.append("Knowledge graph gaps are not reducing across iterations")
+    if kg_d_gaps is not None:
+        try:
+            if float(kg_d_gaps) >= 0.0:
+                focus.append("Knowledge graph gaps are flat/increasing per iteration")
+        except Exception:
+            pass
+    if kg_d_entities is not None and kg_d_entities < 0.1:
+        focus.append("Knowledge graph is not growing per iteration")
+    if kg_d_rels is not None and kg_d_rels < 0.05:
+        focus.append("Knowledge graph relationships are not growing per iteration")
 
-        if dg_with > 0 and dg_empty == dg_with:
-            focus.append("Dependency graphs are empty across analyzed sessions")
-        elif dg_avg_nodes is not None and dg_avg_nodes < 2.0:
-            focus.append("Dependency graphs are very small on average")
-    except Exception:
-        focus = focus
+    if dg_with > 0 and dg_empty == dg_with:
+        focus.append("Dependency graphs are empty across analyzed sessions")
+    elif dg_avg_nodes is not None and dg_avg_nodes < 2.0:
+        focus.append("Dependency graphs are very small on average")
 
     suspected_files: List[str] = []
     if any("Knowledge graph" in f for f in focus):
