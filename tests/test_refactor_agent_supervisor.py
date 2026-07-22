@@ -971,6 +971,26 @@ def test_projection_reconciliation_updates_all_query_and_planning_artifacts(
     assert index_path.with_suffix(".duckdb").exists()
 
 
+def test_projection_reconciliation_queries_manifest_running_count(tmp_path, monkeypatch) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    supervisor.BUNDLE_LANE_MANIFEST.write_text("not loaded directly", encoding="utf-8")
+    calls = []
+
+    class ArtifactStore:
+        @staticmethod
+        def read_artifact_fields(path, fields):
+            calls.append((path, fields))
+            return {"running_count": 1}
+
+    monkeypatch.setattr(supervisor, "_upstream_artifact_store", lambda: ArtifactStore())
+
+    result = supervisor.reconcile_task_projection_artifacts()
+
+    assert result["reason"] == "active_implementation"
+    assert result["parallel_running_count"] == 1
+    assert calls == [(supervisor.BUNDLE_LANE_MANIFEST, ("running_count",))]
+
+
 def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) -> None:
     _isolate_status_paths(tmp_path, monkeypatch)
     monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)

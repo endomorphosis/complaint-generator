@@ -2482,7 +2482,15 @@ def reconcile_task_projection_artifacts(*, skip_while_active: bool = True) -> di
     task_state = _load_json_object(TASK_STATE_PATH)
     active_phase = str(task_state.get("active_phase") or "").strip()
     active_task_id = str(task_state.get("active_task_id") or "").strip()
-    manifest = _load_json_object(BUNDLE_LANE_MANIFEST)
+    manifest: dict[str, Any] = {}
+    if BUNDLE_LANE_MANIFEST.exists():
+        try:
+            manifest = _upstream_artifact_store().read_artifact_fields(
+                BUNDLE_LANE_MANIFEST,
+                ("running_count",),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            manifest = {}
     parallel_running = int(manifest.get("running_count") or 0)
     if skip_while_active and (active_phase or parallel_running):
         return {
