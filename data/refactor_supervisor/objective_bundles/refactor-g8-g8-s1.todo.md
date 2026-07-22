@@ -45,3 +45,16 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Candidate kind: seed
 - Todo vector key: ref-024-definefirstthreeimplementationclaimsfromthequeue
 - Acceptance: The first three claims are small, testable, and dependency-ordered.; Each claim names exact validation commands.
+
+## REF-025 Resolve dirty main checkout blocking 1 worktree merges
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Fingerprint: d70172dd2341f6e7cb439bd4d06873e15d0364b8
+- Dedupe key: reconciliation_guardrail:main_checkout_dirty
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery/2026-07-22-ref-025-reconciliation-d70172dd2341.md
+- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery/2026-07-22-ref-025-reconciliation-d70172dd2341.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
