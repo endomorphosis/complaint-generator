@@ -1704,6 +1704,26 @@ def _append_jsonl(path: str, obj: Dict[str, Any]) -> None:
         f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
+def _append_jsonl_best_effort(path: str, obj: Dict[str, Any], *, event_name: str) -> bool:
+    """Append an optional transcript event, warning on expected artifact failures.
+
+    Transcript events supplement the primary run artifacts, so an unavailable
+    transcript must not replace the operational error being reported.  Keep
+    expected filesystem and text-encoding failures non-fatal, but make them
+    visible and allow unexpected implementation failures to propagate.
+    """
+    try:
+        _append_jsonl(path, obj)
+    except (OSError, UnicodeError) as exc:
+        print(
+            f"Warning: could not append {event_name} event to transcript "
+            f"{os.path.abspath(path)}: {exc}",
+            file=sys.stderr,
+        )
+        return False
+    return True
+
+
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -2610,22 +2630,20 @@ def main() -> int:
         path = os.path.join(out_dir, f"codex_rate_limit_{ts}{suffix}.json")
         _write_rate_limit_artifact_payload(path, payload)
 
-        try:
-            _append_jsonl(
-                transcript_path,
-                {
-                    "event": "rate_limit",
-                    "ts": payload["ts"],
-                    "resets_in_seconds": reset_s,
-                    "reset_at": reset_at,
-                    "provider_error_message": payload.get("provider_error_message"),
-                    "will_retry": bool(will_retry),
-                    "sleep_seconds": sleep_s,
-                    "artifact_path": os.path.abspath(path),
-                },
-            )
-        except Exception:
-            pass
+        _append_jsonl_best_effort(
+            transcript_path,
+            {
+                "event": "rate_limit",
+                "ts": payload["ts"],
+                "resets_in_seconds": reset_s,
+                "reset_at": reset_at,
+                "provider_error_message": payload.get("provider_error_message"),
+                "will_retry": bool(will_retry),
+                "sleep_seconds": sleep_s,
+                "artifact_path": os.path.abspath(path),
+            },
+            event_name="rate-limit",
+        )
 
         return path
 
