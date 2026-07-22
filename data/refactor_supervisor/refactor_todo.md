@@ -2706,7 +2706,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-117 Review swallowed exception path in examples/session_sgd_report.py:59
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -2734,3 +2734,189 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 1fafae091ef0e1b2
 - Acceptance: Codebase scan filed this finding from examples/session_sgd_report.py:59. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-117-codebase-scan-1fafae091ef0.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-118 Review swallowed exception path in examples/sweep_ranker.py:20
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, examples/sweep_ranker.py
+- Validation: python3 -m py_compile examples/sweep_ranker.py
+- Bundle: codebase/runtime/examples-sweep_ranker
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-sweep_ranker.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-sweep_ranker
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/sweep_ranker.py
+- AST symbols: _load_json, _parse_weights, _safe_float, argparse, json, load json, main, math, os, parse weights, rank sweep results, rank_sweep_results, safe float, score point, score_point, typing, typing any, typing dict, typing list, typing tuple, typing.any, typing.dict, typing.list, typing.tuple
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-sweep_ranker
+- Missing evidence: Review swallowed exception path in examples/sweep_ranker.py:20
+- Merge key: codebase/runtime/examples-sweep_ranker
+- Merge family: examples/sweep_ranker.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 5f056c29355d1e24
+- Acceptance: Codebase scan filed this finding from examples/sweep_ranker.py:20. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-118-codebase-scan-5f056c29355d.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-119 Review swallowed exception path in integrations/ipfs_datasets/documents.py:1148
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/documents.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/documents.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-documents
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-documents.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-documents
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/documents.py
+- AST symbols: __future__, __future__.annotations, _annotate_chunk_metadata, _build_parse_summary, _build_transform_lineage, _chunk_page_index, _compute_parse_quality, _decode_text_fallback, _detect_text_input_format, _determine_normalization_label, _ensure_output_dir, _estimate_page_count, _extract_docx_text, _extract_email_text, _extract_pdf_text_fallback, _guess_mime_type, _is_mostly_text, _looks_like_email, _looks_like_html, _looks_like_rtf, _materialize_parse_record, _merge_parse_context, _normalize_whitespace, _split_into_paragraphs, _stable_record_id, _strip_html, _strip_rtf, annotate chunk metadata, build parse summary, build transform lineage, chunk page index, chunk text, chunk_text, compute parse quality, decode text fallback, detect document input format, detect text input format, detect_document_input_format, determine normalization label, email parser, email parser bytesparser, email policy, email.parser, email.parser.bytesparser, email.policy, ensure output dir, estimate page count, extract docx text, extract email text, extract pdf text fallback, extract text content, extract_text_content, future, future annotations, guess mime type, hashlib, html, html unescape, html.unescape, ingest download manifest, ingest local document, ingest_download_manifest, ingest_local_document, io, io bytesio, io.bytesio, is mostly text, json, loader, loader import attr optional, loader import module optional, loader.import_attr_optional, loader.import_module_optional, looks like email, looks like html, looks like rtf, materialize parse record, merge parse context, mimetypes, normalize whitespace
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-documents
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/documents.py:1148
+- Merge key: codebase/runtime/integrations-ipfs_datasets-documents
+- Merge family: integrations/ipfs_datasets/documents.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 13e95d4f65f78f4e
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/documents.py:1148. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-119-codebase-scan-13e95d4f65f7.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-120 Review swallowed exception path in integrations/ipfs_datasets/graphrag.py:128
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/graphrag.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/graphrag.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-graphrag
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-graphrag.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-graphrag
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/graphrag.py
+- AST symbols: __future__, __future__.annotations, _run_pdf_facade, analyze pdf relationships, analyze_pdf_relationships, batch process pdfs, batch_process_pdfs, build ontology, build_ontology, create ontology generator, create_ontology_generator, cross analyze pdf documents, cross_analyze_pdf_documents, extract pdf entities, extract_pdf_entities, future, future annotations, ingest pdf to graphrag, ingest_pdf_to_graphrag, loader, loader import attr optional, loader run async compat, loader.import_attr_optional, loader.run_async_compat, query pdf knowledge graph, query_pdf_knowledge_graph, run pdf facade, run refinement cycle, run_refinement_cycle, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing optional, typing.any, typing.dict, typing.optional, validate ontology, validate_ontology
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-graphrag
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/graphrag.py:128
+- Merge key: codebase/runtime/integrations-ipfs_datasets-graphrag
+- Merge family: integrations/ipfs_datasets/graphrag.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 1026e36dfbd6f72b
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/graphrag.py:128. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-120-codebase-scan-1026e36dfbd6.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-121 Review swallowed exception path in integrations/ipfs_datasets/legal.py:98
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/legal.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/legal.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-legal
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-legal.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-legal
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/legal.py
+- AST symbols: __future__, __future__.annotations, _attach_hf_corpus_metadata, _build_hf_search_diagnostic, _build_query_vector, _coerce_vector_payload, _extract_payload_items, _import_attr_from_candidates, _merge_nested_case_fields, _normalize_authority, _normalize_payload_results, _normalize_scraped_authority, _resolve_state_code, _search_hf_parquet_text, _search_scraped_records, _set_hf_search_warning, _set_last_legal_search_diagnostic, attach hf corpus metadata, build hf search diagnostic, build query vector, coerce vector payload, duckdb, extract payload items, future, future annotations, get last legal search diagnostic, get_last_legal_search_diagnostic, huggingface hub, huggingface hub hf hub download, huggingface_hub, huggingface_hub.hf_hub_download, import attr from candidates, loader, loader import attr optional, loader run async compat, loader.import_attr_optional, loader.run_async_compat, merge nested case fields, normalize authority, normalize payload results, normalize scraped authority, pyarrow parquet, pyarrow.parquet, resolve state code, search federal register, search hf parquet text, search recap documents, search scraped records, search state administrative rules, search state laws, search us code, search_federal_register, search_recap_documents, search_state_administrative_rules, search_state_laws, search_us_code, set hf search warning, set last legal search diagnostic, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing list, typing optional, typing.any, typing.dict, typing.list, typing.optional, vector store, vector store embed text, vector store embeddings available, vector store get embeddings router, vector_store, vector_store.embed_text, vector_store.embeddings_available, vector_store.get_embeddings_router
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-legal
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/legal.py:98
+- Merge key: codebase/runtime/integrations-ipfs_datasets-legal
+- Merge family: integrations/ipfs_datasets/legal.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 11b094c1fe49382a
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/legal.py:98. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-121-codebase-scan-11b094c1fe49.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-122 Review swallowed exception path in integrations/ipfs_datasets/legal.py:112
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/legal.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/legal.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-legal
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-legal.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-legal
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/legal.py
+- AST symbols: __future__, __future__.annotations, _attach_hf_corpus_metadata, _build_hf_search_diagnostic, _build_query_vector, _coerce_vector_payload, _extract_payload_items, _import_attr_from_candidates, _merge_nested_case_fields, _normalize_authority, _normalize_payload_results, _normalize_scraped_authority, _resolve_state_code, _search_hf_parquet_text, _search_scraped_records, _set_hf_search_warning, _set_last_legal_search_diagnostic, attach hf corpus metadata, build hf search diagnostic, build query vector, coerce vector payload, duckdb, extract payload items, future, future annotations, get last legal search diagnostic, get_last_legal_search_diagnostic, huggingface hub, huggingface hub hf hub download, huggingface_hub, huggingface_hub.hf_hub_download, import attr from candidates, loader, loader import attr optional, loader run async compat, loader.import_attr_optional, loader.run_async_compat, merge nested case fields, normalize authority, normalize payload results, normalize scraped authority, pyarrow parquet, pyarrow.parquet, resolve state code, search federal register, search hf parquet text, search recap documents, search scraped records, search state administrative rules, search state laws, search us code, search_federal_register, search_recap_documents, search_state_administrative_rules, search_state_laws, search_us_code, set hf search warning, set last legal search diagnostic, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing list, typing optional, typing.any, typing.dict, typing.list, typing.optional, vector store, vector store embed text, vector store embeddings available, vector store get embeddings router, vector_store, vector_store.embed_text, vector_store.embeddings_available, vector_store.get_embeddings_router
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-legal
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/legal.py:112
+- Merge key: codebase/runtime/integrations-ipfs_datasets-legal
+- Merge family: integrations/ipfs_datasets/legal.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: a99172acf7bba4f1
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/legal.py:112. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-122-codebase-scan-a99172acf7bb.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-123 Review swallowed exception path in integrations/ipfs_datasets/legal.py:662
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/legal.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/legal.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-legal
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-legal.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-legal
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/legal.py
+- AST symbols: __future__, __future__.annotations, _attach_hf_corpus_metadata, _build_hf_search_diagnostic, _build_query_vector, _coerce_vector_payload, _extract_payload_items, _import_attr_from_candidates, _merge_nested_case_fields, _normalize_authority, _normalize_payload_results, _normalize_scraped_authority, _resolve_state_code, _search_hf_parquet_text, _search_scraped_records, _set_hf_search_warning, _set_last_legal_search_diagnostic, attach hf corpus metadata, build hf search diagnostic, build query vector, coerce vector payload, duckdb, extract payload items, future, future annotations, get last legal search diagnostic, get_last_legal_search_diagnostic, huggingface hub, huggingface hub hf hub download, huggingface_hub, huggingface_hub.hf_hub_download, import attr from candidates, loader, loader import attr optional, loader run async compat, loader.import_attr_optional, loader.run_async_compat, merge nested case fields, normalize authority, normalize payload results, normalize scraped authority, pyarrow parquet, pyarrow.parquet, resolve state code, search federal register, search hf parquet text, search recap documents, search scraped records, search state administrative rules, search state laws, search us code, search_federal_register, search_recap_documents, search_state_administrative_rules, search_state_laws, search_us_code, set hf search warning, set last legal search diagnostic, types, types with adapter metadata, types.with_adapter_metadata, typing, typing any, typing dict, typing list, typing optional, typing.any, typing.dict, typing.list, typing.optional, vector store, vector store embed text, vector store embeddings available, vector store get embeddings router, vector_store, vector_store.embed_text, vector_store.embeddings_available, vector_store.get_embeddings_router
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-legal
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/legal.py:662
+- Merge key: codebase/runtime/integrations-ipfs_datasets-legal
+- Merge family: integrations/ipfs_datasets/legal.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 6e1fbcf47fed79d4
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/legal.py:662. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-123-codebase-scan-6e1fbcf47fed.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
