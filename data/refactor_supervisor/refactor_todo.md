@@ -3106,3 +3106,189 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 992a753ac8550677
 - Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/loader.py:353. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-129-codebase-scan-992a753ac855.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-130 Review swallowed exception path in integrations/ipfs_datasets/loader.py:397
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/loader.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/loader.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-loader
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-loader.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-loader
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/loader.py
+- AST symbols: __future__, __future__.annotations, __str__, _build_import_failure, _build_retry_import_failure, _candidate_ipfs_source_roots, _import_module_preserving_sys_path, _loaded_package_matches, _matches_package_root, _package_dir_for_root, _prime_repo_package, _runner, _should_retry_with_repo_paths, actionable import failure message, actionable_import_failure_message, as dict, as_dict, asyncio, build import failure, build import failure diagnostic, build retry import failure, build_import_failure_diagnostic, candidate ipfs source roots, dataclasses, dataclasses dataclass, dataclasses.dataclass, ensure import paths, ensure_import_paths, functools, functools lru cache, functools.lru_cache, future, future annotations, get repo paths, get_repo_paths, import attr optional, import failure message, import failure missing module, import failure type, import module optional, import module preserving sys path, import_attr_optional, import_failure_message, import_failure_missing_module, import_failure_type, import_module_optional, importfailure, importfailure as dict, importfailure str, importfailure.__str__, importfailure.as_dict, importlib, importlib util, importlib.util, loaded package matches, matches package root, optional dependency install command, optional_dependency_install_command, package dir for root, pathlib, pathlib path, pathlib.path, prime repo package, re, repopaths, run async compat, run_async_compat, runner, should retry with repo paths, str, sys, threading, typing, typing any, typing.any
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-loader
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/loader.py:397
+- Merge key: codebase/runtime/integrations-ipfs_datasets-loader
+- Merge family: integrations/ipfs_datasets/loader.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 9c858e22373c5556
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/loader.py:397. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-130-codebase-scan-9c858e22373c.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-131 Review swallowed exception path in integrations/ipfs_datasets/loader.py:407
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/loader.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/loader.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-loader
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-loader.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-loader
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/loader.py
+- AST symbols: __future__, __future__.annotations, __str__, _build_import_failure, _build_retry_import_failure, _candidate_ipfs_source_roots, _import_module_preserving_sys_path, _loaded_package_matches, _matches_package_root, _package_dir_for_root, _prime_repo_package, _runner, _should_retry_with_repo_paths, actionable import failure message, actionable_import_failure_message, as dict, as_dict, asyncio, build import failure, build import failure diagnostic, build retry import failure, build_import_failure_diagnostic, candidate ipfs source roots, dataclasses, dataclasses dataclass, dataclasses.dataclass, ensure import paths, ensure_import_paths, functools, functools lru cache, functools.lru_cache, future, future annotations, get repo paths, get_repo_paths, import attr optional, import failure message, import failure missing module, import failure type, import module optional, import module preserving sys path, import_attr_optional, import_failure_message, import_failure_missing_module, import_failure_type, import_module_optional, importfailure, importfailure as dict, importfailure str, importfailure.__str__, importfailure.as_dict, importlib, importlib util, importlib.util, loaded package matches, matches package root, optional dependency install command, optional_dependency_install_command, package dir for root, pathlib, pathlib path, pathlib.path, prime repo package, re, repopaths, run async compat, run_async_compat, runner, should retry with repo paths, str, sys, threading, typing, typing any, typing.any
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-loader
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/loader.py:407
+- Merge key: codebase/runtime/integrations-ipfs_datasets-loader
+- Merge family: integrations/ipfs_datasets/loader.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 7a4409f5374e9eb6
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/loader.py:407. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-131-codebase-scan-7a4409f5374e.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-132 Review swallowed exception path in integrations/ipfs_datasets/storage.py:218
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, integrations/ipfs_datasets/storage.py
+- Validation: python3 -m py_compile integrations/ipfs_datasets/storage.py
+- Bundle: codebase/runtime/integrations-ipfs_datasets-storage
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-storage.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/integrations-ipfs_datasets-storage
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: integrations/ipfs_datasets/storage.py
+- AST symbols: __future__, __future__.annotations, __init__, _blob_path, _cid_for_bytes, _discover_repo_local_ipfs_path, _discover_repo_local_kubo_cmd, _ensure_local_kubo_environment, _pin_path, _repo_local_ipfs_kit_root, _runtime_backend_probe, add bytes, add path, add_bytes, add_path, blob path, block get, block put, block_get, block_put, cat, cid for bytes, clear ipfs backend router caches, clear_ipfs_backend_router_caches, dag export, dag_export, discover repo local ipfs path, discover repo local kubo cmd, ensure ipfs backend, ensure local kubo environment, ensure_ipfs_backend, future, future annotations, get ipfs backend, get to path, get_ipfs_backend, get_to_path, hashlib, init, loader, loader import attr optional, loader.import_attr_optional, localcacheipfsbackend, localcacheipfsbackend add bytes, localcacheipfsbackend add path, localcacheipfsbackend blob path, localcacheipfsbackend block get, localcacheipfsbackend block put, localcacheipfsbackend cat, localcacheipfsbackend cid for bytes, localcacheipfsbackend dag export, localcacheipfsbackend get to path, localcacheipfsbackend init, localcacheipfsbackend ls, localcacheipfsbackend pin, localcacheipfsbackend pin path, localcacheipfsbackend unpin, localcacheipfsbackend.__init__, localcacheipfsbackend._blob_path, localcacheipfsbackend._cid_for_bytes, localcacheipfsbackend._pin_path, localcacheipfsbackend.add_bytes, localcacheipfsbackend.add_path, localcacheipfsbackend.block_get, localcacheipfsbackend.block_put, localcacheipfsbackend.cat, localcacheipfsbackend.dag_export, localcacheipfsbackend.get_to_path, localcacheipfsbackend.ls, localcacheipfsbackend.pin, localcacheipfsbackend.unpin, ls, os, pathlib, pathlib path, pathlib.path, pin, pin cid, pin path, pin_cid
+- AST symbol scope: file
+- Goal id: codebase/runtime/integrations-ipfs_datasets-storage
+- Missing evidence: Review swallowed exception path in integrations/ipfs_datasets/storage.py:218
+- Merge key: codebase/runtime/integrations-ipfs_datasets-storage
+- Merge family: integrations/ipfs_datasets/storage.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 3f2581f03aaa928b
+- Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/storage.py:218. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-132-codebase-scan-3f2581f03aaa.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-133 Replace placeholder runtime path in lib/formal_logic/core.py:112
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, lib/formal_logic/core.py
+- Validation: python3 -m py_compile lib/formal_logic/core.py
+- Bundle: codebase/runtime/lib-formal_logic-core
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-lib-formal_logic-core.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/lib-formal_logic-core
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: lib/formal_logic/core.py
+- AST symbols: __future__, __future__.annotations, __init__, __str__, abc, abc abc, abc abstractmethod, abc.abc, abc.abstractmethod, action, action str, action.__str__, add fact, add rule, add statement, add_fact, add_rule, add_statement, check compliance, check_compliance, conjunction, conjunction evaluate, conjunction str, conjunction.__str__, conjunction.evaluate, contains, dataclasses, dataclasses dataclass, dataclasses field, dataclasses.dataclass, dataclasses.field, datetime, datetime datetime, datetime timedelta, datetime.datetime, datetime.timedelta, deonticknowledgebase, deonticknowledgebase add fact, deonticknowledgebase add rule, deonticknowledgebase add statement, deonticknowledgebase check compliance, deonticknowledgebase get statements, deonticknowledgebase infer statements, deonticknowledgebase init, deonticknowledgebase to dict, deonticknowledgebase.__init__, deonticknowledgebase.add_fact, deonticknowledgebase.add_rule, deonticknowledgebase.add_statement, deonticknowledgebase.check_compliance, deonticknowledgebase.get_statements, deonticknowledgebase.infer_statements, deonticknowledgebase.to_dict, deonticmodality, deonticstatement, deonticstatement str, deonticstatement.__str__, disjunction, disjunction evaluate, disjunction str, disjunction.__str__, disjunction.evaluate, enum, enum enum, enum.enum, evaluate, future, future annotations, get statements, get_statements, implication, implication evaluate, implication str, implication.__str__, implication.evaluate, infer statements, infer_statements, init, logicaloperator, negation
+- AST symbol scope: file
+- Goal id: codebase/runtime/lib-formal_logic-core
+- Missing evidence: Replace placeholder runtime path in lib/formal_logic/core.py:112
+- Merge key: codebase/runtime/lib-formal_logic-core
+- Merge family: lib/formal_logic/core.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 02fac9895cc5b40e
+- Acceptance: Codebase scan filed this finding from lib/formal_logic/core.py:112. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-133-codebase-scan-02fac9895cc5.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-134 Replace placeholder runtime path in lib/formal_logic/core.py:116
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, lib/formal_logic/core.py
+- Validation: python3 -m py_compile lib/formal_logic/core.py
+- Bundle: codebase/runtime/lib-formal_logic-core
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-lib-formal_logic-core.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/lib-formal_logic-core
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: lib/formal_logic/core.py
+- AST symbols: __future__, __future__.annotations, __init__, __str__, abc, abc abc, abc abstractmethod, abc.abc, abc.abstractmethod, action, action str, action.__str__, add fact, add rule, add statement, add_fact, add_rule, add_statement, check compliance, check_compliance, conjunction, conjunction evaluate, conjunction str, conjunction.__str__, conjunction.evaluate, contains, dataclasses, dataclasses dataclass, dataclasses field, dataclasses.dataclass, dataclasses.field, datetime, datetime datetime, datetime timedelta, datetime.datetime, datetime.timedelta, deonticknowledgebase, deonticknowledgebase add fact, deonticknowledgebase add rule, deonticknowledgebase add statement, deonticknowledgebase check compliance, deonticknowledgebase get statements, deonticknowledgebase infer statements, deonticknowledgebase init, deonticknowledgebase to dict, deonticknowledgebase.__init__, deonticknowledgebase.add_fact, deonticknowledgebase.add_rule, deonticknowledgebase.add_statement, deonticknowledgebase.check_compliance, deonticknowledgebase.get_statements, deonticknowledgebase.infer_statements, deonticknowledgebase.to_dict, deonticmodality, deonticstatement, deonticstatement str, deonticstatement.__str__, disjunction, disjunction evaluate, disjunction str, disjunction.__str__, disjunction.evaluate, enum, enum enum, enum.enum, evaluate, future, future annotations, get statements, get_statements, implication, implication evaluate, implication str, implication.__str__, implication.evaluate, infer statements, infer_statements, init, logicaloperator, negation
+- AST symbol scope: file
+- Goal id: codebase/runtime/lib-formal_logic-core
+- Missing evidence: Replace placeholder runtime path in lib/formal_logic/core.py:116
+- Merge key: codebase/runtime/lib-formal_logic-core
+- Merge family: lib/formal_logic/core.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 1c182497d16a23bf
+- Acceptance: Codebase scan filed this finding from lib/formal_logic/core.py:116. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-134-codebase-scan-1c182497d16a.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-135 Replace placeholder runtime path in lib/knowledge_graph_formats.py:82
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, lib/knowledge_graph_formats.py
+- Validation: python3 -m py_compile lib/knowledge_graph_formats.py
+- Bundle: codebase/runtime/lib-knowledge_graph_formats
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-lib-knowledge_graph_formats.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/lib-knowledge_graph_formats
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: lib/knowledge_graph_formats.py
+- AST symbols: __init__, _builtin_load_dag_json, _builtin_load_json_lines, _builtin_save_dag_json, _builtin_save_json_lines, _formatregistry, _formatregistry.__init__, _formatregistry.load, _formatregistry.register, _formatregistry.registered_formats, _formatregistry.save, builtin load dag json, builtin load json lines, builtin save dag json, builtin save json lines, dataclasses, dataclasses dataclass, dataclasses field, dataclasses.dataclass, dataclasses.field, enum, enum enum, enum.enum, formatregistry, formatregistry init, formatregistry load, formatregistry register, formatregistry registered formats, formatregistry save, from dict, from json, from_dict, from_json, graphdata, graphdata from dict, graphdata from json, graphdata iter nodes chunked, graphdata iter relationships chunked, graphdata load from file, graphdata save to file, graphdata to dict, graphdata to json, graphdata.from_dict, graphdata.from_json, graphdata.iter_nodes_chunked, graphdata.iter_relationships_chunked, graphdata.load_from_file, graphdata.save_to_file, graphdata.to_dict, graphdata.to_json, init, ipfs datasets py knowledge graphs migration formats, ipfs datasets py knowledge graphs migration formats graphdata, ipfs datasets py knowledge graphs migration formats migrationformat, ipfs datasets py knowledge graphs migration formats nodedata, ipfs datasets py knowledge graphs migration formats register format, ipfs datasets py knowledge graphs migration formats registered formats, ipfs datasets py knowledge graphs migration formats relationshipdata, ipfs datasets py knowledge graphs migration formats schemadata, ipfs_datasets_py.knowledge_graphs.migration.formats, ipfs_datasets_py.knowledge_graphs.migration.formats.graphdata, ipfs_datasets_py.knowledge_graphs.migration.formats.migrationformat, ipfs_datasets_py.knowledge_graphs.migration.formats.nodedata, ipfs_datasets_py.knowledge_graphs.migration.formats.register_format, ipfs_datasets_py.knowledge_graphs.migration.formats.registered_formats, ipfs_datasets_py.knowledge_graphs.migration.formats.relationshipdata, ipfs_datasets_py.knowledge_graphs.migration.formats.schemadata, iter nodes chunked, iter relationships chunked, iter_nodes_chunked, iter_relationships_chunked, json, load, load from file, load_from_file, migrationformat, nodedata, nodedata from dict, nodedata to dict, nodedata to json
+- AST symbol scope: file
+- Goal id: codebase/runtime/lib-knowledge_graph_formats
+- Missing evidence: Replace placeholder runtime path in lib/knowledge_graph_formats.py:82
+- Merge key: codebase/runtime/lib-knowledge_graph_formats
+- Merge family: lib/knowledge_graph_formats.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 018923b8aa31e26f
+- Acceptance: Codebase scan filed this finding from lib/knowledge_graph_formats.py:82. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-135-codebase-scan-018923b8aa31.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
