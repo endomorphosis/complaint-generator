@@ -223,7 +223,16 @@ class AdversarialSession:
                 )
             return refreshed_intake_case_file
         except Exception:
-            return None
+            # Refreshing the final snapshot is best-effort: callers can still use
+            # the mediator's existing case file.  Keep that fallback observable,
+            # though, because otherwise a stale final result is indistinguishable
+            # from a successful refresh.
+            logger.warning(
+                "Could not refresh the final intake case file for session %s; "
+                "using the mediator's existing snapshot",
+                self.session_id,
+                exc_info=True,
+            )
 
     @staticmethod
     def _normalize_question(question_text: str) -> str:
