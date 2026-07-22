@@ -1121,7 +1121,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-054 Review swallowed exception path in adversarial_harness/harness.py:478
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
