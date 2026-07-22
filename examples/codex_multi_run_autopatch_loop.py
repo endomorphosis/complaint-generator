@@ -123,12 +123,27 @@ def _extract_summary_path(output: str) -> Optional[str]:
 
 
 def _load_orchestrator_id(summary_path: str) -> Optional[str]:
-    try:
-        with open(summary_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get("orchestrator_id")
-    except Exception:
-        return None
+    """Load an orchestrator id from an advertised summary artifact.
+
+    The child process prints the summary path only after writing the artifact.
+    Read and decode failures therefore indicate a broken artifact and must remain
+    visible instead of being confused with an omitted ``orchestrator_id`` field.
+    """
+
+    with open(summary_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"Expected a JSON object in {summary_path!r}, got {type(data).__name__}"
+        )
+    orchestrator_id = data.get("orchestrator_id")
+    if orchestrator_id is not None and not isinstance(orchestrator_id, str):
+        raise ValueError(
+            f"Expected 'orchestrator_id' in {summary_path!r} to be a string, "
+            f"got {type(orchestrator_id).__name__}"
+        )
+    return orchestrator_id
 
 
 def _load_json_or_none(path: str) -> Optional[dict]:
