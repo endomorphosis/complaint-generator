@@ -73,7 +73,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Optional dependency behavior should stay behind the adapter boundary.
 - Acceptance: Production direct imports are replaced or documented.; Degraded mode still imports cleanly.
 
-- [ ] Task checkbox-5: REF-005 Split mediator/mediator.py by workflow service while preserving public API compatibility
+- [x] Task checkbox-5: REF-005 Split mediator/mediator.py by workflow service while preserving public API compatibility
 
 ## REF-005 Split mediator/mediator.py by workflow service while preserving public API compatibility
 
@@ -379,11 +379,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Large Playwright tests should share fixture setup before UI refactors.
 - Acceptance: Shared builders remove repeated setup.; Screenshots still render with representative support states.
 
-- [ ] Task checkbox-23: REF-023 Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals
+- [x] Task checkbox-23: REF-023 Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals
 
 ## REF-023 Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G8
@@ -449,7 +449,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-027 Resolve dirty main checkout blocking 4 worktree merges
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops

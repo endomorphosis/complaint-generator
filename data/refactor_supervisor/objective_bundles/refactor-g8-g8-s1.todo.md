@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-23: REF-023 Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals
+- [x] Task checkbox-23: REF-023 Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals
 
 ## REF-023 Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals
 

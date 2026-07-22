@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-22T04:21:32Z",
+  "generated_at": "2026-07-22T04:32:41Z",
   "goals": [
     {
       "id": "G1",
@@ -162,7 +162,7 @@
               "priority": "P0",
               "rationale": "The mediator is the largest runtime file and carries high regression risk.",
               "stable_key": "g2:g2.s1:split mediator/mediator.py by workflow service while preserving public api compatibility",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G2.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-005",
@@ -710,7 +710,7 @@
               "priority": "P0",
               "rationale": "Existing roadmap work should feed the automated taskboard rather than drift separately.",
               "stable_key": "g8:g8.s1:cross-link ipfs datasets execution backlog tasks to refactor supervisor goals",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G8.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-023",
@@ -1305,7 +1305,7 @@
         "path": "complaint_phases/dependency_graph.py"
       },
       {
-        "lines": 2901,
+        "lines": 2939,
         "path": "tests/test_mediator.py"
       },
       {
@@ -1351,8 +1351,8 @@
       "pytest_ini": true
     },
     "python_file_count": 439,
-    "python_total_lines": 245714,
-    "scanned_at": "2026-07-22T04:21:18Z",
+    "python_total_lines": 245858,
+    "scanned_at": "2026-07-22T04:32:27Z",
     "signals": {
       "broad_exception_count": 375,
       "direct_ipfs_import_count": 219,
@@ -1630,16 +1630,16 @@
         "completed_work_items": 0,
         "failed": 0,
         "failed_work_items": 0,
-        "queued": 12,
-        "queued_work_items": 20,
+        "queued": 15,
+        "queued_work_items": 23,
         "running": 0,
         "running_work_items": 0
       },
       "todo": {
         "blocked": 0,
-        "complete": 21,
+        "complete": 24,
         "in_progress": 0,
-        "needed": 28
+        "needed": 25
       }
     },
     "goal_count": 9,
@@ -1648,38 +1648,39 @@
       "skipped": true
     },
     "queue_refill": {
-      "available_bundle_count": 14,
-      "available_work_items": 28,
+      "available_bundle_count": 13,
+      "available_work_items": 25,
       "configured_floor": 20,
       "enabled": true,
       "floor_satisfied": true,
       "floor_unit": "active_taskboard_work_items",
-      "queued_work_items_after": 20,
-      "queued_work_items_before": 20,
+      "queued_work_items_after": 23,
+      "queued_work_items_before": 23,
       "submitted_bundle_count": 0,
       "submitted_queue_ids": [],
       "submitted_task_ids": []
     },
     "status_projection": {
       "blocked_count": 0,
-      "completed_count": 21,
+      "completed_count": 24,
       "task_count": 49,
       "updated": {
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md": [
-          "REF-014"
+        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g2-g2-s1.todo.md": [
+          "REF-005"
         ],
         "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md": [
-          "REF-024"
+          "REF-023"
         ],
         "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_todo.md": [
-          "REF-014",
-          "REF-024"
+          "REF-005",
+          "REF-023",
+          "REF-027"
         ]
       },
       "updated_file_count": 3
     },
     "subgoal_count": 17,
-    "synchronized_at": "2026-07-22T04:21:32Z",
+    "synchronized_at": "2026-07-22T04:32:41Z",
     "task_count": 36
   },
   "taskboard": {
@@ -1711,7 +1712,7 @@
       },
       {
         "checkbox_id": 5,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-005",
         "title": "Split mediator/mediator.py by workflow service while preserving public API compatibility"
       },
@@ -1819,7 +1820,7 @@
       },
       {
         "checkbox_id": 23,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-023",
         "title": "Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals"
       },
@@ -1843,9 +1844,9 @@
       },
       {
         "checkbox_id": 27,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-027",
-        "title": "Resolve dirty main checkout blocking 3 worktree merges"
+        "title": "Resolve dirty main checkout blocking 4 worktree merges"
       },
       {
         "checkbox_id": 28,
