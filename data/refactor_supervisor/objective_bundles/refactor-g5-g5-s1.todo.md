@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-015-keeptherefactortaskboardsynchronizedwithgenerate
 - Acceptance: Queued task count is maintained above the configured floor.; Docs and JSON state are regenerated each cycle.
 
-- [ ] Task checkbox-16: REF-016 Record supervisor status, scan metrics, and queue counts for handoff
+- [x] Task checkbox-16: REF-016 Record supervisor status, scan metrics, and queue counts for handoff
 
 ## REF-016 Record supervisor status, scan metrics, and queue counts for handoff
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G5

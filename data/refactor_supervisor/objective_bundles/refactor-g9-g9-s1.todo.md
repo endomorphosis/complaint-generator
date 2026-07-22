@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-036-introducecanonicaltaskidentityandadurablesupervi
 - Acceptance: Every task has a stable canonical key or CID independent of board path and display id.; Legacy markdown tasks migrate idempotently with board namespace provenance.; Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.; Refill cannot create a second active task for the same canonical work item.
 
-- [ ] Task checkbox-37: REF-037 Replace static bundle launch with a dynamic leased worker pool
+- [x] Task checkbox-37: REF-037 Replace static bundle launch with a dynamic leased worker pool
 
 ## REF-037 Replace static bundle launch with a dynamic leased worker pool
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9
@@ -46,11 +46,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-037-replacestaticbundlelaunchwithadynamicleasedworke
 - Acceptance: A persistent scheduler discovers new and refilled tasks without restart.; Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work.; Lane count remains within configured capacity and no task executes under two accepted leases.; The manifest is an authoritative live projection rather than a launch-time snapshot.
 
-- [ ] Task checkbox-38: REF-038 Integrate a deduplicating single-consumer merge train
+- [x] Task checkbox-38: REF-038 Integrate a deduplicating single-consumer merge train
 
 ## REF-038 Integrate a deduplicating single-consumer merge train
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9

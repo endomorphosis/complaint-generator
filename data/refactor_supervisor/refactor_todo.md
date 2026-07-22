@@ -260,7 +260,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The requested supervisor needs a refill loop and visible board state.
 - Acceptance: Queued task count is maintained above the configured floor.; Docs and JSON state are regenerated each cycle.
 
-- [ ] Task checkbox-16: REF-016 Record supervisor status, scan metrics, and queue counts for handoff
+- [x] Task checkbox-16: REF-016 Record supervisor status, scan metrics, and queue counts for handoff
 
 ## REF-016 Record supervisor status, scan metrics, and queue counts for handoff
 
@@ -724,7 +724,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Acceptance: Every task has a stable canonical key or CID independent of board path and display id.; Legacy markdown tasks migrate idempotently with board namespace provenance.; Branches, events, retries, cooldowns, leases, and receipts carry canonical identity.; Refill cannot create a second active task for the same canonical work item.
 - Completion evidence: ipfs_accelerate_py commit a148f05a; 235 daemon regressions and 37 identity, lease, and objective graph regressions passed.
 
-- [ ] Task checkbox-37: REF-037 Replace static bundle launch with a dynamic leased worker pool
+- [x] Task checkbox-37: REF-037 Replace static bundle launch with a dynamic leased worker pool
 
 ## REF-037 Replace static bundle launch with a dynamic leased worker pool
 
@@ -745,7 +745,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-037-replacestaticbundlelaunchwithadynamicleasedworke
 - Acceptance: A persistent scheduler discovers new and refilled tasks without restart.; Workers claim ready tasks, release drained or blocked leases, and steal conflict-safe work.; Lane count remains within configured capacity and no task executes under two accepted leases.; The manifest is an authoritative live projection rather than a launch-time snapshot.
 
-- [ ] Task checkbox-38: REF-038 Integrate a deduplicating single-consumer merge train
+- [x] Task checkbox-38: REF-038 Integrate a deduplicating single-consumer merge train
 
 ## REF-038 Integrate a deduplicating single-consumer merge train
 
@@ -766,7 +766,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-038-integrateadeduplicatingsingle-consumermergetrain
 - Acceptance: All implementation lanes enqueue merge candidates instead of racing the target checkout.; The train deduplicates by canonical task and commit, rebases on the latest target, and preserves priority plus age fairness.; One conflict fingerprint invokes at most one active resolver attempt.; Bounded failures enter quarantine with a durable receipt instead of a polling retry loop.
 
-- [ ] Task checkbox-39: REF-039 Materialize a task dependency DAG and schedule its critical path
+- [x] Task checkbox-39: REF-039 Materialize a task dependency DAG and schedule its critical path
 
 ## REF-039 Materialize a task dependency DAG and schedule its critical path
 
@@ -787,7 +787,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-039-materializeataskdependencydagandscheduleitscriti
 - Acceptance: Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance.; Only tasks whose prerequisite merge receipts succeeded are claimable.; Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority.; Cycles and missing dependencies produce bounded repair evidence rather than deadlock.
 
-- [ ] Task checkbox-40: REF-040 Build an AST and changed-path conflict graph for lane coloring
+- [x] Task checkbox-40: REF-040 Build an AST and changed-path conflict graph for lane coloring
 
 ## REF-040 Build an AST and changed-path conflict graph for lane coloring
 

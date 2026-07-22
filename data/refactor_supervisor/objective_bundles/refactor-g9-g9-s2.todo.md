@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-39: REF-039 Materialize a task dependency DAG and schedule its critical path
+- [x] Task checkbox-39: REF-039 Materialize a task dependency DAG and schedule its critical path
 
 ## REF-039 Materialize a task dependency DAG and schedule its critical path
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9
@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-039-materializeataskdependencydagandscheduleitscriti
 - Acceptance: Goal, import, interface, output-input, migration, and validation prerequisites become explicit DAG edges with provenance.; Only tasks whose prerequisite merge receipts succeeded are claimable.; Priority includes critical-path length, slack, downstream unlock value, age, and configured objective priority.; Cycles and missing dependencies produce bounded repair evidence rather than deadlock.
 
-- [ ] Task checkbox-40: REF-040 Build an AST and changed-path conflict graph for lane coloring
+- [x] Task checkbox-40: REF-040 Build an AST and changed-path conflict graph for lane coloring
 
 ## REF-040 Build an AST and changed-path conflict graph for lane coloring
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9
