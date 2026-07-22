@@ -183,7 +183,12 @@ class GraphAwareRetrievalReranker:
 
         try:
             from complaint_phases import ComplaintPhase, NodeType
-        except Exception:
+        except ImportError:
+            logger.warning(
+                "Complaint phase graph types are unavailable; "
+                "continuing without graph-derived retrieval terms",
+                exc_info=True,
+            )
             return []
 
         terms: List[str] = []
