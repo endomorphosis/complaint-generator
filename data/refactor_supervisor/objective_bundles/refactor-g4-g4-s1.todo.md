@@ -25,7 +25,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-013-definesmokeadaptermediatordocumentanduitestlanes
 - Acceptance: A documented test lane map exists.; Each P0 workstream has a named validation command.
 
-- [ ] Task checkbox-14: REF-014 Add import and dependency-boundary tests for production modules
+- [x] Task checkbox-14: REF-014 Add import and dependency-boundary tests for production modules
 
 ## REF-014 Add import and dependency-boundary tests for production modules
 
@@ -48,7 +48,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-015 Resolve dirty main checkout blocking 1 worktree merges
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
