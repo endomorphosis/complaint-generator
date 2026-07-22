@@ -1,10 +1,10 @@
 # REF-027 Reconciliation Guardrail
 
-Date: 2026-07-21
-Fingerprint: ebc903c15c398edeb9eabd86f6eaa1fc3e15fab8
+Date: 2026-07-22
+Fingerprint: a8d69a08a26f001170144d40fdc5219756a29851
 Kind: main_checkout_dirty
 Reason: main_checkout_dirty
-Candidate count: 2
+Candidate count: 1
 Priority: P1
 Track: ops
 
@@ -12,33 +12,24 @@ Track: ops
 
 - ` M data/refactor_supervisor/refactor_goals.json`
 - ` M docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
-- ` M integrations/ipfs_datasets/loader.py`
-- ` M tests/test_package_imports.py`
 
 ## Main Checkout Evidence
 
-- Path categories: `modified=4`
+- Path categories: `modified=2`
 - Status paths:
   - `data/refactor_supervisor/refactor_goals.json`
   - `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
-  - `integrations/ipfs_datasets/loader.py`
-  - `tests/test_package_imports.py`
 - Name status:
   - `M	data/refactor_supervisor/refactor_goals.json`
   - `M	docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
-  - `M	integrations/ipfs_datasets/loader.py`
-  - `M	tests/test_package_imports.py`
 - Diff stat:
   - `data/refactor_supervisor/refactor_goals.json | 6 +++---`
-  - ` docs/REFACTOR_SUPERVISOR_TASKBOARD.md        | 8 ++++----`
-  - ` integrations/ipfs_datasets/loader.py         | 4 ++++`
-  - ` tests/test_package_imports.py                | 2 ++`
-  - ` 4 files changed, 13 insertions(+), 7 deletions(-)`
+  - ` docs/REFACTOR_SUPERVISOR_TASKBOARD.md        | 4 ++--`
+  - ` 2 files changed, 5 insertions(+), 5 deletions(-)`
 
 ## Sample Branches Or Worktrees
 
-- `implementation/ref-001-attempt-1-1784661950` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-001-attempt-1-1784661950`
-- `implementation/ref-028-attempt-1-1784669974` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-028-attempt-1-1784669974`
+- `rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784688023-807bc7a20043` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784688023`
 
 ## Why This Blocks Progress
 
@@ -57,7 +48,7 @@ worktree cleanup skip count decreases.
 
 ## Reconciliation Plan
 
-Work surface: `2` candidates, `2` sampled records.
+Work surface: `1` candidates, `1` sampled records.
 
 ### Suggested Actions
 
@@ -99,28 +90,24 @@ Work surface: `2` candidates, `2` sampled records.
       "scope": "backlogged_worktrees"
     }
   ],
-  "candidate_count": 2,
+  "candidate_count": 1,
   "conflict_path_counts": {},
   "dedupe_key": "reconciliation_guardrail:main_checkout_dirty",
-  "fingerprint": "ebc903c15c398edeb9eabd86f6eaa1fc3e15fab8",
+  "fingerprint": "a8d69a08a26f001170144d40fdc5219756a29851",
   "kind": "main_checkout_dirty",
   "main_dirty_evidence": {
-    "diff_stat": "data/refactor_supervisor/refactor_goals.json | 6 +++---\n docs/REFACTOR_SUPERVISOR_TASKBOARD.md        | 8 ++++----\n integrations/ipfs_datasets/loader.py         | 4 ++++\n tests/test_package_imports.py                | 2 ++\n 4 files changed, 13 insertions(+), 7 deletions(-)",
-    "name_status": "M\tdata/refactor_supervisor/refactor_goals.json\nM\tdocs/REFACTOR_SUPERVISOR_TASKBOARD.md\nM\tintegrations/ipfs_datasets/loader.py\nM\ttests/test_package_imports.py",
+    "diff_stat": "data/refactor_supervisor/refactor_goals.json | 6 +++---\n docs/REFACTOR_SUPERVISOR_TASKBOARD.md        | 4 ++--\n 2 files changed, 5 insertions(+), 5 deletions(-)",
+    "name_status": "M\tdata/refactor_supervisor/refactor_goals.json\nM\tdocs/REFACTOR_SUPERVISOR_TASKBOARD.md",
     "path_categories": {
-      "modified": 4
+      "modified": 2
     },
     "status_paths": [
       "data/refactor_supervisor/refactor_goals.json",
-      "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-      "integrations/ipfs_datasets/loader.py",
-      "tests/test_package_imports.py"
+      "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
     ],
     "status_short": [
       " M data/refactor_supervisor/refactor_goals.json",
-      " M docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-      " M integrations/ipfs_datasets/loader.py",
-      " M tests/test_package_imports.py"
+      " M docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
     ]
   },
   "reason": "main_checkout_dirty",
@@ -130,19 +117,15 @@ Work surface: `2` candidates, `2` sampled records.
     "Keep todo, objective, discovery, and strategy files parseable after reconciliation."
   ],
   "sample_branches": [
-    "implementation/ref-001-attempt-1-1784661950",
-    "implementation/ref-028-attempt-1-1784669974"
+    "rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784688023-807bc7a20043"
   ],
-  "sample_count": 2,
+  "sample_count": 1,
   "sample_status_paths": [
     "data/refactor_supervisor/refactor_goals.json",
-    "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
-    "integrations/ipfs_datasets/loader.py",
-    "tests/test_package_imports.py"
+    "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
   ],
   "sample_worktrees": [
-    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-001-attempt-1-1784661950",
-    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-028-attempt-1-1784669974"
+    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784688023"
   ],
   "success_signals": [
     "candidate_count_decreases",
