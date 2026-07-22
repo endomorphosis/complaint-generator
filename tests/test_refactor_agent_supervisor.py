@@ -558,6 +558,29 @@ def test_repository_ipfs_p0_cross_links_cover_the_overview_and_known_goals() -> 
     assert all("Merge and scope rule" not in row and row.count("|") >= 5 for row in rows)
 
 
+def test_goal_management_integrity_program_is_persistent_and_dependency_closed() -> None:
+    goals = supervisor.build_goals({"signals": {}})
+    goal = next(goal for goal in goals if goal["id"] == "G10")
+    tasks = supervisor.flatten_tasks([goal])
+
+    assert [subgoal["id"] for subgoal in goal["subgoals"]] == [
+        "G10.S1",
+        "G10.S2",
+        "G10.S3",
+        "G10.S4",
+    ]
+    assert [task.task_id for task in tasks] == [f"REF-{number}" for number in range(200, 213)]
+    task_ids = {task.task_id for task in tasks}
+    assert all(set(task.depends_on) <= task_ids for task in tasks)
+    assert all(
+        any(path.startswith("ipfs_datasets_py/ipfs_accelerate_py/") for path in task.files)
+        for task in tasks
+    )
+    assert any("terminal reason taxonomy" in task.title for task in tasks)
+    assert any("fingerprint-independent audit" in task.title for task in tasks)
+    assert any("automatically reopen" in task.title for task in tasks)
+
+
 def test_merge_watchdog_skips_aborted_historical_merge(tmp_path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
