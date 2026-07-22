@@ -4414,7 +4414,12 @@ class AdversarialSession:
             try:
                 advance_to_evidence()
             except Exception:
-                pass
+                logger.warning(
+                    "Could not advance adversarial session %s to evidence; "
+                    "continuing with the direct document-generation handoff",
+                    self.session_id,
+                    exc_info=True,
+                )
 
         advance_to_formalization = getattr(self.mediator, 'advance_to_formalization_phase', None)
         if callable(advance_to_formalization):
