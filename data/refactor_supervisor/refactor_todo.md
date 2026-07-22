@@ -3297,7 +3297,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-200 Define a typed refill scan result and terminal reason taxonomy
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
