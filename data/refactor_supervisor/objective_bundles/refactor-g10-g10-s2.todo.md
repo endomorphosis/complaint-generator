@@ -66,3 +66,25 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Candidate kind: seed
 - Todo vector key: ref-205-escalatelow-backloganalysisthroughastandllm-rout
 - Acceptance: A policy escalates from incremental static scan to exhaustive AST coverage and then schema-constrained llm_router proposals when healthy backlog remains below target.; Each escalation records cost, scope, novelty, confidence, rejected candidates, and the objective terms it attempted to cover.; Router failure or low-confidence output produces an analysis-inconclusive result and deterministic fallback, never a false completion.; Rate, token, retry, and novelty limits prevent an unbounded task-generation loop.
+
+## REF-206 Resolve dependency guardrail for REF-203
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g10-g10-s2.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery/2026-07-22-ref-206-dependency-guardrail.md
+- Acceptance: Dependency guardrail filed this because REF-203 has missing, self-referential, cyclic, or duplicate task-id metadata. Use the evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery/2026-07-22-ref-206-dependency-guardrail.md to repair the todo board metadata or add the missing prerequisite task, then verify the original task can become ready once its real dependencies complete.
+
+## REF-207 Resolve dependency guardrail for REF-204
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery, data/refactor_supervisor/objective_bundles/refactor-g10-g10-s2.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery/2026-07-22-ref-207-dependency-guardrail.md
+- Acceptance: Dependency guardrail filed this because REF-204 has missing, self-referential, cyclic, or duplicate task-id metadata. Use the evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g10-g10-s2/discovery/2026-07-22-ref-207-dependency-guardrail.md to repair the todo board metadata or add the missing prerequisite task, then verify the original task can become ready once its real dependencies complete.
