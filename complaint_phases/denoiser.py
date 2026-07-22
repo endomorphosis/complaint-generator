@@ -11,6 +11,7 @@ import re
 from typing import Dict, List, Any, Optional, Tuple, Set
 import os
 import random
+from lib.runtime_ownership import require_module_ownership
 from .knowledge_graph import KnowledgeGraph, Entity, Relationship
 from .dependency_graph import DependencyGraph
 from .intake_claim_registry import (
@@ -23,6 +24,8 @@ from .intake_claim_registry import (
 )
 
 logger = logging.getLogger(__name__)
+MODULE_OWNERSHIP = require_module_ownership("complaint_phases.denoiser")
+RUNTIME_ENTRYPOINT_ROLE = MODULE_OWNERSHIP.role
 
 
 class ComplaintDenoiser:
