@@ -28,3 +28,20 @@ Inspect the source task metadata and either add the missing prerequisite task,
 remove the stale dependency, break the dependency cycle, rename duplicate task
 ids so each task is unique, or replace stale references with the correct existing
 task id. Keep the todo board parseable after the repair.
+
+## Repair Applied
+
+The canonical REF-201 task record from
+`data/refactor_supervisor/objective_bundles/refactor-g10-g10-s1.todo.md` was
+added to this bundle's todo board. Its source record is completed, so the local
+record preserves that status. REF-203's real dependency edge to REF-201 remains
+intact rather than being discarded as stale.
+
+## Readiness Verification
+
+The implementation daemon parser, configured with the board's `## REF-` task
+prefix, finds six unique task ids. REF-201 resolves as completed, REF-203 has no
+unresolved dependencies, and the dependency guardrail no longer emits a record
+for REF-203. Under the daemon's dependency scheduling rule, REF-203 therefore
+resolves to ready. The separate REF-204 finding remains active and is covered by
+REF-207.
