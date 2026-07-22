@@ -68,6 +68,143 @@ def test_renderers_use_supervisor_validation_command_delimiter() -> None:
     assert expected in supervisor._task_block(task, "REF-900", 900)
 
 
+def test_queue_refill_maintains_work_item_floor_without_duplicate_active_bundles(
+    tmp_path, monkeypatch
+) -> None:
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    (bundle_dir / "index.json").write_text("{}\n", encoding="utf-8")
+    todo_path = tmp_path / "todo.md"
+    todo_path.write_text(
+        "\n".join(
+            [
+                "- [ ] Task checkbox-1: REF-001 First task",
+                "- [ ] Task checkbox-2: REF-002 Second task",
+                "- [ ] Task checkbox-3: REF-003 Third task",
+                "- [x] Task checkbox-4: REF-004 Completed task",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", bundle_dir)
+    monkeypatch.setattr(supervisor, "TODO_PATH", todo_path)
+    monkeypatch.setattr(supervisor, "QUEUE_PATH", tmp_path / "queue.duckdb")
+
+    def task(task_id: str, priority: str = "P0") -> dict[str, object]:
+        return {
+            "task_id": task_id,
+            "title": f"Title {task_id}",
+            "priority": priority,
+            "goal_id": "G1",
+            "subgoal_id": "G1.S1",
+            "acceptance": [f"Accept {task_id}"],
+            "validation": [f"validate {task_id}"],
+            "paths": [f"{task_id}.py"],
+        }
+
+    payloads = [
+        {"bundle_key": "refactor/g1/g1-s1", "tasks": [task("REF-001"), task("REF-002")]},
+        {"bundle_key": "refactor/g1/g1-s2", "tasks": [task("REF-003", "P1"), task("REF-004")]},
+    ]
+    monkeypatch.setattr(supervisor, "_upstream_bundle_payload_builder", lambda: lambda _path: payloads)
+
+    class FakeQueue:
+        items: list[dict[str, object]] = []
+
+        def __init__(self, _path: str):
+            pass
+
+        def list(self, *, status, limit, task_types):
+            return [item for item in self.items if item["status"] == status][:limit]
+
+        def submit(self, *, task_type, model_name, payload):
+            task_id = f"queue-{len(self.items) + 1}"
+            self.items.append(
+                {
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "model_name": model_name,
+                    "payload": payload,
+                    "status": "queued",
+                }
+            )
+            return task_id
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(supervisor, "_task_queue_class", lambda: FakeQueue)
+
+    first = supervisor.refill_bundle_queue(refill_floor=3)
+    second = supervisor.refill_bundle_queue(refill_floor=3)
+
+    assert first["floor_satisfied"] is True
+    assert first["queued_work_items_after"] == 3
+    assert first["submitted_bundle_count"] == 2
+    assert second["submitted_bundle_count"] == 0
+    assert second["queued_work_items_before"] == 3
+    assert len(FakeQueue.items) == 2
+    queued_payload = FakeQueue.items[0]["payload"]
+    assert queued_payload["schema"] == "complaint_generator.refactor_supervisor.bundle_task.v1"
+    assert queued_payload["goal_id"] == "G1"
+    assert queued_payload["subgoal_id"] == "G1.S1"
+    assert queued_payload["priority"] == "P0"
+    assert queued_payload["acceptance"]
+    assert queued_payload["validation"]
+
+
+def test_goal_json_projects_header_statuses_and_resolves_seed_task_ids(tmp_path, monkeypatch) -> None:
+    todo_path = tmp_path / "todo.md"
+    todo_path.write_text(
+        "\n".join(
+            [
+                "## REF-001 Seed task",
+                "",
+                "- Status: completed",
+                "",
+                "## REF-027 Generated task",
+                "",
+                "- Status: todo",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "TODO_PATH", todo_path)
+    monkeypatch.setattr(supervisor, "OBJECTIVE_PATH", tmp_path / "objective.md")
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    monkeypatch.setattr(supervisor, "QUEUE_PATH", tmp_path / "queue.duckdb")
+    seed_task = supervisor.RefactorTask(
+        goal_id="G1",
+        subgoal_id="G1.S1",
+        title="Seed task",
+        priority="P0",
+        files=("seed.py",),
+        rationale="Keep projections synchronized.",
+        acceptance=("Status is visible.",),
+        validation=("python -m py_compile seed.py",),
+    )
+    goals = [
+        {
+            "id": "G1",
+            "title": "Goal",
+            "priority": "P0",
+            "subgoals": [{"id": "G1.S1", "title": "Subgoal", "tasks": [seed_task]}],
+        }
+    ]
+
+    taskboard = supervisor._taskboard_snapshot()
+    payload = supervisor._json_goal_tree(goals, {}, taskboard=taskboard)
+    projected = payload["goals"][0]["subgoals"][0]["tasks"][0]
+
+    assert taskboard["task_count"] == 2
+    assert taskboard["tasks"][1]["task_id"] == "REF-027"
+    assert projected["task_id"] == "REF-001"
+    assert projected["status"] == "complete"
+
+
 def test_merge_watchdog_skips_aborted_historical_merge(tmp_path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
