@@ -71,6 +71,8 @@ TASK_PAYLOAD_SCHEMA = "complaint_generator.refactor_supervisor.task.v1"
 BUNDLE_TASK_PAYLOAD_SCHEMA = "complaint_generator.refactor_supervisor.bundle_task.v1"
 STOP_TIMEOUT_SECONDS = 20.0
 STOP_POLL_SECONDS = 0.1
+DEFAULT_PARALLEL_RECONCILE_INTERVAL_SECONDS = 15.0
+DEFAULT_PARALLEL_DAEMON_INTERVAL_SECONDS = 15.0
 
 
 def _ensure_accelerate_import_path() -> None:
@@ -4399,8 +4401,16 @@ def status_payload() -> dict[str, Any]:
 def add_parallel_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--refill-floor", type=int, default=24)
     parser.add_argument("--max-lanes", type=int, default=4)
-    parser.add_argument("--interval-s", type=float, default=120.0)
-    parser.add_argument("--daemon-interval-s", type=float, default=120.0)
+    parser.add_argument(
+        "--interval-s",
+        type=float,
+        default=DEFAULT_PARALLEL_RECONCILE_INTERVAL_SECONDS,
+    )
+    parser.add_argument(
+        "--daemon-interval-s",
+        type=float,
+        default=DEFAULT_PARALLEL_DAEMON_INTERVAL_SECONDS,
+    )
     parser.add_argument("--implementation-timeout", type=float, default=1800.0)
     parser.add_argument("--max-restarts", type=int, default=3)
     parser.add_argument("--merge-resolver-timeout", type=float, default=900.0)
