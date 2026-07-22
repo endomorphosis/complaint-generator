@@ -37,7 +37,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-117 Review swallowed exception path in examples/session_sgd_report.py:59
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
