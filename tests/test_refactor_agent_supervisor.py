@@ -6,6 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+
+# This module exercises mocked supervisor orchestration only. Its references to
+# the vendored accelerate package are paths, not heavy runtime dependencies.
+pytestmark = pytest.mark.no_auto_heavy
+
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "refactor_agent_supervisor.py"
 SPEC = importlib.util.spec_from_file_location("complaint_generator_refactor_agent_supervisor", SCRIPT_PATH)
@@ -67,6 +74,47 @@ def test_renderers_use_supervisor_validation_command_delimiter() -> None:
 
     assert expected in supervisor._render_objective_heap(goals)
     assert expected in supervisor._task_block(task, "REF-900", 900)
+
+
+def test_refactor_task_payload_has_actionable_schema_fields() -> None:
+    task = supervisor.RefactorTask(
+        goal_id="G8",
+        subgoal_id="G8.S2",
+        title="Verify the seed contract",
+        priority="P1",
+        files=("scripts/refactor_agent_supervisor.py",),
+        rationale="Agents need complete work instructions.",
+        acceptance=("The payload is complete.",),
+        validation=("python -m pytest tests/test_refactor_agent_supervisor.py -q",),
+        task_id="REF-026",
+    )
+
+    payload = task.payload()
+
+    assert payload["schema"] == supervisor.TASK_PAYLOAD_SCHEMA
+    assert payload["goal_id"] == "G8"
+    assert payload["subgoal_id"] == "G8.S2"
+    assert payload["priority"] == "P1"
+    assert payload["acceptance"] == ["The payload is complete."]
+    assert payload["validation"] == [
+        "python -m pytest tests/test_refactor_agent_supervisor.py -q"
+    ]
+
+
+def test_refactor_task_payload_rejects_missing_acceptance_or_validation() -> None:
+    task = supervisor.RefactorTask(
+        goal_id="G8",
+        subgoal_id="G8.S2",
+        title="Malformed task",
+        priority="P1",
+        files=(),
+        rationale="Malformed work must not reach the queue.",
+        acceptance=(),
+        validation=(),
+    )
+
+    with pytest.raises(ValueError, match="acceptance must be a non-empty list"):
+        task.payload()
 
 
 def test_queue_refill_maintains_work_item_floor_without_duplicate_active_bundles(
@@ -153,6 +201,202 @@ def test_queue_refill_maintains_work_item_floor_without_duplicate_active_bundles
     assert queued_payload["priority"] == "P0"
     assert queued_payload["acceptance"]
     assert queued_payload["validation"]
+
+
+def test_queue_refill_rejects_malformed_payload_without_submitting_it(tmp_path, monkeypatch) -> None:
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    (bundle_dir / "index.json").write_text("{}\n", encoding="utf-8")
+    todo_path = tmp_path / "todo.md"
+    todo_path.write_text("## REF-001 Incomplete task\n\n- Status: todo\n", encoding="utf-8")
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", bundle_dir)
+    monkeypatch.setattr(supervisor, "TODO_PATH", todo_path)
+    monkeypatch.setattr(supervisor, "QUEUE_PATH", tmp_path / "queue.duckdb")
+    monkeypatch.setattr(
+        supervisor,
+        "_upstream_bundle_payload_builder",
+        lambda: lambda _path: [
+            {
+                "bundle_key": "refactor/g8/g8-s2",
+                "tasks": [
+                    {
+                        "task_id": "REF-001",
+                        "title": "Incomplete task",
+                        "priority": "P1",
+                        "parent_goal_id": "G8",
+                        "subgoal_id": "G8.S2",
+                        "acceptance": [],
+                        "validation": ["python -m pytest -q"],
+                    }
+                ],
+            }
+        ],
+    )
+
+    class FakeQueue:
+        submitted: list[dict[str, object]] = []
+
+        def __init__(self, _path: str):
+            pass
+
+        def list(self, **_kwargs):
+            return []
+
+        def submit(self, **kwargs):
+            self.submitted.append(kwargs)
+            return "queue-1"
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(supervisor, "_task_queue_class", lambda: FakeQueue)
+
+    result = supervisor.refill_bundle_queue(refill_floor=1)
+
+    assert result["submitted_bundle_count"] == 0
+    assert result["rejected_bundle_count"] == 1
+    assert result["rejected_payloads"][0]["bundle_key"] == "refactor/g8/g8-s2"
+    assert "acceptance must be a non-empty list" in result["rejected_payloads"][0]["error"]
+    assert FakeQueue.submitted == []
+
+
+def test_seed_taskboard_twice_keeps_one_active_copy_and_complete_queue_payloads(
+    tmp_path, monkeypatch
+) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "OBJECTIVE_PATH", tmp_path / "objective.md")
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    monkeypatch.setattr(supervisor, "TASKBOARD_DOC_PATH", tmp_path / "taskboard.md")
+
+    tasks = [
+        supervisor.RefactorTask(
+            goal_id="G8",
+            subgoal_id="G8.S2",
+            title="First seed task",
+            priority="P1",
+            files=("first.py",),
+            rationale="Exercise repeat seeding.",
+            acceptance=("First task is represented once.",),
+            validation=("python -m py_compile first.py",),
+            task_id="REF-101",
+        ),
+        supervisor.RefactorTask(
+            goal_id="G8",
+            subgoal_id="G8.S2",
+            title="Second seed task",
+            priority="P2",
+            files=("second.py",),
+            rationale="Exercise bundled repeat seeding.",
+            acceptance=("Second task is represented once.",),
+            validation=("python -m py_compile second.py",),
+            task_id="REF-102",
+        ),
+    ]
+    goals = [
+        {
+            "id": "G8",
+            "title": "Reviewable artifacts",
+            "priority": "P1",
+            "subgoals": [
+                {"id": "G8.S2", "title": "Stable seeds", "tasks": tasks},
+            ],
+        }
+    ]
+    monkeypatch.setattr(supervisor, "scan_codebase", lambda: {"signals": {}})
+    monkeypatch.setattr(supervisor, "build_goals", lambda _scan: goals)
+    monkeypatch.setattr(supervisor, "_durable_task_statuses", lambda: {})
+    monkeypatch.setattr(
+        supervisor,
+        "synchronize_taskboard_statuses",
+        lambda: {
+            "task_count": 2,
+            "completed_count": 0,
+            "blocked_count": 0,
+            "updated_file_count": 0,
+            "updated": {},
+        },
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "_collect_counts",
+        lambda: (
+            {
+                "todo": {"needed": 2, "in_progress": 0, "complete": 0, "blocked": 0},
+                "queue": {"queued": 1, "running": 0, "completed": 0, "failed": 0},
+            },
+            {},
+        ),
+    )
+    monkeypatch.setattr(supervisor, "_write_taskboard_doc", lambda *_args, **_kwargs: None)
+
+    def build_payloads(index_path: Path) -> list[dict[str, object]]:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        return [
+            {"bundle_key": key, "tasks": info["tasks"]}
+            for key, info in index["bundles"].items()
+        ]
+
+    monkeypatch.setattr(supervisor, "_upstream_bundle_payload_builder", lambda: build_payloads)
+
+    class FakeQueue:
+        items: list[dict[str, object]] = []
+
+        def __init__(self, _path: str):
+            pass
+
+        def list(self, *, status, limit, task_types):
+            return [item for item in self.items if item["status"] == status][:limit]
+
+        def count(self, *, status, task_types):
+            return len([item for item in self.items if item["status"] == status])
+
+        def submit(self, *, task_type, model_name, payload):
+            queue_id = f"queue-{len(self.items) + 1}"
+            self.items.append(
+                {
+                    "task_id": queue_id,
+                    "task_type": task_type,
+                    "model_name": model_name,
+                    "payload": payload,
+                    "status": "queued",
+                }
+            )
+            return queue_id
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(supervisor, "_task_queue_class", lambda: FakeQueue)
+
+    first = supervisor.seed_taskboard(refill_floor=2)
+    second = supervisor.seed_taskboard(refill_floor=2)
+
+    todo_text = supervisor.TODO_PATH.read_text(encoding="utf-8")
+    shard_text = (supervisor.BUNDLE_DIR / "refactor-g8-g8-s2.todo.md").read_text(
+        encoding="utf-8"
+    )
+    assert todo_text.count("## REF-101 First seed task") == 1
+    assert todo_text.count("## REF-102 Second seed task") == 1
+    assert shard_text.count("## REF-101 First seed task") == 1
+    assert shard_text.count("## REF-102 Second seed task") == 1
+    assert first["queue_refill"]["submitted_bundle_count"] == 1
+    assert second["queue_refill"]["submitted_bundle_count"] == 0
+    assert len(FakeQueue.items) == 1
+
+    payload = FakeQueue.items[0]["payload"]
+    assert payload["schema"] == supervisor.BUNDLE_TASK_PAYLOAD_SCHEMA
+    assert payload["goal_id"] == "G8"
+    assert payload["subgoal_id"] == "G8.S2"
+    assert payload["priority"] == "P1"
+    assert payload["acceptance"] == [
+        "First task is represented once.",
+        "Second task is represented once.",
+    ]
+    assert payload["validation"] == [
+        "python -m py_compile first.py",
+        "python -m py_compile second.py",
+    ]
 
 
 def test_goal_json_projects_header_statuses_and_resolves_seed_task_ids(tmp_path, monkeypatch) -> None:
