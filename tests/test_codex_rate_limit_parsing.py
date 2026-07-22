@@ -24,6 +24,42 @@ _debug_extract_reset_info_from_message = _codex_autopatch._debug_extract_reset_i
 _extract_first_error_message_from_exec_jsonl = _codex_autopatch._extract_first_error_message_from_exec_jsonl
 _extract_rate_limit_reset_info_with_exec_fallback = _codex_autopatch._extract_rate_limit_reset_info_with_exec_fallback
 _pick_reset_at_raw_from_rate_limit_artifact = _codex_autopatch._pick_reset_at_raw_from_rate_limit_artifact
+_append_jsonl_best_effort = _codex_autopatch._append_jsonl_best_effort
+
+
+def test_append_jsonl_best_effort_writes_event(tmp_path) -> None:
+    transcript_path = tmp_path / "codex-chat.jsonl"
+    event = {"event": "rate_limit", "will_retry": False}
+
+    assert _append_jsonl_best_effort(str(transcript_path), event, event_name="rate-limit") is True
+    assert json.loads(transcript_path.read_text(encoding="utf-8")) == event
+
+
+def test_append_jsonl_best_effort_warns_on_expected_artifact_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail_append(*_args, **_kwargs) -> None:
+        raise OSError("transcript is read-only")
+
+    monkeypatch.setattr(_codex_autopatch, "_append_jsonl", fail_append)
+
+    assert _append_jsonl_best_effort("codex-chat.jsonl", {}, event_name="rate-limit") is False
+    warning = capsys.readouterr().err
+    assert "could not append rate-limit event" in warning
+    assert "transcript is read-only" in warning
+
+
+def test_append_jsonl_best_effort_does_not_swallow_unexpected_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_append(*_args, **_kwargs) -> None:
+        raise RuntimeError("unexpected transcript writer failure")
+
+    monkeypatch.setattr(_codex_autopatch, "_append_jsonl", fail_append)
+
+    with pytest.raises(RuntimeError, match="unexpected transcript writer failure"):
+        _append_jsonl_best_effort("codex-chat.jsonl", {}, event_name="rate-limit")
 
 
 def test_parse_iso_dt_rejects_malformed_provider_timestamp() -> None:
