@@ -3440,7 +3440,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-206-defineanevidence-backedgoallifecycleandcompletio
 - Acceptance: Goals distinguish active, provisionally complete, verified complete, analysis inconclusive, blocked, and reopened states with legal transitions.; Completion evidence names acceptance criterion, producing task or scan, validation receipt, repository tree, freshness, and provenance CID.; Task completion alone can make a goal provisional but cannot make it verified.; Missing, stale, failed, or contradictory evidence fails closed with an actionable reason.
 
-- [ ] Task checkbox-207: REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
+- [x] Task checkbox-207: REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
 
 ## REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
 
@@ -3465,7 +3465,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
