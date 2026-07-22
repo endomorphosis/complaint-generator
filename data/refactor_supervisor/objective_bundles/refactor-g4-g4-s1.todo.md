@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-014 Add import and dependency-boundary tests for production modules
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G4
