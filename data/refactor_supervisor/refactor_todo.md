@@ -642,7 +642,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-033 Close objective gap: Rationalize frontend and review surfaces
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
