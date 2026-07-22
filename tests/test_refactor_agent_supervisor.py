@@ -820,6 +820,69 @@ def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) 
     assert member["status"] == "completed"
 
 
+def test_seed_bundle_index_preserves_dynamic_bundle_members(tmp_path, monkeypatch) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    monkeypatch.setattr(supervisor, "TASKBOARD_DOC_PATH", tmp_path / "taskboard.md")
+    supervisor.BUNDLE_DIR.mkdir(parents=True)
+    dynamic_bundle = "codebase/runtime/src-runtime"
+    (supervisor.BUNDLE_DIR / "index.json").write_text(
+        json.dumps(
+            {
+                "bundles": {
+                    dynamic_bundle: {
+                        "bundle_key": dynamic_bundle,
+                        "shard_path": "bundles/codebase-runtime-src-runtime.todo.md",
+                        "parallel_lane": dynamic_bundle,
+                        "bundle_strategy": "codebase_file_ast",
+                        "tasks": [
+                            {
+                                "task_id": "REF-080",
+                                "status": "todo",
+                                "title": "Generated finding",
+                                "candidate_kind": "codebase_scan",
+                                "paths": ["src/runtime.py"],
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    task = supervisor.RefactorTask(
+        goal_id="G1",
+        subgoal_id="G1.S1",
+        title="Seed member",
+        priority="P0",
+        files=(),
+        rationale="Initial plan.",
+        acceptance=("Seed remains present.",),
+        validation=("true",),
+        task_id="REF-001",
+    )
+    goals = [
+        {
+            "id": "G1",
+            "title": "Goal",
+            "priority": "P0",
+            "subgoals": [{"id": "G1.S1", "title": "Subgoal", "tasks": [task]}],
+        }
+    ]
+
+    result = supervisor.write_seed_bundle_index(
+        goals,
+        task_statuses={"REF-001": "completed", "REF-080": "todo"},
+    )
+
+    index = json.loads((supervisor.BUNDLE_DIR / "index.json").read_text(encoding="utf-8"))
+    assert set(index["bundles"]) == {"refactor/g1/g1-s1", dynamic_bundle}
+    assert index["bundles"][dynamic_bundle]["tasks"][0]["task_id"] == "REF-080"
+    assert result["task_count"] == 2
+    assert result["dynamic_task_count"] == 1
+
+
 def test_seed_bundle_index_retains_excluded_bundle_dependency_metadata(
     tmp_path, monkeypatch
 ) -> None:
@@ -981,6 +1044,7 @@ def test_start_daemon_passes_managed_submodule_path_once(tmp_path, monkeypatch) 
     assert command[command.index("--generated-dirty-path") + 1] == str(
         supervisor.TASKBOARD_DOC_PATH
     )
+    assert command.count("--allow-codebase-refill-with-objective-work") == 1
     assert captured["kwargs"]["start_new_session"] is True
     assert payload["status"] == "started"
 

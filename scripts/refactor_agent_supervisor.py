@@ -1326,9 +1326,37 @@ def write_seed_bundle_index(
     task_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
-    bundles: dict[str, dict[str, Any]] = {}
     excluded = exclude_bundle_keys or set()
     statuses = task_statuses or {}
+    index_path = BUNDLE_DIR / "index.json"
+    existing_index = _load_json_object(index_path)
+    existing_bundles = existing_index.get("bundles")
+    if not isinstance(existing_bundles, dict):
+        existing_bundles = {}
+    seed_task_ids = set(_resolved_seed_task_ids(goals).values())
+    bundles: dict[str, dict[str, Any]] = {}
+    dynamic_task_count = 0
+    for bundle_key, raw_info in existing_bundles.items():
+        if not isinstance(raw_info, dict):
+            continue
+        dynamic_tasks: list[dict[str, Any]] = []
+        for raw_task in raw_info.get("tasks", []):
+            if not isinstance(raw_task, dict):
+                continue
+            task_id = str(raw_task.get("task_id") or "")
+            if not task_id or task_id in seed_task_ids:
+                continue
+            task = dict(raw_task)
+            if task_id in statuses:
+                task["status"] = statuses[task_id]
+            dynamic_tasks.append(task)
+        if not dynamic_tasks:
+            continue
+        info = dict(raw_info)
+        info["tasks"] = dynamic_tasks
+        bundles[str(bundle_key)] = info
+        dynamic_task_count += len(dynamic_tasks)
+
     task_index = 1
     for task in flatten_tasks(goals):
         task_id = task.task_id or f"{TASK_PREFIX}{task_index:03d}"
@@ -1350,17 +1378,24 @@ def write_seed_bundle_index(
                 shard_text = shard_text.rstrip() + "\n\n" + block + "\n"
                 shard_path.write_text(shard_text, encoding="utf-8")
 
-        info = bundles.setdefault(
-            bundle_key,
+        info = bundles.setdefault(bundle_key, {})
+        info.update(
             {
                 "bundle_key": bundle_key,
                 "shard_path": shard_path.relative_to(PROJECT_ROOT).as_posix(),
                 "parallel_lane": bundle_key,
-                "bundle_strategy": "goal_subgoal_ast",
-                "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
-                "tasks": [],
-            },
+                "bundle_strategy": str(info.get("bundle_strategy") or "goal_subgoal_ast"),
+                "conflict_policy": str(
+                    info.get("conflict_policy")
+                    or "prefer bundle-local changes; reconcile generated worktrees before merge"
+                ),
+            }
         )
+        info["tasks"] = [
+            item
+            for item in info.get("tasks", [])
+            if isinstance(item, dict) and str(item.get("task_id") or "") != task_id
+        ]
         info["tasks"].append(
             {
                 "task_id": task_id,
@@ -1398,25 +1433,41 @@ def write_seed_bundle_index(
         )
         task_index += 1
 
+    for info in bundles.values():
+        info["tasks"] = sorted(
+            (item for item in info.get("tasks", []) if isinstance(item, dict)),
+            key=lambda item: str(item.get("task_id") or ""),
+        )
+
+    completed_task_ids = {
+        task_id
+        for task_id, status in statuses.items()
+        if str(status).strip().lower() in {"complete", "completed", "done", "succeeded"}
+    }
+    completed_task_ids.update(
+        str(item.get("task_id"))
+        for info in bundles.values()
+        for item in info.get("tasks", [])
+        if str(item.get("status") or "").strip().lower()
+        in {"complete", "completed", "done", "succeeded"}
+        and str(item.get("task_id") or "")
+    )
+
     index_payload = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source_todo": TODO_PATH.relative_to(PROJECT_ROOT).as_posix(),
         "schema": "complaint_generator.refactor_seed_bundle_index",
         "bundle_strategy": "goal_subgoal_ast",
-        "completed_task_ids": sorted(
-            task_id
-            for task_id, status in statuses.items()
-            if str(status).strip().lower() in {"complete", "completed", "done", "succeeded"}
-        ),
+        "completed_task_ids": sorted(completed_task_ids),
         "excluded_bundle_keys": sorted(excluded),
         "bundles": bundles,
     }
-    index_path = BUNDLE_DIR / "index.json"
     index_path.write_text(json.dumps(index_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return {
         "bundle_index_path": str(index_path),
         "bundle_count": len(bundles),
         "task_count": sum(len(bundle.get("tasks", [])) for bundle in bundles.values()),
+        "dynamic_task_count": dynamic_task_count,
         "excluded_bundle_keys": sorted(excluded),
     }
 
@@ -2680,6 +2731,7 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
         "--objective-max-refinement-depth",
         "3",
         "--codebase-refill-scan",
+        "--allow-codebase-refill-with-objective-work",
         "--codebase-scan-min-open-tasks",
         str(int(args.refill_floor)),
         "--codebase-scan-max-findings",
