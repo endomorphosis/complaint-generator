@@ -422,7 +422,10 @@ def normalize_external_url(raw: str, base_url: str) -> str | None:
         absolute, _fragment = urldefrag(absolute)
         absolute = maybe_unwrap_google(absolute)
         parsed = urlparse(absolute)
-    except Exception:
+    except ValueError:
+        # urllib.parse raises ValueError for malformed inputs such as an
+        # unmatched IPv6 bracket. Treat those links as unusable, but allow
+        # unexpected implementation failures to remain visible to callers.
         return None
     return absolute if parsed.scheme in {"http", "https"} else None
 
