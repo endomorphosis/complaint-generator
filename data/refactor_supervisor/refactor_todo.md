@@ -2582,7 +2582,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-113 Review swallowed exception path in examples/codex_multi_run_autopatch_loop.py:130
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -2644,7 +2644,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-115 Review swallowed exception path in examples/observability_benchmarks.py:513
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -2675,7 +2675,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-116 Review swallowed exception path in examples/session_sgd_report.py:43
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
