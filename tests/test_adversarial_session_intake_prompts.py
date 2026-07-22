@@ -1226,6 +1226,23 @@ def test_document_generation_logs_formalization_transition_failure_and_continues
     assert "formalization transition failed" in caplog.text
 
 
+def test_document_generation_logs_evidence_transition_failure_and_continues(caplog):
+    class _FailingEvidenceMediator(_DocumentMediator):
+        def advance_to_evidence_phase(self):
+            raise RuntimeError("evidence transition failed")
+
+    mediator = _FailingEvidenceMediator()
+    session = _make_document_session(mediator)
+
+    with caplog.at_level("WARNING", logger="adversarial_harness.session"):
+        result = session._run_document_generation({"type": "housing_discrimination"})
+
+    assert result["ready_to_file"] is True
+    assert mediator.document_kwargs["user_id"] == "document_session"
+    assert "Could not advance adversarial session document_session to evidence" in caplog.text
+    assert "evidence transition failed" in caplog.text
+
+
 def test_document_generation_logs_formalization_graph_failure_and_continues(caplog):
     class _FailingGraphMediator(_DocumentMediator):
         def __init__(self):
