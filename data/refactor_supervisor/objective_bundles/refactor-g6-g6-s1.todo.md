@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-17: REF-017 Audit broad exception handlers in mediator and adapter paths
+- [x] Task checkbox-17: REF-017 Audit broad exception handlers in mediator and adapter paths
 
 ## REF-017 Audit broad exception handlers in mediator and adapter paths
 

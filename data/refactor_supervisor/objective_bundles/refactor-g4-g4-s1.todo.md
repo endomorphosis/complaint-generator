@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-13: REF-013 Define smoke, adapter, mediator, document, and UI test lanes
+- [x] Task checkbox-13: REF-013 Define smoke, adapter, mediator, document, and UI test lanes
 
 ## REF-013 Define smoke, adapter, mediator, document, and UI test lanes
 

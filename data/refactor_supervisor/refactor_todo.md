@@ -56,7 +56,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.
 - Acceptance: No production entrypoint mutates sys.path for normal imports.; Explicit exceptions are isolated to scripts/tests.
 
-- [ ] Task checkbox-4: REF-004 Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing
+- [x] Task checkbox-4: REF-004 Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing
 
 ## REF-004 Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing
 
@@ -209,11 +209,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Formal validation should fail predictably when unavailable.
 - Acceptance: Logic status distinguishes unavailable, degraded, and implemented.; Callers do not branch on fragile strings.
 
-- [ ] Task checkbox-13: REF-013 Define smoke, adapter, mediator, document, and UI test lanes
+- [x] Task checkbox-13: REF-013 Define smoke, adapter, mediator, document, and UI test lanes
 
 ## REF-013 Define smoke, adapter, mediator, document, and UI test lanes
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G4
@@ -277,11 +277,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Long-running automation needs inspectable state and a clean stop path.
 - Acceptance: Status JSON includes pid, heartbeat, scan summary, and counts.; Stop command terminates the daemon cleanly.
 
-- [ ] Task checkbox-17: REF-017 Audit broad exception handlers in mediator and adapter paths
+- [x] Task checkbox-17: REF-017 Audit broad exception handlers in mediator and adapter paths
 
 ## REF-017 Audit broad exception handlers in mediator and adapter paths
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G6
@@ -311,11 +311,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Silent failures hide regressions during long-running automation.
 - Acceptance: Intentional ignores are named.; Unexpected failures leave diagnostic breadcrumbs.
 
-- [ ] Task checkbox-19: REF-019 Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors
+- [x] Task checkbox-19: REF-019 Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors
 
 ## REF-019 Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G6
@@ -328,11 +328,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Multiple daemon surfaces should be inspectable with the same status fields.
 - Acceptance: Status payloads include status, pid, updated_at, artifacts, and last_error where applicable.; Existing CLI tests remain compatible.
 
-- [ ] Task checkbox-20: REF-020 Add queue count and last-cycle metrics to long-running automation docs
+- [x] Task checkbox-20: REF-020 Add queue count and last-cycle metrics to long-running automation docs
 
 ## REF-020 Add queue count and last-cycle metrics to long-running automation docs
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P2
 - Track: G6
@@ -1083,3 +1083,69 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ce8c3a3f03eb4308
 - Repair evidence: data/refactor_supervisor/discovery/2026-07-22-ref-050-objective-validation-repair.md; objective validation repair
 - Acceptance: Objective scan filed this gap for G2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-050-objective-gap-eac2cf021fa2.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-051 Review swallowed exception path in adversarial_harness/harness.py:49
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, adversarial_harness/harness.py
+- Validation: python3 -m py_compile adversarial_harness/harness.py
+- Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:49. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-051-codebase-scan-3ab0109997e2.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-052 Review swallowed exception path in adversarial_harness/harness.py:54
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, adversarial_harness/harness.py
+- Validation: python3 -m py_compile adversarial_harness/harness.py
+- Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:54. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-052-codebase-scan-888d7f27e0a0.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-053 Review swallowed exception path in adversarial_harness/harness.py:150
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, adversarial_harness/harness.py
+- Validation: python3 -m py_compile adversarial_harness/harness.py
+- Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:150. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-053-codebase-scan-6060fa7dd810.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-054 Review swallowed exception path in adversarial_harness/harness.py:478
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, adversarial_harness/harness.py
+- Validation: python3 -m py_compile adversarial_harness/harness.py
+- Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:478. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-054-codebase-scan-c656748a86e6.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-055 Review swallowed exception path in adversarial_harness/harness.py:879
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, adversarial_harness/harness.py
+- Validation: python3 -m py_compile adversarial_harness/harness.py
+- Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:879. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-055-codebase-scan-c09886e49cef.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-056 Review swallowed exception path in adversarial_harness/session.py:225
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, adversarial_harness/session.py
+- Validation: python3 -m py_compile adversarial_harness/session.py
+- Acceptance: Codebase scan filed this finding from adversarial_harness/session.py:225. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-056-codebase-scan-3d51a7e8f51f.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.

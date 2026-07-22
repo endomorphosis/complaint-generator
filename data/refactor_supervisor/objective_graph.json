@@ -1,7 +1,7 @@
 {
-  "active_goal_count": 15,
-  "completed_goal_count": 11,
-  "generated_at": "2026-07-22T05:03:14.579817+00:00",
+  "active_goal_count": 14,
+  "completed_goal_count": 12,
+  "generated_at": "2026-07-22T05:41:46.938120+00:00",
   "goal_count": 26,
   "goals": [
     {
@@ -113,7 +113,7 @@
       "goal_id": "G2",
       "parents": [],
       "refinement_depth": "0",
-      "status": "active",
+      "status": "completed",
       "title": "Decompose oversized orchestration modules",
       "track": "ops"
     },
@@ -1160,31 +1160,9 @@
     },
     {
       "fib_priority": 999999,
-      "goal_id": "G2",
-      "graph_depth": 0,
-      "heap_index": 8,
-      "output_count": 0,
-      "parents": [],
-      "priority": "P0",
-      "priority_rank": 0,
-      "required_evidence_count": 8,
-      "sort_key": [
-        999999,
-        0,
-        -32,
-        0,
-        "G2"
-      ],
-      "status": "active",
-      "title": "Decompose oversized orchestration modules",
-      "track": "ops",
-      "work_surface_score": 32
-    },
-    {
-      "fib_priority": 999999,
       "goal_id": "G6.S2",
       "graph_depth": 1,
-      "heap_index": 9,
+      "heap_index": 8,
       "output_count": 0,
       "parents": [
         "G6"
@@ -1208,7 +1186,7 @@
       "fib_priority": 999999,
       "goal_id": "G7.S1",
       "graph_depth": 1,
-      "heap_index": 10,
+      "heap_index": 9,
       "output_count": 0,
       "parents": [
         "G7"
@@ -1232,7 +1210,7 @@
       "fib_priority": 999999,
       "goal_id": "G6",
       "graph_depth": 0,
-      "heap_index": 11,
+      "heap_index": 10,
       "output_count": 0,
       "parents": [],
       "priority": "P1",
@@ -1254,7 +1232,7 @@
       "fib_priority": 999999,
       "goal_id": "G6.S1",
       "graph_depth": 1,
-      "heap_index": 12,
+      "heap_index": 11,
       "output_count": 0,
       "parents": [
         "G6"
@@ -1278,7 +1256,7 @@
       "fib_priority": 999999,
       "goal_id": "G4.S1",
       "graph_depth": 1,
-      "heap_index": 13,
+      "heap_index": 12,
       "output_count": 0,
       "parents": [
         "G4"
@@ -1302,7 +1280,7 @@
       "fib_priority": 999999,
       "goal_id": "G7",
       "graph_depth": 0,
-      "heap_index": 14,
+      "heap_index": 13,
       "output_count": 0,
       "parents": [],
       "priority": "P1",
@@ -6483,7 +6461,7 @@
         "id": "goal:G2",
         "kind": "goal",
         "priority": "P0",
-        "status": "active",
+        "status": "completed",
         "thought": "Decompose oversized orchestration modules",
         "title": "Decompose oversized orchestration modules",
         "track": "ops"

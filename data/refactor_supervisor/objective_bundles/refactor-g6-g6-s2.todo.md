@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-19: REF-019 Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors
+- [x] Task checkbox-19: REF-019 Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors
 
 ## REF-019 Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors
 
@@ -25,7 +25,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-019-standardizedaemonstatuspayloadshapeacrossuiscrap
 - Acceptance: Status payloads include status, pid, updated_at, artifacts, and last_error where applicable.; Existing CLI tests remain compatible.
 
-- [ ] Task checkbox-20: REF-020 Add queue count and last-cycle metrics to long-running automation docs
+- [x] Task checkbox-20: REF-020 Add queue count and last-cycle metrics to long-running automation docs
 
 ## REF-020 Add queue count and last-cycle metrics to long-running automation docs
 

@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-003-replaceproductionsys-pathmutationwithpackage-lev
 - Acceptance: No production entrypoint mutates sys.path for normal imports.; Explicit exceptions are isolated to scripts/tests.
 
-- [ ] Task checkbox-4: REF-004 Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing
+- [x] Task checkbox-4: REF-004 Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing
 
 ## REF-004 Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G1
