@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-200: REF-200 Define a typed refill scan result and terminal reason taxonomy
+- [x] Task checkbox-200: REF-200 Define a typed refill scan result and terminal reason taxonomy
 
 ## REF-200 Define a typed refill scan result and terminal reason taxonomy
 
