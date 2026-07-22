@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import importlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -11,6 +12,9 @@ from typing import Any, Dict, Mapping, Optional
 
 from .loader import import_attr_optional
 from .types import with_adapter_metadata
+
+
+logger = logging.getLogger(__name__)
 
 
 generate_text, _error = import_attr_optional("ipfs_datasets_py.llm_router", "generate_text")
@@ -76,7 +80,14 @@ def _resolve_hf_token(env_overrides: Optional[Mapping[str, str]] = None) -> str:
 			if resolved:
 				return resolved
 	except Exception:
-		pass
+		# The vault is one of several supported credential sources, so its
+		# failure must not prevent keyring or Hugging Face CLI credentials from
+		# being used. Keep that fallback observable without logging secret values.
+		logger.warning(
+			"Could not resolve a Hugging Face token from the ipfs_datasets_py "
+			"secrets vault; trying the keyring and Hugging Face CLI fallbacks",
+			exc_info=True,
+		)
 
 	try:
 		import keyring  # type: ignore
