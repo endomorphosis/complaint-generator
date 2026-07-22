@@ -107,11 +107,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Claim support hooks are large enough to hide unrelated concerns.
 - Acceptance: At least one cohesive helper group moves behind a stable import.; No payload contract changes without tests.
 
-- [ ] Task checkbox-7: REF-007 Extract complaint workspace request handlers from UI state helpers
+- [x] Task checkbox-7: REF-007 Extract complaint workspace request handlers from UI state helpers
 
 ## REF-007 Extract complaint workspace request handlers from UI state helpers
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G2
@@ -192,11 +192,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Graph support currently lacks a durable query plane.
 - Acceptance: Interfaces specify persistence, query, and provenance fields.; Fallback graph behavior remains covered.
 
-- [ ] Task checkbox-12: REF-012 Turn not_implemented logic paths into explicit capability-gated contracts
+- [x] Task checkbox-12: REF-012 Turn not_implemented logic paths into explicit capability-gated contracts
 
 ## REF-012 Turn not_implemented logic paths into explicit capability-gated contracts
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G3
@@ -856,7 +856,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-043 Add impact-selected cached and parallel validation stages
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G9
