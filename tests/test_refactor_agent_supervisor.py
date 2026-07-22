@@ -576,6 +576,68 @@ def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) 
     assert member["status"] == "completed"
 
 
+def test_seed_bundle_index_retains_excluded_bundle_dependency_metadata(
+    tmp_path, monkeypatch
+) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    monkeypatch.setattr(supervisor, "TASKBOARD_DOC_PATH", tmp_path / "taskboard.md")
+    prerequisite = supervisor.RefactorTask(
+        goal_id="G9",
+        subgoal_id="G9.S2",
+        title="Completed prerequisite",
+        priority="P0",
+        files=(),
+        rationale="Already merged.",
+        acceptance=("Receipt exists.",),
+        validation=("true",),
+        task_id="REF-041",
+    )
+    dependent = supervisor.RefactorTask(
+        goal_id="G9",
+        subgoal_id="G9.S3",
+        title="Runnable dependent",
+        priority="P0",
+        files=(),
+        rationale="Runs after the prerequisite.",
+        acceptance=("The lane remains claimable.",),
+        validation=("true",),
+        depends_on=("REF-041",),
+        task_id="REF-042",
+    )
+    goals = [
+        {
+            "id": "G9",
+            "title": "Supervisor throughput",
+            "priority": "P0",
+            "subgoals": [
+                {"id": "G9.S2", "title": "Prerequisite", "tasks": [prerequisite]},
+                {"id": "G9.S3", "title": "Dependent", "tasks": [dependent]},
+            ],
+        }
+    ]
+
+    supervisor.write_seed_bundle_index(
+        goals,
+        exclude_bundle_keys={"refactor/g9/g9-s2"},
+        task_statuses={"REF-041": "completed", "REF-042": "todo"},
+    )
+
+    index_path = supervisor.BUNDLE_DIR / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["excluded_bundle_keys"] == ["refactor/g9/g9-s2"]
+    assert index["completed_task_ids"] == ["REF-041"]
+    assert "refactor/g9/g9-s2" in index["bundles"]
+    assert not (supervisor.BUNDLE_DIR / "refactor-g9-g9-s2.todo.md").exists()
+    payloads = supervisor._upstream_bundle_payload_builder()(index_path)
+    dependent_payload = next(
+        payload for payload in payloads if payload["bundle_key"] == "refactor/g9/g9-s3"
+    )
+    assert dependent_payload["claimable"] is True
+    assert dependent_payload["dependency_repair_evidence"] == []
+
+
 def test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval(tmp_path, monkeypatch) -> None:
     _isolate_status_paths(tmp_path, monkeypatch)
     monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)

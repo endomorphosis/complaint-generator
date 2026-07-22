@@ -1288,24 +1288,22 @@ def write_seed_bundle_index(
     for task in flatten_tasks(goals):
         task_id = task.task_id or f"{TASK_PREFIX}{task_index:03d}"
         bundle_key = f"refactor/{task.goal_id.lower()}/{task.subgoal_id.replace('.', '-').lower()}"
-        if bundle_key in excluded:
-            task_index += 1
-            continue
         safe_key = _safe_bundle_key(bundle_key)
         shard_path = BUNDLE_DIR / f"{safe_key}.todo.md"
-        block = _task_block(task, task_id, _task_checkbox_index(task_id, task_index))
-        if shard_path.exists():
-            shard_text = shard_path.read_text(encoding="utf-8", errors="replace")
-        else:
-            shard_text = (
-                f"# Objective Bundle: {bundle_key}\n\n"
-                f"Source todo: {TODO_PATH.relative_to(PROJECT_ROOT)}\n"
-                "Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.\n"
-                "Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.\n"
-            )
-        if f"## {task_id} " not in shard_text:
-            shard_text = shard_text.rstrip() + "\n\n" + block + "\n"
-            shard_path.write_text(shard_text, encoding="utf-8")
+        if bundle_key not in excluded:
+            block = _task_block(task, task_id, _task_checkbox_index(task_id, task_index))
+            if shard_path.exists():
+                shard_text = shard_path.read_text(encoding="utf-8", errors="replace")
+            else:
+                shard_text = (
+                    f"# Objective Bundle: {bundle_key}\n\n"
+                    f"Source todo: {TODO_PATH.relative_to(PROJECT_ROOT)}\n"
+                    "Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.\n"
+                    "Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.\n"
+                )
+            if f"## {task_id} " not in shard_text:
+                shard_text = shard_text.rstrip() + "\n\n" + block + "\n"
+                shard_path.write_text(shard_text, encoding="utf-8")
 
         info = bundles.setdefault(
             bundle_key,
@@ -1360,6 +1358,12 @@ def write_seed_bundle_index(
         "source_todo": TODO_PATH.relative_to(PROJECT_ROOT).as_posix(),
         "schema": "complaint_generator.refactor_seed_bundle_index",
         "bundle_strategy": "goal_subgoal_ast",
+        "completed_task_ids": sorted(
+            task_id
+            for task_id, status in statuses.items()
+            if str(status).strip().lower() in {"complete", "completed", "done", "succeeded"}
+        ),
+        "excluded_bundle_keys": sorted(excluded),
         "bundles": bundles,
     }
     index_path = BUNDLE_DIR / "index.json"
