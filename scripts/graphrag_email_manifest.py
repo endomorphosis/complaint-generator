@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from integrations.ipfs_datasets.loader import ensure_import_paths
+
+ensure_import_paths(module_name="ipfs_datasets_py.processors.legal_data.email_corpus")
 
 from ipfs_datasets_py.processors.legal_data.email_corpus import (
     build_email_graphrag_artifacts,

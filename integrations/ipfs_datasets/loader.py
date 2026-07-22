@@ -75,7 +75,16 @@ def _candidate_ipfs_source_roots() -> list[Path]:
 def _package_dir_for_root(package_root: str) -> Path | None:
     candidates: list[Path] = []
     if package_root == "ipfs_datasets_py":
-        candidates = [source_root / "ipfs_datasets_py" for source_root in _candidate_ipfs_source_roots()]
+        for source_root in _candidate_ipfs_source_roots():
+            candidates.extend(
+                [
+                    source_root / "ipfs_datasets_py",
+                    source_root
+                    / "ipfs_accelerate_py"
+                    / "ipfs_datasets_py"
+                    / "ipfs_datasets_py",
+                ]
+            )
     elif package_root == "ipfs_accelerate_py":
         candidates = [
             source_root / "ipfs_accelerate_py" / "ipfs_accelerate_py"

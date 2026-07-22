@@ -59,11 +59,11 @@ modules.
 | `applications/` | User-facing transport layer for CLI, FastAPI, dashboard, review, and browser workflows. | HTTP requests, CLI options, uploaded files, user/session IDs. | DTO payloads, rendered HTML, files, and calls into workspace or mediator services. | Should not own deep legal workflow logic. Extract route groups and fixture builders before feature changes. |
 | `complaint_generator/` | Public package compatibility layer plus workspace and daemon orchestration. | Console script calls, workspace requests, UI optimization cycles. | Stable package imports, CLI/MCP wrappers, workspace service responses, daemon status artifacts. | Keep top-level modules import-light and preserve existing public exports. |
 | `mediator/` | Core workflow orchestration and stateful legal/evidence hooks. | Normalized case state, evidence, authorities, graph outputs, adapter capabilities. | Claim support payloads, review plans, follow-up execution, formal document inputs. | `mediator/mediator.py` and `mediator/claim_support_hooks.py` are highest-risk extraction targets; split by cohesive service while preserving public method names. |
-| `complaint_phases/` | Workflow graph primitives and three-phase complaint processing. | Complaint narratives, claim requirements, entities, facts, authorities. | Knowledge graphs, dependency graphs, intake case files, denoiser questions, legal graph matches. | Keep domain graph algorithms here; avoid importing application or transport modules. |
+| `complaint_phases/` | Workflow graph primitives and three-phase complaint processing. | Complaint narratives, claim requirements, entities, facts, authorities. | Knowledge graphs, dependency graphs, intake case files, denoiser questions, legal graph matches. | Keep domain graph algorithms here; optional graph persistence/query calls may use the integration port, but avoid importing application or transport modules. |
 | `integrations/ipfs_datasets/` | Optional dependency adapter boundary for `ipfs_datasets_py` and related capabilities. | Adapter calls from mediator, workspace, document, search, graph, GraphRAG, logic, storage, and LLM code. | Degraded-mode safe results, capability reports, provenance, parsed documents, graph/query outputs. | Production code should route optional dependency behavior through this layer rather than direct imports or ad hoc `sys.path` mutation. |
 | `backends/` | LLM/provider backend adapters. | Provider configuration, prompts, model choices, rate limits. | Text or multimodal model responses. | Keep provider-specific failure handling here and expose typed errors to callers. |
 | `lib/` | Cross-consumer utility contracts for formal logic, document rendering, graph export, support maps, and payload helpers. | Pure data structures or local file inputs. | Reusable utilities without user-interface side effects. | Shared code should land here only when it has at least two real consumers. |
-| `scripts/` | Operator and batch workflows. | Shell/CLI invocation, local paths, batch options. | Reports, imports, generated docs, local artifacts. | Scripts may adapt paths for local execution, but production packages should not copy those patterns. |
+| `scripts/` | Operator and batch workflows. | Shell/CLI invocation, local paths, batch options. | Reports, imports, generated docs, local artifacts. | Run repository scripts from an installed environment or as modules from the repository root. Entrypoints must not mutate `sys.path` to discover project or sibling modules. |
 | `tests/` | Regression and contract coverage. | Public APIs, fixtures, snapshots, browser flows. | Safety net for refactor slices. | Add focused lanes before large extractions: imports, adapter degraded mode, mediator, document pipeline, and UI smoke. |
 
 ### Current Extraction Priorities
@@ -94,7 +94,7 @@ under `[tool.complaint_generator.import_boundaries]` and is enforced by
 |---|---|---|
 | `applications/` | `applications/`, `mediator/`, `complaint_phases/`, `integrations/`, `lib/` | Keep reusable legal, evidence, graph, and document workflow logic out of route handlers, CLI commands, Typer setup, FastAPI setup, and browser fixtures. |
 | `mediator/` | `mediator/`, `complaint_phases/`, `integrations/`, `lib/` | Do not import `applications/`, UI frameworks, CLI frameworks, browser fixtures, templates, static assets, or script-only modules. |
-| `complaint_phases/` | `complaint_phases/`, `lib/` | Do not import `applications/`, `mediator/`, `integrations/`, provider backends, or concrete `ipfs_datasets_py` modules; phase code should stay deterministic and domain-focused. |
+| `complaint_phases/` | `complaint_phases/`, `integrations/`, `lib/` | Do not import `applications/`, `mediator/`, provider backends, or concrete `ipfs_datasets_py` modules. Integration imports are limited to explicit persistence/query ports; phase algorithms should stay deterministic and domain-focused. |
 | `integrations/` | `integrations/`, `lib/` | Do not import `applications/`, `mediator/`, or `complaint_phases/` from adapter code; integration modules translate optional dependencies into local contracts. |
 | `lib/` | `lib/` | Do not import application, mediator, phase, integration, backend, script, template, or static-asset modules. |
 
@@ -125,6 +125,9 @@ mediator state.
 3. Long-running automation should expose `status`, `pid`, `updated_at`,
    artifact paths, queue counts where applicable, and a stop path.
 4. Each refactor slice should name a validation lane before code movement.
+5. Operator entrypoints must resolve normal project imports from the installed
+   package (or module execution from the repository root), never by modifying
+   `sys.path`. File-based loading is reserved for isolated tooling and tests.
 
 ### Layer 1: User Interface
 - **CLI Application** - Command-line interface for interactive complaints

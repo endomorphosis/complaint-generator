@@ -95,3 +95,48 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Outputs: applications/complaint_cli.py, applications/complaint_workspace.py, data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-008-ref-004-merge-retry-budget.md
 - Acceptance: Merge retry-budget guardrail filed this from repeated merge failures in REF-004. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g1-g1-s2/discovery/2026-07-21-ref-008-ref-004-merge-retry-budget.md to fix the merge blocker, verify the intended implementation changes are committed in their owning repository or submodule, run `ipfs-accelerate-agent-merge-resolver --events-path ... --apply` when the conflict is semantic, then mark this repair task completed so the supervisor can release REF-004 from strategy blocked_tasks.
+
+## REF-070 Close objective gap: Remove ad hoc import path behavior from production surfaces
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on:
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest tests/test_package_imports.py -q; python -m pytest tests/test_ipfs_adapter_layer.py -q
+- Bundle: refactor/g1/g1-s2
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md
+- Bundle strategy: explicit
+- Graph parents: G1
+- Graph depth: 1
+- Parallel lane: refactor/g1/g1-s2
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files:
+- Changed paths:
+- AST symbols: scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, scripts/master_case_email.py, scripts/process_hacc_pdfs_to_kg.py, scripts/run_gmail_duckdb_pipeline.py, scripts/run_hacc_adversarial_report.py, scripts/run_hacc_grounded_pipeline.py, scripts/run_hacc_preset_matrix.py, No production entrypoint mutates sys.path for normal imports., Explicit exceptions are isolated to scripts/tests., python -m pytest tests/test_package_imports.py -q, applications/dashboard_ui.py, complaint_generator/agentic_evidence_download.py, complaint_generator/data_migration.py, complaint_generator/email_agentic_search.py, complaint_generator/email_authority_enrichment.py, complaint_generator/email_credentials.py, complaint_generator/email_graphrag.py, complaint_generator/email_import.py, complaint_generator/email_oauth.py, complaint_generator/email_pipeline.py, complaint_generator/email_seed_planner.py, complaint_generator/email_timeline_handoff.py, complaint_generator/evidence_relevance.py, integrations/ipfs_datasets/llm.py, Production direct imports are replaced or documented., Degraded mode still imports cleanly., python -m pytest tests/test_ipfs_adapter_layer.py -q
+- Interfaces:
+- Submodules:
+- Generated artifacts:
+- Allow concurrent with:
+- Goal id: G1.S2
+- Canonical task key: task/v1/ad23811d9d14aedb7013be18cb8208f23af01bb88f24e7b8d47b41d7c18ec810
+- Canonical task CID: baguqeeravurychm5csxnw4atxymmxaqi6i5pag5yr4sopogupna5pqmozaia
+- Missing evidence: objective validation repair
+- Embedding query: Remove ad hoc import path behavior from production surfaces
+- AST query: scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, scripts/master_case_email.py, scripts/process_hacc_pdfs_to_kg.py, scripts/run_gmail_duckdb_pipeline.py, scripts/run_hacc_adversarial_report.py, scripts/run_hacc_grounded_pipeline.py, scripts/run_hacc_preset_matrix.py, No production entrypoint mutates sys.path for normal imports., Explicit exceptions are isolated to scripts/tests., python -m pytest tests/test_package_imports.py -q, applications/dashboard_ui.py, complaint_generator/agentic_evidence_download.py, complaint_generator/data_migration.py, complaint_generator/email_agentic_search.py, complaint_generator/email_authority_enrichment.py, complaint_generator/email_credentials.py, complaint_generator/email_graphrag.py, complaint_generator/email_import.py, complaint_generator/email_oauth.py, complaint_generator/email_pipeline.py, complaint_generator/email_seed_planner.py, complaint_generator/email_timeline_handoff.py, complaint_generator/evidence_relevance.py, integrations/ipfs_datasets/llm.py, Production direct imports are replaced or documented., Degraded mode still imports cleanly., python -m pytest tests/test_ipfs_adapter_layer.py -q
+- Surplus group: objective/G1.S2
+- Merge key: b74aae0dd2672d61
+- Merge family: objective/G1.S2
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet:
+- Goal packet role:
+- Goal packet goals:
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: 80d513659b600256
+- Repair evidence: data/refactor_supervisor/discovery/2026-07-22-ref-070-objective-validation-repair.md; objective validation repair
+- Acceptance: Objective scan filed this gap for G1.S2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-070-objective-gap-514368960e0e.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. Refine the objective heap if the gap needs smaller child goals.

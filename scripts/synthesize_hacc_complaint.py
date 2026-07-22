@@ -1,15 +1,12 @@
 import argparse
 import json
 import re
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from lib.runtime_ownership import require_module_ownership
 from adversarial_harness.hacc_evidence import _extract_source_window as _extract_grounded_source_window
