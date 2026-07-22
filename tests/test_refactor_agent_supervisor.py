@@ -1492,6 +1492,8 @@ def test_start_daemon_passes_managed_submodule_path_once(tmp_path, monkeypatch) 
         supervisor.TASKBOARD_DOC_PATH
     )
     assert command.count("--allow-codebase-refill-with-objective-work") == 1
+    assert command.count("--objective-mission-term") == 1
+    assert command[command.index("--objective-mission-term") + 1] == "adversarial_harness"
     assert captured["kwargs"]["start_new_session"] is True
     assert payload["status"] == "started"
 

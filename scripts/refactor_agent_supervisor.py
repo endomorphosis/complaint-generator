@@ -3336,6 +3336,8 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
         "2",
         "--objective-max-refinement-depth",
         "3",
+        "--objective-mission-term",
+        "adversarial_harness",
         "--codebase-refill-scan",
         "--allow-codebase-refill-with-objective-work",
         "--codebase-scan-min-open-tasks",
