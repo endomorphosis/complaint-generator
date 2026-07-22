@@ -4421,7 +4421,12 @@ class AdversarialSession:
             try:
                 advance_to_formalization()
             except Exception:
-                pass
+                logger.warning(
+                    "Could not advance adversarial session %s to formalization; "
+                    "continuing with the direct document-generation handoff",
+                    self.session_id,
+                    exc_info=True,
+                )
 
         try:
             from complaint_phases import ComplaintPhase
