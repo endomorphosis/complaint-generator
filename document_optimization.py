@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime
 import json
+import logging
 import math
 import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -63,6 +64,8 @@ UPSTREAM_AGENTIC_AVAILABLE = any(
     value is not None for value in (OptimizerLLMRouter, ControlLoopConfig, OptimizationMethod)
 )
 DEFAULT_OPTIMIZER_LLM_TIMEOUT_SECONDS = 45
+
+logger = logging.getLogger(__name__)
 
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 1.0) -> float:
@@ -4353,7 +4356,10 @@ class AgenticDocumentOptimizer:
                     try:
                         relief_candidates.extend(extract_relief(support_texts))
                     except Exception:
-                        pass
+                        logger.warning(
+                            "Requested-relief extraction failed; continuing with claim-derived fallback relief",
+                            exc_info=True,
+                        )
             if not relief_candidates:
                 for claim in draft.get("claims_for_relief") if isinstance(draft.get("claims_for_relief"), list) else []:
                     if not isinstance(claim, dict):
