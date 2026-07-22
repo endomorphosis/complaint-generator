@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-22T04:00:53Z",
+  "generated_at": "2026-07-22T04:14:05Z",
   "goals": [
     {
       "id": "G1",
@@ -462,7 +462,7 @@
               "priority": "P0",
               "rationale": "The requested supervisor needs a refill loop and visible board state.",
               "stable_key": "g5:g5.s1:keep the refactor taskboard synchronized with generated goals and subgoals",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G5.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-015",
@@ -1171,8 +1171,8 @@
         "The IPFS datasets adapter loader imports without mutating sys.path.",
         "Missing optional dependencies continue to use the existing degraded-mode loader path."
       ],
-      "depends_on": [],
       "dependency_rationale": "The shared optional-dependency loader must be import-safe before capability and application callers rely on it.",
+      "depends_on": [],
       "files": [
         "integrations/ipfs_datasets/loader.py"
       ],
@@ -1193,10 +1193,10 @@
         "Every adapter capability group reports the same stable status and degraded-reason keys.",
         "Missing optional extras produce actionable degraded reasons without changing loader fallback behavior."
       ],
+      "dependency_rationale": "Capability discovery uses the loader established by CLAIM-001 and must expose a stable contract before applications adopt it.",
       "depends_on": [
         "CLAIM-001"
       ],
-      "dependency_rationale": "Capability discovery uses the loader established by CLAIM-001 and must expose a stable contract before applications adopt it.",
       "files": [
         "integrations/ipfs_datasets/capabilities.py",
         "integrations/ipfs_datasets/loader.py"
@@ -1218,10 +1218,10 @@
         "Complaint CLI and workspace production paths import IPFS datasets capabilities through integrations.ipfs_datasets.",
         "Both application modules still import when the optional IPFS datasets dependency is unavailable."
       ],
+      "dependency_rationale": "Application imports should move only after CLAIM-002 defines the adapter status and degraded-mode contract they consume.",
       "depends_on": [
         "CLAIM-002"
       ],
-      "dependency_rationale": "Application imports should move only after CLAIM-002 defines the adapter status and degraded-mode contract they consume.",
       "files": [
         "applications/complaint_cli.py",
         "applications/complaint_workspace.py"
@@ -1351,11 +1351,11 @@
       "pytest_ini": true
     },
     "python_file_count": 439,
-    "python_total_lines": 245387,
-    "scanned_at": "2026-07-22T04:00:37Z",
+    "python_total_lines": 245605,
+    "scanned_at": "2026-07-22T04:13:51Z",
     "signals": {
       "broad_exception_count": 375,
-      "direct_ipfs_import_count": 215,
+      "direct_ipfs_import_count": 219,
       "direct_ipfs_imports": [
         "applications/complaint_cli.py:265",
         "applications/complaint_cli.py:266",
@@ -1519,6 +1519,10 @@
         "tests/test_p2p_mcp_integration.py:22",
         "tests/test_p2p_mcp_integration.py:25",
         "tests/test_p2p_workflow_scheduler_tools.py:5",
+        "tests/test_package_imports.py:326",
+        "tests/test_package_imports.py:327",
+        "tests/test_package_imports.py:333",
+        "tests/test_package_imports.py:334",
         "tests/test_performance_profiling_suite.py:10",
         "tests/test_pipeline_json_logger_types.py:10",
         "tests/test_property_based_extraction_testing.py:11",
@@ -1552,11 +1556,7 @@
         "tests/unit/optimizers/graphrag/test_ontology_batch_processing.py:21",
         "tests/unit/optimizers/graphrag/test_ontology_comparator.py:10",
         "tests/unit/optimizers/graphrag/test_ontology_critic_hypothesis.py:17",
-        "tests/unit/optimizers/graphrag/test_ontology_serialization.py:19",
-        "tests/unit/optimizers/graphrag/test_pipeline_json_logger.py:13",
-        "tests/unit/optimizers/graphrag/test_query_graph_traversal_performance.py:22",
-        "tests/unit/optimizers/graphrag/test_score_analyzer.py:19",
-        "tests/unit_tests/optimizers/graphrag/test_domain_aware_config.py:16"
+        "tests/unit/optimizers/graphrag/test_ontology_serialization.py:19"
       ],
       "silent_pass_count": 122,
       "sys_path_mutation_count": 46,
@@ -1631,15 +1631,15 @@
         "failed": 0,
         "failed_work_items": 0,
         "queued": 11,
-        "queued_work_items": 21,
+        "queued_work_items": 20,
         "running": 0,
         "running_work_items": 0
       },
       "todo": {
         "blocked": 0,
-        "complete": 18,
+        "complete": 19,
         "in_progress": 0,
-        "needed": 31
+        "needed": 30
       }
     },
     "goal_count": 9,
@@ -1648,27 +1648,37 @@
       "skipped": true
     },
     "queue_refill": {
-      "available_bundle_count": 15,
-      "available_work_items": 31,
+      "available_bundle_count": 14,
+      "available_work_items": 30,
       "configured_floor": 20,
       "enabled": true,
       "floor_satisfied": true,
       "floor_unit": "active_taskboard_work_items",
-      "queued_work_items_after": 21,
-      "queued_work_items_before": 21,
+      "queued_work_items_after": 20,
+      "queued_work_items_before": 20,
       "submitted_bundle_count": 0,
       "submitted_queue_ids": [],
       "submitted_task_ids": []
     },
     "status_projection": {
       "blocked_count": 0,
-      "completed_count": 18,
+      "completed_count": 19,
       "task_count": 49,
-      "updated": {},
-      "updated_file_count": 0
+      "updated": {
+        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md": [
+          "REF-015"
+        ],
+        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g5-g5-s1.todo.md": [
+          "REF-015"
+        ],
+        "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_todo.md": [
+          "REF-015"
+        ]
+      },
+      "updated_file_count": 3
     },
     "subgoal_count": 17,
-    "synchronized_at": "2026-07-22T04:00:53Z",
+    "synchronized_at": "2026-07-22T04:14:05Z",
     "task_count": 36
   },
   "taskboard": {
@@ -1760,7 +1770,7 @@
       },
       {
         "checkbox_id": 15,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-015",
         "title": "Keep the refactor taskboard synchronized with generated goals and subgoals"
       },
