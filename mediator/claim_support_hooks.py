@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import hashlib
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -39,6 +40,24 @@ try:
 except ImportError:
     DUCKDB_AVAILABLE = False
     duckdb = None
+
+
+@dataclass(frozen=True)
+class ClaimSupportPathSummaryDTO:
+    """Stable review DTO for trace, packet, and optional graph path summaries."""
+
+    support_trace_summary: Dict[str, Any]
+    support_packet_summary: Dict[str, Any]
+    graph_trace_summary: Optional[Dict[str, Any]] = None
+
+    def to_payload(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            'support_trace_summary': dict(self.support_trace_summary),
+            'support_packet_summary': dict(self.support_packet_summary),
+        }
+        if self.graph_trace_summary is not None:
+            payload['graph_trace_summary'] = dict(self.graph_trace_summary)
+        return payload
 
 
 class ClaimSupportHook:
@@ -867,6 +886,26 @@ class ClaimSupportHook:
             'fallback_mode_counts': fallback_mode_counts,
             'content_source_field_counts': content_source_field_counts,
         }
+
+    def _build_support_path_summary_dto(
+        self,
+        *,
+        support_traces: List[Dict[str, Any]],
+        support_packets: List[Dict[str, Any]],
+        graph_items: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Build the shared review DTO for an element or claim support path."""
+
+        graph_trace_summary = (
+            self._summarize_graph_traces(graph_items)
+            if graph_items is not None
+            else None
+        )
+        return ClaimSupportPathSummaryDTO(
+            support_trace_summary=self._summarize_support_traces(support_traces),
+            support_packet_summary=self._summarize_support_packets(support_packets),
+            graph_trace_summary=graph_trace_summary,
+        ).to_payload()
 
     def _collect_support_traces_from_links(self, links: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         traces: List[Dict[str, Any]] = []
@@ -3594,8 +3633,11 @@ class ClaimSupportHook:
                     links_by_kind.setdefault(link.get('support_kind', 'unknown'), []).append(link)
 
                 support_traces = self._collect_support_traces_from_links(element.get('links', []) or [])
-                support_trace_summary = self._summarize_support_traces(support_traces)
                 support_packets = [self._build_support_packet(trace) for trace in support_traces]
+                support_path_summary = self._build_support_path_summary_dto(
+                    support_traces=support_traces,
+                    support_packets=support_packets,
+                )
 
                 elements.append(
                     {
@@ -3613,15 +3655,18 @@ class ClaimSupportHook:
                         ],
                         'links_by_kind': links_by_kind,
                         'support_traces': support_traces,
-                        'support_trace_summary': support_trace_summary,
                         'support_packets': support_packets,
-                        'support_packet_summary': self._summarize_support_packets(support_packets),
+                        **support_path_summary,
                         'links': element.get('links', []),
                     }
                 )
 
             claim_support_traces = self._collect_support_traces_from_links(claim_summary.get('links', []))
             claim_support_packets = [self._build_support_packet(trace) for trace in claim_support_traces]
+            claim_support_path_summary = self._build_support_path_summary_dto(
+                support_traces=claim_support_traces,
+                support_packets=claim_support_packets,
+            )
             matrix['claims'][current_claim] = {
                 'claim_type': current_claim,
                 'required_support_kinds': required_kinds,
@@ -3632,8 +3677,7 @@ class ClaimSupportHook:
                 'support_by_kind': claim_summary.get('support_by_kind', {}),
                 'authority_treatment_summary': claim_summary.get('authority_treatment_summary', {}),
                 'authority_rule_candidate_summary': claim_summary.get('authority_rule_candidate_summary', {}),
-                'support_trace_summary': self._summarize_support_traces(claim_support_traces),
-                'support_packet_summary': self._summarize_support_packets(claim_support_packets),
+                **claim_support_path_summary,
                 'elements': elements,
                 'unassigned_links': claim_summary.get('unassigned_links', []),
             }
@@ -3718,6 +3762,11 @@ class ClaimSupportHook:
                     claim_element_text=element.get('element_text'),
                 )
                 support_packets = [self._build_support_packet(trace) for trace in support_traces]
+                support_path_summary = self._build_support_path_summary_dto(
+                    support_traces=support_traces,
+                    support_packets=support_packets,
+                    graph_items=element.get('links', []),
+                )
                 unresolved_elements.append(
                     {
                         'element_id': element.get('element_id'),
@@ -3732,10 +3781,8 @@ class ClaimSupportHook:
                         'links': element.get('links', []),
                         'support_facts': support_facts,
                         'support_traces': support_traces,
-                        'support_trace_summary': self._summarize_support_traces(support_traces),
                         'support_packets': support_packets,
-                        'support_packet_summary': self._summarize_support_packets(support_packets),
-                        'graph_trace_summary': self._summarize_graph_traces(element.get('links', [])),
+                        **support_path_summary,
                         'recommended_action': (
                             'improve_parse_quality'
                             if element.get('total_links', 0)

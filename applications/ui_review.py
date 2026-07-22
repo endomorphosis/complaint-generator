@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
@@ -53,6 +55,62 @@ _UI_REVIEW_PROVIDER_IMAGE_LIMITS = {
 }
 _UI_REVIEW_ROUTE_PROVIDER_ALIASES = {"llm_router", "multimodal_router"}
 _UI_REVIEW_ROUTE_MODEL_ALIASES = {"llm_router", "multimodal_router"}
+
+
+_UI_REVIEW_LIST_FIELDS = (
+    "actor_path_breaks",
+    "broken_controls",
+    "button_audit",
+    "critic_test_obligations",
+    "issues",
+    "page_reviews",
+    "playwright_followups",
+    "recommended_changes",
+    "route_handoffs",
+    "workflow_gaps",
+)
+_UI_REVIEW_MAPPING_FIELDS = (
+    "actor_plan",
+    "complaint_journey",
+    "critic_review",
+    "stage_findings",
+)
+
+
+@dataclass(frozen=True)
+class UIReviewPayloadDTO:
+    """DTO for model-produced review data before it reaches UI consumers.
+
+    Unknown extension fields pass through unchanged.  Known collection fields are
+    guarded at this boundary so templates and report readers do not each need
+    their own defensive normalization.
+    """
+
+    values: Dict[str, Any]
+
+    @classmethod
+    def from_value(cls, value: Any) -> "UIReviewPayloadDTO":
+        normalized = dict(value) if isinstance(value, Mapping) else {}
+        for field in _UI_REVIEW_LIST_FIELDS:
+            if field in normalized and not isinstance(normalized[field], list):
+                normalized[field] = []
+        for field in _UI_REVIEW_MAPPING_FIELDS:
+            if field in normalized:
+                normalized[field] = (
+                    dict(normalized[field])
+                    if isinstance(normalized[field], Mapping)
+                    else {}
+                )
+        return cls(normalized)
+
+    def to_payload(self) -> Dict[str, Any]:
+        return dict(self.values)
+
+
+def normalize_ui_review_payload_dto(value: Any) -> Dict[str, Any]:
+    """Normalize one UI review payload through its explicit response DTO."""
+
+    return UIReviewPayloadDTO.from_value(value).to_payload()
 
 
 def _format_router_backend_path(backend: Dict[str, Any]) -> str:
@@ -2054,7 +2112,9 @@ def create_ui_review_report(
                 page_reports.append(_run_page_review_task(payload))
 
         page_reports.sort(key=lambda item: str(item.get("page_label") or "").strip())
-        review_payload = _aggregate_page_review_reports(page_reports)
+        review_payload = normalize_ui_review_payload_dto(
+            _aggregate_page_review_reports(page_reports)
+        )
         backend_metadata = {
             "id": backend_kwargs.get("id", "ui-review"),
             "provider": backend_kwargs.get("provider"),
@@ -2187,6 +2247,7 @@ def create_ui_review_report(
                     backend_metadata["fallback_attempts"] = list(fallback_attempts)
     backend_metadata.setdefault("prompt_mode", "compact" if use_compact_prompt else "full")
 
+    review_payload = normalize_ui_review_payload_dto(review_payload)
     report = {
         "generated_at": _utc_now(),
         "backend": backend_metadata,
