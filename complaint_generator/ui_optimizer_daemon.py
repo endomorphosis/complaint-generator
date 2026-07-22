@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -25,6 +26,7 @@ from complaint_generator.workspace import optimize_ui
 
 _STOP_REQUESTED = False
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+logger = logging.getLogger(__name__)
 
 
 def _slugify_user_id(user_id: str) -> str:
@@ -66,6 +68,7 @@ def _pid_is_running(pid: int) -> bool:
             check=False,
         )
     except OSError:
+        logger.debug("Could not inspect process %s; treating it as stopped", pid, exc_info=True)
         return False
     stat = str(completed.stdout or "").strip()
     if not stat:
@@ -86,7 +89,11 @@ def _matching_daemon_pids(*, user_id: str, artifact_root: Path) -> list[int]:
             text=True,
             check=False,
         )
+    except OSError:
+        logger.warning("Could not enumerate UI optimizer daemon processes", exc_info=True)
+        return []
     except Exception:
+        logger.exception("Unexpected failure while enumerating UI optimizer daemon processes")
         return []
     matches: list[int] = []
     for raw_line in str(completed.stdout or "").splitlines():
@@ -102,7 +109,8 @@ def _matching_daemon_pids(*, user_id: str, artifact_root: Path) -> list[int]:
             continue
         try:
             pid = int(parts[0])
-        except Exception:
+        except ValueError:
+            logger.debug("Ignoring malformed PID in process listing line %r", raw_line)
             continue
         if _pid_is_running(pid):
             matches.append(pid)
@@ -119,9 +127,20 @@ def _load_json(path: Path) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        logger.warning("Could not load daemon JSON state from %s; using an empty state", path, exc_info=True)
         return {}
-    return payload if isinstance(payload, dict) else {}
+    except Exception:
+        logger.exception("Unexpected failure while loading daemon JSON state from %s; using an empty state", path)
+        return {}
+    if not isinstance(payload, dict):
+        logger.warning(
+            "Daemon JSON state at %s is %s, not an object; using an empty state",
+            path,
+            type(payload).__name__,
+        )
+        return {}
+    return payload
 
 
 def _unique_nonempty(values: list[Any]) -> list[str]:
@@ -289,7 +308,8 @@ def _build_status_payload(
     if pid_file.exists():
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
-        except Exception:
+        except (OSError, ValueError):
+            logger.debug("Could not read daemon PID from %s; reporting no PID", pid_file, exc_info=True)
             pid = None
     recommendation_coverage: dict[str, Any] = {}
     if isinstance(last_result, dict):
@@ -383,13 +403,16 @@ def _cleanup_pid_file(pid_file: Path) -> None:
         return
     try:
         recorded_pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
-    except Exception:
+    except (OSError, ValueError):
+        logger.debug("Could not read daemon PID from %s during cleanup", pid_file, exc_info=True)
         recorded_pid = 0
     if recorded_pid == os.getpid():
         try:
             pid_file.unlink()
+        except FileNotFoundError:
+            logger.debug("Daemon PID file %s was already removed", pid_file)
         except OSError:
-            pass
+            logger.warning("Could not remove daemon PID file %s", pid_file, exc_info=True)
 
 
 def _review_json_excerpt(review_payload: dict[str, Any]) -> str:
@@ -770,6 +793,7 @@ def _run_daemon(args: argparse.Namespace) -> dict[str, Any]:
                     phase_started_at=state.get("phase_started_at"),
                 )
             except Exception as exc:
+                logger.exception("UI optimizer daemon cycle %s failed", cycle_count)
                 error_text = str(exc)
                 error_kind, error_summary = _classify_error(error_text)
                 consecutive_errors += 1
@@ -937,7 +961,12 @@ def _start_daemon(args: argparse.Namespace) -> dict[str, Any]:
     if pid_file.exists():
         try:
             existing_pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
-        except Exception:
+        except (OSError, ValueError):
+            logger.warning(
+                "Could not read existing daemon PID from %s; checking live processes instead",
+                pid_file,
+                exc_info=True,
+            )
             existing_pid = 0
         if _pid_is_running(existing_pid):
             return {
@@ -989,7 +1018,12 @@ def _status_payload(args: argparse.Namespace) -> dict[str, Any]:
     if pid_file.exists():
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
-        except Exception:
+        except (OSError, ValueError):
+            logger.warning(
+                "Could not read daemon PID from %s; checking live processes instead",
+                pid_file,
+                exc_info=True,
+            )
             pid = 0
     matching_pids = _matching_daemon_pids(user_id=args.user_id, artifact_root=artifact_root)
     live_pid = int(matching_pids[0]) if matching_pids else pid
@@ -1020,7 +1054,12 @@ def _stop_daemon(args: argparse.Namespace) -> dict[str, Any]:
     if pid_file.exists():
         try:
             pid = int(pid_file.read_text(encoding="utf-8").strip() or "0")
-        except Exception:
+        except (OSError, ValueError):
+            logger.warning(
+                "Could not read daemon PID from %s before stopping; checking live processes instead",
+                pid_file,
+                exc_info=True,
+            )
             pid = 0
     matching_pids = _matching_daemon_pids(user_id=args.user_id, artifact_root=artifact_root)
     target_pids = sorted(set(([pid] if pid > 0 and _pid_is_running(pid) else []) + matching_pids))
@@ -1035,7 +1074,11 @@ def _stop_daemon(args: argparse.Namespace) -> dict[str, Any]:
     for target_pid in target_pids:
         try:
             os.kill(target_pid, signal.SIGTERM)
+        except ProcessLookupError:
+            logger.debug("Daemon process %s exited before it could be stopped", target_pid)
+            continue
         except OSError:
+            logger.warning("Could not send SIGTERM to daemon process %s", target_pid, exc_info=True)
             continue
     return {
         "status": "stopping",
