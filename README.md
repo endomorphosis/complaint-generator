@@ -241,15 +241,13 @@ Canonical artifacts:
 Use the repo-local helper to rebuild or search that corpus without retyping the long paths:
 
 ```bash
-PYTHONPATH='/home/barberb/HACC/complaint-generator' \
-.venv/bin/python scripts/master_case_email.py \
+.venv/bin/python -m scripts.master_case_email \
   --search-query 'hcv orientation living room' \
   --search-limit 5
 ```
 
 ```bash
-PYTHONPATH='/home/barberb/HACC/complaint-generator' \
-.venv/bin/python scripts/master_case_email.py \
+.venv/bin/python -m scripts.master_case_email \
   --agentic-query 'mobility accommodation retaliation' \
   --complaint-keyword voucher \
   --seed-term 'ashley ferron' \
@@ -258,8 +256,7 @@ PYTHONPATH='/home/barberb/HACC/complaint-generator' \
 ```
 
 ```bash
-PYTHONPATH='/home/barberb/HACC/complaint-generator' \
-.venv/bin/python scripts/master_case_email.py \
+.venv/bin/python -m scripts.master_case_email \
   --rebuild
 ```
 

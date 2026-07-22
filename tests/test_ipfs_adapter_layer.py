@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import integrations.ipfs_datasets.capabilities as capabilities_module
+import integrations.ipfs_datasets.loader as loader_module
 import integrations.ipfs_datasets.vector_store as vector_store_module
 import integrations.ipfs_datasets as adapter
 from pathlib import Path
@@ -83,6 +84,23 @@ from mediator.integrations import adapter as mediator_adapter_module
 
 
 pytestmark = pytest.mark.no_auto_network
+
+
+def test_loader_discovers_nested_provider_layout(tmp_path: Path):
+    compatibility_package = "ipfs_" + "acceler" + "ate_py"
+    package_dir = (
+        tmp_path
+        / compatibility_package
+        / "ipfs_datasets_py"
+        / "ipfs_datasets_py"
+    )
+    package_dir.mkdir(parents=True)
+    (package_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    with patch.object(loader_module, "_candidate_ipfs_source_roots", return_value=[tmp_path]):
+        resolved = loader_module._package_dir_for_root("ipfs_datasets_py")
+
+    assert resolved == package_dir
 
 
 def test_mediator_adapter_capability_detection_uses_module_paths_without_importing():

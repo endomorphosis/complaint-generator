@@ -4,12 +4,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
 
 import anyio
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from integrations.ipfs_datasets.loader import ensure_import_paths
+
+ensure_import_paths(module_name="ipfs_datasets_py.processors.legal_data.email_workspace")
 
 from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
 from ipfs_datasets_py.processors.legal_data.email_workspace import (

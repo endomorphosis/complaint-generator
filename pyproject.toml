@@ -91,6 +91,8 @@ include = [
   "lib.*",
   "mediator",
   "mediator.*",
+  "scripts",
+  "scripts.*",
 ]
 
 [tool.complaint_generator.import_boundaries]
@@ -105,6 +107,9 @@ production_packages = [
   "integrations",
   "lib",
   "mediator",
+]
+operator_packages = [
+  "scripts",
 ]
 enforced_packages = [
   "applications",
@@ -164,6 +169,7 @@ mediator = [
 ]
 complaint_phases = [
   "complaint_phases",
+  "integrations",
   "lib",
 ]
 integrations = [

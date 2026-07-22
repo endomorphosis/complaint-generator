@@ -41,11 +41,29 @@ SCRIPT_ENTRYPOINTS = [
     "scripts/gmail_duckdb_daemon.py",
 ]
 
-ENTRYPOINT_FILES = [
+PATH_STABLE_ENTRYPOINT_FILES = [
     "applications/complaint_workspace.py",
     "applications/document_api.py",
     "integrations/ipfs_datasets/loader.py",
     *SCRIPT_ENTRYPOINTS,
+    "scripts/graphrag_email_manifest.py",
+    "scripts/import_gmail_evidence.py",
+    "scripts/import_local_eml_directory.py",
+    "scripts/master_case_email.py",
+    "scripts/process_hacc_pdfs_to_kg.py",
+    "scripts/run_gmail_duckdb_pipeline.py",
+    "scripts/run_hacc_adversarial_report.py",
+    "scripts/run_hacc_grounded_pipeline.py",
+    "scripts/run_hacc_preset_matrix.py",
+    "scripts/synthesize_hacc_complaint.py",
+]
+
+ADAPTER_LOADED_ENTRYPOINTS = [
+    "scripts/graphrag_email_manifest.py",
+    "scripts/import_gmail_evidence.py",
+    "scripts/import_local_eml_directory.py",
+    "scripts/master_case_email.py",
+    "scripts/run_gmail_duckdb_pipeline.py",
 ]
 
 
@@ -212,13 +230,19 @@ def test_import_boundary_config_covers_distributed_production_packages():
     pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
     boundary_config = dict(pyproject["tool"]["complaint_generator"]["import_boundaries"])
     production_packages = list(boundary_config["production_packages"])
+    operator_packages = list(boundary_config["operator_packages"])
     package_includes = pyproject["tool"]["setuptools"]["packages"]["find"]["include"]
     distributed_package_roots = {pattern.split(".", 1)[0] for pattern in package_includes}
 
     assert len(production_packages) == len(set(production_packages))
-    assert set(production_packages) == distributed_package_roots
+    assert len(operator_packages) == len(set(operator_packages))
+    assert set(production_packages).isdisjoint(operator_packages)
+    assert set(production_packages) | set(operator_packages) == distributed_package_roots
     assert "tests" not in production_packages
+    assert operator_packages == ["scripts"]
     for package_name in production_packages:
+        assert (REPO_ROOT / package_name / "__init__.py").is_file()
+    for package_name in operator_packages:
         assert (REPO_ROOT / package_name / "__init__.py").is_file()
 
     enforced_packages = set(boundary_config["enforced_packages"])
@@ -371,7 +395,7 @@ def _is_sys_path_mutator_call(node: ast.AST) -> bool:
 
 def test_expected_entrypoints_do_not_mutate_sys_path_statically():
     offenders: list[str] = []
-    for relative_path in ENTRYPOINT_FILES:
+    for relative_path in PATH_STABLE_ENTRYPOINT_FILES:
         path = PROJECT_ROOT / relative_path
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
@@ -379,6 +403,39 @@ def test_expected_entrypoints_do_not_mutate_sys_path_statically():
                 offenders.append(f"{relative_path}:{node.lineno}")
 
     assert offenders == []
+
+
+def test_optional_dependency_entrypoints_prime_the_adapter_before_direct_imports():
+    offenders: list[str] = []
+    for relative_path in ADAPTER_LOADED_ENTRYPOINTS:
+        path = PROJECT_ROOT / relative_path
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        adapter_calls = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "ensure_import_paths"
+        ]
+        provider_imports = [
+            node.lineno
+            for node in ast.walk(tree)
+            if (
+                isinstance(node, ast.ImportFrom)
+                and str(node.module or "").startswith("ipfs_datasets_py")
+            )
+            or (
+                isinstance(node, ast.Import)
+                and any(alias.name.startswith("ipfs_datasets_py") for alias in node.names)
+            )
+        ]
+        if not adapter_calls or not provider_imports or min(adapter_calls) >= min(provider_imports):
+            offenders.append(relative_path)
+
+    assert offenders == [], (
+        "Optional-dependency entrypoints must initialize the repository-owned adapter "
+        f"loader before provider imports: {offenders}"
+    )
 
 
 def test_production_package_imports_do_not_change_sys_path():

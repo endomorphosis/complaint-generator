@@ -1531,6 +1531,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal packet work item count: 0
 - Candidate kind: validation_gate
 - Todo vector key: 80d513659b600256
+- Repair evidence: data/refactor_supervisor/discovery/2026-07-22-ref-070-objective-validation-repair.md; objective validation repair
 - Acceptance: Objective scan filed this gap for G1.S2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-070-objective-gap-514368960e0e.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
 
 ## REF-071 Close objective gap: Create focused test lanes for refactor work
