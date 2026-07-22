@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-005-splitmediator-mediator-pybyworkflowservicewhilep
 - Acceptance: One cohesive service is extracted.; Existing imports continue to resolve.
 
-- [ ] Task checkbox-6: REF-006 Move claim support orchestration helpers into focused private modules
+- [x] Task checkbox-6: REF-006 Move claim support orchestration helpers into focused private modules
 
 ## REF-006 Move claim support orchestration helpers into focused private modules
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G2

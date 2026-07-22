@@ -1,29 +1,30 @@
 # REF-027 Reconciliation Guardrail
 
 Date: 2026-07-22
-Fingerprint: bc2e46a8c33920d52a1c6229e6655e4950c6f80c
+Fingerprint: 4d89f1a8bd48e097a7d8eba6ed430f056fa71f39
 Kind: main_checkout_dirty
 Reason: main_checkout_dirty
-Candidate count: 4
+Candidate count: 2
 Priority: P1
 Track: ops
 
 ## Main Checkout Status
 
-- `?? data/refactor_supervisor/merge_resolver_registry/`
+- ` M data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
 
 ## Main Checkout Evidence
 
-- Path categories: `untracked=1`
+- Path categories: `modified=1`
 - Status paths:
-  - `data/refactor_supervisor/merge_resolver_registry`
-- Untracked paths:
-  - `data/refactor_supervisor/merge_resolver_registry`
+  - `data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
+- Name status:
+  - `M	data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
+- Diff stat:
+  - `.../bundle_lanes/bundle_lanes.json                 | 5464 ++++++++++----------`
+  - ` 1 file changed, 2732 insertions(+), 2732 deletions(-)`
 
 ## Sample Branches Or Worktrees
 
-- `implementation/ref-005-a73e3df5fb38-attempt-1-1784693241` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-005-a73e3df5fb38-attempt-1-1784693241`
-- `implementation/ref-006-98d6193364c1-attempt-1-1784693668` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-006-98d6193364c1-attempt-1-1784693668`
 - `rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784688023-807bc7a20043` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784688023`
 - `rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784690090-6077ba322261` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784690090`
 
@@ -44,7 +45,7 @@ worktree cleanup skip count decreases.
 
 ## Reconciliation Plan
 
-Work surface: `4` candidates, `4` sampled records.
+Work surface: `2` candidates, `2` sampled records.
 
 ### Suggested Actions
 
@@ -86,23 +87,22 @@ Work surface: `4` candidates, `4` sampled records.
       "scope": "backlogged_worktrees"
     }
   ],
-  "candidate_count": 4,
+  "candidate_count": 2,
   "conflict_path_counts": {},
   "dedupe_key": "reconciliation_guardrail:main_checkout_dirty",
-  "fingerprint": "bc2e46a8c33920d52a1c6229e6655e4950c6f80c",
+  "fingerprint": "4d89f1a8bd48e097a7d8eba6ed430f056fa71f39",
   "kind": "main_checkout_dirty",
   "main_dirty_evidence": {
+    "diff_stat": ".../bundle_lanes/bundle_lanes.json                 | 5464 ++++++++++----------\n 1 file changed, 2732 insertions(+), 2732 deletions(-)",
+    "name_status": "M\tdata/refactor_supervisor/bundle_lanes/bundle_lanes.json",
     "path_categories": {
-      "untracked": 1
+      "modified": 1
     },
     "status_paths": [
-      "data/refactor_supervisor/merge_resolver_registry"
+      "data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
     ],
     "status_short": [
-      "?? data/refactor_supervisor/merge_resolver_registry/"
-    ],
-    "untracked_paths": [
-      "data/refactor_supervisor/merge_resolver_registry"
+      " M data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
     ]
   },
   "reason": "main_checkout_dirty",
@@ -112,18 +112,14 @@ Work surface: `4` candidates, `4` sampled records.
     "Keep todo, objective, discovery, and strategy files parseable after reconciliation."
   ],
   "sample_branches": [
-    "implementation/ref-005-a73e3df5fb38-attempt-1-1784693241",
-    "implementation/ref-006-98d6193364c1-attempt-1-1784693668",
     "rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784688023-807bc7a20043",
     "rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784690090-6077ba322261"
   ],
-  "sample_count": 4,
+  "sample_count": 2,
   "sample_status_paths": [
-    "data/refactor_supervisor/merge_resolver_registry"
+    "data/refactor_supervisor/bundle_lanes/bundle_lanes.json"
   ],
   "sample_worktrees": [
-    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-005-a73e3df5fb38-attempt-1-1784693241",
-    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-006-98d6193364c1-attempt-1-1784693668",
     "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784688023",
     "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784690090"
   ],

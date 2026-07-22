@@ -90,7 +90,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The mediator is the largest runtime file and carries high regression risk.
 - Acceptance: One cohesive service is extracted.; Existing imports continue to resolve.
 
-- [ ] Task checkbox-6: REF-006 Move claim support orchestration helpers into focused private modules
+- [x] Task checkbox-6: REF-006 Move claim support orchestration helpers into focused private modules
 
 ## REF-006 Move claim support orchestration helpers into focused private modules
 
@@ -294,11 +294,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The scan found many broad exception handlers; refactors need predictable failure semantics.
 - Acceptance: Top production broad-exception clusters are documented.; At least one cluster returns a typed degraded result.
 
-- [ ] Task checkbox-18: REF-018 Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks
+- [x] Task checkbox-18: REF-018 Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks
 
 ## REF-018 Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G6
@@ -447,18 +447,18 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The supervisor itself should not duplicate tasks or emit malformed payloads.
 - Acceptance: Running seed twice does not duplicate active tasks.; Payloads include goal, subgoal, priority, acceptance, and validation.
 
-## REF-027 Resolve dirty main checkout blocking 4 worktree merges
+## REF-027 Resolve dirty main checkout blocking 2 worktree merges
 
 - Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
-- Fingerprint: bc2e46a8c33920d52a1c6229e6655e4950c6f80c
+- Fingerprint: 4d89f1a8bd48e097a7d8eba6ed430f056fa71f39
 - Dedupe key: reconciliation_guardrail:main_checkout_dirty
 - Depends on:
 - Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_todo.md
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md
-- Acceptance: Reconciliation guardrail filed this because 4 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
+- Acceptance: Reconciliation guardrail filed this because 2 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
 
 ## REF-028 Close objective gap: Stabilize repository boundaries
 
@@ -1038,3 +1038,47 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: validation_gate
 - Todo vector key: de6b4676e018ecd7
 - Acceptance: Objective scan filed this gap for G9.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-049-objective-gap-f92bbf64160c.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-050 Close objective gap: Decompose oversized orchestration modules
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: ops
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q
+- Bundle: refactor/g2
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g2.todo.md
+- Bundle strategy: explicit
+- Graph parents: none
+- Graph depth: 0
+- Parallel lane: refactor/g2
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files: 
+- Changed paths: 
+- AST symbols: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js
+- Interfaces: 
+- Submodules: 
+- Generated artifacts: 
+- Allow concurrent with: 
+- Goal id: G2
+- Canonical task key: task/v1/3b42a1c4efdfe552a2d1b443b7f11b9a00404792fa8f344348b885e9e6cdded7
+- Canonical task CID: baguqeerahnbkdrhp37svfiwrwrb3p4i3tiaear4s7khtiq2ixcc6tzwn33lq
+- Missing evidence: objective validation repair
+- Embedding query: Decompose oversized orchestration modules
+- AST query: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js
+- Surplus group: objective/G2
+- Merge key: 711e65b47b204d01
+- Merge family: objective/G2
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet: 
+- Goal packet role: 
+- Goal packet goals: 
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: ce8c3a3f03eb4308
+- Acceptance: Objective scan filed this gap for G2. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-050-objective-gap-eac2cf021fa2.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
