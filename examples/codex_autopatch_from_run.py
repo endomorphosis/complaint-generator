@@ -425,7 +425,14 @@ def _build_prompt(
     dg_with = _optimizer_count(optimizer, "dg_sessions_with_data")
     kg_empty = _optimizer_count(optimizer, "kg_sessions_empty")
     dg_empty = _optimizer_count(optimizer, "dg_sessions_empty")
-    kg_d_gaps = optimizer.get("kg_avg_gaps_delta_per_iter")
+    kg_d_gaps_raw = optimizer.get("kg_avg_gaps_delta_per_iter")
+    try:
+        kg_d_gaps = float(kg_d_gaps_raw) if kg_d_gaps_raw is not None else None
+    except (TypeError, ValueError, OverflowError):
+        # Persisted optimizer metrics can be malformed or outside the range
+        # accepted by float(). Omit only those expected input failures so
+        # unexpected conversion defects remain visible for diagnosis.
+        kg_d_gaps = None
     kg_not_reducing = _optimizer_count(optimizer, "kg_sessions_gaps_not_reducing")
 
     if kg_with > 0 and kg_empty == kg_with:
@@ -436,12 +443,8 @@ def _build_prompt(
     # Dynamics: if gaps aren't shrinking or graphs aren't growing, steer to denoiser answer processing.
     if kg_not_reducing > 0:
         focus.append("Knowledge graph gaps are not reducing across iterations")
-    if kg_d_gaps is not None:
-        try:
-            if float(kg_d_gaps) >= 0.0:
-                focus.append("Knowledge graph gaps are flat/increasing per iteration")
-        except Exception:
-            pass
+    if kg_d_gaps is not None and kg_d_gaps >= 0.0:
+        focus.append("Knowledge graph gaps are flat/increasing per iteration")
     if kg_d_entities is not None and kg_d_entities < 0.1:
         focus.append("Knowledge graph is not growing per iteration")
     if kg_d_rels is not None and kg_d_rels < 0.05:
