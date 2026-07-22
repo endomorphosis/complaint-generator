@@ -770,7 +770,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-039 Materialize a task dependency DAG and schedule its critical path
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9
