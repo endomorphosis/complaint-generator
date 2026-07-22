@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import typer
@@ -85,6 +85,7 @@ except ModuleNotFoundError:
 
 from complaint_generator.legacy_session_migration import migrate_legacy_session
 from applications.ui_review import run_ui_review_workflow
+from integrations.ipfs_datasets.loader import import_attr_optional, import_failure_message
 
 from .complaint_workspace import ComplaintWorkspaceService
 
@@ -96,6 +97,16 @@ DEFAULT_UI_UX_OPTIMIZER_PRIORITY = 90
 
 app = typer.Typer(help="Unified complaint workspace CLI.")
 service = ComplaintWorkspaceService()
+
+
+def _require_ipfs_attr(module_name: str, attr_name: str) -> Any:
+    """Resolve an optional provider attribute through the integration boundary."""
+
+    value, error = import_attr_optional(module_name, attr_name)
+    if value is not None and error is None:
+        return value
+    message = import_failure_message(error) or f"missing attribute {attr_name}"
+    raise ImportError(f"Unable to import {module_name}.{attr_name}: {message}")
 
 
 def _print(payload) -> None:
@@ -262,12 +273,22 @@ def import_gmail_evidence_command(
 ) -> None:
     import anyio
 
-    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
-    from ipfs_datasets_py.processors.legal_data.email_corpus import (
-        build_email_duckdb_artifacts,
-        search_email_graphrag_duckdb,
+    resolve_gmail_credentials = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_auth",
+        "resolve_gmail_credentials",
     )
-    from ipfs_datasets_py.processors.legal_data.email_import import import_gmail_evidence
+    build_email_duckdb_artifacts = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_corpus",
+        "build_email_duckdb_artifacts",
+    )
+    search_email_graphrag_duckdb = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_corpus",
+        "search_email_graphrag_duckdb",
+    )
+    import_gmail_evidence = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_import",
+        "import_gmail_evidence",
+    )
 
     parser = argparse.ArgumentParser(prog="complaint-workspace import-gmail-evidence")
     if not collect_all_messages and not list(address or []):
@@ -407,8 +428,14 @@ def run_gmail_duckdb_pipeline_command(
 ) -> None:
     import anyio
 
-    from ipfs_datasets_py.processors.legal_data.email_auth import resolve_gmail_credentials
-    from ipfs_datasets_py.processors.legal_data.email_pipeline import run_gmail_duckdb_pipeline
+    resolve_gmail_credentials = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_auth",
+        "resolve_gmail_credentials",
+    )
+    run_gmail_duckdb_pipeline = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_pipeline",
+        "run_gmail_duckdb_pipeline",
+    )
 
     parser = argparse.ArgumentParser(prog="complaint-workspace run-gmail-duckdb-pipeline")
     if not collect_all_messages and not list(address or []):
@@ -476,7 +503,10 @@ def search_email_duckdb_command(
     bm25_k1: float = typer.Option(1.2, "--bm25-k1"),
     bm25_b: float = typer.Option(0.75, "--bm25-b"),
 ) -> None:
-    from ipfs_datasets_py.processors.legal_data.email_pipeline import search_email_duckdb_corpus
+    search_email_duckdb_corpus = _require_ipfs_attr(
+        "ipfs_datasets_py.processors.legal_data.email_pipeline",
+        "search_email_duckdb_corpus",
+    )
 
     _print(
         search_email_duckdb_corpus(
