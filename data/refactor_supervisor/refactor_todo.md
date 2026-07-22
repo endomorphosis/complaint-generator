@@ -243,7 +243,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Dependency drift is a recurring refactor risk.
 - Acceptance: Tests catch direct production imports where adapters are required.; Tests avoid blocking intentional test-only imports.
 
-- [ ] Task checkbox-15: REF-015 Keep the refactor taskboard synchronized with generated goals and subgoals
+- [x] Task checkbox-15: REF-015 Keep the refactor taskboard synchronized with generated goals and subgoals
 
 ## REF-015 Keep the refactor taskboard synchronized with generated goals and subgoals
 

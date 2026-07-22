@@ -1764,7 +1764,7 @@
           ],
           "priority": "P0",
           "rationale": "The requested supervisor needs a refill loop and visible board state.",
-          "status": "todo",
+          "status": "completed",
           "subgoal_id": "G5.S1",
           "surplus_group": "refactor/g5/g5-s1",
           "task_id": "REF-015",
@@ -3267,6 +3267,9 @@
             "requeue",
             "quarantine",
             "get",
+            "active_canonical_task_ids",
+            "completed_canonical_task_ids",
+            "_canonical_task_ids_for_statuses",
             "pending_count",
             "processing_count",
             "_count",
@@ -3298,6 +3301,8 @@
             "base",
             "updated",
             "path",
+            "normalized",
+            "placeholders",
             "payload",
             "stage_dir",
             "destination",
@@ -3310,12 +3315,7 @@
             "next_attempt",
             "failure_count",
             "terminal",
-            "rows",
-            "identities",
-            "counts",
-            "candidate",
-            "active_count",
-            "resolved"
+            "rows"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -4381,7 +4381,7 @@
       ]
     }
   },
-  "generated_at": "2026-07-22T04:00:52Z",
+  "generated_at": "2026-07-22T04:14:04Z",
   "schema": "complaint_generator.refactor_seed_bundle_index",
   "source_todo": "data/refactor_supervisor/refactor_todo.md"
 }

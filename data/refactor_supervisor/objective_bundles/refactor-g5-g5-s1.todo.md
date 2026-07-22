@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-15: REF-015 Keep the refactor taskboard synchronized with generated goals and subgoals
+- [x] Task checkbox-15: REF-015 Keep the refactor taskboard synchronized with generated goals and subgoals
 
 ## REF-015 Keep the refactor taskboard synchronized with generated goals and subgoals
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G5
