@@ -8,7 +8,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-009 Standardize capability status and degraded-reason payloads across adapters
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G3
