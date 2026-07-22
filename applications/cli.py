@@ -110,7 +110,10 @@ class CLI:
 				if question:
 					return question
 			except Exception:
-				pass
+				log.warning(
+					'Could not resolve the current inquiry prompt; using the fallback prompt',
+					exc_info=True,
+				)
 		return 'Response'
 
 	def feed(self, text=None):

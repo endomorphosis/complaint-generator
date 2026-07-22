@@ -17,6 +17,20 @@ def _make_cli(mediator=None):
     return cli
 
 
+def test_resolve_prompt_logs_payload_failure_and_uses_fallback(caplog):
+    mediator = Mock()
+    mediator.state.last_question = None
+    mediator.get_current_inquiry_payload.side_effect = RuntimeError('inquiry payload unavailable')
+    cli = _make_cli(mediator)
+
+    with caplog.at_level('WARNING', logger='cli'):
+        prompt = cli._resolve_prompt_text()
+
+    assert prompt == 'Response'
+    assert 'Could not resolve the current inquiry prompt; using the fallback prompt' in caplog.text
+    assert 'inquiry payload unavailable' in caplog.text
+
+
 def test_parse_command_options_supports_key_value_and_bools():
     cli = _make_cli()
 
