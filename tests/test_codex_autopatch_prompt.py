@@ -45,3 +45,24 @@ def test_build_prompt_does_not_swallow_unexpected_metric_conversion_failure() ->
 
     with pytest.raises(RuntimeError, match="unexpected metric conversion failure"):
         _build_prompt({"kg_avg_total_entities": BrokenMetric()})
+
+
+def test_build_prompt_ignores_non_numeric_entity_growth_metric() -> None:
+    prompt = _build_prompt({"kg_avg_entities_delta_per_iter": "not-a-number"})
+
+    assert "Knowledge graph is not growing per iteration" not in prompt
+
+
+def test_build_prompt_flags_low_entity_growth_metric() -> None:
+    prompt = _build_prompt({"kg_avg_entities_delta_per_iter": "0.05"})
+
+    assert "Knowledge graph is not growing per iteration" in prompt
+
+
+def test_build_prompt_does_not_swallow_unexpected_entity_growth_conversion_failure() -> None:
+    class BrokenMetric:
+        def __float__(self) -> float:
+            raise RuntimeError("unexpected metric conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected metric conversion failure"):
+        _build_prompt({"kg_avg_entities_delta_per_iter": BrokenMetric()})

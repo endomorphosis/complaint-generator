@@ -367,13 +367,22 @@ def _build_prompt(
         # generation below.
         kg_avg_entities = None
 
+    kg_d_entities_raw = optimizer.get("kg_avg_entities_delta_per_iter")
+    try:
+        kg_d_entities = float(kg_d_entities_raw) if kg_d_entities_raw is not None else None
+    except (TypeError, ValueError):
+        # Optimizer reports are persisted inputs and may contain non-numeric
+        # metric values. Ignore only expected conversion failures here so an
+        # unexpected runtime defect cannot be swallowed by the best-effort
+        # focus generation below.
+        kg_d_entities = None
+
     try:
         kg_with = int(optimizer.get("kg_sessions_with_data") or 0)
         dg_with = int(optimizer.get("dg_sessions_with_data") or 0)
         kg_empty = int(optimizer.get("kg_sessions_empty") or 0)
         dg_empty = int(optimizer.get("dg_sessions_empty") or 0)
         dg_avg_nodes = optimizer.get("dg_avg_total_nodes")
-        kg_d_entities = optimizer.get("kg_avg_entities_delta_per_iter")
         kg_d_rels = optimizer.get("kg_avg_relationships_delta_per_iter")
         kg_d_gaps = optimizer.get("kg_avg_gaps_delta_per_iter")
         kg_not_reducing = int(optimizer.get("kg_sessions_gaps_not_reducing") or 0)
@@ -392,12 +401,8 @@ def _build_prompt(
                     focus.append("Knowledge graph gaps are flat/increasing per iteration")
             except Exception:
                 pass
-        if kg_d_entities is not None:
-            try:
-                if float(kg_d_entities) < 0.1:
-                    focus.append("Knowledge graph is not growing per iteration")
-            except Exception:
-                pass
+        if kg_d_entities is not None and kg_d_entities < 0.1:
+            focus.append("Knowledge graph is not growing per iteration")
         if kg_d_rels is not None:
             try:
                 if float(kg_d_rels) < 0.05:
