@@ -3565,3 +3565,14 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Candidate kind: seed
 - Todo vector key: ref-212-addend-to-endregressiontestsfortruthfulgoalcompl
 - Acceptance: Tests distinguish threshold skip, cooldown, duplicate-only, healthy exhaustion, parser failure, timeout, partial coverage, and successful generation.; Scenarios prove that stale fingerprints cannot certify completion and that later relevant findings reopen goals and refill the board.; Concurrent serial and bundle supervisors emit one canonical receipt and do not duplicate generated goals or tasks.; Restart and migration preserve evidence lineage, quorum state, dependencies, and truthful operator projections.
+
+## REF-213 Resolve implementation retry-budget failure for REF-208
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on: REF-204, REF-207
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_coverage.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/audit_scanner.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_task_janitor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_task_janitor.py, data/refactor_supervisor/discovery
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-213-ref-208-implementation-retry-budget.md
+- Acceptance: Implementation retry-budget guardrail filed this from repeated implementation failures in REF-208. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-213-ref-208-implementation-retry-budget.md to fix the setup, runtime, or timeout blocker, then mark this repair task completed so the supervisor can release REF-208 from strategy blocked_tasks.
