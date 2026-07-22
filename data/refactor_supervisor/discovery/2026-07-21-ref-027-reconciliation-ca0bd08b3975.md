@@ -1,35 +1,36 @@
 # REF-027 Reconciliation Guardrail
 
 Date: 2026-07-22
-Fingerprint: a8d69a08a26f001170144d40fdc5219756a29851
+Fingerprint: 6d49ced5ffdf1b8902feb1347ea71fd4d1897458
 Kind: main_checkout_dirty
 Reason: main_checkout_dirty
-Candidate count: 1
+Candidate count: 2
 Priority: P1
 Track: ops
 
 ## Main Checkout Status
 
+- ` M data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
 - ` M data/refactor_supervisor/refactor_goals.json`
-- ` M docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
 
 ## Main Checkout Evidence
 
 - Path categories: `modified=2`
 - Status paths:
+  - `data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
   - `data/refactor_supervisor/refactor_goals.json`
-  - `docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
 - Name status:
+  - `M	data/refactor_supervisor/bundle_lanes/bundle_lanes.json`
   - `M	data/refactor_supervisor/refactor_goals.json`
-  - `M	docs/REFACTOR_SUPERVISOR_TASKBOARD.md`
 - Diff stat:
-  - `data/refactor_supervisor/refactor_goals.json | 6 +++---`
-  - ` docs/REFACTOR_SUPERVISOR_TASKBOARD.md        | 4 ++--`
-  - ` 2 files changed, 5 insertions(+), 5 deletions(-)`
+  - `.../bundle_lanes/bundle_lanes.json                 | 379215 +++++++++++++++++-`
+  - ` data/refactor_supervisor/refactor_goals.json       |      6 +-`
+  - ` 2 files changed, 378878 insertions(+), 343 deletions(-)`
 
 ## Sample Branches Or Worktrees
 
 - `rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784688023-807bc7a20043` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784688023`
+- `rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784690090-6077ba322261` at `/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784690090`
 
 ## Why This Blocks Progress
 
@@ -48,7 +49,7 @@ worktree cleanup skip count decreases.
 
 ## Reconciliation Plan
 
-Work surface: `1` candidates, `1` sampled records.
+Work surface: `2` candidates, `2` sampled records.
 
 ### Suggested Actions
 
@@ -90,24 +91,24 @@ Work surface: `1` candidates, `1` sampled records.
       "scope": "backlogged_worktrees"
     }
   ],
-  "candidate_count": 1,
+  "candidate_count": 2,
   "conflict_path_counts": {},
   "dedupe_key": "reconciliation_guardrail:main_checkout_dirty",
-  "fingerprint": "a8d69a08a26f001170144d40fdc5219756a29851",
+  "fingerprint": "6d49ced5ffdf1b8902feb1347ea71fd4d1897458",
   "kind": "main_checkout_dirty",
   "main_dirty_evidence": {
-    "diff_stat": "data/refactor_supervisor/refactor_goals.json | 6 +++---\n docs/REFACTOR_SUPERVISOR_TASKBOARD.md        | 4 ++--\n 2 files changed, 5 insertions(+), 5 deletions(-)",
-    "name_status": "M\tdata/refactor_supervisor/refactor_goals.json\nM\tdocs/REFACTOR_SUPERVISOR_TASKBOARD.md",
+    "diff_stat": ".../bundle_lanes/bundle_lanes.json                 | 379215 +++++++++++++++++-\n data/refactor_supervisor/refactor_goals.json       |      6 +-\n 2 files changed, 378878 insertions(+), 343 deletions(-)",
+    "name_status": "M\tdata/refactor_supervisor/bundle_lanes/bundle_lanes.json\nM\tdata/refactor_supervisor/refactor_goals.json",
     "path_categories": {
       "modified": 2
     },
     "status_paths": [
-      "data/refactor_supervisor/refactor_goals.json",
-      "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
+      "data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
+      "data/refactor_supervisor/refactor_goals.json"
     ],
     "status_short": [
-      " M data/refactor_supervisor/refactor_goals.json",
-      " M docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
+      " M data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
+      " M data/refactor_supervisor/refactor_goals.json"
     ]
   },
   "reason": "main_checkout_dirty",
@@ -117,15 +118,17 @@ Work surface: `1` candidates, `1` sampled records.
     "Keep todo, objective, discovery, and strategy files parseable after reconciliation."
   ],
   "sample_branches": [
-    "rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784688023-807bc7a20043"
+    "rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784688023-807bc7a20043",
+    "rescue/worktree/implementation-ref-016-30a2a7d729bd-attempt-1-1784690090-6077ba322261"
   ],
-  "sample_count": 1,
+  "sample_count": 2,
   "sample_status_paths": [
-    "data/refactor_supervisor/refactor_goals.json",
-    "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
+    "data/refactor_supervisor/bundle_lanes/bundle_lanes.json",
+    "data/refactor_supervisor/refactor_goals.json"
   ],
   "sample_worktrees": [
-    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784688023"
+    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784688023",
+    "/home/barberb/complaint-generator/data/refactor_supervisor/worktrees/ref-016-30a2a7d729bd-attempt-1-1784690090"
   ],
   "success_signals": [
     "candidate_count_decreases",
