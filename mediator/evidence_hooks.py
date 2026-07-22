@@ -7,9 +7,10 @@ storage/document tooling and DuckDB persistence.  Dependency exceptions are
 not stable enough to catch by a common narrower base class.  Storage commands
 therefore raise typed hook errors with their original cause.  High-traffic
 list queries use :class:`DegradedEvidenceResults`, which remains list-compatible
-but distinguishes a failed query from a valid empty result; legacy scalar and
-mapping queries retain their established fallback shape and log the failure.
-The only local filesystem preparation handler is narrowed to ``OSError``.
+but distinguishes a failed query from a valid empty result.  Point lookups also
+raise a typed query error instead of conflating an operational failure with a
+valid not-found result.  The only local filesystem preparation handler is
+narrowed to ``OSError``.
 """
 
 import os
@@ -77,6 +78,10 @@ class EvidenceRetrievalError(EvidenceHookError):
 
 class EvidencePersistenceError(EvidenceHookError):
     """Evidence metadata could not be persisted."""
+
+
+class EvidenceQueryError(EvidenceHookError):
+    """Evidence metadata could not be queried from the configured backend."""
 
 
 class DegradedEvidenceResults(list[Dict[str, Any]]):
@@ -1337,6 +1342,10 @@ class EvidenceStateHook:
             
         Returns:
             Evidence record or None if not found
+
+        Raises:
+            EvidenceQueryError: If the configured evidence database cannot be
+                queried or the stored record cannot be decoded.
         """
         if not DUCKDB_AVAILABLE:
             for record in self._memory_records:
@@ -1346,22 +1355,22 @@ class EvidenceStateHook:
         
         try:
             conn = duckdb.connect(self.db_path)
-            
-            result = conn.execute("""
-                SELECT id, user_id, username, evidence_cid, evidence_type,
-                      evidence_size, timestamp, metadata, complaint_id,
-                      claim_type, description, content_hash, source_url,
-                        acquisition_method, provenance, claim_element_id, claim_element,
-                    parse_status, chunk_count, parsed_text_preview, parse_metadata,
-                    graph_status, graph_entity_count, graph_relationship_count, graph_metadata,
-                    (
-                        SELECT COUNT(*) FROM evidence_facts ef WHERE ef.evidence_id = evidence.id
-                    ) AS fact_count
-                FROM evidence
-                WHERE evidence_cid = ?
-            """, [cid]).fetchone()
-            
-            conn.close()
+            try:
+                result = conn.execute("""
+                    SELECT id, user_id, username, evidence_cid, evidence_type,
+                          evidence_size, timestamp, metadata, complaint_id,
+                          claim_type, description, content_hash, source_url,
+                            acquisition_method, provenance, claim_element_id, claim_element,
+                        parse_status, chunk_count, parsed_text_preview, parse_metadata,
+                        graph_status, graph_entity_count, graph_relationship_count, graph_metadata,
+                        (
+                            SELECT COUNT(*) FROM evidence_facts ef WHERE ef.evidence_id = evidence.id
+                        ) AS fact_count
+                    FROM evidence
+                    WHERE evidence_cid = ?
+                """, [cid]).fetchone()
+            finally:
+                conn.close()
             
             if result:
                 return {
@@ -1396,8 +1405,19 @@ class EvidenceStateHook:
             return None
             
         except Exception as e:
-            self.mediator.log('evidence_query_error', error=str(e), cid=cid)
-            return None
+            # DuckDB adapters and JSON decoders do not share a stable exception
+            # hierarchy. Normalize failures at this boundary while preserving
+            # the original exception for diagnostics and retry decisions.
+            self.mediator.log(
+                'evidence_query_error',
+                operation='get_evidence_by_cid',
+                error=str(e),
+                error_type=type(e).__name__,
+                cid=cid,
+            )
+            raise EvidenceQueryError(
+                f'Failed to query evidence by CID {cid}: {str(e)}'
+            ) from e
 
     def get_evidence_chunks(self, evidence_id: int) -> List[Dict[str, Any]]:
         """Get parsed chunks for a stored evidence record."""
