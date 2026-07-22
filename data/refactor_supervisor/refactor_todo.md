@@ -264,7 +264,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-016 Record supervisor status, scan metrics, and queue counts for handoff
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G5
