@@ -328,7 +328,7 @@
           ],
           "priority": "P0",
           "rationale": "The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.",
-          "status": "todo",
+          "status": "completed",
           "subgoal_id": "G1.S2",
           "surplus_group": "refactor/g1/g1-s2",
           "task_id": "REF-003",
@@ -2446,6 +2446,7 @@
             "FastAPI",
             "duckdb",
             "pytestmark",
+            "_build_playwright_fixture_app",
             "_build_browser_smoke_app",
             "test_review_ui_runtime_ownership_is_web_entrypoint",
             "_build_document_browser_smoke_app",
@@ -2454,6 +2455,7 @@
             "_build_hook_backed_browser_mediator",
             "_build_real_browser_upload_mediator",
             "_serve_app",
+            "_launch_browser",
             "test_claim_support_review_dashboard_smoke_shows_proactively_repaired_legacy_testimony_links",
             "test_claim_support_review_dashboard_smoke_preserves_support_kind_in_canonical_url",
             "test_document_builder_smoke_renders_question_review_links_with_section_aware_support_kind",
@@ -2518,9 +2520,7 @@
             "config",
             "server",
             "thread",
-            "base_url",
-            "deadline",
-            "last_error"
+            "base_url"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
@@ -4386,7 +4386,7 @@
       ]
     }
   },
-  "generated_at": "2026-07-22T05:38:25Z",
+  "generated_at": "2026-07-22T05:52:03Z",
   "schema": "complaint_generator.refactor_seed_bundle_index",
   "source_todo": "data/refactor_supervisor/refactor_todo.md"
 }

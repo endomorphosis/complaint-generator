@@ -4,7 +4,7 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-3: REF-003 Replace production sys.path mutation with package-level imports or adapter loader calls
+- [x] Task checkbox-3: REF-003 Replace production sys.path mutation with package-level imports or adapter loader calls
 
 ## REF-003 Replace production sys.path mutation with package-level imports or adapter loader calls
 

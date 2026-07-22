@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-22T05:38:26Z",
+  "generated_at": "2026-07-22T05:52:04Z",
   "goals": [
     {
       "id": "G1",
@@ -92,7 +92,7 @@
               "priority": "P0",
               "rationale": "The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.",
               "stable_key": "g1:g1.s2:replace production sys.path mutation with package-level imports or adapter loader calls",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G1.S2",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-003",
@@ -1258,7 +1258,7 @@
         "path": "applications/complaint_workspace.py"
       },
       {
-        "lines": 7551,
+        "lines": 7440,
         "path": "tests/test_claim_support_review_playwright_smoke.py"
       },
       {
@@ -1356,8 +1356,8 @@
       "pytest_ini": true
     },
     "python_file_count": 440,
-    "python_total_lines": 246812,
-    "scanned_at": "2026-07-22T05:38:10Z",
+    "python_total_lines": 246708,
+    "scanned_at": "2026-07-22T05:51:50Z",
     "signals": {
       "broad_exception_count": 362,
       "direct_ipfs_import_count": 211,
@@ -1628,7 +1628,7 @@
       "reason": "fast_seed",
       "skipped": true
     },
-    "configured_refill_floor": 20,
+    "configured_refill_floor": 24,
     "counts": {
       "queue": {
         "completed": 0,
@@ -1636,15 +1636,15 @@
         "failed": 0,
         "failed_work_items": 0,
         "queued": 15,
-        "queued_work_items": 16,
+        "queued_work_items": 15,
         "running": 0,
         "running_work_items": 0
       },
       "todo": {
-        "blocked": 0,
-        "complete": 32,
+        "blocked": 6,
+        "complete": 33,
         "in_progress": 0,
-        "needed": 18
+        "needed": 17
       }
     },
     "goal_count": 9,
@@ -1653,32 +1653,39 @@
       "skipped": true
     },
     "queue_refill": {
-      "available_bundle_count": 9,
-      "available_work_items": 18,
-      "configured_floor": 20,
+      "available_bundle_count": 8,
+      "available_work_items": 17,
+      "configured_floor": 24,
       "enabled": true,
       "floor_satisfied": false,
       "floor_unit": "active_taskboard_work_items",
-      "queued_work_items_after": 16,
-      "queued_work_items_before": 16,
+      "queued_work_items_after": 15,
+      "queued_work_items_before": 15,
       "reason": "fewer unique active generated work items are available than the configured floor",
       "submitted_bundle_count": 0,
       "submitted_queue_ids": [],
       "submitted_task_ids": []
     },
     "status_projection": {
-      "blocked_count": 0,
-      "completed_count": 32,
-      "task_count": 50,
-      "updated": {},
-      "updated_file_count": 0
+      "blocked_count": 6,
+      "completed_count": 33,
+      "task_count": 56,
+      "updated": {
+        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g1-g1-s2.todo.md": [
+          "REF-003"
+        ],
+        "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_todo.md": [
+          "REF-003"
+        ]
+      },
+      "updated_file_count": 2
     },
     "subgoal_count": 17,
-    "synchronized_at": "2026-07-22T05:38:26Z",
+    "synchronized_at": "2026-07-22T05:52:04Z",
     "task_count": 36
   },
   "taskboard": {
-    "task_count": 50,
+    "task_count": 56,
     "tasks": [
       {
         "checkbox_id": 1,
@@ -1694,7 +1701,7 @@
       },
       {
         "checkbox_id": 3,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-003",
         "title": "Replace production sys.path mutation with package-level imports or adapter loader calls"
       },
@@ -1979,6 +1986,42 @@
         "status": "complete",
         "task_id": "REF-050",
         "title": "Close objective gap: Decompose oversized orchestration modules"
+      },
+      {
+        "checkbox_id": 51,
+        "status": "blocked",
+        "task_id": "REF-051",
+        "title": "Review swallowed exception path in adversarial_harness/harness.py:49"
+      },
+      {
+        "checkbox_id": 52,
+        "status": "blocked",
+        "task_id": "REF-052",
+        "title": "Review swallowed exception path in adversarial_harness/harness.py:54"
+      },
+      {
+        "checkbox_id": 53,
+        "status": "blocked",
+        "task_id": "REF-053",
+        "title": "Review swallowed exception path in adversarial_harness/harness.py:150"
+      },
+      {
+        "checkbox_id": 54,
+        "status": "blocked",
+        "task_id": "REF-054",
+        "title": "Review swallowed exception path in adversarial_harness/harness.py:478"
+      },
+      {
+        "checkbox_id": 55,
+        "status": "blocked",
+        "task_id": "REF-055",
+        "title": "Review swallowed exception path in adversarial_harness/harness.py:879"
+      },
+      {
+        "checkbox_id": 56,
+        "status": "blocked",
+        "task_id": "REF-056",
+        "title": "Review swallowed exception path in adversarial_harness/session.py:225"
       }
     ]
   },
