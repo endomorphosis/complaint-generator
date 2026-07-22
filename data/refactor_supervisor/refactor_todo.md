@@ -749,7 +749,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-038 Integrate a deduplicating single-consumer merge train
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9
