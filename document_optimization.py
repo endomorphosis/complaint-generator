@@ -4681,6 +4681,11 @@ class AgenticDocumentOptimizer:
         try:
             return method(**kwargs)
         except Exception:
+            logger.warning(
+                "Mediator method %s failed; continuing without optional optimization context",
+                method_name,
+                exc_info=True,
+            )
             return None
 
     def _extract_support_texts(self, values: Any) -> List[str]:
