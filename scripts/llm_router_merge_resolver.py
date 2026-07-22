@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 from typing import Any
 
@@ -85,7 +87,16 @@ def _unmerged_paths(workspace: Path) -> list[str]:
 
 
 def _files_with_conflict_markers(workspace: Path) -> list[str]:
-    result = _run(["git", "grep", "-n", r"^<<<<<<< "], cwd=workspace)
+    result = _run(
+        [
+            "git",
+            "grep",
+            "-n",
+            "-E",
+            r"^(<<<<<<<( .*)?|=======|>>>>>>>( .*)?)$",
+        ],
+        cwd=workspace,
+    )
     if result.returncode not in (0, 1):
         return []
     paths: list[str] = []
@@ -94,6 +105,110 @@ def _files_with_conflict_markers(workspace: Path) -> list[str]:
         if path and path not in paths:
             paths.append(path)
     return paths
+
+
+def _validate_resolution_paths(workspace: Path, paths: list[str]) -> dict[str, Any]:
+    root = workspace.resolve()
+    expanded_paths: list[str] = []
+    invalid_paths: list[str] = []
+    marker_findings: list[dict[str, Any]] = []
+    syntax_errors: list[dict[str, Any]] = []
+    pending = list(dict.fromkeys(path for path in paths if path))
+    visited: set[str] = set()
+    while pending:
+        raw_path = pending.pop(0)
+        if raw_path in visited:
+            continue
+        visited.add(raw_path)
+        relative = Path(raw_path)
+        candidate = (root / relative).resolve()
+        try:
+            normalized = candidate.relative_to(root).as_posix()
+        except ValueError:
+            invalid_paths.append(raw_path)
+            continue
+        if relative.is_absolute():
+            invalid_paths.append(raw_path)
+            continue
+        if candidate.is_dir():
+            top_level = _run(["git", "rev-parse", "--show-toplevel"], cwd=candidate)
+            nested_repo_root = (
+                Path(top_level.stdout.strip()).resolve()
+                if top_level.returncode == 0 and top_level.stdout.strip()
+                else None
+            )
+            nested_paths: set[str] = set()
+            for command in (
+                [
+                    "git",
+                    "diff-tree",
+                    "--root",
+                    "--no-commit-id",
+                    "--name-only",
+                    "-r",
+                    "-m",
+                    "HEAD",
+                ],
+                ["git", "diff", "--name-only", "HEAD"],
+                ["git", "ls-files", "--others", "--exclude-standard"],
+            ):
+                result = _run(command, cwd=candidate)
+                if result.returncode == 0:
+                    nested_paths.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+            for nested_path in sorted(nested_paths)[:1000]:
+                if nested_repo_root == candidate:
+                    expanded = (Path(normalized) / nested_path).as_posix()
+                else:
+                    expanded = Path(nested_path).as_posix()
+                    normalized_prefix = normalized.rstrip("/") + "/"
+                    if normalized not in {"", "."} and not expanded.startswith(normalized_prefix):
+                        continue
+                expanded_paths.append(expanded)
+                pending.append(expanded)
+            continue
+        if not candidate.exists() or not candidate.is_file():
+            continue
+        try:
+            content = candidate.read_bytes()
+        except OSError as exc:
+            syntax_errors.append({"path": normalized, "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            stripped = line.lstrip()
+            if (
+                stripped == b"======="
+                or stripped == b"<<<<<<<"
+                or stripped.startswith(b"<<<<<<< ")
+                or stripped == b">>>>>>>"
+                or stripped.startswith(b">>>>>>> ")
+            ):
+                marker_findings.append(
+                    {
+                        "path": normalized,
+                        "line": line_number,
+                        "marker": stripped[:80].decode("utf-8", errors="replace"),
+                    }
+                )
+        if candidate.suffix == ".py":
+            try:
+                with tokenize.open(candidate) as stream:
+                    source = stream.read()
+                ast.parse(source, filename=str(candidate))
+            except (OSError, SyntaxError, UnicodeError) as exc:
+                syntax_errors.append(
+                    {
+                        "path": normalized,
+                        "line": int(getattr(exc, "lineno", 0) or 0),
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+    return {
+        "valid": not invalid_paths and not marker_findings and not syntax_errors,
+        "expanded_paths": expanded_paths,
+        "invalid_paths": invalid_paths,
+        "marker_findings": marker_findings,
+        "syntax_errors": syntax_errors,
+    }
 
 
 def _patch_paths(diff: str) -> list[str]:
@@ -127,6 +242,13 @@ def _stage_and_commit_if_resolved(workspace: Path, *, paths_to_stage: list[str])
         return False
     paths = list(dict.fromkeys(path for path in paths_to_stage if path))
     if not paths:
+        return False
+    validation = _validate_resolution_paths(workspace, paths)
+    if not validation["valid"]:
+        print(
+            "merge resolution validation failed: " + json.dumps(validation, sort_keys=True),
+            file=sys.stderr,
+        )
         return False
     add = _run(["git", "add", "-A", "--", *paths], cwd=workspace)
     if add.returncode != 0:

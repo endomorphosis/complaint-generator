@@ -3620,20 +3620,160 @@ def merge_event_paths() -> list[Path]:
     return sorted(dict.fromkeys(paths))
 
 
+def _implementation_activity_snapshot() -> dict[str, Any]:
+    task_state = _load_json_object(TASK_STATE_PATH)
+    active_phase = str(task_state.get("active_phase") or "").strip()
+    active_task_id = str(task_state.get("active_task_id") or "").strip()
+    parallel_running_count = 0
+    if BUNDLE_LANE_MANIFEST.exists():
+        try:
+            manifest = _upstream_artifact_store().read_artifact_fields(
+                BUNDLE_LANE_MANIFEST,
+                ("running_count",),
+            )
+            parallel_running_count = int(manifest.get("running_count") or 0)
+        except Exception:
+            parallel_running_count = 0
+    return {
+        "active": bool(active_phase or active_task_id or parallel_running_count),
+        "active_task_id": active_task_id,
+        "active_phase": active_phase,
+        "parallel_running_count": parallel_running_count,
+    }
+
+
+def _taskboard_status_by_id() -> dict[str, str]:
+    return {
+        str(task.get("task_id") or ""): str(task.get("status") or "")
+        for task in _taskboard_snapshot().get("tasks", [])
+        if str(task.get("task_id") or "")
+    }
+
+
+def _try_acquire_watchdog_checkout_lock(
+    *,
+    task_id: str,
+    branch: str,
+) -> dict[str, Any]:
+    _ensure_accelerate_import_path()
+    from ipfs_accelerate_py.agent_supervisor.checkout_lock import (
+        checkout_lock_metadata,
+        checkout_mutation_lock_path,
+    )
+
+    lock_path = checkout_mutation_lock_path(PROJECT_ROOT)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    token = f"watchdog-{os.getpid()}-{time.time_ns()}"
+    for _attempt in range(2):
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            existing = _load_json_object(lock_path)
+            try:
+                owner_pid = int(existing.get("pid") or 0)
+            except (TypeError, ValueError):
+                owner_pid = 0
+            try:
+                age_seconds = max(0.0, time.time() - lock_path.stat().st_mtime)
+            except OSError:
+                continue
+            if (owner_pid and _pid_alive(owner_pid)) or age_seconds < 2.0:
+                return {
+                    "acquired": False,
+                    "reason": "checkout_mutation_lock_active",
+                    "lock_path": str(lock_path),
+                    "owner": existing,
+                }
+            try:
+                lock_path.unlink()
+            except OSError as exc:
+                return {
+                    "acquired": False,
+                    "reason": "stale_checkout_lock_remove_failed",
+                    "lock_path": str(lock_path),
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "owner": existing,
+                }
+            continue
+
+        metadata = checkout_lock_metadata(
+            kind="merge",
+            repo_root=PROJECT_ROOT,
+            task_id=task_id,
+            branch=branch,
+            extra={
+                "operation": "external_merge_watchdog",
+                "claim_token": token,
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
+        try:
+            os.write(descriptor, (json.dumps(metadata, sort_keys=True) + "\n").encode("utf-8"))
+        finally:
+            os.close(descriptor)
+        return {
+            "acquired": True,
+            "reason": "acquired",
+            "lock_path": str(lock_path),
+            "claim_token": token,
+        }
+    return {
+        "acquired": False,
+        "reason": "checkout_mutation_lock_raced",
+        "lock_path": str(lock_path),
+    }
+
+
+def _release_watchdog_checkout_lock(claim: dict[str, Any]) -> None:
+    if not claim.get("acquired"):
+        return
+    lock_path = Path(str(claim.get("lock_path") or ""))
+    if not lock_path.exists():
+        return
+    current = _load_json_object(lock_path)
+    if current.get("claim_token") != claim.get("claim_token"):
+        return
+    lock_path.unlink(missing_ok=True)
+
+
 def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0, max_events: int = 1) -> dict[str, Any]:
     _ensure_accelerate_import_path()
     from ipfs_accelerate_py.agent_supervisor.merge_resolver import (
         MergeResolverRegistry,
+        active_merge_matches_payload,
         invoke_llm_resolver,
         iter_jsonl,
         latest_failed_merge_event,
         merge_in_progress,
         resolver_payload,
         unmerged_paths,
+        validate_resolved_paths,
     )
+
+    activity = _implementation_activity_snapshot()
+    if activity["active"]:
+        payload = {
+            "status": "checked",
+            "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "event_log_count": 0,
+            "found_count": 0,
+            "applied_count": 0,
+            "attempted_count": 0,
+            "results": [
+                {
+                    "found": False,
+                    "skipped": True,
+                    "skip_reason": "implementation_active",
+                    **activity,
+                }
+            ],
+        }
+        _atomic_write_json(MERGE_RESOLVER_STATUS_PATH, payload)
+        return payload
 
     results: list[dict[str, Any]] = []
     attempted = 0
+    task_statuses = _taskboard_status_by_id()
     registry = MergeResolverRegistry(
         MERGE_RESOLVER_REGISTRY_DIR,
         lease_timeout_seconds=max(1.0, float(timeout_seconds) + 30.0),
@@ -3659,18 +3799,17 @@ def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0, max_events: 
                 results.append({"events_path": str(events_path), "found": False})
                 continue
             workspace = Path(str(payload.get("repo_root") or PROJECT_ROOT)).resolve()
-            live_unmerged_paths = unmerged_paths(workspace)
-            live_merge = merge_in_progress(workspace)
-            if not live_merge and not live_unmerged_paths:
+            task_id = str(payload.get("task_id") or "")
+            if task_statuses.get(task_id) == "complete":
                 results.append(
                     {
                         "events_path": str(events_path),
                         "found": True,
-                        "task_id": payload.get("task_id"),
+                        "task_id": task_id,
                         "workspace": str(workspace),
                         "conflict_fingerprint": payload.get("conflict_fingerprint"),
                         "skipped": True,
-                        "skip_reason": "merge_not_active",
+                        "skip_reason": "task_already_completed",
                     }
                 )
                 continue
@@ -3685,72 +3824,132 @@ def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0, max_events: 
                     }
                 )
                 continue
-            claim = registry.acquire(
-                event,
-                owner_id=f"complaint-generator-watchdog-{os.getpid()}",
-                lease_seconds=max(1.0, float(timeout_seconds) + 30.0),
+            checkout_claim = _try_acquire_watchdog_checkout_lock(
+                task_id=task_id,
+                branch=str(payload.get("branch") or ""),
             )
-            if claim is None:
+            if not checkout_claim.get("acquired"):
                 results.append(
                     {
                         "events_path": str(events_path),
                         "found": True,
-                        "task_id": payload.get("task_id"),
+                        "task_id": task_id,
                         "workspace": str(workspace),
                         "conflict_fingerprint": payload.get("conflict_fingerprint"),
                         "skipped": True,
-                        "skip_reason": "resolver_claim_unavailable",
+                        "skip_reason": str(checkout_claim.get("reason") or "checkout_lock_unavailable"),
+                        "checkout_lock": checkout_claim,
                     }
                 )
                 continue
-            attempted += 1
             try:
-                applied = invoke_llm_resolver(
-                    payload,
-                    command_template=merge_resolver_command(),
-                    timeout_seconds=timeout_seconds,
+                live_unmerged_paths = unmerged_paths(workspace)
+                live_merge = merge_in_progress(workspace)
+                if not live_merge and not live_unmerged_paths:
+                    results.append(
+                        {
+                            "events_path": str(events_path),
+                            "found": True,
+                            "task_id": task_id,
+                            "workspace": str(workspace),
+                            "conflict_fingerprint": payload.get("conflict_fingerprint"),
+                            "skipped": True,
+                            "skip_reason": "merge_not_active",
+                        }
+                    )
+                    continue
+                operation_match = active_merge_matches_payload(payload, workspace)
+                if not operation_match.get("matches"):
+                    results.append(
+                        {
+                            "events_path": str(events_path),
+                            "found": True,
+                            "task_id": task_id,
+                            "workspace": str(workspace),
+                            "conflict_fingerprint": payload.get("conflict_fingerprint"),
+                            "skipped": True,
+                            "skip_reason": str(operation_match.get("reason") or "merge_identity_mismatch"),
+                            "operation_match": operation_match,
+                        }
+                    )
+                    continue
+                claim = registry.acquire(
+                    event,
+                    owner_id=f"complaint-generator-watchdog-{os.getpid()}",
+                    lease_seconds=max(1.0, float(timeout_seconds) + 30.0),
                 )
-                remaining_unmerged_paths = unmerged_paths(workspace)
-                merge_still_active = merge_in_progress(workspace)
-                resolved = bool(
-                    applied.get("applied")
-                    and not remaining_unmerged_paths
-                    and not merge_still_active
-                )
-                error = "" if resolved else str(
-                    applied.get("apply_error")
-                    or applied.get("llm_stderr")
-                    or "resolver returned without completing the merge"
-                )
-                receipt_path = registry.release(
-                    claim,
-                    succeeded=resolved,
-                    outcome={
+                if claim is None:
+                    results.append(
+                        {
+                            "events_path": str(events_path),
+                            "found": True,
+                            "task_id": payload.get("task_id"),
+                            "workspace": str(workspace),
+                            "conflict_fingerprint": payload.get("conflict_fingerprint"),
+                            "skipped": True,
+                            "skip_reason": "resolver_claim_unavailable",
+                        }
+                    )
+                    continue
+                attempted += 1
+                try:
+                    applied = invoke_llm_resolver(
+                        payload,
+                        command_template=merge_resolver_command(),
+                        timeout_seconds=timeout_seconds,
+                    )
+                    remaining_unmerged_paths = unmerged_paths(workspace)
+                    merge_still_active = merge_in_progress(workspace)
+                    resolution_validation = validate_resolved_paths(workspace, live_unmerged_paths)
+                    resolved = bool(
+                        applied.get("applied")
+                        and not remaining_unmerged_paths
+                        and not merge_still_active
+                        and resolution_validation.get("valid")
+                    )
+                    error = "" if resolved else str(
+                        applied.get("apply_error")
+                        or applied.get("llm_stderr")
+                        or (
+                            "resolved paths failed marker or Python syntax validation"
+                            if not resolution_validation.get("valid")
+                            else ""
+                        )
+                        or "resolver returned without completing the merge"
+                    )
+                    receipt_path = registry.release(
+                        claim,
+                        succeeded=resolved,
+                        outcome={
+                            "applied": resolved,
+                            "llm_returncode": applied.get("llm_returncode"),
+                            "remaining_unmerged_paths": remaining_unmerged_paths,
+                            "merge_still_active": merge_still_active,
+                            "resolution_validation": resolution_validation,
+                        },
+                        error=error,
+                    )
+                except Exception as exc:
+                    registry.release(claim, succeeded=False, error=str(exc))
+                    raise
+                results.append(
+                    {
+                        "events_path": str(events_path),
+                        "found": True,
+                        "task_id": applied.get("task_id"),
+                        "workspace": str(workspace),
+                        "conflict_fingerprint": payload.get("conflict_fingerprint"),
                         "applied": resolved,
                         "llm_returncode": applied.get("llm_returncode"),
+                        "apply_error": applied.get("apply_error", ""),
                         "remaining_unmerged_paths": remaining_unmerged_paths,
                         "merge_still_active": merge_still_active,
-                    },
-                    error=error,
+                        "resolution_validation": resolution_validation,
+                        "quarantine_receipt": str(receipt_path) if receipt_path else "",
+                    }
                 )
-            except Exception as exc:
-                registry.release(claim, succeeded=False, error=str(exc))
-                raise
-            results.append(
-                {
-                    "events_path": str(events_path),
-                    "found": True,
-                    "task_id": applied.get("task_id"),
-                    "workspace": str(workspace),
-                    "conflict_fingerprint": payload.get("conflict_fingerprint"),
-                    "applied": resolved,
-                    "llm_returncode": applied.get("llm_returncode"),
-                    "apply_error": applied.get("apply_error", ""),
-                    "remaining_unmerged_paths": remaining_unmerged_paths,
-                    "merge_still_active": merge_still_active,
-                    "quarantine_receipt": str(receipt_path) if receipt_path else "",
-                }
-            )
+            finally:
+                _release_watchdog_checkout_lock(checkout_claim)
         except Exception as exc:
             results.append({"events_path": str(events_path), "error": str(exc)})
     payload = {
@@ -3762,7 +3961,7 @@ def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0, max_events: 
         "attempted_count": attempted,
         "results": results,
     }
-    MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _atomic_write_json(MERGE_RESOLVER_STATUS_PATH, payload)
     return payload
 
 
@@ -3858,7 +4057,16 @@ def stop_merge_resolver_watchdog() -> dict[str, Any]:
     if not _pid_alive(pid):
         MERGE_RESOLVER_PID_PATH.unlink(missing_ok=True)
         return {"status": "not_running"}
-    os.kill(pid, signal.SIGTERM)
+    signal_scope = "process"
+    try:
+        process_group = os.getpgid(pid)
+        os.killpg(process_group, signal.SIGTERM)
+        signal_scope = "process_group"
+    except (OSError, ProcessLookupError):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
     for _ in range(20):
         if not _pid_alive(pid):
             break
@@ -3866,7 +4074,12 @@ def stop_merge_resolver_watchdog() -> dict[str, Any]:
     stopped = not _pid_alive(pid)
     if stopped:
         MERGE_RESOLVER_PID_PATH.unlink(missing_ok=True)
-    return {"status": "stopped" if stopped else "stopping", "pid": pid}
+    return {
+        "status": "stopped" if stopped else "stopping",
+        "pid": pid,
+        "signal": "SIGTERM",
+        "signal_scope": signal_scope,
+    }
 
 
 def stop_daemon() -> dict[str, Any]:

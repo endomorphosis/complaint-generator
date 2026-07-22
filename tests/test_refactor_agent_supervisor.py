@@ -610,12 +610,114 @@ def test_merge_watchdog_skips_aborted_historical_merge(tmp_path, monkeypatch) ->
     monkeypatch.setattr(supervisor, "MERGE_RESOLVER_STATUS_PATH", tmp_path / "status.json")
     monkeypatch.setattr(supervisor, "MERGE_RESOLVER_REGISTRY_DIR", tmp_path / "registry")
     monkeypatch.setattr(supervisor, "merge_event_paths", lambda: [events_path])
+    monkeypatch.setattr(
+        supervisor,
+        "_implementation_activity_snapshot",
+        lambda: {
+            "active": False,
+            "active_task_id": "",
+            "active_phase": "",
+            "parallel_running_count": 0,
+        },
+    )
+    monkeypatch.setattr(supervisor, "_taskboard_status_by_id", lambda: {})
 
     result = supervisor.resolve_merge_conflicts_once(timeout_seconds=1)
 
     assert result["attempted_count"] == 0
     assert result["applied_count"] == 0
     assert result["results"][0]["skip_reason"] == "merge_not_active"
+
+
+def test_merge_watchdog_does_not_scan_while_implementation_is_active(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(supervisor, "MERGE_RESOLVER_STATUS_PATH", tmp_path / "status.json")
+    monkeypatch.setattr(
+        supervisor,
+        "_implementation_activity_snapshot",
+        lambda: {
+            "active": True,
+            "active_task_id": "REF-902",
+            "active_phase": "merge_resolver",
+            "parallel_running_count": 0,
+        },
+    )
+    monkeypatch.setattr(
+        supervisor,
+        "merge_event_paths",
+        lambda: pytest.fail("active implementations must short-circuit event scanning"),
+    )
+
+    result = supervisor.resolve_merge_conflicts_once(timeout_seconds=1)
+
+    assert result["attempted_count"] == 0
+    assert result["results"][0]["skip_reason"] == "implementation_active"
+    assert result["results"][0]["active_task_id"] == "REF-902"
+
+
+def test_merge_watchdog_ignores_completed_task_failure_from_another_log(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "checkout", "-b", "main")
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text(
+        json.dumps(
+            {
+                "type": "merge_finished",
+                "task_id": "REF-903",
+                "attempted": True,
+                "merged": False,
+                "branch": "implementation/ref-903",
+                "target_branch": "main",
+                "reason": "content_conflict",
+                "main_worktree_path": str(repo),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", repo)
+    monkeypatch.setattr(supervisor, "MERGE_RESOLVER_STATUS_PATH", tmp_path / "status.json")
+    monkeypatch.setattr(supervisor, "MERGE_RESOLVER_REGISTRY_DIR", tmp_path / "registry")
+    monkeypatch.setattr(supervisor, "merge_event_paths", lambda: [events_path])
+    monkeypatch.setattr(
+        supervisor,
+        "_implementation_activity_snapshot",
+        lambda: {
+            "active": False,
+            "active_task_id": "",
+            "active_phase": "",
+            "parallel_running_count": 0,
+        },
+    )
+    monkeypatch.setattr(supervisor, "_taskboard_status_by_id", lambda: {"REF-903": "complete"})
+
+    result = supervisor.resolve_merge_conflicts_once(timeout_seconds=1)
+
+    assert result["attempted_count"] == 0
+    assert result["results"][0]["skip_reason"] == "task_already_completed"
+
+
+def test_merge_watchdog_checkout_lock_is_exclusive(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", repo)
+
+    first = supervisor._try_acquire_watchdog_checkout_lock(
+        task_id="REF-904",
+        branch="implementation/ref-904",
+    )
+    second = supervisor._try_acquire_watchdog_checkout_lock(
+        task_id="REF-905",
+        branch="implementation/ref-905",
+    )
+
+    assert first["acquired"] is True
+    assert second["acquired"] is False
+    assert second["reason"] == "checkout_mutation_lock_active"
+    supervisor._release_watchdog_checkout_lock(first)
+    assert not Path(first["lock_path"]).exists()
 
 
 def test_router_commit_preserves_unrelated_dirty_paths(tmp_path) -> None:
@@ -645,8 +747,68 @@ def test_router_commit_preserves_unrelated_dirty_paths(tmp_path) -> None:
     assert not router_resolver._stage_and_commit_if_resolved(repo, paths_to_stage=[])
 
 
+def test_router_does_not_commit_invalid_python_resolution(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "checkout", "-b", "main")
+    _git(repo, "config", "user.email", "agent@example.com")
+    _git(repo, "config", "user.name", "Agent")
+    target = repo / "resolver_target.py"
+    target.write_text("value = 1\n", encoding="utf-8")
+    _git(repo, "add", "resolver_target.py")
+    _git(repo, "commit", "-m", "baseline")
+    baseline = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    target.write_text("def broken(\n", encoding="utf-8")
+
+    committed = router_resolver._stage_and_commit_if_resolved(
+        repo,
+        paths_to_stage=["resolver_target.py"],
+    )
+
+    assert committed is False
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == baseline
+    assert _git(repo, "status", "--short").stdout == " M resolver_target.py\n"
+
+
+def test_router_validation_expands_nested_repository_changes(tmp_path) -> None:
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _git(nested, "init")
+    _git(nested, "config", "user.email", "agent@example.com")
+    _git(nested, "config", "user.name", "Agent")
+    (nested / "broken.py").write_text("def broken(\n", encoding="utf-8")
+    _git(nested, "add", "broken.py")
+    _git(nested, "commit", "-m", "invalid resolution")
+
+    validation = router_resolver._validate_resolution_paths(tmp_path, ["nested"])
+
+    assert validation["valid"] is False
+    assert validation["expanded_paths"] == ["nested/broken.py"]
+    assert validation["syntax_errors"][0]["path"] == "nested/broken.py"
+
+
 def test_merge_watchdog_has_explicit_stop_command() -> None:
     assert supervisor.build_parser().parse_args(["stop-merge-watchdog"]).command == "stop-merge-watchdog"
+
+
+def test_merge_watchdog_stop_terminates_owned_process_group(tmp_path, monkeypatch) -> None:
+    pid_path = tmp_path / "watchdog.pid"
+    pid_path.write_text("4321\n", encoding="utf-8")
+    alive = iter([True, False, False])
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(supervisor, "MERGE_RESOLVER_PID_PATH", pid_path)
+    monkeypatch.setattr(supervisor, "_pid_alive", lambda _pid: next(alive))
+    monkeypatch.setattr(supervisor.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(supervisor.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+    monkeypatch.setattr(supervisor.time, "sleep", lambda _seconds: None)
+
+    result = supervisor.stop_merge_resolver_watchdog()
+
+    assert result["status"] == "stopped"
+    assert result["signal_scope"] == "process_group"
+    assert signals == [(4321, supervisor.signal.SIGTERM)]
+    assert not pid_path.exists()
 
 
 def _isolate_status_paths(tmp_path, monkeypatch) -> None:
