@@ -58,3 +58,17 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Outputs: data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery/2026-07-22-ref-025-reconciliation-d70172dd2341.md
 - Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery/2026-07-22-ref-025-reconciliation-d70172dd2341.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
+- Reconciliation result: Generated checkout changes were preserved in commit `2880ee1eae8f36abc95542a12e80967c71dcc4e0`; the scoped reconciliation pass reran at `2026-07-22T04:12:35Z` with both `main_checkout_dirty` and `raw_main_checkout_dirty` false, and the dirty-main blocked candidate count decreased from `1` to `0`. The candidate was processed and its separate preflight conflicts were filed as REF-026.
+
+## REF-026 Resolve 1 preflight-conflicting backlogged worktree merges
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Fingerprint: fc7e21256d1f56af80ccaa2a28a6acefd2614035
+- Dedupe key: reconciliation_guardrail:preflight_merge_conflict
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery/2026-07-22-ref-026-reconciliation-fc7e21256d1f.md
+- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by preflight_merge_conflict. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g8-g8-s1/discovery/2026-07-22-ref-026-reconciliation-fc7e21256d1f.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
