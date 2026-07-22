@@ -143,7 +143,13 @@ def _resolve_openai_api_key(env_overrides: Optional[Mapping[str, str]] = None) -
 			if resolved:
 				return resolved
 	except Exception:
-		pass
+		# The vault is optional and keyring/common-file lookup can still resolve
+		# the key. Surface the degraded lookup without exposing credential values.
+		logger.warning(
+			"Could not resolve an OpenAI API key from the ipfs_datasets_py "
+			"secrets vault; trying the keyring and common-file fallbacks",
+			exc_info=True,
+		)
 
 	try:
 		import keyring  # type: ignore
