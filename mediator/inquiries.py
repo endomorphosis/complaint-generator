@@ -1,8 +1,12 @@
+import logging
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import strings
+
+
+logger = logging.getLogger(__name__)
 
 
 _QUESTION_RE = re.compile(r"[^?\n]+?\?")
@@ -431,6 +435,10 @@ class Inquiries:
 			try:
 				context = builder()
 			except Exception:
+				logger.warning(
+					"Unable to build inquiry gap context; continuing without mediator gap priorities",
+					exc_info=True,
+				)
 				context = {}
 			context = context if isinstance(context, dict) else {}
 		try:
@@ -444,5 +452,8 @@ class Inquiries:
 					context.setdefault("intake_covered_objectives", list(summary.get("covered_objectives") or []))
 					context.setdefault("intake_uncovered_objectives", list(summary.get("uncovered_objectives") or []))
 		except Exception:
-			pass
+			logger.warning(
+				"Unable to load persisted intake priority summary; continuing with available inquiry gap context",
+				exc_info=True,
+			)
 		return context
