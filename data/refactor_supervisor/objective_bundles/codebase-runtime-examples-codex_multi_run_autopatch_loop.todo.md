@@ -6,7 +6,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-113 Review swallowed exception path in examples/codex_multi_run_autopatch_loop.py:130
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
