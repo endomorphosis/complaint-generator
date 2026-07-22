@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-020 Add queue count and last-cycle metrics to long-running automation docs
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P2
 - Track: G6
