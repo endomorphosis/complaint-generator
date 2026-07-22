@@ -186,7 +186,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P1
 - Bundle: refactor/g7
 - Goal: Rationalize frontend and review surfaces
-- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, applications/review_api.py, applications/ui_review.py, mediator/claim_support_hooks.py, tests/test_claim_support_review_playwright_smoke.py, tests/test_review_surface_site_playwright.py
+- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, applications/review_api.py, applications/ui_review.py, mediator/claim_support_hooks.py, tests/test_claim_support_review_playwright_smoke.py, tests/test_review_surface_site_playwright.py, data/refactor_supervisor/discovery/2026-07-21-ref-033-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest --collect-only -q
 
 ## G7.S1 Separate review API contracts from display assembly
