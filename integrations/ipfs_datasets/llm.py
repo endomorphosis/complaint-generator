@@ -159,7 +159,13 @@ def _resolve_openai_api_key(env_overrides: Optional[Mapping[str, str]] = None) -
 			if resolved:
 				return resolved
 	except Exception:
-		pass
+		# Keyring is optional and common local configuration may still provide
+		# the key. Preserve that fallback while making backend failures visible.
+		logger.warning(
+			"OpenAI API-key lookup through keyring failed; "
+			"falling back to common local configuration files",
+			exc_info=True,
+		)
 
 	try:
 		engine_env = importlib.import_module("ipfs_datasets_py.utils.engine_env")
