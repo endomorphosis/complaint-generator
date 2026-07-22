@@ -2954,7 +2954,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-125 Review swallowed exception path in integrations/ipfs_datasets/llm.py:96
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -3078,7 +3078,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-129 Review swallowed exception path in integrations/ipfs_datasets/loader.py:353
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
