@@ -128,7 +128,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-008 Separate dashboard fixture data from live route logic
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G2
