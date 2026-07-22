@@ -1,7 +1,11 @@
 import hashlib
+import logging
 import re
 import time
 from typing import Any, Dict, List, Set
+
+
+logger = logging.getLogger(__name__)
 
 
 class GraphRetrievalAugmentor:
@@ -120,18 +124,25 @@ class GraphAwareRetrievalReranker:
         priority_terms: List[str] = []
 
         try:
+            readiness_priority_terms: List[str] = []
             readiness = dg.get_claim_readiness() if hasattr(dg, "get_claim_readiness") else {}
             if isinstance(readiness, dict):
                 readiness_value = readiness.get("overall_readiness", 1.0)
-                overall_readiness = 1.0 if readiness_value is None else float(readiness_value)
+                parsed_readiness = 1.0 if readiness_value is None else float(readiness_value)
                 for claim in readiness.get("incomplete_claim_details", []) or []:
                     if not isinstance(claim, dict):
                         continue
                     claim_name = str(claim.get("claim_name", "") or "")
                     if claim_name:
-                        priority_terms.append(claim_name)
+                        readiness_priority_terms.append(claim_name)
+                overall_readiness = parsed_readiness
+                priority_terms.extend(readiness_priority_terms)
         except Exception:
-            pass
+            logger.warning(
+                "Failed to extract dependency-graph claim readiness; "
+                "using neutral readiness defaults",
+                exc_info=True,
+            )
 
         try:
             unsatisfied = (
