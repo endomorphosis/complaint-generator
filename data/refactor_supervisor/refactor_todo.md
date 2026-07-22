@@ -2086,7 +2086,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-097 Review swallowed exception path in document_optimization.py:4683
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
