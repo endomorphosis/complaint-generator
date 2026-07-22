@@ -1536,7 +1536,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-071 Close objective gap: Create focused test lanes for refactor work
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
