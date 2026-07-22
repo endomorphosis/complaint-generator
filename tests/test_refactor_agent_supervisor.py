@@ -890,6 +890,86 @@ def test_durable_status_projection_promotes_matching_bundle_receipt_only(
     assert "## REF-002 Still open\n\n- Status: todo" in text
 
 
+def test_projection_reconciliation_updates_all_query_and_planning_artifacts(
+    tmp_path, monkeypatch
+) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    supervisor.BUNDLE_DIR.mkdir()
+    supervisor.TODO_PATH.write_text(
+        """- [ ] Task checkbox-1: REF-001 Completed implementation
+
+## REF-001 Completed implementation
+
+- Status: completed
+
+- [ ] Task checkbox-2: REF-002 Pending implementation
+
+## REF-002 Pending implementation
+
+- Status: todo
+""",
+        encoding="utf-8",
+    )
+    shard = supervisor.BUNDLE_DIR / "goal.todo.md"
+    shard.write_text(supervisor.TODO_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+    supervisor.GOALS_PATH.write_text(
+        json.dumps(
+            {
+                "goals": [
+                    {
+                        "id": "G1",
+                        "subgoals": [
+                            {
+                                "id": "G1.S1",
+                                "tasks": [
+                                    {"task_id": "REF-001", "status": "needed"},
+                                    {"task_id": "REF-002", "status": "needed"},
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    index_path = supervisor.BUNDLE_DIR / "index.json"
+    index_path.write_text(
+        json.dumps(
+            {
+                "schema": "complaint_generator.refactor_seed_bundle_index",
+                "generated_at": "2026-07-22T00:00:00Z",
+                "source_todo": "todo.md",
+                "completed_task_ids": [],
+                "bundles": {
+                    "g1/s1": {
+                        "bundle_key": "g1/s1",
+                        "tasks": [
+                            {"task_id": "REF-001", "status": "todo"},
+                            {"task_id": "REF-002", "status": "todo"},
+                        ],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = supervisor.reconcile_task_projection_artifacts()
+
+    assert result["updated"] is True
+    assert "- [x] Task checkbox-1: REF-001" in supervisor.TODO_PATH.read_text(encoding="utf-8")
+    assert "- [x] Task checkbox-1: REF-001" in shard.read_text(encoding="utf-8")
+    goals = json.loads(supervisor.GOALS_PATH.read_text(encoding="utf-8"))
+    assert goals["goals"][0]["subgoals"][0]["tasks"][0]["status"] == "complete"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["bundles"]["g1/s1"]["tasks"][0]["status"] == "completed"
+    assert "REF-001" in index["completed_task_ids"]
+    assert index_path.with_suffix(".duckdb").exists()
+
+
 def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) -> None:
     _isolate_status_paths(tmp_path, monkeypatch)
     monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)

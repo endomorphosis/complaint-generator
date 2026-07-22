@@ -2382,6 +2382,127 @@ def synchronize_taskboard_statuses() -> dict[str, Any]:
     }
 
 
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _project_goal_tree_statuses(statuses: dict[str, str]) -> dict[str, Any]:
+    if not GOALS_PATH.exists():
+        return {"updated": False, "reason": "goals_missing", "updated_task_ids": []}
+    payload = _load_json_object(GOALS_PATH)
+    projected_status = {
+        "todo": "needed",
+        "in_progress": "in-progress",
+        "blocked": "blocked",
+        "completed": "complete",
+    }
+    updated_task_ids: list[str] = []
+    for goal in payload.get("goals", []) or []:
+        if not isinstance(goal, dict):
+            continue
+        for subgoal in goal.get("subgoals", []) or []:
+            if not isinstance(subgoal, dict):
+                continue
+            for task in subgoal.get("tasks", []) or []:
+                if not isinstance(task, dict):
+                    continue
+                task_id = str(task.get("task_id") or "")
+                status = projected_status.get(statuses.get(task_id, ""))
+                if status and task.get("status") != status:
+                    task["status"] = status
+                    updated_task_ids.append(task_id)
+
+    taskboard = _taskboard_snapshot()
+    taskboard_changed = payload.get("taskboard") != taskboard
+    if taskboard_changed:
+        payload["taskboard"] = taskboard
+    if not updated_task_ids and not taskboard_changed:
+        return {"updated": False, "reason": "current", "updated_task_ids": []}
+    payload["status_projected_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _atomic_write_json(GOALS_PATH, payload)
+    return {
+        "updated": True,
+        "reason": "projected",
+        "updated_task_ids": sorted(set(updated_task_ids)),
+        "taskboard_updated": taskboard_changed,
+    }
+
+
+def _project_bundle_index_statuses(statuses: dict[str, str]) -> dict[str, Any]:
+    index_path = BUNDLE_DIR / "index.json"
+    if not index_path.exists():
+        return {"updated": False, "reason": "index_missing", "updated_task_ids": []}
+    payload = _load_json_object(index_path)
+    updated_task_ids: list[str] = []
+    bundles = payload.get("bundles")
+    bundle_values = bundles.values() if isinstance(bundles, dict) else bundles or []
+    for bundle in bundle_values:
+        if not isinstance(bundle, dict):
+            continue
+        for task in bundle.get("tasks", []) or []:
+            if not isinstance(task, dict):
+                continue
+            task_id = str(task.get("task_id") or "")
+            status = statuses.get(task_id)
+            if status and task.get("status") != status:
+                task["status"] = status
+                updated_task_ids.append(task_id)
+
+    completed = {
+        task_id for task_id, status in statuses.items() if status == "completed"
+    }
+    completed.update(str(item) for item in payload.get("completed_task_ids", []) or [] if str(item))
+    projected_completed = sorted(completed)
+    completed_changed = payload.get("completed_task_ids") != projected_completed
+    if completed_changed:
+        payload["completed_task_ids"] = projected_completed
+    if not updated_task_ids and not completed_changed:
+        return {"updated": False, "reason": "current", "updated_task_ids": []}
+    payload["status_projected_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _upstream_artifact_store().write_bundle_index_artifact(index_path, payload)
+    return {
+        "updated": True,
+        "reason": "projected",
+        "updated_task_ids": sorted(set(updated_task_ids)),
+        "completed_task_ids_updated": completed_changed,
+        "duckdb_path": str(index_path.with_suffix(".duckdb")),
+    }
+
+
+def reconcile_task_projection_artifacts(*, skip_while_active: bool = True) -> dict[str, Any]:
+    task_state = _load_json_object(TASK_STATE_PATH)
+    active_phase = str(task_state.get("active_phase") or "").strip()
+    active_task_id = str(task_state.get("active_task_id") or "").strip()
+    manifest = _load_json_object(BUNDLE_LANE_MANIFEST)
+    parallel_running = int(manifest.get("running_count") or 0)
+    if skip_while_active and (active_phase or parallel_running):
+        return {
+            "updated": False,
+            "reason": "active_implementation",
+            "active_task_id": active_task_id,
+            "active_phase": active_phase,
+            "parallel_running_count": parallel_running,
+        }
+
+    taskboard = synchronize_taskboard_statuses()
+    statuses = _durable_task_statuses()
+    goals = _project_goal_tree_statuses(statuses)
+    bundle_index = _project_bundle_index_statuses(statuses)
+    return {
+        "updated": bool(taskboard["updated_file_count"] or goals["updated"] or bundle_index["updated"]),
+        "reason": "reconciled",
+        "taskboard": taskboard,
+        "goals": goals,
+        "bundle_index": bundle_index,
+    }
+
+
 def _todo_counts() -> dict[str, int]:
     if not TODO_PATH.exists():
         return {"needed": 0, "in_progress": 0, "complete": 0, "blocked": 0}
@@ -3649,6 +3770,14 @@ def run_merge_resolver_watchdog(*, interval_s: float, timeout_seconds: float, on
         while True:
             cycle += 1
             last = resolve_merge_conflicts_once(timeout_seconds=timeout_seconds, max_events=1)
+            try:
+                last["task_projection"] = reconcile_task_projection_artifacts()
+            except Exception as exc:
+                last["task_projection"] = {
+                    "updated": False,
+                    "reason": "projection_error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
             last["cycle"] = cycle
             last["status"] = "running" if not once else "checked"
             MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(last, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -4110,6 +4239,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("stop-merge-watchdog", help="Stop the background merge-conflict watchdog.")
 
+    reconcile = sub.add_parser(
+        "reconcile-projections",
+        help="Synchronize canonical task status into checkboxes, goals, bundle shards, and the query index.",
+    )
+    reconcile.add_argument("--force", action="store_true", help="Run even while an implementation is active.")
+
     sub.add_parser("status", help="Show supervisor status.")
     sub.add_parser("stop", help="Stop the background supervisor.")
     return parser
@@ -4141,6 +4276,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     elif args.command == "stop-merge-watchdog":
         payload = stop_merge_resolver_watchdog()
+    elif args.command == "reconcile-projections":
+        payload = reconcile_task_projection_artifacts(skip_while_active=not args.force)
     elif args.command == "status":
         payload = status_payload()
     elif args.command == "stop":
