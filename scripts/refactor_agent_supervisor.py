@@ -853,6 +853,7 @@ def build_goals(scan: dict[str, Any]) -> list[dict[str, Any]]:
                                 "The structured plan router, evaluator, objective-daemon integration, and focused tests are tracked in the nested ipfs_accelerate_py repository.",
                                 "Selected and rejected branches remain visible to the scheduler with deterministic fallback when llm_router fails.",
                                 "The implementation receipt records nested commits and the parent gitlink chain instead of completing from documentation alone.",
+                                "A prior lane state cannot settle the recovery generation unless its recorded task identities include REF-063.",
                             ),
                             (
                                 "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q",
