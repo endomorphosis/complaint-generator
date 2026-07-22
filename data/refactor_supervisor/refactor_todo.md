@@ -447,18 +447,18 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The supervisor itself should not duplicate tasks or emit malformed payloads.
 - Acceptance: Running seed twice does not duplicate active tasks.; Payloads include goal, subgoal, priority, acceptance, and validation.
 
-## REF-027 Resolve dirty main checkout blocking 2 worktree merges
+## REF-027 Resolve dirty main checkout blocking 3 worktree merges
 
 - Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
-- Fingerprint: 4d89f1a8bd48e097a7d8eba6ed430f056fa71f39
+- Fingerprint: 8e671dee15462088b7865d93c6fb68f81a0a50ac
 - Dedupe key: reconciliation_guardrail:main_checkout_dirty
 - Depends on:
 - Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_todo.md
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md
-- Acceptance: Reconciliation guardrail filed this because 2 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
+- Acceptance: Reconciliation guardrail filed this because 3 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-21-ref-027-reconciliation-ca0bd08b3975.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
 
 ## REF-028 Close objective gap: Stabilize repository boundaries
 
