@@ -772,30 +772,30 @@ class Mediator:
 		claim_pressure: Dict[str, Dict[str, Any]],
 		matching_pressure: Dict[str, Dict[str, Any]],
 	) -> List[Dict[str, Any]]:
-		return self.workflow_actions._build_intake_workflow_action_queue(
+		return self.workflow_actions.build_intake_action_queue(
 			intake_case_file,
 			claim_pressure,
 			matching_pressure,
 		)
 
 	def _summarize_intake_workflow_action_queue(self, queue: Any) -> Dict[str, Any]:
-		return self.workflow_actions._summarize_intake_workflow_action_queue(queue)
+		return self.workflow_actions.summarize_intake_action_queue(queue)
 
 	def _build_evidence_workflow_action_queue(
 		self,
 		alignment_evidence_tasks: Any,
 		evidence_gaps: Any,
 	) -> List[Dict[str, Any]]:
-		return self.workflow_actions._build_evidence_workflow_action_queue(
+		return self.workflow_actions.build_evidence_action_queue(
 			alignment_evidence_tasks,
 			evidence_gaps,
 		)
 
 	def _get_document_provenance_summary(self) -> Dict[str, Any]:
-		return self.workflow_actions._get_document_provenance_summary()
+		return self.workflow_actions.get_document_provenance_summary()
 
 	def _get_document_grounding_lane_outcome_summary(self) -> Dict[str, Any]:
-		return self.workflow_actions._get_document_grounding_lane_outcome_summary()
+		return self.workflow_actions.get_document_grounding_lane_outcome_summary()
 
 	def _get_document_grounding_recovery_action(
 		self,
@@ -803,7 +803,7 @@ class Mediator:
 		provisional_evidence_workflow_action_queue: Any = None,
 		alignment_evidence_tasks: Any = None,
 	) -> Dict[str, Any]:
-		return self.workflow_actions._get_document_grounding_recovery_action(
+		return self.workflow_actions.get_document_grounding_recovery_action(
 			provisional_evidence_workflow_action_queue=provisional_evidence_workflow_action_queue,
 			alignment_evidence_tasks=alignment_evidence_tasks,
 		)
@@ -815,21 +815,21 @@ class Mediator:
 		alignment_evidence_tasks: Any = None,
 		document_grounding_recovery_action: Any = None,
 	) -> Dict[str, Any]:
-		return self.workflow_actions._get_document_grounding_improvement_next_action(
+		return self.workflow_actions.get_document_grounding_improvement_next_action(
 			provisional_evidence_workflow_action_queue=provisional_evidence_workflow_action_queue,
 			alignment_evidence_tasks=alignment_evidence_tasks,
 			document_grounding_recovery_action=document_grounding_recovery_action,
 		)
 
 	def _summarize_evidence_workflow_action_queue(self, queue: Any) -> Dict[str, Any]:
-		return self.workflow_actions._summarize_evidence_workflow_action_queue(queue)
+		return self.workflow_actions.summarize_evidence_action_queue(queue)
 
 	def _build_question_workflow_action_matches(
 		self,
 		candidate: Dict[str, Any],
 		workflow_action_queue: List[Dict[str, Any]],
 	) -> Dict[str, Any]:
-		return self.workflow_actions._build_question_workflow_action_matches(
+		return self.workflow_actions.build_question_action_matches(
 			candidate,
 			workflow_action_queue,
 		)
