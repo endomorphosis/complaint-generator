@@ -167,6 +167,29 @@ def _build_import_failure(exc: BaseException, *, module_name: str, attr_name: st
     )
 
 
+def _build_retry_import_failure(
+    initial_exc: BaseException,
+    retry_exc: BaseException,
+    *,
+    module_name: str,
+) -> ImportFailure:
+    """Preserve both failures from a vendored-package recovery attempt."""
+
+    retry_failure = _build_import_failure(retry_exc, module_name=module_name)
+    initial_failure = _build_import_failure(initial_exc, module_name=module_name)
+    return ImportFailure(
+        module_name=retry_failure.module_name,
+        attr_name=retry_failure.attr_name,
+        error_type=retry_failure.error_type,
+        message=(
+            f"{retry_failure.message} "
+            "(vendored-path recovery was triggered by "
+            f"{initial_failure.error_type}: {initial_failure.message})"
+        ),
+        missing_module_name=retry_failure.missing_module_name,
+    )
+
+
 def import_failure_message(error: Any) -> str | None:
     if error is None:
         return None
@@ -343,15 +366,33 @@ def _import_module_preserving_sys_path(module_name: str) -> Any:
 
 
 def import_module_optional(module_name: str) -> tuple[Any | None, ImportFailure | None]:
+    """Import an optional provider and return ordinary failures as diagnostics.
+
+    Provider modules execute arbitrary initialization code, so import failures
+    are not limited to :class:`ImportError`.  This adapter boundary intentionally
+    converts ordinary exceptions into ``ImportFailure`` while allowing process
+    control exceptions outside the ``Exception`` hierarchy to propagate.
+    """
+
     try:
         return _import_module_preserving_sys_path(module_name), None
     except ModuleNotFoundError as exc:
         if _should_retry_with_repo_paths(module_name, exc):
-            ensure_import_paths(module_name=module_name, missing_module_name=str(getattr(exc, "name", "") or ""))
             try:
+                ensure_import_paths(
+                    module_name=module_name,
+                    missing_module_name=str(getattr(exc, "name", "") or ""),
+                )
                 return _import_module_preserving_sys_path(module_name), None
             except Exception as retry_exc:
-                return None, _build_import_failure(retry_exc, module_name=module_name)
+                # The exception is returned as structured adapter state rather
+                # than discarded; this keeps optional-provider degradation
+                # non-fatal and observable to every caller.
+                return None, _build_retry_import_failure(
+                    exc,
+                    retry_exc,
+                    module_name=module_name,
+                )
         return None, _build_import_failure(exc, module_name=module_name)
     except Exception as exc:
         return None, _build_import_failure(exc, module_name=module_name)
