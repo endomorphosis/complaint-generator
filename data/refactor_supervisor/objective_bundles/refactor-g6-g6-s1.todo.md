@@ -25,7 +25,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-017-auditbroadexceptionhandlersinmediatorandadapterp
 - Acceptance: Top production broad-exception clusters are documented.; At least one cluster returns a typed degraded result.
 
-- [ ] Task checkbox-18: REF-018 Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks
+- [x] Task checkbox-18: REF-018 Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks
 
 ## REF-018 Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks
 
@@ -48,7 +48,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-019 Resolve dirty main checkout blocking 1 worktree merges
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
