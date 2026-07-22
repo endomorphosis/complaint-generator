@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
@@ -50,7 +50,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
