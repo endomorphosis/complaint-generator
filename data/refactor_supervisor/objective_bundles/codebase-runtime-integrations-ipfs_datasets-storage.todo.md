@@ -6,7 +6,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-132 Review swallowed exception path in integrations/ipfs_datasets/storage.py:218
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -34,3 +34,16 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 - Goal registration: dynamic
 - Todo vector key: 3f2581f03aaa928b
 - Acceptance: Codebase scan filed this finding from integrations/ipfs_datasets/storage.py:218. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-132-codebase-scan-3f2581f03aaa.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-133 Resolve dirty main checkout blocking 1 worktree merges
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Fingerprint: f1aaa19fc63e13007e6a2f4e090f9e64c4d89dfc
+- Dedupe key: reconciliation_guardrail:main_checkout_dirty
+- Depends on:
+- Outputs: data/refactor_supervisor/bundle_lanes/codebase-runtime-integrations-ipfs_datasets-storage/discovery, data/refactor_supervisor/objective_bundles/codebase-runtime-integrations-ipfs_datasets-storage.todo.md
+- Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/codebase-runtime-integrations-ipfs_datasets-storage/discovery/2026-07-22-ref-133-reconciliation-f1aaa19fc63e.md
+- Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/codebase-runtime-integrations-ipfs_datasets-storage/discovery/2026-07-22-ref-133-reconciliation-f1aaa19fc63e.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
