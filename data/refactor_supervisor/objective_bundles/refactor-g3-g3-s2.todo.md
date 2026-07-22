@@ -8,7 +8,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-011 Define graph persistence and query interfaces before moving support scoring
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G3
