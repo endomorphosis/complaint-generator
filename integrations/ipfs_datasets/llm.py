@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import importlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -12,6 +13,8 @@ from typing import Any, Dict, Mapping, Optional
 from .loader import import_attr_optional
 from .types import with_adapter_metadata
 
+
+logger = logging.getLogger(__name__)
 
 generate_text, _error = import_attr_optional("ipfs_datasets_py.llm_router", "generate_text")
 get_last_generation_trace, _trace_error = import_attr_optional("ipfs_datasets_py.llm_router", "get_last_generation_trace")
@@ -94,7 +97,14 @@ def _resolve_hf_token(env_overrides: Optional[Mapping[str, str]] = None) -> str:
 			if resolved:
 				return resolved
 	except Exception:
-		pass
+		# A broken or unconfigured keyring backend must not prevent the
+		# Hugging Face client fallback below, but the degraded credential lookup
+		# must remain observable to operators.
+		logger.warning(
+			"Hugging Face token lookup through keyring failed; "
+			"falling back to the Hugging Face client token cache",
+			exc_info=True,
+		)
 
 	try:
 		hub = importlib.import_module("huggingface_hub")
