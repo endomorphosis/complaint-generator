@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-206: REF-206 Define an evidence-backed goal lifecycle and completion state machine
+- [x] Task checkbox-206: REF-206 Define an evidence-backed goal lifecycle and completion state machine
 
 ## REF-206 Define an evidence-backed goal lifecycle and completion state machine
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
