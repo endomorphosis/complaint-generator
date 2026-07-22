@@ -8,7 +8,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-019 Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G6
