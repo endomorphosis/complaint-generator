@@ -4452,7 +4452,12 @@ class AdversarialSession:
                         phase_manager.update_phase_data(ComplaintPhase.FORMALIZATION, 'matching_results', matching_results)
                         phase_manager.update_phase_data(ComplaintPhase.FORMALIZATION, 'matching_complete', True)
         except Exception:
-            pass
+            logger.warning(
+                "Could not prepare formalization graphs for adversarial session %s; "
+                "continuing with the document-generation handoff",
+                self.session_id,
+                exc_info=True,
+            )
 
         builder = getattr(self.mediator, 'build_formal_complaint_document_package', None)
         if not callable(builder):
