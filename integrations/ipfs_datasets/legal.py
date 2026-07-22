@@ -651,7 +651,19 @@ def search_federal_register(
     end_date: Optional[str] = None,
     max_results: int = 10,
 ) -> List[Dict[str, Any]]:
+    search_key = "search_federal_register"
+    diagnostics: Dict[str, Any] = {
+        "search_key": search_key,
+        "query": str(query or ""),
+        "hf_dataset_id": DEFAULT_FEDERAL_REGISTER_DATASET_ID,
+        "attempted_backends": [],
+        "warning_code": "",
+        "warning_message": "",
+    }
+    _set_last_legal_search_diagnostic(search_key, None)
+
     if _search_federal_register_hf_index_async is not None:
+        diagnostics["attempted_backends"].append("huggingface_index")
         try:
             payload = run_async_compat(
                 _search_federal_register_hf_index_async(
@@ -672,16 +684,45 @@ def search_federal_register(
                 max_results=max_results,
             )
             if hf_results:
+                diagnostics["selected_backend"] = "huggingface_index"
+                diagnostics["final_status"] = "success"
+                _set_last_legal_search_diagnostic(search_key, diagnostics)
                 return _attach_hf_corpus_metadata(
                     hf_results,
                     hf_dataset_id=DEFAULT_FEDERAL_REGISTER_DATASET_ID,
                     retrieval_backend="huggingface_index",
                 )
-        except Exception:
-            pass
+            diagnostics["hf_index_status"] = "empty"
+        except Exception as exc:
+            # The upstream API below is an intentional availability fallback,
+            # but an index runtime failure must not be indistinguishable from
+            # an index that returned no matching records.
+            diagnostics["hf_index_failure"] = {
+                "backend": "huggingface_index",
+                "error_type": type(exc).__name__,
+                "error_message": str(exc),
+                "fallback": "upstream_api",
+            }
+            _set_hf_search_warning(
+                diagnostics,
+                warning_code="hf_index_search_failed",
+                warning_message=(
+                    "Federal Register Hugging Face index search failed; "
+                    "falling back to the upstream API."
+                ),
+            )
+            logger.warning(
+                "Federal Register Hugging Face index search failed; "
+                "falling back to the upstream API",
+                exc_info=True,
+            )
 
     if _search_federal_register_async is None:
+        diagnostics["selected_backend"] = ""
+        diagnostics["final_status"] = "empty_upstream_api_unavailable"
+        _set_last_legal_search_diagnostic(search_key, diagnostics)
         return []
+    diagnostics["attempted_backends"].append("upstream_api")
     payload = run_async_compat(
         _search_federal_register_async(
             keywords=query,
@@ -691,6 +732,9 @@ def search_federal_register(
         )
     )
     if not isinstance(payload, dict) or payload.get("status") != "success":
+        diagnostics["selected_backend"] = ""
+        diagnostics["final_status"] = "empty_upstream_api_failure"
+        _set_last_legal_search_diagnostic(search_key, diagnostics)
         return []
     items = _extract_payload_items(payload, "documents", "results")
     results = [
@@ -704,6 +748,9 @@ def search_federal_register(
         )
         for item in items[:max_results]
     ]
+    diagnostics["selected_backend"] = "upstream_api"
+    diagnostics["final_status"] = "success" if results else "empty"
+    _set_last_legal_search_diagnostic(search_key, diagnostics)
     return _attach_hf_corpus_metadata(
         results,
         hf_dataset_id=DEFAULT_FEDERAL_REGISTER_DATASET_ID,
