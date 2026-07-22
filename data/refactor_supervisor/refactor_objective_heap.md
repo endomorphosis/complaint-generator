@@ -105,7 +105,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P1
 - Bundle: refactor/g4/g4-s1
 - Goal: Create focused test lanes for refactor work
-- Evidence: pytest.ini, Makefile, docs/VERIFICATION_SUMMARY.md, A documented test lane map exists., Each P0 workstream has a named validation command., python -m pytest --collect-only -q, tests, pyproject.toml, Tests catch direct production imports where adapters are required., Tests avoid blocking intentional test-only imports., python -m pytest tests/test_package_imports.py -q
+- Evidence: pytest.ini, Makefile, docs/VERIFICATION_SUMMARY.md, A documented test lane map exists., Each P0 workstream has a named validation command., python -m pytest --collect-only -q, tests, pyproject.toml, Tests catch direct production imports where adapters are required., Tests avoid blocking intentional test-only imports., python -m pytest tests/test_package_imports.py -q, data/refactor_supervisor/discovery/2026-07-22-ref-071-objective-validation-repair.md, objective validation repair
 - Validation: python -m pytest --collect-only -q; python -m pytest tests/test_package_imports.py -q
 
 ## G5 Make automation observable and refillable

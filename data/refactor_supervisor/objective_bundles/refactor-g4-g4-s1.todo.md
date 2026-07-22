@@ -84,3 +84,48 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-016-dependency-guardrail.md
 - Acceptance: Dependency guardrail filed this because REF-015 has missing, self-referential, cyclic, or duplicate task-id metadata. Use the evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-016-dependency-guardrail.md to repair the todo board metadata or add the missing prerequisite task, then verify the original task can become ready once its real dependencies complete.
 - Dependency resolution: Preserved the original reconciliation task as REF-015 and reassigned the later, distinct reconciliation snapshot to the unused board-local id REF-017. REF-015 has no task prerequisites; the dependency guardrail reports no remaining findings, so an open REF-015 would be ready immediately.
+
+## REF-071 Close objective gap: Create focused test lanes for refactor work
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: ops
+- Depends on:
+- Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
+- Validation: python -m pytest --collect-only -q; python -m pytest tests/test_package_imports.py -q
+- Bundle: refactor/g4/g4-s1
+- Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md
+- Bundle strategy: explicit
+- Graph parents: G4
+- Graph depth: 1
+- Parallel lane: refactor/g4/g4-s1
+- Conflict policy: prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts
+- Predicted files:
+- Changed paths:
+- AST symbols: pytest.ini, Makefile, docs/VERIFICATION_SUMMARY.md, A documented test lane map exists., Each P0 workstream has a named validation command., python -m pytest --collect-only -q, tests, pyproject.toml, Tests catch direct production imports where adapters are required., Tests avoid blocking intentional test-only imports., python -m pytest tests/test_package_imports.py -q
+- Interfaces:
+- Submodules:
+- Generated artifacts:
+- Allow concurrent with:
+- Goal id: G4.S1
+- Canonical task key: task/v1/7b05e08535b5c207111d9e0eda5f181b5adda08fb3b6c121ffc0c12c199230fe
+- Canonical task CID: baguqeerapmc6bbjvwxbaoei5tyhnuxyydnnn3iepwo3mcip7ydasygmsgd7a
+- Missing evidence: objective validation repair
+- Embedding query: Create focused test lanes for refactor work
+- AST query: pytest.ini, Makefile, docs/VERIFICATION_SUMMARY.md, A documented test lane map exists., Each P0 workstream has a named validation command., python -m pytest --collect-only -q, tests, pyproject.toml, Tests catch direct production imports where adapters are required., Tests avoid blocking intentional test-only imports., python -m pytest tests/test_package_imports.py -q
+- Surplus group: objective/G4.S1
+- Merge key: 1fa82216065fd6d2
+- Merge family: objective/G4.S1
+- Merge role: validation_gate
+- Work item count: 1
+- Work scope: objective_validation_repair
+- Goal packet:
+- Goal packet role:
+- Goal packet goals:
+- Goal packet task count: 0
+- Goal packet work item count: 0
+- Candidate kind: validation_gate
+- Todo vector key: db9d75970eab21b5
+- Repair evidence: data/refactor_supervisor/discovery/2026-07-22-ref-071-objective-validation-repair.md; objective validation repair
+- Acceptance: Objective scan filed this gap for G4.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-071-objective-gap-ebc5b300e9b8.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap. Refine the objective heap if the gap needs smaller child goals.
