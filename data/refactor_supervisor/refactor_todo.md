@@ -1993,7 +1993,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-094 Resolve code annotation in complaint_phases/neurosymbolic_matcher.py:269
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P3
 - Track: runtime
@@ -2148,7 +2148,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-099 Review swallowed exception path in examples/codex_autopatch_from_run.py:83
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
