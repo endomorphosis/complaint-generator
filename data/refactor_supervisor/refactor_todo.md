@@ -1491,7 +1491,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-070 Close objective gap: Remove ad hoc import path behavior from production surfaces
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
