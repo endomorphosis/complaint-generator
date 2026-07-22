@@ -28,3 +28,17 @@ def test_normalize_external_url_does_not_swallow_unexpected_failures(monkeypatch
             "/documents/report.pdf",
             "https://quantumresidential.com/source",
         )
+
+
+def test_score_candidate_url_rejects_malformed_url() -> None:
+    assert research_bootstrap_workflow.score_candidate_url("http://[invalid-ipv6/report.pdf") is None
+
+
+def test_score_candidate_url_does_not_swallow_unexpected_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_url_parse(_url: str) -> object:
+        raise RuntimeError("unexpected URL scorer failure")
+
+    monkeypatch.setattr(research_bootstrap_workflow, "urlparse", fail_url_parse)
+
+    with pytest.raises(RuntimeError, match="unexpected URL scorer failure"):
+        research_bootstrap_workflow.score_candidate_url("https://example.com/report.pdf")

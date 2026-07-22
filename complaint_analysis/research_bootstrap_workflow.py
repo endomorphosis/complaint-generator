@@ -438,7 +438,10 @@ def is_quantum_domain(domain: str) -> bool:
 def score_candidate_url(url: str) -> tuple[int, str] | None:
     try:
         parsed = urlparse(url)
-    except Exception:
+    except ValueError:
+        # Candidate URLs originate in untrusted HTML and may contain malformed
+        # bracketed hosts or invalid Unicode in the authority component. Those
+        # links are unusable; unexpected scorer failures should remain visible.
         return None
     path = (parsed.path or "").lower()
     qs = parse_qs(parsed.query or "")
