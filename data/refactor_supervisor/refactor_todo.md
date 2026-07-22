@@ -60,7 +60,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-004 Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G1
