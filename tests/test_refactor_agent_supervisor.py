@@ -915,11 +915,14 @@ def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) 
         }
     ]
 
-    supervisor.write_seed_bundle_index(goals, task_statuses={"REF-001": "completed"})
+    result = supervisor.write_seed_bundle_index(goals, task_statuses={"REF-001": "completed"})
 
     index = json.loads((supervisor.BUNDLE_DIR / "index.json").read_text(encoding="utf-8"))
     member = index["bundles"]["refactor/g1/g1-s1"]["tasks"][0]
     assert member["status"] == "completed"
+    assert index["query_store"]["duckdb_path"] == "index.duckdb"
+    assert (supervisor.BUNDLE_DIR / "index.duckdb").exists()
+    assert result["bundle_index_duckdb_path"].endswith("index.duckdb")
 
 
 def test_seed_bundle_index_prunes_cross_bundle_and_colliding_task_blocks(
@@ -1262,6 +1265,7 @@ def test_status_projects_dynamic_parallel_scheduler_manifest(tmp_path, monkeypat
     assert payload["parallel_lanes"]["running_count"] == 2
     assert payload["parallel_lanes"]["ready_count"] == 5
     assert payload["parallel_lanes"]["lanes"][0]["task_ids"] == ["T-1"]
+    assert supervisor.BUNDLE_LANE_MANIFEST.with_suffix(".duckdb").exists()
 
 
 def test_parallel_scheduler_has_explicit_stop_command() -> None:

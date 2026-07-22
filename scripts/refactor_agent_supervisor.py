@@ -144,6 +144,13 @@ def _upstream_bundle_completion_receipt_loader():
     return bundle_member_completion_receipts
 
 
+def _upstream_artifact_store():
+    _ensure_accelerate_import_path()
+    from ipfs_accelerate_py.agent_supervisor import artifact_store
+
+    return artifact_store
+
+
 def merge_resolver_command() -> str:
     return shlex.join(
         (
@@ -1895,9 +1902,10 @@ def write_seed_bundle_index(
         "excluded_bundle_keys": sorted(excluded),
         "bundles": bundles,
     }
-    index_path.write_text(json.dumps(index_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _upstream_artifact_store().write_bundle_index_artifact(index_path, index_payload)
     return {
         "bundle_index_path": str(index_path),
+        "bundle_index_duckdb_path": str(index_path.with_suffix(".duckdb")),
         "bundle_count": len(bundles),
         "task_count": sum(len(bundle.get("tasks", [])) for bundle in bundles.values()),
         "dynamic_task_count": dynamic_task_count,
@@ -3252,6 +3260,7 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
                 "pid": existing_pid,
                 "pid_alive": True,
                 "manifest_path": str(BUNDLE_LANE_MANIFEST),
+                "manifest_duckdb_path": str(BUNDLE_LANE_MANIFEST.with_suffix(".duckdb")),
                 "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
             }
         BUNDLE_SCHEDULER_PID_PATH.unlink(missing_ok=True)
@@ -3375,6 +3384,7 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
         "pid_alive": started,
         "exit_code": process.poll(),
         "manifest_path": str(BUNDLE_LANE_MANIFEST),
+        "manifest_duckdb_path": str(BUNDLE_LANE_MANIFEST.with_suffix(".duckdb")),
         "coordination_path": str(BUNDLE_COORDINATION_PATH),
         "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
         "seed": seed_summary,
@@ -3387,6 +3397,7 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
                 "pid": process.pid,
                 "pid_alive": started,
                 "manifest_path": str(BUNDLE_LANE_MANIFEST),
+                "manifest_duckdb_path": str(BUNDLE_LANE_MANIFEST.with_suffix(".duckdb")),
                 "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
             },
             "last_parallel": payload,
@@ -3402,6 +3413,7 @@ def stop_parallel_bundle_supervisor() -> dict[str, Any]:
             "pid": 0,
             "pid_alive": False,
             "manifest_path": str(BUNDLE_LANE_MANIFEST),
+            "manifest_duckdb_path": str(BUNDLE_LANE_MANIFEST.with_suffix(".duckdb")),
         }
     try:
         pid = int(BUNDLE_SCHEDULER_PID_PATH.read_text(encoding="utf-8").strip())
@@ -3414,6 +3426,7 @@ def stop_parallel_bundle_supervisor() -> dict[str, Any]:
             "pid": pid,
             "pid_alive": False,
             "manifest_path": str(BUNDLE_LANE_MANIFEST),
+            "manifest_duckdb_path": str(BUNDLE_LANE_MANIFEST.with_suffix(".duckdb")),
         }
 
     try:
@@ -3432,6 +3445,7 @@ def stop_parallel_bundle_supervisor() -> dict[str, Any]:
         "pid_alive": not stopped,
         "signal": "SIGTERM",
         "manifest_path": str(BUNDLE_LANE_MANIFEST),
+        "manifest_duckdb_path": str(BUNDLE_LANE_MANIFEST.with_suffix(".duckdb")),
         "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
     }
     _write_status({"parallel_scheduler": result})
@@ -3930,9 +3944,44 @@ def status_payload() -> dict[str, Any]:
         ][:10]
     if BUNDLE_LANE_MANIFEST.exists():
         try:
-            manifest = json.loads(BUNDLE_LANE_MANIFEST.read_text(encoding="utf-8"))
+            artifact_store = _upstream_artifact_store()
+            manifest = artifact_store.read_artifact_fields(
+                BUNDLE_LANE_MANIFEST,
+                (
+                    "schema",
+                    "scheduler_state",
+                    "cycle",
+                    "planned_count",
+                    "started_count",
+                    "running_count",
+                    "ready_count",
+                    "blocked_count",
+                    "completed_count",
+                    "started",
+                ),
+            )
             dynamic = str(manifest.get("schema") or "").endswith("dynamic_bundle_scheduler@1")
-            lane_items = manifest.get("lanes", []) if dynamic else manifest.get("started", [])
+            if dynamic:
+                lane_rows = artifact_store.query_artifact(
+                    BUNDLE_LANE_MANIFEST,
+                    table="manifest_lanes",
+                    columns=(
+                        "bundle_key",
+                        "state",
+                        "pid",
+                        "log_path",
+                        "task_ids_json",
+                        "conflict_color",
+                    ),
+                    limit=10,
+                )["rows"]
+                lane_items = []
+                for item in lane_rows:
+                    lane = dict(item)
+                    lane["task_ids"] = json.loads(str(lane.pop("task_ids_json") or "[]"))
+                    lane_items.append(lane)
+            else:
+                lane_items = manifest.get("started", [])
             payload["parallel_lanes"] = {
                 "schema": manifest.get("schema"),
                 "scheduler_state": manifest.get("scheduler_state"),
@@ -3969,6 +4018,7 @@ def status_payload() -> dict[str, Any]:
         "pid": parallel_pid,
         "pid_alive": _pid_alive(parallel_pid),
         "manifest_path": str(BUNDLE_LANE_MANIFEST),
+        "manifest_duckdb_path": str(BUNDLE_LANE_MANIFEST.with_suffix(".duckdb")),
         "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
     }
     if MERGE_RESOLVER_STATUS_PATH.exists():
