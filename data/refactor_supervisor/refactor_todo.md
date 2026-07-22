@@ -3461,7 +3461,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-207-buildgoal-to-taskcodeastacceptanceandvalidationc
 - Acceptance: Every acceptance criterion maps to tasks, predicted and changed files, AST symbols or interfaces, validation commands, and resulting receipts with provenance.; The graph reports uncovered, weakly inferred, stale, contradicted, and verified surfaces separately.; Dynamic codebase findings attach to the most relevant registered goals while preserving a clearly labeled unmapped bucket.; Coverage calculations are deterministic and explain the evidence behind each edge.
 
-- [ ] Task checkbox-208: REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
+- [x] Task checkbox-208: REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
 
 ## REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
 
@@ -3482,11 +3482,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-208-enforceacompletiongateusingvalidationcoveragehea
 - Acceptance: Verified completion requires all mandatory acceptance criteria covered, required validations successful, evidence fresh, analyzer healthy, and configured exhaustion quorum satisfied.; Partial, skipped, failed, timed-out, duplicate-only, or unsupported analysis cannot satisfy the gate.; The gate emits machine-readable pass and fail reasons plus the exact evidence set it evaluated.; Parent goals aggregate child proof without hiding an inconclusive or reopened descendant.
 
-- [ ] Task checkbox-209: REF-209 Detect contradictory evidence and automatically reopen affected goals
+- [x] Task checkbox-209: REF-209 Detect contradictory evidence and automatically reopen affected goals
 
 ## REF-209 Detect contradictory evidence and automatically reopen affected goals
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
