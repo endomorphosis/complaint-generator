@@ -1950,6 +1950,9 @@ def seed_taskboard(
         "backlog_result": backlog_result,
     }
     goal_tree = _json_goal_tree(goals, scan, synchronization=synchronization, taskboard=taskboard)
+    implementation_claim_policy = existing_goal_tree.get("implementation_claim_policy")
+    if isinstance(implementation_claim_policy, dict):
+        goal_tree["implementation_claim_policy"] = implementation_claim_policy
     implementation_claims = existing_goal_tree.get("implementation_claims")
     if isinstance(implementation_claims, list):
         goal_tree["implementation_claims"] = implementation_claims

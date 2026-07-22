@@ -1159,6 +1159,12 @@
       "title": "Increase agent-supervisor planning quality and throughput"
     }
   ],
+  "implementation_claim_policy": {
+    "claim_count": 3,
+    "ordering": "dependency",
+    "source": "data/refactor_supervisor/refactor_todo.md",
+    "source_status": "todo"
+  },
   "implementation_claims": [
     {
       "acceptance": [
@@ -1166,6 +1172,7 @@
         "Missing optional dependencies continue to use the existing degraded-mode loader path."
       ],
       "depends_on": [],
+      "dependency_rationale": "The shared optional-dependency loader must be import-safe before capability and application callers rely on it.",
       "files": [
         "integrations/ipfs_datasets/loader.py"
       ],
@@ -1174,6 +1181,7 @@
       "priority": "P0",
       "sequence": 1,
       "source_task_id": "REF-003",
+      "source_task_status": "todo",
       "subgoal_id": "G1.S2",
       "title": "Remove runtime path bootstrapping from the IPFS datasets adapter loader",
       "validation": [
@@ -1188,6 +1196,7 @@
       "depends_on": [
         "CLAIM-001"
       ],
+      "dependency_rationale": "Capability discovery uses the loader established by CLAIM-001 and must expose a stable contract before applications adopt it.",
       "files": [
         "integrations/ipfs_datasets/capabilities.py",
         "integrations/ipfs_datasets/loader.py"
@@ -1197,6 +1206,7 @@
       "priority": "P0",
       "sequence": 2,
       "source_task_id": "REF-009",
+      "source_task_status": "todo",
       "subgoal_id": "G3.S1",
       "title": "Standardize adapter capability status and degraded-reason payloads",
       "validation": [
@@ -1211,6 +1221,7 @@
       "depends_on": [
         "CLAIM-002"
       ],
+      "dependency_rationale": "Application imports should move only after CLAIM-002 defines the adapter status and degraded-mode contract they consume.",
       "files": [
         "applications/complaint_cli.py",
         "applications/complaint_workspace.py"
@@ -1220,6 +1231,7 @@
       "priority": "P0",
       "sequence": 3,
       "source_task_id": "REF-004",
+      "source_task_status": "todo",
       "subgoal_id": "G1.S2",
       "title": "Route complaint application IPFS imports through the adapter boundary",
       "validation": [
