@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-22T01:51:15Z",
+  "generated_at": "2026-07-22T03:53:46Z",
   "goals": [
     {
       "id": "G1",
@@ -29,9 +29,10 @@
               "priority": "P0",
               "rationale": "Large modules dominate change risk and need explicit boundaries before extraction.",
               "stable_key": "g1:g1.s1:create an entrypoint and ownership map for the largest runtime modules",
+              "status": "complete",
               "subgoal_id": "G1.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-001",
               "title": "Create an entrypoint and ownership map for the largest runtime modules",
               "validation": [
                 "python -m pytest tests/test_package_imports.py -q"
@@ -53,9 +54,10 @@
               "priority": "P0",
               "rationale": "Refactors need a clear import direction to avoid moving complexity around.",
               "stable_key": "g1:g1.s1:document allowed dependency direction between applications, mediator, phases, integrations, and lib",
+              "status": "complete",
               "subgoal_id": "G1.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-002",
               "title": "Document allowed dependency direction between applications, mediator, phases, integrations, and lib",
               "validation": [
                 "python -m pytest tests/test_package_imports.py -q"
@@ -90,9 +92,10 @@
               "priority": "P0",
               "rationale": "The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.",
               "stable_key": "g1:g1.s2:replace production sys.path mutation with package-level imports or adapter loader calls",
+              "status": "needed",
               "subgoal_id": "G1.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-003",
               "title": "Replace production sys.path mutation with package-level imports or adapter loader calls",
               "validation": [
                 "python -m pytest tests/test_package_imports.py -q"
@@ -121,9 +124,10 @@
               "priority": "P0",
               "rationale": "Optional dependency behavior should stay behind the adapter boundary.",
               "stable_key": "g1:g1.s2:route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing",
+              "status": "needed",
               "subgoal_id": "G1.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-004",
               "title": "Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing",
               "validation": [
                 "python -m pytest tests/test_ipfs_adapter_layer.py -q"
@@ -158,9 +162,10 @@
               "priority": "P0",
               "rationale": "The mediator is the largest runtime file and carries high regression risk.",
               "stable_key": "g2:g2.s1:split mediator/mediator.py by workflow service while preserving public api compatibility",
+              "status": "needed",
               "subgoal_id": "G2.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-005",
               "title": "Split mediator/mediator.py by workflow service while preserving public API compatibility",
               "validation": [
                 "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q"
@@ -181,9 +186,10 @@
               "priority": "P0",
               "rationale": "Claim support hooks are large enough to hide unrelated concerns.",
               "stable_key": "g2:g2.s1:move claim support orchestration helpers into focused private modules",
+              "status": "needed",
               "subgoal_id": "G2.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-006",
               "title": "Move claim support orchestration helpers into focused private modules",
               "validation": [
                 "python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q"
@@ -210,9 +216,10 @@
               "priority": "P1",
               "rationale": "The workspace module mixes UI routing, state shaping, and workflow calls.",
               "stable_key": "g2:g2.s2:extract complaint workspace request handlers from ui state helpers",
+              "status": "needed",
               "subgoal_id": "G2.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-007",
               "title": "Extract complaint workspace request handlers from UI state helpers",
               "validation": [
                 "python -m pytest tests/test_review_api.py -q"
@@ -234,9 +241,10 @@
               "priority": "P1",
               "rationale": "Dashboard behavior is harder to test when fixtures and live assembly are interleaved.",
               "stable_key": "g2:g2.s2:separate dashboard fixture data from live route logic",
+              "status": "needed",
               "subgoal_id": "G2.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-008",
               "title": "Separate dashboard fixture data from live route logic",
               "validation": [
                 "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q"
@@ -271,9 +279,10 @@
               "priority": "P0",
               "rationale": "The existing backlog identifies adapter capability reporting as incomplete.",
               "stable_key": "g3:g3.s1:standardize capability status and degraded-reason payloads across adapters",
+              "status": "needed",
               "subgoal_id": "G3.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-009",
               "title": "Standardize capability status and degraded-reason payloads across adapters",
               "validation": [
                 "python -m pytest tests/test_ipfs_adapter_layer.py -q"
@@ -295,9 +304,10 @@
               "priority": "P0",
               "rationale": "Document parsing is still fallback-oriented and should be reusable across ingestion paths.",
               "stable_key": "g3:g3.s1:promote document parsing into a shared ingestion contract",
+              "status": "needed",
               "subgoal_id": "G3.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-010",
               "title": "Promote document parsing into a shared ingestion contract",
               "validation": [
                 "python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q"
@@ -325,9 +335,10 @@
               "priority": "P1",
               "rationale": "Graph support currently lacks a durable query plane.",
               "stable_key": "g3:g3.s2:define graph persistence and query interfaces before moving support scoring",
+              "status": "needed",
               "subgoal_id": "G3.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-011",
               "title": "Define graph persistence and query interfaces before moving support scoring",
               "validation": [
                 "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q"
@@ -349,9 +360,10 @@
               "priority": "P1",
               "rationale": "Formal validation should fail predictably when unavailable.",
               "stable_key": "g3:g3.s2:turn not_implemented logic paths into explicit capability-gated contracts",
+              "status": "needed",
               "subgoal_id": "G3.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-012",
               "title": "Turn not_implemented logic paths into explicit capability-gated contracts",
               "validation": [
                 "python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q"
@@ -387,9 +399,10 @@
               "priority": "P1",
               "rationale": "The repo has many tests; refactor agents need fast confidence lanes.",
               "stable_key": "g4:g4.s1:define smoke, adapter, mediator, document, and ui test lanes",
+              "status": "needed",
               "subgoal_id": "G4.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-013",
               "title": "Define smoke, adapter, mediator, document, and UI test lanes",
               "validation": [
                 "python -m pytest --collect-only -q"
@@ -411,9 +424,10 @@
               "priority": "P1",
               "rationale": "Dependency drift is a recurring refactor risk.",
               "stable_key": "g4:g4.s1:add import and dependency-boundary tests for production modules",
+              "status": "needed",
               "subgoal_id": "G4.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-014",
               "title": "Add import and dependency-boundary tests for production modules",
               "validation": [
                 "python -m pytest tests/test_package_imports.py -q"
@@ -448,9 +462,10 @@
               "priority": "P0",
               "rationale": "The requested supervisor needs a refill loop and visible board state.",
               "stable_key": "g5:g5.s1:keep the refactor taskboard synchronized with generated goals and subgoals",
+              "status": "needed",
               "subgoal_id": "G5.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-015",
               "title": "Keep the refactor taskboard synchronized with generated goals and subgoals",
               "validation": [
                 "python scripts/refactor_agent_supervisor.py seed --once"
@@ -471,9 +486,10 @@
               "priority": "P0",
               "rationale": "Long-running automation needs inspectable state and a clean stop path.",
               "stable_key": "g5:g5.s1:record supervisor status, scan metrics, and queue counts for handoff",
+              "status": "needed",
               "subgoal_id": "G5.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-016",
               "title": "Record supervisor status, scan metrics, and queue counts for handoff",
               "validation": [
                 "python scripts/refactor_agent_supervisor.py status"
@@ -509,9 +525,10 @@
               "priority": "P1",
               "rationale": "The scan found many broad exception handlers; refactors need predictable failure semantics.",
               "stable_key": "g6:g6.s1:audit broad exception handlers in mediator and adapter paths",
+              "status": "needed",
               "subgoal_id": "G6.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-017",
               "title": "Audit broad exception handlers in mediator and adapter paths",
               "validation": [
                 "python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q"
@@ -534,9 +551,10 @@
               "priority": "P1",
               "rationale": "Silent failures hide regressions during long-running automation.",
               "stable_key": "g6:g6.s1:convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks",
+              "status": "needed",
               "subgoal_id": "G6.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-018",
               "title": "Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks",
               "validation": [
                 "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q"
@@ -565,9 +583,10 @@
               "priority": "P1",
               "rationale": "Multiple daemon surfaces should be inspectable with the same status fields.",
               "stable_key": "g6:g6.s2:standardize daemon status payload shape across ui, scraper, gmail, and refactor supervisors",
+              "status": "needed",
               "subgoal_id": "G6.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-019",
               "title": "Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors",
               "validation": [
                 "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q"
@@ -589,9 +608,10 @@
               "priority": "P2",
               "rationale": "Operators need consistent guidance for stalled background workflows.",
               "stable_key": "g6:g6.s2:add queue count and last-cycle metrics to long-running automation docs",
+              "status": "needed",
               "subgoal_id": "G6.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-020",
               "title": "Add queue count and last-cycle metrics to long-running automation docs",
               "validation": [
                 "python scripts/refactor_agent_supervisor.py status"
@@ -627,9 +647,10 @@
               "priority": "P1",
               "rationale": "Review screens depend on stable payloads that should not be assembled ad hoc in route handlers.",
               "stable_key": "g7:g7.s1:move review payload normalization behind explicit dto helpers",
+              "status": "needed",
               "subgoal_id": "G7.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-021",
               "title": "Move review payload normalization behind explicit DTO helpers",
               "validation": [
                 "python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q"
@@ -651,9 +672,10 @@
               "priority": "P1",
               "rationale": "Large Playwright tests should share fixture setup before UI refactors.",
               "stable_key": "g7:g7.s1:create fixture builders for playwright review and dashboard smoke tests",
+              "status": "needed",
               "subgoal_id": "G7.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-022",
               "title": "Create fixture builders for Playwright review and dashboard smoke tests",
               "validation": [
                 "python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q"
@@ -688,9 +710,10 @@
               "priority": "P0",
               "rationale": "Existing roadmap work should feed the automated taskboard rather than drift separately.",
               "stable_key": "g8:g8.s1:cross-link ipfs datasets execution backlog tasks to refactor supervisor goals",
+              "status": "needed",
               "subgoal_id": "G8.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-023",
               "title": "Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals",
               "validation": [
                 "python scripts/refactor_agent_supervisor.py seed --once"
@@ -711,9 +734,10 @@
               "priority": "P0",
               "rationale": "A robust board still needs a practical starting order.",
               "stable_key": "g8:g8.s1:define first three implementation claims from the queued taskboard",
+              "status": "needed",
               "subgoal_id": "G8.S1",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-024",
               "title": "Define first three implementation claims from the queued taskboard",
               "validation": [
                 "python scripts/refactor_agent_supervisor.py status"
@@ -740,9 +764,10 @@
               "priority": "P1",
               "rationale": "Agents need a simple way to see the next work without opening DuckDB manually.",
               "stable_key": "g8:g8.s2:add a taskboard inspection command that prints queued refactor tasks compactly",
+              "status": "needed",
               "subgoal_id": "G8.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-025",
               "title": "Add a taskboard inspection command that prints queued refactor tasks compactly",
               "validation": [
                 "python scripts/refactor_agent_supervisor.py status"
@@ -764,9 +789,10 @@
               "priority": "P1",
               "rationale": "The supervisor itself should not duplicate tasks or emit malformed payloads.",
               "stable_key": "g8:g8.s2:create tests for refactor supervisor seed idempotence and task payload schema",
+              "status": "needed",
               "subgoal_id": "G8.S2",
               "supervisor": "refactor_agent_supervisor",
-              "task_id": "",
+              "task_id": "REF-026",
               "title": "Create tests for refactor supervisor seed idempotence and task payload schema",
               "validation": [
                 "python -m pytest tests/test_refactor_agent_supervisor.py -q"
@@ -808,6 +834,7 @@
               "priority": "P0",
               "rationale": "Bundle-local numeric task ids currently collide across boards and make global reconciliation ambiguous.",
               "stable_key": "g9:g9.s1:introduce canonical task identity and a durable supervisor task ledger",
+              "status": "complete",
               "subgoal_id": "G9.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-036",
@@ -839,6 +866,7 @@
               "priority": "P0",
               "rationale": "The current bundle supervisor starts the first N lexical bundles once and cannot reclaim idle lanes or discover refilled work.",
               "stable_key": "g9:g9.s1:replace static bundle launch with a dynamic leased worker pool",
+              "status": "complete",
               "subgoal_id": "G9.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-037",
@@ -870,6 +898,7 @@
               "priority": "P0",
               "rationale": "Independent lanes currently race to merge and repeatedly retry the same failed branches.",
               "stable_key": "g9:g9.s1:integrate a deduplicating single-consumer merge train",
+              "status": "complete",
               "subgoal_id": "G9.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-038",
@@ -906,6 +935,7 @@
               "priority": "P0",
               "rationale": "Goal parents are currently sorting hints while generated Profile G tasks carry no dependency task CIDs.",
               "stable_key": "g9:g9.s2:materialize a task dependency dag and schedule its critical path",
+              "status": "complete",
               "subgoal_id": "G9.S2",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-039",
@@ -937,6 +967,7 @@
               "priority": "P0",
               "rationale": "The current conflict domain uses one path root and lightweight semantic similarity, which misses multi-file and symbol overlap.",
               "stable_key": "g9:g9.s2:build an ast and changed-path conflict graph for lane coloring",
+              "status": "complete",
               "subgoal_id": "G9.S2",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-040",
@@ -967,6 +998,7 @@
               "priority": "P1",
               "rationale": "Profile G currently records a single constant-scored plan branch and the LLM proposal router is not part of scheduler decisions.",
               "stable_key": "g9:g9.s2:use llm_router to generate and evaluate structured plan branches",
+              "status": "needed",
               "subgoal_id": "G9.S2",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-041",
@@ -1005,6 +1037,7 @@
               "priority": "P1",
               "rationale": "Resource class, capability fit, and lane capacity are currently static even when workers are idle or providers are rate-limited.",
               "stable_key": "g9:g9.s3:schedule lanes from live resources and llm_router provider capacity",
+              "status": "needed",
               "subgoal_id": "G9.S3",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-042",
@@ -1035,6 +1068,7 @@
               "priority": "P1",
               "rationale": "Validation commands currently run serially without changed-file impact selection or reusable baseline results.",
               "stable_key": "g9:g9.s3:add impact-selected cached and parallel validation stages",
+              "status": "needed",
               "subgoal_id": "G9.S3",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-043",
@@ -1074,6 +1108,7 @@
               "priority": "P1",
               "rationale": "Status is split across launch manifests, wrapper files, lane state, and event logs, so planners cannot measure useful capacity.",
               "stable_key": "g9:g9.s4:publish authoritative throughput metrics and scheduler state",
+              "status": "needed",
               "subgoal_id": "G9.S4",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-044",
@@ -1108,6 +1143,7 @@
               "priority": "P2",
               "rationale": "Refill scans reread the tracked codebase and each implementation creates fresh worktree and submodule setup even when inputs are unchanged.",
               "stable_key": "g9:g9.s4:make ast scans and implementation workspaces incremental and reusable",
+              "status": "needed",
               "subgoal_id": "G9.S4",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-045",
@@ -1235,8 +1271,8 @@
       "pytest_ini": true
     },
     "python_file_count": 439,
-    "python_total_lines": 244750,
-    "scanned_at": "2026-07-22T01:51:15Z",
+    "python_total_lines": 245242,
+    "scanned_at": "2026-07-22T03:53:33Z",
     "signals": {
       "broad_exception_count": 375,
       "direct_ipfs_import_count": 215,
@@ -1442,7 +1478,7 @@
         "tests/unit/optimizers/graphrag/test_score_analyzer.py:19",
         "tests/unit_tests/optimizers/graphrag/test_domain_aware_config.py:16"
       ],
-      "silent_pass_count": 120,
+      "silent_pass_count": 122,
       "sys_path_mutation_count": 46,
       "sys_path_mutations": [
         "scripts/graphrag_email_manifest.py:9",
@@ -1500,6 +1536,352 @@
     },
     "test_file_count": 262
   },
+  "schema": "complaint_generator.refactor_supervisor.goals.v1",
   "source_supervisor_module": "ipfs_accelerate_py.agent_supervisor",
+  "synchronization": {
+    "backlog_result": {
+      "reason": "fast_seed",
+      "skipped": true
+    },
+    "configured_refill_floor": 20,
+    "counts": {
+      "queue": {
+        "completed": 0,
+        "completed_work_items": 0,
+        "failed": 0,
+        "failed_work_items": 0,
+        "queued": 12,
+        "queued_work_items": 21,
+        "running": 0,
+        "running_work_items": 0
+      },
+      "todo": {
+        "blocked": 0,
+        "complete": 17,
+        "in_progress": 0,
+        "needed": 32
+      }
+    },
+    "goal_count": 9,
+    "objective_result": {
+      "reason": "fast_seed",
+      "skipped": true
+    },
+    "queue_refill": {
+      "available_bundle_count": 15,
+      "available_work_items": 32,
+      "configured_floor": 20,
+      "enabled": true,
+      "floor_satisfied": true,
+      "floor_unit": "active_taskboard_work_items",
+      "queued_work_items_after": 21,
+      "queued_work_items_before": 21,
+      "submitted_bundle_count": 0,
+      "submitted_queue_ids": [],
+      "submitted_task_ids": []
+    },
+    "subgoal_count": 17,
+    "synchronized_at": "2026-07-22T03:53:46Z",
+    "task_count": 36
+  },
+  "taskboard": {
+    "task_count": 49,
+    "tasks": [
+      {
+        "checkbox_id": 1,
+        "status": "complete",
+        "task_id": "REF-001",
+        "title": "Create an entrypoint and ownership map for the largest runtime modules"
+      },
+      {
+        "checkbox_id": 2,
+        "status": "complete",
+        "task_id": "REF-002",
+        "title": "Document allowed dependency direction between applications, mediator, phases, integrations, and lib"
+      },
+      {
+        "checkbox_id": 3,
+        "status": "needed",
+        "task_id": "REF-003",
+        "title": "Replace production sys.path mutation with package-level imports or adapter loader calls"
+      },
+      {
+        "checkbox_id": 4,
+        "status": "needed",
+        "task_id": "REF-004",
+        "title": "Route direct ipfs_datasets_py imports through integrations/ipfs_datasets adapters where production-facing"
+      },
+      {
+        "checkbox_id": 5,
+        "status": "needed",
+        "task_id": "REF-005",
+        "title": "Split mediator/mediator.py by workflow service while preserving public API compatibility"
+      },
+      {
+        "checkbox_id": 6,
+        "status": "needed",
+        "task_id": "REF-006",
+        "title": "Move claim support orchestration helpers into focused private modules"
+      },
+      {
+        "checkbox_id": 7,
+        "status": "needed",
+        "task_id": "REF-007",
+        "title": "Extract complaint workspace request handlers from UI state helpers"
+      },
+      {
+        "checkbox_id": 8,
+        "status": "needed",
+        "task_id": "REF-008",
+        "title": "Separate dashboard fixture data from live route logic"
+      },
+      {
+        "checkbox_id": 9,
+        "status": "needed",
+        "task_id": "REF-009",
+        "title": "Standardize capability status and degraded-reason payloads across adapters"
+      },
+      {
+        "checkbox_id": 10,
+        "status": "needed",
+        "task_id": "REF-010",
+        "title": "Promote document parsing into a shared ingestion contract"
+      },
+      {
+        "checkbox_id": 11,
+        "status": "needed",
+        "task_id": "REF-011",
+        "title": "Define graph persistence and query interfaces before moving support scoring"
+      },
+      {
+        "checkbox_id": 12,
+        "status": "needed",
+        "task_id": "REF-012",
+        "title": "Turn not_implemented logic paths into explicit capability-gated contracts"
+      },
+      {
+        "checkbox_id": 13,
+        "status": "needed",
+        "task_id": "REF-013",
+        "title": "Define smoke, adapter, mediator, document, and UI test lanes"
+      },
+      {
+        "checkbox_id": 14,
+        "status": "needed",
+        "task_id": "REF-014",
+        "title": "Add import and dependency-boundary tests for production modules"
+      },
+      {
+        "checkbox_id": 15,
+        "status": "needed",
+        "task_id": "REF-015",
+        "title": "Keep the refactor taskboard synchronized with generated goals and subgoals"
+      },
+      {
+        "checkbox_id": 16,
+        "status": "needed",
+        "task_id": "REF-016",
+        "title": "Record supervisor status, scan metrics, and queue counts for handoff"
+      },
+      {
+        "checkbox_id": 17,
+        "status": "needed",
+        "task_id": "REF-017",
+        "title": "Audit broad exception handlers in mediator and adapter paths"
+      },
+      {
+        "checkbox_id": 18,
+        "status": "needed",
+        "task_id": "REF-018",
+        "title": "Convert silent pass blocks in user-facing workflows into debug logs or explicit fallbacks"
+      },
+      {
+        "checkbox_id": 19,
+        "status": "needed",
+        "task_id": "REF-019",
+        "title": "Standardize daemon status payload shape across UI, scraper, Gmail, and refactor supervisors"
+      },
+      {
+        "checkbox_id": 20,
+        "status": "needed",
+        "task_id": "REF-020",
+        "title": "Add queue count and last-cycle metrics to long-running automation docs"
+      },
+      {
+        "checkbox_id": 21,
+        "status": "needed",
+        "task_id": "REF-021",
+        "title": "Move review payload normalization behind explicit DTO helpers"
+      },
+      {
+        "checkbox_id": 22,
+        "status": "needed",
+        "task_id": "REF-022",
+        "title": "Create fixture builders for Playwright review and dashboard smoke tests"
+      },
+      {
+        "checkbox_id": 23,
+        "status": "needed",
+        "task_id": "REF-023",
+        "title": "Cross-link IPFS datasets execution backlog tasks to refactor supervisor goals"
+      },
+      {
+        "checkbox_id": 24,
+        "status": "needed",
+        "task_id": "REF-024",
+        "title": "Define first three implementation claims from the queued taskboard"
+      },
+      {
+        "checkbox_id": 25,
+        "status": "needed",
+        "task_id": "REF-025",
+        "title": "Add a taskboard inspection command that prints queued refactor tasks compactly"
+      },
+      {
+        "checkbox_id": 26,
+        "status": "needed",
+        "task_id": "REF-026",
+        "title": "Create tests for refactor supervisor seed idempotence and task payload schema"
+      },
+      {
+        "checkbox_id": 27,
+        "status": "needed",
+        "task_id": "REF-027",
+        "title": "Resolve dirty main checkout blocking 2 worktree merges"
+      },
+      {
+        "checkbox_id": 28,
+        "status": "complete",
+        "task_id": "REF-028",
+        "title": "Close objective gap: Stabilize repository boundaries"
+      },
+      {
+        "checkbox_id": 29,
+        "status": "complete",
+        "task_id": "REF-029",
+        "title": "Close objective gap: Decompose oversized orchestration modules"
+      },
+      {
+        "checkbox_id": 30,
+        "status": "complete",
+        "task_id": "REF-030",
+        "title": "Close objective gap: Harden adapter contracts and degraded mode"
+      },
+      {
+        "checkbox_id": 31,
+        "status": "complete",
+        "task_id": "REF-031",
+        "title": "Close objective gap: Prepare incremental implementation slices"
+      },
+      {
+        "checkbox_id": 32,
+        "status": "needed",
+        "task_id": "REF-032",
+        "title": "Close objective gap: Pay down error-handling and observability debt"
+      },
+      {
+        "checkbox_id": 33,
+        "status": "needed",
+        "task_id": "REF-033",
+        "title": "Close objective gap: Rationalize frontend and review surfaces"
+      },
+      {
+        "checkbox_id": 34,
+        "status": "complete",
+        "task_id": "REF-034",
+        "title": "Resolve 2 preflight-conflicting backlogged worktree merges"
+      },
+      {
+        "checkbox_id": 35,
+        "status": "complete",
+        "task_id": "REF-035",
+        "title": "Resolve validation retry-budget failure for REF-031"
+      },
+      {
+        "checkbox_id": 36,
+        "status": "complete",
+        "task_id": "REF-036",
+        "title": "Introduce canonical task identity and a durable supervisor task ledger"
+      },
+      {
+        "checkbox_id": 37,
+        "status": "complete",
+        "task_id": "REF-037",
+        "title": "Replace static bundle launch with a dynamic leased worker pool"
+      },
+      {
+        "checkbox_id": 38,
+        "status": "complete",
+        "task_id": "REF-038",
+        "title": "Integrate a deduplicating single-consumer merge train"
+      },
+      {
+        "checkbox_id": 39,
+        "status": "complete",
+        "task_id": "REF-039",
+        "title": "Materialize a task dependency DAG and schedule its critical path"
+      },
+      {
+        "checkbox_id": 40,
+        "status": "complete",
+        "task_id": "REF-040",
+        "title": "Build an AST and changed-path conflict graph for lane coloring"
+      },
+      {
+        "checkbox_id": 41,
+        "status": "needed",
+        "task_id": "REF-041",
+        "title": "Use llm_router to generate and evaluate structured plan branches"
+      },
+      {
+        "checkbox_id": 42,
+        "status": "needed",
+        "task_id": "REF-042",
+        "title": "Schedule lanes from live resources and llm_router provider capacity"
+      },
+      {
+        "checkbox_id": 43,
+        "status": "needed",
+        "task_id": "REF-043",
+        "title": "Add impact-selected cached and parallel validation stages"
+      },
+      {
+        "checkbox_id": 44,
+        "status": "needed",
+        "task_id": "REF-044",
+        "title": "Publish authoritative throughput metrics and scheduler state"
+      },
+      {
+        "checkbox_id": 45,
+        "status": "needed",
+        "task_id": "REF-045",
+        "title": "Make AST scans and implementation workspaces incremental and reusable"
+      },
+      {
+        "checkbox_id": 46,
+        "status": "complete",
+        "task_id": "REF-046",
+        "title": "Resolve merge retry-budget failure for REF-001"
+      },
+      {
+        "checkbox_id": 47,
+        "status": "complete",
+        "task_id": "REF-047",
+        "title": "Close objective gap: Prepare incremental implementation slices"
+      },
+      {
+        "checkbox_id": 48,
+        "status": "complete",
+        "task_id": "REF-048",
+        "title": "Close objective gap: Map package ownership and runtime entrypoints"
+      },
+      {
+        "checkbox_id": 49,
+        "status": "complete",
+        "task_id": "REF-049",
+        "title": "Close objective gap: Establish canonical coordination and merge flow"
+      }
+    ]
+  },
   "todo_path": "data/refactor_supervisor/refactor_todo.md"
 }
