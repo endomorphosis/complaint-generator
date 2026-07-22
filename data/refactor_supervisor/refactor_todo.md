@@ -39,7 +39,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Acceptance: Architecture docs identify allowed imports.; New work has a simple rule for where shared code belongs.
 - Completion evidence: Reconciled by merge commit ea77c82; current architecture and pyproject boundary rules passed all 7 package-import tests.
 
-- [ ] Task checkbox-3: REF-003 Replace production sys.path mutation with package-level imports or adapter loader calls
+- [x] Task checkbox-3: REF-003 Replace production sys.path mutation with package-level imports or adapter loader calls
 
 ## REF-003 Replace production sys.path mutation with package-level imports or adapter loader calls
 
@@ -141,11 +141,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Dashboard behavior is harder to test when fixtures and live assembly are interleaved.
 - Acceptance: Fixture builders are named and reusable.; Playwright smoke tests remain stable.
 
-- [ ] Task checkbox-9: REF-009 Standardize capability status and degraded-reason payloads across adapters
+- [x] Task checkbox-9: REF-009 Standardize capability status and degraded-reason payloads across adapters
 
 ## REF-009 Standardize capability status and degraded-reason payloads across adapters
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G3
@@ -158,11 +158,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The existing backlog identifies adapter capability reporting as incomplete.
 - Acceptance: All adapter groups report stable keys.; Missing optional extras produce actionable reasons.
 
-- [ ] Task checkbox-10: REF-010 Promote document parsing into a shared ingestion contract
+- [x] Task checkbox-10: REF-010 Promote document parsing into a shared ingestion contract
 
 ## REF-010 Promote document parsing into a shared ingestion contract
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G3
@@ -345,11 +345,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Operators need consistent guidance for stalled background workflows.
 - Acceptance: Docs explain where to find pid, log, status, and queue files.; Troubleshooting includes stale running task recovery.
 
-- [ ] Task checkbox-21: REF-021 Move review payload normalization behind explicit DTO helpers
+- [x] Task checkbox-21: REF-021 Move review payload normalization behind explicit DTO helpers
 
 ## REF-021 Move review payload normalization behind explicit DTO helpers
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G7
@@ -362,11 +362,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Review screens depend on stable payloads that should not be assembled ad hoc in route handlers.
 - Acceptance: DTO helpers cover coverage, follow-up, and support-path summaries.; Route response snapshots stay stable.
 
-- [ ] Task checkbox-22: REF-022 Create fixture builders for Playwright review and dashboard smoke tests
+- [x] Task checkbox-22: REF-022 Create fixture builders for Playwright review and dashboard smoke tests
 
 ## REF-022 Create fixture builders for Playwright review and dashboard smoke tests
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G7
@@ -877,7 +877,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-044 Publish authoritative throughput metrics and scheduler state
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G9
