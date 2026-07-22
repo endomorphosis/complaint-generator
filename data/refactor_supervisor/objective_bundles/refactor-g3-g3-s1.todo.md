@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-010 Promote document parsing into a shared ingestion contract
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G3
