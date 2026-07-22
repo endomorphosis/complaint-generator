@@ -971,9 +971,11 @@ def _materialize_parse_record(
     record_id: Optional[str] = None,
     ocr_attempted: bool = False,
     ocr_used: bool = False,
+    ocr_error: Optional[Mapping[str, Any]] = None,
     error: Optional[str] = None,
 ) -> Dict[str, Any]:
     metadata = dict(metadata or {})
+    ocr_error_details = dict(ocr_error or {})
     target_dir = _ensure_output_dir(output_dir)
     resolved_id = record_id or _stable_record_id(source_path, metadata)
     text = str(parsed.get("text") or "")
@@ -991,7 +993,10 @@ def _materialize_parse_record(
     )
     extraction_method = str(parse_metadata.get("extraction_method") or "")
     parse_quality = dict(parse_metadata.get("parse_quality") or {})
-    needs_ocr = bool("requires_ocr_or_binary_pdf" in list(parse_quality.get("quality_flags") or []))
+    needs_ocr = bool(
+        "requires_ocr_or_binary_pdf" in list(parse_quality.get("quality_flags") or [])
+        or (ocr_error_details and not ocr_used)
+    )
     checksum = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest() if text else ""
 
     record = {
@@ -1007,6 +1012,7 @@ def _materialize_parse_record(
         "extraction_method": extraction_method,
         "ocr_attempted": bool(ocr_attempted),
         "ocr_used": bool(ocr_used),
+        "ocr_error": ocr_error_details,
         "needs_ocr": needs_ocr,
         "error": error or "",
         "metadata": {
@@ -1020,6 +1026,7 @@ def _materialize_parse_record(
             "content_type": content_type,
             "ocr_attempted": bool(ocr_attempted),
             "ocr_used": bool(ocr_used),
+            "ocr_error": ocr_error_details,
             "needs_ocr": needs_ocr,
         },
         "parse": parsed,
@@ -1098,6 +1105,12 @@ def parse_pdf_to_record(
     chunk_size: int = 1000,
     overlap: int = 100,
 ) -> Dict[str, Any]:
+    """Parse a PDF and optionally improve a low-text result with OCR.
+
+    OCR is a best-effort enhancement: expected process and filesystem failures
+    retain the initial parse and are reported in ``ocr_error`` instead of
+    making an otherwise usable record fail.
+    """
     path = Path(pdf_path)
     if not path.exists():
         return _materialize_parse_record(
@@ -1117,6 +1130,7 @@ def parse_pdf_to_record(
     text = str(parsed.get("text") or "")
     ocr_attempted = False
     ocr_used = False
+    ocr_error: Dict[str, Any] = {}
 
     if enable_ocr and len(text.strip()) < 100 and shutil.which("ocrmypdf") is not None:
         ocr_attempted = True
@@ -1129,7 +1143,19 @@ def parse_pdf_to_record(
                 text=True,
                 timeout=300,
             )
-            if result.returncode == 0 and ocr_path.exists():
+            if result.returncode != 0:
+                process_message = str(result.stderr or result.stdout or "").strip()
+                ocr_error = {
+                    "error_type": "OCRProcessError",
+                    "message": process_message or f"ocrmypdf exited with status {result.returncode}",
+                    "returncode": int(result.returncode),
+                }
+            elif not ocr_path.exists():
+                ocr_error = {
+                    "error_type": "OCROutputMissing",
+                    "message": "ocrmypdf completed without creating an output PDF",
+                }
+            else:
                 ocr_parsed = parse_document_file(
                     str(ocr_path),
                     mime_type="application/pdf",
@@ -1145,8 +1171,11 @@ def parse_pdf_to_record(
                     parse_quality["ocr_used"] = True
                     parsed_metadata["parse_quality"] = parse_quality
                     parsed["metadata"] = parsed_metadata
-        except Exception:
-            pass
+        except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
+            ocr_error = {
+                "error_type": type(exc).__name__,
+                "message": str(exc) or type(exc).__name__,
+            }
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1157,6 +1186,7 @@ def parse_pdf_to_record(
         output_dir=output_dir,
         ocr_attempted=ocr_attempted,
         ocr_used=ocr_used,
+        ocr_error=ocr_error,
     )
 
 
