@@ -24,6 +24,7 @@ _debug_extract_reset_info_from_message = _codex_autopatch._debug_extract_reset_i
 _extract_first_error_message_from_exec_jsonl = _codex_autopatch._extract_first_error_message_from_exec_jsonl
 _extract_rate_limit_reset_info_with_exec_fallback = _codex_autopatch._extract_rate_limit_reset_info_with_exec_fallback
 _pick_reset_at_raw_from_rate_limit_artifact = _codex_autopatch._pick_reset_at_raw_from_rate_limit_artifact
+_write_rate_limit_artifact_payload = _codex_autopatch._write_rate_limit_artifact_payload
 
 
 def test_parse_iso_dt_rejects_malformed_provider_timestamp() -> None:
@@ -311,3 +312,24 @@ def test_pick_reset_at_prefers_provider_reset_at() -> None:
         "provider_reset_at": "2026-02-11T23:46:00+00:00",
     }
     assert _pick_reset_at_raw_from_rate_limit_artifact(data) == "2026-02-11T23:46:00+00:00"
+
+
+def test_write_rate_limit_artifact_payload_persists_metadata(tmp_path) -> None:
+    artifact_path = tmp_path / "codex_rate_limit.json"
+    payload = {"kind": "rate_limit", "will_retry": True, "sleep_seconds": 30}
+
+    _write_rate_limit_artifact_payload(str(artifact_path), payload)
+
+    assert json.loads(artifact_path.read_text(encoding="utf-8")) == payload
+
+
+def test_write_rate_limit_artifact_payload_does_not_swallow_write_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_open(*_args, **_kwargs):
+        raise OSError("rate-limit artifact is not writable")
+
+    monkeypatch.setattr("builtins.open", fail_open)
+
+    with pytest.raises(OSError, match="rate-limit artifact is not writable"):
+        _write_rate_limit_artifact_payload("codex_rate_limit.json", {"kind": "rate_limit"})
