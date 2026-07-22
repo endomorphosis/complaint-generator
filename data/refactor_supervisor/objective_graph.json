@@ -1,7 +1,7 @@
 {
-  "active_goal_count": 20,
-  "completed_goal_count": 6,
-  "generated_at": "2026-07-21T22:58:51.889947+00:00",
+  "active_goal_count": 18,
+  "completed_goal_count": 8,
+  "generated_at": "2026-07-22T00:37:27.559996+00:00",
   "goal_count": 26,
   "goals": [
     {
@@ -18,9 +18,7 @@
         "scripts/import_gmail_evidence.py",
         "scripts/import_local_eml_directory.py",
         "applications/complaint_cli.py",
-        "applications/dashboard_ui.py",
-        "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
-        "objective validation repair"
+        "applications/dashboard_ui.py"
       ],
       "fib_priority": 999999,
       "goal_id": "G1",
@@ -49,9 +47,7 @@
         "pyproject.toml",
         "Architecture docs identify allowed imports.",
         "New work has a simple rule for where shared code belongs.",
-        "python -m pytest tests/test_package_imports.py -q",
-        "data/refactor_supervisor/discovery/2026-07-21-ref-048-objective-validation-repair.md",
-        "objective validation repair"
+        "python -m pytest tests/test_package_imports.py -q"
       ],
       "fib_priority": 999999,
       "goal_id": "G1.S1",
@@ -59,7 +55,7 @@
         "G1"
       ],
       "refinement_depth": "1",
-      "status": "active",
+      "status": "completed",
       "title": "Map package ownership and runtime entrypoints",
       "track": "ops"
     },
@@ -179,9 +175,7 @@
         "integrations/ipfs_datasets/graphs.py",
         "complaint_phases/knowledge_graph.py",
         "integrations/ipfs_datasets/logic.py",
-        "lib/formal_logic",
-        "data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md",
-        "objective validation repair"
+        "lib/formal_logic"
       ],
       "fib_priority": 999999,
       "goal_id": "G3",
@@ -475,7 +469,7 @@
       "goal_id": "G8",
       "parents": [],
       "refinement_depth": "0",
-      "status": "active",
+      "status": "completed",
       "title": "Prepare incremental implementation slices",
       "track": "ops"
     },
@@ -1094,33 +1088,9 @@
     },
     {
       "fib_priority": 999999,
-      "goal_id": "G1.S1",
-      "graph_depth": 1,
-      "heap_index": 5,
-      "output_count": 0,
-      "parents": [
-        "G1"
-      ],
-      "priority": "P0",
-      "priority_rank": 0,
-      "required_evidence_count": 17,
-      "sort_key": [
-        999999,
-        0,
-        -68,
-        1,
-        "G1.S1"
-      ],
-      "status": "active",
-      "title": "Map package ownership and runtime entrypoints",
-      "track": "ops",
-      "work_surface_score": 68
-    },
-    {
-      "fib_priority": 999999,
       "goal_id": "G3.S2",
       "graph_depth": 1,
-      "heap_index": 6,
+      "heap_index": 5,
       "output_count": 0,
       "parents": [
         "G3"
@@ -1144,7 +1114,7 @@
       "fib_priority": 999999,
       "goal_id": "G8.S2",
       "graph_depth": 1,
-      "heap_index": 7,
+      "heap_index": 6,
       "output_count": 0,
       "parents": [
         "G8"
@@ -1168,7 +1138,7 @@
       "fib_priority": 999999,
       "goal_id": "G3.S1",
       "graph_depth": 1,
-      "heap_index": 8,
+      "heap_index": 7,
       "output_count": 0,
       "parents": [
         "G3"
@@ -1192,7 +1162,7 @@
       "fib_priority": 999999,
       "goal_id": "G5.S1",
       "graph_depth": 1,
-      "heap_index": 9,
+      "heap_index": 8,
       "output_count": 0,
       "parents": [
         "G5"
@@ -1216,7 +1186,7 @@
       "fib_priority": 999999,
       "goal_id": "G8.S1",
       "graph_depth": 1,
-      "heap_index": 10,
+      "heap_index": 9,
       "output_count": 0,
       "parents": [
         "G8"
@@ -1240,7 +1210,7 @@
       "fib_priority": 999999,
       "goal_id": "G2.S1",
       "graph_depth": 1,
-      "heap_index": 11,
+      "heap_index": 10,
       "output_count": 0,
       "parents": [
         "G2"
@@ -1264,7 +1234,7 @@
       "fib_priority": 999999,
       "goal_id": "G2.S2",
       "graph_depth": 1,
-      "heap_index": 12,
+      "heap_index": 11,
       "output_count": 0,
       "parents": [
         "G2"
@@ -1286,31 +1256,9 @@
     },
     {
       "fib_priority": 999999,
-      "goal_id": "G8",
-      "graph_depth": 0,
-      "heap_index": 13,
-      "output_count": 0,
-      "parents": [],
-      "priority": "P0",
-      "priority_rank": 0,
-      "required_evidence_count": 7,
-      "sort_key": [
-        999999,
-        0,
-        -28,
-        0,
-        "G8"
-      ],
-      "status": "active",
-      "title": "Prepare incremental implementation slices",
-      "track": "ops",
-      "work_surface_score": 28
-    },
-    {
-      "fib_priority": 999999,
       "goal_id": "G6.S2",
       "graph_depth": 1,
-      "heap_index": 14,
+      "heap_index": 12,
       "output_count": 0,
       "parents": [
         "G6"
@@ -1334,7 +1282,7 @@
       "fib_priority": 999999,
       "goal_id": "G7.S1",
       "graph_depth": 1,
-      "heap_index": 15,
+      "heap_index": 13,
       "output_count": 0,
       "parents": [
         "G7"
@@ -1358,7 +1306,7 @@
       "fib_priority": 999999,
       "goal_id": "G6",
       "graph_depth": 0,
-      "heap_index": 16,
+      "heap_index": 14,
       "output_count": 0,
       "parents": [],
       "priority": "P1",
@@ -1380,7 +1328,7 @@
       "fib_priority": 999999,
       "goal_id": "G6.S1",
       "graph_depth": 1,
-      "heap_index": 17,
+      "heap_index": 15,
       "output_count": 0,
       "parents": [
         "G6"
@@ -1404,7 +1352,7 @@
       "fib_priority": 999999,
       "goal_id": "G4.S1",
       "graph_depth": 1,
-      "heap_index": 18,
+      "heap_index": 16,
       "output_count": 0,
       "parents": [
         "G4"
@@ -1428,7 +1376,7 @@
       "fib_priority": 999999,
       "goal_id": "G7",
       "graph_depth": 0,
-      "heap_index": 19,
+      "heap_index": 17,
       "output_count": 0,
       "parents": [],
       "priority": "P1",
@@ -1450,7 +1398,7 @@
   "objective_path": "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_objective_heap.md",
   "schema": "ipfs_accelerate_py.agent_supervisor.objective_graph",
   "thought_graph": {
-    "edge_count": 451,
+    "edge_count": 447,
     "edges": [
       {
         "from": "goal:G1",
@@ -1511,16 +1459,6 @@
         "from": "goal:G1",
         "kind": "requires_evidence",
         "to": "evidence:01b06d0183a3"
-      },
-      {
-        "from": "goal:G1",
-        "kind": "requires_evidence",
-        "to": "evidence:f56dc3cd8d39"
-      },
-      {
-        "from": "goal:G1",
-        "kind": "requires_evidence",
-        "to": "evidence:b2c7f787b17c"
       },
       {
         "from": "goal:G1",
@@ -1936,16 +1874,6 @@
         "from": "goal:G3",
         "kind": "requires_evidence",
         "to": "evidence:b04fe9f20996"
-      },
-      {
-        "from": "goal:G3",
-        "kind": "requires_evidence",
-        "to": "evidence:3d8b3df478e0"
-      },
-      {
-        "from": "goal:G3",
-        "kind": "requires_evidence",
-        "to": "evidence:e55df40b4552"
       },
       {
         "from": "goal:G3",
@@ -3708,7 +3636,7 @@
         "to": "validation:1121ae702863"
       }
     ],
-    "node_count": 468,
+    "node_count": 464,
     "nodes": [
       {
         "goal_id": "G7.S1",
@@ -4444,13 +4372,6 @@
         "kind": "evidence_requirement",
         "term": "release drained or blocked leases",
         "thought": "Find or create repository evidence proving `release drained or blocked leases`."
-      },
-      {
-        "goal_id": "G3",
-        "id": "evidence:3d8b3df478e0",
-        "kind": "evidence_requirement",
-        "term": "data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md",
-        "thought": "Find or create repository evidence proving `data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md`."
       },
       {
         "goal_id": "G4.S1",
@@ -5762,13 +5683,6 @@
         "thought": "Find or create repository evidence proving `mediator/evidence_hooks.py`."
       },
       {
-        "goal_id": "G1",
-        "id": "evidence:b2c7f787b17c",
-        "kind": "evidence_requirement",
-        "term": "objective validation repair",
-        "thought": "Find or create repository evidence proving `objective validation repair`."
-      },
-      {
         "goal_id": "G6.S2",
         "id": "evidence:b31f684b6fea",
         "kind": "evidence_requirement",
@@ -6252,13 +6166,6 @@
         "thought": "Find or create repository evidence proving `applications/complaint_cli.py`."
       },
       {
-        "goal_id": "G3",
-        "id": "evidence:e55df40b4552",
-        "kind": "evidence_requirement",
-        "term": "objective validation repair",
-        "thought": "Find or create repository evidence proving `objective validation repair`."
-      },
-      {
         "goal_id": "G9.S1",
         "id": "evidence:e60b8a5484c4",
         "kind": "evidence_requirement",
@@ -6425,13 +6332,6 @@
         "kind": "evidence_requirement",
         "term": "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py",
         "thought": "Find or create repository evidence proving `ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py`."
-      },
-      {
-        "goal_id": "G1",
-        "id": "evidence:f56dc3cd8d39",
-        "kind": "evidence_requirement",
-        "term": "data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md",
-        "thought": "Find or create repository evidence proving `data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md`."
       },
       {
         "goal_id": "G9",
@@ -6637,7 +6537,7 @@
         "id": "goal:G1.S1",
         "kind": "goal",
         "priority": "P0",
-        "status": "active",
+        "status": "completed",
         "thought": "Map package ownership and runtime entrypoints",
         "title": "Map package ownership and runtime entrypoints",
         "track": "ops"
@@ -6807,7 +6707,7 @@
         "id": "goal:G8",
         "kind": "goal",
         "priority": "P0",
-        "status": "active",
+        "status": "completed",
         "thought": "Prepare incremental implementation slices",
         "title": "Prepare incremental implementation slices",
         "track": "ops"
