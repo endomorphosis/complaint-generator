@@ -4,15 +4,12 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G1 Stabilize repository boundaries
 
-- Status: completed
+- Status: active
 - Priority: P0
 - Bundle: refactor/g1
 - Goal: Stabilize repository boundaries
-- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, docs/ARCHITECTURE.md, pyproject.toml, scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, applications/complaint_cli.py, applications/dashboard_ui.py, data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md, objective validation repair
+- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, docs/ARCHITECTURE.md, pyproject.toml, scripts/graphrag_email_manifest.py, scripts/import_gmail_evidence.py, scripts/import_local_eml_directory.py, applications/complaint_cli.py, applications/dashboard_ui.py
 - Validation: python -m pytest --collect-only -q
-- Completed at: 2026-07-21T22:44:23.904588+00:00
-- Completion evidence: docs/ARCHITECTURE.md => docs/ARCHITECTURE.md (path), DOCUMENTATION_INDEX.md (exact), README.md (exact); docs/REFACTOR_SUPERVISOR_TASKBOARD.md => docs/REFACTOR_SUPERVISOR_TASKBOARD.md (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); mediator/mediator.py => mediator/mediator.py (path), .github/workflows/claim-support-regression.yml (exact), .github/workflows/standard-regression.yml (exact); applications/complaint_workspace.py => applications/complaint_workspace.py (path), .complaint_workspace/sessions/demo-user.json (embedding:0.31), .github/workflows/claim-support-regression.yml (exact); tests/test_claim_support_review_playwright_smoke.py => tests/test_claim_support_review_playwright_smoke.py (path), .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast); pyproject.toml => pyproject.toml (path), .github/workflows/claim-support-regression.yml (exact), .github/workflows/standard-regression.yml (exact); scripts/graphrag_email_manifest.py => scripts/graphrag_email_manifest.py (path), complaint_generator/email_agentic_search.py (embedding:0.64), complaint_generator/email_graphrag.py (embedding:0.59); scripts/import_gmail_evidence.py => scripts/import_gmail_evidence.py (path), .complaint_workspace/sessions/alias-script-user.json (ast), .complaint_workspace/sessions/demo-user.json (ast); scripts/import_local_eml_directory.py => scripts/import_local_eml_directory.py (path), adversarial_harness/complainant.py (ast), adversarial_harness/critic.py (ast); applications/complaint_cli.py => applications/complaint_cli.py (path), .complaint_workspace/sessions/demo-user.json (embedding:0.32), .github/workflows/claim-support-regression.yml (exact); applications/dashboard_ui.py => applications/dashboard_ui.py (path), .github/workflows/claim-support-regression.yml (embedding:0.39), .github/workflows/standard-regression.yml (embedding:0.43); data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md => data/refactor_supervisor/discovery/2026-07-21-ref-028-objective-validation-repair.md (path), .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast); objective validation repair => .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast), .complaint_workspace/sessions/site-sdk-user2.json (ast)
-- Completion validation: 0
 
 ## G1.S1 Map package ownership and runtime entrypoints
 
@@ -21,7 +18,7 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 - Priority: P0
 - Bundle: refactor/g1/g1-s1
 - Goal: Map package ownership and runtime entrypoints
-- Evidence: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs., python -m pytest tests/test_package_imports.py -q, data/refactor_supervisor/discovery/2026-07-21-ref-048-objective-validation-repair.md, objective validation repair
+- Evidence: mediator/mediator.py, applications/complaint_workspace.py, tests/test_claim_support_review_playwright_smoke.py, scripts/synthesize_hacc_complaint.py, tests/test_review_api.py, complaint_phases/denoiser.py, A short module ownership map exists., Entrypoints are grouped by CLI, web, mediator, and workflow role., python -m pytest tests/test_package_imports.py -q, docs/ARCHITECTURE.md, pyproject.toml, Architecture docs identify allowed imports., New work has a simple rule for where shared code belongs., python -m pytest tests/test_package_imports.py -q
 - Validation: python -m pytest tests/test_package_imports.py -q
 
 ## G1.S2 Remove ad hoc import path behavior from production surfaces
@@ -36,15 +33,12 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G2 Decompose oversized orchestration modules
 
-- Status: completed
+- Status: active
 - Priority: P0
 - Bundle: refactor/g2
 - Goal: Decompose oversized orchestration modules
 - Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, mediator/mediator.py, mediator/__init__.py, mediator/claim_support_hooks.py, applications/complaint_workspace.py, applications/dashboard_ui.py, playwright/server.js
 - Validation: python -m pytest --collect-only -q
-- Completed at: 2026-07-21T22:44:23.904588+00:00
-- Completion evidence: docs/ARCHITECTURE.md => docs/ARCHITECTURE.md (path), DOCUMENTATION_INDEX.md (exact), README.md (exact); docs/REFACTOR_SUPERVISOR_TASKBOARD.md => docs/REFACTOR_SUPERVISOR_TASKBOARD.md (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); mediator/mediator.py => mediator/mediator.py (path), .github/workflows/claim-support-regression.yml (exact), .github/workflows/standard-regression.yml (exact); mediator/__init__.py => mediator/__init__.py (path), .github/workflows/claim-support-regression.yml (embedding:0.54), .github/workflows/standard-regression.yml (exact); mediator/claim_support_hooks.py => mediator/claim_support_hooks.py (path), .github/workflows/claim-support-regression.yml (exact), .github/workflows/standard-regression.yml (exact); applications/complaint_workspace.py => applications/complaint_workspace.py (path), .complaint_workspace/sessions/demo-user.json (embedding:0.31), .github/workflows/claim-support-regression.yml (exact); applications/dashboard_ui.py => applications/dashboard_ui.py (path), .github/workflows/claim-support-regression.yml (embedding:0.39), .github/workflows/standard-regression.yml (embedding:0.43); playwright/server.js => playwright/server.js (path), TESTING.md (exact), applications/launcher.py (ast)
-- Completion validation: 0
 
 ## G2.S1 Extract mediator service seams
 
@@ -68,15 +62,12 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G3 Harden adapter contracts and degraded mode
 
-- Status: completed
+- Status: active
 - Priority: P0
 - Bundle: refactor/g3
 - Goal: Harden adapter contracts and degraded mode
-- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, integrations/ipfs_datasets/logic.py, lib/formal_logic, data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md, objective validation repair
+- Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, integrations/ipfs_datasets/capabilities.py, integrations/ipfs_datasets/loader.py, integrations/ipfs_datasets/documents.py, mediator/evidence_hooks.py, integrations/ipfs_datasets/graphs.py, complaint_phases/knowledge_graph.py, integrations/ipfs_datasets/logic.py, lib/formal_logic
 - Validation: python -m pytest --collect-only -q
-- Completed at: 2026-07-21T22:56:12.673433+00:00
-- Completion evidence: docs/ARCHITECTURE.md => docs/ARCHITECTURE.md (path), DOCUMENTATION_INDEX.md (exact), README.md (exact); docs/REFACTOR_SUPERVISOR_TASKBOARD.md => docs/REFACTOR_SUPERVISOR_TASKBOARD.md (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); integrations/ipfs_datasets/capabilities.py => integrations/ipfs_datasets/capabilities.py (path), SESSION_84_FINAL_SUMMARY.md (ast), TODO.md (embedding:0.31); integrations/ipfs_datasets/loader.py => integrations/ipfs_datasets/loader.py (path), P3_INFRASTRUCTURE_COMPLETION_SESSION.md (embedding:0.54), P3_SESSION_4_INFRASTRUCTURE_SUMMARY.md (embedding:0.33); integrations/ipfs_datasets/documents.py => integrations/ipfs_datasets/documents.py (path), .complaint_workspace/sessions/alias-script-user.json (ast), .complaint_workspace/sessions/demo-user.json (ast); mediator/evidence_hooks.py => mediator/evidence_hooks.py (path), .complaint_workspace/sessions/alias-script-user.json (ast), .complaint_workspace/sessions/demo-user.json (ast); integrations/ipfs_datasets/graphs.py => integrations/ipfs_datasets/graphs.py (path), BATCH_328_API_RETURN_TYPES_SUMMARY.md (embedding:0.33), DOCUMENTATION_INDEX.md (embedding:0.56); complaint_phases/knowledge_graph.py => complaint_phases/knowledge_graph.py (path), AUTONOMOUS_SESSION_REPORT.md (embedding:0.30), BATCH_328_API_RETURN_TYPES_SUMMARY.md (embedding:0.32); integrations/ipfs_datasets/logic.py => integrations/ipfs_datasets/logic.py (path), BATCH_328_API_RETURN_TYPES_SUMMARY.md (embedding:0.33), DOCUMENTATION_INDEX.md (embedding:0.57); lib/formal_logic => lib/formal_logic (path), adversarial_harness/search_hooks.py (ast), complaint_phases/deontic_logic.py (embedding:0.65); data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md => data/refactor_supervisor/discovery/2026-07-21-ref-030-objective-validation-repair.md (path), .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast); objective validation repair => .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast), .complaint_workspace/sessions/site-sdk-user2.json (ast)
-- Completion validation: 0
 
 ## G3.S1 Normalize IPFS datasets adapter payloads
 
@@ -100,15 +91,12 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G4 Improve validation speed and confidence
 
-- Status: completed
+- Status: active
 - Priority: P1
 - Bundle: refactor/g4
 - Goal: Improve validation speed and confidence
 - Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, pytest.ini, Makefile, docs/VERIFICATION_SUMMARY.md, tests, pyproject.toml
 - Validation: python -m pytest --collect-only -q
-- Completed at: 2026-07-21T22:44:23.904588+00:00
-- Completion evidence: docs/ARCHITECTURE.md => docs/ARCHITECTURE.md (path), DOCUMENTATION_INDEX.md (exact), README.md (exact); docs/REFACTOR_SUPERVISOR_TASKBOARD.md => docs/REFACTOR_SUPERVISOR_TASKBOARD.md (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); pytest.ini => pytest.ini (path), .github/workflows/claim-support-regression.yml (exact), .github/workflows/hacc-unit-regression.yml (exact); Makefile => Makefile (path), .github/workflows/standard-regression.yml (exact), README.md (exact); docs/VERIFICATION_SUMMARY.md => docs/VERIFICATION_SUMMARY.md (path), .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast); tests => tests (path), .github/pull_request_template.md (exact), .github/workflows/claim-support-regression.yml (exact); pyproject.toml => pyproject.toml (path), .github/workflows/claim-support-regression.yml (exact), .github/workflows/standard-regression.yml (exact)
-- Completion validation: 0
 
 ## G4.S1 Create focused test lanes for refactor work
 
@@ -122,15 +110,12 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G5 Make automation observable and refillable
 
-- Status: completed
+- Status: active
 - Priority: P0
 - Bundle: refactor/g5
 - Goal: Make automation observable and refillable
 - Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, scripts/refactor_agent_supervisor.py, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, data/refactor_supervisor
 - Validation: python -m pytest --collect-only -q
-- Completed at: 2026-07-21T22:44:23.904588+00:00
-- Completion evidence: docs/ARCHITECTURE.md => docs/ARCHITECTURE.md (path), DOCUMENTATION_INDEX.md (exact), README.md (exact); docs/REFACTOR_SUPERVISOR_TASKBOARD.md => docs/REFACTOR_SUPERVISOR_TASKBOARD.md (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); scripts/refactor_agent_supervisor.py => scripts/refactor_agent_supervisor.py (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); data/refactor_supervisor => data/refactor_supervisor (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast)
-- Completion validation: 0
 
 ## G5.S1 Operate a durable refactor taskboard
 
@@ -221,15 +206,12 @@ Ultimate objective: Refactor complaint-generator safely and incrementally while 
 
 ## G9 Increase agent-supervisor planning quality and throughput
 
-- Status: completed
+- Status: active
 - Priority: P0
 - Bundle: refactor/g9
 - Goal: Increase agent-supervisor planning quality and throughput
 - Evidence: docs/ARCHITECTURE.md, docs/REFACTOR_SUPERVISOR_TASKBOARD.md, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py
 - Validation: python -m pytest --collect-only -q
-- Completed at: 2026-07-21T22:44:23.904588+00:00
-- Completion evidence: docs/ARCHITECTURE.md => docs/ARCHITECTURE.md (path), DOCUMENTATION_INDEX.md (exact), README.md (exact); docs/REFACTOR_SUPERVISOR_TASKBOARD.md => docs/REFACTOR_SUPERVISOR_TASKBOARD.md (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_identity.py (path), .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py (path), .complaint_workspace/sessions/demo-user.json (ast), AUTONOMOUS_SESSION_REPORT.md (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/lease_coordination.py (path), .complaint_workspace/sessions/demo-user.json (ast), complaint_generator/local_evidence_import.py (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py (path), .complaint_workspace/sessions/demo-user.json (ast), docs/FEATURE_WIRING_MATRIX.json (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py (path), .complaint_workspace/sessions/demo-user.json (ast), docs/FEATURE_WIRING_MATRIX.json (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_queue.py (path), .complaint_workspace/sessions/demo-user.json (ast), applications/ui_review.py (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_train.py => .complaint_workspace/sessions/demo-user.json (ast), docs/ARCHITECTURE.md (embedding:0.31), docs/DOCUMENT_GENERATION_AGENTIC_OPTIMIZATION_PLAN.md (embedding:0.65); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/merge_resolver.py (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py => .complaint_workspace/sessions/demo-user.json (ast), docs/FEATURE_WIRING_MATRIX.json (ast), docs/FEATURE_WIRING_MATRIX.md (embedding:0.58); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/demo_autopatch.py (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py => .complaint_workspace/sessions/demo-user.json (ast), docs/FEATURE_WIRING_MATRIX.json (ast), docs/HACC_VS_IPFS_DATASETS_QUICK.md (embedding:0.66); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py (path), .complaint_workspace/sessions/demo-user.json (ast), AUTONOMOUS_SESSION_REPORT.md (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/resource_scheduler.py => .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast), .complaint_workspace/sessions/site-sdk-user2.json (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_commands.py (path), .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/validation_scheduler.py => .complaint_workspace/sessions/demo-user.json (ast), .complaint_workspace/sessions/site-sdk-user.json (ast), .complaint_workspace/sessions/site-sdk-user2.json (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py (path), .complaint_workspace/sessions/demo-user.json (ast), SESSION_SUMMARY_2026_02_23.md (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py => .complaint_workspace/sessions/demo-user.json (ast), docs/ADVERSARIAL_IMPLEMENTATION_SUMMARY.md (ast), docs/FEATURE_WIRING_MATRIX.json (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/search_hooks.py (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/supervisor_watchdog.py (path), .complaint_workspace/sessions/demo-user.json (ast), docs/FEATURE_WIRING_MATRIX.json (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast); ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py => ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/worktrees.py (path), .complaint_workspace/sessions/demo-user.json (ast), adversarial_harness/complainant.py (ast)
-- Completion validation: 0
 
 ## G9.S1 Establish canonical coordination and merge flow
 

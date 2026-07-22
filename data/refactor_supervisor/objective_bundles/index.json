@@ -3,13 +3,15 @@
   "bundles": {
     "refactor/g1/g1-s1": {
       "bundle_key": "refactor/g1/g1-s1",
-      "bundle_strategy": "explicit",
-      "conflict_policy": "prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts",
+      "bundle_strategy": "goal_subgoal_ast",
+      "conflict_policy": "prefer bundle-local changes; reconcile generated worktrees before merge",
       "parallel_lane": "refactor/g1/g1-s1",
       "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g1-g1-s1.todo.md",
       "tasks": [
         {
           "ast_symbols": [
+            "MODULE_OWNERSHIP",
+            "RUNTIME_ENTRYPOINT_ROLE",
             "ALIGNMENT_TASK_UPDATE_HISTORY_LIMIT",
             "FOLLOW_UP_REVIEWABLE_ESCALATION_STATUSES",
             "Mediator",
@@ -87,24 +89,25 @@
             "save_claim_support_document",
             "get_claim_contradiction_candidates",
             "persist_claim_support_diagnostics",
-            "prune_claim_support_diagnostic_snapshots",
-            "get_claim_support_diagnostic_snapshots",
-            "get_recent_claim_follow_up_execution"
+            "prune_claim_support_diagnostic_snapshots"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G1.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G1",
+            "G1.S1"
+          ],
+          "goal_packet_key": "G1.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 6,
           "graph_depth": 1,
-          "merge_family": "G1.S1",
-          "merge_key": "419974cf3f0fbfd2",
-          "merge_role": "candidate",
+          "merge_family": "G1",
+          "merge_key": "refactor/g1/g1-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Large modules dominate change risk and need explicit boundaries before extraction.",
             "A short module ownership map exists.",
@@ -121,29 +124,14 @@
             "tests/test_review_api.py",
             "complaint_phases/denoiser.py"
           ],
-          "related_task_ids": [
-            "REF-002",
-            "REF-048",
-            "REF-003",
-            "REF-004",
-            "REF-028"
-          ],
-          "surplus_group": "G1.S1",
+          "surplus_group": "refactor/g1/g1-s1",
           "task_id": "REF-001",
-          "todo_bundle_context_keys": [
-            "bundle_context/a73d30a3661a",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/01d9dc94d405"
-          ],
-          "todo_vector_key": "f064c35c0a9417e0",
+          "todo_vector_key": "ref-001-createanentrypointandownershipmapforthelargestru",
           "validation": [
             "python -m pytest tests/test_package_imports.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 6,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [],
@@ -152,15 +140,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G1.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G1",
+            "G1.S1"
+          ],
+          "goal_packet_key": "G1.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G1.S1",
-          "merge_key": "f0d284f2161d394b",
-          "merge_role": "candidate",
+          "merge_family": "G1",
+          "merge_key": "refactor/g1/g1-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Refactors need a clear import direction to avoid moving complexity around.",
             "Architecture docs identify allowed imports.",
@@ -173,109 +164,16 @@
             "docs/ARCHITECTURE.md",
             "pyproject.toml"
           ],
-          "related_task_ids": [
-            "REF-001",
-            "REF-048",
-            "REF-003",
-            "REF-004",
-            "REF-028"
-          ],
-          "surplus_group": "G1.S1",
+          "surplus_group": "refactor/g1/g1-s1",
           "task_id": "REF-002",
-          "todo_bundle_context_keys": [
-            "bundle_context/a73d30a3661a",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/01d9dc94d405"
-          ],
-          "todo_vector_key": "7f16549273829103",
+          "todo_vector_key": "ref-002-documentalloweddependencydirectionbetweenapplica",
           "validation": [
             "python -m pytest tests/test_package_imports.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
-        },
-        {
-          "bundle_strategy": "explicit",
-          "candidate_kind": "validation_gate",
-          "canonical_task_cid": "baguqeerazoqdljqbhywkk3dwetidzjcu3glfwte7xr26hqqynobvi6f5wcaa",
-          "canonical_task_key": "task/v1/cba035a6013e2ca56c7624d03ca454d9965b4c9fbc75e3c2186b835478bdb080",
-          "discovery_path": "data/refactor_supervisor/discovery/2026-07-21-ref-048-objective-gap-f307b3b05fa3.md",
-          "goal_id": "G1.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
-          "graph_depth": 1,
-          "merge_family": "objective/G1.S1",
-          "merge_key": "4003ea72cdc5444e",
-          "merge_role": "validation_gate",
-          "missing_evidence": [
-            "objective validation repair"
-          ],
-          "parent_goal_ids": [
-            "G1"
-          ],
-          "related_task_ids": [
-            "REF-028",
-            "REF-032",
-            "REF-033",
-            "REF-029",
-            "REF-030"
-          ],
-          "surplus_group": "objective/G1.S1",
-          "task_id": "REF-048",
-          "todo_bundle_context_keys": [
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [],
-          "todo_vector_key": "9ca9d1d1566fc3e7",
-          "work_item_count": 1,
-          "work_scope": "objective_validation_repair"
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/a73d30a3661a"
-        ],
-        "compact_context_tokens": 791,
-        "estimated_prompt_tokens": 334,
-        "execution_packet_keys": [
-          "execution_packet/01d9dc94d405"
-        ],
-        "execution_packet_tokens": 125,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/a82eb010147d",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G1.S1",
-          "objective/G1.S1"
-        ],
-        "merge_keys": [
-          "4003ea72cdc5444e",
-          "419974cf3f0fbfd2",
-          "f0d284f2161d394b"
-        ],
-        "merge_ready_task_ids": [
-          "REF-001",
-          "REF-002",
-          "REF-048"
-        ],
-        "surplus_groups": [
-          "G1.S1",
-          "objective/G1.S1"
-        ],
-        "task_count": 3
-      }
+      ]
     },
     "refactor/g1/g1-s2": {
       "bundle_key": "refactor/g1/g1-s2",
@@ -372,15 +270,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G1.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G1",
+            "G1.S2"
+          ],
+          "goal_packet_key": "G1.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 9,
           "graph_depth": 1,
-          "merge_family": "G1.S2",
-          "merge_key": "be1b252f0141dcef",
-          "merge_role": "candidate",
+          "merge_family": "G1",
+          "merge_key": "refactor/g1/g1-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "The scan found production-style sys.path mutation that makes runtime behavior environment-sensitive.",
             "No production entrypoint mutates sys.path for normal imports.",
@@ -400,29 +301,14 @@
             "scripts/run_hacc_grounded_pipeline.py",
             "scripts/run_hacc_preset_matrix.py"
           ],
-          "related_task_ids": [
-            "REF-004",
-            "REF-001",
-            "REF-019",
-            "REF-009",
-            "REF-040"
-          ],
-          "surplus_group": "G1.S2",
+          "surplus_group": "refactor/g1/g1-s2",
           "task_id": "REF-003",
-          "todo_bundle_context_keys": [
-            "bundle_context/1e5f73c9a540",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/193eb7a3d2db"
-          ],
-          "todo_vector_key": "519d627c5be33c2c",
+          "todo_vector_key": "ref-003-replaceproductionsys-pathmutationwithpackage-lev",
           "validation": [
             "python -m pytest tests/test_package_imports.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 9,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -512,15 +398,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G1.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G1",
+            "G1.S2"
+          ],
+          "goal_packet_key": "G1.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 9,
           "graph_depth": 1,
-          "merge_family": "G1.S2",
-          "merge_key": "f8c83d505636b2a6",
-          "merge_role": "candidate",
+          "merge_family": "G1",
+          "merge_key": "refactor/g1/g1-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "Optional dependency behavior should stay behind the adapter boundary.",
             "Production direct imports are replaced or documented.",
@@ -540,65 +429,16 @@
             "complaint_generator/email_credentials.py",
             "complaint_generator/email_graphrag.py"
           ],
-          "related_task_ids": [
-            "REF-003",
-            "REF-001",
-            "REF-002",
-            "REF-048",
-            "REF-028"
-          ],
-          "surplus_group": "G1.S2",
+          "surplus_group": "refactor/g1/g1-s2",
           "task_id": "REF-004",
-          "todo_bundle_context_keys": [
-            "bundle_context/1e5f73c9a540",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/193eb7a3d2db"
-          ],
-          "todo_vector_key": "21928e631ca8d858",
+          "todo_vector_key": "ref-004-routedirectipfs-datasets-pyimportsthroughintegra",
           "validation": [
             "python -m pytest tests/test_ipfs_adapter_layer.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 9,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/1e5f73c9a540",
-          "bundle_context/22184f98c449"
-        ],
-        "compact_context_tokens": 788,
-        "estimated_prompt_tokens": 180,
-        "execution_packet_keys": [
-          "execution_packet/193eb7a3d2db"
-        ],
-        "execution_packet_tokens": 126,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/1a466465e464",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G1.S2"
-        ],
-        "merge_keys": [
-          "be1b252f0141dcef",
-          "f8c83d505636b2a6"
-        ],
-        "merge_ready_task_ids": [
-          "REF-003",
-          "REF-004"
-        ],
-        "surplus_groups": [
-          "G1.S2"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g2/g2-s1": {
       "bundle_key": "refactor/g2/g2-s1",
@@ -609,6 +449,8 @@
       "tasks": [
         {
           "ast_symbols": [
+            "MODULE_OWNERSHIP",
+            "RUNTIME_ENTRYPOINT_ROLE",
             "ALIGNMENT_TASK_UPDATE_HISTORY_LIMIT",
             "FOLLOW_UP_REVIEWABLE_ESCALATION_STATUSES",
             "Mediator",
@@ -686,24 +528,25 @@
             "save_claim_support_document",
             "get_claim_contradiction_candidates",
             "persist_claim_support_diagnostics",
-            "prune_claim_support_diagnostic_snapshots",
-            "get_claim_support_diagnostic_snapshots",
-            "get_recent_claim_follow_up_execution"
+            "prune_claim_support_diagnostic_snapshots"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G2.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G2",
+            "G2.S1"
+          ],
+          "goal_packet_key": "G2.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G2.S1",
-          "merge_key": "adc78ee2026547db",
-          "merge_role": "candidate",
+          "merge_family": "G2",
+          "merge_key": "refactor/g2/g2-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "The mediator is the largest runtime file and carries high regression risk.",
             "One cohesive service is extracted.",
@@ -716,29 +559,14 @@
             "mediator/mediator.py",
             "mediator/__init__.py"
           ],
-          "related_task_ids": [
-            "REF-006",
-            "REF-029",
-            "REF-008",
-            "REF-013",
-            "REF-048"
-          ],
-          "surplus_group": "G2.S1",
+          "surplus_group": "refactor/g2/g2-s1",
           "task_id": "REF-005",
-          "todo_bundle_context_keys": [
-            "bundle_context/ed1c82a417f7",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/3ad9b9ae341c"
-          ],
-          "todo_vector_key": "b9caa8ef3042c4be",
+          "todo_vector_key": "ref-005-splitmediator-mediator-pybyworkflowservicewhilep",
           "validation": [
             "python -m pytest tests/test_mediator.py tests/test_mediator_three_phase.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -828,15 +656,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G2.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G2",
+            "G2.S1"
+          ],
+          "goal_packet_key": "G2.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 1,
           "graph_depth": 1,
-          "merge_family": "G2.S1",
-          "merge_key": "e3f6eabcf7d04178",
-          "merge_role": "candidate",
+          "merge_family": "G2",
+          "merge_key": "refactor/g2/g2-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Claim support hooks are large enough to hide unrelated concerns.",
             "At least one cohesive helper group moves behind a stable import.",
@@ -848,65 +679,16 @@
           "paths": [
             "mediator/claim_support_hooks.py"
           ],
-          "related_task_ids": [
-            "REF-005",
-            "REF-021",
-            "REF-008",
-            "REF-029",
-            "REF-007"
-          ],
-          "surplus_group": "G2.S1",
+          "surplus_group": "refactor/g2/g2-s1",
           "task_id": "REF-006",
-          "todo_bundle_context_keys": [
-            "bundle_context/ed1c82a417f7",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/3ad9b9ae341c"
-          ],
-          "todo_vector_key": "7aa19b22a891fe4e",
+          "todo_vector_key": "ref-006-moveclaimsupportorchestrationhelpersintofocusedp",
           "validation": [
             "python -m pytest tests/test_claim_support_hooks.py tests/test_claim_support_review_dashboard_flow.py -q"
           ],
           "work_item_count": 1,
-          "work_scope": ""
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/ed1c82a417f7"
-        ],
-        "compact_context_tokens": 797,
-        "estimated_prompt_tokens": 110,
-        "execution_packet_keys": [
-          "execution_packet/3ad9b9ae341c"
-        ],
-        "execution_packet_tokens": 129,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/dfe13d58f966",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G2.S1"
-        ],
-        "merge_keys": [
-          "adc78ee2026547db",
-          "e3f6eabcf7d04178"
-        ],
-        "merge_ready_task_ids": [
-          "REF-005",
-          "REF-006"
-        ],
-        "surplus_groups": [
-          "G2.S1"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g2/g2-s2": {
       "bundle_key": "refactor/g2/g2-s2",
@@ -918,6 +700,8 @@
         {
           "ast_symbols": [
             "_require_ipfs_attr",
+            "MODULE_OWNERSHIP",
+            "RUNTIME_ENTRYPOINT_ROLE",
             "DEFAULT_USER_ID",
             "DEFAULT_UI_UX_OPTIMIZER_METHOD",
             "DEFAULT_UI_UX_OPTIMIZER_PRIORITY",
@@ -994,24 +778,25 @@
             "text",
             "candidates",
             "compact",
-            "segments",
-            "sentence_parts",
-            "date_pattern"
+            "segments"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G2.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G2",
+            "G2.S2"
+          ],
+          "goal_packet_key": "G2.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 1,
           "graph_depth": 1,
-          "merge_family": "G2.S2",
-          "merge_key": "64b5544eeedc3464",
-          "merge_role": "candidate",
+          "merge_family": "G2",
+          "merge_key": "refactor/g2/g2-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "The workspace module mixes UI routing, state shaping, and workflow calls.",
             "One handler group is isolated.",
@@ -1023,30 +808,14 @@
           "paths": [
             "applications/complaint_workspace.py"
           ],
-          "related_task_ids": [
-            "REF-008",
-            "REF-006",
-            "REF-026",
-            "REF-005",
-            "REF-029"
-          ],
-          "surplus_group": "G2.S2",
+          "surplus_group": "refactor/g2/g2-s2",
           "task_id": "REF-007",
-          "todo_bundle_context_keys": [
-            "bundle_context/babb49cd8ade",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/0ee4f0dd4bcd",
-            "execution_packet/a5f1575f694f"
-          ],
-          "todo_vector_key": "6c84b1b9b3e4d000",
+          "todo_vector_key": "ref-007-extractcomplaintworkspacerequesthandlersfromuist",
           "validation": [
             "python -m pytest tests/test_review_api.py -q"
           ],
-          "work_item_count": 3,
-          "work_scope": ""
+          "work_item_count": 1,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -1135,15 +904,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G2.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G2",
+            "G2.S2"
+          ],
+          "goal_packet_key": "G2.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G2.S2",
-          "merge_key": "00d917ffe721c4d1",
-          "merge_role": "candidate",
+          "merge_family": "G2",
+          "merge_key": "refactor/g2/g2-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "Dashboard behavior is harder to test when fixtures and live assembly are interleaved.",
             "Fixture builders are named and reusable.",
@@ -1156,66 +928,16 @@
             "applications/dashboard_ui.py",
             "playwright/server.js"
           ],
-          "related_task_ids": [
-            "REF-007",
-            "REF-006",
-            "REF-029",
-            "REF-031",
-            "REF-047"
-          ],
-          "surplus_group": "G2.S2",
+          "surplus_group": "refactor/g2/g2-s2",
           "task_id": "REF-008",
-          "todo_bundle_context_keys": [
-            "bundle_context/babb49cd8ade",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/0ee4f0dd4bcd"
-          ],
-          "todo_vector_key": "346f51dd046e514b",
+          "todo_vector_key": "ref-008-separatedashboardfixturedatafromliveroutelogic",
           "validation": [
             "python -m pytest tests/test_claim_support_review_playwright_smoke.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/babb49cd8ade"
-        ],
-        "compact_context_tokens": 773,
-        "estimated_prompt_tokens": 104,
-        "execution_packet_keys": [
-          "execution_packet/0ee4f0dd4bcd",
-          "execution_packet/a5f1575f694f"
-        ],
-        "execution_packet_tokens": 472,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/bb68098cd2d9",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G2.S2"
-        ],
-        "merge_keys": [
-          "00d917ffe721c4d1",
-          "64b5544eeedc3464"
-        ],
-        "merge_ready_task_ids": [
-          "REF-007",
-          "REF-008"
-        ],
-        "surplus_groups": [
-          "G2.S2"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g3/g3-s1": {
       "bundle_key": "refactor/g3/g3-s1",
@@ -1279,15 +1001,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G3.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G3",
+            "G3.S1"
+          ],
+          "goal_packet_key": "G3.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G3.S1",
-          "merge_key": "20c75e62dfcaad28",
-          "merge_role": "candidate",
+          "merge_family": "G3",
+          "merge_key": "refactor/g3/g3-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "The existing backlog identifies adapter capability reporting as incomplete.",
             "All adapter groups report stable keys.",
@@ -1300,29 +1025,14 @@
             "integrations/ipfs_datasets/capabilities.py",
             "integrations/ipfs_datasets/loader.py"
           ],
-          "related_task_ids": [
-            "REF-010",
-            "REF-023",
-            "REF-003",
-            "REF-011",
-            "REF-026"
-          ],
-          "surplus_group": "G3.S1",
+          "surplus_group": "refactor/g3/g3-s1",
           "task_id": "REF-009",
-          "todo_bundle_context_keys": [
-            "bundle_context/5ae38e916a05",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/75bb3f5d9322"
-          ],
-          "todo_vector_key": "a906003649145c0f",
+          "todo_vector_key": "ref-009-standardizecapabilitystatusanddegraded-reasonpay",
           "validation": [
             "python -m pytest tests/test_ipfs_adapter_layer.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -1412,15 +1122,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G3.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G3",
+            "G3.S1"
+          ],
+          "goal_packet_key": "G3.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G3.S1",
-          "merge_key": "cfbcbddd63a99b05",
-          "merge_role": "candidate",
+          "merge_family": "G3",
+          "merge_key": "refactor/g3/g3-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Document parsing is still fallback-oriented and should be reusable across ingestion paths.",
             "Evidence, authority, and web ingestion can call one parse contract.",
@@ -1433,65 +1146,16 @@
             "integrations/ipfs_datasets/documents.py",
             "mediator/evidence_hooks.py"
           ],
-          "related_task_ids": [
-            "REF-009",
-            "REF-017",
-            "REF-024",
-            "REF-011",
-            "REF-026"
-          ],
-          "surplus_group": "G3.S1",
+          "surplus_group": "refactor/g3/g3-s1",
           "task_id": "REF-010",
-          "todo_bundle_context_keys": [
-            "bundle_context/5ae38e916a05",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/75bb3f5d9322"
-          ],
-          "todo_vector_key": "57de5e1daec2d989",
+          "todo_vector_key": "ref-010-promotedocumentparsingintoasharedingestioncontra",
           "validation": [
             "python -m pytest tests/test_document_pipeline.py tests/test_document_pipeline_fallbacks.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/5ae38e916a05"
-        ],
-        "compact_context_tokens": 797,
-        "estimated_prompt_tokens": 114,
-        "execution_packet_keys": [
-          "execution_packet/75bb3f5d9322"
-        ],
-        "execution_packet_tokens": 137,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/b5e3728cf3cb",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G3.S1"
-        ],
-        "merge_keys": [
-          "20c75e62dfcaad28",
-          "cfbcbddd63a99b05"
-        ],
-        "merge_ready_task_ids": [
-          "REF-009",
-          "REF-010"
-        ],
-        "surplus_groups": [
-          "G3.S1"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g3/g3-s2": {
       "bundle_key": "refactor/g3/g3-s2",
@@ -1588,15 +1252,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G3.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G3",
+            "G3.S2"
+          ],
+          "goal_packet_key": "G3.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G3.S2",
-          "merge_key": "727a2bc3d69b9ac5",
-          "merge_role": "candidate",
+          "merge_family": "G3",
+          "merge_key": "refactor/g3/g3-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "Graph support currently lacks a durable query plane.",
             "Interfaces specify persistence, query, and provenance fields.",
@@ -1609,29 +1276,14 @@
             "integrations/ipfs_datasets/graphs.py",
             "complaint_phases/knowledge_graph.py"
           ],
-          "related_task_ids": [
-            "REF-012",
-            "REF-025",
-            "REF-026",
-            "REF-009",
-            "REF-010"
-          ],
-          "surplus_group": "G3.S2",
+          "surplus_group": "refactor/g3/g3-s2",
           "task_id": "REF-011",
-          "todo_bundle_context_keys": [
-            "bundle_context/0871f7e29303",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/4875c23ecff5"
-          ],
-          "todo_vector_key": "81c47b1b75da4df3",
+          "todo_vector_key": "ref-011-definegraphpersistenceandqueryinterfacesbeforemo",
           "validation": [
             "python -m pytest tests/test_complaint_phases.py tests/test_ipfs_adapter_layer.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -1721,15 +1373,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G3.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G3",
+            "G3.S2"
+          ],
+          "goal_packet_key": "G3.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G3.S2",
-          "merge_key": "52951b363738890b",
-          "merge_role": "candidate",
+          "merge_family": "G3",
+          "merge_key": "refactor/g3/g3-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "Formal validation should fail predictably when unavailable.",
             "Logic status distinguishes unavailable, degraded, and implemented.",
@@ -1742,65 +1397,16 @@
             "integrations/ipfs_datasets/logic.py",
             "lib/formal_logic"
           ],
-          "related_task_ids": [
-            "REF-011",
-            "REF-026",
-            "REF-025",
-            "REF-009",
-            "REF-010"
-          ],
-          "surplus_group": "G3.S2",
+          "surplus_group": "refactor/g3/g3-s2",
           "task_id": "REF-012",
-          "todo_bundle_context_keys": [
-            "bundle_context/0871f7e29303",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/4875c23ecff5"
-          ],
-          "todo_vector_key": "67135618646a6695",
+          "todo_vector_key": "ref-012-turnnot-implementedlogicpathsintoexplicitcapabil",
           "validation": [
             "python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/0871f7e29303",
-          "bundle_context/22184f98c449"
-        ],
-        "compact_context_tokens": 796,
-        "estimated_prompt_tokens": 108,
-        "execution_packet_keys": [
-          "execution_packet/4875c23ecff5"
-        ],
-        "execution_packet_tokens": 127,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/7a26d44fc952",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G3.S2"
-        ],
-        "merge_keys": [
-          "52951b363738890b",
-          "727a2bc3d69b9ac5"
-        ],
-        "merge_ready_task_ids": [
-          "REF-011",
-          "REF-012"
-        ],
-        "surplus_groups": [
-          "G3.S2"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g4/g4-s1": {
       "bundle_key": "refactor/g4/g4-s1",
@@ -1816,15 +1422,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G4.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G4",
+            "G4.S1"
+          ],
+          "goal_packet_key": "G4.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 3,
           "graph_depth": 1,
-          "merge_family": "G4.S1",
-          "merge_key": "fc8bbe1cb8f3d196",
-          "merge_role": "candidate",
+          "merge_family": "G4",
+          "merge_key": "refactor/g4/g4-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "The repo has many tests; refactor agents need fast confidence lanes.",
             "A documented test lane map exists.",
@@ -1838,29 +1447,14 @@
             "Makefile",
             "docs/VERIFICATION_SUMMARY.md"
           ],
-          "related_task_ids": [
-            "REF-014",
-            "REF-035",
-            "REF-005",
-            "REF-046",
-            "REF-024"
-          ],
-          "surplus_group": "G4.S1",
+          "surplus_group": "refactor/g4/g4-s1",
           "task_id": "REF-013",
-          "todo_bundle_context_keys": [
-            "bundle_context/335fd18cb2cc",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/5a2c89fdeb52"
-          ],
-          "todo_vector_key": "14c52e80700f8430",
+          "todo_vector_key": "ref-013-definesmokeadaptermediatordocumentanduitestlanes",
           "validation": [
             "python -m pytest --collect-only -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 3,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [],
@@ -1869,15 +1463,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G4.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G4",
+            "G4.S1"
+          ],
+          "goal_packet_key": "G4.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G4.S1",
-          "merge_key": "bff2f3f3fcd1df2c",
-          "merge_role": "candidate",
+          "merge_family": "G4",
+          "merge_key": "refactor/g4/g4-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Dependency drift is a recurring refactor risk.",
             "Tests catch direct production imports where adapters are required.",
@@ -1890,67 +1487,16 @@
             "tests",
             "pyproject.toml"
           ],
-          "related_task_ids": [
-            "REF-013",
-            "REF-005",
-            "REF-006",
-            "REF-048",
-            "REF-002"
-          ],
-          "surplus_group": "G4.S1",
+          "surplus_group": "refactor/g4/g4-s1",
           "task_id": "REF-014",
-          "todo_bundle_context_keys": [
-            "bundle_context/335fd18cb2cc",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/5a2c89fdeb52",
-            "execution_packet/a5f1575f694f"
-          ],
-          "todo_vector_key": "b124c93ef392a63c",
+          "todo_vector_key": "ref-014-addimportanddependency-boundarytestsforproductio",
           "validation": [
             "python -m pytest tests/test_package_imports.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/335fd18cb2cc"
-        ],
-        "compact_context_tokens": 795,
-        "estimated_prompt_tokens": 103,
-        "execution_packet_keys": [
-          "execution_packet/5a2c89fdeb52",
-          "execution_packet/a5f1575f694f"
-        ],
-        "execution_packet_tokens": 483,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/e42fef7045e8",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G4.S1"
-        ],
-        "merge_keys": [
-          "bff2f3f3fcd1df2c",
-          "fc8bbe1cb8f3d196"
-        ],
-        "merge_ready_task_ids": [
-          "REF-013",
-          "REF-014"
-        ],
-        "surplus_groups": [
-          "G4.S1"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g5/g5-s1": {
       "bundle_key": "refactor/g5/g5-s1",
@@ -2047,15 +1593,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G5.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G5",
+            "G5.S1"
+          ],
+          "goal_packet_key": "G5.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G5.S1",
-          "merge_key": "cacab7e00b7da911",
-          "merge_role": "candidate",
+          "merge_family": "G5",
+          "merge_key": "refactor/g5/g5-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "The requested supervisor needs a refill loop and visible board state.",
             "Queued task count is maintained above the configured floor.",
@@ -2068,29 +1617,14 @@
             "scripts/refactor_agent_supervisor.py",
             "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
           ],
-          "related_task_ids": [
-            "REF-016",
-            "REF-026",
-            "REF-023",
-            "REF-032",
-            "REF-030"
-          ],
-          "surplus_group": "G5.S1",
+          "surplus_group": "refactor/g5/g5-s1",
           "task_id": "REF-015",
-          "todo_bundle_context_keys": [
-            "bundle_context/0679f8d2b54c",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/3b3aa3120f8f"
-          ],
-          "todo_vector_key": "f0cee6f851c7909e",
+          "todo_vector_key": "ref-015-keeptherefactortaskboardsynchronizedwithgenerate",
           "validation": [
             "python scripts/refactor_agent_supervisor.py seed --once"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [],
@@ -2099,15 +1633,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G5.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G5",
+            "G5.S1"
+          ],
+          "goal_packet_key": "G5.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 1,
           "graph_depth": 1,
-          "merge_family": "G5.S1",
-          "merge_key": "70dc3e85deb6f3c2",
-          "merge_role": "candidate",
+          "merge_family": "G5",
+          "merge_key": "refactor/g5/g5-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Long-running automation needs inspectable state and a clean stop path.",
             "Status JSON includes pid, heartbeat, scan summary, and counts.",
@@ -2119,67 +1656,16 @@
           "paths": [
             "data/refactor_supervisor"
           ],
-          "related_task_ids": [
-            "REF-015",
-            "REF-006",
-            "REF-032",
-            "REF-048",
-            "REF-030"
-          ],
-          "surplus_group": "G5.S1",
+          "surplus_group": "refactor/g5/g5-s1",
           "task_id": "REF-016",
-          "todo_bundle_context_keys": [
-            "bundle_context/0679f8d2b54c",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/3b3aa3120f8f",
-            "execution_packet/a5f1575f694f"
-          ],
-          "todo_vector_key": "643b8d533605ac1f",
+          "todo_vector_key": "ref-016-recordsupervisorstatusscanmetricsandqueuecountsf",
           "validation": [
             "python scripts/refactor_agent_supervisor.py status"
           ],
           "work_item_count": 1,
-          "work_scope": ""
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/0679f8d2b54c",
-          "bundle_context/22184f98c449"
-        ],
-        "compact_context_tokens": 791,
-        "estimated_prompt_tokens": 115,
-        "execution_packet_keys": [
-          "execution_packet/3b3aa3120f8f",
-          "execution_packet/a5f1575f694f"
-        ],
-        "execution_packet_tokens": 488,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/e74507362d0f",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G5.S1"
-        ],
-        "merge_keys": [
-          "70dc3e85deb6f3c2",
-          "cacab7e00b7da911"
-        ],
-        "merge_ready_task_ids": [
-          "REF-015",
-          "REF-016"
-        ],
-        "surplus_groups": [
-          "G5.S1"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g6/g6-s1": {
       "bundle_key": "refactor/g6/g6-s1",
@@ -2190,6 +1676,8 @@
       "tasks": [
         {
           "ast_symbols": [
+            "MODULE_OWNERSHIP",
+            "RUNTIME_ENTRYPOINT_ROLE",
             "ALIGNMENT_TASK_UPDATE_HISTORY_LIMIT",
             "FOLLOW_UP_REVIEWABLE_ESCALATION_STATUSES",
             "Mediator",
@@ -2267,24 +1755,25 @@
             "save_claim_support_document",
             "get_claim_contradiction_candidates",
             "persist_claim_support_diagnostics",
-            "prune_claim_support_diagnostic_snapshots",
-            "get_claim_support_diagnostic_snapshots",
-            "get_recent_claim_follow_up_execution"
+            "prune_claim_support_diagnostic_snapshots"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G6.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G6",
+            "G6.S1"
+          ],
+          "goal_packet_key": "G6.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 3,
           "graph_depth": 1,
-          "merge_family": "G6.S1",
-          "merge_key": "c5f92cf1a697522f",
-          "merge_role": "candidate",
+          "merge_family": "G6",
+          "merge_key": "refactor/g6/g6-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "The scan found many broad exception handlers; refactors need predictable failure semantics.",
             "Top production broad-exception clusters are documented.",
@@ -2298,29 +1787,14 @@
             "mediator/evidence_hooks.py",
             "integrations/ipfs_datasets/search.py"
           ],
-          "related_task_ids": [
-            "REF-018",
-            "REF-010",
-            "REF-019",
-            "REF-006",
-            "REF-032"
-          ],
-          "surplus_group": "G6.S1",
+          "surplus_group": "refactor/g6/g6-s1",
           "task_id": "REF-017",
-          "todo_bundle_context_keys": [
-            "bundle_context/a147669b9bef",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/a91a961bc6b5"
-          ],
-          "todo_vector_key": "55f52ff0a2c61671",
+          "todo_vector_key": "ref-017-auditbroadexceptionhandlersinmediatorandadapterp",
           "validation": [
             "python -m pytest tests/test_mediator.py tests/test_ipfs_adapter_layer.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 3,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -2410,15 +1884,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G6.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G6",
+            "G6.S1"
+          ],
+          "goal_packet_key": "G6.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 3,
           "graph_depth": 1,
-          "merge_family": "G6.S1",
-          "merge_key": "0a0414c93a8291bd",
-          "merge_role": "candidate",
+          "merge_family": "G6",
+          "merge_key": "refactor/g6/g6-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Silent failures hide regressions during long-running automation.",
             "Intentional ignores are named.",
@@ -2432,65 +1909,16 @@
             "complaint_generator/ui_optimizer_daemon.py",
             "mediator/state.py"
           ],
-          "related_task_ids": [
-            "REF-017",
-            "REF-019",
-            "REF-021",
-            "REF-048",
-            "REF-032"
-          ],
-          "surplus_group": "G6.S1",
+          "surplus_group": "refactor/g6/g6-s1",
           "task_id": "REF-018",
-          "todo_bundle_context_keys": [
-            "bundle_context/a147669b9bef",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/a91a961bc6b5"
-          ],
-          "todo_vector_key": "66a9481c7b310e32",
+          "todo_vector_key": "ref-018-convertsilentpassblocksinuser-facingworkflowsint",
           "validation": [
             "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_review_api.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 3,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/a147669b9bef"
-        ],
-        "compact_context_tokens": 796,
-        "estimated_prompt_tokens": 122,
-        "execution_packet_keys": [
-          "execution_packet/a91a961bc6b5"
-        ],
-        "execution_packet_tokens": 135,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/ba0483a66180",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G6.S1"
-        ],
-        "merge_keys": [
-          "0a0414c93a8291bd",
-          "c5f92cf1a697522f"
-        ],
-        "merge_ready_task_ids": [
-          "REF-017",
-          "REF-018"
-        ],
-        "surplus_groups": [
-          "G6.S1"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g6/g6-s2": {
       "bundle_key": "refactor/g6/g6-s2",
@@ -2587,15 +2015,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G6.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G6",
+            "G6.S2"
+          ],
+          "goal_packet_key": "G6.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 3,
           "graph_depth": 1,
-          "merge_family": "G6.S2",
-          "merge_key": "b5c5a7716b361a9a",
-          "merge_role": "candidate",
+          "merge_family": "G6",
+          "merge_key": "refactor/g6/g6-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "Multiple daemon surfaces should be inspectable with the same status fields.",
             "Status payloads include status, pid, updated_at, artifacts, and last_error where applicable.",
@@ -2609,29 +2040,14 @@
             "integrations/ipfs_datasets/scraper_daemon.py",
             "scripts/gmail_duckdb_daemon.py"
           ],
-          "related_task_ids": [
-            "REF-020",
-            "REF-018",
-            "REF-003",
-            "REF-017",
-            "REF-041"
-          ],
-          "surplus_group": "G6.S2",
+          "surplus_group": "refactor/g6/g6-s2",
           "task_id": "REF-019",
-          "todo_bundle_context_keys": [
-            "bundle_context/f23adfedaeef",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/91661171bd26"
-          ],
-          "todo_vector_key": "6c46e99fd43397bf",
+          "todo_vector_key": "ref-019-standardizedaemonstatuspayloadshapeacrossuiscrap",
           "validation": [
             "python -m pytest tests/test_ui_optimizer_daemon_cli.py tests/test_gmail_duckdb_daemon_cli.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 3,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [],
@@ -2640,15 +2056,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G6.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G6",
+            "G6.S2"
+          ],
+          "goal_packet_key": "G6.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G6.S2",
-          "merge_key": "8d8729a2f9073978",
-          "merge_role": "candidate",
+          "merge_family": "G6",
+          "merge_key": "refactor/g6/g6-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "Operators need consistent guidance for stalled background workflows.",
             "Docs explain where to find pid, log, status, and queue files.",
@@ -2661,65 +2080,16 @@
             "docs/OBSERVABILITY_INDEX.md",
             "docs/observability/TROUBLESHOOTING.md"
           ],
-          "related_task_ids": [
-            "REF-019",
-            "REF-017",
-            "REF-032",
-            "REF-018",
-            "REF-031"
-          ],
-          "surplus_group": "G6.S2",
+          "surplus_group": "refactor/g6/g6-s2",
           "task_id": "REF-020",
-          "todo_bundle_context_keys": [
-            "bundle_context/f23adfedaeef",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/91661171bd26"
-          ],
-          "todo_vector_key": "6bea500b6d21bc06",
+          "todo_vector_key": "ref-020-addqueuecountandlast-cyclemetricstolong-runninga",
           "validation": [
             "python scripts/refactor_agent_supervisor.py status"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/f23adfedaeef"
-        ],
-        "compact_context_tokens": 807,
-        "estimated_prompt_tokens": 133,
-        "execution_packet_keys": [
-          "execution_packet/91661171bd26"
-        ],
-        "execution_packet_tokens": 150,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/985b1d0ca3a3",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G6.S2"
-        ],
-        "merge_keys": [
-          "8d8729a2f9073978",
-          "b5c5a7716b361a9a"
-        ],
-        "merge_ready_task_ids": [
-          "REF-019",
-          "REF-020"
-        ],
-        "surplus_groups": [
-          "G6.S2"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g7/g7-s1": {
       "bundle_key": "refactor/g7/g7-s1",
@@ -2816,15 +2186,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G7.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G7",
+            "G7.S1"
+          ],
+          "goal_packet_key": "G7.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 3,
           "graph_depth": 1,
-          "merge_family": "G7.S1",
-          "merge_key": "3c1ad5a45f4d3bd2",
-          "merge_role": "candidate",
+          "merge_family": "G7",
+          "merge_key": "refactor/g7/g7-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Review screens depend on stable payloads that should not be assembled ad hoc in route handlers.",
             "DTO helpers cover coverage, follow-up, and support-path summaries.",
@@ -2838,29 +2211,14 @@
             "applications/ui_review.py",
             "mediator/claim_support_hooks.py"
           ],
-          "related_task_ids": [
-            "REF-022",
-            "REF-006",
-            "REF-018",
-            "REF-033",
-            "REF-001"
-          ],
-          "surplus_group": "G7.S1",
+          "surplus_group": "refactor/g7/g7-s1",
           "task_id": "REF-021",
-          "todo_bundle_context_keys": [
-            "bundle_context/b3a98626f328",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/72e762a0abaf"
-          ],
-          "todo_vector_key": "951fe5922c7be2c5",
+          "todo_vector_key": "ref-021-movereviewpayloadnormalizationbehindexplicitdtoh",
           "validation": [
             "python -m pytest tests/test_review_api.py tests/test_claim_support_review_dashboard_flow.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 3,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -2870,6 +2228,7 @@
             "duckdb",
             "pytestmark",
             "_build_browser_smoke_app",
+            "test_review_ui_runtime_ownership_is_web_entrypoint",
             "_build_document_browser_smoke_app",
             "_build_document_review_browser_smoke_app",
             "_build_document_workflow_priority_fixture",
@@ -2927,6 +2286,7 @@
             "test_optimization_trace_intake_handoff_link_opens_review_dashboard_with_confirmation_context",
             "PLAYWRIGHT_AVAILABLE",
             "app",
+            "ownership",
             "chip_labels",
             "mediator",
             "hook",
@@ -2941,24 +2301,25 @@
             "thread",
             "base_url",
             "deadline",
-            "last_error",
-            "payload",
-            "next_action_summary"
+            "last_error"
           ],
           "bundle_strategy": "goal_subgoal_ast",
           "candidate_kind": "seed",
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G7.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G7",
+            "G7.S1"
+          ],
+          "goal_packet_key": "G7.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G7.S1",
-          "merge_key": "3e4472df2cdf813c",
-          "merge_role": "candidate",
+          "merge_family": "G7",
+          "merge_key": "refactor/g7/g7-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Large Playwright tests should share fixture setup before UI refactors.",
             "Shared builders remove repeated setup.",
@@ -2971,148 +2332,16 @@
             "tests/test_claim_support_review_playwright_smoke.py",
             "tests/test_review_surface_site_playwright.py"
           ],
-          "related_task_ids": [
-            "REF-021",
-            "REF-033",
-            "REF-026",
-            "REF-001",
-            "REF-006"
-          ],
-          "surplus_group": "G7.S1",
+          "surplus_group": "refactor/g7/g7-s1",
           "task_id": "REF-022",
-          "todo_bundle_context_keys": [
-            "bundle_context/b3a98626f328",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/72e762a0abaf"
-          ],
-          "todo_vector_key": "dc5c134b98c51bbf",
+          "todo_vector_key": "ref-022-createfixturebuildersforplaywrightreviewanddashb",
           "validation": [
             "python -m pytest tests/test_claim_support_review_playwright_smoke.py tests/test_review_surface_site_playwright.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/b3a98626f328"
-        ],
-        "compact_context_tokens": 811,
-        "estimated_prompt_tokens": 129,
-        "execution_packet_keys": [
-          "execution_packet/72e762a0abaf"
-        ],
-        "execution_packet_tokens": 166,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/dc671dfd0277",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G7.S1"
-        ],
-        "merge_keys": [
-          "3c1ad5a45f4d3bd2",
-          "3e4472df2cdf813c"
-        ],
-        "merge_ready_task_ids": [
-          "REF-021",
-          "REF-022"
-        ],
-        "surplus_groups": [
-          "G7.S1"
-        ],
-        "task_count": 2
-      }
-    },
-    "refactor/g8": {
-      "bundle_key": "refactor/g8",
-      "bundle_strategy": "explicit",
-      "conflict_policy": "prefer bundle-local changes; invoke the LLM merge resolver for semantic conflicts",
-      "parallel_lane": "refactor/g8",
-      "shard_path": "data/refactor_supervisor/objective_bundles/refactor-g8.todo.md",
-      "tasks": [
-        {
-          "bundle_strategy": "explicit",
-          "candidate_kind": "validation_gate",
-          "canonical_task_cid": "baguqeeraq3zbqt4wqrawj5zbqnwjvb6r6npmwdtcfqbgzaah475bsjkfddqq",
-          "canonical_task_key": "task/v1/86f2184f96844164f721836c9a87d1f35ecb0e622c026c8007e7fa19254518e1",
-          "discovery_path": "data/refactor_supervisor/discovery/2026-07-21-ref-047-objective-gap-8237ed56b27c.md",
-          "goal_id": "G8",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
-          "graph_depth": 0,
-          "merge_family": "objective/G8",
-          "merge_key": "73c2c19911fd953e",
-          "merge_role": "validation_gate",
-          "missing_evidence": [
-            "objective validation repair"
-          ],
-          "parent_goal_ids": [],
-          "related_task_ids": [
-            "REF-031",
-            "REF-030",
-            "REF-029",
-            "REF-032",
-            "REF-028"
-          ],
-          "surplus_group": "objective/G8",
-          "task_id": "REF-047",
-          "todo_bundle_context_keys": [
-            "bundle_context/cb0d59ba6344",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/0e9a9419303d"
-          ],
-          "todo_vector_key": "bf05e040a4792343",
-          "work_item_count": 1,
-          "work_scope": "objective_validation_repair"
-        }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/cb0d59ba6344"
-        ],
-        "compact_context_tokens": 822,
-        "estimated_prompt_tokens": 290,
-        "execution_packet_keys": [
-          "execution_packet/0e9a9419303d"
-        ],
-        "execution_packet_tokens": 150,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_key/69b382b8a0c6",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "objective/G8"
-        ],
-        "merge_keys": [
-          "73c2c19911fd953e"
-        ],
-        "merge_ready_task_ids": [
-          "REF-031",
-          "REF-047"
-        ],
-        "surplus_groups": [
-          "objective/G8"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g8/g8-s1": {
       "bundle_key": "refactor/g8/g8-s1",
@@ -3128,15 +2357,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G8.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G8",
+            "G8.S1"
+          ],
+          "goal_packet_key": "G8.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G8.S1",
-          "merge_key": "32b06ff89f5b1eda",
-          "merge_role": "candidate",
+          "merge_family": "G8",
+          "merge_key": "refactor/g8/g8-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "Existing roadmap work should feed the automated taskboard rather than drift separately.",
             "Each P0 backlog workstream maps to at least one refactor goal.",
@@ -3149,29 +2381,14 @@
             "docs/IPFS_DATASETS_PY_EXECUTION_BACKLOG.md",
             "docs/REFACTOR_SUPERVISOR_TASKBOARD.md"
           ],
-          "related_task_ids": [
-            "REF-024",
-            "REF-031",
-            "REF-047",
-            "REF-030",
-            "REF-029"
-          ],
-          "surplus_group": "G8.S1",
+          "surplus_group": "refactor/g8/g8-s1",
           "task_id": "REF-023",
-          "todo_bundle_context_keys": [
-            "bundle_context/5b69f6a99077",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/0fa0e69f1bb0"
-          ],
-          "todo_vector_key": "b021818a1131c9aa",
+          "todo_vector_key": "ref-023-cross-linkipfsdatasetsexecutionbacklogtaskstoref",
           "validation": [
             "python scripts/refactor_agent_supervisor.py seed --once"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [],
@@ -3180,15 +2397,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G8.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G8",
+            "G8.S1"
+          ],
+          "goal_packet_key": "G8.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 1,
           "graph_depth": 1,
-          "merge_family": "G8.S1",
-          "merge_key": "5f175682c9c28700",
-          "merge_role": "candidate",
+          "merge_family": "G8",
+          "merge_key": "refactor/g8/g8-s1",
+          "merge_role": "seed",
           "missing_evidence": [
             "A robust board still needs a practical starting order.",
             "The first three claims are small, testable, and dependency-ordered.",
@@ -3200,65 +2420,16 @@
           "paths": [
             "data/refactor_supervisor/refactor_goals.json"
           ],
-          "related_task_ids": [
-            "REF-023",
-            "REF-010",
-            "REF-009",
-            "REF-031",
-            "REF-047"
-          ],
-          "surplus_group": "G8.S1",
+          "surplus_group": "refactor/g8/g8-s1",
           "task_id": "REF-024",
-          "todo_bundle_context_keys": [
-            "bundle_context/5b69f6a99077",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/0fa0e69f1bb0"
-          ],
-          "todo_vector_key": "aeefea0220033b10",
+          "todo_vector_key": "ref-024-definefirstthreeimplementationclaimsfromthequeue",
           "validation": [
             "python scripts/refactor_agent_supervisor.py status"
           ],
           "work_item_count": 1,
-          "work_scope": ""
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/5b69f6a99077"
-        ],
-        "compact_context_tokens": 793,
-        "estimated_prompt_tokens": 121,
-        "execution_packet_keys": [
-          "execution_packet/0fa0e69f1bb0"
-        ],
-        "execution_packet_tokens": 129,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/2551bdeb222d",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G8.S1"
-        ],
-        "merge_keys": [
-          "32b06ff89f5b1eda",
-          "5f175682c9c28700"
-        ],
-        "merge_ready_task_ids": [
-          "REF-023",
-          "REF-024"
-        ],
-        "surplus_groups": [
-          "G8.S1"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g8/g8-s2": {
       "bundle_key": "refactor/g8/g8-s2",
@@ -3355,15 +2526,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G8.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G8",
+            "G8.S2"
+          ],
+          "goal_packet_key": "G8.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 1,
           "graph_depth": 1,
-          "merge_family": "G8.S2",
-          "merge_key": "f6af864fdc59ea56",
-          "merge_role": "candidate",
+          "merge_family": "G8",
+          "merge_key": "refactor/g8/g8-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "Agents need a simple way to see the next work without opening DuckDB manually.",
             "Status output or a new command lists next tasks by priority.",
@@ -3375,29 +2549,14 @@
           "paths": [
             "scripts/refactor_agent_supervisor.py"
           ],
-          "related_task_ids": [
-            "REF-026",
-            "REF-011",
-            "REF-012",
-            "REF-010",
-            "REF-015"
-          ],
-          "surplus_group": "G8.S2",
+          "surplus_group": "refactor/g8/g8-s2",
           "task_id": "REF-025",
-          "todo_bundle_context_keys": [
-            "bundle_context/db66443ec4c5",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/2bc2d78bd7e9"
-          ],
-          "todo_vector_key": "81fe0565bcadb26c",
+          "todo_vector_key": "ref-025-addataskboardinspectioncommandthatprintsqueuedre",
           "validation": [
             "python scripts/refactor_agent_supervisor.py status"
           ],
           "work_item_count": 1,
-          "work_scope": ""
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -3487,15 +2646,18 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G8.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G8",
+            "G8.S2"
+          ],
+          "goal_packet_key": "G8.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 2,
           "graph_depth": 1,
-          "merge_family": "G8.S2",
-          "merge_key": "1867d7eaeb12e448",
-          "merge_role": "candidate",
+          "merge_family": "G8",
+          "merge_key": "refactor/g8/g8-s2",
+          "merge_role": "seed",
           "missing_evidence": [
             "The supervisor itself should not duplicate tasks or emit malformed payloads.",
             "Running seed twice does not duplicate active tasks.",
@@ -3508,65 +2670,16 @@
             "tests/test_refactor_agent_supervisor.py",
             "scripts/refactor_agent_supervisor.py"
           ],
-          "related_task_ids": [
-            "REF-025",
-            "REF-012",
-            "REF-015",
-            "REF-011",
-            "REF-009"
-          ],
-          "surplus_group": "G8.S2",
+          "surplus_group": "refactor/g8/g8-s2",
           "task_id": "REF-026",
-          "todo_bundle_context_keys": [
-            "bundle_context/db66443ec4c5",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/2bc2d78bd7e9"
-          ],
-          "todo_vector_key": "f2e1b338900364a5",
+          "todo_vector_key": "ref-026-createtestsforrefactorsupervisorseedidempotencea",
           "validation": [
             "python -m pytest tests/test_refactor_agent_supervisor.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 2,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/db66443ec4c5"
-        ],
-        "compact_context_tokens": 787,
-        "estimated_prompt_tokens": 123,
-        "execution_packet_keys": [
-          "execution_packet/2bc2d78bd7e9"
-        ],
-        "execution_packet_tokens": 126,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_family/ad067b0825d6",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G8.S2"
-        ],
-        "merge_keys": [
-          "1867d7eaeb12e448",
-          "f6af864fdc59ea56"
-        ],
-        "merge_ready_task_ids": [
-          "REF-025",
-          "REF-026"
-        ],
-        "surplus_groups": [
-          "G8.S2"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g9/g9-s1": {
       "bundle_key": "refactor/g9/g9-s1",
@@ -3663,13 +2776,16 @@
           "depends_on": [],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S1"
+          ],
+          "goal_packet_key": "G9.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 7,
           "graph_depth": 1,
-          "merge_family": "G9.S1",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s1",
           "merge_role": "seed",
           "missing_evidence": [
@@ -3691,27 +2807,14 @@
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py"
           ],
-          "related_task_ids": [
-            "REF-037",
-            "REF-038",
-            "REF-039",
-            "REF-040",
-            "REF-045"
-          ],
-          "surplus_group": "G9.S1",
+          "surplus_group": "refactor/g9/g9-s1",
           "task_id": "REF-036",
-          "todo_bundle_context_keys": [
-            "bundle_context/a2e491732a99",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [],
           "todo_vector_key": "ref-036-introducecanonicaltaskidentityandadurablesupervi",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 7,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -3803,13 +2906,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S1"
+          ],
+          "goal_packet_key": "G9.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 5,
           "graph_depth": 1,
-          "merge_family": "G9.S1",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s1",
           "merge_role": "seed",
           "missing_evidence": [
@@ -3829,29 +2935,14 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/multi_supervisor_runner.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py"
           ],
-          "related_task_ids": [
-            "REF-036",
-            "REF-038",
-            "REF-042",
-            "REF-039",
-            "REF-044"
-          ],
-          "surplus_group": "G9.S1",
+          "surplus_group": "refactor/g9/g9-s1",
           "task_id": "REF-037",
-          "todo_bundle_context_keys": [
-            "bundle_context/a2e491732a99",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/afbacaa7e017"
-          ],
           "todo_vector_key": "ref-037-replacestaticbundlelaunchwithadynamicleasedworke",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_lease_coordination.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 5,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -3943,13 +3034,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S1",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S1"
+          ],
+          "goal_packet_key": "G9.S1",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 5,
           "graph_depth": 1,
-          "merge_family": "G9.S1",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s1",
           "merge_role": "seed",
           "missing_evidence": [
@@ -3969,64 +3063,16 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py"
           ],
-          "related_task_ids": [
-            "REF-037",
-            "REF-036",
-            "REF-044",
-            "REF-041",
-            "REF-045"
-          ],
-          "surplus_group": "G9.S1",
+          "surplus_group": "refactor/g9/g9-s1",
           "task_id": "REF-038",
-          "todo_bundle_context_keys": [
-            "bundle_context/a2e491732a99",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/afbacaa7e017"
-          ],
           "todo_vector_key": "ref-038-integrateadeduplicatingsingle-consumermergetrain",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_merge_train.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 5,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/a2e491732a99"
-        ],
-        "compact_context_tokens": 847,
-        "estimated_prompt_tokens": 506,
-        "execution_packet_keys": [
-          "execution_packet/afbacaa7e017"
-        ],
-        "execution_packet_tokens": 236,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_key/30a040574acd",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G9.S1"
-        ],
-        "merge_keys": [
-          "refactor/g9/g9-s1"
-        ],
-        "merge_ready_task_ids": [
-          "REF-037",
-          "REF-038"
-        ],
-        "surplus_groups": [
-          "G9.S1"
-        ],
-        "task_count": 3
-      }
+      ]
     },
     "refactor/g9/g9-s2": {
       "bundle_key": "refactor/g9/g9-s2",
@@ -4125,13 +3171,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S2"
+          ],
+          "goal_packet_key": "G9.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 4,
           "graph_depth": 1,
-          "merge_family": "G9.S2",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s2",
           "merge_role": "seed",
           "missing_evidence": [
@@ -4150,29 +3199,14 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py"
           ],
-          "related_task_ids": [
-            "REF-040",
-            "REF-041",
-            "REF-036",
-            "REF-037",
-            "REF-045"
-          ],
-          "surplus_group": "G9.S2",
+          "surplus_group": "refactor/g9/g9-s2",
           "task_id": "REF-039",
-          "todo_bundle_context_keys": [
-            "bundle_context/374ab85eba8d",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/fbb37666cdfb"
-          ],
           "todo_vector_key": "ref-039-materializeataskdependencydagandscheduleitscriti",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_planner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 4,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -4264,13 +3298,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S2"
+          ],
+          "goal_packet_key": "G9.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 5,
           "graph_depth": 1,
-          "merge_family": "G9.S2",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s2",
           "merge_role": "seed",
           "missing_evidence": [
@@ -4290,30 +3327,14 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py"
           ],
-          "related_task_ids": [
-            "REF-039",
-            "REF-041",
-            "REF-036",
-            "REF-045",
-            "REF-044"
-          ],
-          "surplus_group": "G9.S2",
+          "surplus_group": "refactor/g9/g9-s2",
           "task_id": "REF-040",
-          "todo_bundle_context_keys": [
-            "bundle_context/374ab85eba8d",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/fbb37666cdfb",
-            "execution_packet/a5f1575f694f"
-          ],
           "todo_vector_key": "ref-040-buildanastandchanged-pathconflictgraphforlanecol",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_conflict_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q"
           ],
-          "work_item_count": 2,
-          "work_scope": ""
+          "work_item_count": 5,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -4405,13 +3426,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S2",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S2"
+          ],
+          "goal_packet_key": "G9.S2",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 4,
           "graph_depth": 1,
-          "merge_family": "G9.S2",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s2",
           "merge_role": "seed",
           "missing_evidence": [
@@ -4430,66 +3454,16 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py"
           ],
-          "related_task_ids": [
-            "REF-040",
-            "REF-039",
-            "REF-044",
-            "REF-038",
-            "REF-042"
-          ],
-          "surplus_group": "G9.S2",
+          "surplus_group": "refactor/g9/g9-s2",
           "task_id": "REF-041",
-          "todo_bundle_context_keys": [
-            "bundle_context/374ab85eba8d",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/fbb37666cdfb"
-          ],
           "todo_vector_key": "ref-041-usellm-routertogenerateandevaluatestructuredplan",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 4,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/374ab85eba8d"
-        ],
-        "compact_context_tokens": 862,
-        "estimated_prompt_tokens": 457,
-        "execution_packet_keys": [
-          "execution_packet/a5f1575f694f",
-          "execution_packet/fbb37666cdfb"
-        ],
-        "execution_packet_tokens": 681,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_key/e8d14208e601",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G9.S2"
-        ],
-        "merge_keys": [
-          "refactor/g9/g9-s2"
-        ],
-        "merge_ready_task_ids": [
-          "REF-039",
-          "REF-040",
-          "REF-041"
-        ],
-        "surplus_groups": [
-          "G9.S2"
-        ],
-        "task_count": 3
-      }
+      ]
     },
     "refactor/g9/g9-s3": {
       "bundle_key": "refactor/g9/g9-s3",
@@ -4589,13 +3563,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S3",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S3"
+          ],
+          "goal_packet_key": "G9.S3",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 5,
           "graph_depth": 1,
-          "merge_family": "G9.S3",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s3",
           "merge_role": "seed",
           "missing_evidence": [
@@ -4615,30 +3592,14 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/leased_lane.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py"
           ],
-          "related_task_ids": [
-            "REF-043",
-            "REF-044",
-            "REF-037",
-            "REF-039",
-            "REF-036"
-          ],
-          "surplus_group": "G9.S3",
+          "surplus_group": "refactor/g9/g9-s3",
           "task_id": "REF-042",
-          "todo_bundle_context_keys": [
-            "bundle_context/dbff3459f74c",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/14163c4fa4e8",
-            "execution_packet/a5f1575f694f"
-          ],
           "todo_vector_key": "ref-042-schedulelanesfromliveresourcesandllm-routerprovi",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_resource_scheduler.py -q"
           ],
-          "work_item_count": 3,
-          "work_scope": ""
+          "work_item_count": 5,
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -4730,13 +3691,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S3",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S3"
+          ],
+          "goal_packet_key": "G9.S3",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 4,
           "graph_depth": 1,
-          "merge_family": "G9.S3",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s3",
           "merge_role": "seed",
           "missing_evidence": [
@@ -4755,65 +3719,16 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py"
           ],
-          "related_task_ids": [
-            "REF-042",
-            "REF-044",
-            "REF-038",
-            "REF-036",
-            "REF-041"
-          ],
-          "surplus_group": "G9.S3",
+          "surplus_group": "refactor/g9/g9-s3",
           "task_id": "REF-043",
-          "todo_bundle_context_keys": [
-            "bundle_context/dbff3459f74c",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/14163c4fa4e8"
-          ],
           "todo_vector_key": "ref-043-addimpact-selectedcachedandparallelvalidationsta",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_validation_scheduler.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 4,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/dbff3459f74c"
-        ],
-        "compact_context_tokens": 832,
-        "estimated_prompt_tokens": 300,
-        "execution_packet_keys": [
-          "execution_packet/14163c4fa4e8",
-          "execution_packet/a5f1575f694f"
-        ],
-        "execution_packet_tokens": 602,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_key/5219037ec6b5",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G9.S3"
-        ],
-        "merge_keys": [
-          "refactor/g9/g9-s3"
-        ],
-        "merge_ready_task_ids": [
-          "REF-042",
-          "REF-043"
-        ],
-        "surplus_groups": [
-          "G9.S3"
-        ],
-        "task_count": 2
-      }
+      ]
     },
     "refactor/g9/g9-s4": {
       "bundle_key": "refactor/g9/g9-s4",
@@ -4914,13 +3829,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S4",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S4"
+          ],
+          "goal_packet_key": "G9.S4",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 5,
           "graph_depth": 1,
-          "merge_family": "G9.S4",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s4",
           "merge_role": "seed",
           "missing_evidence": [
@@ -4940,30 +3858,14 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/bundle_supervisor.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py"
           ],
-          "related_task_ids": [
-            "REF-045",
-            "REF-042",
-            "REF-037",
-            "REF-039",
-            "REF-040"
-          ],
-          "surplus_group": "G9.S4",
+          "surplus_group": "refactor/g9/g9-s4",
           "task_id": "REF-044",
-          "todo_bundle_context_keys": [
-            "bundle_context/6fe0d3bbc22a",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/b30e6bdcf78d",
-            "execution_packet/a5f1575f694f"
-          ],
           "todo_vector_key": "ref-044-publishauthoritativethroughputmetricsandschedule",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py -q"
           ],
           "work_item_count": 5,
-          "work_scope": ""
+          "work_scope": "goal_subgoal_ast_locality"
         },
         {
           "ast_symbols": [
@@ -5058,13 +3960,16 @@
           ],
           "discovery_path": "docs/REFACTOR_SUPERVISOR_TASKBOARD.md",
           "goal_id": "G9.S4",
-          "goal_packet_goal_ids": [],
-          "goal_packet_key": "",
-          "goal_packet_role": "",
-          "goal_packet_task_count": 0,
-          "goal_packet_work_item_count": 0,
+          "goal_packet_goal_ids": [
+            "G9",
+            "G9.S4"
+          ],
+          "goal_packet_key": "G9.S4",
+          "goal_packet_role": "seed",
+          "goal_packet_task_count": 1,
+          "goal_packet_work_item_count": 5,
           "graph_depth": 1,
-          "merge_family": "G9.S4",
+          "merge_family": "G9",
           "merge_key": "refactor/g9/g9-s4",
           "merge_role": "seed",
           "missing_evidence": [
@@ -5084,68 +3989,19 @@
             "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_daemon.py",
             "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py"
           ],
-          "related_task_ids": [
-            "REF-044",
-            "REF-039",
-            "REF-040",
-            "REF-036",
-            "REF-037"
-          ],
-          "surplus_group": "G9.S4",
+          "surplus_group": "refactor/g9/g9-s4",
           "task_id": "REF-045",
-          "todo_bundle_context_keys": [
-            "bundle_context/6fe0d3bbc22a",
-            "bundle_context/22184f98c449"
-          ],
-          "todo_cluster_key": "todo/g1/f676b773",
-          "todo_execution_packet_keys": [
-            "execution_packet/b30e6bdcf78d"
-          ],
           "todo_vector_key": "ref-045-makeastscansandimplementationworkspacesincrement",
           "validation": [
             "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q"
           ],
-          "work_item_count": 1,
-          "work_scope": ""
+          "work_item_count": 5,
+          "work_scope": "goal_subgoal_ast_locality"
         }
-      ],
-      "todo_vector_summary": {
-        "bundle_context_keys": [
-          "bundle_context/22184f98c449",
-          "bundle_context/6fe0d3bbc22a"
-        ],
-        "compact_context_tokens": 852,
-        "estimated_prompt_tokens": 333,
-        "execution_packet_keys": [
-          "execution_packet/a5f1575f694f",
-          "execution_packet/b30e6bdcf78d"
-        ],
-        "execution_packet_tokens": 616,
-        "goal_packet_goal_ids": [],
-        "goal_packet_keys": [],
-        "goal_packet_work_item_count_max": 0,
-        "merge_candidate_keys": [
-          "merge_key/3d64312032d8",
-          "vector_cluster/b6fa02e4927f"
-        ],
-        "merge_families": [
-          "G9.S4"
-        ],
-        "merge_keys": [
-          "refactor/g9/g9-s4"
-        ],
-        "merge_ready_task_ids": [
-          "REF-044",
-          "REF-045"
-        ],
-        "surplus_groups": [
-          "G9.S4"
-        ],
-        "task_count": 2
-      }
+      ]
     }
   },
-  "generated_at": "2026-07-21T22:48:18.536758+00:00",
+  "generated_at": "2026-07-22T00:13:51Z",
   "schema": "complaint_generator.refactor_seed_bundle_index",
   "source_todo": "data/refactor_supervisor/refactor_todo.md"
 }
