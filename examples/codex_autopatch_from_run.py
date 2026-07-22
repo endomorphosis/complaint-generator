@@ -141,12 +141,9 @@ def _extract_rate_limit_reset_info(msg: str) -> Tuple[Optional[int], Optional[da
             source = "try_again_at"
 
     if reset_at is not None and (reset_s is None or reset_s <= 0):
-        try:
-            remaining = int((reset_at - datetime.now(timezone.utc)).total_seconds())
-            if remaining > 0:
-                reset_s = remaining
-        except Exception:
-            pass
+        remaining = int((reset_at - datetime.now(timezone.utc)).total_seconds())
+        if remaining > 0:
+            reset_s = remaining
 
     return reset_s, reset_at, source
 
