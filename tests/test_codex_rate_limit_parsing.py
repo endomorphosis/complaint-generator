@@ -21,6 +21,7 @@ _parse_iso_dt = _codex_autopatch._parse_iso_dt
 _parse_codex_human_reset_at = _codex_autopatch._parse_codex_human_reset_at
 _extract_rate_limit_reset_info = _codex_autopatch._extract_rate_limit_reset_info
 _debug_extract_reset_info_from_message = _codex_autopatch._debug_extract_reset_info_from_message
+_extract_first_error_message_from_exec_jsonl = _codex_autopatch._extract_first_error_message_from_exec_jsonl
 _extract_rate_limit_reset_info_with_exec_fallback = _codex_autopatch._extract_rate_limit_reset_info_with_exec_fallback
 _pick_reset_at_raw_from_rate_limit_artifact = _codex_autopatch._pick_reset_at_raw_from_rate_limit_artifact
 
@@ -150,6 +151,27 @@ def test_parse_quota_exceeded_is_not_backoff() -> None:
     assert info["source"] == "quota_exceeded"
     assert info["reset_at_iso"] is None
     assert info["resets_in_seconds"] is None
+
+
+def test_extract_exec_error_message_tolerates_unreadable_artifact(tmp_path) -> None:
+    missing_path = tmp_path / "missing.jsonl"
+    invalid_utf8_path = tmp_path / "invalid-utf8.jsonl"
+    invalid_utf8_path.write_bytes(b"\xff\xfe\n")
+
+    assert _extract_first_error_message_from_exec_jsonl(str(missing_path)) is None
+    assert _extract_first_error_message_from_exec_jsonl(str(invalid_utf8_path)) is None
+
+
+def test_extract_exec_error_message_does_not_swallow_unexpected_open_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_open(*_args, **_kwargs):
+        raise RuntimeError("unexpected artifact reader failure")
+
+    monkeypatch.setattr("builtins.open", fail_open)
+
+    with pytest.raises(RuntimeError, match="unexpected artifact reader failure"):
+        _extract_first_error_message_from_exec_jsonl("codex_exec.jsonl")
 
 
 def test_parse_real_codex_exec_jsonl_if_present() -> None:

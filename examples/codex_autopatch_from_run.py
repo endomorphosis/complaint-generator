@@ -170,7 +170,11 @@ def _extract_first_error_message_from_exec_jsonl(path: str) -> Optional[str]:
                 if isinstance(obj, dict) and obj.get("type") == "error" and isinstance(obj.get("message"), str):
                     msg = str(obj.get("message") or "").strip()
                     return msg or None
-    except Exception:
+    except (OSError, UnicodeError):
+        # The exec artifact is optional and may disappear, become unreadable,
+        # or contain invalid text while a run is being inspected. Treat those
+        # input failures as a missing fallback, but do not hide unexpected
+        # failures in the extraction logic.
         return None
     return None
 
