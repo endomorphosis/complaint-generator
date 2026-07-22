@@ -2548,3 +2548,189 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 36cf294a133f9569
 - Acceptance: Codebase scan filed this finding from examples/codex_multi_run_autopatch.py:972. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-111-codebase-scan-36cf294a133f.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-112 Review swallowed exception path in examples/codex_autopatch_from_run.py:443
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, examples/codex_autopatch_from_run.py
+- Validation: python3 -m py_compile examples/codex_autopatch_from_run.py
+- Bundle: codebase/runtime/examples-codex_autopatch_from_run
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-codex_autopatch_from_run.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-codex_autopatch_from_run
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/codex_autopatch_from_run.py
+- AST symbols: __init__, _append_jsonl, _append_jsonl_best_effort, _apply_hunk_to_lines, _apply_patch_transaction, _build_failure_excerpt_from_file_lines, _build_prompt, _combine_apply_patch_blocks, _compact_for_prompt, _count_dg, _count_kg, _debug_extract_reset_info_from_message, _dry_run_apply_patch_text, _extract_apply_patch_blocks, _extract_first_error_message_from_exec_jsonl, _extract_json_block_after_header, _extract_rate_limit_reset_info, _extract_rate_limit_reset_info_with_exec_fallback, _extract_update_files_from_patch_text, _find_session_jsons, _find_subsequence, _find_subsequence_relaxed_indent, _find_subsequence_rstrip, _get_llm_router_backend_config, _load_config, _load_json, _looks_like_apply_patch, _make_task_reminder, _maybe_sleep_from_previous_rate_limit, _multi_file_excerpts_for_prompt, _normalize_patch_text, _optimizer_count, _parse_apply_patch, _parse_codex_human_reset_at, _parse_iso_dt, _pick_best_valid_patch_with_report, _pick_first_valid_patch, _pick_first_valid_patch_with_report, _pick_reset_at_raw_from_rate_limit_artifact, _pick_worst_sessions, _rate_limit_hint, _reprompt_for_real_patch, _restore_original_text, _run_codex_with_tools, _run_codex_with_tools_logged, _run_post_apply_checks, _safe_abs_path, _session_brief, _tool_cat, _tool_grep, _tool_ls, _tool_patch, _truncate_for_log, _try_parse_json_object, _utc_iso, _validate_python_syntax, _write_rate_limit_artifact, _write_rate_limit_artifact_payload, append jsonl, append jsonl best effort, apply hunk to lines, apply patch transaction, argparse, backends, backends llmrouterbackend, backends.llmrouterbackend, build failure excerpt from file lines, build prompt, clip, combine apply patch blocks, compact for prompt, count dg, count kg, datetime, datetime datetime, datetime timedelta, datetime timezone, datetime.datetime, datetime.timedelta, datetime.timezone
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-codex_autopatch_from_run
+- Missing evidence: Review swallowed exception path in examples/codex_autopatch_from_run.py:443
+- Merge key: codebase/runtime/examples-codex_autopatch_from_run
+- Merge family: examples/codex_autopatch_from_run.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 061b16537a95da4e
+- Acceptance: Codebase scan filed this finding from examples/codex_autopatch_from_run.py:443. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-112-codebase-scan-061b16537a95.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-113 Review swallowed exception path in examples/codex_multi_run_autopatch_loop.py:130
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, examples/codex_multi_run_autopatch_loop.py
+- Validation: python3 -m py_compile examples/codex_multi_run_autopatch_loop.py
+- Bundle: codebase/runtime/examples-codex_multi_run_autopatch_loop
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-codex_multi_run_autopatch_loop.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-codex_multi_run_autopatch_loop
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/codex_multi_run_autopatch_loop.py
+- AST symbols: _atomic_write_json, _extract_summary_path, _git_has_changes, _load_json_or_none, _load_orchestrator_id, _run, _run_streaming, _utc_stamp, argparse, atomic write json, datetime, datetime datetime, datetime timezone, datetime.datetime, datetime.timezone, extract summary path, git has changes, json, load json or none, load orchestrator id, main, os, re, run, run streaming, subprocess, sys, time, typing, typing optional, typing.optional, utc stamp
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-codex_multi_run_autopatch_loop
+- Missing evidence: Review swallowed exception path in examples/codex_multi_run_autopatch_loop.py:130
+- Merge key: codebase/runtime/examples-codex_multi_run_autopatch_loop
+- Merge family: examples/codex_multi_run_autopatch_loop.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 53b79553b394fa71
+- Acceptance: Codebase scan filed this finding from examples/codex_multi_run_autopatch_loop.py:130. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-113-codebase-scan-53b79553b394.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-114 Review swallowed exception path in examples/codex_multi_run_autopatch_loop.py:139
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, examples/codex_multi_run_autopatch_loop.py
+- Validation: python3 -m py_compile examples/codex_multi_run_autopatch_loop.py
+- Bundle: codebase/runtime/examples-codex_multi_run_autopatch_loop
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-codex_multi_run_autopatch_loop.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-codex_multi_run_autopatch_loop
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/codex_multi_run_autopatch_loop.py
+- AST symbols: _atomic_write_json, _extract_summary_path, _git_has_changes, _load_json_or_none, _load_orchestrator_id, _run, _run_streaming, _utc_stamp, argparse, atomic write json, datetime, datetime datetime, datetime timezone, datetime.datetime, datetime.timezone, extract summary path, git has changes, json, load json or none, load orchestrator id, main, os, re, run, run streaming, subprocess, sys, time, typing, typing optional, typing.optional, utc stamp
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-codex_multi_run_autopatch_loop
+- Missing evidence: Review swallowed exception path in examples/codex_multi_run_autopatch_loop.py:139
+- Merge key: codebase/runtime/examples-codex_multi_run_autopatch_loop
+- Merge family: examples/codex_multi_run_autopatch_loop.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 6b02f453cf7956b2
+- Acceptance: Codebase scan filed this finding from examples/codex_multi_run_autopatch_loop.py:139. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-114-codebase-scan-6b02f453cf79.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-115 Review swallowed exception path in examples/observability_benchmarks.py:513
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, examples/observability_benchmarks.py
+- Validation: python3 -m py_compile examples/observability_benchmarks.py
+- Bundle: codebase/runtime/examples-observability_benchmarks
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-observability_benchmarks.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-observability_benchmarks
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/observability_benchmarks.py
+- AST symbols: __init__, add, benchmark circuit breaker decision, benchmark concurrent metrics, benchmark concurrent tracing, benchmark latency under load, benchmark memory growth, benchmark metrics export, benchmark metrics recording latency, benchmark trace creation, benchmark trace export, benchmark_circuit_breaker_decision, benchmark_concurrent_metrics, benchmark_concurrent_tracing, benchmark_latency_under_load, benchmark_memory_growth, benchmark_metrics_export, benchmark_metrics_recording_latency, benchmark_trace_creation, benchmark_trace_export, benchmarkresult, benchmarkresult add, benchmarkresult count, benchmarkresult error, benchmarkresult init, benchmarkresult max, benchmarkresult mean, benchmarkresult median, benchmarkresult memory delta mb, benchmarkresult min, benchmarkresult p95, benchmarkresult p99, benchmarkresult print summary, benchmarkresult stdev, benchmarkresult throughput, benchmarkresult total, benchmarkresult.__init__, benchmarkresult.add, benchmarkresult.count, benchmarkresult.error, benchmarkresult.max, benchmarkresult.mean, benchmarkresult.median, benchmarkresult.memory_delta_mb, benchmarkresult.min, benchmarkresult.p95, benchmarkresult.p99, benchmarkresult.print_summary, benchmarkresult.stdev, benchmarkresult.throughput, benchmarkresult.total, collections, collections defaultdict, collections.defaultdict, concurrent futures, concurrent futures as completed, concurrent futures threadpoolexecutor, concurrent.futures, concurrent.futures.as_completed, concurrent.futures.threadpoolexecutor, count, error, fast service, fast_service, init, ipfs datasets py logic observability metrics prometheus, ipfs datasets py logic observability metrics prometheus get prometheus collector, ipfs datasets py logic observability otel integration, ipfs datasets py logic observability otel integration get otel tracer, ipfs datasets py logic security llm circuit breaker, ipfs datasets py logic security llm circuit breaker circuitbreakeropenerror, ipfs datasets py logic security llm circuit breaker get circuit breaker, ipfs_datasets_py.logic.observability.metrics_prometheus, ipfs_datasets_py.logic.observability.metrics_prometheus.get_prometheus_collector, ipfs_datasets_py.logic.observability.otel_integration, ipfs_datasets_py.logic.observability.otel_integration.get_otel_tracer, ipfs_datasets_py.logic.security.llm_circuit_breaker, ipfs_datasets_py.logic.security.llm_circuit_breaker.circuitbreakeropenerror, ipfs_datasets_py.logic.security.llm_circuit_breaker.get_circuit_breaker, json
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-observability_benchmarks
+- Missing evidence: Review swallowed exception path in examples/observability_benchmarks.py:513
+- Merge key: codebase/runtime/examples-observability_benchmarks
+- Merge family: examples/observability_benchmarks.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 35bb81f1968ccae0
+- Acceptance: Codebase scan filed this finding from examples/observability_benchmarks.py:513. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-115-codebase-scan-35bb81f1968c.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-116 Review swallowed exception path in examples/session_sgd_report.py:43
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, examples/session_sgd_report.py
+- Validation: python3 -m py_compile examples/session_sgd_report.py
+- Bundle: codebase/runtime/examples-session_sgd_report
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-session_sgd_report.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-session_sgd_report
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/session_sgd_report.py
+- AST symbols: _avg, _dg_counts, _find_session_json_files, _has_question_matching, _kg_counts, _load_json, _maybe_load_json, _safe_int, _session_graph_paths, _summarize_session, _termination_reason, _write_report, argparse, avg, dataclasses, dataclasses dataclass, dataclasses.dataclass, datetime, datetime datetime, datetime utc, datetime.datetime, datetime.utc, dg counts, find session json files, has question matching, json, kg counts, load json, main, maybe load json, os, safe int, session graph paths, sessionsummary, summarize session, termination reason, typing, typing any, typing dict, typing list, typing optional, typing tuple, typing.any, typing.dict, typing.list, typing.optional, typing.tuple, write report
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-session_sgd_report
+- Missing evidence: Review swallowed exception path in examples/session_sgd_report.py:43
+- Merge key: codebase/runtime/examples-session_sgd_report
+- Merge family: examples/session_sgd_report.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 504dbdf088b1217d
+- Acceptance: Codebase scan filed this finding from examples/session_sgd_report.py:43. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-116-codebase-scan-504dbdf088b1.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-117 Review swallowed exception path in examples/session_sgd_report.py:59
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/refactor_supervisor/discovery, examples/session_sgd_report.py
+- Validation: python3 -m py_compile examples/session_sgd_report.py
+- Bundle: codebase/runtime/examples-session_sgd_report
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-session_sgd_report.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-session_sgd_report
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/session_sgd_report.py
+- AST symbols: _avg, _dg_counts, _find_session_json_files, _has_question_matching, _kg_counts, _load_json, _maybe_load_json, _safe_int, _session_graph_paths, _summarize_session, _termination_reason, _write_report, argparse, avg, dataclasses, dataclasses dataclass, dataclasses.dataclass, datetime, datetime datetime, datetime utc, datetime.datetime, datetime.utc, dg counts, find session json files, has question matching, json, kg counts, load json, main, maybe load json, os, safe int, session graph paths, sessionsummary, summarize session, termination reason, typing, typing any, typing dict, typing list, typing optional, typing tuple, typing.any, typing.dict, typing.list, typing.optional, typing.tuple, write report
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-session_sgd_report
+- Missing evidence: Review swallowed exception path in examples/session_sgd_report.py:59
+- Merge key: codebase/runtime/examples-session_sgd_report
+- Merge family: examples/session_sgd_report.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 1fafae091ef0e1b2
+- Acceptance: Codebase scan filed this finding from examples/session_sgd_report.py:59. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-117-codebase-scan-1fafae091ef0.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
