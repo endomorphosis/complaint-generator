@@ -61,7 +61,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-014 Resolve validation retry-budget failure for REF-012
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
@@ -69,3 +69,4 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Outputs: integrations/ipfs_datasets/logic.py, lib/formal_logic, data/refactor_supervisor/bundle_lanes/refactor-g3-g3-s2/discovery
 - Validation: python -m pytest tests/test_symbolicai_logic_dependency.py tests/test_ipld_logic_storage_dependency.py -q
 - Acceptance: Retry-budget guardrail filed this from repeated validation failures in REF-012. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g3-g3-s2/discovery/2026-07-22-ref-014-ref-012-retry-budget.md to fix the validation blocker, then mark this repair task completed so the supervisor can release REF-012 from strategy blocked_tasks.
+- Repair result: Dependency revision `7b39c55930e54c696bba48039dfffd0244ec2ab3` provides the writable SymbolicAI import bootstrap and real IPLD component imports; the blocked REF-012 capability-contract changes were recovered from rescue commit `99e1c244c199263c65a4ef1194a9a38898e325f0`, and the required dependency lane passes with 2 tests. The next supervisor maintenance pass can release REF-012 from strategy `blocked_tasks`.
