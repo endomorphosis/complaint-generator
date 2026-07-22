@@ -50,7 +50,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-205 Escalate low-backlog analysis through AST and llm_router planning before declaring exhaustion
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G10
