@@ -1197,10 +1197,12 @@ def write_seed_bundle_index(
     goals: list[dict[str, Any]],
     *,
     exclude_bundle_keys: set[str] | None = None,
+    task_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
     bundles: dict[str, dict[str, Any]] = {}
     excluded = exclude_bundle_keys or set()
+    statuses = task_statuses or {}
     task_index = 1
     for task in flatten_tasks(goals):
         task_id = task.task_id or f"{TASK_PREFIX}{task_index:03d}"
@@ -1238,6 +1240,7 @@ def write_seed_bundle_index(
         info["tasks"].append(
             {
                 "task_id": task_id,
+                "status": statuses.get(task_id, "todo"),
                 "goal_id": task.subgoal_id,
                 "graph_depth": 1,
                 "parent_goal_ids": [task.goal_id],
@@ -1515,7 +1518,12 @@ def seed_taskboard(
     todo_changed = _ensure_text(TODO_PATH, _render_seed_todo(goals), overwrite=existing_todo_headers == 0)
     if existing_todo_headers:
         todo_changed = _append_missing_explicit_seed_tasks(TODO_PATH, goals) or todo_changed
-    bundle_seed = write_seed_bundle_index(goals, exclude_bundle_keys=exclude_bundle_keys)
+    durable_statuses = _durable_task_statuses()
+    bundle_seed = write_seed_bundle_index(
+        goals,
+        exclude_bundle_keys=exclude_bundle_keys,
+        task_statuses=durable_statuses,
+    )
     status_projection = synchronize_taskboard_statuses()
     todo_changed = bool(todo_changed or str(TODO_PATH) in status_projection["updated"])
 

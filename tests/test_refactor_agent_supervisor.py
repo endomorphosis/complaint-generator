@@ -278,6 +278,38 @@ def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_
     assert shard_text.count("- Status: completed") == 2
 
 
+def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    monkeypatch.setattr(supervisor, "TASKBOARD_DOC_PATH", tmp_path / "taskboard.md")
+    task = supervisor.RefactorTask(
+        goal_id="G1",
+        subgoal_id="G1.S1",
+        title="Completed member",
+        priority="P0",
+        files=(),
+        rationale="Already merged.",
+        acceptance=("Receipt exists.",),
+        validation=("true",),
+        task_id="REF-001",
+    )
+    goals = [
+        {
+            "id": "G1",
+            "title": "Goal",
+            "priority": "P0",
+            "subgoals": [{"id": "G1.S1", "title": "Subgoal", "tasks": [task]}],
+        }
+    ]
+
+    supervisor.write_seed_bundle_index(goals, task_statuses={"REF-001": "completed"})
+
+    index = json.loads((supervisor.BUNDLE_DIR / "index.json").read_text(encoding="utf-8"))
+    member = index["bundles"]["refactor/g1/g1-s1"]["tasks"][0]
+    assert member["status"] == "completed"
+
+
 def test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval(tmp_path, monkeypatch) -> None:
     _isolate_status_paths(tmp_path, monkeypatch)
     monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
