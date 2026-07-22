@@ -1990,3 +1990,189 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 20594a03322b57b6
 - Acceptance: Codebase scan filed this finding from complaint_analysis/research_bootstrap_workflow.py:438. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-093-codebase-scan-20594a03322b.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-094 Resolve code annotation in complaint_phases/neurosymbolic_matcher.py:269
+
+- Status: todo
+- Completion: manual
+- Priority: P3
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, complaint_phases/neurosymbolic_matcher.py
+- Validation: python3 -m py_compile complaint_phases/neurosymbolic_matcher.py
+- Bundle: codebase/runtime/complaint_phases-neurosymbolic_matcher
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-complaint_phases-neurosymbolic_matcher.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/complaint_phases-neurosymbolic_matcher
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: complaint_phases/neurosymbolic_matcher.py
+- AST symbols: __init__, _check_requirement_satisfied, _llm_semantic_match, _match_single_claim, _requirement_matches, _semantic_requirement_check, assess claim viability, assess_claim_viability, average gaps per result, average satisfaction score, average_gaps_per_result, average_satisfaction_score, check requirement satisfied, dependency graph, dependency graph dependencygraph, dependency graph dependencynode, dependency graph nodetype, dependency_graph, dependency_graph.dependencygraph, dependency_graph.dependencynode, dependency_graph.nodetype, gap frequency distribution, gap_frequency_distribution, generate fact finding recommendations, generate_fact_finding_recommendations, high viability percentage, high_viability_percentage, init, knowledge graph, knowledge graph entity, knowledge graph knowledgegraph, knowledge_graph, knowledge_graph.entity, knowledge_graph.knowledgegraph, legal graph, legal graph legalelement, legal graph legalgraph, legal_graph, legal_graph.legalelement, legal_graph.legalgraph, llm semantic match, logging, match claims to law, match single claim, match_claims_to_law, matching history size, matching_history_size, most common gap, most_common_gap, neurosymbolicmatcher, neurosymbolicmatcher assess claim viability, neurosymbolicmatcher average gaps per result, neurosymbolicmatcher average satisfaction score, neurosymbolicmatcher check requirement satisfied, neurosymbolicmatcher gap frequency distribution, neurosymbolicmatcher generate fact finding recommendations, neurosymbolicmatcher high viability percentage, neurosymbolicmatcher init, neurosymbolicmatcher llm semantic match, neurosymbolicmatcher match claims to law, neurosymbolicmatcher match single claim, neurosymbolicmatcher matching history size, neurosymbolicmatcher most common gap, neurosymbolicmatcher requirement matches, neurosymbolicmatcher satisfaction improvement trend, neurosymbolicmatcher satisfaction variance, neurosymbolicmatcher semantic requirement check, neurosymbolicmatcher total claims processed, neurosymbolicmatcher total satisfied claims, neurosymbolicmatcher.__init__, neurosymbolicmatcher._check_requirement_satisfied, neurosymbolicmatcher._llm_semantic_match, neurosymbolicmatcher._match_single_claim, neurosymbolicmatcher._requirement_matches, neurosymbolicmatcher._semantic_requirement_check, neurosymbolicmatcher.assess_claim_viability, neurosymbolicmatcher.average_gaps_per_result, neurosymbolicmatcher.average_satisfaction_score, neurosymbolicmatcher.gap_frequency_distribution, neurosymbolicmatcher.generate_fact_finding_recommendations
+- AST symbol scope: file
+- Goal id: codebase/runtime/complaint_phases-neurosymbolic_matcher
+- Missing evidence: Resolve code annotation in complaint_phases/neurosymbolic_matcher.py:269
+- Merge key: codebase/runtime/complaint_phases-neurosymbolic_matcher
+- Merge family: complaint_phases/neurosymbolic_matcher.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 7bc1d7368daf69b1
+- Acceptance: Codebase scan filed this finding from complaint_phases/neurosymbolic_matcher.py:269. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-094-codebase-scan-7bc1d7368daf.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-095 Review swallowed exception path in document_optimization.py:43
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, document_optimization.py
+- Validation: python3 -m py_compile document_optimization.py
+- Bundle: codebase/runtime/document_optimization
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-document_optimization.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/document_optimization
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: document_optimization.py
+- AST symbols: __future__, __future__.annotations, __init__, _apply_actor_payload, _apply_config, _build_anchored_chronology_summary, _build_blocker_prompt, _build_claim_reasoning_review, _build_claim_reasoning_theorem_export_metadata, _build_claim_support_temporal_handoff, _build_claim_supporting_facts_delta, _build_claim_temporal_gap_hints, _build_claims_for_relief_delta, _build_document_evidence_targeting_summary, _build_document_execution_drift_summary, _build_document_grounding_improvement_summary, _build_document_grounding_lane_outcome_summary, _build_document_workflow_execution_summary, _build_fallback_actor_payload, _build_generic_delta, _build_iteration_change_manifest, _build_list_delta, _build_manifest_delta_details, _build_packet_projection, _build_support_context, _build_upstream_optimizer_metadata, _build_workflow_optimization_guidance, _build_workflow_phase_targeting, _build_workflow_targeting_summary, _call_mediator, _choose_focus_section, _choose_focus_section_from_workflow_targeting, _chronology_fact_label, _claim_key, _claim_label, _claim_temporal_gap_focus, _clamp, _classify_manifest_change, _collect_temporal_registry_identifiers, _collect_unresolved_temporal_issue_identifiers, _contains_actor_marker, _contains_anchor, _contains_causation_link, _contains_date_anchor, _cosine_similarity, _dedupe_text_values, _embed_text, _extract_element_texts, _extract_llm_metadata, _extract_manifest_value, _extract_support_texts, _focus_query_text, _format_service_recipient_detail, _format_timeline_date, _generate_llm_payload, _get_embeddings_router, _get_upstream_llm_router, _heuristic_review, _join_chronology_segments, _lexical_overlap_score, _merge_review_payload, _normalize_affidavit_facts, _normalize_blocker_records, _normalize_claims_for_relief, _normalize_exhibits, _normalize_intake_objective, _normalize_intake_objectives, _normalize_lines, _normalize_optimizer_provider, _normalize_service_recipient_details, _parse_json_payload, _rank_candidates, _refresh_dependent_sections, _reset_runtime_state, _resolve_stage_provider, _resolve_tracked_fields, _router_status, _router_usage_summary, _run_actor, _run_critic
+- AST symbol scope: file
+- Goal id: codebase/runtime/document_optimization
+- Missing evidence: Review swallowed exception path in document_optimization.py:43
+- Merge key: codebase/runtime/document_optimization
+- Merge family: document_optimization.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: d5d93085783be4b8
+- Acceptance: Codebase scan filed this finding from document_optimization.py:43. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-095-codebase-scan-d5d93085783b.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-096 Review swallowed exception path in document_optimization.py:4355
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, document_optimization.py
+- Validation: python3 -m py_compile document_optimization.py
+- Bundle: codebase/runtime/document_optimization
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-document_optimization.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/document_optimization
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: document_optimization.py
+- AST symbols: __future__, __future__.annotations, __init__, _apply_actor_payload, _apply_config, _build_anchored_chronology_summary, _build_blocker_prompt, _build_claim_reasoning_review, _build_claim_reasoning_theorem_export_metadata, _build_claim_support_temporal_handoff, _build_claim_supporting_facts_delta, _build_claim_temporal_gap_hints, _build_claims_for_relief_delta, _build_document_evidence_targeting_summary, _build_document_execution_drift_summary, _build_document_grounding_improvement_summary, _build_document_grounding_lane_outcome_summary, _build_document_workflow_execution_summary, _build_fallback_actor_payload, _build_generic_delta, _build_iteration_change_manifest, _build_list_delta, _build_manifest_delta_details, _build_packet_projection, _build_support_context, _build_upstream_optimizer_metadata, _build_workflow_optimization_guidance, _build_workflow_phase_targeting, _build_workflow_targeting_summary, _call_mediator, _choose_focus_section, _choose_focus_section_from_workflow_targeting, _chronology_fact_label, _claim_key, _claim_label, _claim_temporal_gap_focus, _clamp, _classify_manifest_change, _collect_temporal_registry_identifiers, _collect_unresolved_temporal_issue_identifiers, _contains_actor_marker, _contains_anchor, _contains_causation_link, _contains_date_anchor, _cosine_similarity, _dedupe_text_values, _embed_text, _extract_element_texts, _extract_llm_metadata, _extract_manifest_value, _extract_support_texts, _focus_query_text, _format_service_recipient_detail, _format_timeline_date, _generate_llm_payload, _get_embeddings_router, _get_upstream_llm_router, _heuristic_review, _join_chronology_segments, _lexical_overlap_score, _merge_review_payload, _normalize_affidavit_facts, _normalize_blocker_records, _normalize_claims_for_relief, _normalize_exhibits, _normalize_intake_objective, _normalize_intake_objectives, _normalize_lines, _normalize_optimizer_provider, _normalize_service_recipient_details, _parse_json_payload, _rank_candidates, _refresh_dependent_sections, _reset_runtime_state, _resolve_stage_provider, _resolve_tracked_fields, _router_status, _router_usage_summary, _run_actor, _run_critic
+- AST symbol scope: file
+- Goal id: codebase/runtime/document_optimization
+- Missing evidence: Review swallowed exception path in document_optimization.py:4355
+- Merge key: codebase/runtime/document_optimization
+- Merge family: document_optimization.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 6d722b95b86a59c0
+- Acceptance: Codebase scan filed this finding from document_optimization.py:4355. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-096-codebase-scan-6d722b95b86a.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-097 Review swallowed exception path in document_optimization.py:4683
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, document_optimization.py
+- Validation: python3 -m py_compile document_optimization.py
+- Bundle: codebase/runtime/document_optimization
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-document_optimization.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/document_optimization
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: document_optimization.py
+- AST symbols: __future__, __future__.annotations, __init__, _apply_actor_payload, _apply_config, _build_anchored_chronology_summary, _build_blocker_prompt, _build_claim_reasoning_review, _build_claim_reasoning_theorem_export_metadata, _build_claim_support_temporal_handoff, _build_claim_supporting_facts_delta, _build_claim_temporal_gap_hints, _build_claims_for_relief_delta, _build_document_evidence_targeting_summary, _build_document_execution_drift_summary, _build_document_grounding_improvement_summary, _build_document_grounding_lane_outcome_summary, _build_document_workflow_execution_summary, _build_fallback_actor_payload, _build_generic_delta, _build_iteration_change_manifest, _build_list_delta, _build_manifest_delta_details, _build_packet_projection, _build_support_context, _build_upstream_optimizer_metadata, _build_workflow_optimization_guidance, _build_workflow_phase_targeting, _build_workflow_targeting_summary, _call_mediator, _choose_focus_section, _choose_focus_section_from_workflow_targeting, _chronology_fact_label, _claim_key, _claim_label, _claim_temporal_gap_focus, _clamp, _classify_manifest_change, _collect_temporal_registry_identifiers, _collect_unresolved_temporal_issue_identifiers, _contains_actor_marker, _contains_anchor, _contains_causation_link, _contains_date_anchor, _cosine_similarity, _dedupe_text_values, _embed_text, _extract_element_texts, _extract_llm_metadata, _extract_manifest_value, _extract_support_texts, _focus_query_text, _format_service_recipient_detail, _format_timeline_date, _generate_llm_payload, _get_embeddings_router, _get_upstream_llm_router, _heuristic_review, _join_chronology_segments, _lexical_overlap_score, _merge_review_payload, _normalize_affidavit_facts, _normalize_blocker_records, _normalize_claims_for_relief, _normalize_exhibits, _normalize_intake_objective, _normalize_intake_objectives, _normalize_lines, _normalize_optimizer_provider, _normalize_service_recipient_details, _parse_json_payload, _rank_candidates, _refresh_dependent_sections, _reset_runtime_state, _resolve_stage_provider, _resolve_tracked_fields, _router_status, _router_usage_summary, _run_actor, _run_critic
+- AST symbol scope: file
+- Goal id: codebase/runtime/document_optimization
+- Missing evidence: Review swallowed exception path in document_optimization.py:4683
+- Merge key: codebase/runtime/document_optimization
+- Merge family: document_optimization.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 1d23478780270cb6
+- Acceptance: Codebase scan filed this finding from document_optimization.py:4683. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-097-codebase-scan-1d2347878027.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-098 Review swallowed exception path in examples/codex_autopatch_from_run.py:60
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, examples/codex_autopatch_from_run.py
+- Validation: python3 -m py_compile examples/codex_autopatch_from_run.py
+- Bundle: codebase/runtime/examples-codex_autopatch_from_run
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-codex_autopatch_from_run.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-codex_autopatch_from_run
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/codex_autopatch_from_run.py
+- AST symbols: __init__, _append_jsonl, _apply_hunk_to_lines, _apply_patch_transaction, _build_failure_excerpt_from_file_lines, _build_prompt, _combine_apply_patch_blocks, _compact_for_prompt, _count_dg, _count_kg, _debug_extract_reset_info_from_message, _dry_run_apply_patch_text, _extract_apply_patch_blocks, _extract_first_error_message_from_exec_jsonl, _extract_json_block_after_header, _extract_rate_limit_reset_info, _extract_rate_limit_reset_info_with_exec_fallback, _extract_update_files_from_patch_text, _find_session_jsons, _find_subsequence, _find_subsequence_relaxed_indent, _find_subsequence_rstrip, _get_llm_router_backend_config, _load_config, _load_json, _looks_like_apply_patch, _make_task_reminder, _maybe_sleep_from_previous_rate_limit, _multi_file_excerpts_for_prompt, _normalize_patch_text, _parse_apply_patch, _parse_codex_human_reset_at, _parse_iso_dt, _pick_best_valid_patch_with_report, _pick_first_valid_patch, _pick_first_valid_patch_with_report, _pick_reset_at_raw_from_rate_limit_artifact, _pick_worst_sessions, _rate_limit_hint, _reprompt_for_real_patch, _restore_original_text, _run_codex_with_tools, _run_codex_with_tools_logged, _run_post_apply_checks, _safe_abs_path, _session_brief, _tool_cat, _tool_grep, _tool_ls, _tool_patch, _truncate_for_log, _try_parse_json_object, _utc_iso, _validate_python_syntax, _write_rate_limit_artifact, append jsonl, apply hunk to lines, apply patch transaction, argparse, backends, backends llmrouterbackend, backends.llmrouterbackend, build failure excerpt from file lines, build prompt, clip, combine apply patch blocks, compact for prompt, count dg, count kg, datetime, datetime datetime, datetime timedelta, datetime timezone, datetime.datetime, datetime.timedelta, datetime.timezone, debug extract reset info from message, dry run apply patch text, excerpt for file, excerpt_for_file
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-codex_autopatch_from_run
+- Missing evidence: Review swallowed exception path in examples/codex_autopatch_from_run.py:60
+- Merge key: codebase/runtime/examples-codex_autopatch_from_run
+- Merge family: examples/codex_autopatch_from_run.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: e398f8e3d3b4f5f5
+- Acceptance: Codebase scan filed this finding from examples/codex_autopatch_from_run.py:60. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-098-codebase-scan-e398f8e3d3b4.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-099 Review swallowed exception path in examples/codex_autopatch_from_run.py:83
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, examples/codex_autopatch_from_run.py
+- Validation: python3 -m py_compile examples/codex_autopatch_from_run.py
+- Bundle: codebase/runtime/examples-codex_autopatch_from_run
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-examples-codex_autopatch_from_run.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/examples-codex_autopatch_from_run
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: examples/codex_autopatch_from_run.py
+- AST symbols: __init__, _append_jsonl, _apply_hunk_to_lines, _apply_patch_transaction, _build_failure_excerpt_from_file_lines, _build_prompt, _combine_apply_patch_blocks, _compact_for_prompt, _count_dg, _count_kg, _debug_extract_reset_info_from_message, _dry_run_apply_patch_text, _extract_apply_patch_blocks, _extract_first_error_message_from_exec_jsonl, _extract_json_block_after_header, _extract_rate_limit_reset_info, _extract_rate_limit_reset_info_with_exec_fallback, _extract_update_files_from_patch_text, _find_session_jsons, _find_subsequence, _find_subsequence_relaxed_indent, _find_subsequence_rstrip, _get_llm_router_backend_config, _load_config, _load_json, _looks_like_apply_patch, _make_task_reminder, _maybe_sleep_from_previous_rate_limit, _multi_file_excerpts_for_prompt, _normalize_patch_text, _parse_apply_patch, _parse_codex_human_reset_at, _parse_iso_dt, _pick_best_valid_patch_with_report, _pick_first_valid_patch, _pick_first_valid_patch_with_report, _pick_reset_at_raw_from_rate_limit_artifact, _pick_worst_sessions, _rate_limit_hint, _reprompt_for_real_patch, _restore_original_text, _run_codex_with_tools, _run_codex_with_tools_logged, _run_post_apply_checks, _safe_abs_path, _session_brief, _tool_cat, _tool_grep, _tool_ls, _tool_patch, _truncate_for_log, _try_parse_json_object, _utc_iso, _validate_python_syntax, _write_rate_limit_artifact, append jsonl, apply hunk to lines, apply patch transaction, argparse, backends, backends llmrouterbackend, backends.llmrouterbackend, build failure excerpt from file lines, build prompt, clip, combine apply patch blocks, compact for prompt, count dg, count kg, datetime, datetime datetime, datetime timedelta, datetime timezone, datetime.datetime, datetime.timedelta, datetime.timezone, debug extract reset info from message, dry run apply patch text, excerpt for file, excerpt_for_file
+- AST symbol scope: file
+- Goal id: codebase/runtime/examples-codex_autopatch_from_run
+- Missing evidence: Review swallowed exception path in examples/codex_autopatch_from_run.py:83
+- Merge key: codebase/runtime/examples-codex_autopatch_from_run
+- Merge family: examples/codex_autopatch_from_run.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Goal registration: dynamic
+- Todo vector key: 24ed648c404ce112
+- Acceptance: Codebase scan filed this finding from examples/codex_autopatch_from_run.py:83. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-099-codebase-scan-24ed648c404c.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
