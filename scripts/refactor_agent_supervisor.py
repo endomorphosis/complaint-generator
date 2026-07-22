@@ -46,6 +46,7 @@ BUNDLE_COORDINATION_PATH = BUNDLE_LANE_ROOT / "coordination.sqlite3"
 MERGE_RESOLVER_PID_PATH = STATE_ROOT / "merge_resolver_watchdog.pid"
 MERGE_RESOLVER_STATUS_PATH = STATE_ROOT / "merge_resolver_watchdog_status.json"
 MERGE_RESOLVER_LOG_PATH = STATE_ROOT / "merge_resolver_watchdog.log"
+MERGE_RESOLVER_REGISTRY_DIR = STATE_ROOT / "merge_resolver_registry"
 STATUS_PATH = STATE_ROOT / "refactor_supervisor_status.json"
 PID_PATH = STATE_ROOT / "refactor_supervisor.pid"
 LOG_PATH = STATE_ROOT / "refactor_supervisor.log"
@@ -1799,12 +1800,28 @@ def merge_event_paths() -> list[Path]:
 
 def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0, max_events: int = 1) -> dict[str, Any]:
     _ensure_accelerate_import_path()
-    from ipfs_accelerate_py.agent_supervisor.merge_resolver import invoke_llm_resolver, resolver_payload
+    from ipfs_accelerate_py.agent_supervisor.merge_resolver import (
+        MergeResolverRegistry,
+        invoke_llm_resolver,
+        iter_jsonl,
+        latest_failed_merge_event,
+        merge_in_progress,
+        resolver_payload,
+        unmerged_paths,
+    )
 
     results: list[dict[str, Any]] = []
     attempted = 0
+    registry = MergeResolverRegistry(
+        MERGE_RESOLVER_REGISTRY_DIR,
+        lease_timeout_seconds=max(1.0, float(timeout_seconds) + 30.0),
+    )
     for events_path in merge_event_paths():
         try:
+            event = latest_failed_merge_event(iter_jsonl(events_path))
+            if event is None:
+                results.append({"events_path": str(events_path), "found": False})
+                continue
             payload = resolver_payload(
                 events_path=events_path,
                 repo_root=PROJECT_ROOT,
@@ -1819,6 +1836,22 @@ def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0, max_events: 
             if not payload.get("found"):
                 results.append({"events_path": str(events_path), "found": False})
                 continue
+            workspace = Path(str(payload.get("repo_root") or PROJECT_ROOT)).resolve()
+            live_unmerged_paths = unmerged_paths(workspace)
+            live_merge = merge_in_progress(workspace)
+            if not live_merge and not live_unmerged_paths:
+                results.append(
+                    {
+                        "events_path": str(events_path),
+                        "found": True,
+                        "task_id": payload.get("task_id"),
+                        "workspace": str(workspace),
+                        "conflict_fingerprint": payload.get("conflict_fingerprint"),
+                        "skipped": True,
+                        "skip_reason": "merge_not_active",
+                    }
+                )
+                continue
             if attempted >= max(1, int(max_events)):
                 results.append(
                     {
@@ -1830,20 +1863,70 @@ def resolve_merge_conflicts_once(*, timeout_seconds: float = 900.0, max_events: 
                     }
                 )
                 continue
-            attempted += 1
-            applied = invoke_llm_resolver(
-                payload,
-                command_template=merge_resolver_command(),
-                timeout_seconds=timeout_seconds,
+            claim = registry.acquire(
+                event,
+                owner_id=f"complaint-generator-watchdog-{os.getpid()}",
+                lease_seconds=max(1.0, float(timeout_seconds) + 30.0),
             )
+            if claim is None:
+                results.append(
+                    {
+                        "events_path": str(events_path),
+                        "found": True,
+                        "task_id": payload.get("task_id"),
+                        "workspace": str(workspace),
+                        "conflict_fingerprint": payload.get("conflict_fingerprint"),
+                        "skipped": True,
+                        "skip_reason": "resolver_claim_unavailable",
+                    }
+                )
+                continue
+            attempted += 1
+            try:
+                applied = invoke_llm_resolver(
+                    payload,
+                    command_template=merge_resolver_command(),
+                    timeout_seconds=timeout_seconds,
+                )
+                remaining_unmerged_paths = unmerged_paths(workspace)
+                merge_still_active = merge_in_progress(workspace)
+                resolved = bool(
+                    applied.get("applied")
+                    and not remaining_unmerged_paths
+                    and not merge_still_active
+                )
+                error = "" if resolved else str(
+                    applied.get("apply_error")
+                    or applied.get("llm_stderr")
+                    or "resolver returned without completing the merge"
+                )
+                receipt_path = registry.release(
+                    claim,
+                    succeeded=resolved,
+                    outcome={
+                        "applied": resolved,
+                        "llm_returncode": applied.get("llm_returncode"),
+                        "remaining_unmerged_paths": remaining_unmerged_paths,
+                        "merge_still_active": merge_still_active,
+                    },
+                    error=error,
+                )
+            except Exception as exc:
+                registry.release(claim, succeeded=False, error=str(exc))
+                raise
             results.append(
                 {
                     "events_path": str(events_path),
                     "found": True,
                     "task_id": applied.get("task_id"),
-                    "applied": applied.get("applied", False),
+                    "workspace": str(workspace),
+                    "conflict_fingerprint": payload.get("conflict_fingerprint"),
+                    "applied": resolved,
                     "llm_returncode": applied.get("llm_returncode"),
                     "apply_error": applied.get("apply_error", ""),
+                    "remaining_unmerged_paths": remaining_unmerged_paths,
+                    "merge_still_active": merge_still_active,
+                    "quarantine_receipt": str(receipt_path) if receipt_path else "",
                 }
             )
         except Exception as exc:
@@ -1933,6 +2016,27 @@ def start_merge_resolver_watchdog(args: argparse.Namespace) -> dict[str, Any]:
     }
     MERGE_RESOLVER_STATUS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return payload
+
+
+def stop_merge_resolver_watchdog() -> dict[str, Any]:
+    if not MERGE_RESOLVER_PID_PATH.exists():
+        return {"status": "not_running"}
+    try:
+        pid = int(MERGE_RESOLVER_PID_PATH.read_text(encoding="utf-8").strip())
+    except Exception:
+        pid = 0
+    if not _pid_alive(pid):
+        MERGE_RESOLVER_PID_PATH.unlink(missing_ok=True)
+        return {"status": "not_running"}
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(20):
+        if not _pid_alive(pid):
+            break
+        time.sleep(0.2)
+    stopped = not _pid_alive(pid)
+    if stopped:
+        MERGE_RESOLVER_PID_PATH.unlink(missing_ok=True)
+    return {"status": "stopped" if stopped else "stopping", "pid": pid}
 
 
 def stop_daemon() -> dict[str, Any]:
@@ -2113,6 +2217,8 @@ def build_parser() -> argparse.ArgumentParser:
     merge_run.add_argument("--timeout-seconds", type=float, default=900.0)
     merge_run.add_argument("--once", action="store_true")
 
+    sub.add_parser("stop-merge-watchdog", help="Stop the background merge-conflict watchdog.")
+
     sub.add_parser("status", help="Show supervisor status.")
     sub.add_parser("stop", help="Stop the background supervisor.")
     return parser
@@ -2140,6 +2246,8 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=args.timeout_seconds,
             once=args.once,
         )
+    elif args.command == "stop-merge-watchdog":
+        payload = stop_merge_resolver_watchdog()
     elif args.command == "status":
         payload = status_payload()
     elif args.command == "stop":

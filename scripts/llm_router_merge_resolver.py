@@ -96,13 +96,39 @@ def _files_with_conflict_markers(workspace: Path) -> list[str]:
     return paths
 
 
-def _stage_and_commit_if_resolved(workspace: Path) -> bool:
+def _patch_paths(diff: str) -> list[str]:
+    paths: list[str] = []
+    for line in diff.splitlines():
+        if not line.startswith("diff --git "):
+            continue
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            continue
+        for value in parts[2:4]:
+            path = value[2:] if value.startswith(("a/", "b/")) else value
+            if path and path != "/dev/null" and path not in paths:
+                paths.append(path)
+    return paths
+
+
+def _merge_in_progress(workspace: Path) -> bool:
+    result = _run(["git", "rev-parse", "--git-path", "MERGE_HEAD"], cwd=workspace)
+    if result.returncode != 0 or not result.stdout.strip():
+        return False
+    merge_head = Path(result.stdout.strip())
+    if not merge_head.is_absolute():
+        merge_head = workspace / merge_head
+    return merge_head.exists()
+
+
+def _stage_and_commit_if_resolved(workspace: Path, *, paths_to_stage: list[str]) -> bool:
     if _unmerged_paths(workspace) or _files_with_conflict_markers(workspace):
         return False
-    status = _run(["git", "status", "--porcelain"], cwd=workspace)
-    if status.returncode != 0 or not status.stdout.strip():
-        return True
-    add = _run(["git", "add", "-A"], cwd=workspace)
+    paths = list(dict.fromkeys(path for path in paths_to_stage if path))
+    if not paths:
+        return False
+    add = _run(["git", "add", "-A", "--", *paths], cwd=workspace)
     if add.returncode != 0:
         print(add.stderr[-2000:], file=sys.stderr)
         return False
@@ -135,6 +161,10 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     workspace = Path(args[0] if args else os.environ.get("IPFS_ACCELERATE_AGENT_MERGE_WORKSPACE", os.getcwd())).resolve()
     prompt = sys.stdin.read()
+    initial_conflict_paths = list(
+        dict.fromkeys([*_unmerged_paths(workspace), *_files_with_conflict_markers(workspace)])
+    )
+    merge_was_in_progress = _merge_in_progress(workspace)
     try:
         response = _router_response(prompt)
     except Exception as exc:
@@ -142,16 +172,25 @@ def main(argv: list[str] | None = None) -> int:
         return _fallback(prompt, workspace)
 
     diff = _extract_unified_diff(response)
+    diff_applied = False
     if diff:
         check = _run(["git", "apply", "--check", "-"], cwd=workspace, input_text=diff)
         if check.returncode == 0:
             apply = _run(["git", "apply", "-"], cwd=workspace, input_text=diff)
             if apply.returncode != 0:
                 print(apply.stderr[-4000:], file=sys.stderr)
+            else:
+                diff_applied = True
         else:
             print(check.stderr[-4000:], file=sys.stderr)
 
-    if _stage_and_commit_if_resolved(workspace):
+    stage_paths = list(initial_conflict_paths)
+    if diff_applied:
+        stage_paths.extend(_patch_paths(diff))
+    if (merge_was_in_progress or diff_applied) and _stage_and_commit_if_resolved(
+        workspace,
+        paths_to_stage=stage_paths,
+    ):
         return 0
 
     print("llm_router response did not fully resolve the worktree; falling back to tool-backed resolver", file=sys.stderr)
