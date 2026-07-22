@@ -350,10 +350,13 @@ def _parse_arch_router_route(text: str) -> str:
 	stripped = _strip_code_fences(text)
 	try:
 		payload = json.loads(stripped)
-		if isinstance(payload, Mapping):
-			return str(payload.get("route") or payload.get("name") or "").strip()
-	except Exception:
-		pass
+	except json.JSONDecodeError:
+		# Router models do not always honor the JSON-only instruction. Preserve
+		# the tolerant regex/plain-text fallbacks only for malformed JSON; parser
+		# defects and unexpected runtime failures must remain visible to callers.
+		payload = None
+	if isinstance(payload, Mapping):
+		return str(payload.get("route") or payload.get("name") or "").strip()
 	match = re.search(r'"route"\s*:\s*"([^"]+)"', stripped)
 	if match:
 		return match.group(1).strip()
