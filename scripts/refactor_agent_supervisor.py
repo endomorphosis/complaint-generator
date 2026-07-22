@@ -135,6 +135,15 @@ def _upstream_bundle_payload_builder():
     return build_bundle_task_payloads
 
 
+def _upstream_bundle_completion_receipt_loader():
+    _ensure_accelerate_import_path()
+    from ipfs_accelerate_py.agent_supervisor.bundle_supervisor import (
+        bundle_member_completion_receipts,
+    )
+
+    return bundle_member_completion_receipts
+
+
 def merge_resolver_command() -> str:
     return shlex.join(
         (
@@ -1683,6 +1692,56 @@ def _task_block(task: RefactorTask, task_id: str, index: int) -> str:
     )
 
 
+def _prune_seed_bundle_shard(path: Path, tasks: list[dict[str, Any]]) -> list[str]:
+    """Remove task blocks that are no longer members of a static seed bundle."""
+
+    if not path.exists():
+        return []
+    expected = {
+        (str(task.get("task_id") or ""), str(task.get("title") or "").strip())
+        for task in tasks
+        if task.get("task_id") and task.get("title")
+    }
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+    header_pattern = re.compile(rf"^##\s+({re.escape(TASK_PREFIX)}\d+)\s+(.+?)\s*$")
+    checkbox_pattern = re.compile(
+        rf"^\s*[-*]\s+\[[^\]]\]\s+Task checkbox-\d+:\s+({re.escape(TASK_PREFIX)}\d+)\b"
+    )
+    headers: list[tuple[int, str, str]] = []
+    for index, raw_line in enumerate(lines):
+        match = header_pattern.match(raw_line.rstrip("\r\n"))
+        if match:
+            headers.append((index, match.group(1), match.group(2).strip()))
+    if not headers:
+        return []
+
+    starts: list[int] = []
+    for header_index, task_id, _title in headers:
+        start = header_index
+        candidate = header_index - 1
+        if candidate >= 0 and not lines[candidate].strip():
+            candidate -= 1
+        if candidate >= 0:
+            checkbox = checkbox_pattern.match(lines[candidate].rstrip("\r\n"))
+            if checkbox and checkbox.group(1) == task_id:
+                start = candidate
+        starts.append(start)
+
+    output = list(lines[: starts[0]])
+    removed: list[str] = []
+    for position, ((header_index, task_id, title), start) in enumerate(zip(headers, starts)):
+        end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+        if (task_id, title) in expected:
+            output.extend(lines[start:end])
+        else:
+            removed.append(task_id)
+    rendered = "".join(output)
+    existing = "".join(lines)
+    if rendered != existing:
+        path.write_text(rendered.rstrip() + "\n", encoding="utf-8")
+    return removed
+
+
 def write_seed_bundle_index(
     goals: list[dict[str, Any]],
     *,
@@ -1698,6 +1757,7 @@ def write_seed_bundle_index(
     if not isinstance(existing_bundles, dict):
         existing_bundles = {}
     seed_task_ids = set(_resolved_seed_task_ids(goals).values())
+    seed_bundle_keys: set[str] = set()
     bundles: dict[str, dict[str, Any]] = {}
     dynamic_task_count = 0
     for bundle_key, raw_info in existing_bundles.items():
@@ -1725,6 +1785,7 @@ def write_seed_bundle_index(
     for task in flatten_tasks(goals):
         task_id = task.task_id or f"{TASK_PREFIX}{task_index:03d}"
         bundle_key = f"refactor/{task.goal_id.lower()}/{task.subgoal_id.replace('.', '-').lower()}"
+        seed_bundle_keys.add(bundle_key)
         safe_key = _safe_bundle_key(bundle_key)
         shard_path = BUNDLE_DIR / f"{safe_key}.todo.md"
         if bundle_key not in excluded:
@@ -1738,7 +1799,7 @@ def write_seed_bundle_index(
                     "Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.\n"
                     "Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.\n"
                 )
-            if f"## {task_id} " not in shard_text:
+            if f"## {task_id} {task.title}" not in shard_text:
                 shard_text = shard_text.rstrip() + "\n\n" + block + "\n"
                 shard_path.write_text(shard_text, encoding="utf-8")
 
@@ -1803,6 +1864,14 @@ def write_seed_bundle_index(
             key=lambda item: str(item.get("task_id") or ""),
         )
 
+    pruned_task_ids: dict[str, list[str]] = {}
+    for bundle_key in sorted(seed_bundle_keys - excluded):
+        info = bundles.get(bundle_key, {})
+        shard_path = PROJECT_ROOT / str(info.get("shard_path") or "")
+        removed = _prune_seed_bundle_shard(shard_path, list(info.get("tasks") or []))
+        if removed:
+            pruned_task_ids[bundle_key] = removed
+
     completed_task_ids = {
         task_id
         for task_id, status in statuses.items()
@@ -1832,6 +1901,7 @@ def write_seed_bundle_index(
         "bundle_count": len(bundles),
         "task_count": sum(len(bundle.get("tasks", [])) for bundle in bundles.values()),
         "dynamic_task_count": dynamic_task_count,
+        "pruned_task_ids": pruned_task_ids,
         "excluded_bundle_keys": sorted(excluded),
     }
 
@@ -2157,15 +2227,30 @@ def _canonical_projection_status(value: Any) -> str:
 
 def _durable_task_statuses() -> dict[str, str]:
     statuses: dict[str, str] = {}
+    tasks: list[Any] = []
     if TODO_PATH.exists():
         parse_task_file = _upstream_portal_task_parser()
-        for task in parse_task_file(TODO_PATH, TASK_HEADER_PREFIX):
+        tasks = list(parse_task_file(TODO_PATH, TASK_HEADER_PREFIX))
+        for task in tasks:
             statuses[task.task_id] = _canonical_projection_status(task.status)
     state = _load_json_object(TASK_STATE_PATH)
     for task_id in state.get("blocked_task_ids", []) or []:
         statuses.setdefault(str(task_id), "blocked")
     for task_id in state.get("completed_task_ids", []) or []:
         statuses[str(task_id)] = "completed"
+    try:
+        receipts = _upstream_bundle_completion_receipt_loader()(BUNDLE_LANE_ROOT)
+    except (ImportError, OSError, TypeError, ValueError):
+        receipts = {}
+    task_id_by_cid = {
+        str(task.canonical_task_cid): str(task.task_id)
+        for task in tasks
+        if getattr(task, "canonical_task_cid", "") and getattr(task, "task_id", "")
+    }
+    for canonical_task_cid in receipts:
+        task_id = task_id_by_cid.get(str(canonical_task_cid))
+        if task_id:
+            statuses[task_id] = "completed"
     return statuses
 
 

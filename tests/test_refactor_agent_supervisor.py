@@ -659,6 +659,7 @@ def _isolate_status_paths(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(supervisor, "TODO_PATH", tmp_path / "todo.md")
     monkeypatch.setattr(supervisor, "QUEUE_PATH", tmp_path / "queue.duckdb")
     monkeypatch.setattr(supervisor, "BUNDLE_LANE_MANIFEST", tmp_path / "lanes.json")
+    monkeypatch.setattr(supervisor, "BUNDLE_LANE_ROOT", tmp_path / "bundle-lanes")
     monkeypatch.setattr(supervisor, "BUNDLE_SCHEDULER_PID_PATH", tmp_path / "bundle-scheduler.pid")
     monkeypatch.setattr(supervisor, "BUNDLE_SCHEDULER_LOG_PATH", tmp_path / "bundle-scheduler.log")
     monkeypatch.setattr(supervisor, "MERGE_RESOLVER_STATUS_PATH", tmp_path / "merge-status.json")
@@ -825,6 +826,70 @@ def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_
     assert "- Status: todo" in colliding_text
 
 
+def test_durable_status_projection_promotes_matching_bundle_receipt_only(
+    tmp_path, monkeypatch
+) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    supervisor.BUNDLE_DIR.mkdir()
+    supervisor.TODO_PATH.write_text(
+        """## REF-001 Canonical implementation task
+
+- Status: todo
+- Outputs: src/runtime.py
+- Acceptance: Runtime is implemented.
+
+## REF-002 Still open
+
+- Status: todo
+- Outputs: src/other.py
+- Acceptance: Other work is implemented.
+""",
+        encoding="utf-8",
+    )
+    tasks = supervisor._upstream_portal_task_parser()(
+        supervisor.TODO_PATH, supervisor.TASK_HEADER_PREFIX
+    )
+    target_cid = next(task.canonical_task_cid for task in tasks if task.task_id == "REF-001")
+    lane_state = supervisor.BUNDLE_LANE_ROOT / "objective-runtime" / "state"
+    lane_state.mkdir(parents=True)
+    (lane_state / "agent_objective_runtime_events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "todo_status_updated",
+                        "timestamp": "2026-07-22T12:00:00+00:00",
+                        "task_id": "REF-001",
+                        "canonical_task_cid": target_cid,
+                        "updated": True,
+                        "updated_task_ids": ["REF-001"],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "todo_status_updated",
+                        "timestamp": "2026-07-22T12:01:00+00:00",
+                        "task_id": "REF-002",
+                        "canonical_task_cid": "different-semantic-task-cid",
+                        "updated": True,
+                        "updated_task_ids": ["REF-002"],
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    projected = supervisor.synchronize_taskboard_statuses()
+
+    text = supervisor.TODO_PATH.read_text(encoding="utf-8")
+    assert projected["completed_count"] == 1
+    assert "## REF-001 Canonical implementation task\n\n- Status: completed" in text
+    assert "## REF-002 Still open\n\n- Status: todo" in text
+
+
 def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) -> None:
     _isolate_status_paths(tmp_path, monkeypatch)
     monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
@@ -855,6 +920,77 @@ def test_seed_bundle_index_carries_durable_member_status(tmp_path, monkeypatch) 
     index = json.loads((supervisor.BUNDLE_DIR / "index.json").read_text(encoding="utf-8"))
     member = index["bundles"]["refactor/g1/g1-s1"]["tasks"][0]
     assert member["status"] == "completed"
+
+
+def test_seed_bundle_index_prunes_cross_bundle_and_colliding_task_blocks(
+    tmp_path, monkeypatch
+) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    monkeypatch.setattr(supervisor, "TASKBOARD_DOC_PATH", tmp_path / "taskboard.md")
+    supervisor.BUNDLE_DIR.mkdir(parents=True)
+    first = supervisor.RefactorTask(
+        goal_id="G1",
+        subgoal_id="G1.S1",
+        title="First bundle member",
+        priority="P0",
+        files=(),
+        rationale="First work.",
+        acceptance=("First is complete.",),
+        validation=("true",),
+        task_id="REF-001",
+    )
+    second = supervisor.RefactorTask(
+        goal_id="G1",
+        subgoal_id="G1.S2",
+        title="Second bundle member",
+        priority="P0",
+        files=(),
+        rationale="Second work.",
+        acceptance=("Second is complete.",),
+        validation=("true",),
+        task_id="REF-002",
+    )
+    first_shard = supervisor.BUNDLE_DIR / "refactor-g1-g1-s1.todo.md"
+    first_shard.write_text(
+        """# Objective Bundle: refactor/g1/g1-s1
+
+## REF-002 Second bundle member
+
+- Status: completed
+
+## REF-003 Resolve dependency guardrail for REF-001
+
+- Status: todo
+""",
+        encoding="utf-8",
+    )
+    goals = [
+        {
+            "id": "G1",
+            "title": "Goal",
+            "priority": "P0",
+            "subgoals": [
+                {"id": "G1.S1", "title": "First", "tasks": [first]},
+                {"id": "G1.S2", "title": "Second", "tasks": [second]},
+            ],
+        }
+    ]
+
+    result = supervisor.write_seed_bundle_index(goals)
+
+    first_text = first_shard.read_text(encoding="utf-8")
+    second_text = (supervisor.BUNDLE_DIR / "refactor-g1-g1-s2.todo.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## REF-001 First bundle member" in first_text
+    assert "## REF-002" not in first_text
+    assert "## REF-003" not in first_text
+    assert "## REF-002 Second bundle member" in second_text
+    assert result["pruned_task_ids"] == {
+        "refactor/g1/g1-s1": ["REF-002", "REF-003"]
+    }
 
 
 def test_seed_bundle_index_preserves_dynamic_bundle_members(tmp_path, monkeypatch) -> None:
