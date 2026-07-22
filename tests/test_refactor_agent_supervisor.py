@@ -1440,6 +1440,14 @@ def test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval(tmp_
     assert supervisor.BUNDLE_SCHEDULER_PID_PATH.read_text(encoding="utf-8") == "4242\n"
 
 
+def test_parallel_defaults_minimize_idle_lane_handoff_latency() -> None:
+    args = supervisor.build_parser().parse_args(["start-parallel"])
+
+    assert args.max_lanes == 4
+    assert args.interval_s == supervisor.DEFAULT_PARALLEL_RECONCILE_INTERVAL_SECONDS == 15.0
+    assert args.daemon_interval_s == supervisor.DEFAULT_PARALLEL_DAEMON_INTERVAL_SECONDS == 15.0
+
+
 def test_start_daemon_passes_managed_submodule_path_once(tmp_path, monkeypatch) -> None:
     _isolate_status_paths(tmp_path, monkeypatch)
     monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
