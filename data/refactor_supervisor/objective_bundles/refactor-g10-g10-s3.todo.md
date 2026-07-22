@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-206-defineanevidence-backedgoallifecycleandcompletio
 - Acceptance: Goals distinguish active, provisionally complete, verified complete, analysis inconclusive, blocked, and reopened states with legal transitions.; Completion evidence names acceptance criterion, producing task or scan, validation receipt, repository tree, freshness, and provenance CID.; Task completion alone can make a goal provisional but cannot make it verified.; Missing, stale, failed, or contradictory evidence fails closed with an actionable reason.
 
-- [ ] Task checkbox-207: REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
+- [x] Task checkbox-207: REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
 
 ## REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
@@ -46,11 +46,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-207-buildgoal-to-taskcodeastacceptanceandvalidationc
 - Acceptance: Every acceptance criterion maps to tasks, predicted and changed files, AST symbols or interfaces, validation commands, and resulting receipts with provenance.; The graph reports uncovered, weakly inferred, stale, contradicted, and verified surfaces separately.; Dynamic codebase findings attach to the most relevant registered goals while preserving a clearly labeled unmapped bucket.; Coverage calculations are deterministic and explain the evidence behind each edge.
 
-- [ ] Task checkbox-208: REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
+- [x] Task checkbox-208: REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
 
 ## REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G10
