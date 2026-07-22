@@ -894,7 +894,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: ref-044-publishauthoritativethroughputmetricsandschedule
 - Acceptance: One event-derived snapshot reports ready, active, idle, blocked, validation, merge, and resolver phases.; Metrics include queue wait, implementation and validation duration, merge wait, conflict and retry rate, completions, tokens, and cost.; Every metric is keyed by canonical goal, subgoal, task, lane, and provider identity.; Scheduler decisions consume the same snapshot exposed to operators.
 
-- [ ] Task checkbox-45: REF-045 Make AST scans and implementation workspaces incremental and reusable
+- [x] Task checkbox-45: REF-045 Make AST scans and implementation workspaces incremental and reusable
 
 ## REF-045 Make AST scans and implementation workspaces incremental and reusable
 
@@ -1578,3 +1578,235 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Todo vector key: db9d75970eab21b5
 - Repair evidence: data/refactor_supervisor/discovery/2026-07-22-ref-071-objective-validation-repair.md; objective validation repair
 - Acceptance: Objective scan filed this gap for G4.S1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-071-objective-gap-ebc5b300e9b8.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
+
+## REF-080 Review swallowed exception path in adversarial_harness/session.py:4416
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, adversarial_harness/session.py
+- Validation: python3 -m py_compile adversarial_harness/session.py
+- Bundle: codebase/runtime/adversarial_harness-session
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-adversarial_harness-session.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/adversarial_harness-session
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: adversarial_harness/session.py
+- AST symbols: __init__, _anchor_probe_map, _build_document_generation_fallback, _build_fallback_probe, _build_grounding_summary, _build_intake_question_structure_summary, _build_runtime_workflow_guidance, _candidate_matches_intake_objective, _claim_temporal_gap_prompts, _compact_document_generation_result, _coverage_gap_rank, _covered_anchor_sections_from_questions, _default_relief_for_seed, _emit_progress, _empathy_prefix_for_question, _extract_actor_critic_intake_context, _extract_actor_critic_score, _extract_anchor_sections, _extract_blocker_closure_match_count, _extract_claim_temporal_gap_summary, _extract_document_chronology_priority_hints, _extract_intake_prompt_candidates, _extract_latest_batch_priorities, _extract_latest_batch_priority_flags, _extract_phase1_section, _extract_question_objective, _extract_question_text, _extract_question_type, _extract_required_blocker_objectives, _extract_selector_score, _extract_selector_signals, _extract_workflow_phase, _has_empathy_prefix, _inject_intake_prompt_questions, _intake_objective_gap_label, _intake_objective_group, _intake_objective_weight, _is_actor_or_decisionmaker_question, _is_adverse_action_detail_question, _is_causation_sequence_question, _is_contradiction_resolution_question, _is_documentary_evidence_question, _is_exact_dates_question, _is_exhibit_ready_question, _is_harm_or_remedy_question, _is_hearing_request_timing_question, _is_protected_activity_causation_question, _is_redundant_candidate, _is_response_dates_question, _is_staff_names_titles_question, _is_timeline_question, _is_witness_question, _normalize_question, _normalized_actor_critic_score, _normalized_selector_score, _objective_sort_key, _persist_intake_priority_summary, _phase_focus_rank_for_candidate, _phase_focus_weight, _question_dedupe_key, _question_intent_key, _question_mentions_evidence_anchor, _question_objectives_from_prompt, _question_precision_score, _question_quality_score, _question_similarity, _question_specificity_score, _question_targets_anchor_section, _question_targets_missing_anchor_section, _question_tokens, _questions_substantially_overlap, _refresh_final_intake_case_file_snapshot, _reprioritize_candidates_for_intake_objectives, _router_backed_quality_signal, _run_document_generation, _seed_requires_causation_probe, _seed_supports_reasonable_accommodation, _seed_supports_selection_criteria, _select_next_question, _should_apply_empathy_prefix
+- Goal id: codebase/runtime/adversarial_harness-session
+- Missing evidence: Review swallowed exception path in adversarial_harness/session.py:4416
+- Merge key: codebase/runtime/adversarial_harness-session
+- Merge family: adversarial_harness/session.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Todo vector key: 8af245b6aa1f9912
+- Acceptance: Codebase scan filed this finding from adversarial_harness/session.py:4416. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-080-codebase-scan-8af245b6aa1f.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-081 Review swallowed exception path in adversarial_harness/session.py:4423
+
+- Status: completed
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, adversarial_harness/session.py
+- Validation: python3 -m py_compile adversarial_harness/session.py
+- Bundle: codebase/runtime/adversarial_harness-session
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-adversarial_harness-session.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/adversarial_harness-session
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: adversarial_harness/session.py
+- AST symbols: __init__, _anchor_probe_map, _build_document_generation_fallback, _build_fallback_probe, _build_grounding_summary, _build_intake_question_structure_summary, _build_runtime_workflow_guidance, _candidate_matches_intake_objective, _claim_temporal_gap_prompts, _compact_document_generation_result, _coverage_gap_rank, _covered_anchor_sections_from_questions, _default_relief_for_seed, _emit_progress, _empathy_prefix_for_question, _extract_actor_critic_intake_context, _extract_actor_critic_score, _extract_anchor_sections, _extract_blocker_closure_match_count, _extract_claim_temporal_gap_summary, _extract_document_chronology_priority_hints, _extract_intake_prompt_candidates, _extract_latest_batch_priorities, _extract_latest_batch_priority_flags, _extract_phase1_section, _extract_question_objective, _extract_question_text, _extract_question_type, _extract_required_blocker_objectives, _extract_selector_score, _extract_selector_signals, _extract_workflow_phase, _has_empathy_prefix, _inject_intake_prompt_questions, _intake_objective_gap_label, _intake_objective_group, _intake_objective_weight, _is_actor_or_decisionmaker_question, _is_adverse_action_detail_question, _is_causation_sequence_question, _is_contradiction_resolution_question, _is_documentary_evidence_question, _is_exact_dates_question, _is_exhibit_ready_question, _is_harm_or_remedy_question, _is_hearing_request_timing_question, _is_protected_activity_causation_question, _is_redundant_candidate, _is_response_dates_question, _is_staff_names_titles_question, _is_timeline_question, _is_witness_question, _normalize_question, _normalized_actor_critic_score, _normalized_selector_score, _objective_sort_key, _persist_intake_priority_summary, _phase_focus_rank_for_candidate, _phase_focus_weight, _question_dedupe_key, _question_intent_key, _question_mentions_evidence_anchor, _question_objectives_from_prompt, _question_precision_score, _question_quality_score, _question_similarity, _question_specificity_score, _question_targets_anchor_section, _question_targets_missing_anchor_section, _question_tokens, _questions_substantially_overlap, _refresh_final_intake_case_file_snapshot, _reprioritize_candidates_for_intake_objectives, _router_backed_quality_signal, _run_document_generation, _seed_requires_causation_probe, _seed_supports_reasonable_accommodation, _seed_supports_selection_criteria, _select_next_question, _should_apply_empathy_prefix
+- Goal id: codebase/runtime/adversarial_harness-session
+- Missing evidence: Review swallowed exception path in adversarial_harness/session.py:4423
+- Merge key: codebase/runtime/adversarial_harness-session
+- Merge family: adversarial_harness/session.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Todo vector key: 34e672b9ad65450c
+- Acceptance: Codebase scan filed this finding from adversarial_harness/session.py:4423. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-081-codebase-scan-34e672b9ad65.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-082 Review swallowed exception path in adversarial_harness/session.py:4449
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, adversarial_harness/session.py
+- Validation: python3 -m py_compile adversarial_harness/session.py
+- Bundle: codebase/runtime/adversarial_harness-session
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-adversarial_harness-session.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/adversarial_harness-session
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: adversarial_harness/session.py
+- AST symbols: __init__, _anchor_probe_map, _build_document_generation_fallback, _build_fallback_probe, _build_grounding_summary, _build_intake_question_structure_summary, _build_runtime_workflow_guidance, _candidate_matches_intake_objective, _claim_temporal_gap_prompts, _compact_document_generation_result, _coverage_gap_rank, _covered_anchor_sections_from_questions, _default_relief_for_seed, _emit_progress, _empathy_prefix_for_question, _extract_actor_critic_intake_context, _extract_actor_critic_score, _extract_anchor_sections, _extract_blocker_closure_match_count, _extract_claim_temporal_gap_summary, _extract_document_chronology_priority_hints, _extract_intake_prompt_candidates, _extract_latest_batch_priorities, _extract_latest_batch_priority_flags, _extract_phase1_section, _extract_question_objective, _extract_question_text, _extract_question_type, _extract_required_blocker_objectives, _extract_selector_score, _extract_selector_signals, _extract_workflow_phase, _has_empathy_prefix, _inject_intake_prompt_questions, _intake_objective_gap_label, _intake_objective_group, _intake_objective_weight, _is_actor_or_decisionmaker_question, _is_adverse_action_detail_question, _is_causation_sequence_question, _is_contradiction_resolution_question, _is_documentary_evidence_question, _is_exact_dates_question, _is_exhibit_ready_question, _is_harm_or_remedy_question, _is_hearing_request_timing_question, _is_protected_activity_causation_question, _is_redundant_candidate, _is_response_dates_question, _is_staff_names_titles_question, _is_timeline_question, _is_witness_question, _normalize_question, _normalized_actor_critic_score, _normalized_selector_score, _objective_sort_key, _persist_intake_priority_summary, _phase_focus_rank_for_candidate, _phase_focus_weight, _question_dedupe_key, _question_intent_key, _question_mentions_evidence_anchor, _question_objectives_from_prompt, _question_precision_score, _question_quality_score, _question_similarity, _question_specificity_score, _question_targets_anchor_section, _question_targets_missing_anchor_section, _question_tokens, _questions_substantially_overlap, _refresh_final_intake_case_file_snapshot, _reprioritize_candidates_for_intake_objectives, _router_backed_quality_signal, _run_document_generation, _seed_requires_causation_probe, _seed_supports_reasonable_accommodation, _seed_supports_selection_criteria, _select_next_question, _should_apply_empathy_prefix
+- Goal id: codebase/runtime/adversarial_harness-session
+- Missing evidence: Review swallowed exception path in adversarial_harness/session.py:4449
+- Merge key: codebase/runtime/adversarial_harness-session
+- Merge family: adversarial_harness/session.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Todo vector key: 7272a7e35b1fb333
+- Acceptance: Codebase scan filed this finding from adversarial_harness/session.py:4449. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-082-codebase-scan-7272a7e35b1f.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-083 Review swallowed exception path in applications/cli.py:112
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, applications/cli.py
+- Validation: python3 -m py_compile applications/cli.py
+- Bundle: codebase/runtime/applications-cli
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-applications-cli.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/applications-cli
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: applications/cli.py
+- AST symbols: __init__, _build_local_session_payload, _ensure_session_identity, _format_adversarial_autopatch_output, _format_authority_search_history_summary, _format_authority_search_program_summary, _format_claim_review_output, _format_claim_review_quality_summary, _format_cli_count_labels, _format_execute_follow_up_output, _format_execution_quality_summary, _format_export_complaint_output, _format_follow_up_fact_targeting, _format_follow_up_fact_targeting_summary, _format_follow_up_source_context_summary, _format_history_output, _format_intake_status_summary, _format_search_warning_summary, _format_status_output, _format_temporal_follow_up_summary, _humanize_cli_label, _local_state_dir, _parse_command_options, _resolve_prompt_text, _restore_local_session_payload, _using_temporary_session, adversarial autopatch, adversarial harness demo autopatch, adversarial harness demo autopatch run adversarial autopatch batch, adversarial_autopatch, adversarial_harness.demo_autopatch, adversarial_harness.demo_autopatch.run_adversarial_autopatch_batch, build local session payload, claim review, claim_review, cli, cli adversarial autopatch, cli build local session payload, cli claim review, cli ensure session identity, cli execute follow up, cli export complaint, cli feed, cli format adversarial autopatch output, cli format authority search history summary, cli format authority search program summary, cli format claim review output, cli format claim review quality summary, cli format cli count labels, cli format execute follow up output, cli format execution quality summary, cli format export complaint output, cli format follow up fact targeting, cli format follow up fact targeting summary, cli format follow up source context summary, cli format history output, cli format intake status summary, cli format search warning summary, cli format status output, cli format temporal follow up summary, cli humanize cli label, cli init, cli interpret command, cli local state dir, cli loop, cli parse command options, cli print commands, cli print error, cli print response, cli resolve prompt text, cli restore local session payload, cli resume, cli save, cli using temporary session, cli.__init__, cli._build_local_session_payload, cli._ensure_session_identity, cli._format_adversarial_autopatch_output, cli._format_authority_search_history_summary, cli._format_authority_search_program_summary
+- Goal id: codebase/runtime/applications-cli
+- Missing evidence: Review swallowed exception path in applications/cli.py:112
+- Merge key: codebase/runtime/applications-cli
+- Merge family: applications/cli.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Todo vector key: 8418d6dba6f128ff
+- Acceptance: Codebase scan filed this finding from applications/cli.py:112. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-083-codebase-scan-8418d6dba6f1.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-084 Replace placeholder runtime path in complaint_analysis/indexer.py:231
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, complaint_analysis/indexer.py
+- Validation: python3 -m py_compile complaint_analysis/indexer.py
+- Bundle: codebase/runtime/complaint_analysis-indexer
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-complaint_analysis-indexer.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/complaint_analysis-indexer
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: complaint_analysis/indexer.py
+- AST symbols: __init__, _calculate_relevance, _extract_keywords, _tag_applicability, applicability distribution, applicability_distribution, average legal provisions, average relevance score, average_legal_provisions, average_relevance_score, calculate relevance, datetime, datetime datetime, datetime.datetime, documents by applicability, documents by risk level, documents with embeddings, documents_by_applicability, documents_by_risk_level, documents_with_embeddings, extract keywords, get statistics, get_statistics, high risk documents percentage, high_risk_documents_percentage, hybriddocumentindexer, hybriddocumentindexer applicability distribution, hybriddocumentindexer average legal provisions, hybriddocumentindexer average relevance score, hybriddocumentindexer calculate relevance, hybriddocumentindexer documents by applicability, hybriddocumentindexer documents by risk level, hybriddocumentindexer documents with embeddings, hybriddocumentindexer extract keywords, hybriddocumentindexer get statistics, hybriddocumentindexer high risk documents percentage, hybriddocumentindexer index document, hybriddocumentindexer init, hybriddocumentindexer maximum relevance score, hybriddocumentindexer risk level distribution, hybriddocumentindexer search, hybriddocumentindexer tag applicability, hybriddocumentindexer total indexed documents, hybriddocumentindexer.__init__, hybriddocumentindexer._calculate_relevance, hybriddocumentindexer._extract_keywords, hybriddocumentindexer._tag_applicability, hybriddocumentindexer.applicability_distribution, hybriddocumentindexer.average_legal_provisions, hybriddocumentindexer.average_relevance_score, hybriddocumentindexer.documents_by_applicability, hybriddocumentindexer.documents_by_risk_level, hybriddocumentindexer.documents_with_embeddings, hybriddocumentindexer.get_statistics, hybriddocumentindexer.high_risk_documents_percentage, hybriddocumentindexer.index_document, hybriddocumentindexer.maximum_relevance_score, hybriddocumentindexer.risk_level_distribution, hybriddocumentindexer.search, hybriddocumentindexer.total_indexed_documents, index document, index_document, init, integrations ipfs datasets vector store, integrations ipfs datasets vector store embeddings available, integrations ipfs datasets vector store embeddingsrouter, integrations.ipfs_datasets.vector_store, integrations.ipfs_datasets.vector_store.embeddings_available, integrations.ipfs_datasets.vector_store.embeddingsrouter, keywords, keywords get keywords, keywords get type specific keywords, keywords.get_keywords, keywords.get_type_specific_keywords, legal patterns, legal patterns legalpatternextractor, legal_patterns, legal_patterns.legalpatternextractor, logging, maximum relevance score
+- Goal id: codebase/runtime/complaint_analysis-indexer
+- Missing evidence: Replace placeholder runtime path in complaint_analysis/indexer.py:231
+- Merge key: codebase/runtime/complaint_analysis-indexer
+- Merge family: complaint_analysis/indexer.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Todo vector key: 12fef95f050ba8c9
+- Acceptance: Codebase scan filed this finding from complaint_analysis/indexer.py:231. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-084-codebase-scan-12fef95f050b.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-085 Review swallowed exception path in complaint_analysis/research_bootstrap_workflow.py:425
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, complaint_analysis/research_bootstrap_workflow.py
+- Validation: python3 -m py_compile complaint_analysis/research_bootstrap_workflow.py
+- Bundle: codebase/runtime/complaint_analysis-research_bootstrap_workflow
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-complaint_analysis-research_bootstrap_workflow.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/complaint_analysis-research_bootstrap_workflow
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: complaint_analysis/research_bootstrap_workflow.py
+- AST symbols: __future__, __future__.annotations, __init__, candidate, collections, collections counter, collections defaultdict, collections.counter, collections.defaultdict, context snippets, context_snippets, csv, dataclasses, dataclasses asdict, dataclasses dataclass, dataclasses.asdict, dataclasses.dataclass, datetime, datetime datetime, datetime timezone, datetime.datetime, datetime.timezone, domain of, domain_of, evidencerow, extract external document queue, extract links, extract text from file, extract third party candidates from corpus, extract urls, extract_external_document_queue, extract_links, extract_text_from_file, extract_third_party_candidates_from_corpus, extract_urls, find org name candidates, find_org_name_candidates, future, future annotations, handle data, handle_data, html parser, html parser htmlparser, html.parser, html.parser.htmlparser, init, is asset url, is government domain, is quantum domain, is_asset_url, is_government_domain, is_quantum_domain, iter corpus files, iter_corpus_files, json, load manifest rows, load_manifest_rows, looks like ignored domain, looks_like_ignored_domain, maybe unwrap google, maybe_unwrap_google, normalize external url, normalize url, normalize whitespace, normalize_external_url, normalize_url, normalize_whitespace, org name is gov like, org name is noise, org_name_is_gov_like, org_name_is_noise, pathlib, pathlib path, pathlib.path, re, relationship score, relationship_score, score candidate url, score_candidate_url, text
+- Goal id: codebase/runtime/complaint_analysis-research_bootstrap_workflow
+- Missing evidence: Review swallowed exception path in complaint_analysis/research_bootstrap_workflow.py:425
+- Merge key: codebase/runtime/complaint_analysis-research_bootstrap_workflow
+- Merge family: complaint_analysis/research_bootstrap_workflow.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Todo vector key: 55a0fab86af9f927
+- Acceptance: Codebase scan filed this finding from complaint_analysis/research_bootstrap_workflow.py:425. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-085-codebase-scan-55a0fab86af9.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-086 Review swallowed exception path in complaint_analysis/research_bootstrap_workflow.py:438
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, complaint_analysis/research_bootstrap_workflow.py
+- Validation: python3 -m py_compile complaint_analysis/research_bootstrap_workflow.py
+- Bundle: codebase/runtime/complaint_analysis-research_bootstrap_workflow
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-complaint_analysis-research_bootstrap_workflow.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/complaint_analysis-research_bootstrap_workflow
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: complaint_analysis/research_bootstrap_workflow.py
+- AST symbols: __future__, __future__.annotations, __init__, candidate, collections, collections counter, collections defaultdict, collections.counter, collections.defaultdict, context snippets, context_snippets, csv, dataclasses, dataclasses asdict, dataclasses dataclass, dataclasses.asdict, dataclasses.dataclass, datetime, datetime datetime, datetime timezone, datetime.datetime, datetime.timezone, domain of, domain_of, evidencerow, extract external document queue, extract links, extract text from file, extract third party candidates from corpus, extract urls, extract_external_document_queue, extract_links, extract_text_from_file, extract_third_party_candidates_from_corpus, extract_urls, find org name candidates, find_org_name_candidates, future, future annotations, handle data, handle_data, html parser, html parser htmlparser, html.parser, html.parser.htmlparser, init, is asset url, is government domain, is quantum domain, is_asset_url, is_government_domain, is_quantum_domain, iter corpus files, iter_corpus_files, json, load manifest rows, load_manifest_rows, looks like ignored domain, looks_like_ignored_domain, maybe unwrap google, maybe_unwrap_google, normalize external url, normalize url, normalize whitespace, normalize_external_url, normalize_url, normalize_whitespace, org name is gov like, org name is noise, org_name_is_gov_like, org_name_is_noise, pathlib, pathlib path, pathlib.path, re, relationship score, relationship_score, score candidate url, score_candidate_url, text
+- Goal id: codebase/runtime/complaint_analysis-research_bootstrap_workflow
+- Missing evidence: Review swallowed exception path in complaint_analysis/research_bootstrap_workflow.py:438
+- Merge key: codebase/runtime/complaint_analysis-research_bootstrap_workflow
+- Merge family: complaint_analysis/research_bootstrap_workflow.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Todo vector key: 20594a03322b57b6
+- Acceptance: Codebase scan filed this finding from complaint_analysis/research_bootstrap_workflow.py:438. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-086-codebase-scan-20594a03322b.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+## REF-087 Resolve code annotation in complaint_phases/knowledge_graph.py:2168
+
+- Status: todo
+- Completion: manual
+- Priority: P3
+- Track: runtime
+- Depends on: 
+- Outputs: data/agent_supervisor/discovery, complaint_phases/knowledge_graph.py
+- Validation: python3 -m py_compile complaint_phases/knowledge_graph.py
+- Bundle: codebase/runtime/complaint_phases-knowledge_graph
+- Bundle shard: data/refactor_supervisor/objective_bundles/codebase-runtime-complaint_phases-knowledge_graph.todo.md
+- Bundle strategy: codebase_file_ast
+- Graph parents: codebase/runtime
+- Graph depth: 1
+- Parallel lane: codebase/runtime/complaint_phases-knowledge_graph
+- Conflict policy: serialize findings for the same file; allow independent file bundles to run concurrently
+- Predicted files: complaint_phases/knowledge_graph.py
+- AST symbols: __init__, _apply_entity_actor_critic, _apply_relationship_actor_critic, _clamp, _entity_actor_score, _entity_critic_penalty, _entity_text, _env_bool, _env_float, _extract_entities, _extract_event_date_reference, _extract_relationships, _get_entity_id, _get_relationship_id, _has_date_signal, _has_exact_date_signal, _llm_extract_entities, _llm_extract_relationships, _merge_provenance, _relation_actor_score, _relation_critic_penalty, _support_facts, _update_metadata, _utc_now_isoformat, add entity, add relationship, add timeline event fact, add_entity, add_relationship, add_timeline_event_fact, apply entity actor critic, apply relationship actor critic, average confidence, average entities per graph, average relationships per entity, average relationships per graph, average_confidence, average_entities_per_graph, average_relationships_per_entity, average_relationships_per_graph, bind graph services, bind_graph_services, build from text, build_from_text, clamp, dataclasses, dataclasses asdict, dataclasses dataclass, dataclasses field, dataclasses.asdict, dataclasses.dataclass, dataclasses.field, datetime, datetime datetime, datetime utc, datetime.datetime, datetime.utc, entity, entity actor score, entity critic penalty, entity extraction rate, entity text, entity to dict, entity type distribution, entity.to_dict, entity_extraction_rate, entity_type_distribution, env bool, env float, extract entities, extract event date reference, extract relationships, find gaps, find_gaps, from dict, from json, from_dict, from_json, get entities by type, get entity
+- Goal id: codebase/runtime/complaint_phases-knowledge_graph
+- Missing evidence: Resolve code annotation in complaint_phases/knowledge_graph.py:2168
+- Merge key: codebase/runtime/complaint_phases-knowledge_graph
+- Merge family: complaint_phases/knowledge_graph.py
+- Merge role: codebase_scan
+- Work item count: 1
+- Work scope: codebase_file_ast
+- Candidate kind: codebase_scan
+- Todo vector key: fef985c2cd7eb07d
+- Acceptance: Codebase scan filed this finding from complaint_phases/knowledge_graph.py:2168. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-087-codebase-scan-fef985c2cd7e.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
