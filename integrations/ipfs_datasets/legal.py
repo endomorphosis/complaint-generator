@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
+
 from typing import Any, Dict, List, Optional
 
 from .loader import import_attr_optional, run_async_compat
 from .types import with_adapter_metadata
 from .vector_store import EMBEDDINGS_AVAILABLE, embed_text as embed_query_text, get_embeddings_router
 
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_LEGAL_QUERY_EMBEDDING_MODEL = "thenlper/gte-small"
 DEFAULT_STATE_LAWS_DATASET_ID = "justicedao/ipfs_state_laws"
@@ -81,6 +85,7 @@ def _build_query_vector(
     *,
     model_name: str = DEFAULT_LEGAL_QUERY_EMBEDDING_MODEL,
     provider: Optional[str] = None,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> List[float] | None:
     query_text = str(query or "").strip()
     if not query_text or not EMBEDDINGS_AVAILABLE:
@@ -109,7 +114,25 @@ def _build_query_vector(
 
     try:
         return _coerce_vector_payload(router.embed_text(query_text))
-    except Exception:
+    except Exception as exc:
+        embedding_diagnostic = {
+            "status": "error",
+            "stage": "router_embed_text",
+            "provider": str(provider or "auto"),
+            "model_name": str(model_name or ""),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        if diagnostics is not None:
+            diagnostics["embedding"] = embedding_diagnostic
+        logger.warning(
+            "Legal query embedding failed; continuing with text-search fallbacks "
+            "(provider=%s, model=%s, error_type=%s)",
+            embedding_diagnostic["provider"],
+            embedding_diagnostic["model_name"],
+            embedding_diagnostic["error_type"],
+            exc_info=True,
+        )
         return None
 
 
@@ -747,6 +770,7 @@ def search_state_laws(
             query,
             model_name=embedding_model,
             provider=embedding_provider,
+            diagnostics=diagnostics,
         )
         if query_vector is not None:
             payload = run_async_compat(
@@ -866,6 +890,7 @@ def search_state_administrative_rules(
             query,
             model_name=embedding_model,
             provider=embedding_provider,
+            diagnostics=diagnostics,
         )
         if query_vector is not None:
             payload = run_async_compat(

@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import integrations.ipfs_datasets.capabilities as capabilities_module
+import integrations.ipfs_datasets.legal as legal_module
 import integrations.ipfs_datasets.loader as loader_module
 import integrations.ipfs_datasets.vector_store as vector_store_module
 import integrations.ipfs_datasets as adapter
@@ -459,6 +460,42 @@ def test_search_state_administrative_rules_normalizes_vector_results():
     assert results[0]['metadata']['details']['operation'] == 'search_state_administrative_rules'
     assert results[0]['metadata']['details']['hf_dataset_id'] == 'justicedao/ipfs_state_admin_rules'
     assert results[0]['metadata']['details']['retrieval_backend'] == 'huggingface_corpus'
+
+
+def test_search_state_laws_reports_router_embedding_failure(caplog):
+    router = Mock()
+    router.embed_text.side_effect = RuntimeError('embedding provider unavailable')
+
+    with patch.object(legal_module, 'EMBEDDINGS_AVAILABLE', True), patch.object(
+        legal_module,
+        'embed_query_text',
+        new=None,
+    ), patch.object(legal_module, 'get_embeddings_router', return_value=router), patch.object(
+        legal_module,
+        '_search_state_law_corpus_async',
+        new=Mock(return_value=object()),
+    ), patch.object(legal_module, '_search_hf_parquet_text', return_value=[]):
+        with caplog.at_level('WARNING', logger=legal_module.__name__):
+            results = search_state_laws(
+                'tenant retaliation',
+                state='OR',
+                embedding_model='test-model',
+                embedding_provider='test-provider',
+                allow_live_scrape_fallback=False,
+            )
+
+    assert results == []
+    diagnostics = get_last_legal_search_diagnostic('search_state_laws')
+    assert diagnostics['embedding'] == {
+        'status': 'error',
+        'stage': 'router_embed_text',
+        'provider': 'test-provider',
+        'model_name': 'test-model',
+        'error_type': 'RuntimeError',
+        'error': 'embedding provider unavailable',
+    }
+    assert 'continuing with text-search fallbacks' in caplog.text
+    assert 'embedding provider unavailable' in caplog.text
 
 
 def test_search_state_laws_can_skip_live_scrape_fallback():
