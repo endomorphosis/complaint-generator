@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Protocol, TypedDict, runtime_checkable
 
 from .loader import import_module_optional
 from .types import (
@@ -49,6 +50,213 @@ GRAPHS_ERROR = (
     or _graph_storage_error
     or _graph_lineage_error
 )
+
+
+class GraphProvenance(TypedDict, total=False):
+    """Source and transformation lineage carried by graph snapshots and queries.
+
+    All fields are optional so older graph payloads remain valid.  Backends must
+    preserve fields they do not understand instead of dropping them.
+    """
+
+    source_id: str
+    source_type: str
+    source_record_id: str | int
+    source_ref: str
+    source_url: str
+    source_system: str
+    content_hash: str
+    acquired_at: str
+    parser_version: str
+    extraction_version: str
+    transform_lineage: Dict[str, Any]
+    metadata: Dict[str, Any]
+
+
+class GraphPersistenceRequest(TypedDict):
+    """Canonical write contract passed to a graph persistence backend."""
+
+    graph_id: str
+    graph_version: str
+    snapshot_id: str
+    content_hash: str
+    entities: List[Dict[str, Any]]
+    relationships: List[Dict[str, Any]]
+    provenance: GraphProvenance
+    metadata: Dict[str, Any]
+
+
+class GraphSupportQuery(TypedDict):
+    """Canonical claim-support lookup contract passed to a graph query backend."""
+
+    graph_id: str
+    graph_version: str
+    claim_element_id: str
+    claim_type: str
+    claim_element_text: str
+    max_results: int
+    filters: Dict[str, Any]
+    provenance: GraphProvenance
+
+
+@runtime_checkable
+class GraphPersistence(Protocol):
+    """Port implemented by durable graph stores.
+
+    ``persist_snapshot`` must be idempotent for a request's ``snapshot_id``.
+    ``get_snapshot`` returns that same canonical request shape, or ``None`` when
+    the requested graph/version is unknown.
+    """
+
+    def persist_snapshot(self, request: GraphPersistenceRequest) -> Mapping[str, Any]:
+        """Persist one immutable graph version and return write semantics."""
+        ...
+
+    def get_snapshot(
+        self,
+        graph_id: str,
+        *,
+        graph_version: Optional[str] = None,
+    ) -> Optional[Mapping[str, Any]]:
+        """Load the latest or requested immutable graph snapshot."""
+        ...
+
+
+@runtime_checkable
+class GraphQuery(Protocol):
+    """Port implemented by graph engines capable of support retrieval."""
+
+    def query_support(self, query: GraphSupportQuery) -> Mapping[str, Any]:
+        """Return support matches for a canonical claim-element query."""
+        ...
+
+
+@runtime_checkable
+class GraphRepository(GraphPersistence, GraphQuery, Protocol):
+    """Combined persistence and query plane used by full graph backends."""
+
+
+def _canonical_graph_content(graph_payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return the immutable graph content used for version identifiers."""
+    entities = [
+        dict(item)
+        for item in graph_payload.get("entities", []) or []
+        if isinstance(item, Mapping)
+    ]
+    relationships = [
+        dict(item)
+        for item in graph_payload.get("relationships", []) or []
+        if isinstance(item, Mapping)
+    ]
+    entities.sort(key=lambda item: str(item.get("id") or item.get("entity_id") or ""))
+    relationships.sort(
+        key=lambda item: str(item.get("id") or item.get("relationship_id") or "")
+    )
+    return {
+        "entities": entities,
+        "relationships": relationships,
+    }
+
+
+def _graph_content_hash(graph_payload: Mapping[str, Any]) -> str:
+    encoded = json.dumps(
+        _canonical_graph_content(graph_payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _normalize_graph_provenance(
+    graph_payload: Mapping[str, Any],
+    explicit: Optional[Mapping[str, Any]] = None,
+) -> GraphProvenance:
+    metadata = graph_payload.get("metadata")
+    graph_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    embedded = graph_metadata.get("provenance")
+    provenance: Dict[str, Any] = dict(embedded) if isinstance(embedded, Mapping) else {}
+
+    source_id = str(graph_payload.get("source_id") or provenance.get("source_id") or "")
+    if source_id:
+        provenance["source_id"] = source_id
+    lineage = graph_metadata.get("transform_lineage") or graph_metadata.get("lineage")
+    if isinstance(lineage, Mapping) and "transform_lineage" not in provenance:
+        provenance["transform_lineage"] = dict(lineage)
+    if explicit:
+        for key, value in explicit.items():
+            if value not in (None, "", [], (), {}):
+                provenance[str(key)] = value
+    return GraphProvenance(**provenance)
+
+
+def build_graph_persistence_request(
+    graph_payload: Mapping[str, Any],
+    *,
+    graph_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
+    provenance: Optional[Mapping[str, Any]] = None,
+    metadata: Optional[Mapping[str, Any]] = None,
+) -> GraphPersistenceRequest:
+    """Normalize a graph payload into the backend-independent write contract."""
+    payload_metadata = graph_payload.get("metadata")
+    normalized_metadata = dict(payload_metadata) if isinstance(payload_metadata, Mapping) else {}
+    if metadata:
+        normalized_metadata.update(metadata)
+
+    content_hash = _graph_content_hash(graph_payload)
+    source_id = str(graph_payload.get("source_id") or "")
+    stable_graph_id = str(
+        graph_id
+        or normalized_metadata.get("graph_id")
+        or _stable_identifier("graph", source_id or content_hash)
+    )
+    stable_graph_version = str(
+        graph_version
+        or normalized_metadata.get("graph_version")
+        or f"sha256:{content_hash[:16]}"
+    )
+    snapshot_id = _stable_identifier("graph-snapshot", stable_graph_id, stable_graph_version, content_hash)
+    return GraphPersistenceRequest(
+        graph_id=stable_graph_id,
+        graph_version=stable_graph_version,
+        snapshot_id=snapshot_id,
+        content_hash=content_hash,
+        entities=[dict(item) for item in graph_payload.get("entities", []) or [] if isinstance(item, Mapping)],
+        relationships=[
+            dict(item)
+            for item in graph_payload.get("relationships", []) or []
+            if isinstance(item, Mapping)
+        ],
+        provenance=_normalize_graph_provenance(graph_payload, provenance),
+        metadata=normalized_metadata,
+    )
+
+
+def build_graph_support_query(
+    claim_element_id: str,
+    *,
+    graph_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
+    claim_type: Optional[str] = None,
+    claim_element_text: Optional[str] = None,
+    max_results: int = 10,
+    filters: Optional[Mapping[str, Any]] = None,
+    provenance: Optional[Mapping[str, Any]] = None,
+) -> GraphSupportQuery:
+    """Normalize user input into the backend-independent query contract."""
+    if max_results < 0:
+        raise ValueError("max_results must be greater than or equal to zero")
+    return GraphSupportQuery(
+        graph_id=str(graph_id or ""),
+        graph_version=str(graph_version or ""),
+        claim_element_id=str(claim_element_id or ""),
+        claim_type=str(claim_type or ""),
+        claim_element_text=str(claim_element_text or ""),
+        max_results=int(max_results),
+        filters=dict(filters or {}),
+        provenance=GraphProvenance(**dict(provenance or {})),
+    )
 
 
 def _stable_identifier(prefix: str, *parts: str) -> str:
@@ -136,6 +344,19 @@ def _fact_dedup_key(fact: Dict[str, Any]) -> str:
     return "|".join([claim_element_id, claim_element_text, text])
 
 
+def _fact_matches_filters(fact: Mapping[str, Any], filters: Mapping[str, Any]) -> bool:
+    for key, expected in filters.items():
+        actual: Any = fact.get(key)
+        if actual is None and isinstance(fact.get("provenance"), Mapping):
+            actual = fact["provenance"].get(key)
+        if isinstance(expected, (list, tuple, set, frozenset)):
+            if actual not in expected:
+                return False
+        elif actual != expected:
+            return False
+    return True
+
+
 def _texts_semantically_similar(left: str, right: str) -> bool:
     left_normalized = " ".join((left or "").lower().split())
     right_normalized = " ".join((right or "").lower().split())
@@ -211,6 +432,25 @@ def extract_graph_from_text(
     artifact_id = source_id or metadata.get("artifact_id") or ""
     claim_element_id = str(metadata.get("claim_element_id") or "").strip()
     claim_element_text = str(metadata.get("claim_element_text") or metadata.get("claim_element") or "").strip()
+    embedded_provenance = metadata.get("provenance")
+    graph_provenance: Dict[str, Any] = (
+        dict(embedded_provenance) if isinstance(embedded_provenance, Mapping) else {}
+    )
+    if artifact_id:
+        graph_provenance.setdefault("source_id", str(artifact_id))
+    for provenance_key in (
+        "source_type",
+        "source_record_id",
+        "source_ref",
+        "source_url",
+        "source_system",
+        "content_hash",
+        "acquired_at",
+        "parser_version",
+        "extraction_version",
+    ):
+        if metadata.get(provenance_key) not in (None, ""):
+            graph_provenance.setdefault(provenance_key, metadata[provenance_key])
 
     if artifact_id:
         entities.append(
@@ -223,6 +463,7 @@ def extract_graph_from_text(
                     "source_id": artifact_id,
                     "source_url": metadata.get("source_url", ""),
                     "mime_type": metadata.get("mime_type", ""),
+                    "provenance": graph_provenance,
                 },
             )
         )
@@ -240,6 +481,7 @@ def extract_graph_from_text(
                     "claim_element_id": claim_element_id,
                     "claim_element_text": claim_element_text,
                     "claim_type": metadata.get("claim_type", ""),
+                    "provenance": graph_provenance,
                 },
             )
         )
@@ -260,6 +502,7 @@ def extract_graph_from_text(
                     "text": sentence,
                     "sentence_index": index,
                     "source_id": artifact_id,
+                    "provenance": graph_provenance,
                 },
             )
         )
@@ -271,7 +514,7 @@ def extract_graph_from_text(
                     target_id=fact_id,
                     relation_type="has_fact",
                     confidence=1.0,
-                    attributes={"sentence_index": index},
+                    attributes={"sentence_index": index, "provenance": graph_provenance},
                 )
             )
         if claim_node_id:
@@ -282,7 +525,7 @@ def extract_graph_from_text(
                     target_id=claim_node_id,
                     relation_type="supports",
                     confidence=0.6,
-                    attributes={"sentence_index": index},
+                    attributes={"sentence_index": index, "provenance": graph_provenance},
                 )
             )
 
@@ -297,6 +540,7 @@ def extract_graph_from_text(
                 **metadata,
                 "text_length": len(text),
                 "sentence_count": len(sentences),
+                "provenance": graph_provenance,
             },
         ).as_dict(),
         operation="extract_graph_from_text",
@@ -310,12 +554,60 @@ def query_graph_support(
     claim_element_id: str,
     *,
     graph_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
     support_facts: Optional[List[Dict[str, Any]]] = None,
     claim_type: Optional[str] = None,
     claim_element_text: Optional[str] = None,
     max_results: int = 10,
+    filters: Optional[Mapping[str, Any]] = None,
+    provenance: Optional[Mapping[str, Any]] = None,
+    query_backend: Optional[GraphQuery] = None,
 ) -> Dict[str, Any]:
-    facts = support_facts or []
+    query = build_graph_support_query(
+        claim_element_id,
+        graph_id=graph_id,
+        graph_version=graph_version,
+        claim_type=claim_type,
+        claim_element_text=claim_element_text,
+        max_results=max_results,
+        filters=filters,
+        provenance=provenance,
+    )
+    backend_error: Optional[Exception] = None
+    if query_backend is not None:
+        try:
+            backend_response = query_backend.query_support(query)
+            if not isinstance(backend_response, Mapping):
+                raise TypeError("graph query backend must return a mapping")
+            normalized_response = dict(backend_response)
+            normalized_response.setdefault("status", "available")
+            normalized_response.setdefault("graph_id", query["graph_id"])
+            normalized_response.setdefault("graph_version", query["graph_version"])
+            normalized_response.setdefault("claim_element_id", query["claim_element_id"])
+            normalized_response.setdefault("claim_type", query["claim_type"])
+            normalized_response.setdefault("claim_element_text", query["claim_element_text"])
+            normalized_response.setdefault("results", [])
+            normalized_response.setdefault("summary", {"result_count": len(normalized_response["results"])})
+            normalized_response.setdefault("provenance", query["provenance"])
+            normalized_response["query"] = query
+            return with_adapter_metadata(
+                normalized_response,
+                operation="query_graph_support",
+                backend_available=True,
+                implementation_status="backend",
+                extra_metadata={
+                    "graph_id": query["graph_id"],
+                    "graph_version": query["graph_version"],
+                },
+            )
+        except Exception as exc:  # A backend failure must not remove local support review.
+            backend_error = exc
+
+    facts = [
+        fact
+        for fact in support_facts or []
+        if isinstance(fact, Mapping) and _fact_matches_filters(fact, query["filters"])
+    ]
     ranked_results = []
     support_by_kind: Dict[str, int] = {}
     support_by_source: Dict[str, int] = {}
@@ -443,7 +735,7 @@ def query_graph_support(
         for item in limited_results
     ]
 
-    return with_adapter_metadata(
+    payload = with_adapter_metadata(
         GraphSupportResult(
             status="available-fallback" if KNOWLEDGE_GRAPHS_AVAILABLE else "unavailable",
             claim_element_id=claim_element_id,
@@ -466,62 +758,143 @@ def query_graph_support(
         ).as_dict(),
         operation="query_graph_support",
         backend_available=KNOWLEDGE_GRAPHS_AVAILABLE,
-        degraded_reason=GRAPHS_ERROR if not KNOWLEDGE_GRAPHS_AVAILABLE else None,
-        implementation_status="fallback" if KNOWLEDGE_GRAPHS_AVAILABLE else "unavailable",
+        degraded_reason=(
+            backend_error
+            or (GRAPHS_ERROR if not KNOWLEDGE_GRAPHS_AVAILABLE else None)
+        ),
+        implementation_status="fallback" if facts or KNOWLEDGE_GRAPHS_AVAILABLE else "unavailable",
+        extra_metadata={
+            "graph_id": query["graph_id"],
+            "graph_version": query["graph_version"],
+            "query_filters": query["filters"],
+        },
     )
+    payload["graph_version"] = query["graph_version"]
+    payload["provenance"] = query["provenance"]
+    payload["query"] = query
+    for result in payload.get("results", []):
+        result_metadata = result.get("metadata") if isinstance(result, dict) else None
+        if isinstance(result_metadata, dict) and isinstance(result_metadata.get("provenance"), dict):
+            result["provenance"] = dict(result_metadata["provenance"])
+    return payload
 
 
 def persist_graph_snapshot(
     graph_payload: Dict[str, Any],
     *,
     graph_id: Optional[str] = None,
+    graph_version: Optional[str] = None,
     graph_changed: Optional[bool] = None,
     existing_graph: bool = False,
     persistence_metadata: Optional[Dict[str, Any]] = None,
+    provenance: Optional[Mapping[str, Any]] = None,
+    persistence: Optional[GraphPersistence] = None,
 ) -> Dict[str, Any]:
-    entity_count = len(graph_payload.get("entities", []) or []) if isinstance(graph_payload, dict) else 0
-    relationship_count = len(graph_payload.get("relationships", []) or []) if isinstance(graph_payload, dict) else 0
-    source_id = str(graph_payload.get("source_id") or "") if isinstance(graph_payload, dict) else ""
-    metadata = graph_payload.get("metadata", {}) if isinstance(graph_payload, dict) and isinstance(graph_payload.get("metadata"), dict) else {}
+    if not isinstance(graph_payload, Mapping):
+        raise TypeError("graph_payload must be a mapping")
+
+    request = build_graph_persistence_request(
+        graph_payload,
+        graph_id=graph_id,
+        graph_version=graph_version,
+        provenance=provenance,
+        metadata=persistence_metadata,
+    )
+    entity_count = len(request["entities"])
+    relationship_count = len(request["relationships"])
+    source_id = str(graph_payload.get("source_id") or "")
+    metadata = graph_payload.get("metadata", {}) if isinstance(graph_payload.get("metadata"), dict) else {}
     derived_graph_changed = bool(graph_changed) if graph_changed is not None else bool(entity_count or relationship_count) and not existing_graph
     created = bool(derived_graph_changed and not existing_graph)
     reused = bool(existing_graph and not created)
-    stable_graph_id = graph_id or _stable_identifier(
-        "graph",
-        source_id,
-        str(entity_count),
-        str(relationship_count),
-        str(metadata.get("text_length") or ""),
-    )
-    return with_adapter_metadata(
-        GraphSnapshotResult(
-            status="pending" if _graph_storage_module is not None else "noop",
-            graph_id=stable_graph_id,
-            persisted=False,
-            created=created,
-            reused=reused,
-            node_count=entity_count,
-            edge_count=relationship_count,
-            metadata={
-                "source_id": source_id,
-                **(persistence_metadata or {}),
-                "lineage": {
-                    "status": str(graph_payload.get("status") or "") if isinstance(graph_payload, dict) else "",
-                    "text_length": metadata.get("text_length", 0),
-                    "sentence_count": metadata.get("sentence_count", 0),
-                },
+    stable_graph_id = request["graph_id"]
+
+    backend_result: Dict[str, Any] = {}
+    persistence_error: Optional[Exception] = None
+    if persistence is not None:
+        try:
+            raw_result = persistence.persist_snapshot(request)
+            if not isinstance(raw_result, Mapping):
+                raise TypeError("graph persistence backend must return a mapping")
+            backend_result = dict(raw_result)
+        except Exception as exc:  # Keep snapshot metadata available in degraded mode.
+            persistence_error = exc
+
+    backend_used = persistence is not None and persistence_error is None
+    base_payload = GraphSnapshotResult(
+        status=(
+            str(backend_result.get("status") or "persisted")
+            if backend_used
+            else ("degraded" if persistence_error else ("pending" if _graph_storage_module is not None else "noop"))
+        ),
+        graph_id=stable_graph_id,
+        persisted=bool(backend_result.get("persisted", True)) if backend_used else False,
+        created=bool(backend_result.get("created", created)) if backend_used else created,
+        reused=bool(backend_result.get("reused", reused)) if backend_used else reused,
+        node_count=int(backend_result.get("node_count", entity_count) or 0) if backend_used else entity_count,
+        edge_count=int(backend_result.get("edge_count", relationship_count) or 0) if backend_used else relationship_count,
+        metadata={
+            "source_id": source_id,
+            **(persistence_metadata or {}),
+            "lineage": {
+                "status": str(graph_payload.get("status") or ""),
+                "text_length": metadata.get("text_length", 0),
+                "sentence_count": metadata.get("sentence_count", 0),
             },
-        ).as_dict(),
+        },
+    ).as_dict()
+    if backend_result:
+        for key, value in backend_result.items():
+            if key != "metadata":
+                base_payload[key] = value
+        if isinstance(backend_result.get("metadata"), Mapping):
+            base_payload["metadata"].update(backend_result["metadata"])
+
+    payload = with_adapter_metadata(
+        base_payload,
         operation="persist_graph_snapshot",
-        backend_available=_graph_storage_module is not None,
-        degraded_reason=_graph_storage_error,
-        implementation_status="pending" if _graph_storage_module is not None else "noop",
+        backend_available=backend_used or _graph_storage_module is not None,
+        degraded_reason=persistence_error or (_graph_storage_error if persistence is None else None),
+        implementation_status=(
+            "backend"
+            if backend_used
+            else ("degraded" if persistence_error else ("pending" if _graph_storage_module is not None else "noop"))
+        ),
+        extra_metadata={
+            "graph_version": request["graph_version"],
+            "snapshot_id": request["snapshot_id"],
+            "content_hash": request["content_hash"],
+        },
     )
+    payload["graph_version"] = request["graph_version"]
+    payload["snapshot_id"] = request["snapshot_id"]
+    payload["content_hash"] = request["content_hash"]
+    backend_provenance = backend_result.get("provenance")
+    merged_provenance = dict(request["provenance"])
+    if isinstance(backend_provenance, Mapping):
+        merged_provenance.update(
+            {
+                str(key): value
+                for key, value in backend_provenance.items()
+                if value not in (None, "", [], (), {})
+            }
+        )
+    payload["graph_id"] = request["graph_id"]
+    payload["provenance"] = merged_provenance
+    return payload
 
 
 __all__ = [
     "KNOWLEDGE_GRAPHS_AVAILABLE",
     "GRAPHS_ERROR",
+    "GraphProvenance",
+    "GraphPersistenceRequest",
+    "GraphSupportQuery",
+    "GraphPersistence",
+    "GraphQuery",
+    "GraphRepository",
+    "build_graph_persistence_request",
+    "build_graph_support_query",
     "extract_graph_from_text",
     "query_graph_support",
     "persist_graph_snapshot",

@@ -95,6 +95,55 @@ class TestKnowledgeGraph:
         kg2 = KnowledgeGraph.from_dict(data)
         assert len(kg2.entities) == 1
         assert kg2.get_entity("e1").name == "John Doe"
+
+    def test_knowledge_graph_persistence_and_fallback_query_preserve_provenance(self):
+        kg = KnowledgeGraph(
+            graph_id='complaint:1',
+            provenance={
+                'source_id': 'intake:1',
+                'source_type': 'complaint',
+                'content_hash': 'intake-hash',
+            },
+        )
+        kg.add_entity(Entity(
+            id='claim:1',
+            type='claim_element',
+            name='Protected activity',
+        ))
+        kg.add_entity(Entity(
+            id='fact:1',
+            type='fact',
+            name='Employee complained to HR.',
+            attributes={'text': 'Employee complained to HR.'},
+            provenance={'source_record_id': 12, 'source_ref': 'evidence:12'},
+        ))
+        kg.add_relationship(Relationship(
+            id='supports:1',
+            source_id='fact:1',
+            target_id='claim:1',
+            relation_type='supports',
+        ))
+
+        snapshot = kg.persist()
+        support = kg.query_support(
+            'claim:1',
+            claim_type='employment',
+            claim_element_text='Protected activity',
+        )
+
+        assert snapshot['graph_id'] == 'complaint:1'
+        assert snapshot['snapshot_id'].startswith('graph-snapshot:')
+        assert snapshot['provenance']['source_id'] == 'intake:1'
+        assert support['results'][0]['fact_id'] == 'fact:1'
+        assert support['results'][0]['provenance']['source_record_id'] == 12
+        assert support['query']['graph_id'] == 'complaint:1'
+        assert support['query']['provenance']['content_hash'] == 'intake-hash'
+
+        restored = KnowledgeGraph.from_dict(kg.to_dict())
+        assert restored.graph_id == 'complaint:1'
+        assert restored.graph_version == kg.graph_version
+        assert restored.provenance['source_id'] == 'intake:1'
+        assert restored.get_entity('fact:1').provenance['source_ref'] == 'evidence:12'
     
     def test_knowledge_graph_builder(self):
         """Test building knowledge graph from text."""

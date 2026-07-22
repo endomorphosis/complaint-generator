@@ -29,7 +29,13 @@ from integrations.ipfs_datasets.documents import (
     parse_pdf_to_record,
     should_parse_document_input,
 )
-from integrations.ipfs_datasets.graphs import extract_graph_from_text, persist_graph_snapshot, query_graph_support
+from integrations.ipfs_datasets.graphs import (
+    GraphPersistence,
+    GraphQuery,
+    extract_graph_from_text,
+    persist_graph_snapshot,
+    query_graph_support,
+)
 from integrations.ipfs_datasets.graphrag import (
     analyze_pdf_relationships,
     batch_process_pdfs,
@@ -1164,6 +1170,79 @@ def test_persist_graph_snapshot_returns_stable_contract():
     assert result['metadata']['projection_target'] == 'complaint_phase_knowledge_graph'
     assert result['metadata']['lineage']['status'] == graph_payload['status']
     assert result['metadata']['operation'] == 'persist_graph_snapshot'
+
+
+def test_graph_persistence_interface_receives_versioned_provenance_contract():
+    class RecordingPersistence:
+        def __init__(self):
+            self.request = None
+
+        def persist_snapshot(self, request):
+            self.request = request
+            return {'status': 'persisted', 'persisted': True, 'created': True}
+
+        def get_snapshot(self, graph_id, *, graph_version=None):
+            return self.request
+
+    backend = RecordingPersistence()
+    assert isinstance(backend, GraphPersistence)
+    graph_payload = extract_graph_from_text(
+        'A dated notice supports the claim.',
+        source_id='artifact-9',
+        metadata={
+            'provenance': {
+                'source_type': 'evidence',
+                'source_record_id': 9,
+                'content_hash': 'source-hash',
+            }
+        },
+    )
+
+    result = persist_graph_snapshot(graph_payload, persistence=backend)
+
+    assert result['status'] == 'persisted'
+    assert result['persisted'] is True
+    assert result['graph_version'].startswith('sha256:')
+    assert result['snapshot_id'].startswith('graph-snapshot:')
+    assert result['content_hash'] == backend.request['content_hash']
+    assert backend.request['graph_id'] == result['graph_id']
+    assert backend.request['provenance']['source_id'] == 'artifact-9'
+    assert backend.request['provenance']['source_type'] == 'evidence'
+    assert backend.request['provenance']['source_record_id'] == 9
+
+
+def test_graph_query_interface_receives_query_and_provenance_fields():
+    class RecordingQuery:
+        def __init__(self):
+            self.query = None
+
+        def query_support(self, query):
+            self.query = query
+            return {
+                'results': [{'fact_id': 'fact:backend', 'text': 'Backend result'}],
+                'summary': {'result_count': 1},
+            }
+
+    backend = RecordingQuery()
+    assert isinstance(backend, GraphQuery)
+
+    result = query_graph_support(
+        'employment:1',
+        graph_id='case:1',
+        graph_version='7',
+        claim_type='employment',
+        claim_element_text='Protected activity',
+        filters={'source_type': 'evidence'},
+        provenance={'source_system': 'complaint-generator'},
+        query_backend=backend,
+    )
+
+    assert result['results'][0]['fact_id'] == 'fact:backend'
+    assert result['metadata']['implementation_status'] == 'backend'
+    assert backend.query['graph_id'] == 'case:1'
+    assert backend.query['graph_version'] == '7'
+    assert backend.query['filters'] == {'source_type': 'evidence'}
+    assert backend.query['provenance']['source_system'] == 'complaint-generator'
 
 
 def test_query_graph_support_ranks_fact_backed_results():
