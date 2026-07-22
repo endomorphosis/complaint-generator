@@ -480,6 +480,20 @@ def _serve_app(app):
         thread.join(timeout=5)
 
 
+@contextmanager
+def _launch_browser():
+    """Build and reliably dispose the Chromium fixture used by site smoke tests."""
+    _require_browser_stack()
+
+    with sync_playwright() as playwright_context:
+        browser = playwright_context.chromium.launch()
+        try:
+            yield browser
+        finally:
+            if browser.is_connected():
+                browser.close()
+
+
 def _wait_for_text(page, selector: str, expected_text: str) -> None:
     page.wait_for_function(
         """
@@ -502,6 +516,77 @@ def _wait_for_input_value(page, selector: str, expected_value: str) -> None:
         """,
         arg={"selector": selector, "expectedValue": expected_value},
     )
+
+
+def _build_review_surface_fixture(tmp_path: Path):
+    """Return a site app backed by a fresh, stateful review mediator."""
+    mediator = _SiteFlowMediator(tmp_path / "artifacts")
+    return mediator, create_review_surface_app(mediator)
+
+
+def _load_representative_review(page, base_url: str) -> None:
+    page.goto(
+        f"{base_url}/claim-support-review?claim_type=retaliation",
+        wait_until="domcontentloaded",
+    )
+    page.get_by_role("button", name="Load Review").click()
+    _wait_for_text(page, "#status-line", "Review payload loaded.")
+    _wait_for_text(page, "#confirm-intake-summary-status", "awaiting complainant confirmation")
+
+
+def _add_representative_testimony(page) -> None:
+    page.locator("#testimony-element-id").fill("retaliation:1")
+    page.locator("#testimony-element-text").fill("Protected activity")
+    page.locator("#testimony-actor").fill("Jane Doe")
+    page.locator("#testimony-act").fill("Reported discrimination to HR")
+    page.locator("#testimony-harm").fill("Supervisor retaliation")
+    page.locator("#testimony-narrative").fill(
+        "I reported discrimination to HR, and my supervisor started retaliating the next day."
+    )
+    page.get_by_role("button", name="Save Testimony").click()
+    _wait_for_text(page, "#testimony-summary-chips", "Records: 1")
+    _wait_for_text(page, "#testimony-list", "Protected activity")
+    _wait_for_text(page, "#testimony-list", "Reported discrimination to HR")
+
+
+def _add_representative_document(page) -> None:
+    page.locator("#document-element-id").fill("retaliation:1")
+    page.locator("#document-element-text").fill("Protected activity")
+    page.locator("#document-label").fill("Supervisor write-up")
+    page.locator("#document-filename").fill("writeup.txt")
+    page.locator("#document-text").fill(
+        "Supervisor issued a disciplinary write-up immediately after the protected report."
+    )
+    page.get_by_role("button", name="Save Document").click()
+    _wait_for_text(page, "#document-summary-chips", "Documents: 1")
+    _wait_for_text(page, "#document-list", "Supervisor write-up")
+    _wait_for_text(page, "#document-list", "Fact previews")
+
+
+def _confirm_representative_intake_summary(page) -> None:
+    page.locator("#confirm-intake-summary-note").fill(
+        "Reviewed with complainant on the dashboard."
+    )
+    page.locator("#confirm-intake-summary-button").click()
+    _wait_for_text(page, "#status-line", "Intake summary confirmed.")
+    _wait_for_text(page, "#confirm-intake-summary-status", "Intake summary confirmed")
+    assert page.locator("#confirm-intake-summary-button").is_disabled()
+
+
+def _add_representative_support_states(page) -> None:
+    """Populate testimony, documentary, and confirmed-intake review states."""
+    _add_representative_testimony(page)
+    _add_representative_document(page)
+    _confirm_representative_intake_summary(page)
+
+
+def _capture_fixture_screenshot(page, path: Path) -> Path:
+    """Capture a fixture screenshot and fail clearly when no image was rendered."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(path), full_page=True)
+    assert path.is_file()
+    assert path.stat().st_size > 0
+    return path
 
 
 def _write_sectioned_parquet(path: Path, rows: list[dict]) -> Path:
@@ -881,11 +966,10 @@ def test_review_surface_site_navigation_serves_all_operator_pages(monkeypatch: p
         lambda cid: {"status": "available", "data": trace_bytes, "size": len(trace_bytes)},
     )
 
-    app = create_review_surface_app(_SiteFlowMediator(tmp_path / "artifacts"))
+    _, app = _build_review_surface_fixture(tmp_path)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             page = browser.new_page()
             try:
                 page.goto(f"{base_url}/", wait_until="domcontentloaded")
@@ -956,11 +1040,10 @@ def test_review_surface_site_navigation_supports_review_to_builder_to_trace_loop
         lambda cid: {"status": "available", "data": trace_bytes, "size": len(trace_bytes)},
     )
 
-    app = create_review_surface_app(_SiteFlowMediator(tmp_path / "artifacts"))
+    _, app = _build_review_surface_fixture(tmp_path)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             page = browser.new_page()
             try:
                 page.goto(f"{base_url}/", wait_until="domcontentloaded")
@@ -1007,52 +1090,18 @@ def test_review_surface_site_navigation_supports_review_to_builder_to_trace_loop
 def test_review_surface_dashboard_actions_update_live_review(tmp_path: Path):
     _require_browser_stack()
 
-    mediator = _SiteFlowMediator(tmp_path / "artifacts")
-    app = create_review_surface_app(mediator)
+    mediator, app = _build_review_surface_fixture(tmp_path)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             page = browser.new_page()
             try:
-                page.goto(
-                    f"{base_url}/claim-support-review?claim_type=retaliation",
-                    wait_until="domcontentloaded",
-                )
-                page.get_by_role("button", name="Load Review").click()
-                _wait_for_text(page, "#status-line", "Review payload loaded.")
-                _wait_for_text(page, "#confirm-intake-summary-status", "awaiting complainant confirmation")
+                _load_representative_review(page, base_url)
+                _add_representative_support_states(page)
 
-                page.locator("#testimony-element-id").fill("retaliation:1")
-                page.locator("#testimony-element-text").fill("Protected activity")
-                page.locator("#testimony-actor").fill("Jane Doe")
-                page.locator("#testimony-act").fill("Reported discrimination to HR")
-                page.locator("#testimony-harm").fill("Supervisor retaliation")
-                page.locator("#testimony-narrative").fill(
-                    "I reported discrimination to HR, and my supervisor started retaliating the next day."
-                )
-                page.get_by_role("button", name="Save Testimony").click()
-                _wait_for_text(page, "#testimony-summary-chips", "Records: 1")
-                _wait_for_text(page, "#testimony-list", "Protected activity")
-                _wait_for_text(page, "#testimony-list", "Reported discrimination to HR")
-
-                page.locator("#document-element-id").fill("retaliation:1")
-                page.locator("#document-element-text").fill("Protected activity")
-                page.locator("#document-label").fill("Supervisor write-up")
-                page.locator("#document-filename").fill("writeup.txt")
-                page.locator("#document-text").fill(
-                    "Supervisor issued a disciplinary write-up immediately after the protected report."
-                )
-                page.get_by_role("button", name="Save Document").click()
-                _wait_for_text(page, "#document-summary-chips", "Documents: 1")
-                _wait_for_text(page, "#document-list", "Supervisor write-up")
-                _wait_for_text(page, "#document-list", "Fact previews")
-
-                page.locator("#confirm-intake-summary-note").fill("Reviewed with complainant on the dashboard.")
-                page.locator("#confirm-intake-summary-button").click()
-                _wait_for_text(page, "#status-line", "Intake summary confirmed.")
-                _wait_for_text(page, "#confirm-intake-summary-status", "Intake summary confirmed")
-                assert page.locator("#confirm-intake-summary-button").is_disabled()
+                assert len(mediator._testimony_records) == 1
+                assert len(mediator._evidence_records) == 1
+                assert mediator._summary_confirmation["confirmed"] is True
             finally:
                 browser.close()
 
@@ -1060,63 +1109,30 @@ def test_review_surface_dashboard_actions_update_live_review(tmp_path: Path):
 def test_review_surface_live_dashboard_captures_loaded_and_updated_review_screenshots(tmp_path: Path):
     _require_browser_stack()
 
-    mediator = _SiteFlowMediator(tmp_path / "artifacts")
-    app = create_review_surface_app(mediator)
+    mediator, app = _build_review_surface_fixture(tmp_path)
     screenshot_dir = tmp_path / "review-surface-live-dashboard-snapshots"
-    screenshot_dir.mkdir(parents=True, exist_ok=True)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             page = browser.new_page(viewport={"width": 1440, "height": 1200})
             try:
-                page.goto(
-                    f"{base_url}/claim-support-review?claim_type=retaliation",
-                    wait_until="domcontentloaded",
-                )
-                page.get_by_role("button", name="Load Review").click()
-                _wait_for_text(page, "#status-line", "Review payload loaded.")
-                _wait_for_text(page, "#confirm-intake-summary-status", "awaiting complainant confirmation")
+                _load_representative_review(page, base_url)
                 _wait_for_text(page, "body", "Operator Review Surface")
 
-                loaded_screenshot = screenshot_dir / "review-loaded.png"
-                page.screenshot(path=str(loaded_screenshot), full_page=True)
-                assert loaded_screenshot.exists()
-                assert loaded_screenshot.stat().st_size > 0
-
-                page.locator("#testimony-element-id").fill("retaliation:1")
-                page.locator("#testimony-element-text").fill("Protected activity")
-                page.locator("#testimony-actor").fill("Jane Doe")
-                page.locator("#testimony-act").fill("Reported discrimination to HR")
-                page.locator("#testimony-harm").fill("Supervisor retaliation")
-                page.locator("#testimony-narrative").fill(
-                    "I reported discrimination to HR, and my supervisor started retaliating the next day."
+                loaded_screenshot = _capture_fixture_screenshot(
+                    page, screenshot_dir / "review-loaded.png"
                 )
-                page.get_by_role("button", name="Save Testimony").click()
-                _wait_for_text(page, "#testimony-summary-chips", "Records: 1")
-                _wait_for_text(page, "#testimony-list", "Protected activity")
 
-                page.locator("#document-element-id").fill("retaliation:1")
-                page.locator("#document-element-text").fill("Protected activity")
-                page.locator("#document-label").fill("Supervisor write-up")
-                page.locator("#document-filename").fill("writeup.txt")
-                page.locator("#document-text").fill(
-                    "Supervisor issued a disciplinary write-up immediately after the protected report."
+                _add_representative_support_states(page)
+                assert len(mediator._testimony_records) == 1
+                assert len(mediator._evidence_records) == 1
+                assert mediator._summary_confirmation["confirmed"] is True
+
+                updated_screenshot = _capture_fixture_screenshot(
+                    page, screenshot_dir / "review-updated.png"
                 )
-                page.get_by_role("button", name="Save Document").click()
-                _wait_for_text(page, "#document-summary-chips", "Documents: 1")
-                _wait_for_text(page, "#document-list", "Supervisor write-up")
 
-                page.locator("#confirm-intake-summary-note").fill("Reviewed with complainant on the dashboard.")
-                page.locator("#confirm-intake-summary-button").click()
-                _wait_for_text(page, "#status-line", "Intake summary confirmed.")
-                _wait_for_text(page, "#confirm-intake-summary-status", "Intake summary confirmed")
-                assert page.locator("#confirm-intake-summary-button").is_disabled()
-
-                updated_screenshot = screenshot_dir / "review-updated.png"
-                page.screenshot(path=str(updated_screenshot), full_page=True)
-                assert updated_screenshot.exists()
-                assert updated_screenshot.stat().st_size > 0
+                assert loaded_screenshot.read_bytes() != updated_screenshot.read_bytes()
             finally:
                 browser.close()
 
@@ -1124,11 +1140,10 @@ def test_review_surface_live_dashboard_captures_loaded_and_updated_review_screen
 def test_review_surface_restores_review_focus_after_reopen(tmp_path: Path):
     _require_browser_stack()
 
-    app = create_review_surface_app(_SiteFlowMediator(tmp_path / "artifacts"))
+    _, app = _build_review_surface_fixture(tmp_path)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             context = browser.new_context()
             try:
                 page = context.new_page()
@@ -1156,11 +1171,10 @@ def test_review_surface_restores_review_focus_after_reopen(tmp_path: Path):
 def test_review_surface_restores_document_builder_state_and_review_resume_link(tmp_path: Path):
     _require_browser_stack()
 
-    app = create_review_surface_app(_SiteFlowMediator(tmp_path / "artifacts"))
+    _, app = _build_review_surface_fixture(tmp_path)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             context = browser.new_context()
             try:
                 review_page = context.new_page()
@@ -1216,13 +1230,11 @@ def test_review_surface_restores_document_builder_state_and_review_resume_link(t
 def test_review_surface_resume_loop_captures_builder_and_review_screenshots(tmp_path: Path):
     _require_browser_stack()
 
-    app = create_review_surface_app(_SiteFlowMediator(tmp_path / "artifacts"))
+    _, app = _build_review_surface_fixture(tmp_path)
     screenshot_dir = tmp_path / "review-surface-resume-snapshots"
-    screenshot_dir.mkdir(parents=True, exist_ok=True)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             context = browser.new_context(viewport={"width": 1440, "height": 1200})
             try:
                 review_page = context.new_page()
@@ -1261,10 +1273,9 @@ def test_review_surface_resume_loop_captures_builder_and_review_screenshots(tmp_
                 )
                 resume_link = resumed_builder.get_by_role("link", name="Resume Review Focus")
                 assert resume_link.is_visible()
-                builder_screenshot = screenshot_dir / "builder-resume-link.png"
-                resumed_builder.screenshot(path=str(builder_screenshot), full_page=True)
-                assert builder_screenshot.exists()
-                assert builder_screenshot.stat().st_size > 0
+                _capture_fixture_screenshot(
+                    resumed_builder, screenshot_dir / "builder-resume-link.png"
+                )
 
                 resume_href = resume_link.get_attribute("href") or ""
                 assert resume_href.startswith("/claim-support-review?")
@@ -1276,10 +1287,9 @@ def test_review_surface_resume_loop_captures_builder_and_review_screenshots(tmp_
                 _wait_for_input_value(resumed_builder, "#claim-type", "retaliation")
                 _wait_for_input_value(resumed_builder, "#user-id", "resume-user")
                 _wait_for_text(resumed_builder, "#status-line", "Review payload loaded.")
-                review_screenshot = screenshot_dir / "review-resumed-focus.png"
-                resumed_builder.screenshot(path=str(review_screenshot), full_page=True)
-                assert review_screenshot.exists()
-                assert review_screenshot.stat().st_size > 0
+                _capture_fixture_screenshot(
+                    resumed_builder, screenshot_dir / "review-resumed-focus.png"
+                )
             finally:
                 context.close()
                 browser.close()
@@ -1288,11 +1298,10 @@ def test_review_surface_resume_loop_captures_builder_and_review_screenshots(tmp_
 def test_review_surface_ipfs_dashboard_shells_render_all_registered_dashboards(tmp_path: Path):
     _require_browser_stack()
 
-    app = create_review_surface_app(_SiteFlowMediator(tmp_path / "artifacts"))
+    _, app = _build_review_surface_fixture(tmp_path)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             page = browser.new_page()
             try:
                 page.goto(f"{base_url}/dashboards", wait_until="domcontentloaded")
@@ -1311,11 +1320,10 @@ def test_review_surface_ipfs_dashboard_shells_render_all_registered_dashboards(t
 def test_review_surface_ipfs_dashboard_raw_routes_render_all_registered_dashboards(tmp_path: Path):
     _require_browser_stack()
 
-    app = create_review_surface_app(_SiteFlowMediator(tmp_path / "artifacts"))
+    _, app = _build_review_surface_fixture(tmp_path)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             page = browser.new_page()
             try:
                 for slug, title in _IPFS_DASHBOARD_ROUTES:
@@ -1340,13 +1348,11 @@ def test_review_surface_dashboard_parquet_cards_support_search_review_and_annota
     docket_parquet = _write_dashboard_docket_parquet(tmp_path)
     workspace_parquet = _write_dashboard_workspace_parquet(tmp_path)
     user_id = f"dashboard-playwright-user-{uuid.uuid4().hex}"
-    app = create_review_surface_app(_SiteFlowMediator(tmp_path / "artifacts"))
+    _, app = _build_review_surface_fixture(tmp_path)
     screenshot_dir = tmp_path / "dashboard-parquet-review-screenshots"
-    screenshot_dir.mkdir(parents=True, exist_ok=True)
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             page = browser.new_page(viewport={"width": 1440, "height": 1100})
             try:
                 page.goto(f"{base_url}/dashboards?user_id={user_id}", wait_until="domcontentloaded")
@@ -1368,7 +1374,9 @@ def test_review_surface_dashboard_parquet_cards_support_search_review_and_annota
                 _wait_for_text(page, "#dashboard-docket-dataset-preview", "docket-doc-2")
                 _wait_for_input_value(page, "#dashboard-dataset-annotation-document-id", "docket-doc-2")
                 assert int(page.locator("#dashboard-docket-dataset-results").inner_text()) >= 1
-                page.screenshot(path=str(screenshot_dir / "docket-dataset-search.png"), full_page=True)
+                _capture_fixture_screenshot(
+                    page, screenshot_dir / "docket-dataset-search.png"
+                )
 
                 page.locator("#dashboard-workspace-dataset-path").fill(str(workspace_parquet))
                 page.locator("#dashboard-workspace-dataset-query").fill("accommodation")
@@ -1436,10 +1444,9 @@ def test_review_surface_dashboard_parquet_cards_support_search_review_and_annota
                 _wait_for_text(page, "#dashboard-dataset-annotation-preview", "workspace-collection-1")
                 _wait_for_text(page, "#dashboard-dataset-annotation-preview", "email")
                 assert page.locator("#dashboard-workspace-evidence").inner_text() == "1"
-                page.screenshot(path=str(screenshot_dir / "workspace-dataset-annotation.png"), full_page=True)
-
-                assert (screenshot_dir / "docket-dataset-search.png").stat().st_size > 0
-                assert (screenshot_dir / "workspace-dataset-annotation.png").stat().st_size > 0
+                _capture_fixture_screenshot(
+                    page, screenshot_dir / "workspace-dataset-annotation.png"
+                )
             finally:
                 browser.close()
 
@@ -1518,8 +1525,7 @@ def test_review_surface_workspace_sdk_flow_exercises_mcp_tools(
     app = create_review_surface_app(mediator=object())
 
     with _serve_app(app) as base_url:
-        with sync_playwright() as playwright_context:
-            browser = playwright_context.chromium.launch()
+        with _launch_browser() as browser:
             page = browser.new_page()
             try:
                 page.goto(f"{base_url}/workspace", wait_until="domcontentloaded")
