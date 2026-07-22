@@ -399,12 +399,21 @@ def import_module_optional(module_name: str) -> tuple[Any | None, ImportFailure 
 
 
 def import_attr_optional(module_name: str, attr_name: str) -> tuple[Any | None, ImportFailure | None]:
+    """Import an optional module attribute, reporting only genuine absence.
+
+    A module can implement dynamic attribute lookup with ``__getattr__``.  Such
+    code may raise arbitrary exceptions, but only ``AttributeError`` represents
+    the normal "capability is not exposed" outcome.  Provider runtime failures
+    must remain visible to the caller rather than being mislabeled as optional
+    capability degradation.
+    """
+
     module, error = import_module_optional(module_name)
     if module is None:
         return None, error
     try:
         return getattr(module, attr_name), None
-    except Exception as exc:
+    except AttributeError as exc:
         return None, _build_import_failure(exc, module_name=module_name, attr_name=attr_name)
 
 
