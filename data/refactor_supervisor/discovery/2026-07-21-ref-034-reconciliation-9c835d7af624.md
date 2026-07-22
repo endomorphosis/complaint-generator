@@ -160,3 +160,11 @@ Work surface: `2` candidates, `2` sampled records.
   ]
 }
 ```
+
+## Resolution
+
+Resolved on 2026-07-21. The configured `llm_router` resolver path was exercised
+for both preflight conflicts. `REF-001` contained unique ownership-map work and
+was reconciled into `main` by `f4fc518`; the stale `REF-028` tree was already
+superseded and was retired by `fa6b295` without changing the current tree. Both
+source worktrees and branches were removed after ancestry verification.

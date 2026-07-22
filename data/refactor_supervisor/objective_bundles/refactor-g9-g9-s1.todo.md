@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-36: REF-036 Introduce canonical task identity and a durable supervisor task ledger
+- [x] Task checkbox-36: REF-036 Introduce canonical task identity and a durable supervisor task ledger
 
 ## REF-036 Introduce canonical task identity and a durable supervisor task ledger
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9

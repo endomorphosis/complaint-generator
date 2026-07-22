@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-1: REF-001 Create an entrypoint and ownership map for the largest runtime modules
+- [x] Task checkbox-1: REF-001 Create an entrypoint and ownership map for the largest runtime modules
 
 ## REF-001 Create an entrypoint and ownership map for the largest runtime modules
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G1
@@ -25,11 +25,11 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-001-createanentrypointandownershipmapforthelargestru
 - Acceptance: A short module ownership map exists.; Entrypoints are grouped by CLI, web, mediator, and workflow role.
 
-- [ ] Task checkbox-2: REF-002 Document allowed dependency direction between applications, mediator, phases, integrations, and lib
+- [x] Task checkbox-2: REF-002 Document allowed dependency direction between applications, mediator, phases, integrations, and lib
 
 ## REF-002 Document allowed dependency direction between applications, mediator, phases, integrations, and lib
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G1
@@ -48,7 +48,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-048 Close objective gap: Map package ownership and runtime entrypoints
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops

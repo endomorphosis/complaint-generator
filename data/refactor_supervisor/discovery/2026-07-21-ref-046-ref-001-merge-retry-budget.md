@@ -23,3 +23,12 @@ The accelerator backlog refinery classified this as backlog work instead of
 allowing another implementation attempt to loop on the same failure. The source
 task is added to the strategy `blocked_tasks` list and the follow-up task below
 is appended for normal daemon parsing.
+
+## Resolution
+
+Resolved on 2026-07-21. The preflight conflict was routed through the configured
+LLM resolver and then conservatively reconciled in an isolated worktree. The
+ownership registry and its application, mediator, workflow, CLI, and test
+integration landed in `main` through `f4fc518`; all seven package-import tests
+passed. REF-001 and REF-046 were marked completed and REF-001 was removed from
+strategy `blocked_tasks`.

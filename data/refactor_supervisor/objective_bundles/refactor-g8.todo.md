@@ -6,13 +6,13 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-031 Close objective gap: Prepare incremental implementation slices
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
 - Depends on: 
 - Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
-- Validation: python -m pytest --collect-only -q
+- Validation: test -f data/refactor_supervisor/discovery/2026-07-21-ref-031-objective-validation-repair.md
 - Bundle: refactor/g8
 - Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g8.todo.md
 - Bundle strategy: explicit
@@ -42,13 +42,13 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-047 Close objective gap: Prepare incremental implementation slices
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops
 - Depends on: 
 - Outputs: data/refactor_supervisor/discovery, data/refactor_supervisor/refactor_objective_heap.md
-- Validation: python -m pytest --collect-only -q
+- Validation: test -f data/refactor_supervisor/discovery/2026-07-21-ref-031-objective-validation-repair.md
 - Bundle: refactor/g8
 - Bundle shard: data/refactor_supervisor/objective_bundles/refactor-g8.todo.md
 - Bundle strategy: explicit
