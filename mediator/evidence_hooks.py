@@ -1,4 +1,16 @@
-"""Evidence management hooks for mediator."""
+"""Evidence management hooks for mediator.
+
+Broad-exception audit (REF-017)
+---------------------------------
+Broad handlers in this module guard two production boundaries: optional IPFS
+storage/document tooling and DuckDB persistence.  Dependency exceptions are
+not stable enough to catch by a common narrower base class.  Storage commands
+therefore raise typed hook errors with their original cause.  High-traffic
+list queries use :class:`DegradedEvidenceResults`, which remains list-compatible
+but distinguishes a failed query from a valid empty result; legacy scalar and
+mapping queries retain their established fallback shape and log the failure.
+The only local filesystem preparation handler is narrowed to ``OSError``.
+"""
 
 import os
 import json
@@ -49,6 +61,48 @@ _ARTIFACT_FAMILY_CORPUS_FAMILY = {
     'legal_authority_text': 'legal_authority',
     'legal_authority_reference': 'legal_authority',
 }
+
+
+class EvidenceHookError(RuntimeError):
+    """Base error for a failed evidence hook operation."""
+
+
+class EvidenceStorageError(EvidenceHookError):
+    """Evidence could not be normalized or stored."""
+
+
+class EvidenceRetrievalError(EvidenceHookError):
+    """Evidence could not be retrieved from the configured backend."""
+
+
+class EvidencePersistenceError(EvidenceHookError):
+    """Evidence metadata could not be persisted."""
+
+
+class DegradedEvidenceResults(list[Dict[str, Any]]):
+    """List-compatible result identifying a failed best-effort query."""
+
+    status: str
+    operation: str
+    degraded_reason: str
+    error_type: str
+
+    def __init__(self, *, operation: str, error: BaseException) -> None:
+        super().__init__()
+        self.status = 'degraded'
+        self.operation = operation
+        self.degraded_reason = str(error) or type(error).__name__
+        self.error_type = type(error).__name__
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            'status': self.status,
+            'operation': self.operation,
+            'degraded_reason': self.degraded_reason,
+            'error_type': self.error_type,
+            'result_count': len(self),
+            'results': list(self),
+        }
 
 
 def _resolve_artifact_identity(*, content_origin: str = '', artifact_family: str = '', corpus_family: str = '') -> Dict[str, str]:
@@ -159,6 +213,9 @@ class EvidenceStorageHook:
             - metadata: Any additional metadata
         """
         try:
+            storage_status = 'stored'
+            storage_degraded_reason = ''
+            storage_error_type = ''
             content_hash = stable_content_hash(data)
             provenance = build_provenance(
                 source_url=str((metadata or {}).get('source_url', '')),
@@ -194,9 +251,14 @@ class EvidenceStorageHook:
                         cid=cid, size=len(data), type=evidence_type)
                 except Exception as ipfs_error:
                     cid = f"Qm{hashlib.sha256(data).hexdigest()[:44]}"
+                    storage_status = 'degraded'
+                    storage_degraded_reason = str(ipfs_error) or type(ipfs_error).__name__
+                    storage_error_type = type(ipfs_error).__name__
                     self.mediator.log(
                         'evidence_ipfs_runtime_unavailable',
                         error=str(ipfs_error),
+                        error_type=type(ipfs_error).__name__,
+                        operation='ipfs_add_bytes',
                         cid=cid,
                         size=len(data),
                         type=evidence_type,
@@ -204,6 +266,9 @@ class EvidenceStorageHook:
             else:
                 # Fallback: Create a simulated CID using hash
                 cid = f"Qm{hashlib.sha256(data).hexdigest()[:44]}"
+                storage_status = 'degraded'
+                storage_degraded_reason = 'IPFS backend unavailable; using deterministic local identifier'
+                storage_error_type = 'BackendUnavailable'
                 self.mediator.log('evidence_simulated', 
                     cid=cid, size=len(data), type=evidence_type)
             
@@ -256,11 +321,21 @@ class EvidenceStorageHook:
                     'relationship_count': len(graph_payload.get('relationships', []) or []),
                 }
             result['ipfs_available'] = IPFS_AVAILABLE
+            result['ipfs_persisted'] = storage_status == 'stored'
+            result['storage_status'] = storage_status
+            if storage_degraded_reason:
+                result['degraded_reason'] = storage_degraded_reason
+                result['error_type'] = storage_error_type
             return result
             
         except Exception as e:
-            self.mediator.log('evidence_storage_error', error=str(e))
-            raise Exception(f'Failed to store evidence: {str(e)}')
+            self.mediator.log(
+                'evidence_storage_error',
+                error=str(e),
+                error_type=type(e).__name__,
+                operation='store_evidence',
+            )
+            raise EvidenceStorageError(f'Failed to store evidence: {str(e)}') from e
     
     def store_evidence_file(self, file_path: str, evidence_type: str,
                            metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -291,9 +366,24 @@ class EvidenceStorageHook:
             
             return self.store_evidence(data, evidence_type, file_metadata)
             
-        except Exception as e:
-            self.mediator.log('evidence_file_error', error=str(e), file=file_path)
-            raise Exception(f'Failed to store evidence file: {str(e)}')
+        except EvidenceStorageError as e:
+            self.mediator.log(
+                'evidence_file_error',
+                error=str(e),
+                error_type=type(e).__name__,
+                operation='store_evidence_file',
+                file=file_path,
+            )
+            raise
+        except (OSError, ValueError, TypeError) as e:
+            self.mediator.log(
+                'evidence_file_error',
+                error=str(e),
+                error_type=type(e).__name__,
+                operation='store_evidence_file',
+                file=file_path,
+            )
+            raise EvidenceStorageError(f'Failed to store evidence file: {str(e)}') from e
     
     def retrieve_evidence(self, cid: str) -> bytes:
         """
@@ -312,11 +402,23 @@ class EvidenceStorageHook:
                 return data
             else:
                 self.mediator.log('evidence_retrieval_unavailable', cid=cid)
-                raise Exception('IPFS not available for evidence retrieval')
+                raise EvidenceRetrievalError(
+                    'Failed to retrieve evidence: IPFS not available for evidence retrieval'
+                )
                 
+        except EvidenceRetrievalError:
+            raise
         except Exception as e:
-            self.mediator.log('evidence_retrieval_error', error=str(e), cid=cid)
-            raise Exception(f'Failed to retrieve evidence: {str(e)}')
+            # ``cat`` is an optional backend boundary with backend-specific
+            # exception types.  Normalize it while retaining the cause.
+            self.mediator.log(
+                'evidence_retrieval_error',
+                error=str(e),
+                error_type=type(e).__name__,
+                operation='retrieve_evidence',
+                cid=cid,
+            )
+            raise EvidenceRetrievalError(f'Failed to retrieve evidence: {str(e)}') from e
 
 
 class EvidenceStateHook:
@@ -351,9 +453,15 @@ class EvidenceStateHook:
                 path.parent.mkdir(parents=True, exist_ok=True)
             if path.exists() and path.is_file() and path.stat().st_size == 0:
                 path.unlink()
-        except Exception:
-            # Best-effort only; duckdb.connect will raise a useful error if needed.
-            pass
+        except OSError as exc:
+            # Best-effort only; duckdb.connect will raise a useful error if
+            # needed, but path preparation failures still leave a breadcrumb.
+            self.mediator.log(
+                'evidence_db_path_prepare_error',
+                db_path=self.db_path,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
     
     def _get_default_db_path(self) -> str:
         """Get default DuckDB database path."""
@@ -584,7 +692,12 @@ class EvidenceStateHook:
             self.mediator.log('evidence_schema_initialized', db_path=self.db_path)
             
         except Exception as e:
-            self.mediator.log('evidence_schema_error', error=str(e))
+            self.mediator.log(
+                'evidence_schema_error',
+                operation='initialize_evidence_schema',
+                error=str(e),
+                error_type=type(e).__name__,
+            )
 
     def _store_document_chunks(self, conn, evidence_id: int, document_parse: Dict[str, Any]) -> None:
         chunks = document_parse.get('chunks', []) or []
@@ -1129,8 +1242,13 @@ class EvidenceStateHook:
             return {'record_id': record_id, 'created': True, 'reused': False}
             
         except Exception as e:
-            self.mediator.log('evidence_record_error', error=str(e))
-            raise Exception(f'Failed to add evidence record: {str(e)}')
+            self.mediator.log(
+                'evidence_record_error',
+                operation='upsert_evidence_record',
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            raise EvidencePersistenceError(f'Failed to add evidence record: {str(e)}') from e
     
     def get_user_evidence(self, user_id: str) -> List[Dict[str, Any]]:
         """
@@ -1208,7 +1326,7 @@ class EvidenceStateHook:
             
         except Exception as e:
             self.mediator.log('evidence_query_error', error=str(e))
-            return []
+            return DegradedEvidenceResults(operation='get_user_evidence', error=e)
     
     def get_evidence_by_cid(self, cid: str) -> Optional[Dict[str, Any]]:
         """
@@ -1311,7 +1429,7 @@ class EvidenceStateHook:
             ]
         except Exception as e:
             self.mediator.log('evidence_chunk_query_error', error=str(e), evidence_id=evidence_id)
-            return []
+            return DegradedEvidenceResults(operation='get_evidence_chunks', error=e)
 
     def get_evidence_graph(self, evidence_id: int) -> Dict[str, Any]:
         """Get normalized graph entities and relationships for a stored evidence record."""
@@ -1393,7 +1511,7 @@ class EvidenceStateHook:
             ]
         except Exception as e:
             self.mediator.log('evidence_fact_query_error', error=str(e), evidence_id=evidence_id)
-            return []
+            return DegradedEvidenceResults(operation='get_evidence_facts', error=e)
     
     def get_evidence_statistics(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -1659,7 +1777,7 @@ class EvidenceStateHook:
             ]
         except Exception as e:
             self.mediator.log('scraper_run_query_error', error=str(e), user_id=user_id)
-            return []
+            return DegradedEvidenceResults(operation='get_scraper_runs', error=e)
 
     def get_scraper_run_details(self, run_id: int) -> Dict[str, Any]:
         """Return one persisted scraper run with iterations, tactics, and coverage rows."""
@@ -1992,7 +2110,7 @@ class EvidenceStateHook:
             return [self._serialize_scraper_queue_row(row) for row in rows]
         except Exception as e:
             self.mediator.log('scraper_queue_query_error', error=str(e), user_id=user_id, status=status)
-            return []
+            return DegradedEvidenceResults(operation='get_scraper_queue', error=e)
 
     def get_scraper_queue_job(self, job_id: int) -> Dict[str, Any]:
         """Return one queued scraper job."""
@@ -2226,5 +2344,11 @@ Provide brief recommendations for:
         try:
             response = self.mediator.query_backend(prompt)
             return response
-        except Exception:
+        except Exception as exc:
+            self.mediator.log(
+                'evidence_recommendation_degraded',
+                operation='generate_evidence_recommendations',
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
             return 'Evidence analysis available. Review submitted evidence and consider any gaps in documentation.'

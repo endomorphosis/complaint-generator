@@ -165,14 +165,15 @@ def _discover_repo_local_ipfs_path() -> str:
 
 
 def _ensure_local_kubo_environment() -> str:
+    """Discover local Kubo configuration without leaking probe state.
+
+    Runtime probes may be called repeatedly under different environments (for
+    example after an operator installs or removes Kubo).  Writing an
+    auto-discovered command into ``os.environ`` made the first probe override
+    all later discovery and could falsely report a missing backend as healthy.
+    Explicit environment settings remain honored by the discovery helpers.
+    """
     discovered_cmd = _discover_repo_local_kubo_cmd()
-    if discovered_cmd:
-        os.environ.setdefault("IPFS_DATASETS_PY_KUBO_CMD", discovered_cmd)
-
-    discovered_ipfs_path = _discover_repo_local_ipfs_path()
-    if discovered_ipfs_path:
-        os.environ.setdefault("IPFS_PATH", discovered_ipfs_path)
-
     return discovered_cmd
 
 

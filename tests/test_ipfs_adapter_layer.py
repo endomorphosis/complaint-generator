@@ -51,6 +51,7 @@ from integrations.ipfs_datasets.logic import check_contradictions, prove_claim_e
 from integrations.ipfs_datasets.mcp_gateway import execute_gateway_tool, list_gateway_tools
 from integrations.ipfs_datasets.scraper_daemon import ScraperDaemon, ScraperDaemonConfig
 from integrations.ipfs_datasets.search import (
+    DegradedSearchResults,
     download_url,
     download_with_recovery,
     evaluate_scraped_content,
@@ -504,6 +505,38 @@ def test_search_multi_engine_web_normalizes_orchestrated_results():
     assert results[0]['provider'] == 'ipfs_datasets_py'
     assert results[0]['metadata']['details']['operation'] == 'search_multi_engine_search'
     assert results[0]['metadata']['details']['query'] == 'agency guidance'
+
+
+def test_search_multi_engine_web_returns_typed_degradation_on_orchestrator_failure():
+    fallback_records = [{'url': 'https://example.com/fallback', 'source_type': 'brave_search'}]
+
+    with patch('integrations.ipfs_datasets.search.MULTI_ENGINE_SEARCH_AVAILABLE', True):
+        with patch('integrations.ipfs_datasets.search.OrchestratorConfig', return_value=object()):
+            with patch(
+                'integrations.ipfs_datasets.search.MultiEngineOrchestrator',
+                side_effect=RuntimeError('orchestrator offline'),
+            ):
+                with patch(
+                    'integrations.ipfs_datasets.search.search_brave_web',
+                    return_value=fallback_records,
+                ):
+                    results = search_multi_engine_web('agency guidance', max_results=5)
+
+    assert isinstance(results, DegradedSearchResults)
+    assert results == fallback_records
+    assert results.status == 'degraded'
+    assert results.operation == 'search_multi_engine_web'
+    assert results.error_type == 'RuntimeError'
+    assert results.fallback_provider == 'brave'
+    assert results.as_dict() == {
+        'status': 'degraded',
+        'operation': 'search_multi_engine_web',
+        'degraded_reason': 'orchestrator offline',
+        'error_type': 'RuntimeError',
+        'fallback_provider': 'brave',
+        'result_count': 1,
+        'results': fallback_records,
+    }
 
 
 def test_download_url_persists_bytes_and_normalizes_metadata():
