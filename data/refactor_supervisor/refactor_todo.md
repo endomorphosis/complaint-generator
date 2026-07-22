@@ -1697,7 +1697,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-084 Replace placeholder runtime path in complaint_analysis/indexer.py:231
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
