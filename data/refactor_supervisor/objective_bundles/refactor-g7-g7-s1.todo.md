@@ -29,7 +29,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 
 ## REF-022 Create fixture builders for Playwright review and dashboard smoke tests
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G7
