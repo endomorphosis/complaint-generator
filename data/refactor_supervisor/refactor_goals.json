@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-22T00:13:46Z",
+  "generated_at": "2026-07-22T01:51:15Z",
   "goals": [
     {
       "id": "G1",
@@ -1133,7 +1133,7 @@
         "path": "mediator/mediator.py"
       },
       {
-        "lines": 8152,
+        "lines": 8148,
         "path": "applications/complaint_workspace.py"
       },
       {
@@ -1234,9 +1234,9 @@
       "pyproject": true,
       "pytest_ini": true
     },
-    "python_file_count": 438,
-    "python_total_lines": 244706,
-    "scanned_at": "2026-07-22T00:13:46Z",
+    "python_file_count": 439,
+    "python_total_lines": 244750,
+    "scanned_at": "2026-07-22T01:51:15Z",
     "signals": {
       "broad_exception_count": 375,
       "direct_ipfs_import_count": 215,
@@ -1247,8 +1247,8 @@
         "applications/complaint_cli.py:410",
         "applications/complaint_cli.py:411",
         "applications/complaint_cli.py:479",
-        "applications/complaint_workspace.py:1582",
-        "applications/complaint_workspace.py:4211",
+        "applications/complaint_workspace.py:1578",
+        "applications/complaint_workspace.py:4207",
         "applications/dashboard_ui.py:892",
         "complaint_generator/agentic_evidence_download.py:10",
         "complaint_generator/data_migration.py:13",
@@ -1498,7 +1498,7 @@
         "mediator/__init__.py:1"
       ]
     },
-    "test_file_count": 261
+    "test_file_count": 262
   },
   "source_supervisor_module": "ipfs_accelerate_py.agent_supervisor",
   "todo_path": "data/refactor_supervisor/refactor_todo.md"
