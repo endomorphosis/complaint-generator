@@ -1088,7 +1088,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-051 Review swallowed exception path in adversarial_harness/harness.py:49
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -1097,10 +1097,9 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Validation: python3 -m py_compile adversarial_harness/harness.py
 - Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:49. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-051-codebase-scan-3ab0109997e2.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
 
-- Blocked reason: Deferred by objective-task janitor during launch steering because off_mission_codebase_scan_task; this keeps lanes focused on Swissknife, Hallucinate App, MCP++, Meta glasses, and Playwright launch readiness.
 ## REF-052 Review swallowed exception path in adversarial_harness/harness.py:54
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -1109,10 +1108,9 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Validation: python3 -m py_compile adversarial_harness/harness.py
 - Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:54. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-052-codebase-scan-888d7f27e0a0.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
 
-- Blocked reason: Deferred by objective-task janitor during launch steering because off_mission_codebase_scan_task; this keeps lanes focused on Swissknife, Hallucinate App, MCP++, Meta glasses, and Playwright launch readiness.
 ## REF-053 Review swallowed exception path in adversarial_harness/harness.py:150
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -1121,10 +1119,9 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Validation: python3 -m py_compile adversarial_harness/harness.py
 - Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:150. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-053-codebase-scan-6060fa7dd810.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
 
-- Blocked reason: Deferred by objective-task janitor during launch steering because off_mission_codebase_scan_task; this keeps lanes focused on Swissknife, Hallucinate App, MCP++, Meta glasses, and Playwright launch readiness.
 ## REF-054 Review swallowed exception path in adversarial_harness/harness.py:478
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -1133,10 +1130,9 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Validation: python3 -m py_compile adversarial_harness/harness.py
 - Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:478. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-054-codebase-scan-c656748a86e6.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
 
-- Blocked reason: Deferred by objective-task janitor during launch steering because off_mission_codebase_scan_task; this keeps lanes focused on Swissknife, Hallucinate App, MCP++, Meta glasses, and Playwright launch readiness.
 ## REF-055 Review swallowed exception path in adversarial_harness/harness.py:879
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -1145,10 +1141,9 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Validation: python3 -m py_compile adversarial_harness/harness.py
 - Acceptance: Codebase scan filed this finding from adversarial_harness/harness.py:879. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-055-codebase-scan-c09886e49cef.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
 
-- Blocked reason: Deferred by objective-task janitor during launch steering because off_mission_codebase_scan_task; this keeps lanes focused on Swissknife, Hallucinate App, MCP++, Meta glasses, and Playwright launch readiness.
 ## REF-056 Review swallowed exception path in adversarial_harness/session.py:225
 
-- Status: blocked
+- Status: todo
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -1156,7 +1151,6 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Outputs: data/refactor_supervisor/discovery, adversarial_harness/session.py
 - Validation: python3 -m py_compile adversarial_harness/session.py
 - Acceptance: Codebase scan filed this finding from adversarial_harness/session.py:225. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-056-codebase-scan-3d51a7e8f51f.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
-- Blocked reason: Deferred by objective-task janitor during launch steering because off_mission_codebase_scan_task; this keeps lanes focused on Swissknife, Hallucinate App, MCP++, Meta glasses, and Playwright launch readiness.
 
 ## REF-057 Close objective gap: Stabilize repository boundaries
 
@@ -3641,7 +3635,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-216 Review swallowed exception path in mediator/inquiries.py:446
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -3672,7 +3666,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-217 Review swallowed exception path in mediator/integrations/graph_tools.py:133
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
