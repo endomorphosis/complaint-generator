@@ -6,7 +6,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-124 Review swallowed exception path in integrations/ipfs_datasets/llm.py:78
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -68,7 +68,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-126 Review swallowed exception path in integrations/ipfs_datasets/llm.py:127
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
