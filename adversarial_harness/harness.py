@@ -56,9 +56,18 @@ def _sanitize_for_json(value: Any) -> Any:
             )
     if hasattr(value, "__dict__"):
         try:
-            return _sanitize_for_json(vars(value))
-        except Exception:
-            pass
+            attributes = vars(value)
+        except TypeError:
+            logger.warning(
+                "Could not inspect %s attributes for JSON serialization; using string fallback",
+                type(value).__name__,
+                exc_info=True,
+            )
+        else:
+            # Keep recursive conversion outside the access-error handler. A
+            # failure in an attribute serializer is not evidence that the
+            # object's attributes are unavailable and must remain observable.
+            return _sanitize_for_json(attributes)
     return str(value)
 
 
