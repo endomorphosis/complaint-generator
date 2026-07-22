@@ -140,10 +140,13 @@ def _isolate_status_paths(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(supervisor, "STATE_ROOT", tmp_path)
     monkeypatch.setattr(supervisor, "STATUS_PATH", tmp_path / "status.json")
     monkeypatch.setattr(supervisor, "PID_PATH", tmp_path / "supervisor.pid")
+    monkeypatch.setattr(supervisor, "TASK_STATE_PATH", tmp_path / "task-state.json")
     monkeypatch.setattr(supervisor, "GOALS_PATH", tmp_path / "goals.json")
     monkeypatch.setattr(supervisor, "TODO_PATH", tmp_path / "todo.md")
     monkeypatch.setattr(supervisor, "QUEUE_PATH", tmp_path / "queue.duckdb")
     monkeypatch.setattr(supervisor, "BUNDLE_LANE_MANIFEST", tmp_path / "lanes.json")
+    monkeypatch.setattr(supervisor, "BUNDLE_SCHEDULER_PID_PATH", tmp_path / "bundle-scheduler.pid")
+    monkeypatch.setattr(supervisor, "BUNDLE_SCHEDULER_LOG_PATH", tmp_path / "bundle-scheduler.log")
     monkeypatch.setattr(supervisor, "MERGE_RESOLVER_STATUS_PATH", tmp_path / "merge-status.json")
     monkeypatch.setattr(supervisor, "MERGE_RESOLVER_PID_PATH", tmp_path / "merge.pid")
     monkeypatch.setattr(supervisor, "UPSTREAM_SUPERVISOR_STATUS_PATH", tmp_path / "upstream-status.json")
@@ -218,6 +221,156 @@ def test_status_uses_live_upstream_heartbeat(tmp_path, monkeypatch) -> None:
     assert payload["heartbeat"] == "2026-07-21T12:34:56Z"
     assert payload["heartbeat_at"] == payload["heartbeat"]
     assert payload["upstream_supervisor_status"]["status"] == "running"
+
+
+def test_durable_status_projection_repairs_primary_counts_and_bundle_shards(tmp_path, monkeypatch) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    supervisor.BUNDLE_DIR.mkdir()
+    supervisor.TODO_PATH.write_text(
+        """- [ ] Task checkbox-1: REF-001 First task
+
+## REF-001 First task
+
+- Status: todo
+
+## REF-002 Second task
+
+- Status: completed
+""",
+        encoding="utf-8",
+    )
+    shard = supervisor.BUNDLE_DIR / "objective.todo.md"
+    shard.write_text(
+        """- [ ] Task checkbox-1: REF-001 First task
+
+## REF-001 First task
+
+- Status: todo
+
+- [ ] Task checkbox-2: REF-002 Second task
+
+## REF-002 Second task
+
+- Status: todo
+""",
+        encoding="utf-8",
+    )
+    supervisor.TASK_STATE_PATH.write_text(
+        json.dumps({"completed_task_ids": ["REF-001"], "blocked_task_ids": []}),
+        encoding="utf-8",
+    )
+
+    projected = supervisor.synchronize_taskboard_statuses()
+
+    assert projected["completed_count"] == 2
+    assert supervisor._todo_counts() == {
+        "needed": 0,
+        "in_progress": 0,
+        "complete": 2,
+        "blocked": 0,
+    }
+    assert "- [x] Task checkbox-1: REF-001" in supervisor.TODO_PATH.read_text(encoding="utf-8")
+    shard_text = shard.read_text(encoding="utf-8")
+    assert "- [x] Task checkbox-1: REF-001" in shard_text
+    assert "- [x] Task checkbox-2: REF-002" in shard_text
+    assert shard_text.count("- Status: completed") == 2
+
+
+def test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval(tmp_path, monkeypatch) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(supervisor, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervisor, "ACCELERATE_REPO", tmp_path / "ipfs_accelerate_py")
+    monkeypatch.setattr(supervisor, "BUNDLE_DIR", tmp_path / "bundles")
+    monkeypatch.setattr(supervisor, "BUNDLE_LANE_ROOT", tmp_path / "bundle-lanes")
+    monkeypatch.setattr(supervisor, "BUNDLE_COORDINATION_PATH", tmp_path / "coordination.sqlite3")
+    monkeypatch.setattr(supervisor, "active_bundle_keys", lambda: set())
+    monkeypatch.setattr(
+        supervisor,
+        "seed_taskboard",
+        lambda **_kwargs: {"counts": {"todo": {}}, "bundle_seed": {"generated": 2}},
+    )
+    monkeypatch.setattr(supervisor, "_pid_alive", lambda pid: pid == 4242)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        supervisor,
+        "_collect_counts",
+        lambda: ({"todo": {}, "queue": {}}, {}),
+    )
+    captured: dict[str, object] = {}
+
+    class Process:
+        pid = 4242
+
+        @staticmethod
+        def poll():
+            return None
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return Process()
+
+    monkeypatch.setattr(supervisor.subprocess, "Popen", fake_popen)
+    args = supervisor.build_parser().parse_args(["start-parallel", "--interval-s", "37"])
+
+    payload = supervisor.run_parallel_bundle_supervisor(args, start=True)
+
+    command = captured["command"]
+    assert isinstance(command, list)
+    assert command[:3] == [sys.executable, "-m", "ipfs_accelerate_py.agent_supervisor.bundle_supervisor"]
+    assert command[command.index("--poll-interval") + 1] == "37.0"
+    assert command[-1] == "--start"
+    assert captured["kwargs"]["start_new_session"] is True
+    assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
+    assert payload["status"] == "started"
+    assert supervisor.BUNDLE_SCHEDULER_PID_PATH.read_text(encoding="utf-8") == "4242\n"
+
+
+def test_status_projects_dynamic_parallel_scheduler_manifest(tmp_path, monkeypatch) -> None:
+    _isolate_status_paths(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        supervisor,
+        "_collect_counts",
+        lambda: ({"todo": {}, "queue": {}}, {}),
+    )
+    supervisor.BUNDLE_SCHEDULER_PID_PATH.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    supervisor.BUNDLE_LANE_MANIFEST.write_text(
+        json.dumps(
+            {
+                "schema": "ipfs_accelerate_py.agent_supervisor.dynamic_bundle_scheduler@1",
+                "scheduler_state": "running",
+                "cycle": 3,
+                "planned_count": 8,
+                "started_count": 2,
+                "running_count": 2,
+                "ready_count": 5,
+                "blocked_count": 1,
+                "completed_count": 4,
+                "lanes": [
+                    {
+                        "bundle_key": "objective/a",
+                        "state": "running",
+                        "pid": 123,
+                        "task_ids": ["T-1"],
+                        "conflict_color": 2,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = supervisor.status_payload()
+
+    assert payload["parallel_scheduler"]["pid_alive"] is True
+    assert payload["parallel_lanes"]["running_count"] == 2
+    assert payload["parallel_lanes"]["ready_count"] == 5
+    assert payload["parallel_lanes"]["lanes"][0]["task_ids"] == ["T-1"]
+
+
+def test_parallel_scheduler_has_explicit_stop_command() -> None:
+    assert supervisor.build_parser().parse_args(["stop-parallel"]).command == "stop-parallel"
 
 
 def test_stop_daemon_terminates_process_group_and_cleans_pid(tmp_path, monkeypatch) -> None:

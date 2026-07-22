@@ -40,10 +40,13 @@ STRATEGY_PATH = STATE_ROOT / "strategy.json"
 EVENTS_PATH = STATE_ROOT / "events.jsonl"
 REFILL_STATE_PATH = STATE_ROOT / "refill_state.json"
 SUPERVISOR_STATE_DIR = STATE_ROOT / "supervisor_state"
+TASK_STATE_PATH = SUPERVISOR_STATE_DIR / "complaint_generator_refactor_task_state.json"
 WORKTREE_ROOT = STATE_ROOT / "worktrees"
 BUNDLE_LANE_ROOT = STATE_ROOT / "bundle_lanes"
 BUNDLE_LANE_MANIFEST = BUNDLE_LANE_ROOT / "bundle_lanes.json"
 BUNDLE_COORDINATION_PATH = BUNDLE_LANE_ROOT / "coordination.sqlite3"
+BUNDLE_SCHEDULER_PID_PATH = BUNDLE_LANE_ROOT / "bundle_scheduler.pid"
+BUNDLE_SCHEDULER_LOG_PATH = BUNDLE_LANE_ROOT / "bundle_scheduler.log"
 MERGE_RESOLVER_PID_PATH = STATE_ROOT / "merge_resolver_watchdog.pid"
 MERGE_RESOLVER_STATUS_PATH = STATE_ROOT / "merge_resolver_watchdog_status.json"
 MERGE_RESOLVER_LOG_PATH = STATE_ROOT / "merge_resolver_watchdog.log"
@@ -102,6 +105,13 @@ def _upstream_task_board_helpers():
     from ipfs_accelerate_py.agent_supervisor.todo_daemon.task_board import task_status_counts
 
     return parse_markdown_tasks, task_status_counts
+
+
+def _upstream_portal_task_parser():
+    _ensure_accelerate_import_path()
+    from ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_daemon import parse_task_file
+
+    return parse_task_file
 
 
 def _upstream_bundle_runner():
@@ -1282,11 +1292,97 @@ def _ensure_text(path: Path, text: str, *, overwrite: bool = True) -> bool:
     return True
 
 
+def _durable_task_statuses() -> dict[str, str]:
+    statuses: dict[str, str] = {}
+    if TODO_PATH.exists():
+        parse_task_file = _upstream_portal_task_parser()
+        for task in parse_task_file(TODO_PATH, TASK_HEADER_PREFIX):
+            statuses[task.task_id] = str(task.status or "todo").strip().lower()
+    state = _load_json_object(TASK_STATE_PATH)
+    for task_id in state.get("blocked_task_ids", []) or []:
+        statuses.setdefault(str(task_id), "blocked")
+    for task_id in state.get("completed_task_ids", []) or []:
+        statuses[str(task_id)] = "completed"
+    return statuses
+
+
+def _project_task_statuses(path: Path, statuses: dict[str, str]) -> list[str]:
+    if not path.exists() or not statuses:
+        return []
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+    checkbox_pattern = re.compile(
+        rf"^(?P<prefix>\s*[-*]\s+\[)(?P<mark>[^\]])(?P<suffix>\]\s+Task checkbox-\d+:\s+(?P<task_id>{re.escape(TASK_PREFIX)}\d+)\b.*)$"
+    )
+    header_pattern = re.compile(rf"^##\s+(?P<task_id>{re.escape(TASK_PREFIX)}\d+)\b")
+    status_pattern = re.compile(r"^(?P<prefix>\s*-\s+Status:\s*).*$", re.IGNORECASE)
+    current_task_id = ""
+    updated: set[str] = set()
+    output: list[str] = []
+    for raw_line in lines:
+        newline = "\n" if raw_line.endswith("\n") else ""
+        line = raw_line[:-1] if newline else raw_line
+        checkbox = checkbox_pattern.match(line)
+        if checkbox:
+            task_id = checkbox.group("task_id")
+            status = statuses.get(task_id, "")
+            mark = "x" if status == "completed" else "!" if status == "blocked" else checkbox.group("mark")
+            if mark != checkbox.group("mark"):
+                line = f"{checkbox.group('prefix')}{mark}{checkbox.group('suffix')}"
+                updated.add(task_id)
+        header = header_pattern.match(line)
+        if header:
+            current_task_id = header.group("task_id")
+        status_line = status_pattern.match(line)
+        status = statuses.get(current_task_id, "")
+        if status_line and status in {"completed", "blocked"}:
+            projected = f"{status_line.group('prefix')}{status}"
+            if projected != line:
+                line = projected
+                updated.add(current_task_id)
+        output.append(line + newline)
+    rendered = "".join(output)
+    existing = "".join(lines)
+    if rendered != existing:
+        path.write_text(rendered, encoding="utf-8")
+    return sorted(updated)
+
+
+def synchronize_taskboard_statuses() -> dict[str, Any]:
+    statuses = _durable_task_statuses()
+    updated: dict[str, list[str]] = {}
+    primary_updates = _project_task_statuses(TODO_PATH, statuses)
+    if primary_updates:
+        updated[str(TODO_PATH)] = primary_updates
+    if BUNDLE_DIR.exists():
+        for path in sorted(BUNDLE_DIR.glob("*.todo.md")):
+            task_updates = _project_task_statuses(path, statuses)
+            if task_updates:
+                updated[str(path)] = task_updates
+    return {
+        "task_count": len(statuses),
+        "completed_count": sum(status == "completed" for status in statuses.values()),
+        "blocked_count": sum(status == "blocked" for status in statuses.values()),
+        "updated_file_count": len(updated),
+        "updated": updated,
+    }
+
+
 def _todo_counts() -> dict[str, int]:
     if not TODO_PATH.exists():
         return {"needed": 0, "in_progress": 0, "complete": 0, "blocked": 0}
-    parse_markdown_tasks, task_status_counts = _upstream_task_board_helpers()
-    return task_status_counts(parse_markdown_tasks(TODO_PATH.read_text(encoding="utf-8", errors="replace")))
+    counts = {"needed": 0, "in_progress": 0, "complete": 0, "blocked": 0}
+    parse_task_file = _upstream_portal_task_parser()
+    for task in parse_task_file(TODO_PATH, TASK_HEADER_PREFIX):
+        status = str(task.status or "todo").strip().lower().replace("_", "-")
+        if status in {"completed", "complete", "done"}:
+            counts["complete"] += 1
+        elif status == "blocked":
+            counts["blocked"] += 1
+        elif status in {"in-progress", "in progress", "running"}:
+            counts["in_progress"] += 1
+        else:
+            counts["needed"] += 1
+    return counts
 
 
 def _queue_counts() -> dict[str, int]:
@@ -1419,6 +1515,8 @@ def seed_taskboard(
     if existing_todo_headers:
         todo_changed = _append_missing_explicit_seed_tasks(TODO_PATH, goals) or todo_changed
     bundle_seed = write_seed_bundle_index(goals, exclude_bundle_keys=exclude_bundle_keys)
+    status_projection = synchronize_taskboard_statuses()
+    todo_changed = bool(todo_changed or str(TODO_PATH) in status_projection["updated"])
 
     objective_result: dict[str, Any] = {"skipped": True, "reason": "fast_seed"}
     backlog_result: dict[str, Any] = {"skipped": True, "reason": "fast_seed"}
@@ -1523,6 +1621,7 @@ def seed_taskboard(
                 "objective_result": objective_result,
                 "backlog_result": backlog_result,
                 "bundle_seed": bundle_seed,
+                "status_projection": status_projection,
             },
         }
     )
@@ -1533,6 +1632,7 @@ def seed_taskboard(
         "objective_result": objective_result,
         "backlog_result": backlog_result,
         "bundle_seed": bundle_seed,
+        "status_projection": status_projection,
         "scan": scan,
     }
 
@@ -1870,6 +1970,21 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> dict[str, Any]:
+    if start and BUNDLE_SCHEDULER_PID_PATH.exists():
+        try:
+            existing_pid = int(BUNDLE_SCHEDULER_PID_PATH.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            existing_pid = 0
+        if _pid_alive(existing_pid):
+            return {
+                "status": "already_running",
+                "pid": existing_pid,
+                "pid_alive": True,
+                "manifest_path": str(BUNDLE_LANE_MANIFEST),
+                "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
+            }
+        BUNDLE_SCHEDULER_PID_PATH.unlink(missing_ok=True)
+
     exclude_bundle_keys = active_bundle_keys() if start and args.skip_active_bundle else set()
     seed_result = seed_taskboard(
         refill_floor=args.refill_floor,
@@ -1877,7 +1992,6 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
         exclude_bundle_keys=exclude_bundle_keys,
     )
     bundle_index_path = BUNDLE_DIR / "index.json"
-    parser_factory, run_bundle_supervisor = _upstream_bundle_runner()
     argv = [
         "--bundle-index-path",
         str(bundle_index_path),
@@ -1895,6 +2009,8 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
         TASK_PREFIX,
         "--max-lanes",
         str(int(args.max_lanes)),
+        "--poll-interval",
+        str(float(args.interval_s)),
         "--daemon-interval",
         str(float(args.daemon_interval_s)),
         "--check-interval",
@@ -1924,29 +2040,127 @@ def run_parallel_bundle_supervisor(args: argparse.Namespace, *, start: bool) -> 
         str(int(args.lease_ms)),
     ]
     argv.append("--implement" if args.implement else "--no-implement")
-    if start:
-        argv.append("--start")
-    bundle_args = parser_factory().parse_args(argv)
-    payload = run_bundle_supervisor(bundle_args)
-    payload["seed"] = {
+    seed_summary = {
         "counts": seed_result.get("counts"),
         "bundle_seed": seed_result.get("bundle_seed"),
     }
-    payload["mode"] = "start_parallel" if start else "plan_parallel"
+
+    if not start:
+        parser_factory, run_bundle_supervisor = _upstream_bundle_runner()
+        bundle_args = parser_factory().parse_args(argv)
+        payload = run_bundle_supervisor(bundle_args)
+        payload["seed"] = seed_summary
+        payload["mode"] = "plan_parallel"
+        _write_status(
+            {
+                "last_parallel": {
+                    "mode": "plan_parallel",
+                    "planned_count": payload.get("planned_count", 0),
+                    "claimable_count": payload.get("claimable_count", 0),
+                    "blocked_count": payload.get("blocked_count", 0),
+                    "seed": seed_summary,
+                }
+            }
+        )
+        return payload
+
+    BUNDLE_LANE_ROOT.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "ipfs_accelerate_py.agent_supervisor.bundle_supervisor",
+        *argv,
+        "--start",
+    ]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(ACCELERATE_REPO) + os.pathsep + env.get("PYTHONPATH", "")
+    log_handle = BUNDLE_SCHEDULER_LOG_PATH.open("ab")
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    finally:
+        log_handle.close()
+    time.sleep(1.0)
+    started = _pid_alive(process.pid)
+    if started:
+        BUNDLE_SCHEDULER_PID_PATH.write_text(f"{process.pid}\n", encoding="utf-8")
+    else:
+        BUNDLE_SCHEDULER_PID_PATH.unlink(missing_ok=True)
+    payload = {
+        "status": "started" if started else "start_failed",
+        "mode": "start_parallel",
+        "pid": process.pid,
+        "pid_alive": started,
+        "exit_code": process.poll(),
+        "manifest_path": str(BUNDLE_LANE_MANIFEST),
+        "coordination_path": str(BUNDLE_COORDINATION_PATH),
+        "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
+        "seed": seed_summary,
+        "command": command,
+    }
     _write_status(
         {
-            "status": "parallel_started" if start else "parallel_planned",
-            "pid": 0,
-            "pid_alive": False,
-            "objective_path": str(OBJECTIVE_PATH),
-            "todo_path": str(TODO_PATH),
-            "bundle_dir": str(BUNDLE_DIR),
-            "bundle_lane_manifest": str(BUNDLE_LANE_MANIFEST),
-            "bundle_coordination_path": str(BUNDLE_COORDINATION_PATH),
+            "parallel_scheduler": {
+                "status": payload["status"],
+                "pid": process.pid,
+                "pid_alive": started,
+                "manifest_path": str(BUNDLE_LANE_MANIFEST),
+                "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
+            },
             "last_parallel": payload,
         }
     )
     return payload
+
+
+def stop_parallel_bundle_supervisor() -> dict[str, Any]:
+    if not BUNDLE_SCHEDULER_PID_PATH.exists():
+        return {
+            "status": "not_running",
+            "pid": 0,
+            "pid_alive": False,
+            "manifest_path": str(BUNDLE_LANE_MANIFEST),
+        }
+    try:
+        pid = int(BUNDLE_SCHEDULER_PID_PATH.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        pid = 0
+    if not _pid_alive(pid):
+        BUNDLE_SCHEDULER_PID_PATH.unlink(missing_ok=True)
+        return {
+            "status": "not_running",
+            "pid": pid,
+            "pid_alive": False,
+            "manifest_path": str(BUNDLE_LANE_MANIFEST),
+        }
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
+    while _pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(STOP_POLL_SECONDS)
+    stopped = not _pid_alive(pid)
+    if stopped:
+        BUNDLE_SCHEDULER_PID_PATH.unlink(missing_ok=True)
+    result = {
+        "status": "stopped" if stopped else "stopping",
+        "pid": pid,
+        "pid_alive": not stopped,
+        "signal": "SIGTERM",
+        "manifest_path": str(BUNDLE_LANE_MANIFEST),
+        "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
+    }
+    _write_status({"parallel_scheduler": result})
+    return result
 
 
 def active_bundle_keys() -> set[str]:
@@ -2318,6 +2532,8 @@ def status_payload() -> dict[str, Any]:
         "log_path": str(LOG_PATH),
         "bundle_lane_manifest": str(BUNDLE_LANE_MANIFEST),
         "bundle_coordination_path": str(BUNDLE_COORDINATION_PATH),
+        "bundle_scheduler_pid_path": str(BUNDLE_SCHEDULER_PID_PATH),
+        "bundle_scheduler_log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
         "merge_resolver_command": merge_resolver_command(),
         "merge_resolver_enabled_for_new_launches": True,
         "status_path": str(STATUS_PATH),
@@ -2406,22 +2622,46 @@ def status_payload() -> dict[str, Any]:
     if BUNDLE_LANE_MANIFEST.exists():
         try:
             manifest = json.loads(BUNDLE_LANE_MANIFEST.read_text(encoding="utf-8"))
+            dynamic = str(manifest.get("schema") or "").endswith("dynamic_bundle_scheduler@1")
+            lane_items = manifest.get("lanes", []) if dynamic else manifest.get("started", [])
             payload["parallel_lanes"] = {
+                "schema": manifest.get("schema"),
+                "scheduler_state": manifest.get("scheduler_state"),
+                "cycle": manifest.get("cycle"),
                 "planned_count": manifest.get("planned_count", 0),
                 "started_count": manifest.get("started_count", 0),
-                "started": [
+                "running_count": manifest.get("running_count", manifest.get("started_count", 0)),
+                "ready_count": manifest.get("ready_count", 0),
+                "blocked_count": manifest.get("blocked_count", 0),
+                "completed_count": manifest.get("completed_count", 0),
+                "lanes": [
                     {
                         "bundle_key": item.get("bundle_key"),
-                        "accepted": item.get("accepted"),
+                        "state": item.get("state", "accepted" if item.get("accepted") else None),
                         "pid": item.get("pid"),
                         "log_path": item.get("log_path"),
+                        "task_ids": item.get("task_ids", []),
+                        "conflict_color": item.get("conflict_color"),
                     }
-                    for item in manifest.get("started", [])[:10]
+                    for item in lane_items[:10]
                     if isinstance(item, dict)
                 ],
             }
         except Exception as exc:
             payload["parallel_lanes_error"] = str(exc)
+    parallel_pid = 0
+    if BUNDLE_SCHEDULER_PID_PATH.exists():
+        try:
+            parallel_pid = int(BUNDLE_SCHEDULER_PID_PATH.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            parallel_pid = 0
+    payload["parallel_scheduler"] = {
+        **dict(payload.get("parallel_scheduler") or {}),
+        "pid": parallel_pid,
+        "pid_alive": _pid_alive(parallel_pid),
+        "manifest_path": str(BUNDLE_LANE_MANIFEST),
+        "log_path": str(BUNDLE_SCHEDULER_LOG_PATH),
+    }
     if MERGE_RESOLVER_STATUS_PATH.exists():
         try:
             merge_payload = json.loads(MERGE_RESOLVER_STATUS_PATH.read_text(encoding="utf-8"))
@@ -2489,6 +2729,8 @@ def build_parser() -> argparse.ArgumentParser:
     start_parallel = sub.add_parser("start-parallel", help="Launch upstream leased bundle supervisors for parallel task lanes.")
     add_parallel_args(start_parallel)
 
+    sub.add_parser("stop-parallel", help="Stop the background parallel bundle scheduler and its owned lanes.")
+
     resolve_merges = sub.add_parser("resolve-merges", help="Run one merge-conflict resolver scan over supervisor event logs.")
     resolve_merges.add_argument("--timeout-seconds", type=float, default=900.0)
 
@@ -2520,6 +2762,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = run_parallel_bundle_supervisor(args, start=False)
     elif args.command == "start-parallel":
         payload = run_parallel_bundle_supervisor(args, start=True)
+    elif args.command == "stop-parallel":
+        payload = stop_parallel_bundle_supervisor()
     elif args.command == "resolve-merges":
         payload = resolve_merge_conflicts_once(timeout_seconds=args.timeout_seconds)
     elif args.command == "start-merge-watchdog":
