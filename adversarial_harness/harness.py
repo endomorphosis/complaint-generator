@@ -34,6 +34,8 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, set):
         return [_json_safe(item) for item in sorted(value, key=lambda item: str(item))]
     return value
+
+
 def _sanitize_for_json(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(key): _sanitize_for_json(item) for key, item in value.items()}
@@ -46,8 +48,12 @@ def _sanitize_for_json(value: Any) -> Any:
     if hasattr(value, "isoformat") and callable(getattr(value, "isoformat")):
         try:
             return value.isoformat()
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError):
+            logger.warning(
+                "Could not serialize %s with isoformat(); using fallback JSON representation",
+                type(value).__name__,
+                exc_info=True,
+            )
     if hasattr(value, "__dict__"):
         try:
             return _sanitize_for_json(vars(value))
