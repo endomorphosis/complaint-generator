@@ -927,6 +927,10 @@ def test_start_parallel_detaches_scheduler_and_uses_requested_poll_interval(tmp_
     assert command[command.index("--poll-interval") + 1] == "37.0"
     assert command.count("--worktree-submodule-path") == 1
     assert command[command.index("--worktree-submodule-path") + 1] == "ipfs_datasets_py/ipfs_accelerate_py"
+    assert command.count("--generated-dirty-path") == 1
+    assert command[command.index("--generated-dirty-path") + 1] == str(
+        supervisor.TASKBOARD_DOC_PATH
+    )
     assert command[-1] == "--start"
     assert captured["kwargs"]["start_new_session"] is True
     assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
@@ -972,6 +976,10 @@ def test_start_daemon_passes_managed_submodule_path_once(tmp_path, monkeypatch) 
     assert command.count("--worktree-submodule-path") == 1
     assert command[command.index("--worktree-submodule-path") + 1] == (
         "ipfs_datasets_py/ipfs_accelerate_py"
+    )
+    assert command.count("--generated-dirty-path") == 1
+    assert command[command.index("--generated-dirty-path") + 1] == str(
+        supervisor.TASKBOARD_DOC_PATH
     )
     assert captured["kwargs"]["start_new_session"] is True
     assert payload["status"] == "started"
