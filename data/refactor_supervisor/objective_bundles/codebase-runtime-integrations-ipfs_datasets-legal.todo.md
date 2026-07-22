@@ -37,7 +37,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-122 Review swallowed exception path in integrations/ipfs_datasets/legal.py:112
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
