@@ -5,6 +5,8 @@ Tests the three-phase complaint processing system with knowledge graphs,
 dependency graphs, and neurosymbolic matching.
 """
 
+import logging
+
 from complaint_phases import (
     KnowledgeGraphBuilder, KnowledgeGraph, Entity, Relationship,
     DependencyGraphBuilder, DependencyGraph, DependencyNode, Dependency,
@@ -154,6 +156,72 @@ class TestKnowledgeGraph:
         assert len(kg.entities) > 0
         summary = kg.summary()
         assert summary['total_entities'] > 0
+
+    def test_knowledge_graph_builder_enriches_graph_from_llm_json(self):
+        """Mediator JSON should add validated entities and relationships."""
+        class Mediator:
+            def __init__(self):
+                self.prompts = []
+
+            def query_backend(self, prompt):
+                self.prompts.append(prompt)
+                if '"relationships"' in prompt:
+                    return {
+                        "relationships": [
+                            {
+                                "source_id": "entity_1",
+                                "target_id": "entity_2",
+                                "type": "communicated_with",
+                                "confidence": "1.4",
+                            },
+                            {
+                                "source_id": "entity_1",
+                                "target_id": "missing",
+                                "type": "involves",
+                            },
+                        ]
+                    }
+                return """Here is the result:
+```json
+{"entities": [
+  {"type": "person", "name": "Jordan Lee", "attributes": {"role": "complainant"}, "confidence": 0.91},
+  {"type": "organization", "name": "Northwind LLC", "confidence": 0.88},
+  {"type": "invented_type", "name": "Discard me", "confidence": 0.99}
+]}
+```
+"""
+
+        mediator = Mediator()
+        builder = KnowledgeGraphBuilder(mediator=mediator)
+        graph = builder.build_from_text(
+            "Jordan Lee sent a complaint to Northwind LLC about discrimination."
+        )
+
+        assert any(entity.name == "Jordan Lee" for entity in graph.entities.values())
+        assert any(entity.name == "Northwind LLC" for entity in graph.entities.values())
+        assert all(entity.name != "Discard me" for entity in graph.entities.values())
+        llm_relationships = [
+            relationship
+            for relationship in graph.relationships.values()
+            if relationship.relation_type == "communicated_with"
+        ]
+        assert len(llm_relationships) == 1
+        assert llm_relationships[0].confidence <= 1.0
+        assert len(mediator.prompts) == 2
+
+    def test_knowledge_graph_builder_falls_back_when_llm_backend_fails(self, caplog):
+        """LLM failure should remain observable without breaking heuristic graphs."""
+        class FailingMediator:
+            def query_backend(self, _prompt):
+                raise RuntimeError("backend unavailable")
+
+        with caplog.at_level(logging.WARNING):
+            graph = KnowledgeGraphBuilder(mediator=FailingMediator()).build_from_text(
+                "My employer fired me after I complained to HR."
+            )
+
+        assert graph.entities
+        assert "using rule-based results" in caplog.text
 
     def test_knowledge_graph_builder_specializes_employment_discrimination_and_retaliation(self):
         """Heuristic claim extraction should specialize workplace discrimination when employment context is present."""
