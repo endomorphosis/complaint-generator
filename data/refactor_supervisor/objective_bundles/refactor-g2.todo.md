@@ -42,7 +42,7 @@ Conflict policy: keep edits inside this bundle when possible; use the LLM merge 
 
 ## REF-050 Close objective gap: Decompose oversized orchestration modules
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: ops

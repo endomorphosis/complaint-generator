@@ -4381,7 +4381,7 @@
       ]
     }
   },
-  "generated_at": "2026-07-22T05:11:05Z",
+  "generated_at": "2026-07-22T05:23:08Z",
   "schema": "complaint_generator.refactor_seed_bundle_index",
   "source_todo": "data/refactor_supervisor/refactor_todo.md"
 }
