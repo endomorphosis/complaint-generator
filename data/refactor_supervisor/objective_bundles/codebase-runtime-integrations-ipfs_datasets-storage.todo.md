@@ -37,7 +37,7 @@ Conflict policy: serialize edits to one file; allow independent file bundles to 
 
 ## REF-133 Resolve dirty main checkout blocking 1 worktree merges
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: ops
