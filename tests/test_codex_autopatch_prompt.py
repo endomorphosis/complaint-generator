@@ -1,0 +1,47 @@
+"""Focused tests for diagnostic prompt construction."""
+
+import importlib.util
+import os
+
+import pytest
+
+
+def _load_codex_autopatch_module():
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, "examples", "codex_autopatch_from_run.py")
+    spec = importlib.util.spec_from_file_location("codex_autopatch_prompt", path)
+    assert spec and spec.loader, f"Failed to load spec for: {path}"
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)  # type: ignore[attr-defined]
+    return module
+
+
+_codex_autopatch = _load_codex_autopatch_module()
+
+
+def _build_prompt(optimizer_report):
+    return _codex_autopatch._build_prompt(
+        run_dir="run",
+        cycle_summary_path="cycle_summary.json",
+        cycle_summary={"optimizer_report": optimizer_report},
+        sgd_report_path="sgd_report.json",
+        sgd_report={},
+        worst_sessions=[],
+        worst_session_json_paths=[],
+        context_mode="lean",
+    )
+
+
+def test_build_prompt_ignores_non_numeric_average_entity_metric() -> None:
+    prompt = _build_prompt({"kg_avg_total_entities": "not-a-number"})
+
+    assert "Knowledge graphs are very small on average" not in prompt
+
+
+def test_build_prompt_does_not_swallow_unexpected_metric_conversion_failure() -> None:
+    class BrokenMetric:
+        def __float__(self) -> float:
+            raise RuntimeError("unexpected metric conversion failure")
+
+    with pytest.raises(RuntimeError, match="unexpected metric conversion failure"):
+        _build_prompt({"kg_avg_total_entities": BrokenMetric()})
