@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Dict, List, Optional
 
+from lib.formal_logic import capability_state_from_payload
+
 
 def extract_logic_contradiction_count(reasoning_diagnostics: Optional[Dict[str, Any]]) -> int:
     """Return explicit contradiction results emitted by the logic adapter."""
@@ -102,6 +104,10 @@ def summarize_adapter_result(
 
     adapter_result = adapter_result if isinstance(adapter_result, dict) else {}
     metadata = adapter_result.get('metadata', {}) if isinstance(adapter_result.get('metadata'), dict) else {}
+    capability = adapter_result.get('capability')
+    if not isinstance(capability, dict):
+        capability = metadata.get('capability') if isinstance(metadata.get('capability'), dict) else {}
+    capability_state = capability_state_from_payload(capability or metadata or adapter_result)
     summary = {
         'status': str(adapter_result.get('status') or ''),
         'operation': str(metadata.get('operation') or ''),
@@ -109,6 +115,14 @@ def summarize_adapter_result(
         'backend_available': bool(metadata.get('backend_available', False)),
         'degraded_reason': str(metadata.get('degraded_reason') or adapter_result.get('degraded_reason') or ''),
     }
+    if capability_state is not None:
+        summary.update({
+            'capability_available': capability_state.available,
+            'capability_degraded': capability_state.degraded,
+            'capability_implemented': capability_state.implemented,
+        })
+    if capability:
+        summary['capability'] = dict(capability)
     for field in count_fields or []:
         if field not in adapter_result:
             continue

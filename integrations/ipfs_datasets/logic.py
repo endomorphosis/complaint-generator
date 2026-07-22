@@ -5,6 +5,15 @@ from copy import deepcopy
 import inspect
 from typing import Any, Dict, Iterable, List
 
+from lib.formal_logic.capabilities import (
+    FormalLogicCapability,
+    FormalLogicCapabilityError,
+    FormalLogicDegradedError,
+    FormalLogicOperation,
+    FormalLogicUnavailableError,
+    LogicCapabilityState,
+    LogicCapabilityStatus,
+)
 from lib.formal_logic.frames import FrameKnowledgeBase
 
 from .loader import import_module_optional
@@ -36,6 +45,187 @@ REASONER_BRIDGE_ERROR = _reasoner_error
 REASONER_BRIDGE_PATH = getattr(_reasoner_module, "__name__", "") if _reasoner_module is not None else ""
 LOCAL_FORMAL_LOGIC_AVAILABLE = True
 LOCAL_FORMAL_LOGIC_PATH = "lib.formal_logic"
+LOGIC_CAPABILITY_SCHEMA_VERSION = "formal-logic-capabilities/v1"
+
+_DEGRADED_OPERATION_REASONS = {
+    FormalLogicOperation.TEXT_TO_FOL: (
+        "The FOL provider imports, but this adapter exposes only a structural "
+        "conversion contract; authoritative text-to-FOL conversion is unavailable."
+    ),
+    FormalLogicOperation.LEGAL_TEXT_TO_DEONTIC: (
+        "The deontic provider imports, but this adapter exposes only a structural "
+        "conversion contract; authoritative legal-rule translation is unavailable."
+    ),
+    FormalLogicOperation.PROVE_CLAIM_ELEMENTS: (
+        "TDFOL is available for formula construction, but claim-element proof "
+        "execution is not connected to a complete prover contract."
+    ),
+    FormalLogicOperation.CHECK_CONTRADICTIONS: (
+        "TDFOL is available for formula construction, but contradiction checking "
+        "is limited to structural signal extraction."
+    ),
+}
+
+
+def _provider_diagnostic(error: Any, *, fallback: str) -> str:
+    diagnostic = str(error or "").strip()
+    return diagnostic or fallback
+
+
+def get_logic_capability(
+    operation: FormalLogicOperation | str,
+) -> FormalLogicCapability:
+    """Return the typed runtime contract for one logic operation.
+
+    Importing the broad provider package is not evidence that every operation
+    works.  Each operation is gated by the module it actually needs.  Degraded
+    operations may return deterministic structural payloads, while strict
+    validation callers can demand a complete implementation before execution.
+    """
+
+    normalized_operation = FormalLogicOperation.coerce(operation)
+    module: Any = None
+    error: Any = None
+    module_path = ""
+
+    if normalized_operation is FormalLogicOperation.TEXT_TO_FOL:
+        module, error, module_path = _fol_module, _fol_error, "ipfs_datasets_py.logic.fol"
+    elif normalized_operation is FormalLogicOperation.LEGAL_TEXT_TO_DEONTIC:
+        module, error, module_path = (
+            _deontic_module,
+            _deontic_error,
+            "ipfs_datasets_py.logic.deontic",
+        )
+    elif normalized_operation in {
+        FormalLogicOperation.PROVE_CLAIM_ELEMENTS,
+        FormalLogicOperation.CHECK_CONTRADICTIONS,
+    }:
+        module, error, module_path = (
+            _tdfol_module,
+            _tdfol_error,
+            "ipfs_datasets_py.logic.TDFOL",
+        )
+    else:
+        local_implemented = bool(LOCAL_FORMAL_LOGIC_AVAILABLE)
+        reasoner_implemented = bool(REASONER_BRIDGE_AVAILABLE)
+        if local_implemented or reasoner_implemented:
+            provider = LOCAL_FORMAL_LOGIC_PATH if local_implemented else REASONER_BRIDGE_PATH
+            return FormalLogicCapability(
+                operation=normalized_operation,
+                state=LogicCapabilityState.IMPLEMENTED,
+                provider=provider,
+                module_path=provider,
+                details={
+                    "schema_version": LOGIC_CAPABILITY_SCHEMA_VERSION,
+                    "local_formal_logic_available": local_implemented,
+                    "reasoner_bridge_available": reasoner_implemented,
+                    "reasoner_bridge_path": REASONER_BRIDGE_PATH,
+                },
+            )
+        return FormalLogicCapability(
+            operation=normalized_operation,
+            state=LogicCapabilityState.UNAVAILABLE,
+            provider="ipfs_datasets_py",
+            module_path=REASONER_BRIDGE_PATH or LOCAL_FORMAL_LOGIC_PATH,
+            reason=_provider_diagnostic(
+                REASONER_BRIDGE_ERROR,
+                fallback="Neither the local formal-logic bridge nor the reasoner bridge is available.",
+            ),
+            details={"schema_version": LOGIC_CAPABILITY_SCHEMA_VERSION},
+        )
+
+    # Keep the aggregate probe as a startup master switch, but retain the
+    # operation-specific module and diagnostic in the returned contract.
+    if not LOGIC_AVAILABLE:
+        module = None
+        error = error or LOGIC_ERROR
+
+    if module is None:
+        return FormalLogicCapability(
+            operation=normalized_operation,
+            state=LogicCapabilityState.UNAVAILABLE,
+            provider="ipfs_datasets_py",
+            module_path=module_path,
+            reason=_provider_diagnostic(
+                error,
+                fallback=f"Required provider module '{module_path}' is unavailable.",
+            ),
+            details={
+                "schema_version": LOGIC_CAPABILITY_SCHEMA_VERSION,
+                "local_formal_logic_available": bool(LOCAL_FORMAL_LOGIC_AVAILABLE),
+            },
+        )
+
+    return FormalLogicCapability(
+        operation=normalized_operation,
+        state=LogicCapabilityState.DEGRADED,
+        provider="ipfs_datasets_py",
+        module_path=module_path,
+        reason=_DEGRADED_OPERATION_REASONS[normalized_operation],
+        details={
+            "schema_version": LOGIC_CAPABILITY_SCHEMA_VERSION,
+            "local_formal_logic_available": bool(LOCAL_FORMAL_LOGIC_AVAILABLE),
+        },
+    )
+
+
+def get_logic_capabilities() -> Dict[FormalLogicOperation, FormalLogicCapability]:
+    """Return capability contracts keyed by the typed operation enum."""
+
+    return {operation: get_logic_capability(operation) for operation in FormalLogicOperation}
+
+
+def get_logic_capability_report() -> Dict[str, Any]:
+    """Return a JSON-ready summary of all formal-logic capabilities."""
+
+    capabilities = get_logic_capabilities()
+    return {
+        "schema_version": LOGIC_CAPABILITY_SCHEMA_VERSION,
+        "capabilities": {
+            operation.value: capability.as_dict()
+            for operation, capability in capabilities.items()
+        },
+        "unavailable": [
+            operation.value
+            for operation, capability in capabilities.items()
+            if not capability.available
+        ],
+        "degraded": [
+            operation.value
+            for operation, capability in capabilities.items()
+            if capability.degraded
+        ],
+        "implemented": [
+            operation.value
+            for operation, capability in capabilities.items()
+            if capability.implemented
+        ],
+    }
+
+
+def require_logic_capability(
+    operation: FormalLogicOperation | str,
+    *,
+    allow_degraded: bool = False,
+) -> FormalLogicCapability:
+    """Gate an operation and raise a typed, predictable capability error."""
+
+    capability = get_logic_capability(operation)
+    if allow_degraded:
+        return capability.require_available()
+    return capability.require_implemented()
+
+
+def _logic_operation_metadata(capability: FormalLogicCapability) -> Dict[str, Any]:
+    return {
+        "capability_status": capability.state.value,
+        "capability_available": capability.available,
+        "capability_degraded": capability.degraded,
+        "capability_implemented": capability.implemented,
+        "capability": capability.as_dict(),
+        "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
+        "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+    }
 
 
 def _normalize_logic_symbol(value: Any, *, prefix: str) -> str:
@@ -446,6 +636,20 @@ def _build_reasoner_proof_artifact(
         )
         proof_id = str(compliance.get("proof_id") or "").strip()
         explanation = explain_proof(proof_id, format="json") if proof_id else {}
+        normalized_explanation = explanation if isinstance(explanation, dict) else {}
+        # Provider versions differ in how much context ``explain_proof``
+        # returns.  Preserve the adapter contract even when the provider emits
+        # only the proof graph.
+        normalized_explanation = dict(normalized_explanation)
+        normalized_explanation.setdefault("proof_id", proof_id)
+        normalized_explanation.setdefault(
+            "theorem_export_metadata",
+            dict(compliance.get("theorem_export_metadata") or theorem_export_metadata),
+        )
+        normalized_explanation.setdefault(
+            "claim_support_temporal_handoff",
+            dict(compliance.get("claim_support_temporal_handoff") or claim_support_temporal_handoff),
+        )
         return {
             "available": True,
             "status": "success",
@@ -457,7 +661,7 @@ def _build_reasoner_proof_artifact(
             "claim_support_temporal_handoff": dict(
                 compliance.get("claim_support_temporal_handoff") or claim_support_temporal_handoff
             ),
-            "explanation": explanation if isinstance(explanation, dict) else {},
+            "explanation": normalized_explanation,
             "prover_report": dict(pipeline.get("prover_report") or {}),
         }
     except Exception as exc:
@@ -556,43 +760,66 @@ def _build_local_logic_snapshot(temporal_reasoning_payload: Dict[str, Any]) -> D
     }
 
 
-def text_to_fol(text: str) -> Dict[str, Any]:
+def text_to_fol(text: str, *, require_implemented: bool = False) -> Dict[str, Any]:
+    """Return text-to-FOL diagnostics at the operation's actual capability tier.
+
+    Strict workflows should set ``require_implemented``.  The typed gate then
+    fails before an empty structural result can be mistaken for conversion.
+    """
+
+    capability = get_logic_capability(FormalLogicOperation.TEXT_TO_FOL)
+    if require_implemented:
+        capability.require_implemented()
     return with_adapter_metadata(
         {
-            "status": "not_implemented" if LOGIC_AVAILABLE else "unavailable",
+            "status": capability.state.value,
             "predicates": [],
             "source_text": text,
+            "capability": capability.as_dict(),
         },
         operation="text_to_fol",
-        backend_available=LOGIC_AVAILABLE,
-        degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
-        implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
-        extra_metadata={
-            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
-            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
-        },
+        backend_available=capability.available,
+        degraded_reason=capability.reason,
+        implementation_status=capability.state.value,
+        extra_metadata=_logic_operation_metadata(capability),
     )
 
 
-def legal_text_to_deontic(text: str) -> Dict[str, Any]:
+def legal_text_to_deontic(
+    text: str,
+    *,
+    require_implemented: bool = False,
+) -> Dict[str, Any]:
+    """Return legal-text translation at the operation's capability tier."""
+
+    capability = get_logic_capability(FormalLogicOperation.LEGAL_TEXT_TO_DEONTIC)
+    if require_implemented:
+        capability.require_implemented()
     return with_adapter_metadata(
         {
-            "status": "not_implemented" if LOGIC_AVAILABLE else "unavailable",
+            "status": capability.state.value,
             "norms": [],
             "source_text": text,
+            "capability": capability.as_dict(),
         },
         operation="legal_text_to_deontic",
-        backend_available=LOGIC_AVAILABLE,
-        degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
-        implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
-        extra_metadata={
-            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
-            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
-        },
+        backend_available=capability.available,
+        degraded_reason=capability.reason,
+        implementation_status=capability.state.value,
+        extra_metadata=_logic_operation_metadata(capability),
     )
 
 
-def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) -> Dict[str, Any]:
+def prove_claim_elements(
+    predicates: Iterable[Dict[str, Any]] | Dict[str, Any],
+    *,
+    require_implemented: bool = False,
+) -> Dict[str, Any]:
+    """Build proof inputs, optionally requiring authoritative proof support."""
+
+    capability = get_logic_capability(FormalLogicOperation.PROVE_CLAIM_ELEMENTS)
+    if require_implemented:
+        capability.require_implemented()
     normalized_payload = _normalize_logic_payload(predicates)
     predicate_list = normalized_payload["predicates"]
     predicate_summary = _summarize_predicates(predicate_list)
@@ -603,26 +830,35 @@ def prove_claim_elements(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
     )
     return with_adapter_metadata(
         {
-            "status": "not_implemented" if LOGIC_AVAILABLE else "unavailable",
+            "status": capability.state.value,
             "provable_elements": [],
             "unprovable_elements": [],
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
+            "capability": capability.as_dict(),
         },
         operation="prove_claim_elements",
-        backend_available=LOGIC_AVAILABLE,
-        degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
-        implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
+        backend_available=capability.available,
+        degraded_reason=capability.reason,
+        implementation_status=capability.state.value,
         extra_metadata={
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
-            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
-            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+            **_logic_operation_metadata(capability),
         },
     )
 
 
-def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) -> Dict[str, Any]:
+def check_contradictions(
+    predicates: Iterable[Dict[str, Any]] | Dict[str, Any],
+    *,
+    require_implemented: bool = False,
+) -> Dict[str, Any]:
+    """Extract contradiction signals at the reported capability tier."""
+
+    capability = get_logic_capability(FormalLogicOperation.CHECK_CONTRADICTIONS)
+    if require_implemented:
+        capability.require_implemented()
     normalized_payload = _normalize_logic_payload(predicates)
     predicate_list = normalized_payload["predicates"]
     predicate_summary = _summarize_predicates(predicate_list)
@@ -633,25 +869,34 @@ def check_contradictions(predicates: Iterable[Dict[str, Any]] | Dict[str, Any]) 
     )
     return with_adapter_metadata(
         {
-            "status": "not_implemented" if LOGIC_AVAILABLE else "unavailable",
+            "status": capability.state.value,
             "contradictions": [],
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
+            "capability": capability.as_dict(),
         },
         operation="check_contradictions",
-        backend_available=LOGIC_AVAILABLE,
-        degraded_reason=LOGIC_ERROR if not LOGIC_AVAILABLE else None,
-        implementation_status="not_implemented" if LOGIC_AVAILABLE else "unavailable",
+        backend_available=capability.available,
+        degraded_reason=capability.reason,
+        implementation_status=capability.state.value,
         extra_metadata={
             **predicate_summary,
             "temporal_reasoning_payload": temporal_reasoning_payload,
-            "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
-            "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
+            **_logic_operation_metadata(capability),
         },
     )
 
 
-def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
+def run_hybrid_reasoning(
+    payload: Dict[str, Any],
+    *,
+    require_implemented: bool = False,
+) -> Dict[str, Any]:
+    """Run the local temporal bridge under an explicit capability contract."""
+
+    capability = get_logic_capability(FormalLogicOperation.RUN_HYBRID_REASONING)
+    if require_implemented:
+        capability.require_implemented()
     normalized_payload = _normalize_logic_payload(payload)
     predicates = normalized_payload["predicates"]
     bridge_payload = normalized_payload["temporal_reasoning_payload"]
@@ -695,6 +940,7 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     result_payload = {
         "status": "success",
+        "capability": capability.as_dict(),
         "result": {
             "formalism": temporal_reasoning_payload.get("formalism") or "tdfol_dcec_bridge_v1",
             "claim_types": list(temporal_reasoning_payload.get("claim_types", []) or []),
@@ -720,9 +966,9 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
     return with_adapter_metadata(
         result_payload,
         operation="run_hybrid_reasoning",
-        backend_available=True,
+        backend_available=capability.available,
         degraded_reason=str(REASONER_BRIDGE_ERROR) if REASONER_BRIDGE_ERROR and not REASONER_BRIDGE_AVAILABLE else None,
-        implementation_status="implemented",
+        implementation_status=capability.state.value,
         extra_metadata={
             **predicate_summary,
             "reasoning_mode": "temporal_bridge",
@@ -733,17 +979,30 @@ def run_hybrid_reasoning(payload: Dict[str, Any]) -> Dict[str, Any]:
             "local_formal_logic_available": LOCAL_FORMAL_LOGIC_AVAILABLE,
             "local_formal_logic_path": LOCAL_FORMAL_LOGIC_PATH,
             "local_logic_snapshot_frame_count": local_logic_snapshot["frame_count"],
+            **_logic_operation_metadata(capability),
         },
     )
 
 
 __all__ = [
+    "FormalLogicCapability",
+    "FormalLogicCapabilityError",
+    "FormalLogicDegradedError",
+    "FormalLogicOperation",
+    "FormalLogicUnavailableError",
     "LOGIC_AVAILABLE",
+    "LOGIC_CAPABILITY_SCHEMA_VERSION",
     "LOGIC_ERROR",
     "LOCAL_FORMAL_LOGIC_AVAILABLE",
     "LOCAL_FORMAL_LOGIC_PATH",
     "REASONER_BRIDGE_AVAILABLE",
     "REASONER_BRIDGE_ERROR",
+    "LogicCapabilityState",
+    "LogicCapabilityStatus",
+    "get_logic_capabilities",
+    "get_logic_capability",
+    "get_logic_capability_report",
+    "require_logic_capability",
     "text_to_fol",
     "legal_text_to_deontic",
     "prove_claim_elements",

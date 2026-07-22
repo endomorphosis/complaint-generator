@@ -1,5 +1,15 @@
 """Reusable formal-logic primitives for complaint-generator."""
 
+from .capabilities import (
+    FormalLogicCapability,
+    FormalLogicCapabilityError,
+    FormalLogicDegradedError,
+    FormalLogicOperation,
+    FormalLogicUnavailableError,
+    LogicCapabilityState,
+    LogicCapabilityStatus,
+    capability_state_from_payload,
+)
 from .core import (
     Action,
     Conjunction,
@@ -28,8 +38,16 @@ __all__ = [
     "Frame",
     "FrameKnowledgeBase",
     "FrameSlotEvidence",
+    "FormalLogicCapability",
+    "FormalLogicCapabilityError",
+    "FormalLogicDegradedError",
+    "FormalLogicOperation",
+    "FormalLogicUnavailableError",
     "Implication",
     "LogicalOperator",
+    "LogicCapabilityState",
+    "LogicCapabilityStatus",
+    "capability_state_from_payload",
     "Negation",
     "Party",
     "Predicate",

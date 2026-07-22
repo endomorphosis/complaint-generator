@@ -41,6 +41,7 @@ except ModuleNotFoundError:
 
 from complaint_phases.denoiser import ComplaintDenoiser
 from complaint_phases.phase_manager import ComplaintPhase
+from lib.formal_logic import LogicCapabilityState, capability_state_from_payload
 from intake_status import (
     build_intake_case_review_summary,
     build_intake_status_summary,
@@ -1681,10 +1682,8 @@ def summarize_claim_reasoning_review(
             name
             for name, summary in adapter_statuses.items()
             if isinstance(summary, dict)
-            and str(
-                summary.get("implementation_status") or summary.get("status") or ""
-            )
-            in {"unavailable", "error", "not_implemented"}
+            and capability_state_from_payload(summary)
+            in {LogicCapabilityState.UNAVAILABLE, LogicCapabilityState.DEGRADED}
         )
         used_fallback_ontology = bool(reasoning.get("used_fallback_ontology"))
         hybrid_reasoning = reasoning.get("hybrid_reasoning", {})
