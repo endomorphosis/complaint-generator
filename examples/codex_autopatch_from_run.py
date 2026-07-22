@@ -57,7 +57,9 @@ def _parse_iso_dt(s: str) -> Optional[datetime]:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
-    except Exception:
+    except ValueError:
+        # Provider timestamps are untrusted and may be malformed. Keep those
+        # inputs non-fatal, but allow unexpected parser defects to surface.
         return None
 
 
