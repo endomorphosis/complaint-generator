@@ -3292,3 +3292,276 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Goal registration: dynamic
 - Todo vector key: 018923b8aa31e26f
 - Acceptance: Codebase scan filed this finding from lib/knowledge_graph_formats.py:82. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-135-codebase-scan-018923b8aa31.md, fix the bug or improvement, add or update focused validation when appropriate, and keep the supervisor-fed backlog parseable.
+
+- [ ] Task checkbox-200: REF-200 Define a typed refill scan result and terminal reason taxonomy
+
+## REF-200 Define a typed refill scan result and terminal reason taxonomy
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on:
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scan_receipts.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_implementation_supervisor_runner.py -q
+- Bundle: refactor/g10/g10-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S1
+- Missing evidence: Refill callbacks currently collapse skipped, deduplicated, exhausted, failed, and timed-out scans into the same empty collection.
+- AST symbols: logger, DEFAULT_CODEBASE_SCAN_MIN_OPEN_TASKS, DEFAULT_CODEBASE_SCAN_MAX_FINDINGS, DEFAULT_CODEBASE_SCAN_COOLDOWN_SECONDS, DEFAULT_OBJECTIVE_SCAN_MIN_OPEN_TASKS, DEFAULT_OBJECTIVE_SCAN_MAX_FINDINGS, DEFAULT_OBJECTIVE_SCAN_COOLDOWN_SECONDS, DEFAULT_VALIDATION_RETRY_BUDGET, DEFAULT_MERGE_RETRY_BUDGET, DEFAULT_IMPLEMENTATION_RETRY_BUDGET, DEFAULT_STALE_GIT_LOCK_SECONDS, DEFAULT_GENERATED_DIRTY_HARD_PATH_CAP, DEFAULT_GENERATED_DIRTY_MAX_DELETE_PATHS, DEFAULT_GENERATED_DIRTY_ALLOW_DELETIONS, DEFAULT_DEPENDENCY_GUARDRAIL_MAX_FINDINGS, DEFAULT_RECONCILIATION_GUARDRAIL_MAX_FINDINGS, DEFAULT_TASK_ID_PREFIX, DEFAULT_TASK_HEADER_PREFIX, CODEBASE_SCAN_MAX_FILE_BYTES, CODEBASE_SCAN_SUFFIXES, CODEBASE_SCAN_SKIP_PARTS, CODEBASE_SCAN_SKIP_PREFIXES, ANNOTATION_FOLLOWUP_RE, CodebaseFinding, utc_now, task_id_prefix, task_header_prefix, split_csv, task_ids_from_todo_text, task_block_is_present
+- Merge key: refactor/g10/g10-s1
+- Candidate kind: seed
+- Todo vector key: ref-200-defineatypedrefillscanresultandterminalreasontax
+- Acceptance: A versioned result contract distinguishes generated, exhausted, duplicate-only, threshold-satisfied, cooldown, disabled, partial, failed, and timed-out outcomes.; The contract records scan mode, analyzer version, repository and tree identity, start and finish timestamps, and whether the result is safe for completion reasoning.; Legacy list-returning callbacks remain supported through an explicit compatibility adapter rather than implicit truthiness.; No empty result is interpreted as goal completion without a typed terminal reason.
+
+- [ ] Task checkbox-201: REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
+
+## REF-201 Instrument scan inventory, parser coverage, exclusions, and candidate accounting
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-200
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scan_receipts.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q
+- Bundle: refactor/g10/g10-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S1
+- Missing evidence: A zero novel-finding count is not diagnosable without knowing what the analyzer discovered, parsed, skipped, rejected, or failed to inspect.
+- AST symbols: logger, DEFAULT_CODEBASE_SCAN_MIN_OPEN_TASKS, DEFAULT_CODEBASE_SCAN_MAX_FINDINGS, DEFAULT_CODEBASE_SCAN_COOLDOWN_SECONDS, DEFAULT_OBJECTIVE_SCAN_MIN_OPEN_TASKS, DEFAULT_OBJECTIVE_SCAN_MAX_FINDINGS, DEFAULT_OBJECTIVE_SCAN_COOLDOWN_SECONDS, DEFAULT_VALIDATION_RETRY_BUDGET, DEFAULT_MERGE_RETRY_BUDGET, DEFAULT_IMPLEMENTATION_RETRY_BUDGET, DEFAULT_STALE_GIT_LOCK_SECONDS, DEFAULT_GENERATED_DIRTY_HARD_PATH_CAP, DEFAULT_GENERATED_DIRTY_MAX_DELETE_PATHS, DEFAULT_GENERATED_DIRTY_ALLOW_DELETIONS, DEFAULT_DEPENDENCY_GUARDRAIL_MAX_FINDINGS, DEFAULT_RECONCILIATION_GUARDRAIL_MAX_FINDINGS, DEFAULT_TASK_ID_PREFIX, DEFAULT_TASK_HEADER_PREFIX, CODEBASE_SCAN_MAX_FILE_BYTES, CODEBASE_SCAN_SUFFIXES, CODEBASE_SCAN_SKIP_PARTS, CODEBASE_SCAN_SKIP_PREFIXES, ANNOTATION_FOLLOWUP_RE, CodebaseFinding, utc_now, task_id_prefix, task_header_prefix, split_csv, task_ids_from_todo_text, task_block_is_present
+- Merge key: refactor/g10/g10-s1
+- Candidate kind: seed
+- Todo vector key: ref-201-instrumentscaninventoryparsercoverageexclusionsa
+- Acceptance: Receipts count git roots, tracked files, eligible files, parsed files, cache hits, excluded files, parser failures, raw candidates, seen candidates, deduplicated candidates, and appended tasks.; Every skipped file and parser failure has a bounded reason code plus representative paths, with full details available as a durable artifact.; Candidate accounting balances from raw detection through filtering and task materialization.; Incremental and exhaustive scans report equivalent coverage dimensions.
+
+- [ ] Task checkbox-202: REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
+
+## REF-202 Persist scan receipts in events, strategy state, status, and scheduler metrics
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-200
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scan_receipts.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/event_log.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/implementation_supervisor_runner.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_implementation_supervisor_runner.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_implementation_supervisor_runner.py -q
+- Bundle: refactor/g10/g10-s1
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S1
+- Missing evidence: Operators and schedulers currently see only refill counts, so they cannot distinguish healthy exhaustion from an analyzer failure.
+- AST symbols: _EVENT_LOG_MAX_BYTES_ENV, _DEFAULT_EVENT_LOG_MAX_BYTES, _EVENT_LOG_RETAIN_RECENT_ENV, _DEFAULT_EVENT_LOG_RETAIN_RECENT, utc_now, unique_backup_path, repair_jsonl_event_log, read_jsonl_events, event_log_sources, read_jsonl_event_sources, append_jsonl_event, rotate_event_log_if_needed, stamp, quarantine_path, index, timestamp_key, event, max_bytes, retain_recent, total_count, archive_events, retained_events, archive_path, suffix, candidate, backup_path, lines, line, path, source_repair
+- Merge key: refactor/g10/g10-s1
+- Candidate kind: seed
+- Todo vector key: ref-202-persistscanreceiptsineventsstrategystatestatusan
+- Acceptance: Each refill attempt emits one canonical receipt CID and a compact event projection regardless of outcome.; Strategy and status payloads expose the latest successful scan, latest attempted scan, terminal reason, freshness, health, and candidate funnel.; Large per-file details are referenced by artifact path or CID rather than embedded repeatedly in heartbeat files.; Metrics distinguish skipped, duplicate-only, exhausted, partial, and failed scans without breaking older consumers.
+
+- [ ] Task checkbox-203: REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
+
+## REF-203 Add analyzer canaries, parser failure budgets, and fail-closed health classification
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-201
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/analyzer_health.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_analyzer_health.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_analyzer_health.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py -q
+- Bundle: refactor/g10/g10-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S2
+- Missing evidence: A scanner that silently stops recognizing syntax can otherwise report the same zero findings as a complete repository.
+- AST symbols: logger, DEFAULT_CODEBASE_SCAN_MIN_OPEN_TASKS, DEFAULT_CODEBASE_SCAN_MAX_FINDINGS, DEFAULT_CODEBASE_SCAN_COOLDOWN_SECONDS, DEFAULT_OBJECTIVE_SCAN_MIN_OPEN_TASKS, DEFAULT_OBJECTIVE_SCAN_MAX_FINDINGS, DEFAULT_OBJECTIVE_SCAN_COOLDOWN_SECONDS, DEFAULT_VALIDATION_RETRY_BUDGET, DEFAULT_MERGE_RETRY_BUDGET, DEFAULT_IMPLEMENTATION_RETRY_BUDGET, DEFAULT_STALE_GIT_LOCK_SECONDS, DEFAULT_GENERATED_DIRTY_HARD_PATH_CAP, DEFAULT_GENERATED_DIRTY_MAX_DELETE_PATHS, DEFAULT_GENERATED_DIRTY_ALLOW_DELETIONS, DEFAULT_DEPENDENCY_GUARDRAIL_MAX_FINDINGS, DEFAULT_RECONCILIATION_GUARDRAIL_MAX_FINDINGS, DEFAULT_TASK_ID_PREFIX, DEFAULT_TASK_HEADER_PREFIX, CODEBASE_SCAN_MAX_FILE_BYTES, CODEBASE_SCAN_SUFFIXES, CODEBASE_SCAN_SKIP_PARTS, CODEBASE_SCAN_SKIP_PREFIXES, ANNOTATION_FOLLOWUP_RE, CodebaseFinding, utc_now, task_id_prefix, task_header_prefix, split_csv, task_ids_from_todo_text, task_block_is_present
+- Merge key: refactor/g10/g10-s2
+- Candidate kind: seed
+- Todo vector key: ref-203-addanalyzercanariesparserfailurebudgetsandfail-c
+- Acceptance: Deterministic fixtures exercise every supported finding kind and parser path on each analyzer version.; Missing canaries, excessive skips, parser failures, incomplete git-root discovery, and impossible candidate funnels classify the scan as unhealthy or partial.; Health thresholds are configurable, recorded in the receipt, and cannot silently downgrade a failed scan to exhausted.; The daemon continues safe implementation work while preventing unhealthy analysis from closing goals.
+
+- [ ] Task checkbox-204: REF-204 Implement fingerprint-independent audit scans and exhaustion quorum
+
+## REF-204 Implement fingerprint-independent audit scans and exhaustion quorum
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-201, REF-202
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/audit_scanner.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scan_receipts.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/dataset_store.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_audit_scanner.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_audit_scanner.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_incremental_runtime.py -q
+- Bundle: refactor/g10/g10-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S2
+- Missing evidence: A saturated or corrupt seen-fingerprint set can make normal refill scans appear exhausted without independently re-evaluating the codebase.
+- AST symbols: logger, DEFAULT_CODEBASE_SCAN_MIN_OPEN_TASKS, DEFAULT_CODEBASE_SCAN_MAX_FINDINGS, DEFAULT_CODEBASE_SCAN_COOLDOWN_SECONDS, DEFAULT_OBJECTIVE_SCAN_MIN_OPEN_TASKS, DEFAULT_OBJECTIVE_SCAN_MAX_FINDINGS, DEFAULT_OBJECTIVE_SCAN_COOLDOWN_SECONDS, DEFAULT_VALIDATION_RETRY_BUDGET, DEFAULT_MERGE_RETRY_BUDGET, DEFAULT_IMPLEMENTATION_RETRY_BUDGET, DEFAULT_STALE_GIT_LOCK_SECONDS, DEFAULT_GENERATED_DIRTY_HARD_PATH_CAP, DEFAULT_GENERATED_DIRTY_MAX_DELETE_PATHS, DEFAULT_GENERATED_DIRTY_ALLOW_DELETIONS, DEFAULT_DEPENDENCY_GUARDRAIL_MAX_FINDINGS, DEFAULT_RECONCILIATION_GUARDRAIL_MAX_FINDINGS, DEFAULT_TASK_ID_PREFIX, DEFAULT_TASK_HEADER_PREFIX, CODEBASE_SCAN_MAX_FILE_BYTES, CODEBASE_SCAN_SUFFIXES, CODEBASE_SCAN_SKIP_PARTS, CODEBASE_SCAN_SKIP_PREFIXES, ANNOTATION_FOLLOWUP_RE, CodebaseFinding, utc_now, task_id_prefix, task_header_prefix, split_csv, task_ids_from_todo_text, task_block_is_present
+- Merge key: refactor/g10/g10-s2
+- Candidate kind: seed
+- Todo vector key: ref-204-implementfingerprint-independentauditscansandexh
+- Acceptance: Audit mode scans without mutating or trusting the normal seen set and reports known, stale, changed, and novel findings separately.; Exhaustion requires a configurable quorum of healthy exhaustive receipts tied to repository tree, analyzer version, configuration, and objective revision.; Relevant code, configuration, analyzer, or objective changes invalidate prior quorum members deterministically.; Repeated scans of an unchanged tree are deduplicated and cannot manufacture quorum confidence.
+
+- [ ] Task checkbox-205: REF-205 Escalate low-backlog analysis through AST and llm_router planning before declaring exhaustion
+
+## REF-205 Escalate low-backlog analysis through AST and llm_router planning before declaring exhaustion
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: G10
+- Depends on: REF-203, REF-204
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/analyzer_health.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/audit_scanner.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_analysis_escalation.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_analysis_escalation.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q
+- Bundle: refactor/g10/g10-s2
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S2
+- Missing evidence: Static pattern exhaustion should trigger bounded semantic and goal-directed analysis rather than leave the board below its configured floor without explanation.
+- AST symbols: PromptBuilder, BootstrapCallback, DEFAULT_OPEN_TASK_STATUSES, DEFAULT_TASK_PROPOSAL_TEST_OUTPUT, TaskProposalRouterError, TaskProposalRouterConfig, TaskProposalRouterCliConfig, TaskProposalRoutePaths, TaskProposalRouteSpec, _repo_path, build_task_proposal_route_paths, _task_values, _task_value, task_metadata_lines, build_task_proposal_prompt, standard_task_proposal_requested_outputs, build_task_proposal_prompt_builder, build_task_proposal_router_cli_config, run_configured_task_proposal_router_cli, ConfiguredTaskProposalRouterRunner, build_configured_task_proposal_router_runner, build_repo_task_proposal_router_runner, build_repo_task_proposal_route_runner, build_repo_task_proposal_route_runner_from_spec, select_proposal_task, _artifact_relative_path, run_task_proposal_router, build_task_proposal_router_parser, run_task_proposal_router_cli, StructuredRouter
+- Merge key: refactor/g10/g10-s2
+- Candidate kind: seed
+- Todo vector key: ref-205-escalatelow-backloganalysisthroughastandllm-rout
+- Acceptance: A policy escalates from incremental static scan to exhaustive AST coverage and then schema-constrained llm_router proposals when healthy backlog remains below target.; Each escalation records cost, scope, novelty, confidence, rejected candidates, and the objective terms it attempted to cover.; Router failure or low-confidence output produces an analysis-inconclusive result and deterministic fallback, never a false completion.; Rate, token, retry, and novelty limits prevent an unbounded task-generation loop.
+
+- [ ] Task checkbox-206: REF-206 Define an evidence-backed goal lifecycle and completion state machine
+
+## REF-206 Define an evidence-backed goal lifecycle and completion state machine
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-200
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_tracker.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q
+- Bundle: refactor/g10/g10-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S3
+- Missing evidence: The objective graph currently treats completed task statuses as sufficient even when completion evidence and validation receipts are absent.
+- AST symbols: DEFAULT_ULTIMATE_GOAL, DEFAULT_ROOT_EVIDENCE, DEFAULT_GOAL_PREFIX, DEFAULT_TRACKING_DOCUMENT_TITLE, DEFAULT_ROOT_GOAL_TITLE, OPEN_TASK_STATUSES_FOR_GOAL_COMPLETION, TASK_GOAL_METADATA_KEYS, ObjectiveTrackingResult, ObjectiveCompletionResult, RepositoryComponent, fibonacci_number, fibonacci_priority, infer_goal_prefix, next_goal_id, render_goal_block, rewrite_goal_fields, completion_evidence_summary, open_goal_ids_from_todo_board, open_goal_ids_from_todo_boards, run_goal_validation, reconcile_objective_goal_completion, ensure_objective_tracking_document, COMPONENT_SCAN_SKIP_DIRS, COMPONENT_MANIFEST_NAMES, INTERFACE_DESCRIPTOR_SUFFIXES, _unique_paths, discover_gitmodule_paths, discover_gitlink_paths, discover_submodule_paths, _component_relative_path
+- Merge key: refactor/g10/g10-s3
+- Candidate kind: seed
+- Todo vector key: ref-206-defineanevidence-backedgoallifecycleandcompletio
+- Acceptance: Goals distinguish active, provisionally complete, verified complete, analysis inconclusive, blocked, and reopened states with legal transitions.; Completion evidence names acceptance criterion, producing task or scan, validation receipt, repository tree, freshness, and provenance CID.; Task completion alone can make a goal provisional but cannot make it verified.; Missing, stale, failed, or contradictory evidence fails closed with an actionable reason.
+
+- [ ] Task checkbox-207: REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
+
+## REF-207 Build goal-to-task, code, AST, acceptance, and validation coverage maps
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-201, REF-206
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_coverage.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_vector_index.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/conflict_graph.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_coverage.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_coverage.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py -q
+- Bundle: refactor/g10/g10-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S3
+- Missing evidence: Goal completion cannot be assessed when acceptance criteria are not mapped to implementation surfaces and proof-producing validations.
+- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, DEFAULT_AST_DATASET_MAX_CHARS, AST_DATASET_RECORD_SCHEMA_VERSION, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, DEPENDENCY_EDGE_KINDS, SUCCESSFUL_MERGE_RECEIPT_STATUSES, DependencyEdge, TaskDependencyNode, DependencyRepairEvidence, TaskScheduleRecord, TaskDependencyGraph, TaskDependencyDAG, TaskPlanningGraph
+- Merge key: refactor/g10/g10-s3
+- Candidate kind: seed
+- Todo vector key: ref-207-buildgoal-to-taskcodeastacceptanceandvalidationc
+- Acceptance: Every acceptance criterion maps to tasks, predicted and changed files, AST symbols or interfaces, validation commands, and resulting receipts with provenance.; The graph reports uncovered, weakly inferred, stale, contradicted, and verified surfaces separately.; Dynamic codebase findings attach to the most relevant registered goals while preserving a clearly labeled unmapped bucket.; Coverage calculations are deterministic and explain the evidence behind each edge.
+
+- [ ] Task checkbox-208: REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
+
+## REF-208 Enforce a completion gate using validation, coverage, health, freshness, and exhaustion proof
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-204, REF-207
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_coverage.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/audit_scanner.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_task_janitor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_task_janitor.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_task_janitor.py -q
+- Bundle: refactor/g10/g10-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S3
+- Missing evidence: Goal reconciliation must require proof of the stated objective rather than infer success from a drained or deduplicated task list.
+- AST symbols: logger, _plan_value_dict, objective_record_plan_context, _evaluated_branch_dict, plan_objective_records, persist_objective_plan_evaluations, default_repo_root, default_objective_path, default_todo_path, default_state_root, split_csv, parse_goal_completion_todo_boards, discovery_fingerprints, build_arg_parser, run_objective_daemon, main, to_dict, finding, validation, validation_commands, predicted_files, predicted_symbols, branch, branch_payload, branch_id, scores, rationales, wrapped_score, wrapped_rationale, payload
+- Merge key: refactor/g10/g10-s3
+- Candidate kind: seed
+- Todo vector key: ref-208-enforceacompletiongateusingvalidationcoveragehea
+- Acceptance: Verified completion requires all mandatory acceptance criteria covered, required validations successful, evidence fresh, analyzer healthy, and configured exhaustion quorum satisfied.; Partial, skipped, failed, timed-out, duplicate-only, or unsupported analysis cannot satisfy the gate.; The gate emits machine-readable pass and fail reasons plus the exact evidence set it evaluated.; Parent goals aggregate child proof without hiding an inconclusive or reopened descendant.
+
+- [ ] Task checkbox-209: REF-209 Detect contradictory evidence and automatically reopen affected goals
+
+## REF-209 Detect contradictory evidence and automatically reopen affected goals
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-208
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_coverage.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_task_janitor.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_task_janitor.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_task_janitor.py -q
+- Bundle: refactor/g10/g10-s3
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S3
+- Missing evidence: A completed goal currently remains completed even when a later codebase scan creates directly relevant work or validation regresses.
+- AST symbols: ACTIVE_GOAL_STATUSES, OPEN_TASK_STATUSES, JANITOR_RECEIPT_SCHEMA, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, DEFAULT_MISSION_TERMS, GOAL_METADATA_KEYS, CODEBASE_SCAN_BACKLOG_TITLE_PREFIXES, CODEBASE_SCAN_BACKLOG_MARKERS, WORKTREE_CLEANUP_BACKLOG_MARKERS, GUARDRAIL_REPAIR_MARKERS, DYNAMIC_GOAL_REGISTRATION_VALUES, COMPLETED_TASK_STATUSES, JANITOR_BLOCKED_REASON_MARKER, ObjectiveTaskJanitorReceipt, _unique, _split_terms, _task_goal_ids, _task_haystack, _goal_haystack, _goal_requires_launch_playwright_gate, _matches_any_term, _is_generated_objective_task, _is_guardrail_repair_task, _is_codebase_scan_backlog_task, _is_mission_critical_codebase_scan_task, _is_worktree_cleanup_backlog_task, _critical_goal_ids, _janitor_owned_task_ids
+- Merge key: refactor/g10/g10-s3
+- Candidate kind: seed
+- Todo vector key: ref-209-detectcontradictoryevidenceandautomaticallyreope
+- Acceptance: Novel mapped findings, failed required validations, changed evidence surfaces, and invalidated audit receipts reopen verified or provisional goals deterministically.; Reopening records the contradiction, impacted criteria, invalidated evidence, source receipt, and newly scheduled work.; Unrelated findings do not churn completed goals, and repeated identical contradictions are idempotent.; Parent and dependent goal states are recalculated without erasing historical completion receipts.
+
+- [ ] Task checkbox-210: REF-210 Generate bounded goals, subgoals, and tasks from uncovered or inconclusive evidence
+
+## REF-210 Generate bounded goals, subgoals, and tasks from uncovered or inconclusive evidence
+
+- Status: todo
+- Completion: manual
+- Priority: P1
+- Track: G10
+- Depends on: REF-205, REF-207, REF-209
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_coverage.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_generation.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_generation.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q
+- Bundle: refactor/g10/g10-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S4
+- Missing evidence: Uncovered acceptance criteria and inconclusive analysis should become reviewable, dependency-linked work instead of silently draining the board.
+- AST symbols: DEFAULT_EMBEDDING_DIMENSIONS, DEFAULT_EMBEDDING_MIN_SCORE, DEFAULT_BUNDLE_CLUSTER_MIN_SCORE, DEFAULT_OBJECTIVE_TASK_SUMMARY_PREFIX, parse_python_ast_quietly, DEFAULT_DISCOVERY_OUTPUT_PATH, DEFAULT_SURPLUS_FINDINGS_PER_GOAL, DEFAULT_SURPLUS_MIN_TERMS_PER_TODO, DEFAULT_SCAN_OVERSAMPLE_MULTIPLIER, DEFAULT_TASK_PREFIX, DEFAULT_AST_DATASET_MAX_CHARS, AST_DATASET_RECORD_SCHEMA_VERSION, LAUNCH_PLAYWRIGHT_VALIDATION_COMMAND, LAUNCH_PLAYWRIGHT_VALIDATION_MARKERS, LAUNCH_PLAYWRIGHT_VALIDATION_GATE_EVIDENCE, SCAN_SUFFIXES, SKIP_DIRS, ObjectiveGoal, ObjectiveFinding, ObjectiveTaskRecord, ObjectiveHeapRecord, DEPENDENCY_EDGE_KINDS, SUCCESSFUL_MERGE_RECEIPT_STATUSES, DependencyEdge, TaskDependencyNode, DependencyRepairEvidence, TaskScheduleRecord, TaskDependencyGraph, TaskDependencyDAG, TaskPlanningGraph
+- Merge key: refactor/g10/g10-s4
+- Candidate kind: seed
+- Todo vector key: ref-210-generateboundedgoalssubgoalsandtasksfromuncovere
+- Acceptance: Deterministic rules and llm_router proposals can create bounded child goals, subgoals, and tasks from uncovered criteria, unsupported surfaces, or contradiction receipts.; Generated work records parent objective terms, expected evidence delta, dependencies, predicted files and symbols, validation, confidence, cost, and novelty.; Canonical identity and semantic deduplication prevent equivalent goals or tasks from being regenerated across cycles.; Depth, breadth, token, retry, and open-work limits keep autonomous refinement finite and scheduler-aware.
+
+- [ ] Task checkbox-211: REF-211 Migrate existing goals and expose trustworthy completion diagnostics
+
+## REF-211 Migrate existing goals and expose trustworthy completion diagnostics
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-202, REF-206, REF-208, REF-209, REF-210
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_tracker.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/scheduler_metrics.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/implementation_supervisor_runner.py, ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/todo_daemon/implementation_supervisor.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_completion.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler_metrics.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_implementation_supervisor_runner.py -q
+- Bundle: refactor/g10/g10-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S4
+- Missing evidence: Existing completed goals need a safe migration path and operators need to see confidence and missing proof without reading raw event logs.
+- AST symbols: DEFAULT_ULTIMATE_GOAL, DEFAULT_ROOT_EVIDENCE, DEFAULT_GOAL_PREFIX, DEFAULT_TRACKING_DOCUMENT_TITLE, DEFAULT_ROOT_GOAL_TITLE, OPEN_TASK_STATUSES_FOR_GOAL_COMPLETION, TASK_GOAL_METADATA_KEYS, ObjectiveTrackingResult, ObjectiveCompletionResult, RepositoryComponent, fibonacci_number, fibonacci_priority, infer_goal_prefix, next_goal_id, render_goal_block, rewrite_goal_fields, completion_evidence_summary, open_goal_ids_from_todo_board, open_goal_ids_from_todo_boards, run_goal_validation, reconcile_objective_goal_completion, ensure_objective_tracking_document, COMPONENT_SCAN_SKIP_DIRS, COMPONENT_MANIFEST_NAMES, INTERFACE_DESCRIPTOR_SUFFIXES, _unique_paths, discover_gitmodule_paths, discover_gitlink_paths, discover_submodule_paths, _component_relative_path
+- Merge key: refactor/g10/g10-s4
+- Candidate kind: seed
+- Todo vector key: ref-211-migrateexistinggoalsandexposetrustworthycompleti
+- Acceptance: Legacy completed goals migrate idempotently to provisional or verified state based on available evidence, never by optimistic default.; Status and manifest projections show lifecycle state, confidence, uncovered criteria, stale evidence, analyzer health, exhaustion quorum, and reopen reasons.; Schema versioning and compatibility readers preserve existing boards, events, and automation during rollout.; The migration can be previewed and resumed safely after interruption.
+
+- [ ] Task checkbox-212: REF-212 Add end-to-end regression tests for truthful goal completion and autonomous refill
+
+## REF-212 Add end-to-end regression tests for truthful goal completion and autonomous refill
+
+- Status: todo
+- Completion: manual
+- Priority: P0
+- Track: G10
+- Depends on: REF-203, REF-204, REF-205, REF-208, REF-209, REF-210, REF-211
+- Outputs: ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_lifecycle_e2e.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py, ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py
+- Validation: PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_goal_lifecycle_e2e.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_backlog_refinery.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_objective_graph.py ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_scheduler.py -q
+- Bundle: refactor/g10/g10-s4
+- Bundle strategy: goal/subgoal bundle with AST-symbol locality
+- Goal id: G10.S4
+- Missing evidence: The completion and refill contract needs system-level regression coverage across restart, concurrency, stale evidence, analyzer failure, and contradiction scenarios.
+- AST symbols: _git, _seed_repo, _git_dir, test_commit_generated_dirty_outputs_commits_nested_repo_and_parent_gitlink, test_commit_generated_dirty_outputs_repairs_recursive_clean_gitlinks, test_commit_generated_dirty_outputs_repairs_stale_nested_index_lock, test_commit_generated_dirty_outputs_defers_during_merge, test_namespace_recorder_factories_bind_standard_paths, test_configured_backlog_recorder_bundle_delegates_to_runtime_factories, _write_todo, test_backlog_refinery_appends_missing_task_blocks_in_order, test_backlog_refinery_codebase_scan_refills_low_backlog, test_codebase_scan_writes_file_local_ast_bundle, test_codebase_scan_synchronizes_fingerprints_across_strategy_files, test_codebase_scan_retires_later_duplicate_vector_tasks, test_codebase_scan_reserves_ids_from_discovery_artifacts, test_backlog_refinery_annotation_scan_ignores_literal_status_strings, test_backlog_refinery_codebase_scan_skips_vanished_git_roots, test_backlog_refinery_repairs_invalid_strategy_file, test_backlog_refinery_iter_jsonl_quarantines_malformed_events, test_backlog_refinery_dependency_guardrail_adds_ready_repair_task, test_backlog_refinery_dependency_guardrail_detects_dependency_cycle, test_backlog_refinery_dependency_guardrail_detects_duplicate_task_ids, test_backlog_refinery_releases_completed_guardrail_block, test_backlog_refinery_releases_completed_and_duplicate_stale_strategy_blocks, test_backlog_refinery_releases_historical_completed_retry_repairs, test_backlog_refinery_releases_orphaned_block_without_repair_path, test_backlog_refinery_releases_recursive_retry_repair_block, test_backlog_refinery_retires_ready_recursive_retry_repair_task, test_backlog_refinery_releases_stale_dependency_guardrail_after_metadata_repaired
+- Merge key: refactor/g10/g10-s4
+- Candidate kind: seed
+- Todo vector key: ref-212-addend-to-endregressiontestsfortruthfulgoalcompl
+- Acceptance: Tests distinguish threshold skip, cooldown, duplicate-only, healthy exhaustion, parser failure, timeout, partial coverage, and successful generation.; Scenarios prove that stale fingerprints cannot certify completion and that later relevant findings reopen goals and refill the board.; Concurrent serial and bundle supervisors emit one canonical receipt and do not duplicate generated goals or tasks.; Restart and migration preserve evidence lineage, quorum state, dependencies, and truthful operator projections.

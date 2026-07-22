@@ -1667,7 +1667,7 @@ def _task_block(task: RefactorTask, task_id: str, index: int) -> str:
             "- Completion: manual",
             f"- Priority: {task.priority}",
             f"- Track: {task.goal_id}",
-            "- Depends on: " + ", ".join(task.depends_on),
+            "- Depends on:" + (" " + ", ".join(task.depends_on) if task.depends_on else ""),
             f"- Outputs: {outputs}",
             f"- Validation: {validation}",
             f"- Bundle: {bundle_key}",
