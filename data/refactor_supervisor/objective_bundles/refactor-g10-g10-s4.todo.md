@@ -4,11 +4,11 @@ Source todo: data/refactor_supervisor/refactor_todo.md
 Purpose: automatically parallelized refactor lane generated from goal/subgoal/AST scan metadata.
 Conflict policy: keep edits inside this bundle when possible; rely on supervisor merge reconciliation.
 
-- [ ] Task checkbox-210: REF-210 Generate bounded goals, subgoals, and tasks from uncovered or inconclusive evidence
+- [x] Task checkbox-210: REF-210 Generate bounded goals, subgoals, and tasks from uncovered or inconclusive evidence
 
 ## REF-210 Generate bounded goals, subgoals, and tasks from uncovered or inconclusive evidence
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G10
