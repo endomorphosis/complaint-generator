@@ -1575,7 +1575,10 @@ def _looks_like_formal_complaint_candidate(body: str) -> bool:
 
 def generate_decentralized_id() -> Dict[str, Any]:
     try:
-        from ipfs_datasets_py.processors.auth.ucan import UCANManager
+        UCANManager = _require_ipfs_attr(
+            "ipfs_datasets_py.processors.auth.ucan",
+            "UCANManager",
+        )
 
         manager = UCANManager.get_instance()
         if manager.initialize():
@@ -4204,7 +4207,10 @@ class ComplaintWorkspaceService:
             if str(os.getenv("COMPLAINT_PROVIDER_DIAGNOSTICS_CHECK_SECRETS", "") or "").strip() != "1":
                 return ""
             try:
-                from ipfs_datasets_py.mcp_server.secrets_vault import get_secrets_vault
+                get_secrets_vault = _require_ipfs_attr(
+                    "ipfs_datasets_py.mcp_server.secrets_vault",
+                    "get_secrets_vault",
+                )
 
                 vault = get_secrets_vault()
                 for name in names:

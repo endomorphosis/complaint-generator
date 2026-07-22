@@ -127,16 +127,6 @@ allowed_adapter_paths = [
 exception_policy = "Each exception must name one production Python file and its exact imported modules. Remove the imports through an adapter and delete the exception together."
 
 [tool.complaint_generator.import_boundaries.restricted_imports.ipfs_datasets_py.temporary_exceptions]
-"applications/complaint_cli.py" = [
-  "ipfs_datasets_py.processors.legal_data.email_auth",
-  "ipfs_datasets_py.processors.legal_data.email_corpus",
-  "ipfs_datasets_py.processors.legal_data.email_import",
-  "ipfs_datasets_py.processors.legal_data.email_pipeline",
-]
-"applications/complaint_workspace.py" = [
-  "ipfs_datasets_py.mcp_server.secrets_vault",
-  "ipfs_datasets_py.processors.auth.ucan",
-]
 "complaint_generator/agentic_evidence_download.py" = ["ipfs_datasets_py.processors.legal_data.email_relevance"]
 "complaint_generator/data_migration.py" = ["ipfs_datasets_py.processors.legal_data"]
 "complaint_generator/email_agentic_search.py" = ["ipfs_datasets_py.processors.legal_data"]
