@@ -837,6 +837,29 @@ def build_goals(scan: dict[str, Any]) -> list[dict[str, Any]]:
                             task_id="REF-041",
                             depends_on=("REF-039",),
                         ),
+                        _task(
+                            "G9",
+                            "G9.S2",
+                            "Recover structured plan branch implementation in the nested supervisor",
+                            "P0",
+                            (
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/task_proposal_router.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/plan_evaluator.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/ipfs_accelerate_py/agent_supervisor/objective_daemon.py",
+                                "ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py",
+                            ),
+                            "REF-041 validated nested changes in a lane that did not forward managed submodule paths, so its root merge recorded only taskboard documentation.",
+                            (
+                                "The structured plan router, evaluator, objective-daemon integration, and focused tests are tracked in the nested ipfs_accelerate_py repository.",
+                                "Selected and rejected branches remain visible to the scheduler with deterministic fallback when llm_router fails.",
+                                "The implementation receipt records nested commits and the parent gitlink chain instead of completing from documentation alone.",
+                            ),
+                            (
+                                "PYTHONPATH=ipfs_datasets_py/ipfs_accelerate_py python -m pytest ipfs_datasets_py/ipfs_accelerate_py/test/api/test_agent_supervisor_plan_evaluator.py -q",
+                            ),
+                            task_id="REF-063",
+                            depends_on=("REF-041",),
+                        ),
                     ],
                 },
                 {
@@ -2451,6 +2474,8 @@ def start_daemon(args: argparse.Namespace) -> dict[str, Any]:
         "--implement",
         "--implementation-timeout",
         str(float(args.implementation_timeout)),
+        "--worktree-submodule-path",
+        "ipfs_datasets_py/ipfs_accelerate_py",
         "--llm-merge-resolver-command",
         merge_resolver_command(),
         "--llm-merge-resolver-timeout-seconds",
