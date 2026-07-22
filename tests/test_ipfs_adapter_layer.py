@@ -3,6 +3,7 @@
 import importlib
 from io import BytesIO
 import json
+import os
 import tempfile
 import integrations.ipfs_datasets.vector_store as vector_store_module
 import integrations.ipfs_datasets as adapter
@@ -827,6 +828,15 @@ def test_scraper_daemon_optimizes_tactics_across_iterations():
                         result = daemon.run(keywords=['employment discrimination'], domains=['example.com'])
 
     assert len(result['iterations']) >= 1
+    assert result['status'] == 'completed'
+    assert result['pid'] == os.getpid()
+    assert result['updated_at']
+    assert result['artifacts']['final_result_count'] == len(result['final_results'])
+    assert result['last_error'] is None
+    assert daemon.status_payload() == {
+        key: result[key]
+        for key in ('status', 'pid', 'updated_at', 'artifacts', 'last_error')
+    }
     assert result['final_results']
     assert 'https://example.com/policy' in result['coverage_ledger']
     assert result['tactic_history']['multi_engine_search']

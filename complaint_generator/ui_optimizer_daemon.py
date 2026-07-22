@@ -286,6 +286,37 @@ def _prune_old_cycle_artifacts(artifact_root: Path, *, keep_latest: int = 6) -> 
         subprocess.run(["rm", "-rf", str(stale)], check=False)
 
 
+def _status_artifacts(
+    *,
+    args: argparse.Namespace,
+    pid_file: Path,
+    status_file: Path,
+    log_file: Path,
+    last_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the stable artifact manifest shared by persisted and CLI status."""
+
+    artifacts: dict[str, Any] = {
+        "artifact_root": str(Path(args.artifact_root).expanduser().resolve()),
+        "workspace_root": str(Path(args.workspace_root).expanduser().resolve()),
+        "pid_file": str(pid_file),
+        "status_file": str(status_file),
+        "log_file": str(log_file),
+    }
+    if isinstance(last_result, dict):
+        for key in (
+            "cycle_root",
+            "screenshot_dir",
+            "optimizer_output_dir",
+            "export_review_path",
+            "cycle_manifest_path",
+        ):
+            value = last_result.get(key)
+            if value:
+                artifacts[key] = str(value)
+    return artifacts
+
+
 def _build_status_payload(
     *,
     args: argparse.Namespace,
@@ -320,8 +351,19 @@ def _build_status_payload(
     phase_started_dt = _parse_iso_datetime(phase_started_at)
     retry_started_dt = _parse_iso_datetime(retry_started_at)
     next_retry_dt = _parse_iso_datetime(next_retry_at)
+    artifacts = _status_artifacts(
+        args=args,
+        pid_file=pid_file,
+        status_file=status_file,
+        log_file=log_file,
+        last_result=last_result,
+    )
     return {
         "status": state,
+        "pid": pid,
+        "updated_at": now.isoformat(),
+        "artifacts": artifacts,
+        "last_error": error,
         "phase": phase,
         "phase_started_at": phase_started_at,
         "phase_elapsed_seconds": _elapsed_seconds(phase_started_dt, now=now),
@@ -344,7 +386,6 @@ def _build_status_payload(
         "provider": str(args.provider or ""),
         "model": str(args.model or ""),
         "use_llm_draft": bool(args.use_llm_draft),
-        "pid": pid,
         "pid_file": str(pid_file),
         "status_file": str(status_file),
         "log_file": str(log_file),
@@ -355,7 +396,6 @@ def _build_status_payload(
         "error_kind": error_kind,
         "error_summary": error_summary,
         "error": error,
-        "updated_at": now.isoformat(),
     }
 
 
@@ -1034,10 +1074,24 @@ def _status_payload(args: argparse.Namespace) -> dict[str, Any]:
         recommendation_coverage = dict(last_result.get("recommendation_coverage") or {})
         if not recommendation_coverage:
             recommendation_coverage = _extract_optimizer_recommendation_coverage(last_result.get("optimizer_result"))
+    artifacts = dict(status_payload.get("artifacts") or {})
+    if not artifacts:
+        artifacts = _status_artifacts(
+            args=args,
+            pid_file=pid_file,
+            status_file=status_file,
+            log_file=log_file,
+            last_result=last_result if isinstance(last_result, dict) else None,
+        )
+    updated_at = str(status_payload.get("updated_at") or datetime.now(UTC).isoformat())
+    last_error = status_payload.get("last_error", status_payload.get("error"))
     return {
         "status": "ok",
-        "artifact_root": str(artifact_root),
         "pid": live_pid,
+        "updated_at": updated_at,
+        "artifacts": artifacts,
+        "last_error": last_error,
+        "artifact_root": str(artifact_root),
         "running": _pid_is_running(live_pid),
         "matching_pids": matching_pids,
         "pid_file": str(pid_file),
