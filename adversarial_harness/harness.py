@@ -136,34 +136,48 @@ class AdversarialHarness:
 
     @staticmethod
     def _attach_result_spec_metadata(result: SessionResult, spec: Dict[str, Any]) -> SessionResult:
+        if not isinstance(result.seed_complaint, dict):
+            return result
+
         try:
-            if isinstance(result.seed_complaint, dict):
-                search_summary = _seed_search_summary(
-                    result.seed_complaint,
-                    str(spec.get('hacc_search_mode') or 'package'),
-                )
-                result.seed_complaint = {
-                    **result.seed_complaint,
-                    '_meta': {
-                        'personality': spec.get('personality'),
-                        'max_turns': spec.get('max_turns'),
-                        'include_hacc_evidence': spec.get('include_hacc_evidence', False),
-                        'hacc_preset': spec.get('hacc_preset'),
-                        'use_hacc_vector_search': spec.get('use_hacc_vector_search', False),
-                        'hacc_search_mode': search_summary['requested_search_mode'],
-                        'hacc_effective_search_mode': search_summary['effective_search_mode'],
-                        'hacc_search_fallback_note': search_summary['fallback_note'],
-                        'search_summary': search_summary,
-                        'seed_source': result.seed_complaint.get('source'),
-                        'anchor_sections': list(
-                            (
-                                result.seed_complaint.get('key_facts', {}) or {}
-                            ).get('anchor_sections', [])
-                        ),
-                    }
-                }
-        except Exception:
-            pass
+            search_summary = _seed_search_summary(
+                result.seed_complaint,
+                str(spec.get('hacc_search_mode') or 'package'),
+            )
+            key_facts = dict(result.seed_complaint.get('key_facts') or {})
+            anchor_sections = list(key_facts.get('anchor_sections') or [])
+        except (TypeError, ValueError):
+            # Seed complaints can originate in external evidence packages. A
+            # malformed optional metadata field must not turn an otherwise
+            # completed session into a failed one, but it must be observable.
+            # Keep unexpected implementation failures outside this recovery
+            # path so they are not silently reported as successful enrichment.
+            logger.warning(
+                "Could not attach optional specification metadata to session %s; "
+                "leaving its seed complaint unchanged",
+                result.session_id,
+                exc_info=True,
+            )
+            return result
+
+        # Perform the mutation outside the external-data recovery boundary so
+        # defects in result assignment or metadata assembly remain visible.
+        result.seed_complaint = {
+            **result.seed_complaint,
+            '_meta': {
+                'personality': spec.get('personality'),
+                'max_turns': spec.get('max_turns'),
+                'include_hacc_evidence': spec.get('include_hacc_evidence', False),
+                'hacc_preset': spec.get('hacc_preset'),
+                'use_hacc_vector_search': spec.get('use_hacc_vector_search', False),
+                'hacc_search_mode': search_summary['requested_search_mode'],
+                'hacc_effective_search_mode': search_summary['effective_search_mode'],
+                'hacc_search_fallback_note': search_summary['fallback_note'],
+                'search_summary': search_summary,
+                'seed_source': result.seed_complaint.get('source'),
+                'anchor_sections': anchor_sections,
+            }
+        }
         return result
 
     @staticmethod
