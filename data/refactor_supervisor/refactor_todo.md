@@ -226,11 +226,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: The repo has many tests; refactor agents need fast confidence lanes.
 - Acceptance: A documented test lane map exists.; Each P0 workstream has a named validation command.
 
-- [ ] Task checkbox-14: REF-014 Add import and dependency-boundary tests for production modules
+- [x] Task checkbox-14: REF-014 Add import and dependency-boundary tests for production modules
 
 ## REF-014 Add import and dependency-boundary tests for production modules
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G4
@@ -396,7 +396,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Existing roadmap work should feed the automated taskboard rather than drift separately.
 - Acceptance: Each P0 backlog workstream maps to at least one refactor goal.; Duplicated tasks are merged or explicitly scoped.
 
-- [ ] Task checkbox-24: REF-024 Define first three implementation claims from the queued taskboard
+- [x] Task checkbox-24: REF-024 Define first three implementation claims from the queued taskboard
 
 ## REF-024 Define first three implementation claims from the queued taskboard
 

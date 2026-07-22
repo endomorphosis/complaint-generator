@@ -25,7 +25,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Todo vector key: ref-023-cross-linkipfsdatasetsexecutionbacklogtaskstoref
 - Acceptance: Each P0 backlog workstream maps to at least one refactor goal.; Duplicated tasks are merged or explicitly scoped.
 
-- [ ] Task checkbox-24: REF-024 Define first three implementation claims from the queued taskboard
+- [x] Task checkbox-24: REF-024 Define first three implementation claims from the queued taskboard
 
 ## REF-024 Define first three implementation claims from the queued taskboard
 

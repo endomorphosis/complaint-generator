@@ -1,6 +1,6 @@
 {
   "bundle_dir": "data/refactor_supervisor/objective_bundles",
-  "generated_at": "2026-07-22T04:14:05Z",
+  "generated_at": "2026-07-22T04:21:32Z",
   "goals": [
     {
       "id": "G1",
@@ -424,7 +424,7 @@
               "priority": "P1",
               "rationale": "Dependency drift is a recurring refactor risk.",
               "stable_key": "g4:g4.s1:add import and dependency-boundary tests for production modules",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G4.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-014",
@@ -734,7 +734,7 @@
               "priority": "P0",
               "rationale": "A robust board still needs a practical starting order.",
               "stable_key": "g8:g8.s1:define first three implementation claims from the queued taskboard",
-              "status": "needed",
+              "status": "complete",
               "subgoal_id": "G8.S1",
               "supervisor": "refactor_agent_supervisor",
               "task_id": "REF-024",
@@ -1351,8 +1351,8 @@
       "pytest_ini": true
     },
     "python_file_count": 439,
-    "python_total_lines": 245605,
-    "scanned_at": "2026-07-22T04:13:51Z",
+    "python_total_lines": 245714,
+    "scanned_at": "2026-07-22T04:21:18Z",
     "signals": {
       "broad_exception_count": 375,
       "direct_ipfs_import_count": 219,
@@ -1630,16 +1630,16 @@
         "completed_work_items": 0,
         "failed": 0,
         "failed_work_items": 0,
-        "queued": 11,
+        "queued": 12,
         "queued_work_items": 20,
         "running": 0,
         "running_work_items": 0
       },
       "todo": {
         "blocked": 0,
-        "complete": 19,
+        "complete": 21,
         "in_progress": 0,
-        "needed": 30
+        "needed": 28
       }
     },
     "goal_count": 9,
@@ -1649,7 +1649,7 @@
     },
     "queue_refill": {
       "available_bundle_count": 14,
-      "available_work_items": 30,
+      "available_work_items": 28,
       "configured_floor": 20,
       "enabled": true,
       "floor_satisfied": true,
@@ -1662,23 +1662,24 @@
     },
     "status_projection": {
       "blocked_count": 0,
-      "completed_count": 19,
+      "completed_count": 21,
       "task_count": 49,
       "updated": {
         "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md": [
-          "REF-015"
+          "REF-014"
         ],
-        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g5-g5-s1.todo.md": [
-          "REF-015"
+        "/home/barberb/complaint-generator/data/refactor_supervisor/objective_bundles/refactor-g8-g8-s1.todo.md": [
+          "REF-024"
         ],
         "/home/barberb/complaint-generator/data/refactor_supervisor/refactor_todo.md": [
-          "REF-015"
+          "REF-014",
+          "REF-024"
         ]
       },
       "updated_file_count": 3
     },
     "subgoal_count": 17,
-    "synchronized_at": "2026-07-22T04:14:05Z",
+    "synchronized_at": "2026-07-22T04:21:32Z",
     "task_count": 36
   },
   "taskboard": {
@@ -1764,7 +1765,7 @@
       },
       {
         "checkbox_id": 14,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-014",
         "title": "Add import and dependency-boundary tests for production modules"
       },
@@ -1824,7 +1825,7 @@
       },
       {
         "checkbox_id": 24,
-        "status": "needed",
+        "status": "complete",
         "task_id": "REF-024",
         "title": "Define first three implementation claims from the queued taskboard"
       },
@@ -1844,7 +1845,7 @@
         "checkbox_id": 27,
         "status": "needed",
         "task_id": "REF-027",
-        "title": "Resolve dirty main checkout blocking 2 worktree merges"
+        "title": "Resolve dirty main checkout blocking 3 worktree merges"
       },
       {
         "checkbox_id": 28,
