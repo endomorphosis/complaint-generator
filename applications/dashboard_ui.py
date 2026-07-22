@@ -87,7 +87,6 @@ _IPFS_DASHBOARD_ENTRIES = [
     DashboardEntry("admin-mcp", "Admin MCP Dashboard", "admin/mcp_dashboard.html", "Administrative MCP dashboard.", "Admin Dashboards"),
 ]
 
-_IPFS_DASHBOARD_MAP = {entry.slug: entry for entry in _IPFS_DASHBOARD_ENTRIES}
 _LAYPERSON_HUB_ADVANCED_DASHBOARD_SLUGS = {
     "mcp",
     "software-mcp",
@@ -479,7 +478,14 @@ _DASHBOARD_FIXTURES = build_dashboard_fixture_data()
 
 
 def get_dashboard_fixtures() -> DashboardFixtures:
+    """Return the process-wide fixture catalog used by the live dashboard routes."""
     return _DASHBOARD_FIXTURES
+
+
+def _resolve_dashboard_fixtures(
+    fixtures: DashboardFixtures | None,
+) -> DashboardFixtures:
+    return fixtures if fixtures is not None else get_dashboard_fixtures()
 
 
 def get_ipfs_dashboard_entry(
@@ -487,15 +493,20 @@ def get_ipfs_dashboard_entry(
     *,
     fixtures: DashboardFixtures | None = None,
 ) -> DashboardEntry | None:
-    return (fixtures or _DASHBOARD_FIXTURES).ipfs_entry_map.get(str(slug or ""))
+    return _resolve_dashboard_fixtures(fixtures).ipfs_entry_map.get(str(slug or ""))
 
 
 def get_default_ipfs_dashboard_entry(
     *,
     fixtures: DashboardFixtures | None = None,
 ) -> DashboardEntry:
-    resolved_fixtures = fixtures or _DASHBOARD_FIXTURES
-    return resolved_fixtures.ipfs_entry_map["mcp"]
+    resolved_fixtures = _resolve_dashboard_fixtures(fixtures)
+    default_entry = resolved_fixtures.ipfs_entry_map.get("mcp")
+    if default_entry is not None:
+        return default_entry
+    if resolved_fixtures.ipfs_entries:
+        return resolved_fixtures.ipfs_entries[0]
+    raise ValueError("Dashboard fixtures must define at least one IPFS dashboard entry")
 
 
 def _render_feature_chips(features: list[str]) -> str:
@@ -518,7 +529,7 @@ def _render_subsection_nav(label: str, links: list[tuple[str, str]]) -> str:
     """
 
 
-def _render_entry_path_cards(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
+def _render_entry_path_cards(fixtures: DashboardFixtures) -> str:
     cards = []
     for item in fixtures.entry_path_cards:
         primary_label, primary_href = item["primary"]
@@ -536,7 +547,7 @@ def _render_entry_path_cards(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) 
     return "\n".join(cards)
 
 
-def _render_dashboard_subsection_index(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
+def _render_dashboard_subsection_index(fixtures: DashboardFixtures) -> str:
     cards = []
     for item in fixtures.dashboard_subsection_index:
         cards.append(
@@ -551,7 +562,7 @@ def _render_dashboard_subsection_index(fixtures: DashboardFixtures = _DASHBOARD_
     return "\n".join(cards)
 
 
-def _render_capability_cards(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
+def _render_capability_cards(fixtures: DashboardFixtures) -> str:
     cards = []
     for item in fixtures.capability_cards:
         primary_label, primary_href = item["primary"]
@@ -575,7 +586,7 @@ def _render_capability_cards(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) 
     return "\n".join(cards)
 
 
-def _render_improvement_plan(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
+def _render_improvement_plan(fixtures: DashboardFixtures) -> str:
     return "".join(
         f"""
         <li>
@@ -587,7 +598,7 @@ def _render_improvement_plan(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) 
     )
 
 
-def _render_journey_detail_panels(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
+def _render_journey_detail_panels(fixtures: DashboardFixtures) -> str:
     panels = []
     for panel in fixtures.journey_detail_panels:
         steps = "".join(
@@ -615,7 +626,7 @@ def _render_journey_detail_panels(fixtures: DashboardFixtures = _DASHBOARD_FIXTU
     return "\n".join(panels)
 
 
-def _render_package_capability_matrix(fixtures: DashboardFixtures = _DASHBOARD_FIXTURES) -> str:
+def _render_package_capability_matrix(fixtures: DashboardFixtures) -> str:
     cards = []
     for item in fixtures.package_capability_matrix:
         cards.append(
@@ -845,8 +856,9 @@ def _render_ipfs_dashboard(entry: DashboardEntry) -> str:
 
 def _render_shell_page(
     entry: DashboardEntry,
-    fixtures: DashboardFixtures = _DASHBOARD_FIXTURES,
+    fixtures: DashboardFixtures | None = None,
 ) -> str:
+    fixtures = _resolve_dashboard_fixtures(fixtures)
     shell_links = "".join(
         f'<a class="shell-link{' is-active' if item.slug == entry.slug else ''}" href="/dashboards/ipfs-datasets/{escape(item.slug)}">{escape(item.title)}</a>'
         for item in fixtures.ipfs_entries
@@ -908,8 +920,9 @@ def _render_dashboard_hub(
     default_manifest_path: str = "",
     default_docket_dataset_path: str = "",
     default_workspace_dataset_path: str = "",
-    fixtures: DashboardFixtures = _DASHBOARD_FIXTURES,
+    fixtures: DashboardFixtures | None = None,
 ) -> str:
+    fixtures = _resolve_dashboard_fixtures(fixtures)
     complaint_links = "".join(
         f'<li><a href="{escape(path)}">{escape(label)}</a></li>'
         for label, path in fixtures.complaint_links
@@ -5573,12 +5586,24 @@ def _render_dashboard_hub(
 """
 
 
-def create_dashboard_ui_router() -> APIRouter:
+def create_dashboard_ui_router(
+    *,
+    fixtures: DashboardFixtures | None = None,
+) -> APIRouter:
+    """Create dashboard routes bound to one explicit fixture catalog.
+
+    The default catalog is resolved when the router is created. Tests and preview
+    servers can inject a freshly built catalog without mutating live module state.
+    """
+    route_fixtures = _resolve_dashboard_fixtures(fixtures)
     router = APIRouter()
 
     @router.get("/mcp", response_class=HTMLResponse)
     async def legacy_mcp_dashboard_root() -> str:
-        return _render_shell_page(get_default_ipfs_dashboard_entry())
+        return _render_shell_page(
+            get_default_ipfs_dashboard_entry(fixtures=route_fixtures),
+            route_fixtures,
+        )
 
     @router.get("/api/mcp/analytics/history")
     async def mcp_analytics_history() -> dict[str, Any]:
@@ -5614,18 +5639,19 @@ def create_dashboard_ui_router() -> APIRouter:
             default_manifest_path=str(manifest_path or "").strip(),
             default_docket_dataset_path=str(docket_dataset_path or "").strip(),
             default_workspace_dataset_path=str(workspace_dataset_path or "").strip(),
+            fixtures=route_fixtures,
         )
 
     @router.get("/dashboards/ipfs-datasets/{slug}", response_class=HTMLResponse)
     async def ipfs_datasets_dashboard_shell(slug: str) -> str:
-        entry = get_ipfs_dashboard_entry(slug)
+        entry = get_ipfs_dashboard_entry(slug, fixtures=route_fixtures)
         if entry is None:
             raise HTTPException(status_code=404, detail="Dashboard not found")
-        return _render_shell_page(entry)
+        return _render_shell_page(entry, route_fixtures)
 
     @router.get("/dashboards/raw/ipfs-datasets/{slug}", response_class=HTMLResponse)
     async def ipfs_datasets_dashboard_raw(slug: str) -> str:
-        entry = get_ipfs_dashboard_entry(slug)
+        entry = get_ipfs_dashboard_entry(slug, fixtures=route_fixtures)
         if entry is None:
             raise HTTPException(status_code=404, detail="Dashboard not found")
         return _render_ipfs_dashboard(entry)
@@ -5633,7 +5659,11 @@ def create_dashboard_ui_router() -> APIRouter:
     return router
 
 
-def attach_dashboard_ui_routes(app: FastAPI) -> FastAPI:
+def attach_dashboard_ui_routes(
+    app: FastAPI,
+    *,
+    fixtures: DashboardFixtures | None = None,
+) -> FastAPI:
     if _IPFS_DATASETS_STATIC_DIR.is_dir() and not any(
         getattr(route, "path", None) == "/ipfs-datasets-static" for route in app.routes
     ):
@@ -5642,5 +5672,5 @@ def attach_dashboard_ui_routes(app: FastAPI) -> FastAPI:
             StaticFiles(directory=str(_IPFS_DATASETS_STATIC_DIR)),
             name="ipfs-datasets-static",
         )
-    app.include_router(create_dashboard_ui_router())
+    app.include_router(create_dashboard_ui_router(fixtures=fixtures))
     return app
