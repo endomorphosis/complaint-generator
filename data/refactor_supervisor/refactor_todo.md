@@ -413,11 +413,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: A robust board still needs a practical starting order.
 - Acceptance: The first three claims are small, testable, and dependency-ordered.; Each claim names exact validation commands.
 
-- [ ] Task checkbox-25: REF-025 Add a taskboard inspection command that prints queued refactor tasks compactly
+- [x] Task checkbox-25: REF-025 Add a taskboard inspection command that prints queued refactor tasks compactly
 
 ## REF-025 Add a taskboard inspection command that prints queued refactor tasks compactly
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G8
@@ -430,11 +430,11 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Missing evidence: Agents need a simple way to see the next work without opening DuckDB manually.
 - Acceptance: Status output or a new command lists next tasks by priority.; Output is stable enough for automation.
 
-- [ ] Task checkbox-26: REF-026 Create tests for refactor supervisor seed idempotence and task payload schema
+- [x] Task checkbox-26: REF-026 Create tests for refactor supervisor seed idempotence and task payload schema
 
 ## REF-026 Create tests for refactor supervisor seed idempotence and task payload schema
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: G8
@@ -1203,7 +1203,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 - Repair evidence: data/refactor_supervisor/discovery/2026-07-22-ref-057-objective-validation-repair.md; objective validation repair
 - Acceptance: Objective scan filed this gap for G1. Use evidence in /home/barberb/complaint-generator/data/refactor_supervisor/discovery/2026-07-22-ref-057-objective-gap-08d9b0956fd6.md, add code/tests/docs or child goals that prove the missing evidence terms are covered (objective validation repair), and keep the supervisor-fed backlog aligned with the objective heap.  Refine the objective heap if the gap needs smaller child goals.
 
-- [ ] Task checkbox-63: REF-063 Recover structured plan branch implementation in the nested supervisor
+- [x] Task checkbox-63: REF-063 Recover structured plan branch implementation in the nested supervisor
 
 ## REF-063 Recover structured plan branch implementation in the nested supervisor
 
