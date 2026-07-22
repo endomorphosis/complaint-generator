@@ -3604,7 +3604,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-215 Review swallowed exception path in mediator/evidence_hooks.py:1398
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
@@ -3697,7 +3697,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-218 Review swallowed exception path in mediator/integrations/graph_tools.py:154
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P1
 - Track: runtime
