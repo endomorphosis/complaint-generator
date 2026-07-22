@@ -728,7 +728,7 @@ This board is consumed by `ipfs_accelerate_py.agent_supervisor`.
 
 ## REF-037 Replace static bundle launch with a dynamic leased worker pool
 
-- Status: todo
+- Status: completed
 - Completion: manual
 - Priority: P0
 - Track: G9
