@@ -150,3 +150,83 @@ Work surface: `2` candidates, `2` sampled records.
   "top_conflict_paths": []
 }
 ```
+
+## Reconciliation Result
+
+Resolved: 2026-07-22T04:09:01Z
+
+The original blocker was reconciled without discarding checkout or worktree
+content:
+
+- The sampled REF-014 implementation commit `4ff79d0` was merged into `main`
+  by merge commit `93bf1f4`; commit `3bd1384` then recorded REF-014 as
+  completed. `git merge-base --is-ancestor 4ff79d0 main` returned `0`.
+- The sampled worktree and branch
+  `implementation/ref-014-0fe33c0cb7c7-attempt-1-1784692026` no longer exist,
+  so they are no longer blocked by the dirty-checkout guardrail.
+- The original dirty path was classified as generated supervisor lane-registry
+  state. It remained parseable as JSON and was not discarded. The shared main
+  checkout continued to receive later supervisor-generated updates while this
+  isolated task ran; those later changes were left with their active owner and
+  are not attributed to the closed REF-014 candidate.
+- The cleanup phase found separate, uncommitted REF-013 worktree changes in
+  `docs/REFACTOR_SUPERVISOR_TASKBOARD.md` and
+  `tests/test_package_imports.py`. It preserved them on rescue branch
+  `rescue/worktree/implementation-ref-013-d4fc48536ac0-attempt-1-1784693051-3c65dce8f628`
+  at commit `3aa48e9387d60150d6076030c85b59b5b623368f` rather than deleting them.
+  The rerun consequently reported no remaining dirty worktree group.
+
+The scoped reconciliation-only rerun was executed from the clean REF-015
+checkout with scan caching disabled:
+
+```sh
+PYTHONPATH=/home/barberb/complaint-generator/ipfs_datasets_py/ipfs_accelerate_py \
+python -m ipfs_accelerate_py.agent_supervisor.todo_daemon.implementation_supervisor \
+  --once --reconciliation-only \
+  --todo-path "$PWD/data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md" \
+  --state-dir "$PWD/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/state" \
+  --state-prefix agent_refactor_g4_g4_s1_ref015 \
+  --task-prefix REF- \
+  --worktree-root /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/worktrees/refactor-g4-g4-s1 \
+  --worktree-submodule-path ipfs_datasets_py/ipfs_accelerate_py \
+  --worktree-reconciliation-max-merges 1 \
+  --worktree-reconciliation-dry-run \
+  --no-worktree-scan-cache \
+  --log-level INFO
+```
+
+Fresh result:
+
+- `target_signature`: `3bd1384fba462c47362f62b2ab5b39e3681c925d`
+- `main_checkout_dirty`: `false`
+- `raw_main_checkout_dirty`: `false`
+- `candidate_count`: decreased from `1` to `0`
+- `preflight_blocked_count`: `0`
+- `dirty_worktree_group_count`: `0`
+- REF-013 cleanup disposition: `dirty_worktree_rescued`
+
+The ignored lane event log
+`data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/state/agent_refactor_g4_g4_s1_ref015_supervisor_events.jsonl`
+records the `2026-07-22T04:09:01.698289+00:00` supervisor check with zero
+reconciliation candidates and zero dirty worktree groups.
+
+### Machine Readable Result
+
+```json
+{
+  "blocked_candidate_count_after": 0,
+  "blocked_candidate_count_before": 1,
+  "candidate_branch": "implementation/ref-014-0fe33c0cb7c7-attempt-1-1784692026",
+  "candidate_commit": "4ff79d0",
+  "candidate_merge_commit": "93bf1f4",
+  "candidate_worktree_present_after": false,
+  "dirty_worktree_group_count_after": 0,
+  "main_checkout_dirty_after_scoped_rerun": false,
+  "preflight_blocked_count_after": 0,
+  "reconciliation_rerun_at": "2026-07-22T04:09:01.698289+00:00",
+  "reconciliation_target_signature": "3bd1384fba462c47362f62b2ab5b39e3681c925d",
+  "rescued_worktree_commit": "3aa48e9387d60150d6076030c85b59b5b623368f",
+  "rescued_worktree_ref": "rescue/worktree/implementation-ref-013-d4fc48536ac0-attempt-1-1784693051-3c65dce8f628",
+  "result": "resolved"
+}
+```
