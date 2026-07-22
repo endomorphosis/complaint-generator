@@ -60,7 +60,7 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Acceptance: Reconciliation guardrail filed this because 1 branch or worktree cleanup candidates are blocked by main_checkout_dirty. Use evidence and the machine-readable reconciliation plan in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-015-reconciliation-c66aac1f89b6.md, reconcile the dirty checkout or dirty worktree group deliberately, then rerun the supervisor cleanup/reconciliation pass and confirm that the blocked candidate count decreases.
 - Reconciliation result: REF-014 commit `4ff79d0` was merged into `main` by `93bf1f4` and its sampled branch/worktree were removed. The scoped reconciliation-only pass at `2026-07-22T04:09:01Z` reported `main_checkout_dirty: false`, `candidate_count` decreased from `1` to `0`, and no dirty worktree groups; separate REF-013 dirt was preserved on rescue commit `3aa48e9` rather than discarded.
 
-## REF-015 Resolve dirty main checkout blocking 2 worktree merges
+## REF-017 Resolve dirty main checkout blocking 2 worktree merges
 
 - Status: completed
 - Completion: manual
@@ -83,3 +83,4 @@ Conflict policy: keep edits inside this bundle when possible; rely on supervisor
 - Outputs: data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery, data/refactor_supervisor/objective_bundles/refactor-g4-g4-s1.todo.md
 - Validation: test -f /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-016-dependency-guardrail.md
 - Acceptance: Dependency guardrail filed this because REF-015 has missing, self-referential, cyclic, or duplicate task-id metadata. Use the evidence in /home/barberb/complaint-generator/data/refactor_supervisor/bundle_lanes/refactor-g4-g4-s1/discovery/2026-07-22-ref-016-dependency-guardrail.md to repair the todo board metadata or add the missing prerequisite task, then verify the original task can become ready once its real dependencies complete.
+- Dependency resolution: Preserved the original reconciliation task as REF-015 and reassigned the later, distinct reconciliation snapshot to the unused board-local id REF-017. REF-015 has no task prerequisites; the dependency guardrail reports no remaining findings, so an open REF-015 would be ready immediately.
