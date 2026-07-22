@@ -127,7 +127,25 @@ def _build_query_vector(
 
     try:
         return _coerce_vector_payload(router.embed_text(query_text))
-    except Exception:
+    except Exception as exc:
+        embedding_diagnostic = {
+            "status": "error",
+            "stage": "router_embed_text",
+            "provider": str(provider or "auto"),
+            "model_name": str(model_name or ""),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        if diagnostics is not None:
+            diagnostics["embedding"] = embedding_diagnostic
+        logger.warning(
+            "Legal query embedding failed; continuing with text-search fallbacks "
+            "(provider=%s, model=%s, error_type=%s)",
+            embedding_diagnostic["provider"],
+            embedding_diagnostic["model_name"],
+            embedding_diagnostic["error_type"],
+            exc_info=True,
+        )
         return None
 
 
