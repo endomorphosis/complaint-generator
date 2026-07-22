@@ -232,6 +232,17 @@ def _pick_reset_at_raw_from_rate_limit_artifact(data: Dict[str, Any]) -> Optiona
     return None
 
 
+def _write_rate_limit_artifact_payload(path: str, payload: Dict[str, Any]) -> None:
+    """Persist rate-limit metadata, surfacing failures to the caller.
+
+    Callers publish this path to users and orchestration processes, so silently
+    continuing after a failed write would falsely claim that resumable metadata
+    exists.
+    """
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
 def _find_session_jsons(run_dir: str) -> List[str]:
     out: List[str] = []
     if not os.path.isdir(run_dir):
@@ -2597,11 +2608,7 @@ def main() -> int:
 
         suffix = "" if int(attempt_index) <= 0 else f"_retry{int(attempt_index):02d}"
         path = os.path.join(out_dir, f"codex_rate_limit_{ts}{suffix}.json")
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2)
-        except Exception:
-            pass
+        _write_rate_limit_artifact_payload(path, payload)
 
         try:
             _append_jsonl(
