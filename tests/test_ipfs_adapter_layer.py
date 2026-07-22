@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 import os
 import tempfile
+import integrations.ipfs_datasets.capabilities as capabilities_module
 import integrations.ipfs_datasets.vector_store as vector_store_module
 import integrations.ipfs_datasets as adapter
 from pathlib import Path
@@ -13,6 +14,8 @@ from unittest.mock import Mock, patch
 import zipfile
 
 from integrations.ipfs_datasets.capabilities import (
+    CAPABILITY_NAMES,
+    CAPABILITY_SCHEMA_VERSION,
     get_ipfs_datasets_capabilities,
     summarize_ipfs_datasets_capability_report,
     summarize_ipfs_datasets_capabilities,
@@ -145,6 +148,93 @@ def test_capability_registry_exposes_common_contract_fields():
         assert "error_type" in payload["details"]
         assert payload["details"]["adapter_module"].startswith("integrations.ipfs_datasets")
         assert payload["details"]["contract_family"]
+
+
+def test_capability_registry_keys_are_stable_across_runtime_modes():
+    status_keys = {
+        "status",
+        "available",
+        "module_path",
+        "degraded_reason",
+        "provider",
+        "details",
+    }
+    detail_keys = {
+        "capability",
+        "adapter_module",
+        "contract_family",
+        "install_extra",
+        "reason_code",
+        "degraded_reason",
+        "error_type",
+        "error_message",
+        "missing_module",
+        "remediation",
+    }
+    missing_extra = ModuleNotFoundError("No module named 'optional_parser'")
+    missing_extra.name = "optional_parser"
+
+    try:
+        get_ipfs_datasets_capabilities.cache_clear()
+        with patch.object(
+            capabilities_module,
+            "import_module_optional",
+            return_value=(object(), None),
+        ):
+            available = get_ipfs_datasets_capabilities()
+
+        get_ipfs_datasets_capabilities.cache_clear()
+        with patch.object(
+            capabilities_module,
+            "import_module_optional",
+            return_value=(None, missing_extra),
+        ):
+            degraded = get_ipfs_datasets_capabilities()
+    finally:
+        get_ipfs_datasets_capabilities.cache_clear()
+
+    assert tuple(available) == CAPABILITY_NAMES
+    assert tuple(degraded) == CAPABILITY_NAMES
+    for name in CAPABILITY_NAMES:
+        available_payload = available[name].as_dict()
+        degraded_payload = degraded[name].as_dict()
+        assert set(available_payload) == status_keys
+        assert set(degraded_payload) == status_keys
+        assert set(available_payload["details"]) == detail_keys
+        assert set(degraded_payload["details"]) == detail_keys
+
+
+def test_capability_degraded_reason_identifies_extra_and_recovery_action():
+    missing_extra = ModuleNotFoundError("No module named 'symbolicai'")
+    missing_extra.name = "symbolicai"
+
+    try:
+        get_ipfs_datasets_capabilities.cache_clear()
+        with patch.object(
+            capabilities_module,
+            "import_module_optional",
+            side_effect=lambda module_name: (
+                (None, missing_extra)
+                if module_name == "ipfs_datasets_py.logic"
+                else (object(), None)
+            ),
+        ):
+            report = summarize_ipfs_datasets_capability_report()
+    finally:
+        get_ipfs_datasets_capabilities.cache_clear()
+
+    logic_status = report["capabilities"]["logic_tools"]
+    reason = logic_status["degraded_reason"]
+    assert report["schema_version"] == CAPABILITY_SCHEMA_VERSION
+    assert report["capability_keys"] == list(CAPABILITY_NAMES)
+    assert report["degraded_capabilities"] == {"logic_tools": reason}
+    assert logic_status["status"] == "degraded"
+    assert logic_status["available"] is False
+    assert logic_status["details"]["reason_code"] == "missing_optional_dependency"
+    assert logic_status["details"]["missing_module"] == "symbolicai"
+    assert "logic_tools" in reason
+    assert "symbolicai" in reason
+    assert 'python -m pip install "ipfs_datasets_py[logic]"' in reason
 
 
 def test_capability_report_returns_counts_and_nested_statuses():
